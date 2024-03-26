@@ -1,0 +1,51 @@
+#!/bin/bash
+set -e
+#--------------------------------------------------------------------------------
+# SCRIPT TO OBTAIN C-STAR CONFIGURATIONS
+# This program will donwload necessary code and input files to run C-Star in a
+# particular configuration
+
+# It is necessary to have performed a first-time setup using the script "setup"
+#--------------------------------------------------------------------------------
+if [[ "$#" -eq 0 || "$1" == "-h" || "$1" == "--help" ]];then    
+    echo "
+	Usage: $(basename "$0") [configuration_name]
+
+	Description:
+		Obtain code and input files related to a particular C-Star configuration and compile.		
+	
+      	Options:
+	-h, --help : Display this help message
+
+	configuration_name : 
+		roms_marbl_example : 24x24 example configuration of ROMS with MARBL biogeochemistry
+	"
+    exit 0
+fi
+
+case "$1" in
+    roms_marbl_example)
+	configdir=${CSTAR_ROOT}/configurations/roms_marbl_example
+	# Download ROMS source code:
+	git clone https://github.com/dafyddstephenson/roms_marbl_example.git ${configdir}
+	git -C ${CSTAR_ROOT}/configurations/roms_marbl_example checkout --quiet roms_latest
+
+	# Compile
+	cd ${configdir}/code
+	cp ${ROMS_ROOT}/Examples/Makefile .
+	make
+	if [ -L input_data ];then rm input_data;fi
+	echo "--------------------------------------------------------------------------------"
+	echo "$1 download and compile complete. See "
+	echo "${CSTAR_ROOT}/configurations/roms_marbl_example/README.md"
+	echo "for instructions on how to run".
+	echo "--------------------------------------------------------------------------------"
+	;;
+    *)
+	echo "Unsupported configuration name: $1. For a list of valid options, run"
+	echo "./cstar_get_config --help"
+esac
+	    
+	
+	# Download initial and boundary files:
+	
