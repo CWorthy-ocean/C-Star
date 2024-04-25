@@ -1,0 +1,25 @@
+channels:
+  - conda-forge
+  - defaults
+
+package:
+  name: cstar_ocean
+  version: 0.0.0
+  
+source:
+  path: ..
+build:
+  noarch: python
+  number: 0
+  script: python -m pip install --no-deps --ignore-installed .
+requirements:
+  host:
+    - python>=3.10
+    - setuptools
+  run:
+    - python>=3.10
+    - conda-forge::compilers=1.6.0 # [osx and arm64]
+    - conda-forge::netcdf-fortran=4.6.1 # [osx and arm64]
+    - conda-forge::mpich=4.1.2 # [osx and arm64]
+    - conda-forge::nco==5.1.8 # [osx and arm64]
+  
