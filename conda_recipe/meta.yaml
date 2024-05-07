@@ -9,10 +9,13 @@ package:
 source:
   path: ..
 build:
-  noarch: python
   number: 0
-  script: python -m pip install --no-deps --ignore-installed .
+
 requirements:
+  build:
+    - conda-forge::compilers=1.6.0 # [osx and arm64]
+    - conda-forge::netcdf-fortran=4.6.1 # [osx and arm64]
+    - conda-forge::mpich=4.1.2 # [osx and arm64]
   host:
     - python>=3.10
     - setuptools
