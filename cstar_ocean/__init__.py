@@ -67,18 +67,20 @@ elif ((platform.system()=='Darwin') and (platform.machine()=='arm64')):
 # This sets variables associated with external codebases that are not installed
 # with C-Star (e.g. ROMS_ROOT)
 
-_config_file=_cstar_root+'/cstar_config.py'
+_config_file=_cstar_root+'/cstar_local_config.py'
 if os.path.exists(_config_file):
-    import cstar_config
+    from . import cstar_local_config
     
 ################################################################################
 
 
 
 from .core import _input_files
+from .core import ModelGrid
 from .core import InitialConditions
 from .core import BoundaryConditions
 from .core import SurfaceForcing
+from .core import TidalForcing
 from .core import ModelCode
 from .core import Component
 from .core import Blueprint

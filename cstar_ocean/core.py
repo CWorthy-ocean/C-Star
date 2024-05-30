@@ -1,3 +1,14 @@
+# NOTES:
+# 1. some inconsistency with instance.build:
+# - Package is currently built to checkout arbitrary model code in ModelCode class and Blueprint.model_code
+# - however, instance.build() only is set up to build ROMS code.
+# - We can imagine (though unlikely) there being modifications to MARBL, or some future component.
+# - Will need a descriptor in the ModelCode class to say what model exactly this code belongs to so we can build it correctly in instance.build().
+# - or perhaps ALL input (ModelCode, InitialConditions, etc.) could belong to a component?
+
+# 2. It's currently assumed all instances come from a blueprint and instance.blueprint is used extensively as in the design doc.
+# but one could create an instance and later turn it into a blueprint? 
+
 import pooch
 import numpy as np
 import xarray as xr
@@ -11,41 +22,26 @@ import os
 
 from . import _cstar_root,_cstar_compiler,_config_file
 
+##############################
+# Temporarily define a ModelGrid class until we can use the one from setup_tools?
+@dataclass(kw_only=True)
+class ModelGrid:
+    source: pooch.core.Pooch
+    def get(self):
+        [self.source.fetch(f) for f in self.source.registry.keys()]            
+##############################
+
+
 @dataclass(kw_only=True)
 class _input_files:
-
     source:     pooch.core.Pooch
-    grid:       str
-
-    ## Others wanted:
-
-    #variables:  dict?
-    #times:      xr.cftime_range
-    #timesteps:  np.ndarray
-
-    #n_entries:  int = field(init=False)
-    #start_time: datetime = field(init=False)
-    #end_time:   datetime = field(init=False)
-    #start_step: int = field(init=False)
-    #end_step:   int = field(init=False)
-    #frequency:  timedelta  = field(init=False)
-    #n_steps:    int = field(init=False)
-
-    # def __post_init__(self):
-            
-    #     self.start_step   = self.timesteps[0]
-    #     self.end_step     = self.timesteps[-1]
-    #     self.start_time   = self.times[0]
-    #     self.end_time     = self.times[-1]
-    #     self.n_steps      = self.end_step - self.start_step
-    #     self.n_entries    = len(self.timesteps)
-    #     self.frequency    = (self.end_time - self.start_time)/(self.n_entries-1)
-    
+    grid:       ModelGrid
     def get(self):
         """Downloads or copies each file from source to the specified path."""
 
         [self.source.fetch(f) for f in self.source.registry.keys()]
-        
+
+
 
 @dataclass(kw_only=True)
 class InitialConditions(_input_files):
@@ -74,6 +70,13 @@ class SurfaceForcing(_input_files):
     def plot(self):
         '''plot the surface forcing data'''
         raise NotImplementedError("This method is not yet implemented.")
+
+@dataclass(kw_only=True)
+class TidalForcing(_input_files): 
+    def plot(self):
+        '''plot the tidal forcing data'''
+        raise NotImplementedError("This method is not yet implemented.")
+   
 
 class ModelCode:
     ''' Source code modifications, namelists, etc.'''
@@ -190,17 +193,37 @@ class Component:
                 os.environ["ROMS_ROOT"]=target
                 os.environ["PATH"     ]+=':'+target+'/Tools-Roms/'
                 print(_cstar_root)
+                
                 # Set the configuration file to be read by __init__.py for future sessions:
+                config_file_str=f'os.environ["ROMS_ROOT"]="{target}"\nos.environ["PATH"]+=":"+"{target}/Tools-Roms"\n'
+                if not os.path.exists(_config_file):
+                    config_file_str='import os\n'+config_file_str                    
                 with open(_config_file,'w') as f:
-                    f.write(f'os.environ["ROMS_ROOT"]={target}\n')
-                    f.write(f'os.environ["PATH"]+=":"+{target}+"/Tools-Roms"\n')
+                    f.write(config_file_str)
                     
                 # Distribute custom makefiles for ROMS
-                subprocess.run(f"rsync -av {_cstar_root}/additional_files/ROMS_Makefiles/ {target}",shell=True)
+                #subprocess.run(f"rsync -av {_cstar_root}/additional_files/ROMS_Makefiles/ {target}",shell=True)
+                import shutil
+                shutil.copytree(_cstar_root+"/additional_files/ROMS_Makefiles/",target,dirs_exist_ok=True)
+                
+                # Make things
+                subprocess.run(f"make nhmg COMPILER={_cstar_compiler}",cwd=target+"/Work",shell=True)
+                subprocess.run(f"make COMPILER={_cstar_compiler}",cwd=target+"/Tools-Roms",shell=True)
+                
+            case "MARBL":
+                # Set environment variables for this session:
+                os.environ["MARBL_ROOT"]=target
+                print(_cstar_root)
+                
+                # Set the configuration file to be read by __init__.py for future sessions:
+                config_file_str=f'os.environ["MARBL_ROOT"]="{target}"\n'
+                if not os.path.exists(_config_file):
+                    config_file_str='import os\n'+config_file_str                    
+                with open(_config_file,'w') as f:
+                    f.write(config_file_str)
 
                 # Make things
-                
-
+                subprocess.run(f"make {_cstar_compiler} USEMPI=TRUE",cwd=target+"/src",shell=True)
             
     
             
@@ -208,10 +231,11 @@ class Component:
 class Blueprint:
     name: str
     components: list
-    grid: str # should eventually be a grid object from setup_tools
+    grid: ModelGrid # should eventually be a grid object from setup_tools
     initial_conditions: InitialConditions
     boundary_conditions: BoundaryConditions
     surface_forcing: SurfaceForcing
+    tidal_forcing: TidalForcing
     model_code: ModelCode
     
     def create_instance(self, instance_name, path):
@@ -230,9 +254,6 @@ class Instance:
     #                             registry_id, history, status
 
     # Matt's proposed methods: persist,setup,build,pre_run,run,post_run
-    
-    def persist(self):
-        print('Saving this instance to disk')                        
         
     def setup(self):
         print("configuring this instance on this machine")
@@ -241,19 +262,22 @@ class Instance:
         for c in self.blueprint.components:
             c.check() # check() should prompt user to get() if needed
 
-            # checkout the correct version
-            subprocess.run(f"git checkout -C {c.local_root} {c.checkout_target}")
-            
-                
+            # checkout the correct version (this is already done by Component.get(), doesn't hurt, but review)
+            subprocess.run(f"git -C {c.local_root} checkout {c.checkout_target}")
+
         
         print('Obtaining model source code modifications and namelist files')
         self.blueprint.model_code.get()
         print('Obtaining initial condition data')
         self.blueprint.initial_conditions.get()
+        print('Obtaining grid file')
+        self.blueprint.model_grid.get()
         print('Obtaining boundary condition data')
         self.blueprint.boundary_conditions.get()
         print('Obtaining surface forcing data')
         self.blueprint.surface_forcing.get()
+        print('Obtaining tidal forcing data')
+        self.blueprint.tidal_forcing.get()
         
         self.is_setup = True
         # Also get source code modifications
@@ -261,15 +285,23 @@ class Instance:
         
     def build(self):
         '''
-        
         '''
+        # Go to wherever setup just assembled everything and run make
+        # First need to access the pooch path
         print('Compiling the code')
-
+        if "ROMS" in [c.component_name for c in self.blueprint.components]:
+            subprocess.run(f"make COMPILER={_cstar_compiler}",cwd=self.blueprint.model_code.target_path,shell=True)
+            
+    def pre_run(self):
+        print("carrying out pre-run actions")
+        # partit etc.
+        
     def run(self):
         print(f"Running the instance using blueprint {self.blueprint.name} on machine {self.machine}")
 
     def post_run(self):
         print('Carrying out post-run actions')
+        # ncjoin etc.?
     
 
 ################################################################################

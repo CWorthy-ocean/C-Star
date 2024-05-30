@@ -10,6 +10,25 @@ extdir=os.getcwd()+'/externals/'
 inputpath=runpath+'INPUT/'
 rme_input_base_url='https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/';
 
+#### MODEL GRID (placeholder until setup_tools grid class is usable here)
+MGP = pooch.create(
+    path=inputpath,
+    base_url=rme_input_base_url,
+    registry={'roms_grd.nc':'fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d'}
+    )
+
+mg= cstar.ModelGrid(source=MGP)
+
+#### TIDAL FORCING
+
+TFP = pooch.create(
+    path=inputpath,
+    base_url=rme_input_base_url,
+    registry={'roms_tides.nc':'90db174ab174909f9bf27c13fa19995c03f680bcb80e7d012268505b48590338'}
+    )
+
+tf= cstar.TidalForcing(source=TFP,grid=mg)
+
 #### INITIAL CONDITIONS
 ICP = pooch.create(
     path=inputpath,
@@ -19,7 +38,7 @@ ICP = pooch.create(
 
 ic = cstar.InitialConditions(
     source=ICP,
-    grid='roms_grd.nc')
+    grid=mg)
 #    times=xr.cftime_range(start="2012-01-03 11:59:24",end="2012-01-03 12:00:00",freq="36S"),
 #    timesteps=np.array([2398,2399],dtype=int)
 
@@ -33,7 +52,7 @@ BCP = pooch.create(
     )
 bc = cstar.BoundaryConditions(
     source=BCP,
-    grid='roms_grd.nc')#,
+    grid=mg)#,
 
 #### SURFACE FORCING
 SFP = pooch.create(
@@ -55,7 +74,7 @@ SFP = pooch.create(
 
 sf = cstar.SurfaceForcing(
     source=SFP,
-    grid='roms_grd.nc')
+    grid=mg)
 
 blueprint_src_repo='https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git';
 blueprint_src_hash='f3c3541';
@@ -77,38 +96,15 @@ marbl_component=cstar.Component("MARBL",checkout_target="marbl0.45.0")
 roms_marbl_blueprint=cstar.Blueprint(
     name='roms_marbl_example',
     components=[roms_component,marbl_component],
-    grid='roms_grd.nc',
+    grid=mg,
     initial_conditions=ic,
     boundary_conditions=bc,
     surface_forcing=sf,
+    tidal_forcing=tf,
     model_code=mc)
     
 roms_marbl_instance=roms_marbl_blueprint.create_instance(
     instance_name='roms_marbl_instance',
     path='/Users/dafyddstephenson/Code/C-Star/cstar_ocean/cstar_ocean')
 
-#roms_marbl_instance.persist()
-
-
-############################## scratch space below
-
-#print(ic.is_restart)  # Should print True if timestep > 0
-#ic.get("/desired/path/for/initial_conditions.nc")
-
-
-# Define the components and input_files for your blueprint
-components = ["ROMS", "MARBL"]
-input_files = ["config.ini", "data.nc"]
-grid = 'roms marbl grid object'
-inputdata = ['initial conditions','boundary conditions','forcing']
-# Create the blueprint
-#roms_marbl_blueprint = Blueprint("roms_marbl_example", components, grid, inputdata)
-
-
-# Paths where instances are managed
-path_all_instances = "/path/to/instances"
-path_scratch = "/path/to/scratch"
-
-# Create an instance from the blueprint
-#instance = roms_marbl_blueprint.create_instance("instance_001", '.')
 
