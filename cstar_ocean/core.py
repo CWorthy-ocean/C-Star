@@ -1,4 +1,4 @@
-# NOTES:
+# NOTES:A
 # 1. some inconsistency with instance.build:
 # - Package is currently built to checkout arbitrary model code in ModelCode class and Blueprint.model_code
 # - however, instance.build() only is set up to build ROMS code.
@@ -7,7 +7,12 @@
 # - or perhaps ALL input (ModelCode, InitialConditions, etc.) could belong to a component?
 
 # 2. It's currently assumed all instances come from a blueprint and instance.blueprint is used extensively as in the design doc.
-# but one could create an instance and later turn it into a blueprint? 
+# but one could create an instance and later turn it into a blueprint?
+
+# 3. The ModelCode class has a `target_path` (for cloning the repo) and a `src_path` (for finding the code in the repo).
+# We can imagine instead having standards for blueprint repositories so `src_path` is always the same and doesn't need to be specified, reducing bloat.
+
+# 4. Instance.is_setup() is only set to True after running Instance.setup() in the current session, so Instance.build() requires it to be run again if done before.
 
 import pooch
 import numpy as np
@@ -15,10 +20,9 @@ import xarray as xr
 import subprocess
 import importlib.util
 from dataclasses import dataclass, field
-from cftime import datetime #cftime has more robust datetime objects for modelling
-from datetime import timedelta #... but no timedelta object
 import shutil
 import os
+import re
 
 from . import _cstar_root,_cstar_compiler,_config_file
 
@@ -31,6 +35,21 @@ class ModelGrid:
         [self.source.fetch(f) for f in self.source.registry.keys()]            
 ##############################
 
+def _get_repo_hash_from_checkout_target(repo_url,checkout_target):
+    # First check if the checkout target is a 7 or 40 digit hexadecimal string
+    is_potential_hash= (bool(re.match(r'^[0-9a-f]{7}$',checkout_target)) or bool(re.match(r'^[0-9a-f]{40}$',checkout_target)))
+    
+    # Then try ls-remote to see if there is a match (no match if either invalid or a valid hash):
+    ls_remote=subprocess.run('git ls-remote '+repo_url+' '+checkout_target,shell=True,capture_output=True,text=True).stdout
+
+    if len(ls_remote)==0:
+        if is_potential_hash:
+            return checkout_target # just return the input target assuming a hash, but can't validate
+        else:
+            raise ValueError("supplied checkout_target does not appear to be a valid reference for this repository")
+    else:
+        return ls_remote.split()[0]
+    
 
 @dataclass(kw_only=True)
 class _input_files:
@@ -40,8 +59,6 @@ class _input_files:
         """Downloads or copies each file from source to the specified path."""
 
         [self.source.fetch(f) for f in self.source.registry.keys()]
-
-
 
 @dataclass(kw_only=True)
 class InitialConditions(_input_files):
@@ -80,12 +97,19 @@ class TidalForcing(_input_files):
 
 class ModelCode:
     ''' Source code modifications, namelists, etc.'''
-    def __init__(self,source_repo,checkout_target=None,target_path='.',retrieval_commands=None):
+    def __init__(self,source_repo,checkout_target='main',target_path='.',src_path=None,retrieval_commands=None):
         self.source_repo = source_repo
         self.checkout_target = checkout_target #either a commit hash or a tag
         self.target_path = target_path
         self.retrieval_commands = retrieval_commands
+        self.checkout_hash = _get_repo_hash_from_checkout_target(self.source_repo,self.checkout_target)            
         
+        # The actual model code may not be in the top level of the repo (target_path) so we can specify a subdir (src_path)
+        if src_path is None:
+            self.src_path=self.target_path
+        else:
+            self.src_path=src_path
+
         if retrieval_commands is None:
             retrieval_commands=[f"git clone {self.source_repo} {self.target_path}",]
             if checkout_target is not None:
@@ -107,10 +131,12 @@ class ModelCode:
         
 class Component:
     '''C-Star components, e.g. ROMS'''
-    def __init__(self,component_name,checkout_target=None,source_repo=None):
+    def __init__(self,component_name,checkout_target='main',source_repo=None):
         self.component_name = component_name
         self.checkout_target = checkout_target
         self.source_repo = source_repo
+        self.checkout_hash = _get_repo_hash_from_checkout_target(self.source_repo,self.checkout_target)
+
 
         if self.source_repo is None:
             match self.component_name:
@@ -118,9 +144,9 @@ class Component:
                     self.source_repo='https://github.com/CESR-lab/ucla-roms.git'
                 case "MARBL":
                     self.source_repo='https://github.com/marbl-ecosys/MARBL.git'
-
-        if self.checkout_target is None:
-            self.checkout_target='main'
+        
+        self.repo_basename=\
+            os.path.basename(self.source_repo).replace('.git','')
 
     @property
     def expected_env_var(self):
@@ -134,6 +160,8 @@ class Component:
         return os.environ[self.expected_env_var]
             
 
+#TODO: Clones are going straight into externals, not externals/ucla-roms or whatever
+    
     def check(self):
         '''Check if we already have the component on this system'''
                    
@@ -142,24 +170,40 @@ class Component:
 
         # Check 2: X_ROOT points to the correct repository
         if env_var_exists:
+            local_root=os.environ[self.expected_env_var]
             # Check X_ROOT env var points to the right repo...
-            env_var_repo_remote=subprocess.run(f"git -C "+os.environ[self.expected_env_var]+\
-                                              " remote get-url origin",\
+            env_var_repo_remote=subprocess.run(f"git -C {local_root} remote get-url origin",\
                             shell=True,capture_output=True,text=True).stdout.replace('\n','')
             # <TODO: catch errors from this subprocess>
             
             env_var_matches_repo=(self.source_repo==env_var_repo_remote)
             # ... and fail if it doesn't:
             if env_var_matches_repo:
-                print(f"PLACEHOLDER MESSAGE: {self.expected_env_var} points to the correct repo {self.source_repo}. Proceeding")
-                #TODO expand this                
-            else:
+                # Check the checkout_hash matches head:
+                head_hash=subprocess.run(f'git -C {local_root} rev-parse HEAD',\
+                                         shell=True,capture_output=True,text=True).stdout.replace('\n','')
+                head_hash_matches_checkout_hash=(head_hash==self.checkout_hash)
+                if head_hash_matches_checkout_hash:
+                    print(f"PLACEHOLDER MESSAGE: {self.expected_env_var} points to the correct repo {self.source_repo} at the correct hash {self.checkout_hash}. Proceeding")
+                else:
+                    print(f"{self.expected_env_var} points to the correct repo {self.source_repo} "+\
+                          f"but HEAD is at: \n{head_hash}, rather than the hash associated with checkout_target {self.checkout_target}:\n"+\
+                          f"{self.checkout_hash}")
+                    yn=input("Would you like to checkout this target now?")
+                    if yn.casefold() in ['y','yes']:
+                        subprocess.run(f"git -C {local_root} checkout {self.checkout_target}",shell=True)
+                        if self.component_name=="ROMS":
+                            # Distribute the correct Makefiles for ROMS
+                            shutil.copytree(_cstar_root+"/additional_files/ROMS_Makefiles/",local_root,dirs_exist_ok=True)                        
+                    else:
+                        raise EnvironmentError()
+            else: #env_var_matches_repo False
                 raise EnvironmentError(f"System environment variable '{self.expected_env_var}' points to a github repository whose "+\
                                        f"remote: \n '{env_var_repo_remote}' \n does not match that expected by C-Star: \n"+\
                                        f"{self.source_repo}. Your environment may be misconfigured.")
 
         else: #env_var_exists False, i.e. X_ROOT not defined 
-            ext_dir=cstar_root+'/externals/'
+            ext_dir=_cstar_root+'/externals/'+self.repo_basename
             print(self.expected_env_var+" not found in current environment. " +\
                   "if this is your first time running a C-Star instance that " +\
                   f"uses {self.component_name}, you will need to set it up." +\
@@ -171,10 +215,10 @@ class Component:
                 self.get(ext_dir)
             else:
                 custom_path=input("Would you like to install somewhere else? (enter path or 'N' to quit)")
-            if custom_path.casefold() not in ['n','no']:
-                raise EnvironmentError()
-            else:
-                self.get(custom_path)
+                if custom_path.casefold() not in ['n','no']:
+                    raise EnvironmentError()
+                else:
+                    self.get(custom_path)
             
             # Check expected ROOT directory and offer to install or throw an error if it's there:
             
@@ -203,7 +247,6 @@ class Component:
                     
                 # Distribute custom makefiles for ROMS
                 #subprocess.run(f"rsync -av {_cstar_root}/additional_files/ROMS_Makefiles/ {target}",shell=True)
-                import shutil
                 shutil.copytree(_cstar_root+"/additional_files/ROMS_Makefiles/",target,dirs_exist_ok=True)
                 
                 # Make things
@@ -231,7 +274,7 @@ class Component:
 class Blueprint:
     name: str
     components: list
-    grid: ModelGrid # should eventually be a grid object from setup_tools
+    model_grid: ModelGrid # should eventually be a grid object from setup_tools
     initial_conditions: InitialConditions
     boundary_conditions: BoundaryConditions
     surface_forcing: SurfaceForcing
@@ -261,10 +304,6 @@ class Instance:
         # Check and get components:
         for c in self.blueprint.components:
             c.check() # check() should prompt user to get() if needed
-
-            # checkout the correct version (this is already done by Component.get(), doesn't hurt, but review)
-            subprocess.run(f"git -C {c.local_root} checkout {c.checkout_target}")
-
         
         print('Obtaining model source code modifications and namelist files')
         self.blueprint.model_code.get()
@@ -288,9 +327,13 @@ class Instance:
         '''
         # Go to wherever setup just assembled everything and run make
         # First need to access the pooch path
-        print('Compiling the code')
-        if "ROMS" in [c.component_name for c in self.blueprint.components]:
-            subprocess.run(f"make COMPILER={_cstar_compiler}",cwd=self.blueprint.model_code.target_path,shell=True)
+        
+        if not self.is_setup:
+            print(f"Instance {self.name} is not yet set up. Run Instance.setup(), then try Instance.build() again.")
+        else:
+            print('Compiling the code')
+            if "ROMS" in [c.component_name for c in self.blueprint.components]:
+                subprocess.run(f"make COMPILER={_cstar_compiler}",cwd=self.blueprint.model_code.src_path,shell=True)
             
     def pre_run(self):
         print("carrying out pre-run actions")
@@ -298,6 +341,7 @@ class Instance:
         
     def run(self):
         print(f"Running the instance using blueprint {self.blueprint.name} on machine {self.machine}")
+        
 
     def post_run(self):
         print('Carrying out post-run actions')

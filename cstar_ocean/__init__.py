@@ -36,7 +36,9 @@ if (platform.system()=='Linux') \
 
             os.environ["MPIHOME"]="/opt/cray/pe/mpich/8.1.25/ofi/intel/19.0/"
             os.environ["NETCDFHOME"]=os.environ["NETCDF"]
-            os.environ["LD_LIBRARY_PATH"]+=':'+os.environ["NETCDFHOME"]+"/lib"
+            os.environ["LD_LIBRARY_PATH"]=os.environ.get("LD_LIBRARY_PATH",default="")+\
+                                      ":"+os.environ["NETCDFHOME"]+"/lib"            
+            
             _cstar_compiler="intel"
 
         case 'perlmutter':
@@ -47,9 +49,12 @@ if (platform.system()=='Linux') \
 
             os.environ["MPIHOME"]="/opt/cray/pe/mpich/8.1.28/ofi/gnu/12.3/"
             os.environ["NETCDFHOME"]="/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/"
-            os.environ["PATH"]+=":"+os.environ["NETCDFHOME"]+"/bin"
-            os.environ["LD_LIBRARY_PATH"]+=":"+os.environ["NETCDFHOME"]+"/lib"
-            os.environ["LIBRARY_PATH"]+=":"+os.environ["NETCDFHOME"]+"/lib"
+            os.environ["PATH"]=os.environ.get("PATH",default="")+\
+                           ":"+os.environ["NETCDFHOME"]+"/bin"
+            os.environ["LD_LIBRARY_PATH"]=os.environ.get("LD_LIBRARY_PATH",default="")+\
+                                      ":"+os.environ["NETCDFHOME"]+"/lib"            
+            os.environ["LIBRARY_PATH"]=os.environ.get("LIBRARY_PATH",default="")+\
+                                   ":"+os.environ["NETCDFHOME"]+"/lib"
 
             _cstar_compiler="gnu"
 
@@ -59,8 +64,8 @@ elif ((platform.system()=='Darwin') and (platform.machine()=='arm64')):
     
     os.environ["MPIHOME"]=os.environ["CONDA_PREFIX"]
     os.environ["NETCDFHOME"]=os.environ["CONDA_PREFIX"]
-    os.environ["LD_LIBRARY_PATH"]+=":"+os.environ["NETCDFHOME"]+"/lib"
-    
+    os.environ["LD_LIBRARY_PATH"]=os.environ.get("LD_LIBRARY_PATH",default="")+\
+                              ":"+os.environ["NETCDFHOME"]+"/lib"
     _cstar_compiler="gnu"
         
 # Now read the local/custom initialisation file

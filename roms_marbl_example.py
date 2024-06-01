@@ -77,11 +77,12 @@ sf = cstar.SurfaceForcing(
     grid=mg)
 
 blueprint_src_repo='https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git';
-blueprint_src_hash='f3c3541';
+blueprint_src_hash='c1cb5f216390250c4050360e9ab6295da55ecdda';
 
 mc = cstar.ModelCode(source_repo=blueprint_src_repo,
                checkout_target=blueprint_src_hash,\
                target_path=runpath,
+               src_path=runpath+'/code',
                retrieval_commands=[\
                     "git clone --no-checkout --filter=blob:none {self.source_repo} {self.target_path}",\
                     "git -C {self.target_path} sparse-checkout init --cone",\
@@ -91,12 +92,12 @@ mc = cstar.ModelCode(source_repo=blueprint_src_repo,
                                    
 #####
 roms_component=cstar.Component("ROMS" ,source_repo="https://github.com/dafyddstephenson/ucla-roms.git",checkout_target="7fd149280d9c1f30882fade2a3897247f8cc4bbd")
-marbl_component=cstar.Component("MARBL",checkout_target="marbl0.45.0")
+marbl_component=cstar.Component("MARBL",source_repo="https://github.com/dafyddstephenson/MARBL.git",checkout_target="marbl0.45.0")
 
 roms_marbl_blueprint=cstar.Blueprint(
     name='roms_marbl_example',
     components=[roms_component,marbl_component],
-    grid=mg,
+    model_grid=mg,
     initial_conditions=ic,
     boundary_conditions=bc,
     surface_forcing=sf,
