@@ -16,6 +16,7 @@ setup(
     #include_package_data=True,
     #data_files=[()],
     python_requires = '>=3.10',
+    include_package_data=True,
     #install_requires = dependency_list,
     #setup_requires=['pytest-runner'],
     #tests_require=['pytest'],
