@@ -4,7 +4,7 @@
 import os,sys,platform
 import importlib.util
 
-_cstar_root=importlib.util.find_spec('cstar_ocean').submodule_search_locations[0]
+_CSTAR_ROOT=importlib.util.find_spec('cstar_ocean').submodule_search_locations[0]
 
 if (platform.system()=='Linux') \
    and ('LMOD_DIR'     in list(os.environ)) \
@@ -27,7 +27,7 @@ if (platform.system()=='Linux') \
             os.environ["MPIHOME"]=os.environ["MVAPICH2HOME"]
             os.environ["NETCDF"]=os.environ["NETCDF_FORTRANHOME"]
             os.environ["MPI_ROOT"]=os.environ["MVAPICH2HOME"]
-            _cstar_compiler="intel"
+            _CSTAR_COMPILER="intel"
         
         case 'derecho':
             module('load' 'intel')
@@ -39,7 +39,7 @@ if (platform.system()=='Linux') \
             os.environ["LD_LIBRARY_PATH"]=os.environ.get("LD_LIBRARY_PATH",default="")+\
                                       ":"+os.environ["NETCDFHOME"]+"/lib"            
             
-            _cstar_compiler="intel"
+            _CSTAR_COMPILER="intel"
 
         case 'perlmutter':
 
@@ -56,7 +56,7 @@ if (platform.system()=='Linux') \
             os.environ["LIBRARY_PATH"]=os.environ.get("LIBRARY_PATH",default="")+\
                                    ":"+os.environ["NETCDFHOME"]+"/lib"
 
-            _cstar_compiler="gnu"
+            _CSTAR_COMPILER="gnu"
 
 elif ((platform.system()=='Darwin') and (platform.machine()=='arm64')):
 
@@ -66,28 +66,41 @@ elif ((platform.system()=='Darwin') and (platform.machine()=='arm64')):
     os.environ["NETCDFHOME"]=os.environ["CONDA_PREFIX"]
     os.environ["LD_LIBRARY_PATH"]=os.environ.get("LD_LIBRARY_PATH",default="")+\
                               ":"+os.environ["NETCDFHOME"]+"/lib"
-    _cstar_compiler="gnu"
+    _CSTAR_COMPILER="gnu"
         
 # Now read the local/custom initialisation file
 # This sets variables associated with external codebases that are not installed
 # with C-Star (e.g. ROMS_ROOT)
 
-_config_file=_cstar_root+'/cstar_local_config.py'
-if os.path.exists(_config_file):
-    from . import cstar_local_config
+# _CONFIG_FILE=_CSTAR_ROOT+'/cstar_local_config.py'
+# if os.path.exists(_CONFIG_FILE):
+#     from . import cstar_local_config
     
 ################################################################################
 
 
 
-from .core import _input_files
+# from .core import _input_files
+# from .core import ModelGrid
+# from .core import InitialConditions
+# from .core import BoundaryConditions
+# from .core import SurfaceForcing
+# from .core import TidalForcing
+# from .core import ModelCode
+# from .core import Component
+# from .core import Blueprint
+# from .core import Instance
+
+from .core import BaseModel
+from .core import AdditionalCode
+from .core import InputDataset
 from .core import ModelGrid
 from .core import InitialConditions
-from .core import BoundaryConditions
-from .core import SurfaceForcing
 from .core import TidalForcing
-from .core import ModelCode
+from .core import BoundaryForcing
+from .core import SurfaceForcing
 from .core import Component
-from .core import Blueprint
-from .core import Instance
+from .core import Case
+
+
 
