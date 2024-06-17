@@ -5,7 +5,7 @@ channels:
 package:
   name: cstar_ocean
   version: 0.0.0
-  
+
 source:
   path: ..
 build:
@@ -13,7 +13,7 @@ build:
   script: {{ PYTHON }} -m pip install . --no-deps --ignore-installed --no-cache-dir --no-build-isolation -vvv
   include_files:
     - cstar_ocean/additional_files/*
-  
+
 
 requirements:
   host:
@@ -28,4 +28,3 @@ requirements:
     - conda-forge::netcdf-fortran=4.6.1 # [osx and arm64]
     - conda-forge::mpich=4.1.2 # [osx and arm64]
     - conda-forge::nco==5.1.8 # [osx and arm64]
-  

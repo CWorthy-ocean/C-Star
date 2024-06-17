@@ -1,88 +1,92 @@
 registry_attrs:
   name: roms_marbl_example
-  valid_date_range: 80s-10s
-  
-default_run_parameters:
-  start_date: the 90s
-  end_date: the 00s
+#  valid_date_range: 80s-10s
 
-components:      
+default_run_parameters:
+  start_date: 2012-01-03
+  end_date: 2012-12-31
+
+components:
   - component:
       base_model:
         name: 'MARBL'
         source_repo: 'https://github.com/dafyddstephenson/MARBL.git'
         checkout_target: 'marbl0.45.0'
       additional_code:
-        - source_repo: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
-          checkout_target: 'c1cb5f216390250c4050360e9ab6295da55ecdda'
-          files_run:
-            - "marbl_in"
-            - "marbl_output_tracer_list"
-            - "marbl_output_diagnostic_list"
-              
+        - source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
+          checkout_target: '35ebe3ef4f177c14aad881cf24f067fcc0cec34c'
+          namelists:
+            - "namelists/MARBL/marbl_in"
+            - "namelists/MARBL/marbl_tracer_output_list"
+            - "namelists/MARBL/marbl_diagnostic_output_list"
+
   - component:
       base_model:
         name: 'ROMS'
         source_repo: 'https://github.com/dafyddstephenson/ucla-roms.git'
         checkout_target: '7fd149280d9c1f30882fade2a3897247f8cc4bbd'
       additional_code:
-        - source_repo: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
-          checkout_target: 'c1cb5f216390250c4050360e9ab6295da55ecdda'
-          files_compile:
-            - "code/bgc.opt"
-            - "code/bulk_frc.opt"
-            - "code/cppdefs.opt"
-            - "code/diagnostics.opt"
-            - "code/ocean_vars.opt"
-            - "code/param.opt"
-            - "code/tracers.opt"
-            - "code/Makefile"
-            - "code/get_makefile"
-            - "code/Make.depend"
-          files_run:
-            - "roms.in_MARBL"
+        - source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
+          checkout_target: '35ebe3ef4f177c14aad881cf24f067fcc0cec34c'
+          source_mods:
+            - "source_mods/ROMS/bgc.opt"
+            - "source_mods/ROMS/bulk_frc.opt"
+            - "source_mods/ROMS/cppdefs.opt"
+            - "source_mods/ROMS/diagnostics.opt"
+            - "source_mods/ROMS/ocean_vars.opt"
+            - "source_mods/ROMS/param.opt"
+            - "source_mods/ROMS/tracers.opt"
+            - "source_mods/ROMS/Makefile"
+            - "source_mods/ROMS/get_makefile"
+            - "source_mods/ROMS/Make.depend"
+          namelists:
+            - "namelists/ROMS/roms.in_MARBL"
+          scripts:
+            run:
+              - "scripts/run/start_run.sh"
+              - "scripts/run/submit_job.sh"
       input_datasets:
         model_grid:
-          files: 
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_grd.nc'
-              hash: 'fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d' 
+          files:
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_grd.nc'
+              hash: 'fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d'
         initial_conditions:
           files:
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/MARBL_rst.20120103120000.nc'
-              hash: 'fc3bbd039256edc89c898efda0eebc5c53773995598d59310bc6d57f454a6ddd'             
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/MARBL_rst.20120103120000.nc'
+              hash: 'fc3bbd039256edc89c898efda0eebc5c53773995598d59310bc6d57f454a6ddd'
         tidal_forcing:
           files:
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_tides.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_tides.nc'
               hash: '90db174ab174909f9bf27c13fa19995c03f680bcb80e7d012268505b48590338'
         boundary_forcing:
           files:
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_bry_2012.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_bry_2012.nc'
               hash: 'c3b0e14aae6dd5a0d54703fa04cf95960c1970e732c0a230427bf8b0fbbd8bf1'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_bry_bgc.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_bry_bgc_MARBL.nc'
               hash: '897a8df8ed45841a98b3906f2dd07750decc5c2b50095ba648a855c869c7d3ee'
         surface_forcing:
           files:
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201201.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201201.nc'
               hash: '923049a9c2ab9ce77fa4a0211585e6848a12e87bf237e7aa310f693c3ac6abfa'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201202.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201202.nc'
               hash: '5a5d99cdfaacdcda7b531916f6af0f7cef4aea595ea634dac809226ea2a8a4fe'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201203.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201203.nc'
               hash: '8251bd08d435444da7c38fe11eba082365ee7b68453b6dc61460ddcb72c07671'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201204.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201204.nc'
               hash: '0b62ab974bd718af1d421a715dc2b0968f65ec99856513f2ee988d996ff3d059'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201205.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201205.nc'
               hash: 'b82797f91c0741245e58b90f787c9597f342faa49c45ebb27e2df964006d6df5'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201206.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201206.nc'
               hash: '8cf6f2413ae45dddc1680a19aea0d40a04def82366d626a7fe33dfe5eef7ea7f'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201207.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201207.nc'
               hash: '4ec7284f2bdc222b961483af5f6a01ecd6feea5236bb57d2101171f38ea8653b'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201208.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201208.nc'
               hash: '4eec008592337e0da87c2fac8c41a1400cc7067fcdc146a665db5b3a74213828'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201209.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201209.nc'
               hash: 'feb5718c45c4d0874919367fbadfca6784dfddaa2b193ef767a37d92a554eed4'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201210.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201210.nc'
               hash: '74538789218a2815c5a5532756e1282958d22026da7513ced0131febfce1012b'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201211.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201211.nc'
               hash: 'c79d4b2a9d1c41f9c603454c2b023995a6c3ea78c01d17b7428257c3c66f8750'
-            - source: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/main/INPUT/roms_frc.201212.nc'
+            - source: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201212.nc'
               hash: '477d1c0f2abcb0d5227594777521ce30d30c2376f5a8b2f08c25e25a77fd1fa5'
