@@ -139,21 +139,26 @@ class BaseModel(ABC):
                     )
                 else:
                     print(
-                        f"{self.expected_env_var} points to the correct repo "
+                        "############################################################\n"
+                        + f"{self.expected_env_var} points to the correct repo "
                         + f"{self.source_repo} but HEAD is at: \n"
                         + f"{head_hash}, rather than the hash associated with "
                         + f"checkout_target {self.checkout_target}:\n"
                         + f"{self.checkout_hash}"
+                        + "\n############################################################"
                     )
                     yn = input("Would you like to checkout this target now?")
-                    if yn.casefold() in ["y", "yes"]:
-                        subprocess.run(
-                            f"git -C {local_root} checkout {self.checkout_target}",
-                            shell=True,
-                        )
-                        self._base_model_adjustments()
-                    else:
-                        raise EnvironmentError()
+                    while True:
+                        if yn.casefold() in ["y", "yes"]:
+                            subprocess.run(
+                                f"git -C {local_root} checkout {self.checkout_target}",
+                                shell=True,
+                            )
+                            self._base_model_adjustments()
+                        elif yn.casefold() in ["n","no"]:
+                            raise EnvironmentError()
+                        else:
+                            print("invalid selection; enter 'y' or 'n'")
         else:  # env_var_exists False (e.g. ROMS_ROOT not defined)
             ext_dir = _CSTAR_ROOT + "/externals/" + self.repo_basename
             print(
@@ -166,21 +171,25 @@ class BaseModel(ABC):
                 + f"{ext_dir}"
                 + "\n#######################################################"
             )
-            yn = input(
-                "Would you like to do this now?"
-                + "('y', or 'n' to install elsewhere or quit)\n"
+            while True:
+                yn = input(
+                    "Would you like to do this now? "
+                    + "('y', 'n', or 'custom' to install at a custom path)\n"
             )
-            if yn.casefold() in ["y", "yes", "ok"]:
-                self.get(ext_dir)
-            else:
-                custom_path = input(
-                    "Would you like to install somewhere else?"
-                    + "(enter path or 'N' to quit)"
-                )
-                if custom_path.casefold() in ["n", "no"]:
+                if yn.casefold() in ["y", "yes", "ok"]:
+                    self.get(ext_dir)
+                    break
+                elif yn.casefold in ['n','no']:
                     raise EnvironmentError()
-                else:
+                elif yn.casefold() == 'custom':
+                    custom_path = input(
+                        "Enter custom path for install:\n"
+                    )
                     self.get(os.path.abspath(custom_path))
+                    break
+                else:
+                    print("invalid selection; enter 'y','n',or 'custom'")
+                
 
 
 @abstractmethod
@@ -336,9 +345,6 @@ class AdditionalCode:
                     else:
                         raise FileNotFoundError(f"Error: {tmp_file_path} does not exist.")
 
-
-        #TODO: push the latest rme repo and try this again
-
         
                     
 class InputDataset:
@@ -355,12 +361,14 @@ class InputDataset:
         self.file_hash = file_hash
 
     def get(self,local_path):
+        # QUESTION: Got a lot of TimeoutErrors - think the default is 5 seconds?
+        downloader=pooch.HTTPDownloader(timeout=120)
         to_fetch=pooch.create(
             path=local_path,
             base_url=os.path.dirname(self.source),
             registry={os.path.basename(self.source):self.file_hash})
 
-        to_fetch.fetch(os.path.basename(self.source))
+        to_fetch.fetch(os.path.basename(self.source),downloader=downloader)
             
 
 class ModelGrid(InputDataset):
@@ -406,10 +414,22 @@ class Component(ABC):
                       f"input_datasets={self.input_datasets}")
 
 
+    @abstractmethod
+    def build(self):
+        ''' Build the model component'''
+        
+
+    
 class ROMSComponent(Component):
-    pass
+    def build(self,local_path):
+        ''' We need here to go to the additional code/source mods and run make'''
+        subprocess.run(f'make COMPILER={_CSTAR_COMPILER}',\
+                       cwd=local_path+'/source_mods/ROMS',shell=True)
+
+
 class MARBLComponent(Component):
-    pass
+    def build(self,local_path):
+        print('source code modifications to MARBL are not yet supported')
 
 class Case:
     """A combination of unique components that make up this Case"""
@@ -420,25 +440,30 @@ class Case:
         self.components = components
         self.caseroot = caseroot
         self.is_setup = False
+        
     @classmethod
     def from_blueprint(cls, blueprint: str, caseroot: str):
         with open(blueprint, "r") as file:
             bp_dict = yaml.safe_load(file)
         components = []
         for component_info in bp_dict["components"]:
-            # Construct the BaseModel instance
+            # Get base model information and choose corresponding subclasses:
+            # QUESTION : is this the best way to handle the need for different subclasses here?
             base_model_info = component_info["component"]["base_model"]
+
             match base_model_info["name"].casefold():
                 case "roms":
-                    base_model = ROMSBaseModel(
-                        base_model_info["source_repo"],
-                        base_model_info["checkout_target"],
-                    )
+                    ThisComponent=ROMSComponent
+                    ThisBaseModel=ROMSBaseModel
                 case "marbl":
-                    base_model = MARBLBaseModel(
-                        base_model_info["source_repo"],
-                        base_model_info["checkout_target"],
-                        )
+                    ThisComponent=MARBLComponent                    
+                    ThisBaseModel=MARBLBaseModel
+            
+            # Construct the BaseModel instance
+            base_model = ThisBaseModel(
+                base_model_info["source_repo"],
+                base_model_info["checkout_target"]
+                )
 
             # Construct any AdditionalCode instances
             if "additional_code" not in component_info["component"].keys():
@@ -526,8 +551,9 @@ class Case:
                          for f in input_dataset_info['surface_forcing']['files']]
 
                     input_datasets+=surface_forcing
-                    
-            components.append(Component(base_model, additional_code, input_datasets))
+
+                
+            components.append(ThisComponent(base_model, additional_code, input_datasets))
         
         if len(components) == 1:
             components = components[0]
@@ -552,17 +578,21 @@ class Case:
             if isinstance(component.input_datasets,list):
                 [inp.get(self.caseroot) for inp in component.input_datasets]
             elif isinstance(component.input_datasets,InputDataset):
-                component.input_dataset.get(self.caseroot)
+                tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
+                #os.makedirs(tgt_dir,exist_ok=True) 
+                component.input_dataset.get(tgt_dir)
 
         
             #self.is_setup = True
             # Add a marker somewhere to avoid repeating this process
 
     def build(self):
-        # Loop over components and build.
-        # Have a build method on each component.
-        pass
-    
+        '''build this case on this machine'''
+        for component in self.components:
+            component.build(local_path=self.caseroot)
+
+    def pre_run(self):
+        ''' carry out pre-run actions '''
             
         
 # Example Usage
