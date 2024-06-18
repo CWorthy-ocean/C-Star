@@ -1,7 +1,4 @@
-# Still todo list:A
-# InputDataset.get() [using pooch]
-
-# AdditionalCode.get() [requires rme repo revamp for logic]
+# Still todo list:
 
 import os
 import re
@@ -361,7 +358,7 @@ class InputDataset:
         self.file_hash = file_hash
 
     def get(self,local_path):
-        # QUESTION: Got a lot of TimeoutErrors - think the default is 5 seconds?
+        #NOTE: default timeout was leading to a lot of timeouterrors
         downloader=pooch.HTTPDownloader(timeout=120)
         to_fetch=pooch.create(
             path=local_path,
@@ -400,13 +397,15 @@ class Component(ABC):
     def __init__(
         self,
         base_model: BaseModel,
+        discretization:  Optional[dict] = None,
         additional_code: Optional[Union[AdditionalCode, List[AdditionalCode]]] = None,
-        input_datasets: Optional[Union[InputDataset, List[InputDataset]]] = None,
+        input_datasets:  Optional[Union[InputDataset, List[InputDataset]]] = None,
     ):
         # Do Type checking here
         self.base_model = base_model
         self.additional_code = additional_code
         self.input_datasets = input_datasets
+
 
     def __repr__(self):
         return (f"Component(base_model={self.base_model},"+\
@@ -418,18 +417,62 @@ class Component(ABC):
     def build(self):
         ''' Build the model component'''
         
-
+    @abstractmethod
+    def pre_run(self):
+        '''Things to do before running with this component'''
     
 class ROMSComponent(Component):
+
+    def __init__(
+            self,
+        base_model: BaseModel,
+        discretization:  Optional[dict] = None,
+        additional_code: Optional[Union[AdditionalCode, List[AdditionalCode]]] = None,
+        input_datasets:  Optional[Union[InputDataset, List[InputDataset]]] = None,
+        nx:        Optional[int] = None,
+        ny:        Optional[int] = None,
+        n_levels:  Optional[int] = None,
+        n_procs_x: Optional[int] = None,
+        n_procs_y: Optional[int] = None
+        ):
+        super().__init__(
+            base_model=base_model,
+            additional_code=additional_code,
+            input_datasets=input_datasets)
+        # QUESTION: should all these attrs be passed in as a single "discretization" arg of type dict?
+        self.nx=nx
+        self.ny=ny
+        self.n_levels=n_levels
+        self.n_procs_x=n_procs_x
+        self.n_procs_y=n_procs_y
+
+    
+            
     def build(self,local_path):
         ''' We need here to go to the additional code/source mods and run make'''
         subprocess.run(f'make COMPILER={_CSTAR_COMPILER}',\
                        cwd=local_path+'/source_mods/ROMS',shell=True)
 
+    def pre_run(self,local_path):
+        ''' Before running ROMS, we need to run partit on all the netcdf files'''
 
+        
+        if self.input_datasets is not None:
+            datasets_to_partition=self.input_datasets if isinstance(self.input_datasets,list) else [self.input_datasets,]
+
+            for f in datasets_to_partition:
+                fname=os.path.basename(f.source)
+                subprocess.run('partit '+str(self.n_procs_x)+' '+str(self.n_procs_y)+' '+fname,
+                               cwd=local_path+'/input_datasets/ROMS/',shell=True)
+
+        
+        
 class MARBLComponent(Component):
     def build(self,local_path):
         print('source code modifications to MARBL are not yet supported')
+
+    def pre_run(self,local_path):
+        print('no pre-run actions involving MARBL are currently supported')
 
 class Case:
     """A combination of unique components that make up this Case"""
@@ -447,6 +490,8 @@ class Case:
             bp_dict = yaml.safe_load(file)
         components = []
         for component_info in bp_dict["components"]:
+            component_kwargs={}
+            
             # Get base model information and choose corresponding subclasses:
             # QUESTION : is this the best way to handle the need for different subclasses here?
             base_model_info = component_info["component"]["base_model"]
@@ -464,7 +509,16 @@ class Case:
                 base_model_info["source_repo"],
                 base_model_info["checkout_target"]
                 )
+            component_kwargs['base_model']=base_model
 
+            # Get discretization info:
+            if "discretization" not in component_info["component"].keys():
+                discretization=None
+            else:
+                discretization_info=component_info['component']['discretization']                
+                for key in list(discretization_info.keys()):
+                    component_kwargs[key]=discretization_info[key]
+                
             # Construct any AdditionalCode instances
             if "additional_code" not in component_info["component"].keys():
                 additional_code=None
@@ -502,6 +556,8 @@ class Case:
                 if len(additional_code) == 1:
                     additional_code = additional_code[0]
 
+                component_kwargs['additional_code']=additional_code
+                
             # Construct any InputDataset instances:
             if 'input_datasets' not in component_info['component'].keys():
                 input_datasets=None
@@ -552,9 +608,10 @@ class Case:
 
                     input_datasets+=surface_forcing
 
-                
-            components.append(ThisComponent(base_model, additional_code, input_datasets))
-        
+                component_kwargs['input_datasets']=input_datasets
+            print(component_kwargs)
+            components.append(ThisComponent(**component_kwargs))
+            
         if len(components) == 1:
             components = components[0]
             
@@ -575,10 +632,10 @@ class Case:
                 component.additional_code.get(self.caseroot)
 
             #Get InputDatasets
+            tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name            
             if isinstance(component.input_datasets,list):
-                [inp.get(self.caseroot) for inp in component.input_datasets]
+                [inp.get(tgt_dir) for inp in component.input_datasets]
             elif isinstance(component.input_datasets,InputDataset):
-                tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
                 #os.makedirs(tgt_dir,exist_ok=True) 
                 component.input_dataset.get(tgt_dir)
 
@@ -593,7 +650,9 @@ class Case:
 
     def pre_run(self):
         ''' carry out pre-run actions '''
-            
+        for component in self.components:
+            component.pre_run(self.caseroot)
+        
         
 # Example Usage
 # config = cs.Case.from_blueprint('example.yaml')
