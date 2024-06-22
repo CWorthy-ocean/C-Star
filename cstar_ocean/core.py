@@ -1,15 +1,23 @@
 # Still todo list:
+# - make it so read_inp can accept longer than 64 characters for roms.in
+# - roms.in_MARBL is currently looking in INPUT_DIR/PARTED but this isn't where pre_run is working
+
 
 import os
 import re
 import yaml
+import glob
 import pooch
 import shutil
 import tempfile
 import subprocess
+from math import ceil
 from abc import ABC, abstractmethod
 from typing import List, Union, Optional
-from . import _CSTAR_ROOT, _CSTAR_COMPILER  # ,_CONFIG_FILE
+from . import _CSTAR_SYSTEM, _CSTAR_ROOT, _CSTAR_COMPILER, _CSTAR_SYSTEM_DEFAULT_PARTITION,\
+              _CSTAR_SYSTEM_CORES_PER_NODE,_CSTAR_SYSTEM_MEMGB_PER_NODE,\
+              _CSTAR_SYSTEM_MAX_WALLTIME,_CSTAR_SCHEDULER
+    # ,_CONFIG_FILE
 
 
 ################################################################################
@@ -40,6 +48,27 @@ def _get_hash_from_checkout_target(repo_url, checkout_target):
             )
     else:
         return ls_remote.split()[0]
+
+def _calculate_node_distribution(n_cores_required,tot_cores_per_node):
+    ''' Given the number of cores required for a job and the total number of cores on a node,
+    calculate how many nodes to request and how many cores to request on each'''
+    n_nodes_to_request=ceil(n_cores_required/tot_cores_per_node)
+    cores_to_request_per_node= ceil(
+        tot_cores_per_node - ((n_nodes_to_request * tot_cores_per_node) - n_cores_required)/n_nodes_to_request
+    )
+    
+    return n_nodes_to_request,cores_to_request_per_node
+
+def _replace_text_in_file(file_path,old_text,new_text):
+    temp_file_path = file_path + '.tmp'
+    
+    with open(file_path, 'r') as read_file, open(temp_file_path, 'w') as write_file:
+        for line in read_file:
+            new_line = line.replace(old_text, new_text)
+            write_file.write(new_line)
+            
+    os.remove(file_path)
+    os.rename(temp_file_path, file_path)
 
 
 ################################################################################
@@ -144,14 +173,15 @@ class BaseModel(ABC):
                         + f"{self.checkout_hash}"
                         + "\n############################################################"
                     )
-                    yn = input("Would you like to checkout this target now?")
                     while True:
+                        yn = input("Would you like to checkout this target now?")                        
                         if yn.casefold() in ["y", "yes"]:
                             subprocess.run(
                                 f"git -C {local_root} checkout {self.checkout_target}",
                                 shell=True,
                             )
                             self._base_model_adjustments()
+                            break
                         elif yn.casefold() in ["n","no"]:
                             raise EnvironmentError()
                         else:
@@ -312,7 +342,7 @@ class AdditionalCode:
         self.namelists          = namelists
         self.run_scripts        = run_scripts
         self.processing_scripts = processing_scripts
-
+        
     def get(self, local_path):
         # options:
         # clone into caseroot and be done with it
@@ -341,7 +371,7 @@ class AdditionalCode:
                         shutil.move(tmp_file_path,tgt_file_path)
                     else:
                         raise FileNotFoundError(f"Error: {tmp_file_path} does not exist.")
-
+        self.local_path=local_path
         
                     
 class InputDataset:
@@ -356,6 +386,7 @@ class InputDataset:
         self.base_model = base_model
         self.source = source
         self.file_hash = file_hash
+        self.local_path = None
 
     def get(self,local_path):
         #NOTE: default timeout was leading to a lot of timeouterrors
@@ -366,7 +397,7 @@ class InputDataset:
             registry={os.path.basename(self.source):self.file_hash})
 
         to_fetch.fetch(os.path.basename(self.source),downloader=downloader)
-            
+        self.local_path=local_path
 
 class ModelGrid(InputDataset):
     pass
@@ -420,7 +451,15 @@ class Component(ABC):
     @abstractmethod
     def pre_run(self):
         '''Things to do before running with this component'''
-    
+
+    @abstractmethod
+    def run(self):
+        pass
+
+    @abstractmethod
+    def post_run(self):
+        pass
+        
 class ROMSComponent(Component):
 
     def __init__(
@@ -445,49 +484,207 @@ class ROMSComponent(Component):
         self.n_levels=n_levels
         self.n_procs_x=n_procs_x
         self.n_procs_y=n_procs_y
+        self.exe_path=None
 
-    
+    @property
+    def n_procs_tot(self):
+        return self.n_procs_x * self.n_procs_y
+        
             
     def build(self,local_path):
         ''' We need here to go to the additional code/source mods and run make'''
+        builddir=local_path+'/source_mods/ROMS/'
+        if os.path.isdir(builddir+'Compile'):
+            subprocess.run('make compile_clean',cwd=builddir,shell=True)
         subprocess.run(f'make COMPILER={_CSTAR_COMPILER}',\
-                       cwd=local_path+'/source_mods/ROMS',shell=True)
+                       cwd=builddir,shell=True)
+
+        self.exe_path=builddir+'roms'
 
     def pre_run(self,local_path):
         ''' Before running ROMS, we need to run partit on all the netcdf files'''
 
-        
+        # Partition input datasets
         if self.input_datasets is not None:
             datasets_to_partition=self.input_datasets if isinstance(self.input_datasets,list) else [self.input_datasets,]
 
+            dspath=local_path+'/input_datasets/ROMS/'
+            os.makedirs(dspath+'PARTITIONED',exist_ok=True)
+            ndig=len(str(self.n_procs_tot)) # number of digits in n_procs_tot to pad filename strings
             for f in datasets_to_partition:
                 fname=os.path.basename(f.source)
-                subprocess.run('partit '+str(self.n_procs_x)+' '+str(self.n_procs_y)+' '+fname,
-                               cwd=local_path+'/input_datasets/ROMS/',shell=True)
+                subprocess.run('partit '+str(self.n_procs_x)+' '+str(self.n_procs_y)+' ../'+fname,
+                               cwd=dspath+'PARTITIONED',shell=True)
 
+            
+
+        ################################################################################
+        ## NOTE: we assume that roms.in is the ONLY entry in additional_code.namelists, hence [0]
+        _replace_text_in_file(local_path+'/'+self.additional_code.namelists[0],'INPUT_DIR',local_path+'/input_datasets/ROMS')
         
-        
+        ##FIXME: it doesn't make any sense to have the next line in ROMSComponent
+        _replace_text_in_file(local_path+'/'+self.additional_code.namelists[0],'MARBL_NAMELIST_DIR',local_path+'/namelists/MARBL')
+        ################################################################################
+
+    def run(self,account_key=None,
+                 walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
+                 job_name='my_roms_run'):
+
+        run_path=self.additional_code.local_path+'/output/PARTITIONED/'
+        #FIXME this only works if additional_code.get() is called in the same session
+        os.makedirs(run_path,exist_ok=True)
+        if self.exe_path is None:
+            #FIXME this only works if build() is called in the same session
+            print(f'Unable to find ROMS executable. Run .build() first.')
+        else:
+            print(self.exe_path)
+            match _CSTAR_SYSTEM:
+                case "sdsc_expanse":
+                    exec_pfx="srun --mpi=pmi2"
+                case "nersc_perlmutter":
+                    exec_pfx="srun"
+                case "ncar_derecho":
+                    exec_pfx="mpirun"
+                case "osx_arm64":
+                    exec_pfx="mpirun"
+
+                #FIXME (probably throughout): self.additional_code /could/ be a list
+                # need to figure out which element to use
+            roms_exec_cmd=\
+                f"{exec_pfx} -n {self.n_procs_tot} {self.exe_path} "+\
+                f"{self.additional_code.local_path}/{self.additional_code.namelists[0]}"
+
+            print(roms_exec_cmd)
+            
+            if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
+                nnodes,ncores=_calculate_node_distribution(
+                    self.n_procs_tot,_CSTAR_SYSTEM_CORES_PER_NODE)
+                    
+            match _CSTAR_SCHEDULER:
+
+                #FIXME: set
+                # - job_name (base it on bp metadata)
+                # - outfile (base on job name and submit date)
+                # - account_key (have as an input, maybe have user set a default or write to cfg?)
+                # - nnodes,ncpus:
+                #     take n_procs_x,n_procs_y and get total cpus, then set global info on sys eg
+                #     how many cpus to a node for each HPC and divide accordingly using mod
+                # - walltime: base it on expected_runtime from blueprint? or just set to max
+                #            by default and allow user override
+                
+                case "pbs":
+                    scheduler_script=f"""PBS -S /bin/bash
+                    #PBS -N {job_name}
+                    #PBS -o {jobname}.out
+                    #PBS -A {account_key}
+                    #PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}
+                    #PBS -q {_CSTAR_SYSTEM_DEFAULT_PARTITION}
+                    #PBS -j oe
+                    #PBS -k eod
+                    #PBS -V
+
+                    {roms_exec_cmd}
+                    """
+
+                    with tempfile.NamedTemporaryFile(mode='w',delete=False,suffix='.pbs') as f:
+                        f.write(scheduler_script)
+                        subprocess.run(f'qsub {f.name}',shell=True)
+                    
+
+                    # FIXME: need to somehow incorporate walltime, n_nodes, etc.
+                    # partition
+                    # scheduler_request="qsub"+\
+                    #     " -N "+"FIXME_job_name"+\
+                    #     " -o "+"FIXME_outfile"+\
+                    #     " -A "+str(account_key)+\
+                    #     " -l "+"select="+str(nnodes)+":ncpus="+str(ncpus)+",walltime="+str(walltime)+\
+                    #     " -q "+partition+\
+                    #     " -j "+"oe -k eod"+\
+                    #     " -V "+\
+                    #     "FIXME.sh"
+                    
+                case "slurm":
+
+                    #TODO: export ALL copies env vars, but will need to handle module load
+                    
+                    scheduler_script=f"""#!/bin/bash
+                    #SBATCH --job-name={job_name}
+                    #SBATCH --output={outfile}
+                    #SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}
+                    #SBATCH --nodes={nnodes}
+                    #SBATCH --ntasks-per-node={ncores}
+                    #SBATCH --acount={account_key}
+                    #SBATCH --export=ALL
+                    #SBATCH --mail-type=ALL
+                    #SBATCH -C=cpu
+                    #SBATCH -t={walltime}
+
+                    {roms_exec_cmd}
+                    """
+                    with tempfile.NamedTemporaryFile(mode='w',delete=False,suffix='.sh') as f:
+                        f.write(scheduler_script)
+                        subprocess.run(f'sbatch {f.name}',shell=True)
+                        
+                 #    scheduler_request="sbatch"+\
+                 #        " --job-name="+"FIXME_job_name"+\
+                 #          " --output="+"FIXME_outfile"+\
+                 #       " --partition="+partition+\
+                 #           " --nodes="+str(nnodes)+\
+                 # " --ntasks-per-node="+str(ncpus)+\
+                 #         " --account="+str(account_key)+\
+                 #         "  --export="+"ALL"+\
+                 #       " --mail-type="+"ALL"+\
+                 #                " -t="+str(walltime)+\
+                 #                "FIXME.sh"
+
+                case None:
+                    subprocess.run(roms_exec_cmd,shell=True,cwd=run_path)
+                    
+    def post_run(self):
+        out_path=self.additional_code.local_path+'/output/'
+        #run_path='/Users/dafyddstephenson/Code/my_c_star/cstar_ocean/rme_case/output/'
+        files = glob.glob(out_path+'PARTITIONED/*.0.nc')
+        if not files:
+            print('no suitable output found')
+        else:
+            for f in files:
+                print(f)
+                subprocess.run('ncjoin '+f[:-4]+'?.nc',cwd=out_path,shell=True)
+
+                    
 class MARBLComponent(Component):
     def build(self,local_path):
         print('source code modifications to MARBL are not yet supported')
 
     def pre_run(self,local_path):
         print('no pre-run actions involving MARBL are currently supported')
+    def run(self,local_path):
+        print('MARBL must be run in the context of a parent model')
+    def post_run(self):
+        print('no post-run actions involving MARBL are currently supported')
 
 class Case:
     """A combination of unique components that make up this Case"""
 
-    def __init__(self, components: List[Component], caseroot: str):
+    def __init__(self, components: List[Component],
+                           name: str,
+                       caseroot: str):
+                 
         if not all(isinstance(comp, Component) for comp in components):
             raise TypeError("components must be a list of Component instances")
         self.components = components
         self.caseroot = caseroot
         self.is_setup = False
+        self.name = name
         
     @classmethod
     def from_blueprint(cls, blueprint: str, caseroot: str):
         with open(blueprint, "r") as file:
             bp_dict = yaml.safe_load(file)
+
+        # Primary metadata
+        casename=bp_dict["registry_attrs"]["name"]
+            
         components = []
         for component_info in bp_dict["components"]:
             component_kwargs={}
@@ -609,13 +806,13 @@ class Case:
                     input_datasets+=surface_forcing
 
                 component_kwargs['input_datasets']=input_datasets
-            print(component_kwargs)
+
             components.append(ThisComponent(**component_kwargs))
             
         if len(components) == 1:
             components = components[0]
             
-        return cls(components=components, caseroot=caseroot)
+        return cls(components=components,name=casename,caseroot=caseroot)
     
     def setup(self):
         print("configuring this Case on this machine")
@@ -653,7 +850,26 @@ class Case:
         for component in self.components:
             component.pre_run(self.caseroot)
         
+
+    def run(self):
+        '''execute the model'''
+
+        # Assuming for now that ROMS presence implies it is the master program
         
+        for component in self.components:
+            if component.base_model.name=='ROMS':
+                component.run(self.caseroot)
+            
+    def post_run(self):
+        ''' carry out pre-run actions '''
+        for component in self.components:
+            component.post_run()
+        
+        
+        
+
+#--------------------------------------------------------------------------------
+            
 # Example Usage
 # config = cs.Case.from_blueprint('example.yaml')
 

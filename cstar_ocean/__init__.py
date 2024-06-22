@@ -31,8 +31,14 @@ if (
             os.environ["MPIHOME"] = os.environ["MVAPICH2HOME"]
             os.environ["NETCDF"] = os.environ["NETCDF_FORTRANHOME"]
             os.environ["MPI_ROOT"] = os.environ["MVAPICH2HOME"]
-            _CSTAR_COMPILER = "intel"
-
+            _CSTAR_COMPILER                 = "intel"
+            _CSTAR_SYSTEM                   = "sdsc_expanse"
+            _CSTAR_SCHEDULER                = "slurm"
+            _CSTAR_SYSTEM_DEFAULT_PARTITION = "compute"
+            _CSTAR_SYSTEM_CORES_PER_NODE    = 128 #cpu nodes
+            _CSTAR_SYSTEM_MEMGB_PER_NODE    = 256 #cpu nodes
+            _CSTAR_SYSTEM_MAX_WALLTIME      = "48:00:00"
+            
         case "derecho":
             module("load" "intel")
             module("load", "netcdf")
@@ -47,7 +53,13 @@ if (
                 + "/lib"
             )
 
-            _CSTAR_COMPILER = "intel"
+            _CSTAR_COMPILER                 = "intel"
+            _CSTAR_SYSTEM                   = "ncar_derecho"
+            _CSTAR_SCHEDULER                = "pbs"
+            _CSTAR_SYSTEM_DEFAULT_PARTITION = "regular"
+            _CSTAR_SYSTEM_CORES_PER_NODE    = 128 #cpu nodes
+            _CSTAR_SYSTEM_MEMGB_PER_NODE    = 256 #cpu nodes
+            _CSTAR_SYSTEM_MAX_WALLTIME      = "12:00:00"
 
         case "perlmutter":
             module("load", "cpu")
@@ -75,7 +87,13 @@ if (
                 + "/lib"
             )
 
-            _CSTAR_COMPILER = "gnu"
+            _CSTAR_COMPILER                 = "gnu"
+            _CSTAR_SYSTEM                   = "nersc_perlmutter"
+            _CSTAR_SCHEDULER                = "slurm"
+            _CSTAR_SYSTEM_DEFAULT_PARTITION = "regular"
+            _CSTAR_SYSTEM_CORES_PER_NODE    = 128 #cpu nodes
+            _CSTAR_SYSTEM_MEMGB_PER_NODE    = 512 #cpu nodes
+            _CSTAR_SYSTEM_MAX_WALLTIME      = "24:00:00"
 
 elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
     # if on MacOS arm64 all dependencies should have been installed by conda
@@ -89,7 +107,13 @@ elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
         + "/lib"
     )
     _CSTAR_COMPILER = "gnu"
-
+    _CSTAR_SYSTEM   = "osx_arm64"
+    _CSTAR_SCHEDULER         = None
+    _CSTAR_SYSTEM_DEFAULT_PARTITION = None
+    _CSTAR_SYSTEM_CORES_PER_NODE    = 12 # get from sysctl -n hw.ncpu
+    _CSTAR_SYSTEM_MEMGB_PER_NODE    = None
+    _CSTAR_SYSTEM_MAX_WALLTIME      = None
+    
 # Now read the local/custom initialisation file
 # This sets variables associated with external codebases that are not installed
 # with C-Star (e.g. ROMS_ROOT)
