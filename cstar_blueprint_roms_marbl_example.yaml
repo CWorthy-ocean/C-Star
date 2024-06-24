@@ -25,7 +25,7 @@ components:
       base_model:
         name: 'ROMS'
         source_repo: 'https://github.com/dafyddstephenson/ucla-roms.git'
-        checkout_target: 'bad2f7cdda2d8759014d8bd6d661c2834fa88955'
+        checkout_target: '75524245ebf9388ee2c59c5164c954d13a9eb11f'
       discretization:
         nx: 24
         ny: 24

@@ -124,25 +124,8 @@ elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
 
 ################################################################################
 
-
-# from .core import _input_files
-# from .core import ModelGrid
-# from .core import InitialConditions
-# from .core import BoundaryConditions
-# from .core import SurfaceForcing
-# from .core import TidalForcing
-# from .core import ModelCode
-# from .core import Component
-# from .core import Blueprint
-# from .core import Instance
-
-from .core import BaseModel
-from .core import AdditionalCode
-from .core import InputDataset
-from .core import ModelGrid
-from .core import InitialConditions
-from .core import TidalForcing
-from .core import BoundaryForcing
-from .core import SurfaceForcing
-from .core import Component
-from .core import Case
+from .cstar_base_model import BaseModel, ROMSBaseModel, MARBLBaseModel
+from .cstar_additional_code import AdditionalCode
+from .cstar_input_dataset import InputDataset, ModelGrid, TidalForcing, BoundaryForcing, SurfaceForcing, InitialConditions
+from .cstar_component import Component, ROMSComponent, MARBLComponent
+from .cstar_case import Case
