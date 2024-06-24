@@ -159,14 +159,16 @@ class BaseModel(ABC):
                 head_hash_matches_checkout_hash = head_hash == self.checkout_hash
                 if head_hash_matches_checkout_hash:
                     print(
-                        f"PLACEHOLDER MESSAGE: {self.expected_env_var}"
-                        + f"points to the correct repo {self.source_repo}"
+                        "############################################################\n"
+                        +f"C-STAR: {self.expected_env_var}, {os.environ[self.expected_env_var]} "
+                        + f"points to the correct repo {self.source_repo} "
                         + f"at the correct hash {self.checkout_hash}. Proceeding"
+                        +"\n############################################################" 
                     )
                 else:
                     print(
                         "############################################################\n"
-                        + f"{self.expected_env_var} points to the correct repo "
+                        + f"C-STAR: {self.expected_env_var} points to the correct repo "
                         + f"{self.source_repo} but HEAD is at: \n"
                         + f"{head_hash}, rather than the hash associated with "
                         + f"checkout_target {self.checkout_target}:\n"
@@ -190,7 +192,7 @@ class BaseModel(ABC):
             ext_dir = _CSTAR_ROOT + "/externals/" + self.repo_basename
             print(
                 "#######################################################\n"
-                + self.expected_env_var
+                + f"C-STAR: {self.expected_env_var}"
                 + " not found in current environment. \n"
                 + "if this is your first time running a C-Star case that "
                 + f"uses {self.name}, you will need to set it up.\n"
@@ -353,7 +355,7 @@ class AdditionalCode:
         # e.g. git clone roms_marbl_example and distribute files based on tree
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            print(f'cloning {self.source_repo} into temporary directory')
+            print(f'cloning {self.source_repo} into temporary directory {tmp_dir}')
             subprocess.run(f"git clone {self.source_repo} {tmp_dir}",check=True,shell=True)
             subprocess.run(f"git checkout {self.checkout_target}",cwd=tmp_dir,shell=True)
             # TODO if checkout fails, this should fail
@@ -522,7 +524,7 @@ class ROMSComponent(Component):
         ## NOTE: we assume that roms.in is the ONLY entry in additional_code.namelists, hence [0]
         _replace_text_in_file(local_path+'/'+self.additional_code.namelists[0],'INPUT_DIR',local_path+'/input_datasets/ROMS')
         
-        ##FIXME: it doesn't make any sense to have the next line in ROMSComponent
+        ##FIXME: it doesn't make any sense to have the next line in ROMSComponent, does it?
         _replace_text_in_file(local_path+'/'+self.additional_code.namelists[0],'MARBL_NAMELIST_DIR',local_path+'/namelists/MARBL')
         ################################################################################
 
@@ -535,7 +537,7 @@ class ROMSComponent(Component):
         os.makedirs(run_path,exist_ok=True)
         if self.exe_path is None:
             #FIXME this only works if build() is called in the same session
-            print(f'Unable to find ROMS executable. Run .build() first.')
+            print(f'C-STAR: Unable to find ROMS executable. Run .build() first.')
         else:
             print(self.exe_path)
             match _CSTAR_SYSTEM:
@@ -561,16 +563,6 @@ class ROMSComponent(Component):
                     self.n_procs_tot,_CSTAR_SYSTEM_CORES_PER_NODE)
                     
             match _CSTAR_SCHEDULER:
-
-                #FIXME: set
-                # - job_name (base it on bp metadata)
-                # - outfile (base on job name and submit date)
-                # - account_key (have as an input, maybe have user set a default or write to cfg?)
-                # - nnodes,ncpus:
-                #     take n_procs_x,n_procs_y and get total cpus, then set global info on sys eg
-                #     how many cpus to a node for each HPC and divide accordingly using mod
-                # - walltime: base it on expected_runtime from blueprint? or just set to max
-                #            by default and allow user override
                 
                 case "pbs":
                     scheduler_script=f"""PBS -S /bin/bash
@@ -589,19 +581,6 @@ class ROMSComponent(Component):
                     with tempfile.NamedTemporaryFile(mode='w',delete=False,suffix='.pbs') as f:
                         f.write(scheduler_script)
                         subprocess.run(f'qsub {f.name}',shell=True)
-                    
-
-                    # FIXME: need to somehow incorporate walltime, n_nodes, etc.
-                    # partition
-                    # scheduler_request="qsub"+\
-                    #     " -N "+"FIXME_job_name"+\
-                    #     " -o "+"FIXME_outfile"+\
-                    #     " -A "+str(account_key)+\
-                    #     " -l "+"select="+str(nnodes)+":ncpus="+str(ncpus)+",walltime="+str(walltime)+\
-                    #     " -q "+partition+\
-                    #     " -j "+"oe -k eod"+\
-                    #     " -V "+\
-                    #     "FIXME.sh"
                     
                 case "slurm":
 
@@ -624,18 +603,6 @@ class ROMSComponent(Component):
                     with tempfile.NamedTemporaryFile(mode='w',delete=False,suffix='.sh') as f:
                         f.write(scheduler_script)
                         subprocess.run(f'sbatch {f.name}',shell=True)
-                        
-                 #    scheduler_request="sbatch"+\
-                 #        " --job-name="+"FIXME_job_name"+\
-                 #          " --output="+"FIXME_outfile"+\
-                 #       " --partition="+partition+\
-                 #           " --nodes="+str(nnodes)+\
-                 # " --ntasks-per-node="+str(ncpus)+\
-                 #         " --account="+str(account_key)+\
-                 #         "  --export="+"ALL"+\
-                 #       " --mail-type="+"ALL"+\
-                 #                " -t="+str(walltime)+\
-                 #                "FIXME.sh"
 
                 case None:
                     subprocess.run(roms_exec_cmd,shell=True,cwd=run_path)
