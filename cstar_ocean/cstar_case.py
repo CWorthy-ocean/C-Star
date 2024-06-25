@@ -7,24 +7,99 @@ from .cstar_additional_code import AdditionalCode
 from .cstar_input_dataset import InputDataset,ModelGrid,InitialConditions,TidalForcing,BoundaryForcing,SurfaceForcing
 
 
-
-
 class Case:
-    """A combination of unique components that make up this Case"""
+    """
+    A unique combination of Components that defines a C-Star simulation.
+
+    Attributes
+    ---------
+    components: Component or list of Components
+        The unique model component(s) that make up this case
+    name: str
+        The name of this case
+    caseroot: str
+        The local directory in which this case will be set up
+
+    Methods
+    -------
+    from_blueprint(blueprint,caseroot)
+        Instantiate a Case from a "blueprint" yaml file
+    
+    setup()
+        Fetch all code and files necessary to run this case in the local caseroot folder
+    build()
+        Compile any case-specific code on this machine
+    pre_run()
+        Execute any pre-processing actions necessary to run this case
+    run()
+        Run this case
+    post_run()
+        Execute any post-processing actions associated with this case
+    
+    """
 
     def __init__(self, components: List[Component],
                            name: str,
                        caseroot: str):
-                 
+
+        """
+        Initialize a Case object manually from components, name, and caseroot path.
+
+        Parameters:
+        ----------
+        components: Component or list of Components
+            The unique model component(s) that make up this case        
+        name: str
+            The name of this case
+        caseroot: str
+            The local directory in which this case will be set up
+
+        Returns:
+        -------
+        Case
+            An initialized Case object
+        """
+        
         if not all(isinstance(comp, Component) for comp in components):
             raise TypeError("components must be a list of Component instances")
         self.components = components
         self.caseroot = caseroot
-        self.is_setup = False
         self.name = name
         
     @classmethod
     def from_blueprint(cls, blueprint: str, caseroot: str):
+        """
+        Initialize a Case object from a blueprint.
+
+        This method reads a YAML file containing the blueprint for a case
+        and initializes a Case object based on the provided specifications.        
+
+        A blueprint YAML file should be structured as follows:
+
+        - registry_attrs: overall case metadata, including "name"
+        - components: A list of components, containing, e.g.
+            - base_model: containing ["name","source_repo",and "checkout_target"]
+            - additional_code: optional, containing ["source_repo","checkout_target","source_mods","namelists"]
+            - input_datasets: with options like "model_grid","initial_conditions","tidal_forcing","boundary_forcing","surface_forcing"
+                              each containing "source" (a URL) and "hash" (a SHA-256 sum)
+            - discretization: containing e.g. grid "nx","ny","n_levels" and parallelization "n_procs_x","n_procs_y" information
+        
+        The blueprint MUST contain a name and at least one component with a base_model
+        
+        Parameters:
+        -----------
+        blueprint: str
+            Path to a yaml file containing the blueprint for the case
+        caseroot: str
+            Path to the local directory where the case will be curated and run
+
+        Returns:
+        --------
+        Case
+            An initalized Case object based on the provided blueprint
+
+        """
+        
         with open(blueprint, "r") as file:
             bp_dict = yaml.safe_load(file)
 
@@ -78,13 +153,13 @@ class Case:
                     namelists    = [f for f in additional_code_info['namelists']] \
                            if 'namelists'   in additional_code_info.keys() else None
 
-                    run_scripts  = [f for f in additional_code_info['scripts']['run']] \
-                           if ('scripts'    in additional_code_info.keys()) and \
-                              ('run'        in additional_code_info['scripts'].keys()) else None
+                    # run_scripts  = [f for f in additional_code_info['scripts']['run']] \
+                    #        if ('scripts'    in additional_code_info.keys()) and \
+                    #           ('run'        in additional_code_info['scripts'].keys()) else None
 
-                    proc_scripts = [f for f in additional_code_info['scripts']['processing']] \
-                           if ('scripts'    in additional_code_info.keys()) and \
-                              ('processing' in additional_code_info['scripts'].keys()) else None
+                    # proc_scripts = [f for f in additional_code_info['scripts']['processing']] \
+                    #        if ('scripts'    in additional_code_info.keys()) and \
+                    #           ('processing' in additional_code_info['scripts'].keys()) else None
                            
                 
                 additional_code.append(AdditionalCode(\
@@ -92,9 +167,7 @@ class Case:
                                                  source_repo     = source_repo,\
                                                  checkout_target = checkout_target,\
                                                  source_mods     = source_mods,\
-                                                 namelists       = namelists,\
-                                                 run_scripts     = run_scripts,\
-                                          processing_scripts     = proc_scripts))
+                                                 namelists       = namelists))
 
                 if len(additional_code) == 1:
                     additional_code = additional_code[0]
@@ -161,7 +234,19 @@ class Case:
         return cls(components=components,name=casename,caseroot=caseroot)
     
     def setup(self):
-        print("configuring this Case on this machine")
+        """
+        Fetch all code and files necessary to run this case in the local `caseroot` folder
+
+        This method loops over each Component object making up the case, and performs three operations
+        1. Checks the component's base model is present in the environment
+           and checked out to the correct point in the history by calling component.base_model.check()
+        2. Retrieves any additional code associated with the component by calling the get() method
+           on each AdditionalCode object in component.additional_code. Depending on the nature of the additional code, these
+           are saved to `caseroot/namelists/component.name` or `caseroot/source_mods/component.base_model.name`
+        3. Fetches any input datasets necessary to run the component by calling the get() method
+           on each InputDataset object in component.input_datasets. These are saved to `caseroot`/input_datasets/`component.base_model.name`
+        """
+        
 
         for component in self.components:
 
@@ -182,31 +267,38 @@ class Case:
                 component.input_dataset.get(tgt_dir)
 
         
-            #self.is_setup = True
-            # Add a marker somewhere to avoid repeating this process
+        #TODO: Add a marker somewhere to avoid repeating this process, e.g. self.is_setup=True
 
     def build(self):
-        '''build this case on this machine'''
+        """Compile any necessary additional code associated with this case
+        by calling component.build() on each Component object making up this case"""
+        
         for component in self.components:
-            component.build(local_path=self.caseroot)
+            component.build()
 
     def pre_run(self):
-        ''' carry out pre-run actions '''
+        """For each Component associated with this case, execute
+        pre-processing actions by calling component.pre_run()"""
+        
         for component in self.components:
             component.pre_run(self.caseroot)
         
 
     def run(self):
-        '''execute the model'''
+        """Run the case by calling `component.run(caseroot)`
+        on the primary component (to which others are coupled)."""
 
         # Assuming for now that ROMS presence implies it is the master program
-        
+        # TODO add more advanced logic for this
         for component in self.components:
             if component.base_model.name=='ROMS':
                 component.run(self.caseroot)
-            
+
+                
     def post_run(self):
-        ''' carry out pre-run actions '''
+        """For each Component associated with this case, execute
+        post-processing actions by calling component.post_run()"""
+        
         for component in self.components:
             component.post_run()
         

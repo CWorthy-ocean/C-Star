@@ -48,10 +48,6 @@ components:
             - "source_mods/ROMS/Make.depend"
           namelists:
             - "namelists/ROMS/roms.in_MARBL"
-          scripts:
-            run:
-              - "scripts/run/start_run.sh"
-              - "scripts/run/submit_job.sh"
       input_datasets:
         model_grid:
           files:

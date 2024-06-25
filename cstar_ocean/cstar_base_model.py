@@ -6,11 +6,61 @@ from . import _CSTAR_ROOT, _CSTAR_COMPILER
 from .utils import _get_hash_from_checkout_target
 
 class BaseModel(ABC):
-    """The model from which this model component is derived,
-    incl. source code and commit/tag (e.g. MARBL v0.45.0)"""
+    """
+    The model from which this component is derived (e.g. MARBL v0.45.0)
+
+    Attributes
+    -----------
+    source_repo: str
+        URL pointing to a git-controlled repository containing the base model source code
+    checkout_target: str
+        A tag, git hash, or other target to check out the source repo at the correct point in its history    
+    checkout_hash: str
+        The git hash associated with `checkout_target`
+    repo_basename: str
+        The basename of the repository, e.g. "repo" for "https://github.com/dev-team/repo.git
+
+    Properties
+    ----------
+    default_source_repo: str
+        The default value of `source_repo`
+    default_checkout_target: str
+        The default value of `checkout_target`    
+    expected_env_var: str
+        Environment variable pointing to the root of the base model
+        indicating that the base model has been installed and configured on the local machine
+        BaseModel.check() will look for this variable as a first check.
+    
+    Methods
+    -------
+    check()
+        Perform a series of checks to ensure that the base model is configured on this machine
+        in agreement with this BaseModel instance.
+    get()
+        Obtain and configure the base model on this machine if it is not already. check() will
+        prompt the user to get() if checks fail.
+    """
+
+    
 
     def __init__(self, source_repo=None, checkout_target=None):
-        # Type check here
+        """
+        Initialize a BaseModel object manually from a source repository and checkout target.
+
+        Parameters:
+        -----------
+        source_repo: str
+            URL pointing to a git-controlled repository containing the base model source code
+        checkout_target: str
+            A tag, git hash, or other target to check out the source repo at the correct point in its history
+
+        Returns:
+        -------
+        BaseModel
+            An initialized BaseModel object
+        """
+        
+        # TODO: Type check here
         self.source_repo = (
             source_repo if source_repo is not None else self.default_source_repo
         )
@@ -32,7 +82,7 @@ class BaseModel(ABC):
     @property
     @abstractmethod
     def default_source_repo(self):
-        '''Default source repository, defined in subclasses, e.g. https://github.com/marbl-ecosys/MARBL.git'''
+        """Default source repository, defined in subclasses, e.g. https://github.com/marbl-ecosys/MARBL.git"""
 
     @property
     @abstractmethod
@@ -46,13 +96,24 @@ class BaseModel(ABC):
 
     @abstractmethod
     def _base_model_adjustments(self):
-        """If there are any adjustments we need to make to the base model
-        after a clean checkout, do them here. For instance, we would like
-        to replace the Makefiles that are bundled with ROMS with
-        machine-agnostic equivalents"""
-
+        """
+        Perform any C-Star specific adjustments to the base model that would
+        be needed after a clean checkout. 
+        """
+    
     def check(self):
-        """Check if we already have the BaseModel installed on this system"""
+        """
+        Perform a series of checks to ensure that the base model is properly configured on this machine.
+
+        The method proceeds as follows:
+        1. Check `BaseModel.expected_env_var` is present in the environment
+            (prompt installation of the base model if not)
+        2. Check `BaseModel.expected_env_var` points to the correct remote repository
+            (raise an EnvironmentError if not)
+        3. Check the repository is checked out to the correct target
+            (prompt checkout of the correct target if not)
+        
+        """
 
         # check 1: X_ROOT variable is in user's env
         env_var_exists = self.expected_env_var in os.environ
@@ -158,6 +219,19 @@ def get(self, target):
 
 
 class ROMSBaseModel(BaseModel):
+    """
+    An implementation of the BaseModel class for the UCLA Regional Ocean Modeling System
+    
+    This subclass sets unique values for BaseModel properties specific to ROMS, and overrides
+    the get() method to compile ROMS-specific libraries.
+
+    Methods:
+    -------
+    get()
+        overrides BaseModel.get() to clone the UCLA ROMS repository, set environment, and compile libraries
+    """
+
+    
     @property
     def name(self):
         return "ROMS"
@@ -175,6 +249,12 @@ class ROMSBaseModel(BaseModel):
         return "ROMS_ROOT"
 
     def _base_model_adjustments(self):
+        """
+        Perform C-Star specific adjustments to stock ROMS code.
+        
+        In particular, this method replaces the default Makefiles with machine-agnostic
+        versions, allowing C-Star to be used with ROMS across multiple different computing systems.
+        """
         shutil.copytree(
             _CSTAR_ROOT + "/additional_files/ROMS_Makefiles/",
             os.environ[self.expected_env_var],
@@ -182,6 +262,24 @@ class ROMSBaseModel(BaseModel):
         )
 
     def get(self, target):
+        """
+        Clone ROMS code to local machine, set environment, compile libraries
+
+        This method:
+        1. clones ROMS from `source_repo`
+        2. checks out the correct commit from `checkout_target`
+        3. Sets environment variable ROMS_ROOT and appends $ROMS_ROOT/Tools-Roms to PATH
+        4. Replaces ROMS Makefiles for machine-agnostic compilation
+        5. Compiles the NHMG library
+        6. Compiles the Tools-Roms package
+
+        Parameters:
+        -----------
+        target: src
+            the path where ROMS will be cloned and compiled
+        """
+        
+        
         # Get the REPO and checkout the right version
         subprocess.run(f"git clone {self.source_repo} {target}", shell=True)
         subprocess.run(f"git -C {target} checkout {self.checkout_target}", shell=True)
@@ -213,6 +311,18 @@ class ROMSBaseModel(BaseModel):
 
 
 class MARBLBaseModel(BaseModel):
+    """
+    An implementation of the BaseModel class for the Marine Biogeochemistry Library
+    
+    This subclass sets unique values for BaseModel properties specific to MARBL, and overrides
+    the get() method to compile MARBL.
+
+    Methods:
+    -------
+    get()
+        overrides BaseModel.get() to clone the MARBL repository, set environment, and compile library.
+    """
+    
     @property
     def name(self):
         return "MARBL"
@@ -233,7 +343,22 @@ class MARBLBaseModel(BaseModel):
         pass
 
     def get(self,target):
-        # TODO: this is copypasta from the ROMSBaseModel get method
+        """
+        Clone MARBL code to local machine, set environment, compile libraries
+
+        This method:
+        1. clones MARBL from `source_repo`
+        2. checks out the correct commit from `checkout_target`
+        3. Sets environment variable MARBL_ROOT
+        4. Compiles MARBL
+
+        Parameters:
+        -----------
+        target: str
+            The local path where MARBL will be cloned and compiled
+        """
+        
+        # FIXME: duplicate code from ROMSBaseModel.get()
         subprocess.run(f"git clone {self.source_repo} {target}", shell=True)
         subprocess.run(f"git -C {target} checkout {self.checkout_target}", shell=True)
 
