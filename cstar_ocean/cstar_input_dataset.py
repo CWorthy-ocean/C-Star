@@ -45,6 +45,22 @@ class InputDataset:
         self.file_hash = file_hash
         self.local_path = None
 
+    def __str__(self):
+        name=self.__class__.__name__
+        base_str=f"{name} object "
+        base_str= "-"*(len(name)+7)+"\n"+base_str
+        base_str+="\n"+"-"*(len(name)+7)
+
+        base_str+=f"\nBase model: {self.base_model.name}"
+        base_str+=f"\nRemote path URL: {self.source}"
+        if self.local_path is not None:
+            base_str+=f"\nLocal path: {self.local_path}"
+        
+        return base_str
+
+    def __repr__(self):
+        return self.__str__()
+
     def get(self,local_path):
         """
         Fetch the file containing this input dataset and save it to `local_path` using Pooch.

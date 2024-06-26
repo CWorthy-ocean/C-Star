@@ -73,7 +73,27 @@ class AdditionalCode:
         self.source_mods        = source_mods
         self.namelists          = namelists
         self.local_path         = None
-                                             
+
+    def __str__(self):
+        base_str =  f"AdditionalCode object"# associated with {self.base_model.name} base model"
+        base_str+=f"\n---------------------"
+        base_str+=f"\nBase model: {self.base_model.name}"
+        base_str+=f"\nAdditional code repository URL: {self.source_repo} (checkout target: {self.checkout_target})"
+        if self.local_path is not None:
+            base_str+=f"\n Local path: {self.local_path}"        
+        if self.source_mods is not None:
+            base_str+=f"\nSource code modification files (paths relative to repository top level):"
+            for filename in self.source_mods:
+                base_str+=f"\n    {filename}"
+        if self.namelists is not None:
+            base_str+=f"\nNamelist files (paths relative to repository top level):"
+            for filename in self.namelists:
+                base_str+=f"\n    {filename}"
+        return base_str
+    def __repr__(self):
+        return self.__str__()
+        
+            
     def get(self, local_path):
         """
         Clone `source_repo` into a temporary directory and move required files to `local_path`.

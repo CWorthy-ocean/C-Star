@@ -19,7 +19,9 @@ class Case:
         The name of this case
     caseroot: str
         The local directory in which this case will be set up
-
+    is_from_blueprint: bool
+        Whether this Case was instantiated from a blueprint yaml file
+    
     Methods
     -------
     from_blueprint(blueprint,caseroot)
@@ -40,7 +42,8 @@ class Case:
 
     def __init__(self, components: List[Component],
                            name: str,
-                       caseroot: str):
+                       caseroot: str
+                 ):
 
         """
         Initialize a Case object manually from components, name, and caseroot path.
@@ -65,6 +68,33 @@ class Case:
         self.components = components
         self.caseroot = caseroot
         self.name = name
+        self.is_from_blueprint=False
+        self.blueprint=None
+
+    def __str__(self):
+        base_str="------------------"
+        base_str+="\nC-Star case object "
+        base_str+="\n------------------"
+
+        base_str+=f"\nName: {self.name}"
+        base_str+=f"\nLocal caseroot: {self.caseroot}"
+        base_str+="\n"
+        
+        if self.is_from_blueprint:
+            base_str+="\nThis case was instantiated from the blueprint file:"
+            base_str+=f"\n   {self.blueprint}"
+
+        base_str+="\n"
+        base_str+="\nIt is built from the following Component base models (query using Case.components): "
+        
+        for C in self.components:
+            base_str+="\n   "+C.base_model.name
+
+
+
+        return base_str
+    def __repr__(self):
+        return self.__str__()
         
     @classmethod
     def from_blueprint(cls, blueprint: str, caseroot: str):
@@ -230,8 +260,11 @@ class Case:
             
         if len(components) == 1:
             components = components[0]
-            
-        return cls(components=components,name=casename,caseroot=caseroot)
+
+        caseinstance=cls(components=components,name=casename,caseroot=caseroot)
+        caseinstance.is_from_blueprint=True
+        caseinstance.blueprint=blueprint
+        return caseinstance
     
     def setup(self):
         """
@@ -251,7 +284,7 @@ class Case:
         for component in self.components:
 
             # Check BaseModel
-            component.base_model.check()
+            component.base_model.handle_config_status()
 
             # Get AdditionalCode
             if isinstance(component.additional_code,list):

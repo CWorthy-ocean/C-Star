@@ -77,10 +77,24 @@ class Component(ABC):
         self.input_datasets = input_datasets
 
 
+        
+    def __str__(self):
+        name=self.__class__.__name__
+        base_str=f"{name} object "
+        base_str= "-"*(len(name)+7)+"\n"+base_str
+        base_str+="\n"+"-"*(len(name)+7)
+        base_str+="\nBuilt from: "
+        
+        NAC=len(self.additional_code) if isinstance(self.additional_code,list) else 1 if isinstance(self.additional_code,AdditionalCode) else 0
+        NID=len(self.input_datasets)  if isinstance(self.input_datasets ,list) else 1 if isinstance(self.input_datasets,InputDataset   ) else 0        
+        base_str+=f"\n{NAC} AdditionalCode repositories"
+        base_str+=f"\n{NID} InputDataset objects"
+
+        
+        return base_str
+    
     def __repr__(self):
-        return (f"Component(base_model={self.base_model},"+\
-                     f"additional_code={self.additional_code},"+\
-                      f"input_datasets={self.input_datasets}")
+        return self.__str__()
 
 
     @abstractmethod
