@@ -2,8 +2,8 @@ import os
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
-from . import _CSTAR_ROOT, _CSTAR_COMPILER
 from .utils import _get_hash_from_checkout_target, _get_repo_remote, _get_repo_head_hash
+from .cstar_environment import _CSTAR_ROOT, _CSTAR_COMPILER
 
 
 class BaseModel(ABC):
@@ -203,7 +203,11 @@ class BaseModel(ABC):
            3: The expected environment variable is not present and it is assumed the base model is not installed locally
               -> prompt installation of the base model
         """
-        local_root = os.environ[self.expected_env_var]
+        local_root = [
+            os.environ[self.expected_env_var]
+            if self.expected_env_var in os.environ
+            else None
+        ]
         match self.local_config_status:
             case None:
                 self.get_local_config_status()

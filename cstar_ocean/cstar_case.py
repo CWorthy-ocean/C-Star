@@ -118,6 +118,8 @@ class Case:
             - additional_code: optional, containing ["source_repo","checkout_target","source_mods","namelists"]
             - input_datasets: with options like "model_grid","initial_conditions","tidal_forcing","boundary_forcing","surface_forcing"
                               each containing "source" (a URL) and "hash" (a SHA-256 sum)
+            - discretization: containing e.g. grid "nx","ny","n_levels" and parallelization "n_procs_x","n_procs_y" information
+        
 
         The blueprint MUST contain a name and at least one component with a base_model
 
@@ -167,6 +169,15 @@ class Case:
             )
             component_kwargs["base_model"] = base_model
 
+            # Get discretization info:
+            if "discretization" not in component_info["component"].keys():
+                discretization=None
+            else:
+                discretization_info=component_info['component']['discretization']                
+                for key in list(discretization_info.keys()):
+                    component_kwargs[key]=discretization_info[key]
+
+            
             # Construct any AdditionalCode instances
             additional_code: Union[AdditionalCode, List[AdditionalCode], None]
             if "additional_code" not in component_info["component"].keys():

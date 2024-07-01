@@ -85,7 +85,7 @@ for src_file in files_in_src_dir:
                                     "nothing happens here"
                                     # logging.info(file_name+'.o depends on '+file_used+'.mod')
                                     # fout.write(file_name+'.o: '+file_used+'.mod\n')
-                except AttributeError:
+                except IndexError:
                     print(
                         "unusual case encountered when looking for use statement in "
                         + file_name
@@ -121,7 +121,7 @@ for src_file in files_in_src_dir:
                                     "nothing happens here"
                                     # logging.info(file_name+'.o depends on '+file_used+'.mod')
                                     # fout.write(file_name+'.o: '+file_used+'.mod\n')
-                except AttributeError:
+                except IndexError:
                     print(
                         "unusual case encountered when looking for include statement in "
                         + file_name

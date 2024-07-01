@@ -10,7 +10,7 @@ from .cstar_base_model import BaseModel, ROMSBaseModel
 from .cstar_input_dataset import InputDataset
 from .cstar_additional_code import AdditionalCode
 
-from . import (
+from .cstar_environment import (
     _CSTAR_COMPILER,
     _CSTAR_SCHEDULER,
     _CSTAR_SYSTEM,
