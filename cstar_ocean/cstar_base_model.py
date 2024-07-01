@@ -218,7 +218,7 @@ class BaseModel(ABC):
               -> prompt installation of the base model
         """
             
-        match self.config_status:
+        match self.local_config_status:
             case None:
                 self.get_local_config_status()
                 self.handle_config_status()
@@ -277,7 +277,7 @@ class BaseModel(ABC):
                         if yn.casefold() in ["y", "yes", "ok"]:
                            self.get(ext_dir)
                            break 
-                        elif yn.casefold in ['n','no']:
+                        elif yn.casefold in ["n","no"]:
                            raise EnvironmentError()
                         elif yn.casefold() == 'custom':
                            custom_path = input(

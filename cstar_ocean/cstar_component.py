@@ -272,11 +272,12 @@ class ROMSComponent(Component):
             datasets_to_partition=self.input_datasets if isinstance(self.input_datasets,list) else [self.input_datasets,]
 
             #dspath=local_path+'/input_datasets/ROMS/'
-            os.makedirs(dspath+'PARTITIONED',exist_ok=True)
             ndig=len(str(self.n_procs_tot)) # number of digits in n_procs_tot to pad filename strings
             for f in datasets_to_partition:
                 dspath=f.local_path
                 fname=os.path.basename(f.source)
+                
+                os.makedirs(dspath+'/PARTITIONED',exist_ok=True)                                
                 subprocess.run('partit '+str(self.n_procs_x)+' '+str(self.n_procs_y)+' ../'+fname,
                                cwd=dspath+'PARTITIONED',shell=True)
 
@@ -420,13 +421,13 @@ class ROMSComponent(Component):
 class MARBLComponent(Component):
     # Inherits its docstring from Component
     
-    def build(self,local_path):
+    def build(self):
         print('source code modifications to MARBL are not yet supported')
 
-    def pre_run(self,local_path):
+    def pre_run(self):
         print('no pre-run actions involving MARBL are currently supported')
         
-    def run(self,local_path):
+    def run(self):
         print('MARBL must be run in the context of a parent model')
         
     def post_run(self):

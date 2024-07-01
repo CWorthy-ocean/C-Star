@@ -70,6 +70,9 @@ class Case:
         self.name = name
         self.is_from_blueprint=False
         self.blueprint=None
+        self.is_setup=self.check_is_setup()
+
+        #self.is_setup=self.check_is_setup()
 
     def __str__(self):
         base_str="------------------"
@@ -78,6 +81,7 @@ class Case:
 
         base_str+=f"\nName: {self.name}"
         base_str+=f"\nLocal caseroot: {self.caseroot}"
+        base_str+=f"\nIs setup: {self.is_setup}"
         base_str+="\n"
         
         if self.is_from_blueprint:
@@ -264,22 +268,70 @@ class Case:
         caseinstance=cls(components=components,name=casename,caseroot=caseroot)
         caseinstance.is_from_blueprint=True
         caseinstance.blueprint=blueprint
+
         return caseinstance
+
+    def check_is_setup(self):
+        """
+        Check whether all code and files necessary to run this case exist in the local `caseroot` folder
+
+        This method is called by Case.__init__() and sets the Case.is_setup attribute.
+        
+        The method loops over each Component object makng up the case and
+        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
+        2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
+        3. Loops over InputDataset instances in the component calling InputDataset.check_exists_locally(caseroot) on each
+
+        Returns:
+        --------
+        is_setup: bool
+            True if all components are correctly set up in the caseroot directory
+        
+        """
+        for component in self.components:
+            if component.base_model.local_config_status!=0:
+                #print(f'{component.base_model.name} does not appear to be configured properly.'+\
+                    #'\nRun Case.setup() or BaseModel.handle_config_status()')
+                return False
+            
+            # Check AdditionalCode
+            if isinstance(component.additional_code,list):
+                for ac in component.additional_code:
+                    if not ac.check_exists_locally(self.caseroot):
+                        return False
+            elif isinstance(component.additional_code,AdditionalCode):
+                if not component.additional_code.check_exists_locally(self.caseroot):
+                    return False
+
+            # Check InputDatasets
+            if isinstance(component.input_datasets,list):
+                for id in component.input_datasets:
+                    if not id.check_exists_locally(self.caseroot):
+                        return False
+            elif isinstance(component.input_datasets,InputDataset):
+                if not component.input_dataset.check_exists_locally(self.caseroot):
+                    return False
+
+        return True
+            
     
     def setup(self):
         """
         Fetch all code and files necessary to run this case in the local `caseroot` folder
 
         This method loops over each Component object making up the case, and performs three operations
-        1. Checks the component's base model is present in the environment
-           and checked out to the correct point in the history by calling component.base_model.check()
+        1. Ensures the component's base model is present in the environment
+           and checked out to the correct point in the history by calling component.base_model.handle_config_status()
         2. Retrieves any additional code associated with the component by calling the get() method
            on each AdditionalCode object in component.additional_code. Depending on the nature of the additional code, these
            are saved to `caseroot/namelists/component.name` or `caseroot/source_mods/component.base_model.name`
         3. Fetches any input datasets necessary to run the component by calling the get() method
            on each InputDataset object in component.input_datasets. These are saved to `caseroot`/input_datasets/`component.base_model.name`
         """
-        
+
+        if self.is_setup:
+            print(f"This case appears to have already been set up at {self.caseroot}")
+            return
 
         for component in self.components:
 
@@ -293,13 +345,14 @@ class Case:
                 component.additional_code.get(self.caseroot)
 
             #Get InputDatasets
-            tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name            
+            #tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name            
             if isinstance(component.input_datasets,list):
-                [inp.get(tgt_dir) for inp in component.input_datasets]
+                [inp.get(self.caseroot) for inp in component.input_datasets]
             elif isinstance(component.input_datasets,InputDataset):
-                component.input_dataset.get(tgt_dir)
-
+                component.input_dataset.get(self.caseroot)
         
+        
+        self.is_setup=True
         #TODO: Add a marker somewhere to avoid repeating this process, e.g. self.is_setup=True
 
     def build(self):
@@ -314,7 +367,7 @@ class Case:
         pre-processing actions by calling component.pre_run()"""
         
         for component in self.components:
-            component.pre_run(self.caseroot)
+            component.pre_run()
         
 
     def run(self):

@@ -25,6 +25,9 @@ class AdditionalCode:
         Path(s) from the top level of `source_repo` to any code that is needed to compile a unique instance of the base model
     namelists: str or list of strs
         Path(s) from the top level of `source_repo` to any code that is needed at runtime for the base model
+    exists_locally: bool, default None
+        True if the additional code has been fetched to the local machine, set when `check_exists_locally()` method is called
+        
     local_path: str, default None
         The path to where the additional code has been fetched locally, set when the `get()` method is called
 
@@ -33,7 +36,8 @@ class AdditionalCode:
     get(local_path):
        Clone the `source_repo` repository to a temporary directory, checkout `checkout_target`,
        and move files associated with this AdditionalCode instance to `local_path`.
-    
+    check_exists_locally(local_path):
+       Verify whether the files associated with this AdditionalCode instance can be found at `local_path`
     """
 
     def __init__(self,  base_model: BaseModel,
@@ -72,6 +76,7 @@ class AdditionalCode:
         self.checkout_target    = checkout_target
         self.source_mods        = source_mods
         self.namelists          = namelists
+        self.exists_locally     = None
         self.local_path         = None
 
     def __str__(self):
@@ -79,6 +84,8 @@ class AdditionalCode:
         base_str+=f"\n---------------------"
         base_str+=f"\nBase model: {self.base_model.name}"
         base_str+=f"\nAdditional code repository URL: {self.source_repo} (checkout target: {self.checkout_target})"
+        if self.exists_locally is not None:
+            base_str+=f"\n Exists locally: {self.exists_locally}"
         if self.local_path is not None:
             base_str+=f"\n Local path: {self.local_path}"        
         if self.source_mods is not None:
@@ -133,4 +140,42 @@ class AdditionalCode:
                     else:
                         raise FileNotFoundError(f"Error: {tmp_file_path} does not exist.")
         self.local_path=local_path
+        self.exists_locally=True
+
+    def check_exists_locally(self,local_path):
+        """
+        Checks whether this AdditionalCode  has already been fetched to the local machine
+
+        Behaves similarly to get() but verifies that the actions of get() have been performed.
+        Updates the "AdditionalCode.exists_locally" attribute.
+        
+        Parameters:
+        -----------
+        local_path (str):
+            The local path to check for the existence of this additional code
+
+        Returns:
+        --------
+        exists_locally (bool):
+            True if the method has verified the local existence of the additional code
+        """
+
+        #FIXME: this method, unlike InputDataset.check_exists_locally(), only matches filenames
+        
+        for file_type in ['source_mods','namelists']:
+            file_list=getattr(self,file_type)
+            if file_list is None:
+                continue 
+            tgt_dir=local_path+'/'+file_type+'/'+self.base_model.name
+            for f in file_list:
+                tgt_file_path=tgt_dir+'/'+os.path.basename(f)
+                if not os.path.exists(tgt_file_path):
+                    self.exists_locally=False
+                    return False
+
+        if self.exists_locally!=False:
+            self.local_path=local_path
+            self.exists_locally=True
+            return True
+                    
         
