@@ -48,7 +48,7 @@ NC3TO4Z := $(addsuffix $(OBJ_ext),$(NC3TO4Z))
 nc3to4z: $(NC3TO4Z)
 	$(LDR) $(FFLAGS) $(LDFLAGS) -o nc3to4z $(NC3TO4Z) $(LCDF)
 
-# mpc	
+# mpc
 mpc: mpc$(UPF77_ext) Makefile
 	$(CPP) $(CPPFLAGS) -P mpc$(UPF77_ext) > ./mpc$(PPF77_ext)
 	$(CFT) $(FFLAGS) $(LDFLAGS) -o mpc ./mpc$(PPF77_ext)
@@ -62,7 +62,7 @@ extract_data_join: $(EXTRACT_DATA_JOIN)
 # particle_join
 PARTICLE_JOIN = ncjoin_mod particle_join  lenstr
 PARTICLE_JOIN := $(addsuffix $(OBJ_ext), $(PARTICLE_JOIN))
-particle_join: 
+particle_join:
 	$(LDR) $(FFLAGS) $(LDFLAGS) -o particle_join $(PARTICLE_JOIN) $(LCDF)
 
 # r2r_init
@@ -102,7 +102,7 @@ R2R_MATCH_TOPO = r2r_match_topo r2r_interp_init mrg_zone_subs tiling\
                         spln2d roms_read_write read_string lenstr
 R2R_MATCH_TOPO := $(addsuffix $(OBJ_ext),$(R2R_MATCH_TOPO))
 r2r_match_topo: $(R2R_MATCH_TOPO)
-	$(LDR) $(FFLAGS) $(LDFLAGS) -o r2r_match_topo $(R2R_MATCH_TOPO) $(LCDF)                                  
+	$(LDR) $(FFLAGS) $(LDFLAGS) -o r2r_match_topo $(R2R_MATCH_TOPO) $(LCDF)
 
 # sample
 SAMPLE = roms_read_write sample tiling\

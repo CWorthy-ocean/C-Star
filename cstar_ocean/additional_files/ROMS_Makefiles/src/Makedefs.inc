@@ -53,7 +53,7 @@ ifeq ($(CFT),mpifort)
    ifeq ($(findstring $(expected_fc),$(MPIVER)),)
 	_ := $(error "COMPILER is set to $(COMPILER) but mpifort wraps $(MPIVER). Call make with the COMPILER= argument (either intel or gnu)")
    endif
-endif 
+endif
 
 # For BUILD_MODE = "vtune" or "grof" always keep source code:
 ifeq ($(BUILD_MODE),vtune)
