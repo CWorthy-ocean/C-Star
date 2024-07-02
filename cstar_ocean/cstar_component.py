@@ -3,10 +3,10 @@ import glob
 import tempfile
 import subprocess
 from abc import ABC, abstractmethod
-from typing import List, Union, Optional, TypedDict
+from typing import List, Union, Optional, Any
 
 from .utils import _calculate_node_distribution, _replace_text_in_file
-from .cstar_base_model import BaseModel, ROMSBaseModel
+from .cstar_base_model import ROMSBaseModel, BaseModel
 from .cstar_input_dataset import InputDataset
 from .cstar_additional_code import AdditionalCode
 
@@ -18,16 +18,6 @@ from .cstar_environment import (
     _CSTAR_SYSTEM_DEFAULT_PARTITION,
     _CSTAR_SYSTEM_CORES_PER_NODE,
 )
-
-
-class _ComponentKwargs(TypedDict, total=False):
-    """
-    Ensures a correctly formatted dictionary kwargs_dict is passed to Component.__init__(**kwargs_dict)
-    """
-
-    base_model: BaseModel
-    additional_code: Optional[Union[AdditionalCode, List[AdditionalCode]]]
-    input_datasets: Optional[Union[InputDataset, List[InputDataset]]]
 
 
 class Component(ABC):
@@ -58,12 +48,7 @@ class Component(ABC):
         Execute any post-processing actions associated with this component
     """
 
-    def __init__(
-        self,
-        base_model: BaseModel,
-        additional_code: Optional[Union[AdditionalCode, List[AdditionalCode]]] = None,
-        input_datasets: Optional[Union[InputDataset, List[InputDataset]]] = None,
-    ):
+    def __init__(self, **kwargs: Any):
         """
         Initialize a Component object from a base model and any additional_code or input_datasets
 
@@ -86,9 +71,20 @@ class Component(ABC):
         """
 
         # FIXME: do Type checking here
-        self.base_model = base_model
-        self.additional_code = additional_code
-        self.input_datasets = input_datasets
+        if "base_model" not in kwargs or not isinstance(
+            kwargs["base_model"], BaseModel
+        ):
+            raise ValueError(
+                "base_model must be provided and must be an instance of BaseModel"
+            )
+        self.base_model: BaseModel = kwargs["base_model"]
+
+        self.additional_code: Optional[Union[AdditionalCode, List[AdditionalCode]]] = (
+            kwargs.get("additional_code", None)
+        )
+        self.input_datasets: Optional[Union[InputDataset, List[InputDataset]]] = (
+            kwargs.get("input_datasets", None)
+        )
 
     def __str__(self):
         name = self.__class__.__name__

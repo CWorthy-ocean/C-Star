@@ -1,7 +1,7 @@
 import yaml
-from typing import List, Type, Union
+from typing import List, Type, Union, Any
 
-from .cstar_component import Component, MARBLComponent, ROMSComponent, _ComponentKwargs
+from .cstar_component import Component, MARBLComponent, ROMSComponent
 from .cstar_base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
 from .cstar_additional_code import AdditionalCode
 from .cstar_input_dataset import (
@@ -33,7 +33,8 @@ class Case:
     -------
     from_blueprint(blueprint,caseroot)
         Instantiate a Case from a "blueprint" yaml file
-
+    persist(filename)
+        Create a "blueprint" yaml file for this Case object
     setup()
         Fetch all code and files necessary to run this case in the local caseroot folder
     build()
@@ -119,7 +120,7 @@ class Case:
             - input_datasets: with options like "model_grid","initial_conditions","tidal_forcing","boundary_forcing","surface_forcing"
                               each containing "source" (a URL) and "hash" (a SHA-256 sum)
             - discretization: containing e.g. grid "nx","ny","n_levels" and parallelization "n_procs_x","n_procs_y" information
-        
+
 
         The blueprint MUST contain a name and at least one component with a base_model
 
@@ -146,7 +147,7 @@ class Case:
         components = []
 
         for component_info in bp_dict["components"]:
-            component_kwargs: _ComponentKwargs = {}
+            component_kwargs: dict[str, Any] = {}
 
             # Use "ThisComponent" as a reference that is set here and used throughout
             # QUESTION : is this the best way to handle the need for different subclasses here?
@@ -171,13 +172,12 @@ class Case:
 
             # Get discretization info:
             if "discretization" not in component_info["component"].keys():
-                discretization=None
+                discretization_info = None
             else:
-                discretization_info=component_info['component']['discretization']                
+                discretization_info = component_info["component"]["discretization"]
                 for key in list(discretization_info.keys()):
-                    component_kwargs[key]=discretization_info[key]
+                    component_kwargs[key] = discretization_info[key]
 
-            
             # Construct any AdditionalCode instances
             additional_code: Union[AdditionalCode, List[AdditionalCode], None]
             if "additional_code" not in component_info["component"].keys():
@@ -314,6 +314,114 @@ class Case:
 
         return caseinstance
 
+    def persist(self, filename):
+        """
+        Write this case to a yaml file.
+
+        This effectively performs the actions of Case.from_blueprint(), but in reverse,
+        populating a dictionary from a Case object and its components and their attributes,
+        then writing that dictionary to a yaml file.
+
+        Parameters:
+        ----------
+        filename (str):
+            The yaml file created and written to by the method
+        """
+
+        bp_dict: dict = {}
+
+        # Add metadata to dictionary
+        bp_dict["registry_attrs"] = {"name": self.name}
+
+        bp_dict["components"] = []
+        for component in self.components:
+            component_info: dict = {}
+            # This will be bp_dict["components"]["component"]=component_info
+
+            base_model_info: dict = {}
+            # This will be component_info["base_model"] = base_model_info
+            base_model_info = {}
+            base_model_info["name"] = component.base_model.name
+            base_model_info["source_repo"] = component.base_model.source_repo
+            base_model_info["checkout_target"] = component.base_model.checkout_target
+
+            component_info["base_model"] = base_model_info
+
+            # discretization info (if present)
+            discretization_info = {}
+            if "nx" in component.__dict__.keys():
+                discretization_info["nx"] = component.nx
+            if "ny" in component.__dict__.keys():
+                discretization_info["ny"] = component.ny
+            if "n_levels" in component.__dict__.keys():
+                discretization_info["n_levels"] = component.n_levels
+            if "n_procs_x" in component.__dict__.keys():
+                discretization_info["n_procs_x"] = component.n_procs_x
+            if "n_procs_y" in component.__dict__.keys():
+                discretization_info["n_procs_y"] = component.n_procs_y
+
+            if len(discretization_info) > 0:
+                component_info["discretization"] = discretization_info
+
+            # AdditionalCode instances - can also be None
+            # Loop over additional code
+            additional_code = component.additional_code
+            if isinstance(additional_code, AdditionalCode):
+                additional_code = [
+                    additional_code,
+                ]
+            if isinstance(additional_code, list):
+                additional_code_list: list = []
+                for adc in additional_code:
+                    additional_code_info: dict = {}
+                    # This will be component_info["component"]["additional_code"]=additional_code_info
+                    additional_code_info["source_repo"] = adc.source_repo
+                    additional_code_info["checkout_target"] = adc.checkout_target
+                    if adc.source_mods is not None:
+                        additional_code_info["source_mods"] = (
+                            adc.source_mods
+                        )  # this is a list
+                    if adc.namelists is not None:
+                        additional_code_info["namelists"] = adc.namelists
+
+                    additional_code_list.append(additional_code_info)
+
+                component_info["additional_code"] = additional_code_list
+
+            # InputDataset
+            input_datasets = component.input_datasets
+            if isinstance(input_datasets, InputDataset):
+                input_datasets = [
+                    input_datasets,
+                ]
+            if isinstance(input_datasets, list):
+                input_dataset_info: dict = {}
+                for ind in input_datasets:
+                    if isinstance(ind, ModelGrid):
+                        dct_key = "model_grid"
+                    elif isinstance(ind, InitialConditions):
+                        dct_key = "initial_conditions"
+                    elif isinstance(ind, TidalForcing):
+                        dct_key = "tidal_forcing"
+                    elif isinstance(ind, BoundaryForcing):
+                        dct_key = "boundary_forcing"
+                    elif isinstance(ind, SurfaceForcing):
+                        dct_key = "surface_forcing"
+                    if dct_key not in input_dataset_info.keys():
+                        input_dataset_info[dct_key] = {}
+                    if "files" not in input_dataset_info[dct_key].keys():
+                        input_dataset_info[dct_key]["files"] = []
+                    input_dataset_info[dct_key]["files"].append(
+                        {"source": ind.source, "file_hash": ind.file_hash}
+                    )
+
+                component_info["input_datasets"] = input_dataset_info
+
+            bp_dict["components"].append({"component": component_info})
+
+        with open(filename, "w") as yaml_file:
+            yaml.dump(bp_dict, yaml_file, default_flow_style=False, sort_keys=False)
+
     def check_is_setup(self):
         """
         Check whether all code and files necessary to run this case exist in the local `caseroot` folder
@@ -348,8 +456,8 @@ class Case:
 
             # Check InputDatasets
             if isinstance(component.input_datasets, list):
-                for id in component.input_datasets:
-                    if not id.check_exists_locally(self.caseroot):
+                for ind in component.input_datasets:
+                    if not ind.check_exists_locally(self.caseroot):
                         return False
             elif isinstance(component.input_datasets, InputDataset):
                 if not component.input_dataset.check_exists_locally(self.caseroot):
