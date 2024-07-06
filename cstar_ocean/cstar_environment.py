@@ -22,17 +22,25 @@ _CSTAR_SYSTEM_MEMGB_PER_NODE: Optional[int]
 _CSTAR_SYSTEM_MAX_WALLTIME: Optional[str]
 
 
+
 if (
     (platform.system() == "Linux")
     and ("LMOD_DIR" in list(os.environ))
-    and ("LMOD_SYSHOST" in list(os.environ))
 ):
     sys.path.append(os.environ["LMOD_DIR"] + "/../init")
     from env_modules_python import module
 
-    syshost = os.environ["LMOD_SYSHOST"].casefold()
-    module("purge")
-    match syshost:
+    if "LMOD_SYSHOST" in list(os.environ):
+        sysname=os.environ["LMOD_SYSHOST"].casefold()
+    elif "LMOD_SYSTEM_NAME" in list(os.environ):
+        sysname=os.environ["LMOD_SYSTEM_NAME"].casefold()
+    else:
+        raise EnvironmentError("unable to find LMOD_SYSHOST or LMOD_SYSTEM_NAME in environment. "+\
+        "Your system may be unsupported")
+    
+
+    module("restore")
+    match sysname:
         case "expanse":
             sdsc_default_modules = "slurm sdsc DefaultModules shared"
             nc_prerequisite_modules = "cpu/0.15.4 intel/19.1.1.217 mvapich2/2.3.4"
@@ -70,7 +78,7 @@ if (
             _CSTAR_COMPILER = "intel"
             _CSTAR_SYSTEM = "ncar_derecho"
             _CSTAR_SCHEDULER = "pbs"
-            _CSTAR_SYSTEM_DEFAULT_PARTITION = "regular"
+            _CSTAR_SYSTEM_DEFAULT_PARTITION = "main"
             _CSTAR_SYSTEM_CORES_PER_NODE = 128  # cpu nodes
             _CSTAR_SYSTEM_MEMGB_PER_NODE = 256  # cpu nodes
             _CSTAR_SYSTEM_MAX_WALLTIME = "12:00:00"
@@ -132,8 +140,8 @@ elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
 # This sets variables associated with external codebases that are not installed
 # with C-Star (e.g. ROMS_ROOT)
 
-# _CONFIG_FILE=_CSTAR_ROOT+'/cstar_local_config.py'
-# if os.path.exists(_CONFIG_FILE):
-#     from . import cstar_local_config
+_CSTAR_CONFIG_FILE=_CSTAR_ROOT+'/cstar_local_config.py'
+if os.path.exists(_CSTAR_CONFIG_FILE):
+    from . import cstar_local_config
 
 ################################################################################

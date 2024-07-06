@@ -1,9 +1,11 @@
+import os
 import yaml
 from typing import List, Type, Union, Any
 
 from .cstar_component import Component, MARBLComponent, ROMSComponent
 from .cstar_base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
 from .cstar_additional_code import AdditionalCode
+from .cstar_environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from .cstar_input_dataset import (
     InputDataset,
     ModelGrid,
@@ -70,7 +72,7 @@ class Case:
         """
 
         self.components: Union[Component, List[Component]] = components
-        self.caseroot: str = caseroot
+        self.caseroot: str = os.path.abspath(caseroot)
         self.name: str = name
         self.is_from_blueprint: bool = False
         self.blueprint: Union[str, None] = None
@@ -163,6 +165,10 @@ class Case:
                 case "marbl":
                     ThisComponent = MARBLComponent
                     ThisBaseModel = MARBLBaseModel
+                case _:
+                    raise ValueError(f'Base model name {base_model_info["name"]} in blueprint '+\
+                                     f'{blueprint}  does not match a value that is supported by C-Star. '+\
+                                     f'Currently supported values are "ROMS" and "MARBL"')                    
 
             # Construct the BaseModel instance
             base_model = ThisBaseModel(
@@ -517,7 +523,10 @@ class Case:
         for component in self.components:
             component.pre_run()
 
-    def run(self):
+    def run(self,
+            account_key=None,
+            walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
+            job_name="my_case_run"):
         """Run the case by calling `component.run(caseroot)`
         on the primary component (to which others are coupled)."""
 
@@ -525,7 +534,9 @@ class Case:
         # TODO add more advanced logic for this
         for component in self.components:
             if component.base_model.name == "ROMS":
-                component.run(self.caseroot)
+                component.run(account_key=account_key,
+                              walltime=walltime,
+                              job_name=job_name)
 
     def post_run(self):
         """For each Component associated with this case, execute

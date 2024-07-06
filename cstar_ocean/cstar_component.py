@@ -351,6 +351,7 @@ class ROMSComponent(Component):
             `job_name.out`
         """
 
+
         run_path = self.additional_code.local_path + "/output/PARTITIONED/"
         # FIXME this only works if additional_code.get() is called in the same session
         os.makedirs(run_path, exist_ok=True)
@@ -358,7 +359,6 @@ class ROMSComponent(Component):
             # FIXME this only works if build() is called in the same session
             print("C-STAR: Unable to find ROMS executable. Run .build() first.")
         else:
-            print(self.exe_path)
             match _CSTAR_SYSTEM:
                 case "sdsc_expanse":
                     exec_pfx = "srun --mpi=pmi2"
@@ -376,7 +376,6 @@ class ROMSComponent(Component):
                 + f"{self.additional_code.local_path}/{self.additional_code.namelists[0]}"
             )
 
-            print(roms_exec_cmd)
 
             if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
                 nnodes, ncores = _calculate_node_distribution(
@@ -385,47 +384,48 @@ class ROMSComponent(Component):
 
             match _CSTAR_SCHEDULER:
                 case "pbs":
-                    scheduler_script = f"""PBS -S /bin/bash
-                    #PBS -N {job_name}
-                    #PBS -o {job_name}.out
-                    #PBS -A {account_key}
-                    #PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}
-                    #PBS -q {_CSTAR_SYSTEM_DEFAULT_PARTITION}
-                    #PBS -j oe
-                    #PBS -k eod
-                    #PBS -V
+                    if account_key is None:
+                        raise ValueError("please call Component.run() with a value for account_key")
+                    scheduler_script = f"#PBS -S /bin/bash"
+                    scheduler_script+=f"\n#PBS -N {job_name}"
+                    scheduler_script+=f"\n#PBS -o {job_name}.out"
+                    scheduler_script+=f"\n#PBS -A {account_key}"
+                    scheduler_script+=f"\n#PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}"
+                    scheduler_script+=f"\n#PBS -q {_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                    scheduler_script+=f"\n#PBS -j oe"
+                    scheduler_script+=f"\n#PBS -k eod"
+                    scheduler_script+=f"\n#PBS -V"
+                    if _CSTAR_SYSTEM=="ncar_derecho":
+                        scheduler_script+="\ncd ${PBS_O_WORKDIR}"
+                    scheduler_script+=f"\n\n{roms_exec_cmd}"
 
-                    {roms_exec_cmd}
-                    """
-
-                    with tempfile.NamedTemporaryFile(
-                        mode="w", delete=False, suffix=".pbs"
-                    ) as f:
+                    script_fname='cstar_run_script.pbs'
+                    with open(run_path+script_fname,'w') as f:
                         f.write(scheduler_script)
-                        subprocess.run(f"qsub {f.name}", shell=True)
+                    subprocess.run(f"qsub {script_fname}", shell=True,cwd=run_path)
 
                 case "slurm":
                     # TODO: export ALL copies env vars, but will need to handle module load
+                    if account_key is None:
+                        raise ValueError("please call Component.run() with a value for account_key")
 
-                    scheduler_script = f"""#!/bin/bash
-                    #SBATCH --job-name={job_name}
-                    #SBATCH --output={job_name}.out
-                    #SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}
-                    #SBATCH --nodes={nnodes}
-                    #SBATCH --ntasks-per-node={ncores}
-                    #SBATCH --acount={account_key}
-                    #SBATCH --export=ALL
-                    #SBATCH --mail-type=ALL
-                    #SBATCH -C=cpu
-                    #SBATCH -t={walltime}
+                    scheduler_script = f"#!/bin/bash"
+                    scheduler_script+=f"\n#SBATCH --job-name={job_name}"
+                    scheduler_script+=f"\n#SBATCH --output={job_name}.out"
+                    scheduler_script+=f"\n#SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                    scheduler_script+=f"\n#SBATCH --nodes={nnodes}"
+                    scheduler_script+=f"\n#SBATCH --ntasks-per-node={ncores}"
+                    scheduler_script+=f"\n#SBATCH --acount={account_key}"
+                    scheduler_script+=f"\n#SBATCH --export=ALL"
+                    scheduler_script+=f"\n#SBATCH --mail-type=ALL"
+                    scheduler_script+=f"\n#SBATCH -C=cpu"
+                    scheduler_script+=f"\n#SBATCH -t={walltime}"
+                    scheduler_script+=f"\n\n{roms_exec_cmd}"
 
-                    {roms_exec_cmd}
-                    """
-                    with tempfile.NamedTemporaryFile(
-                        mode="w", delete=False, suffix=".sh"
-                    ) as f:
+                    script_fname='cstar_run_script.sh'
+                    with open(run_path+script_fname,'w') as f:
                         f.write(scheduler_script)
-                        subprocess.run(f"sbatch {f.name}", shell=True)
+                    subprocess.run(f"sbatch {script_fname}", shell=True,cwd=run_path)
 
                 case None:
                     subprocess.run(roms_exec_cmd, shell=True, cwd=run_path)

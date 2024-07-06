@@ -22,6 +22,7 @@ requirements:
   run:
     - python>=3.10
     - pooch
+    - yaml
     - numpy
     - xarray
     - conda-forge::compilers=1.6.0 # [osx and arm64]

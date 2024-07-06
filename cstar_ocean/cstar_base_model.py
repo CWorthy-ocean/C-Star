@@ -2,9 +2,8 @@ import os
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
-from .utils import _get_hash_from_checkout_target, _get_repo_remote, _get_repo_head_hash
-from .cstar_environment import _CSTAR_ROOT, _CSTAR_COMPILER
-
+from .utils import _get_hash_from_checkout_target, _get_repo_remote, _get_repo_head_hash, _write_to_config_file
+from .cstar_environment import _CSTAR_ROOT, _CSTAR_COMPILER, _CSTAR_CONFIG_FILE
 
 class BaseModel(ABC):
     """
@@ -259,6 +258,7 @@ class BaseModel(ABC):
                     + f"uses {self.name}, you will need to set it up.\n"
                     + f"It is recommended that you install {self.name} in \n"
                     + f"{ext_dir}"
+                    + "\nThis will also modify your `cstar_local_config.py` file."                    
                     + "\n#######################################################"
                 )
                 while True:
@@ -269,7 +269,7 @@ class BaseModel(ABC):
                     if yn.casefold() in ["y", "yes", "ok"]:
                         self.get(ext_dir)
                         break
-                    elif yn.casefold in ["n", "no"]:
+                    elif yn.casefold() in ["n", "no"]:
                         raise EnvironmentError()
                     elif yn.casefold() == "custom":
                         custom_path = input("Enter custom path for install:\n")
@@ -352,14 +352,11 @@ class ROMSBaseModel(BaseModel):
         os.environ["PATH"] += ":" + target + "/Tools-Roms/"
 
         # Set the configuration file to be read by __init__.py for future sessions:
-        #                            === TODO ===
-        # config_file_str=\
-        # f'os.environ["ROMS_ROOT"]="{target}"\nos.environ["PATH"]+=":"+\
-        # "{target}/Tools-Roms"\n'
-        # if not os.path.exists(_CONFIG_FILE):
-        # config_file_str='import os\n'+config_file_str
-        # with open(_CONFIG_FILE,'w') as f:
-        # f.write(config_file_str)
+        config_file_str=\
+        f'os.environ["ROMS_ROOT"]="{target}"\nos.environ["PATH"]+=":'+\
+        f'{target}/Tools-Roms"\n'
+
+        _write_to_config_file(config_file_str)
 
         # Distribute custom makefiles for ROMS
         self._base_model_adjustments()
@@ -429,12 +426,9 @@ class MARBLBaseModel(BaseModel):
         os.environ["MARBL_ROOT"] = target
 
         # Set the configuration file to be read by __init__.py for future sessions:
-        #                              ===TODO===
-        # config_file_str=f'os.environ["MARBL_ROOT"]="{target}"\n'
-        # if not os.path.exists(_CONFIG_FILE):
-        #    config_file_str='import os\n'+config_file_str
-        # with open(_CONFIG_FILE,'w') as f:
-        #        f.write(config_file_str)
+        # QUESTION: how better to handle this?
+        config_file_str=f'\nos.environ["MARBL_ROOT"]="{target}"\n'
+        _write_to_config_file(config_file_str)
 
         # Make things
         subprocess.run(
