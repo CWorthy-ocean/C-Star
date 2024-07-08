@@ -412,14 +412,14 @@ class ROMSComponent(Component):
                     scheduler_script = f"#!/bin/bash"
                     scheduler_script+=f"\n#SBATCH --job-name={job_name}"
                     scheduler_script+=f"\n#SBATCH --output={job_name}.out"
-                    scheduler_script+=f"\n#SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                    scheduler_script+=f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
                     scheduler_script+=f"\n#SBATCH --nodes={nnodes}"
                     scheduler_script+=f"\n#SBATCH --ntasks-per-node={ncores}"
-                    scheduler_script+=f"\n#SBATCH --acount={account_key}"
+                    scheduler_script+=f"\n#SBATCH --account={account_key}"
                     scheduler_script+=f"\n#SBATCH --export=ALL"
                     scheduler_script+=f"\n#SBATCH --mail-type=ALL"
-                    scheduler_script+=f"\n#SBATCH -C=cpu"
-                    scheduler_script+=f"\n#SBATCH -t={walltime}"
+                    scheduler_script+=f"\n#SBATCH -C cpu"
+                    scheduler_script+=f"\n#SBATCH --time={walltime}"
                     scheduler_script+=f"\n\n{roms_exec_cmd}"
 
                     script_fname='cstar_run_script.sh'
