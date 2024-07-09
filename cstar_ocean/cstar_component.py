@@ -107,9 +107,24 @@ class Component(ABC):
             if isinstance(self.input_datasets, InputDataset)
             else 0
         )
-        base_str += f"\n{NAC} AdditionalCode repositories"
-        base_str += f"\n{NID} InputDataset objects"
+        base_str += f"\n{NAC} AdditionalCode repositories (query using ROMSComponent.additional_code)"
+        base_str += f"\n{NID} InputDataset objects (query using ROMSComponent.input_datasets"
 
+        base_str+="\n\nDiscretization info:"
+        if self.n_procs_x is not None:
+            base_str+="\nn_procs_x:"+str(self.n_procs_x)+" (Number of x-direction processors)"
+        if self.n_procs_y is not None:
+            base_str+="\nn_procs_y:"+str(self.n_procs_y)+" (Number of y-direction processors)"
+        if self.n_levels is not None:
+            base_str+="\nn_levels:"+str(self.n_levels)
+        if self.nx is not None:
+            base_str+="\nnx:"+str(self.nx)
+        if self.ny is not None:
+            base_str+="\nny:"+str(self.ny)
+
+        if self.exe_path is not None:
+            base_str+="\n\nIs compiled: True"
+            base_str+="\n exe_path: "+self.exe_path
         return base_str
 
     def __repr__(self):
@@ -357,7 +372,9 @@ class ROMSComponent(Component):
         os.makedirs(run_path, exist_ok=True)
         if self.exe_path is None:
             # FIXME this only works if build() is called in the same session
-            print("C-STAR: Unable to find ROMS executable. Run .build() first.")
+            print("C-STAR: Unable to find ROMS executable. Run Component.build() first."+\
+                  "\n If you have already run Component.build(), either run it again or "+\
+                  " add the executable path manually using Component.exe_path='YOUR/PATH'.")
         else:
             match _CSTAR_SYSTEM:
                 case "sdsc_expanse":
@@ -412,13 +429,17 @@ class ROMSComponent(Component):
                     scheduler_script = f"#!/bin/bash"
                     scheduler_script+=f"\n#SBATCH --job-name={job_name}"
                     scheduler_script+=f"\n#SBATCH --output={job_name}.out"
-                    scheduler_script+=f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                    if _CSTAR_SYSTEM=="nersc_perlmutter":
+                        scheduler_script+=f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                        scheduler_script+=f"\n#SBATCH -C cpu"                        
+                    else:
+                        scheduler_script+=f"\n#SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                    #FIXME: This ^^^ is a pretty ugly patch...
                     scheduler_script+=f"\n#SBATCH --nodes={nnodes}"
                     scheduler_script+=f"\n#SBATCH --ntasks-per-node={ncores}"
                     scheduler_script+=f"\n#SBATCH --account={account_key}"
                     scheduler_script+=f"\n#SBATCH --export=ALL"
                     scheduler_script+=f"\n#SBATCH --mail-type=ALL"
-                    scheduler_script+=f"\n#SBATCH -C cpu"
                     scheduler_script+=f"\n#SBATCH --time={walltime}"
                     scheduler_script+=f"\n\n{roms_exec_cmd}"
 
