@@ -2,8 +2,14 @@ import os
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
-from .utils import _get_hash_from_checkout_target, _get_repo_remote, _get_repo_head_hash, _write_to_config_file
-from .cstar_environment import _CSTAR_ROOT, _CSTAR_COMPILER, _CSTAR_CONFIG_FILE
+from .utils import (
+    _get_hash_from_checkout_target,
+    _get_repo_remote,
+    _get_repo_head_hash,
+    _write_to_config_file,
+)
+from .cstar_environment import _CSTAR_ROOT, _CSTAR_COMPILER
+
 
 class BaseModel(ABC):
     """
@@ -258,7 +264,7 @@ class BaseModel(ABC):
                     + f"uses {self.name}, you will need to set it up.\n"
                     + f"It is recommended that you install {self.name} in \n"
                     + f"{ext_dir}"
-                    + "\nThis will also modify your `cstar_local_config.py` file."                    
+                    + "\nThis will also modify your `cstar_local_config.py` file."
                     + "\n#######################################################"
                 )
                 while True:
@@ -352,9 +358,10 @@ class ROMSBaseModel(BaseModel):
         os.environ["PATH"] += ":" + target + "/Tools-Roms/"
 
         # Set the configuration file to be read by __init__.py for future sessions:
-        config_file_str=\
-        f'os.environ["ROMS_ROOT"]="{target}"\nos.environ["PATH"]+=":'+\
-        f'{target}/Tools-Roms"\n'
+        config_file_str = (
+            f'os.environ["ROMS_ROOT"]="{target}"\nos.environ["PATH"]+=":'
+            + f'{target}/Tools-Roms"\n'
+        )
 
         _write_to_config_file(config_file_str)
 
@@ -427,7 +434,7 @@ class MARBLBaseModel(BaseModel):
 
         # Set the configuration file to be read by __init__.py for future sessions:
         # QUESTION: how better to handle this?
-        config_file_str=f'\nos.environ["MARBL_ROOT"]="{target}"\n'
+        config_file_str = f'\nos.environ["MARBL_ROOT"]="{target}"\n'
         _write_to_config_file(config_file_str)
 
         # Make things

@@ -27,7 +27,7 @@ While C-Star isn't yet directly available through conda's usual channels, it can
 ### i. Build the package
 In your `base` conda environment, run `conda-build conda_recipe/` In the `C-Star/cstar_ocean` directory. **If this works, skip to step 2.**
 
-If it did not work, note that you may first have to run `conda install conda-build` 
+If it did not work, note that you may first have to run `conda install conda-build`
 in the base environment.
 
 If you are on a HPC system, writing to the base environment may not be allowed. If you have this issue, it is recommended to install conda yourself, rather than using Linux environment modules.
@@ -47,7 +47,7 @@ Once the package has been built, you can install it using `conda install --use-l
 It is recommended that first-time users see the example notebook `<repository_top_level>/cstar_ocean/examples/cstar_example_notebook.ipynb`. A summary is provided here:
 
 ## Overview of C-Star structures
-- A Case (`cstar.Case`) is the primary object of C-Star. It contains all the necessary information for a user to run a reproducable Earth system simulation. 
+- A Case (`cstar.Case`) is the primary object of C-Star. It contains all the necessary information for a user to run a reproducable Earth system simulation.
 - A Case is built from Components (`cstar.Component`), each representing a specific configuration of a model of one part of the overall system being simulated. In this notebook we'll be working with an ocean circulation component and a biogeochemistry component.
 - A Component object, meanwhile, consists of, at least, a base model (`cstar.BaseModel`), and optionally additional code (`cstar.AdditionalCode`), input datasets (`cstar.InputDataset`), and discretization information needed to run the base model in the specific configuration in question. In the simplest scenario, we can imagine a Case consisting of a single Component which is just a base model in an bundled example configuration (like an ocean double gyre) with itsings run in serial withtical initial and forcing data (i.e. no additional code, input datasets, or parallelization information needed).
 - You can find more information on C-Star `Case`, `Component`, `BaseModel`, `AdditionalCode`, and `InputDataset` objects by querying, e.g., `cstar.Component?`.
@@ -56,21 +56,21 @@ It is recommended that first-time users see the example notebook `<repository_to
 A Case can be instantiated in one of two ways:
 
 - using the standard constructor (after manually constructing the Component objects that will make up the Case):
-	
+
 ```
 	my_case=cstar_ocean.Case(list_of_component_objects,\
 	 	  	 name='case_name',\
 	  		 caseroot='/path/to/where/case/will/be/run')
-``` 
+```
 
 
-- From a pre-defined "blueprint", using 
+- From a pre-defined "blueprint", using
 
 ```
 	my_case=cstar_ocean.Case.from_blueprint('path/to/blueprint.yaml')
 ```
 
-An example blueprint file is provided at 
+An example blueprint file is provided at
 
 ```<repository_top_level>/cstar_ocean/examples/cstar_blueprint_roms_marbl_example.yaml```
 
@@ -84,6 +84,3 @@ Once a case has been constructed, the sequence of steps to run it is as follows:
 - `my_case.pre_run()` performs any pre-processing steps necessary to run the model
 - `my_case.run(account_key='MY_ACCOUNT_KEY')` either executes the case or submits it to the appropriate job scheduler with the user's provided account key. If running on a machine without a scheduling system (such as a laptop), the optional `account_key` argument can be ignored. Additional arguments include `walltime='HH:MM:SS'` and `job_name='my_job_name'`
 - `my_case.post_run()` performs any necessary post-processing steps to work with the output.
-
-
-

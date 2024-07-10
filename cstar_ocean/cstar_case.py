@@ -166,9 +166,11 @@ class Case:
                     ThisComponent = MARBLComponent
                     ThisBaseModel = MARBLBaseModel
                 case _:
-                    raise ValueError(f'Base model name {base_model_info["name"]} in blueprint '+\
-                                     f'{blueprint}  does not match a value that is supported by C-Star. '+\
-                                     f'Currently supported values are "ROMS" and "MARBL"')                    
+                    raise ValueError(
+                        f'Base model name {base_model_info["name"]} in blueprint '
+                        + f"{blueprint}  does not match a value that is supported by C-Star. "
+                        + 'Currently supported values are "ROMS" and "MARBL"'
+                    )
 
             # Construct the BaseModel instance
             base_model = ThisBaseModel(
@@ -523,10 +525,12 @@ class Case:
         for component in self.components:
             component.pre_run()
 
-    def run(self,
-            account_key=None,
-            walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
-            job_name="my_case_run"):
+    def run(
+        self,
+        account_key=None,
+        walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
+        job_name="my_case_run",
+    ):
         """Run the case by calling `component.run(caseroot)`
         on the primary component (to which others are coupled)."""
 
@@ -534,9 +538,9 @@ class Case:
         # TODO add more advanced logic for this
         for component in self.components:
             if component.base_model.name == "ROMS":
-                component.run(account_key=account_key,
-                              walltime=walltime,
-                              job_name=job_name)
+                component.run(
+                    account_key=account_key, walltime=walltime, job_name=job_name
+                )
 
     def post_run(self):
         """For each Component associated with this case, execute

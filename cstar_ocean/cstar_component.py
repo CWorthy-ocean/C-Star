@@ -1,6 +1,5 @@
 import os
 import glob
-import tempfile
 import subprocess
 from abc import ABC, abstractmethod
 from typing import List, Union, Optional, Any
@@ -108,23 +107,33 @@ class Component(ABC):
             else 0
         )
         base_str += f"\n{NAC} AdditionalCode repositories (query using ROMSComponent.additional_code)"
-        base_str += f"\n{NID} InputDataset objects (query using ROMSComponent.input_datasets"
+        base_str += (
+            f"\n{NID} InputDataset objects (query using ROMSComponent.input_datasets"
+        )
 
-        base_str+="\n\nDiscretization info:"
+        base_str += "\n\nDiscretization info:"
         if self.n_procs_x is not None:
-            base_str+="\nn_procs_x:"+str(self.n_procs_x)+" (Number of x-direction processors)"
+            base_str += (
+                "\nn_procs_x:"
+                + str(self.n_procs_x)
+                + " (Number of x-direction processors)"
+            )
         if self.n_procs_y is not None:
-            base_str+="\nn_procs_y:"+str(self.n_procs_y)+" (Number of y-direction processors)"
+            base_str += (
+                "\nn_procs_y:"
+                + str(self.n_procs_y)
+                + " (Number of y-direction processors)"
+            )
         if self.n_levels is not None:
-            base_str+="\nn_levels:"+str(self.n_levels)
+            base_str += "\nn_levels:" + str(self.n_levels)
         if self.nx is not None:
-            base_str+="\nnx:"+str(self.nx)
+            base_str += "\nnx:" + str(self.nx)
         if self.ny is not None:
-            base_str+="\nny:"+str(self.ny)
+            base_str += "\nny:" + str(self.ny)
 
         if self.exe_path is not None:
-            base_str+="\n\nIs compiled: True"
-            base_str+="\n exe_path: "+self.exe_path
+            base_str += "\n\nIs compiled: True"
+            base_str += "\n exe_path: " + self.exe_path
         return base_str
 
     def __repr__(self):
@@ -366,15 +375,16 @@ class ROMSComponent(Component):
             `job_name.out`
         """
 
-
         run_path = self.additional_code.local_path + "/output/PARTITIONED/"
         # FIXME this only works if additional_code.get() is called in the same session
         os.makedirs(run_path, exist_ok=True)
         if self.exe_path is None:
             # FIXME this only works if build() is called in the same session
-            print("C-STAR: Unable to find ROMS executable. Run Component.build() first."+\
-                  "\n If you have already run Component.build(), either run it again or "+\
-                  " add the executable path manually using Component.exe_path='YOUR/PATH'.")
+            print(
+                "C-STAR: Unable to find ROMS executable. Run Component.build() first."
+                + "\n If you have already run Component.build(), either run it again or "
+                + " add the executable path manually using Component.exe_path='YOUR/PATH'."
+            )
         else:
             match _CSTAR_SYSTEM:
                 case "sdsc_expanse":
@@ -393,7 +403,6 @@ class ROMSComponent(Component):
                 + f"{self.additional_code.local_path}/{self.additional_code.namelists[0]}"
             )
 
-
             if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
                 nnodes, ncores = _calculate_node_distribution(
                     self.n_procs_tot, _CSTAR_SYSTEM_CORES_PER_NODE
@@ -402,51 +411,61 @@ class ROMSComponent(Component):
             match _CSTAR_SCHEDULER:
                 case "pbs":
                     if account_key is None:
-                        raise ValueError("please call Component.run() with a value for account_key")
-                    scheduler_script = f"#PBS -S /bin/bash"
-                    scheduler_script+=f"\n#PBS -N {job_name}"
-                    scheduler_script+=f"\n#PBS -o {job_name}.out"
-                    scheduler_script+=f"\n#PBS -A {account_key}"
-                    scheduler_script+=f"\n#PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}"
-                    scheduler_script+=f"\n#PBS -q {_CSTAR_SYSTEM_DEFAULT_PARTITION}"
-                    scheduler_script+=f"\n#PBS -j oe"
-                    scheduler_script+=f"\n#PBS -k eod"
-                    scheduler_script+=f"\n#PBS -V"
-                    if _CSTAR_SYSTEM=="ncar_derecho":
-                        scheduler_script+="\ncd ${PBS_O_WORKDIR}"
-                    scheduler_script+=f"\n\n{roms_exec_cmd}"
+                        raise ValueError(
+                            "please call Component.run() with a value for account_key"
+                        )
+                    scheduler_script = "#PBS -S /bin/bash"
+                    scheduler_script += f"\n#PBS -N {job_name}"
+                    scheduler_script += f"\n#PBS -o {job_name}.out"
+                    scheduler_script += f"\n#PBS -A {account_key}"
+                    scheduler_script += (
+                        f"\n#PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}"
+                    )
+                    scheduler_script += f"\n#PBS -q {_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                    scheduler_script += "\n#PBS -j oe"
+                    scheduler_script += "\n#PBS -k eod"
+                    scheduler_script += "\n#PBS -V"
+                    if _CSTAR_SYSTEM == "ncar_derecho":
+                        scheduler_script += "\ncd ${PBS_O_WORKDIR}"
+                    scheduler_script += f"\n\n{roms_exec_cmd}"
 
-                    script_fname='cstar_run_script.pbs'
-                    with open(run_path+script_fname,'w') as f:
+                    script_fname = "cstar_run_script.pbs"
+                    with open(run_path + script_fname, "w") as f:
                         f.write(scheduler_script)
-                    subprocess.run(f"qsub {script_fname}", shell=True,cwd=run_path)
+                    subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
 
                 case "slurm":
                     # TODO: export ALL copies env vars, but will need to handle module load
                     if account_key is None:
-                        raise ValueError("please call Component.run() with a value for account_key")
+                        raise ValueError(
+                            "please call Component.run() with a value for account_key"
+                        )
 
-                    scheduler_script = f"#!/bin/bash"
-                    scheduler_script+=f"\n#SBATCH --job-name={job_name}"
-                    scheduler_script+=f"\n#SBATCH --output={job_name}.out"
-                    if _CSTAR_SYSTEM=="nersc_perlmutter":
-                        scheduler_script+=f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
-                        scheduler_script+=f"\n#SBATCH -C cpu"                        
+                    scheduler_script = "#!/bin/bash"
+                    scheduler_script += f"\n#SBATCH --job-name={job_name}"
+                    scheduler_script += f"\n#SBATCH --output={job_name}.out"
+                    if _CSTAR_SYSTEM == "nersc_perlmutter":
+                        scheduler_script += (
+                            f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                        )
+                        scheduler_script += "\n#SBATCH -C cpu"
                     else:
-                        scheduler_script+=f"\n#SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
-                    #FIXME: This ^^^ is a pretty ugly patch...
-                    scheduler_script+=f"\n#SBATCH --nodes={nnodes}"
-                    scheduler_script+=f"\n#SBATCH --ntasks-per-node={ncores}"
-                    scheduler_script+=f"\n#SBATCH --account={account_key}"
-                    scheduler_script+=f"\n#SBATCH --export=ALL"
-                    scheduler_script+=f"\n#SBATCH --mail-type=ALL"
-                    scheduler_script+=f"\n#SBATCH --time={walltime}"
-                    scheduler_script+=f"\n\n{roms_exec_cmd}"
+                        scheduler_script += (
+                            f"\n#SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                        )
+                    # FIXME: This ^^^ is a pretty ugly patch...
+                    scheduler_script += f"\n#SBATCH --nodes={nnodes}"
+                    scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
+                    scheduler_script += f"\n#SBATCH --account={account_key}"
+                    scheduler_script += "\n#SBATCH --export=ALL"
+                    scheduler_script += "\n#SBATCH --mail-type=ALL"
+                    scheduler_script += f"\n#SBATCH --time={walltime}"
+                    scheduler_script += f"\n\n{roms_exec_cmd}"
 
-                    script_fname='cstar_run_script.sh'
-                    with open(run_path+script_fname,'w') as f:
+                    script_fname = "cstar_run_script.sh"
+                    with open(run_path + script_fname, "w") as f:
                         f.write(scheduler_script)
-                    subprocess.run(f"sbatch {script_fname}", shell=True,cwd=run_path)
+                    subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path)
 
                 case None:
                     subprocess.run(roms_exec_cmd, shell=True, cwd=run_path)

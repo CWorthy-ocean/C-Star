@@ -1,17 +1,15 @@
-'''
+"""
 This is a condensed version of the cstar_example_notebook.ipynb designed to be run in an interactive python session.
 For more details, see ../README.md or cstar_example_notebook.ipynb
-'''
-
-import os
+"""
+import os 
 ################## IMPORTANT ###################
 ## If you have not installed C-Star using conda:
-#import sys
-#sys.path.append(os.path.abspath('../'))
+import sys
+sys.path.append(os.path.abspath('../'))
 
 ###############################################
 import cstar_ocean as cstar
-
 
 
 roms_marbl_case = cstar.Case.from_blueprint(
@@ -19,7 +17,7 @@ roms_marbl_case = cstar.Case.from_blueprint(
     caseroot="roms_marbl_example_case/",
 )
 
-# In a python session, execute:
+## In a python session, execute:
 # roms_marbl_case.setup()
 # roms_marbl_case.build()
 # roms_marbl_case.pre_run()

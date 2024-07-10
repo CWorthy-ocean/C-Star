@@ -22,22 +22,19 @@ _CSTAR_SYSTEM_MEMGB_PER_NODE: Optional[int]
 _CSTAR_SYSTEM_MAX_WALLTIME: Optional[str]
 
 
-
-if (
-    (platform.system() == "Linux")
-    and ("LMOD_DIR" in list(os.environ))
-):
+if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
     sys.path.append(os.environ["LMOD_DIR"] + "/../init")
     from env_modules_python import module
 
     if "LMOD_SYSHOST" in list(os.environ):
-        sysname=os.environ["LMOD_SYSHOST"].casefold()
+        sysname = os.environ["LMOD_SYSHOST"].casefold()
     elif "LMOD_SYSTEM_NAME" in list(os.environ):
-        sysname=os.environ["LMOD_SYSTEM_NAME"].casefold()
+        sysname = os.environ["LMOD_SYSTEM_NAME"].casefold()
     else:
-        raise EnvironmentError("unable to find LMOD_SYSHOST or LMOD_SYSTEM_NAME in environment. "+\
-        "Your system may be unsupported")
-    
+        raise EnvironmentError(
+            "unable to find LMOD_SYSHOST or LMOD_SYSTEM_NAME in environment. "
+            + "Your system may be unsupported"
+        )
 
     module("restore")
     match sysname:
@@ -140,8 +137,8 @@ elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
 # This sets variables associated with external codebases that are not installed
 # with C-Star (e.g. ROMS_ROOT)
 
-_CSTAR_CONFIG_FILE=_CSTAR_ROOT+'/cstar_local_config.py'
+_CSTAR_CONFIG_FILE = _CSTAR_ROOT + "/cstar_local_config.py"
 if os.path.exists(_CSTAR_CONFIG_FILE):
-    from . import cstar_local_config
+    pass
 
 ################################################################################
