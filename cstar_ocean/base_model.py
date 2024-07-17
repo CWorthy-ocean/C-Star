@@ -8,7 +8,7 @@ from cstar_ocean.utils import (
     _get_repo_head_hash,
     _write_to_config_file,
 )
-from cstar_ocean.cstar_environment import _CSTAR_ROOT, _CSTAR_COMPILER
+from cstar_ocean.environment import _CSTAR_ROOT, _CSTAR_COMPILER
 
 
 class BaseModel(ABC):

@@ -2,11 +2,11 @@ import os
 import yaml
 from typing import List, Type, Union, Any
 
-from cstar_ocean.cstar_component import Component, MARBLComponent, ROMSComponent
-from cstar_ocean.cstar_base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
-from cstar_ocean.cstar_additional_code import AdditionalCode
-from cstar_ocean.cstar_environment import _CSTAR_SYSTEM_MAX_WALLTIME
-from cstar_ocean.cstar_input_dataset import (
+from cstar_ocean.component import Component, MARBLComponent, ROMSComponent
+from cstar_ocean.base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
+from cstar_ocean.additional_code import AdditionalCode
+from cstar_ocean.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar_ocean.input_dataset import (
     InputDataset,
     ModelGrid,
     InitialConditions,

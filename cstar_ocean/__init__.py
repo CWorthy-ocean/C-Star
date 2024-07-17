@@ -1,13 +1,13 @@
 ################################################################################
 # Build module environment at import time
 # NOTE: need to set ROMS_ROOT,MARBL_ROOT,CSTAR_ROOT,CSTAR_SYSTEM, and maybe modify PATH on conda install
-from cstar_ocean.cstar_base_model import (
+from cstar_ocean.base_model import (
     BaseModel,
     ROMSBaseModel,
     MARBLBaseModel,
 )
-from cstar_ocean.cstar_additional_code import AdditionalCode
-from cstar_ocean.cstar_input_dataset import (
+from cstar_ocean.additional_code import AdditionalCode
+from cstar_ocean.input_dataset import (
     InputDataset,
     ModelGrid,
     TidalForcing,
@@ -16,7 +16,7 @@ from cstar_ocean.cstar_input_dataset import (
     InitialConditions,
 )
 
-from cstar_ocean.cstar_component import (
+from cstar_ocean.component import (
     Component,
     ROMSComponent,
     MARBLComponent,

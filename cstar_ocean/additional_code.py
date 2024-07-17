@@ -3,7 +3,7 @@ import shutil
 import tempfile
 import subprocess
 from typing import Optional, Union, List
-from cstar_ocean.cstar_base_model import BaseModel
+from cstar_ocean.base_model import BaseModel
 
 
 class AdditionalCode:
