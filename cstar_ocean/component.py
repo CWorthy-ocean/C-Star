@@ -2,7 +2,7 @@ import os
 import glob
 import subprocess
 from abc import ABC, abstractmethod
-from typing import List, Union, Optional, Any
+from typing import List, Optional, Any
 
 from cstar_ocean.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar_ocean.base_model import ROMSBaseModel, BaseModel
@@ -78,11 +78,11 @@ class Component(ABC):
             )
         self.base_model: BaseModel = kwargs["base_model"]
 
-        self.additional_code: Optional[Union[AdditionalCode, List[AdditionalCode]]] = (
+        self.additional_code: Optional[AdditionalCode | List[AdditionalCode]] = (
             kwargs.get("additional_code", None)
         )
-        self.input_datasets: Optional[Union[InputDataset, List[InputDataset]]] = (
-            kwargs.get("input_datasets", None)
+        self.input_datasets: Optional[InputDataset | List[InputDataset]] = kwargs.get(
+            "input_datasets", None
         )
 
     def __str__(self):
@@ -216,8 +216,8 @@ class ROMSComponent(Component):
     def __init__(
         self,
         base_model: ROMSBaseModel,
-        additional_code: Optional[Union[AdditionalCode, List[AdditionalCode]]] = None,
-        input_datasets: Optional[Union[InputDataset, List[InputDataset]]] = None,
+        additional_code: Optional[AdditionalCode | List[AdditionalCode]] = None,
+        input_datasets: Optional[InputDataset | List[InputDataset]] = None,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
         n_levels: Optional[int] = None,

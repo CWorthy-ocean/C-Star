@@ -2,7 +2,7 @@ import os
 import shutil
 import tempfile
 import subprocess
-from typing import Optional, Union, List
+from typing import Optional, List
 from cstar_ocean.base_model import BaseModel
 
 
@@ -45,8 +45,8 @@ class AdditionalCode:
         base_model: BaseModel,
         source_repo: str,
         checkout_target: str,
-        source_mods: Optional[Union[str, List[str]]] = None,
-        namelists: Optional[Union[str, List[str]]] = None,
+        source_mods: Optional[str | List[str]] = None,
+        namelists: Optional[str | List[str]] = None,
     ):
         """
         Initialize an AdditionalCode object from a repository URL and a list of code files

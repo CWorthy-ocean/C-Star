@@ -1,6 +1,6 @@
 import os
 import yaml
-from typing import List, Type, Union, Any
+from typing import List, Type, Any
 
 from cstar_ocean.component import Component, MARBLComponent, ROMSComponent
 from cstar_ocean.base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
@@ -51,7 +51,7 @@ class Case:
     """
 
     def __init__(
-        self, components: Union[Component, List[Component]], name: str, caseroot: str
+        self, components: Component | List[Component], name: str, caseroot: str
     ):
         """
         Initialize a Case object manually from components, name, and caseroot path.
@@ -71,11 +71,11 @@ class Case:
             An initialized Case object
         """
 
-        self.components: Union[Component, List[Component]] = components
+        self.components: Component | List[Component] = components
         self.caseroot: str = os.path.abspath(caseroot)
         self.name: str = name
         self.is_from_blueprint: bool = False
-        self.blueprint: Union[str, None] = None
+        self.blueprint: str | None = None
         self.is_setup: bool = self.check_is_setup()
 
         # self.is_setup=self.check_is_setup()
@@ -145,7 +145,7 @@ class Case:
 
         # Primary metadata
         casename = bp_dict["registry_attrs"]["name"]
-        components: Union[Component, List[Component]]
+        components: Component | List[Component]
         components = []
 
         for component_info in bp_dict["components"]:
@@ -187,7 +187,7 @@ class Case:
                     component_kwargs[key] = discretization_info[key]
 
             # Construct any AdditionalCode instances
-            additional_code: Union[AdditionalCode, List[AdditionalCode], None]
+            additional_code: AdditionalCode | List[AdditionalCode] | None
             if "additional_code" not in component_info["component"].keys():
                 additional_code = None
             else:
@@ -233,7 +233,7 @@ class Case:
                 component_kwargs["additional_code"] = additional_code
 
             # Construct any InputDataset instances:
-            input_datasets: Union[InputDataset, List[InputDataset], None]
+            input_datasets: InputDataset | List[InputDataset] | None
             if "input_datasets" not in component_info["component"].keys():
                 input_datasets = None
             else:
