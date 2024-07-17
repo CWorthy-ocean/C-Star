@@ -4,12 +4,12 @@ import subprocess
 from abc import ABC, abstractmethod
 from typing import List, Union, Optional, Any
 
-from .utils import _calculate_node_distribution, _replace_text_in_file
-from .cstar_base_model import ROMSBaseModel, BaseModel
-from .cstar_input_dataset import InputDataset
-from .cstar_additional_code import AdditionalCode
+from cstar_ocean.utils import _calculate_node_distribution, _replace_text_in_file
+from cstar_ocean.cstar_base_model import ROMSBaseModel, BaseModel
+from cstar_ocean.cstar_input_dataset import InputDataset
+from cstar_ocean.cstar_additional_code import AdditionalCode
 
-from .cstar_environment import (
+from cstar_ocean.cstar_environment import (
     _CSTAR_COMPILER,
     _CSTAR_SCHEDULER,
     _CSTAR_SYSTEM,

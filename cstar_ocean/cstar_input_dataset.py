@@ -1,7 +1,7 @@
 import os
 import pooch
 import hashlib
-from .cstar_base_model import BaseModel
+from cstar_ocean.cstar_base_model import BaseModel
 
 
 class InputDataset:

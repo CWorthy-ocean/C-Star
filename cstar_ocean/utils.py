@@ -2,7 +2,7 @@ import os
 import re
 import subprocess
 from math import ceil
-from .cstar_environment import _CSTAR_CONFIG_FILE
+from cstar_ocean.cstar_environment import _CSTAR_CONFIG_FILE
 
 
 def _write_to_config_file(config_file_str):
