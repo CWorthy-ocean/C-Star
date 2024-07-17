@@ -8,7 +8,7 @@ setup(
     version="0.0.0",
     description="Computation Systems for Tracking Ocean Carbon (CSTAR) python package",
     author="Dafydd Stephenson, Thomas Nicholas, Matt Long, and others",
-    author_email="dafydd@cworthy.org, thomas@cworthy.org",
+    author_email="dafydd@cworthy.org, tom@cworthy.org",
     url="https://github.com/CWorthy-ocean/C-Star",
     keywords=["MCDR", "CDR"],
     # include_package_data=True,
