@@ -44,11 +44,11 @@ class InputDataset:
 
         """
 
-        self.base_model = base_model
-        self.source = source
-        self.file_hash = file_hash
-        self.exists_locally = None
-        self.local_path = None
+        self.base_model: BaseModel = base_model
+        self.source: str = source
+        self.file_hash: str = file_hash
+        self.exists_locally: bool | None = None
+        self.local_path: str | None = None
 
     def __str__(self):
         name = self.__class__.__name__
@@ -68,7 +68,7 @@ class InputDataset:
     def __repr__(self):
         return self.__str__()
 
-    def get(self, local_path):
+    def get(self, local_path: str):
         """
         Fetch the file containing this input dataset and save it to `local_path` using Pooch.
 
@@ -95,7 +95,7 @@ class InputDataset:
         to_fetch.fetch(os.path.basename(self.source), downloader=downloader)
         self.local_path = tgt_dir
 
-    def check_exists_locally(self, local_path):
+    def check_exists_locally(self, local_path: str) -> bool:
         """
         Checks whether this InputDataset has already been fetched to the local machine
 

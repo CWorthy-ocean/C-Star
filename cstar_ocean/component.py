@@ -78,8 +78,8 @@ class Component(ABC):
             )
         self.base_model: BaseModel = kwargs["base_model"]
 
-        self.additional_code: Optional[AdditionalCode | List[AdditionalCode]] = (
-            kwargs.get("additional_code", None)
+        self.additional_code: Optional[AdditionalCode] = kwargs.get(
+            "additional_code", None
         )
         self.input_datasets: Optional[InputDataset | List[InputDataset]] = kwargs.get(
             "input_datasets", None
@@ -92,13 +92,8 @@ class Component(ABC):
         base_str += "\n" + "-" * (len(name) + 7)
         base_str += "\nBuilt from: "
 
-        NAC = (
-            len(self.additional_code)
-            if isinstance(self.additional_code, list)
-            else 1
-            if isinstance(self.additional_code, AdditionalCode)
-            else 0
-        )
+        NAC = 0 if self.additional_code is None else 1
+
         NID = (
             len(self.input_datasets)
             if isinstance(self.input_datasets, list)
@@ -216,7 +211,7 @@ class ROMSComponent(Component):
     def __init__(
         self,
         base_model: ROMSBaseModel,
-        additional_code: Optional[AdditionalCode | List[AdditionalCode]] = None,
+        additional_code: Optional[AdditionalCode] = None,
         input_datasets: Optional[InputDataset | List[InputDataset]] = None,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
@@ -232,7 +227,7 @@ class ROMSComponent(Component):
         base_model: ROMSBaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        additional_code: AdditionalCode or list of AdditionalCodes
+        additional_code: AdditionalCode
             Additional code contributing to a unique instance of a base model,
             e.g. namelists, source modifications, etc.
         input_datasets: InputDataset or list of InputDatasets
@@ -257,17 +252,20 @@ class ROMSComponent(Component):
             input_datasets=input_datasets,
         )
         # QUESTION: should all these attrs be passed in as a single "discretization" arg of type dict?
-        self.nx = nx
-        self.ny = ny
-        self.n_levels = n_levels
-        self.n_procs_x = n_procs_x
-        self.n_procs_y = n_procs_y
-        self.exe_path = None
+        self.nx: Optional[int] = nx
+        self.ny: Optional[int] = ny
+        self.n_levels: Optional[int] = n_levels
+        self.n_procs_x: Optional[int] = n_procs_x
+        self.n_procs_y: Optional[int] = n_procs_y
+        self.exe_path: Optional[str] = None
 
     @property
-    def n_procs_tot(self):
+    def n_procs_tot(self) -> Optional[int]:
         """Total number of processors required by this ROMS configuration"""
-        return self.n_procs_x * self.n_procs_y
+        if (self.n_procs_x is None) or (self.n_procs_y is None):
+            return None
+        else:
+            return self.n_procs_x * self.n_procs_y
 
     def build(self):
         """
@@ -352,9 +350,9 @@ class ROMSComponent(Component):
 
     def run(
         self,
-        account_key=None,
-        walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
-        job_name="my_roms_run",
+        account_key: Optional[str] = None,
+        walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
+        job_name: str = "my_roms_run",
     ):
         """
         Runs the executable created by `build()`
@@ -374,9 +372,20 @@ class ROMSComponent(Component):
             The name of the job submitted to the scheduler, which also sets the output file name
             `job_name.out`
         """
+        if self.additional_code is None:
+            print(
+                "C-STAR: Unable to find AdditionalCode associated with this Component."
+            )
+            return
+        elif self.additional_code.local_path is None:
+            print(
+                "C-STAR: Unable to find local copy of AdditionalCode. Run Component.get() first."
+                + "\nIf you have already run Component.get(), either run it again or "
+                + " add the local path manually using Component.additional_code.local_path='YOUR/PATH'."
+            )
+        else:
+            run_path = self.additional_code.local_path + "/output/PARTITIONED/"
 
-        run_path = self.additional_code.local_path + "/output/PARTITIONED/"
-        # FIXME this only works if additional_code.get() is called in the same session
         os.makedirs(run_path, exist_ok=True)
         if self.exe_path is None:
             # FIXME this only works if build() is called in the same session
@@ -384,6 +393,12 @@ class ROMSComponent(Component):
                 "C-STAR: Unable to find ROMS executable. Run Component.build() first."
                 + "\n If you have already run Component.build(), either run it again or "
                 + " add the executable path manually using Component.exe_path='YOUR/PATH'."
+            )
+        elif self.additional_code.namelists is None:
+            raise ValueError(
+                "C-STAR: This ROMS Component object's AdditionalCode"
+                + " does not contain any namelists."
+                + "Cannot run ROMS without a namelist file, e.g. roms.in"
             )
         else:
             match _CSTAR_SYSTEM:

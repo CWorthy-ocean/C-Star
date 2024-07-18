@@ -11,21 +11,21 @@ components:
   - component:
       base_model:
         name: 'MARBL'
-        source_repo: 'https://github.com/dafyddstephenson/MARBL.git'
+        source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
         checkout_target: 'marbl0.45.0'
       additional_code:
-        - source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-          checkout_target: '9f66e60bea0553868268c75571aba67df94356ce'
-          namelists:
-            - "namelists/MARBL/marbl_in"
-            - "namelists/MARBL/marbl_tracer_output_list"
-            - "namelists/MARBL/marbl_diagnostic_output_list"
+        source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
+        checkout_target: '9f66e60bea0553868268c75571aba67df94356ce'
+        namelists:
+          - "namelists/MARBL/marbl_in"
+          - "namelists/MARBL/marbl_tracer_output_list"
+          - "namelists/MARBL/marbl_diagnostic_output_list"
 
   - component:
       base_model:
         name: 'ROMS'
-        source_repo: 'https://github.com/dafyddstephenson/ucla-roms.git'
-        checkout_target: 'f286fae610059a88b7ae7a5678f7890e9319ce84'
+        source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
+        checkout_target: '1ab203d5334a17bf398cd86765b9fa268e0065a8'
       discretization:
         nx: 24
         ny: 24
@@ -33,21 +33,21 @@ components:
         n_procs_x: 3
         n_procs_y: 3
       additional_code:
-        - source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-          checkout_target: '9f66e60bea0553868268c75571aba67df94356ce'
-          source_mods:
-            - "source_mods/ROMS/bgc.opt"
-            - "source_mods/ROMS/bulk_frc.opt"
-            - "source_mods/ROMS/cppdefs.opt"
-            - "source_mods/ROMS/diagnostics.opt"
-            - "source_mods/ROMS/ocean_vars.opt"
-            - "source_mods/ROMS/param.opt"
-            - "source_mods/ROMS/tracers.opt"
-            - "source_mods/ROMS/Makefile"
-            - "source_mods/ROMS/get_makefile"
-            - "source_mods/ROMS/Make.depend"
-          namelists:
-            - "namelists/ROMS/roms.in_MARBL"
+        source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
+        checkout_target: '9f66e60bea0553868268c75571aba67df94356ce'
+        source_mods:
+          - "source_mods/ROMS/bgc.opt"
+          - "source_mods/ROMS/bulk_frc.opt"
+          - "source_mods/ROMS/cppdefs.opt"
+          - "source_mods/ROMS/diagnostics.opt"
+          - "source_mods/ROMS/ocean_vars.opt"
+          - "source_mods/ROMS/param.opt"
+          - "source_mods/ROMS/tracers.opt"
+          - "source_mods/ROMS/Makefile"
+          - "source_mods/ROMS/get_makefile"
+          - "source_mods/ROMS/Make.depend"
+        namelists:
+          - "namelists/ROMS/roms.in_MARBL"
       input_datasets:
         model_grid:
           files:

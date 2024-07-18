@@ -45,8 +45,8 @@ class AdditionalCode:
         base_model: BaseModel,
         source_repo: str,
         checkout_target: str,
-        source_mods: Optional[str | List[str]] = None,
-        namelists: Optional[str | List[str]] = None,
+        source_mods: Optional[List[str]] = None,
+        namelists: Optional[List[str]] = None,
     ):
         """
         Initialize an AdditionalCode object from a repository URL and a list of code files
@@ -72,13 +72,13 @@ class AdditionalCode:
         """
 
         # TODO:  Type check here
-        self.base_model = base_model
-        self.source_repo = source_repo
-        self.checkout_target = checkout_target
-        self.source_mods = source_mods
-        self.namelists = namelists
-        self.exists_locally = None
-        self.local_path = None
+        self.base_model: BaseModel = base_model
+        self.source_repo: str = source_repo
+        self.checkout_target: str = checkout_target
+        self.source_mods: Optional[List[str]] = source_mods
+        self.namelists: Optional[List[str]] = namelists
+        self.exists_locally: Optional[bool] = None
+        self.local_path: Optional[str] = None
 
     def __str__(self):
         base_str = "AdditionalCode object"  # associated with {self.base_model.name} base model"
@@ -102,7 +102,7 @@ class AdditionalCode:
     def __repr__(self):
         return self.__str__()
 
-    def get(self, local_path):
+    def get(self, local_path: str):
         """
         Clone `source_repo` into a temporary directory and move required files to `local_path`.
 
@@ -150,7 +150,7 @@ class AdditionalCode:
         self.local_path = local_path
         self.exists_locally = True
 
-    def check_exists_locally(self, local_path):
+    def check_exists_locally(self, local_path: str) -> bool:
         """
         Checks whether this AdditionalCode  has already been fetched to the local machine
 
@@ -184,4 +184,4 @@ class AdditionalCode:
         if not self.exists_locally:
             self.local_path = local_path
             self.exists_locally = True
-            return True
+        return True

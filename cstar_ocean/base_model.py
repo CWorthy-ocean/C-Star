@@ -147,7 +147,7 @@ class BaseModel(ABC):
         be needed after a clean checkout.
         """
 
-    def get_local_config_status(self):
+    def get_local_config_status(self) -> int:
         """
         Perform a series of checks to ensure that the base model is properly configured on this machine.
 
@@ -285,7 +285,7 @@ class BaseModel(ABC):
                         print("invalid selection; enter 'y','n',or 'custom'")
 
     @abstractmethod
-    def get(self, target):
+    def get(self, target: str):
         """clone the basemodel code to your local machine"""
 
 
@@ -303,19 +303,19 @@ class ROMSBaseModel(BaseModel):
     """
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "ROMS"
 
     @property
-    def default_source_repo(self):
+    def default_source_repo(self) -> str:
         return "https://github.com/CESR-lab/ucla-roms.git"
 
     @property
-    def default_checkout_target(self):
+    def default_checkout_target(self) -> str:
         return "main"
 
     @property
-    def expected_env_var(self):
+    def expected_env_var(self) -> str:
         return "ROMS_ROOT"
 
     def _base_model_adjustments(self):
@@ -331,7 +331,7 @@ class ROMSBaseModel(BaseModel):
             dirs_exist_ok=True,
         )
 
-    def get(self, target):
+    def get(self, target: str):
         """
         Clone ROMS code to local machine, set environment, compile libraries
 
@@ -391,25 +391,25 @@ class MARBLBaseModel(BaseModel):
     """
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "MARBL"
 
     @property
-    def default_source_repo(self):
+    def default_source_repo(self) -> str:
         return "https://github.com/marbl-ecosys/MARBL.git"
 
     @property
-    def default_checkout_target(self):
+    def default_checkout_target(self) -> str:
         return "v0.45.0"
 
     @property
-    def expected_env_var(self):
+    def expected_env_var(self) -> str:
         return "MARBL_ROOT"
 
     def _base_model_adjustments(self):
         pass
 
-    def get(self, target):
+    def get(self, target: str):
         """
         Clone MARBL code to local machine, set environment, compile libraries
 

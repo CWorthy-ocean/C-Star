@@ -1,6 +1,6 @@
 import os
 import yaml
-from typing import List, Type, Any
+from typing import List, Type, Any, Optional
 
 from cstar_ocean.component import Component, MARBLComponent, ROMSComponent
 from cstar_ocean.base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
@@ -75,7 +75,7 @@ class Case:
         self.caseroot: str = os.path.abspath(caseroot)
         self.name: str = name
         self.is_from_blueprint: bool = False
-        self.blueprint: str | None = None
+        self.blueprint: Optional[str] = None
         self.is_setup: bool = self.check_is_setup()
 
         # self.is_setup=self.check_is_setup()
@@ -187,48 +187,33 @@ class Case:
                     component_kwargs[key] = discretization_info[key]
 
             # Construct any AdditionalCode instances
-            additional_code: AdditionalCode | List[AdditionalCode] | None
+            additional_code: Optional[AdditionalCode]
             if "additional_code" not in component_info["component"].keys():
                 additional_code = None
             else:
-                additional_code_list = component_info["component"]["additional_code"]
-                additional_code = []
+                additional_code_info = component_info["component"]["additional_code"]
 
-                for additional_code_info in additional_code_list:
-                    source_repo = additional_code_info["source_repo"]
-                    checkout_target = additional_code_info["checkout_target"]
-                    source_mods = (
-                        [f for f in additional_code_info["source_mods"]]
-                        if "source_mods" in additional_code_info.keys()
-                        else None
-                    )
-
-                    namelists = (
-                        [f for f in additional_code_info["namelists"]]
-                        if "namelists" in additional_code_info.keys()
-                        else None
-                    )
-
-                    # run_scripts  = [f for f in additional_code_info['scripts']['run']] \
-                    #        if ('scripts'    in additional_code_info.keys()) and \
-                    #           ('run'        in additional_code_info['scripts'].keys()) else None
-
-                    # proc_scripts = [f for f in additional_code_info['scripts']['processing']] \
-                    #        if ('scripts'    in additional_code_info.keys()) and \
-                    #           ('processing' in additional_code_info['scripts'].keys()) else None
-
-                additional_code.append(
-                    AdditionalCode(
-                        base_model=base_model,
-                        source_repo=source_repo,
-                        checkout_target=checkout_target,
-                        source_mods=source_mods,
-                        namelists=namelists,
-                    )
+                source_repo = additional_code_info["source_repo"]
+                checkout_target = additional_code_info["checkout_target"]
+                source_mods = (
+                    [f for f in additional_code_info["source_mods"]]
+                    if "source_mods" in additional_code_info.keys()
+                    else None
                 )
 
-                if len(additional_code) == 1:
-                    additional_code = additional_code[0]
+                namelists = (
+                    [f for f in additional_code_info["namelists"]]
+                    if "namelists" in additional_code_info.keys()
+                    else None
+                )
+
+                additional_code = AdditionalCode(
+                    base_model=base_model,
+                    source_repo=source_repo,
+                    checkout_target=checkout_target,
+                    source_mods=source_mods,
+                    namelists=namelists,
+                )
 
                 component_kwargs["additional_code"] = additional_code
 
@@ -322,7 +307,7 @@ class Case:
 
         return caseinstance
 
-    def persist(self, filename):
+    def persist(self, filename: str):
         """
         Write this case to a yaml file.
 
@@ -342,7 +327,15 @@ class Case:
         bp_dict["registry_attrs"] = {"name": self.name}
 
         bp_dict["components"] = []
-        for component in self.components:
+
+        if isinstance(self.components, Component):
+            component_list = [
+                self.components,
+            ]
+        elif isinstance(self.components, list):
+            component_list = self.components
+
+        for component in component_list:
             component_info: dict = {}
             # This will be bp_dict["components"]["component"]=component_info
 
@@ -357,15 +350,15 @@ class Case:
 
             # discretization info (if present)
             discretization_info = {}
-            if "nx" in component.__dict__.keys():
+            if hasattr(component, "nx"):
                 discretization_info["nx"] = component.nx
-            if "ny" in component.__dict__.keys():
+            if hasattr(component, "ny"):
                 discretization_info["ny"] = component.ny
-            if "n_levels" in component.__dict__.keys():
+            if hasattr(component, "n_levels"):
                 discretization_info["n_levels"] = component.n_levels
-            if "n_procs_x" in component.__dict__.keys():
+            if hasattr(component, "n_procs_x"):
                 discretization_info["n_procs_x"] = component.n_procs_x
-            if "n_procs_y" in component.__dict__.keys():
+            if hasattr(component, "n_procs_y"):
                 discretization_info["n_procs_y"] = component.n_procs_y
 
             if len(discretization_info) > 0:
@@ -374,27 +367,22 @@ class Case:
             # AdditionalCode instances - can also be None
             # Loop over additional code
             additional_code = component.additional_code
-            if isinstance(additional_code, AdditionalCode):
-                additional_code = [
-                    additional_code,
-                ]
-            if isinstance(additional_code, list):
-                additional_code_list: list = []
-                for adc in additional_code:
-                    additional_code_info: dict = {}
-                    # This will be component_info["component"]["additional_code"]=additional_code_info
-                    additional_code_info["source_repo"] = adc.source_repo
-                    additional_code_info["checkout_target"] = adc.checkout_target
-                    if adc.source_mods is not None:
-                        additional_code_info["source_mods"] = (
-                            adc.source_mods
-                        )  # this is a list
-                    if adc.namelists is not None:
-                        additional_code_info["namelists"] = adc.namelists
 
-                    additional_code_list.append(additional_code_info)
+            if additional_code is not None:
+                additional_code_info: dict = {}
+                # This will be component_info["component"]["additional_code"]=additional_code_info
+                additional_code_info["source_repo"] = additional_code.source_repo
+                additional_code_info["checkout_target"] = (
+                    additional_code.checkout_target
+                )
+                if additional_code.source_mods is not None:
+                    additional_code_info["source_mods"] = (
+                        additional_code.source_mods
+                    )  # this is a list
+                if additional_code.namelists is not None:
+                    additional_code_info["namelists"] = additional_code.namelists
 
-                component_info["additional_code"] = additional_code_list
+                component_info["additional_code"] = additional_code_info
 
             # InputDataset
             input_datasets = component.input_datasets
@@ -430,7 +418,7 @@ class Case:
         with open(filename, "w") as yaml_file:
             yaml.dump(bp_dict, yaml_file, default_flow_style=False, sort_keys=False)
 
-    def check_is_setup(self):
+    def check_is_setup(self) -> bool:
         """
         Check whether all code and files necessary to run this case exist in the local `caseroot` folder
 
@@ -447,7 +435,14 @@ class Case:
             True if all components are correctly set up in the caseroot directory
 
         """
-        for component in self.components:
+        if isinstance(self.components, Component):
+            component_list = [
+                self.components,
+            ]
+        elif isinstance(self.components, list):
+            component_list = self.components
+
+        for component in component_list:
             if component.base_model.local_config_status != 0:
                 # print(f'{component.base_model.name} does not appear to be configured properly.'+\
                 #'\nRun Case.setup() or BaseModel.handle_config_status()')
@@ -468,7 +463,7 @@ class Case:
                     if not ind.check_exists_locally(self.caseroot):
                         return False
             elif isinstance(component.input_datasets, InputDataset):
-                if not component.input_dataset.check_exists_locally(self.caseroot):
+                if not component.input_datasets.check_exists_locally(self.caseroot):
                     return False
 
         return True
