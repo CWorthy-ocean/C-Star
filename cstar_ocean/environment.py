@@ -4,12 +4,13 @@ import platform
 import importlib.util
 from typing import Optional
 
-spec = importlib.util.find_spec(__name__.split(".")[0])
+top_level_package_name = __name__.split(".")[0]
+spec = importlib.util.find_spec(top_level_package_name)
 if spec is not None:
     if isinstance(spec.submodule_search_locations, list):
         _CSTAR_ROOT: str = spec.submodule_search_locations[0]
 else:
-    raise ImportError
+    raise ImportError(f"Top-level package '{top_level_package_name}' not found.")
 
 
 ## Set environment variables according to system
