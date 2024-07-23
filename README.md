@@ -17,31 +17,8 @@ This option is simpler, but you will have to first install any dependencies your
 
 It may also be worth including `ipython`,`xarray`,`numpy`, `matplotlib` and `jupyter` in the environment to work with any output, though these are not needed to run C-Star.
 
-### ii. Add C-Star to your path
-Use e.g. `sys.path.append(/Users/myname/Code/C-Star/cstar_ocean`) in a python session.
-
----
-
-## Option 2: Install with conda
-While C-Star isn't yet directly available through conda's usual channels, it can be built and installed locally with conda
-### i. Build the package
-In your `base` conda environment, run `conda-build conda_recipe/` In the `C-Star/cstar_ocean` directory. **If this works, skip to step 2.**
-
-If it did not work, note that you may first have to run `conda install conda-build`
-in the base environment.
-
-If you are on a HPC system, writing to the base environment may not be allowed. If you have this issue, it is recommended to install conda yourself, rather than using Linux environment modules.
-
-To install your own copy of conda on a HPC, first remove any reference to conda in your shell's rc file (e.g. `~/.bashrc`) and use `module restore` to go back to the default module set.
-Then use (noting that step 3 will manipulate your shell's rc file):
-- `wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh`
-- `bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda3`
-- `$HOME/miniconda3/bin/conda init`
-
-You can then try to install `conda-build` in the base environment again.
-
-### ii. Install the package
-Once the package has been built, you can install it using `conda install --use-local cstar_ocean` from any location. It is recommended that you use a clean environment.
+### ii. Install C-Star locally with pip
+With your C-star conda environment active, use `pip install -e $CSTAR_ROOT/cstar_ocean` where `CSTAR_ROOT` is the top-level directory of this repository.
 
 # Using C-Star:
 It is recommended that first-time users see the example notebook `<repository_top_level>/cstar_ocean/examples/cstar_example_notebook.ipynb`. A summary is provided here:
