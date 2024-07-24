@@ -1,12 +1,4 @@
 # Installation
-**NOTE: This process will be simplified once C-Star is available through conda**
-
-There are two ways to use C-Star
-
----
-
-## Option 1 (easiest): Add to python path
-This option is simpler, but you will have to first install any dependencies yourself.
 ### i. Create a new conda environment containing any dependencies:
 
 ```conda create -n "cstar_environment python=3.12 pooch pyyaml```
