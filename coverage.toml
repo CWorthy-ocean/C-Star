@@ -1,7 +1,0 @@
-[tool.coverage.run]
-source = ["cstar_ocean"]
-omit = [
-    "tests/*",
-    "**/__init__.py",
-    "setup.py",
-]
