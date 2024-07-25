@@ -29,8 +29,11 @@ jobs:
           create-args: |
             python=${{ matrix.python-version }}
 
-      - name: Conda info
-        run: conda info
+      - name: Environment info
+        shell: bash
+        run: |
+          conda info
+          printenv
 
       - name: Install C-Star
         shell: micromamba-shell {0}
