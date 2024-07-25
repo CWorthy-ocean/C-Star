@@ -107,26 +107,26 @@ class Component(ABC):
         )
 
         base_str += "\n\nDiscretization info:"
-        if hasattr(self,'n_procs_x') and self.n_procs_x is not None:
+        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
             base_str += (
                 "\nn_procs_x:"
                 + str(self.n_procs_x)
                 + " (Number of x-direction processors)"
             )
-        if hasattr(self,'n_procs_y') and self.n_procs_y is not None:
+        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
             base_str += (
                 "\nn_procs_y:"
                 + str(self.n_procs_y)
                 + " (Number of y-direction processors)"
             )
-        if hasattr(self,'n_levels') and self.n_levels is not None:
+        if hasattr(self, "n_levels") and self.n_levels is not None:
             base_str += "\nn_levels:" + str(self.n_levels)
-        if hasattr(self,'nx') and self.nx is not None:
+        if hasattr(self, "nx") and self.nx is not None:
             base_str += "\nnx:" + str(self.nx)
-        if hasattr(self,'ny') and self.ny is not None:
+        if hasattr(self, "ny") and self.ny is not None:
             base_str += "\nny:" + str(self.ny)
 
-        if hasattr(self,'exe_path') and self.exe_path is not None:
+        if hasattr(self, "exe_path") and self.exe_path is not None:
             base_str += "\n\nIs compiled: True"
             base_str += "\n exe_path: " + self.exe_path
         return base_str

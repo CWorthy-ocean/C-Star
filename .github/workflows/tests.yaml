@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+
+  test:
+    name: ${{ matrix.python-version }}-build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: ci/environment.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+
+      - name: Conda info
+        run: conda info
+
+      - name: Install C-Star
+        shell: micromamba-shell {0}
+        run: |
+           python - V
+           python -m pip install -e cstar_ocean --no-deps --force-reinstall
+
+      - name: Running Tests
+        shell: bash -l {0}
+        run: |
+           python -V
+           coverage run --rcfile=coverage.toml cstar_ocean/tests/test_roms_marbl_example.py
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m ; coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
