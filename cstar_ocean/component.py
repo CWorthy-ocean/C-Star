@@ -410,6 +410,8 @@ class ROMSComponent(Component):
                     exec_pfx = "mpirun"
                 case "osx_arm64":
                     exec_pfx = "mpirun"
+                case "linux_x86_64":
+                    exec_pfx = "mpirun"
 
                 # FIXME (probably throughout): self.additional_code /could/ be a list
                 # need to figure out which element to use
