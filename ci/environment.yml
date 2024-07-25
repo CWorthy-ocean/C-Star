@@ -3,6 +3,9 @@ channels:
   - conda-forge
 dependencies:
   - python>=3.10
+  - pooch
+  - pyyaml
+  - coverage
   - numpy
   - compilers
   - netcdf-fortran
