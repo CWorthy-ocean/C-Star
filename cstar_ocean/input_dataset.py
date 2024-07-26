@@ -1,6 +1,9 @@
 import os
 import pooch
 import hashlib
+import datetime as dt
+import dateutil.parser
+from typing import Optional
 from cstar_ocean.base_model import BaseModel
 
 
@@ -29,7 +32,14 @@ class InputDataset:
         Verify whether the file containing this input dataset has been fetched to `local_path`
     """
 
-    def __init__(self, base_model: BaseModel, source: str, file_hash: str):
+    def __init__(
+        self,
+        base_model: BaseModel,
+        source: str,
+        file_hash: str,
+        start_date: Optional[str | dt.datetime] = None,
+        end_date: Optional[str | dt.datetime] = None,
+    ):
         """
         Initialize an InputDataset object associated with a base model using a source URL and file hash
 
@@ -47,8 +57,14 @@ class InputDataset:
         self.base_model: BaseModel = base_model
         self.source: str = source
         self.file_hash: str = file_hash
-        self.exists_locally: bool | None = None
-        self.local_path: str | None = None
+        self.exists_locally: Optional[bool] = None
+        self.local_path: Optional[str] = None
+        self.start_date = start_date
+        self.end_date = end_date
+        if isinstance(start_date, str):
+            self.start_date = dateutil.parser.parse(start_date)
+        if isinstance(end_date, str):
+            self.end_date = dateutil.parser.parse(end_date)
 
     def __str__(self):
         name = self.__class__.__name__

@@ -53,7 +53,9 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             os.environ["MPI_ROOT"] = os.environ["MVAPICH2HOME"]
             _CSTAR_COMPILER = "intel"
             _CSTAR_SYSTEM = "sdsc_expanse"
-            _CSTAR_SCHEDULER = "slurm"  # can get this with `scontrol show config` or `sinfo --version`
+            _CSTAR_SCHEDULER = (
+                "slurm"  # can get this with `scontrol show config` or `sinfo --version`
+            )
             _CSTAR_SYSTEM_DEFAULT_PARTITION = "compute"
             _CSTAR_SYSTEM_CORES_PER_NODE = (
                 128  # cpu nodes, can get dynamically node-by-node
@@ -173,6 +175,8 @@ elif (
 
 _CSTAR_CONFIG_FILE = _CSTAR_ROOT + "/cstar_local_config.py"
 if os.path.exists(_CSTAR_CONFIG_FILE):
-    pass
+    # FIXME: Ruff tries to remove this "unused" import but it is needed
+    # better approach in future? Currently telling ruff to ignore
+    import cstar_ocean.cstar_local_config  # noqa: F401
 
 ################################################################################

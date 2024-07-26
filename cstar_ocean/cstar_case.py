@@ -1,5 +1,8 @@
 import os
 import yaml
+import warnings
+import datetime as dt
+import dateutil.parser
 from typing import List, Type, Any, Optional
 
 from cstar_ocean.component import Component, MARBLComponent, ROMSComponent
@@ -28,6 +31,10 @@ class Case:
         The name of this case
     caseroot: str
         The local directory in which this case will be set up
+    start_date: TODO
+
+    end_date: TODO
+
     is_from_blueprint: bool
         Whether this Case was instantiated from a blueprint yaml file
 
@@ -51,7 +58,14 @@ class Case:
     """
 
     def __init__(
-        self, components: Component | List[Component], name: str, caseroot: str
+        self,
+        components: Component | List[Component],
+        name: str,
+        caseroot: str,
+        start_date: Optional[str | dt.datetime] = None,
+        end_date: Optional[str | dt.datetime] = None,
+        valid_start_date: Optional[str | dt.datetime] = None,
+        valid_end_date: Optional[str | dt.datetime] = None,
     ):
         """
         Initialize a Case object manually from components, name, and caseroot path.
@@ -78,7 +92,96 @@ class Case:
         self.blueprint: Optional[str] = None
         self.is_setup: bool = self.check_is_setup()
 
-        # self.is_setup=self.check_is_setup()
+        # Make sure valid dates are datetime objects if present:
+        if valid_start_date is not None:
+            self.valid_start_date: Optional[dt.datetime] = (
+                valid_start_date
+                if isinstance(valid_start_date, dt.datetime)
+                else dateutil.parser.parse(valid_start_date)
+            )
+        if valid_end_date is not None:
+            self.valid_end_date: Optional[dt.datetime] = (
+                valid_end_date
+                if isinstance(valid_end_date, dt.datetime)
+                else dateutil.parser.parse(valid_end_date)
+            )
+        # Warn user if valid dates are not present:
+        if valid_end_date is None or valid_start_date is None:
+            warnings.warn(
+                "Range of valid dates not provided."
+                + " Unable to check if simulation dates are out of range. "
+                + "Case objects should be initialized with valid_start_date "
+                + "and valid_end_date attributes.",
+                RuntimeWarning,
+            )
+
+        # Make sure Case start_date is set and is a datetime object:
+        if start_date is not None:
+            # Set if provided
+            self.start_date: Optional[dt.datetime] = (
+                start_date
+                if isinstance(start_date, dt.datetime)
+                else dateutil.parser.parse(start_date)
+            )
+            # Set to earliest valid date if not provided and warn
+        elif valid_start_date is not None:
+            self.start_date = self.valid_start_date
+            warnings.warn(
+                "start_date not provided. "
+                + f"Defaulting to earliest valid start date: {valid_start_date}."
+            )
+        else:
+            # Raise error if no way to set
+            raise ValueError(
+                "Neither start_date nor valid_start_date provided."
+                + " Unable to establish a simulation date range"
+            )
+        assert isinstance(
+            self.start_date, dt.datetime
+        ), "At this point either the code has failed or start_date is a datetime object"
+
+        # Make sure Case end_date is set and is a datetime object:
+        if end_date is not None:
+            # Set if provided
+            self.end_date: Optional[dt.datetime] = (
+                end_date
+                if isinstance(end_date, dt.datetime)
+                else dateutil.parser.parse(end_date)
+            )
+        elif valid_end_date is not None:
+            # Set to latest valid date if not provided and warn
+            self.end_date = self.valid_end_date
+            warnings.warn(
+                "end_date not provided."
+                + f"Defaulting to latest valid end date: {valid_end_date}"
+            )
+
+        else:
+            # Raise error if no way to set
+            raise ValueError(
+                "Neither end_date nor valid_end_date provided."
+                + " Unable to establish a simulation date range"
+            )
+
+        assert isinstance(
+            self.end_date, dt.datetime
+        ), "At this point either the code has failed or end_date is a datetime object"
+
+        # Check provded dates are valid
+        if (self.valid_start_date is not None) and (
+            self.start_date < self.valid_start_date
+        ):
+            raise ValueError(
+                f"start_date {self.start_date} is before the earliest valid start date {self.valid_start_date}."
+            )
+        if (self.valid_end_date is not None) and (self.end_date > self.valid_end_date):
+            raise ValueError(
+                f"end_date {self.end_date} is after the latest valid end date {self.valid_end_date}."
+            )
+        if self.start_date > self.end_date:
+            raise ValueError(
+                f"start_date {self.start_date} is after end_date {self.end_date}."
+            )
 
     def __str__(self):
         base_str = "------------------"
@@ -106,7 +209,13 @@ class Case:
         return self.__str__()
 
     @classmethod
-    def from_blueprint(cls, blueprint: str, caseroot: str):
+    def from_blueprint(
+        cls,
+        blueprint: str,
+        caseroot: str,
+        start_date: Optional[str | dt.datetime],
+        end_date: Optional[str | dt.datetime],
+    ):
         """
         Initialize a Case object from a blueprint.
 
@@ -132,6 +241,10 @@ class Case:
             Path to a yaml file containing the blueprint for the case
         caseroot: str
             Path to the local directory where the case will be curated and run
+        start_date: str or datetime
+            TODO
+        end_date: str or datetime
+            TODO
 
         Returns:
         --------
@@ -143,8 +256,18 @@ class Case:
         with open(blueprint, "r") as file:
             bp_dict = yaml.safe_load(file)
 
-        # Primary metadata
+        # Top-level metadata
         casename = bp_dict["registry_attrs"]["name"]
+
+        valid_start_date: dt.datetime
+        valid_end_date: dt.datetime
+        valid_start_date = bp_dict["registry_attrs"]["valid_date_range"]["start_date"]
+        valid_end_date = bp_dict["registry_attrs"]["valid_date_range"]["end_date"]
+        if isinstance(start_date, str):
+            start_date = dateutil.parser.parse(start_date)
+        if isinstance(end_date, str):
+            end_date = dateutil.parser.parse(end_date)
+
         components: Component | List[Component]
         components = []
 
@@ -246,6 +369,8 @@ class Case:
                             base_model=base_model,
                             source=f["source"],
                             file_hash=f["hash"],
+                            start_date=f["start_date"],
+                            end_date=f["end_date"],
                         )
                         for f in input_dataset_info["initial_conditions"]["files"]
                     ]
@@ -274,6 +399,8 @@ class Case:
                             base_model=base_model,
                             source=f["source"],
                             file_hash=f["hash"],
+                            start_date=f["start_date"],
+                            end_date=f["end_date"],
                         )
                         for f in input_dataset_info["boundary_forcing"]["files"]
                     ]
@@ -288,6 +415,8 @@ class Case:
                             base_model=base_model,
                             source=f["source"],
                             file_hash=f["hash"],
+                            start_date=f["start_date"],
+                            end_date=f["end_date"],
                         )
                         for f in input_dataset_info["surface_forcing"]["files"]
                     ]
@@ -301,7 +430,16 @@ class Case:
         if len(components) == 1:
             components = components[0]
 
-        caseinstance = cls(components=components, name=casename, caseroot=caseroot)
+        caseinstance = cls(
+            components=components,
+            name=casename,
+            caseroot=caseroot,
+            start_date=start_date,
+            end_date=end_date,
+            valid_start_date=valid_start_date,
+            valid_end_date=valid_end_date,
+        )
+
         caseinstance.is_from_blueprint = True
         caseinstance.blueprint = blueprint
 
@@ -325,6 +463,8 @@ class Case:
 
         # Add metadata to dictionary
         bp_dict["registry_attrs"] = {"name": self.name}
+
+        raise NotImplementedError("we need to add the date ranges to the yaml")
 
         bp_dict["components"] = []
 
@@ -498,10 +638,23 @@ class Case:
 
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
-            if isinstance(component.input_datasets, list):
-                [inp.get(self.caseroot) for inp in component.input_datasets]
-            elif isinstance(component.input_datasets, InputDataset):
-                component.input_dataset.get(self.caseroot)
+            if isinstance(component.input_datasets, InputDataset):
+                component_list = [
+                    component.input_datasets,
+                ]
+            elif isinstance(component.input_datasets, list):
+                component_list = component.input_datasets
+            else:
+                component_list = []
+
+            # Verify dates line up before running .get():
+            for inp in component_list:
+                # Download input dataset if its date range overlaps Case's date range
+                if ((inp.start_date is None) or (inp.end_date is None)) or (
+                    (inp.start_date <= self.end_date)
+                    and (inp.end_date >= self.start_date)
+                ):
+                    inp.get(self.caseroot)
 
         self.is_setup = True
         # TODO: Add a marker somewhere to avoid repeating this process, e.g. self.is_setup=True
@@ -533,6 +686,10 @@ class Case:
         # TODO add more advanced logic for this
         for component in self.components:
             if component.base_model.name == "ROMS":
+                # TODO: This is the point where you should modify the namelist to use
+                # the Case's start and end dates
+
+                # After that you need to run some verification stuff on the downloaded files
                 component.run(
                     account_key=account_key, walltime=walltime, job_name=job_name
                 )
