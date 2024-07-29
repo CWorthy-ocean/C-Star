@@ -6,7 +6,7 @@ from typing import List, Optional, Any
 
 from cstar_ocean.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar_ocean.base_model import ROMSBaseModel, BaseModel
-from cstar_ocean.input_dataset import InputDataset
+from cstar_ocean.input_dataset import InputDataset, InitialConditions, ModelGrid, SurfaceForcing, BoundaryForcing, TidalForcing
 from cstar_ocean.additional_code import AdditionalCode
 
 from cstar_ocean.environment import (
@@ -69,7 +69,7 @@ class Component(ABC):
             An intialized Component object
         """
 
-        # FIXME: do Type checking here
+        # TODO: do Type checking here
         if "base_model" not in kwargs or not isinstance(
             kwargs["base_model"], BaseModel
         ):
@@ -107,9 +107,11 @@ class Component(ABC):
         )
 
         base_str += "\n\nDiscretization info:"
+        if hasattr(self, "time_step") and self.time_step is not None:        
+            base_str += ("\ntime_step: "+str(self.time_step))
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
             base_str += (
-                "\nn_procs_x:"
+                "\nn_procs_x: "
                 + str(self.n_procs_x)
                 + " (Number of x-direction processors)"
             )
@@ -125,7 +127,6 @@ class Component(ABC):
             base_str += "\nnx:" + str(self.nx)
         if hasattr(self, "ny") and self.ny is not None:
             base_str += "\nny:" + str(self.ny)
-
         if hasattr(self, "exe_path") and self.exe_path is not None:
             base_str += "\n\nIs compiled: True"
             base_str += "\n exe_path: " + self.exe_path
@@ -213,6 +214,7 @@ class ROMSComponent(Component):
         base_model: ROMSBaseModel,
         additional_code: Optional[AdditionalCode] = None,
         input_datasets: Optional[InputDataset | List[InputDataset]] = None,
+        time_step: int = 1,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
         n_levels: Optional[int] = None,
@@ -252,6 +254,7 @@ class ROMSComponent(Component):
             input_datasets=input_datasets,
         )
         # QUESTION: should all these attrs be passed in as a single "discretization" arg of type dict?
+        self.time_step: int = time_step
         self.nx: Optional[int] = nx
         self.ny: Optional[int] = ny
         self.n_levels: Optional[int] = n_levels
@@ -308,19 +311,22 @@ class ROMSComponent(Component):
 
         # Partition input datasets
         if self.input_datasets is not None:
-            datasets_to_partition = (
-                self.input_datasets
-                if isinstance(self.input_datasets, list)
-                else [
+            if isinstance(self.input_datasets, InputDataset):
+                dataset_list = [
                     self.input_datasets,
                 ]
-            )
+            elif isinstance(self.input_datasets, list):
+                dataset_list = self.input_datasets
+            else:
+                dataset_list = []
 
+            datasets_to_partition = [ d for d in dataset_list if d.exists_locally ]
+        
             for f in datasets_to_partition:
                 dspath = f.local_path
                 fname = os.path.basename(f.source)
 
-                os.makedirs(dspath + "/PARTITIONED", exist_ok=True)
+                os.makedirs(os.path.dirname(dspath) + "/PARTITIONED", exist_ok=True)
                 subprocess.run(
                     "partit "
                     + str(self.n_procs_x)
@@ -328,10 +334,29 @@ class ROMSComponent(Component):
                     + str(self.n_procs_y)
                     + " ../"
                     + fname,
-                    cwd=dspath + "PARTITIONED",
+                    cwd=os.path.dirname(dspath) + "/PARTITIONED",
                     shell=True,
                 )
+            # Edit namelist file to contain dataset paths
+            forstr=""
+            namelist_path=self.additional_code.local_path + "/" + self.additional_code.namelists[0]
+            for f in datasets_to_partition:
+                partitioned_path=os.path.dirname(f.local_path)+'/PARTITIONED/'+os.path.basename(f.local_path)
+                if isinstance(f,ModelGrid):
+                    gridstr="     "+partitioned_path+"\n"
+                    _replace_text_in_file(namelist_path,"__GRID_FILE_PLACEHOLDER__",gridstr)                    
+                elif isinstance(f,InitialConditions):
+                    icstr="     "+partitioned_path+"\n"
+                    _replace_text_in_file(namelist_path,"__INITIAL_CONDITION_FILE_PLACEHOLDER__",icstr)                    
+                elif type(f) in [SurfaceForcing,TidalForcing,BoundaryForcing]:
+                    forstr+="     "+partitioned_path+"\n"
 
+            _replace_text_in_file(namelist_path,"__FORCING_FILES_PLACEHOLDER__",forstr)
+            
+
+            
+
+                                
         ################################################################################
         ## NOTE: we assume that roms.in is the ONLY entry in additional_code.namelists, hence [0]
         _replace_text_in_file(
@@ -346,13 +371,15 @@ class ROMSComponent(Component):
             "MARBL_NAMELIST_DIR",
             self.additional_code.local_path + "/namelists/MARBL",
         )
+        
         ################################################################################
 
     def run(
-        self,
-        account_key: Optional[str] = None,
-        walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
-        job_name: str = "my_roms_run",
+            self,
+            n_time_steps: int,
+            account_key: Optional[str] = None,
+            walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
+            job_name: str = "my_roms_run",
     ):
         """
         Runs the executable created by `build()`
@@ -386,6 +413,14 @@ class ROMSComponent(Component):
         else:
             run_path = self.additional_code.local_path + "/output/PARTITIONED/"
 
+        # Add number of timesteps to namelist
+        print('doin the thing')
+        _replace_text_in_file(
+            self.additional_code.local_path + "/" + self.additional_code.namelists[0],
+            "__NTIMES_PLACEHOLDER__",
+            str(n_time_steps),
+        )
+        
         os.makedirs(run_path, exist_ok=True)
         if self.exe_path is None:
             # FIXME this only works if build() is called in the same session

@@ -12,7 +12,7 @@ components:
         checkout_target: 'marbl0.45.0'
       additional_code:
         source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-        checkout_target: '9f66e60bea0553868268c75571aba67df94356ce'
+        checkout_target: 'cstar_latest'
         namelists:
           - "namelists/MARBL/marbl_in"
           - "namelists/MARBL/marbl_tracer_output_list"
@@ -29,9 +29,10 @@ components:
         n_levels: 100
         n_procs_x: 3
         n_procs_y: 3
+        time_step: 360
       additional_code:
         source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-        checkout_target: '9f66e60bea0553868268c75571aba67df94356ce'
+        checkout_target: 'cstar_latest'
         source_mods:
           - "source_mods/ROMS/bgc.opt"
           - "source_mods/ROMS/bulk_frc.opt"
@@ -44,7 +45,7 @@ components:
           - "source_mods/ROMS/get_makefile"
           - "source_mods/ROMS/Make.depend"
         namelists:
-          - "namelists/ROMS/roms.in_MARBL"
+          - "namelists/ROMS/roms.in_TEMPLATE"
       input_datasets:
         model_grid:
           files:

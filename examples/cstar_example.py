@@ -9,8 +9,8 @@ import cstar_ocean as cstar
 roms_marbl_case = cstar.Case.from_blueprint(
     blueprint="cstar_blueprint_roms_marbl_example.yaml",
     caseroot="roms_marbl_example_case/",
-    start_date="20120104 12:00:00",
-    end_date="20120105 12:00:00",
+    start_date="20120103 12:00:00",
+    end_date="20120104 12:00:00",
 )
 
 ## In a python session, execute:

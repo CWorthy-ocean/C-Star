@@ -90,7 +90,6 @@ class Case:
         self.name: str = name
         self.is_from_blueprint: bool = False
         self.blueprint: Optional[str] = None
-        self.is_setup: bool = self.check_is_setup()
 
         # Make sure valid dates are datetime objects if present:
         if valid_start_date is not None:
@@ -182,6 +181,8 @@ class Case:
             raise ValueError(
                 f"start_date {self.start_date} is after end_date {self.end_date}."
             )
+        # Lastly, check if everything is set up
+        self.is_setup: bool = self.check_is_setup()        
 
     def __str__(self):
         base_str = "------------------"
@@ -463,8 +464,12 @@ class Case:
 
         # Add metadata to dictionary
         bp_dict["registry_attrs"] = {"name": self.name}
-
-        raise NotImplementedError("we need to add the date ranges to the yaml")
+        if self.valid_start_date is not None:
+            bp_dict["registry_attrs"]["valid_date_range"] = {"start_date": str(self.valid_start_date)}
+        if self.valid_end_date is not None:
+            bp_dict["registry_attrs"]["valid_date_range"] = {"end_date": str(self.valid_end_date)}
+            
+        #raise NotImplementedError("we need to add the date ranges to the yaml")
 
         bp_dict["components"] = []
 
@@ -500,6 +505,9 @@ class Case:
                 discretization_info["n_procs_x"] = component.n_procs_x
             if hasattr(component, "n_procs_y"):
                 discretization_info["n_procs_y"] = component.n_procs_y
+            if hasattr(component, "time_step"):
+                discretization_info["time_step"] = component.time_step
+                
 
             if len(discretization_info) > 0:
                 component_info["discretization"] = discretization_info
@@ -589,23 +597,29 @@ class Case:
                 return False
 
             # Check AdditionalCode
-            if isinstance(component.additional_code, list):
-                for ac in component.additional_code:
-                    if not ac.check_exists_locally(self.caseroot):
-                        return False
-            elif isinstance(component.additional_code, AdditionalCode):
-                if not component.additional_code.check_exists_locally(self.caseroot):
-                    return False
+            if not component.additional_code.check_exists_locally(self.caseroot):
+                return False
 
             # Check InputDatasets
-            if isinstance(component.input_datasets, list):
-                for ind in component.input_datasets:
-                    if not ind.check_exists_locally(self.caseroot):
-                        return False
-            elif isinstance(component.input_datasets, InputDataset):
-                if not component.input_datasets.check_exists_locally(self.caseroot):
-                    return False
+            
+            # Get InputDatasets
+            # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
+            if isinstance(component.input_datasets, InputDataset):
+                dataset_list = [
+                    component.input_datasets,
+                ]
+            elif isinstance(component.input_datasets, list):
+                dataset_list = component.input_datasets
+            else:
+                dataset_list = []
 
+            for inp in dataset_list:
+                if not inp.check_exists_locally(self.caseroot):
+                    if ((inp.start_date is None) or (inp.end_date is None)) or (
+                            (inp.start_date <= self.end_date)
+                            and (inp.end_date >= self.start_date)
+                    ):
+                        return False                
         return True
 
     def setup(self):
@@ -639,16 +653,16 @@ class Case:
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
             if isinstance(component.input_datasets, InputDataset):
-                component_list = [
+                dataset_list = [
                     component.input_datasets,
                 ]
             elif isinstance(component.input_datasets, list):
-                component_list = component.input_datasets
+                dataset_list = component.input_datasets
             else:
-                component_list = []
+                dataset_list = []
 
             # Verify dates line up before running .get():
-            for inp in component_list:
+            for inp in dataset_list:
                 # Download input dataset if its date range overlaps Case's date range
                 if ((inp.start_date is None) or (inp.end_date is None)) or (
                     (inp.start_date <= self.end_date)
@@ -689,9 +703,15 @@ class Case:
                 # TODO: This is the point where you should modify the namelist to use
                 # the Case's start and end dates
 
+                # Calculate number of time steps:
+                run_length_seconds=int((self.end_date - self.start_date).total_seconds())
+                
                 # After that you need to run some verification stuff on the downloaded files
                 component.run(
-                    account_key=account_key, walltime=walltime, job_name=job_name
+                    n_time_steps=(run_length_seconds//component.time_step),\
+                    account_key=account_key,\
+                    walltime=walltime,\
+                    job_name=job_name
                 )
 
     def post_run(self):
