@@ -182,7 +182,7 @@ class Case:
                 f"start_date {self.start_date} is after end_date {self.end_date}."
             )
         # Lastly, check if everything is set up
-        self.is_setup: bool = self.check_is_setup()        
+        self.is_setup: bool = self.check_is_setup()
 
     def __str__(self):
         base_str = "------------------"
@@ -465,11 +465,15 @@ class Case:
         # Add metadata to dictionary
         bp_dict["registry_attrs"] = {"name": self.name}
         if self.valid_start_date is not None:
-            bp_dict["registry_attrs"]["valid_date_range"] = {"start_date": str(self.valid_start_date)}
+            bp_dict["registry_attrs"]["valid_date_range"] = {
+                "start_date": str(self.valid_start_date)
+            }
         if self.valid_end_date is not None:
-            bp_dict["registry_attrs"]["valid_date_range"] = {"end_date": str(self.valid_end_date)}
-            
-        #raise NotImplementedError("we need to add the date ranges to the yaml")
+            bp_dict["registry_attrs"]["valid_date_range"] = {
+                "end_date": str(self.valid_end_date)
+            }
+
+        # raise NotImplementedError("we need to add the date ranges to the yaml")
 
         bp_dict["components"] = []
 
@@ -507,7 +511,6 @@ class Case:
                 discretization_info["n_procs_y"] = component.n_procs_y
             if hasattr(component, "time_step"):
                 discretization_info["time_step"] = component.time_step
-                
 
             if len(discretization_info) > 0:
                 component_info["discretization"] = discretization_info
@@ -592,18 +595,15 @@ class Case:
 
         for component in component_list:
             if component.base_model.local_config_status != 0:
-                # print(f'{component.base_model.name} does not appear to be configured properly.'+\
-                #'\nRun Case.setup() or BaseModel.handle_config_status()')
                 return False
 
             # Check AdditionalCode
-            if not component.additional_code.check_exists_locally(self.caseroot):
+            if (component.additional_code is not None) and (
+                component.additional_code.check_exists_locally(self.caseroot)
+            ):
                 return False
 
             # Check InputDatasets
-            
-            # Get InputDatasets
-            # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
             if isinstance(component.input_datasets, InputDataset):
                 dataset_list = [
                     component.input_datasets,
@@ -615,11 +615,19 @@ class Case:
 
             for inp in dataset_list:
                 if not inp.check_exists_locally(self.caseroot):
-                    if ((inp.start_date is None) or (inp.end_date is None)) or (
-                            (inp.start_date <= self.end_date)
-                            and (inp.end_date >= self.start_date)
+                    # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
+                    if (not isinstance(inp.start_date, dt.datetime)) or (
+                        not isinstance(inp.end_date, dt.datetime)
                     ):
-                        return False                
+                        return False
+                    elif (not isinstance(self.start_date, dt.datetime)) or (
+                        not isinstance(self.end_date, dt.datetime)
+                    ):
+                        return False
+                    elif (inp.start_date <= self.end_date) and (
+                        inp.end_date >= self.start_date
+                    ):
+                        return False
         return True
 
     def setup(self):
@@ -704,14 +712,16 @@ class Case:
                 # the Case's start and end dates
 
                 # Calculate number of time steps:
-                run_length_seconds=int((self.end_date - self.start_date).total_seconds())
-                
+                run_length_seconds = int(
+                    (self.end_date - self.start_date).total_seconds()
+                )
+
                 # After that you need to run some verification stuff on the downloaded files
                 component.run(
-                    n_time_steps=(run_length_seconds//component.time_step),\
-                    account_key=account_key,\
-                    walltime=walltime,\
-                    job_name=job_name
+                    n_time_steps=(run_length_seconds // component.time_step),
+                    account_key=account_key,
+                    walltime=walltime,
+                    job_name=job_name,
                 )
 
     def post_run(self):

@@ -1,12 +1,20 @@
 import os
 import glob
+import warnings
 import subprocess
 from abc import ABC, abstractmethod
 from typing import List, Optional, Any
 
 from cstar_ocean.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar_ocean.base_model import ROMSBaseModel, BaseModel
-from cstar_ocean.input_dataset import InputDataset, InitialConditions, ModelGrid, SurfaceForcing, BoundaryForcing, TidalForcing
+from cstar_ocean.input_dataset import (
+    InputDataset,
+    InitialConditions,
+    ModelGrid,
+    SurfaceForcing,
+    BoundaryForcing,
+    TidalForcing,
+)
 from cstar_ocean.additional_code import AdditionalCode
 
 from cstar_ocean.environment import (
@@ -107,8 +115,8 @@ class Component(ABC):
         )
 
         base_str += "\n\nDiscretization info:"
-        if hasattr(self, "time_step") and self.time_step is not None:        
-            base_str += ("\ntime_step: "+str(self.time_step))
+        if hasattr(self, "time_step") and self.time_step is not None:
+            base_str += "\ntime_step: " + str(self.time_step)
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
             base_str += (
                 "\nn_procs_x: "
@@ -320,8 +328,8 @@ class ROMSComponent(Component):
             else:
                 dataset_list = []
 
-            datasets_to_partition = [ d for d in dataset_list if d.exists_locally ]
-        
+            datasets_to_partition = [d for d in dataset_list if d.exists_locally]
+
             for f in datasets_to_partition:
                 dspath = f.local_path
                 fname = os.path.basename(f.source)
@@ -338,25 +346,35 @@ class ROMSComponent(Component):
                     shell=True,
                 )
             # Edit namelist file to contain dataset paths
-            forstr=""
-            namelist_path=self.additional_code.local_path + "/" + self.additional_code.namelists[0]
+            forstr = ""
+            namelist_path = (
+                self.additional_code.local_path
+                + "/"
+                + self.additional_code.namelists[0]
+            )
             for f in datasets_to_partition:
-                partitioned_path=os.path.dirname(f.local_path)+'/PARTITIONED/'+os.path.basename(f.local_path)
-                if isinstance(f,ModelGrid):
-                    gridstr="     "+partitioned_path+"\n"
-                    _replace_text_in_file(namelist_path,"__GRID_FILE_PLACEHOLDER__",gridstr)                    
-                elif isinstance(f,InitialConditions):
-                    icstr="     "+partitioned_path+"\n"
-                    _replace_text_in_file(namelist_path,"__INITIAL_CONDITION_FILE_PLACEHOLDER__",icstr)                    
-                elif type(f) in [SurfaceForcing,TidalForcing,BoundaryForcing]:
-                    forstr+="     "+partitioned_path+"\n"
+                partitioned_path = (
+                    os.path.dirname(f.local_path)
+                    + "/PARTITIONED/"
+                    + os.path.basename(f.local_path)
+                )
+                if isinstance(f, ModelGrid):
+                    gridstr = "     " + partitioned_path + "\n"
+                    _replace_text_in_file(
+                        namelist_path, "__GRID_FILE_PLACEHOLDER__", gridstr
+                    )
+                elif isinstance(f, InitialConditions):
+                    icstr = "     " + partitioned_path + "\n"
+                    _replace_text_in_file(
+                        namelist_path, "__INITIAL_CONDITION_FILE_PLACEHOLDER__", icstr
+                    )
+                elif type(f) in [SurfaceForcing, TidalForcing, BoundaryForcing]:
+                    forstr += "     " + partitioned_path + "\n"
 
-            _replace_text_in_file(namelist_path,"__FORCING_FILES_PLACEHOLDER__",forstr)
-            
+            _replace_text_in_file(
+                namelist_path, "__FORCING_FILES_PLACEHOLDER__", forstr
+            )
 
-            
-
-                                
         ################################################################################
         ## NOTE: we assume that roms.in is the ONLY entry in additional_code.namelists, hence [0]
         _replace_text_in_file(
@@ -371,15 +389,15 @@ class ROMSComponent(Component):
             "MARBL_NAMELIST_DIR",
             self.additional_code.local_path + "/namelists/MARBL",
         )
-        
+
         ################################################################################
 
     def run(
-            self,
-            n_time_steps: int,
-            account_key: Optional[str] = None,
-            walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
-            job_name: str = "my_roms_run",
+        self,
+        n_time_steps: Optional[int] = None,
+        account_key: Optional[str] = None,
+        walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
+        job_name: str = "my_roms_run",
     ):
         """
         Runs the executable created by `build()`
@@ -410,17 +428,34 @@ class ROMSComponent(Component):
                 + "\nIf you have already run Component.get(), either run it again or "
                 + " add the local path manually using Component.additional_code.local_path='YOUR/PATH'."
             )
+            return
         else:
             run_path = self.additional_code.local_path + "/output/PARTITIONED/"
 
         # Add number of timesteps to namelist
-        print('doin the thing')
+        # Check if n_time_steps is None, indicating it was not explicitly set
+        if n_time_steps is None:
+            n_time_steps = 1
+            warnings.warn(
+                "n_time_steps not explicitly set, using default value of 1. "
+                "Please call ROMSComponent.run() with the n_time_steps argument "
+                "to specify the length of the run.",
+                UserWarning,
+            )
+            assert isinstance(n_time_steps, int)
+
+        if self.additional_code.namelists is None:
+            raise ValueError(
+                "A namelist file (typically roms.in) is needed to run ROMS."
+                " ROMSComponent.additional_code.namelists should be a non-empty list of filenames."
+            )
+
         _replace_text_in_file(
             self.additional_code.local_path + "/" + self.additional_code.namelists[0],
             "__NTIMES_PLACEHOLDER__",
             str(n_time_steps),
         )
-        
+
         os.makedirs(run_path, exist_ok=True)
         if self.exe_path is None:
             # FIXME this only works if build() is called in the same session

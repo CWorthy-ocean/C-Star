@@ -66,6 +66,9 @@ class InputDataset:
         if isinstance(end_date, str):
             self.end_date = dateutil.parser.parse(end_date)
 
+        assert self.start_date is None or isinstance(self.start_date, dt.datetime)
+        assert self.end_date is None or isinstance(self.end_date, dt.datetime)
+
     def __str__(self):
         name = self.__class__.__name__
         base_str = f"{name} object "
@@ -110,7 +113,7 @@ class InputDataset:
 
         to_fetch.fetch(os.path.basename(self.source), downloader=downloader)
         self.exists_locally = True
-        self.local_path = tgt_dir+'/'+os.path.basename(self.source)
+        self.local_path = tgt_dir + "/" + os.path.basename(self.source)
 
     def check_exists_locally(self, local_path: str) -> bool:
         """
@@ -129,7 +132,7 @@ class InputDataset:
         exists_locally (bool):
             True if the method has verified the local existence of the dataset
         """
-        #FIXME: fpath should just be local_path and wherever this is called should provide a full path
+        # FIXME: fpath should just be local_path and wherever this is called should provide a full path
         tgt_dir = local_path + "/input_datasets/" + self.base_model.name + "/"
         fpath = tgt_dir + os.path.basename(self.source)
         if os.path.exists(fpath):
