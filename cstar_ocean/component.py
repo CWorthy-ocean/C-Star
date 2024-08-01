@@ -195,6 +195,8 @@ class ROMSComponent(Component):
     input_datasets: InputDataset or list of InputDatasets
         Any spatiotemporal data needed to run this instance of ROMS
         e.g. initial conditions, surface forcing, etc.
+    time_step: int, Optional, default=1
+        The time step with which to run ROMS in this configuration
     nx,ny,n_levels: int
         The number of x and y points and vertical levels in the domain associated with this object
     n_procs_x,n_procs_y: int
