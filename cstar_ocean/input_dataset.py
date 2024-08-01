@@ -132,7 +132,6 @@ class InputDataset:
         exists_locally (bool):
             True if the method has verified the local existence of the dataset
         """
-        # FIXME: fpath should just be local_path and wherever this is called should provide a full path
         tgt_dir = local_path + "/input_datasets/" + self.base_model.name + "/"
         fpath = tgt_dir + os.path.basename(self.source)
         if os.path.exists(fpath):

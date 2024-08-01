@@ -31,10 +31,15 @@ class Case:
         The name of this case
     caseroot: str
         The local directory in which this case will be set up
-    start_date: TODO
-
-    end_date: TODO
-
+    valid_start_date: str or datetime.datetime, Optional, default=None
+        The earliest start date at which this Case is considered valid
+    valid_end_date: str or datetime.datetime, Optional, default=None
+        The latest end date up to which this Case is considered valid
+    start_date: str or datetime, Optional, default=valid_start_date
+        The date from which to begin running this Case. 
+    end_date: str or datetime.datetime, Optional, default=valid_end_date
+        The date at which to cease running this Case.
+    
     is_from_blueprint: bool
         Whether this Case was instantiated from a blueprint yaml file
 
@@ -242,10 +247,10 @@ class Case:
             Path to a yaml file containing the blueprint for the case
         caseroot: str
             Path to the local directory where the case will be curated and run
-        start_date: str or datetime
-            TODO
-        end_date: str or datetime
-            TODO
+        start_date: str or datetime, Optional, default=valid_start_date
+           The date from which to begin running this Case.
+        end_date: str or datetime.datetime, Optional, default=valid_end_date
+           The date at which to cease running this Case.
 
         Returns:
         --------
@@ -473,7 +478,6 @@ class Case:
                 "end_date": str(self.valid_end_date)
             }
 
-        # raise NotImplementedError("we need to add the date ranges to the yaml")
 
         bp_dict["components"] = []
 
@@ -679,7 +683,6 @@ class Case:
                     inp.get(self.caseroot)
 
         self.is_setup = True
-        # TODO: Add a marker somewhere to avoid repeating this process, e.g. self.is_setup=True
 
     def build(self):
         """Compile any necessary additional code associated with this case
@@ -708,9 +711,6 @@ class Case:
         # TODO add more advanced logic for this
         for component in self.components:
             if component.base_model.name == "ROMS":
-                # TODO: This is the point where you should modify the namelist to use
-                # the Case's start and end dates
-
                 # Calculate number of time steps:
                 run_length_seconds = int(
                     (self.end_date - self.start_date).total_seconds()

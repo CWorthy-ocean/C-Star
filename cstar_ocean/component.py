@@ -483,8 +483,6 @@ class ROMSComponent(Component):
                 case "linux_x86_64":
                     exec_pfx = "mpirun"
 
-                # FIXME (probably throughout): self.additional_code /could/ be a list
-                # need to figure out which element to use
             roms_exec_cmd = (
                 f"{exec_pfx} -n {self.n_procs_tot} {self.exe_path} "
                 + f"{self.additional_code.local_path}/{self.additional_code.namelists[0]}"
