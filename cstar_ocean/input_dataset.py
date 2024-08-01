@@ -77,6 +77,10 @@ class InputDataset:
 
         base_str += f"\nBase model: {self.base_model.name}"
         base_str += f"\nRemote path URL: {self.source}"
+        if self.start_date is not None:
+            base_str += f"\nstart_date: {self.start_date}"
+        if self.end_date is not None:
+            base_str += f"\nend_date: {self.end_date}"
         if self.exists_locally is not None:
             base_str += f"\n Exists locally: {self.exists_locally}"
         if self.local_path is not None:

@@ -36,10 +36,10 @@ class Case:
     valid_end_date: str or datetime.datetime, Optional, default=None
         The latest end date up to which this Case is considered valid
     start_date: str or datetime, Optional, default=valid_start_date
-        The date from which to begin running this Case. 
+        The date from which to begin running this Case.
     end_date: str or datetime.datetime, Optional, default=valid_end_date
         The date at which to cease running this Case.
-    
+
     is_from_blueprint: bool
         Whether this Case was instantiated from a blueprint yaml file
 
@@ -195,9 +195,15 @@ class Case:
         base_str += "\n------------------"
 
         base_str += f"\nName: {self.name}"
-        base_str += f"\nLocal caseroot: {self.caseroot}"
+        base_str += f"\ncaseroot: {self.caseroot}"
+        base_str += f"\nstart_date: {self.start_date}"
+        base_str += f"\nend_date: {self.end_date}"
         base_str += f"\nIs setup: {self.is_setup}"
+        base_str += f"\nValid date range:"
+        base_str += f"\nvalid_start_date: {self.valid_start_date}"
+        base_str += f"\nvalid_end_date: {self.valid_end_date}"
         base_str += "\n"
+
 
         if self.is_from_blueprint:
             base_str += "\nThis case was instantiated from the blueprint file:"
@@ -477,7 +483,6 @@ class Case:
             bp_dict["registry_attrs"]["valid_date_range"] = {
                 "end_date": str(self.valid_end_date)
             }
-
 
         bp_dict["components"] = []
 
