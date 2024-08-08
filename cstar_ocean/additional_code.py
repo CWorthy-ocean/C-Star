@@ -1,7 +1,6 @@
 import os
 import shutil
 import tempfile
-import subprocess
 from typing import Optional, List
 from cstar_ocean.base_model import BaseModel
 from cstar_ocean.utils import _clone_and_checkout
@@ -123,9 +122,11 @@ class AdditionalCode:
             The local path (typically `Case.caseroot`) where the additional code will be curated
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
-            _clone_and_checkout(source_repo=self.source_repo, 
-                                local_path=tmp_dir, 
-                                checkout_target=self.checkout_target)
+            _clone_and_checkout(
+                source_repo=self.source_repo,
+                local_path=tmp_dir,
+                checkout_target=self.checkout_target,
+            )
 
             for file_type in ["source_mods", "namelists"]:
                 file_list = getattr(self, file_type)

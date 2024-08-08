@@ -167,7 +167,7 @@ elif (
     _CSTAR_SYSTEM_CORES_PER_NODE = os.cpu_count()
     _CSTAR_SYSTEM_MEMGB_PER_NODE = None
     _CSTAR_SYSTEM_MAX_WALLTIME = None
-    # FIXME lots of this is repeat code, can determine a lot of these vars using functions rather than hardcoding
+    # TODO: lots of this is repeat code, can determine a lot of these vars using functions rather than hardcoding
 
 # Now read the local/custom initialisation file
 # This sets variables associated with external codebases that are not installed
@@ -175,8 +175,9 @@ elif (
 
 _CSTAR_CONFIG_FILE = _CSTAR_ROOT + "/cstar_local_config.py"
 if os.path.exists(_CSTAR_CONFIG_FILE):
-    # FIXME: Ruff tries to remove this "unused" import but it is needed
-    # better approach in future? Currently telling ruff to ignore
-    import cstar_ocean.cstar_local_config  # noqa: F401
+    from cstar_ocean.cstar_local_config import set_local_environment
+
+    set_local_environment()
+
 
 ################################################################################

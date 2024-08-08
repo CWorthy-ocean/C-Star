@@ -14,6 +14,7 @@ def _write_to_config_file(config_file_str):
         )
 
         base_conf_str += "\nimport os\n"
+        base_conf_str += "def set_local_environment():"
         config_file_str = base_conf_str + config_file_str
 
     with open(_CSTAR_CONFIG_FILE, "a") as f:

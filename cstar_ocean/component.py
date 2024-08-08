@@ -94,10 +94,14 @@ class Component(ABC):
         )
 
     def __str__(self):
+        # Header
         name = self.__class__.__name__
         base_str = f"{name} object "
         base_str = "-" * (len(name) + 7) + "\n" + base_str
         base_str += "\n" + "-" * (len(name) + 7)
+
+        # Attrs
+        base_str += f"\ntime_step: {self.time_step} seconds"
         base_str += "\nBuilt from: "
 
         NAC = 0 if self.additional_code is None else 1
@@ -460,9 +464,9 @@ class ROMSComponent(Component):
 
         os.makedirs(run_path, exist_ok=True)
         if self.exe_path is None:
-            # FIXME this only works if build() is called in the same session
-            print(
-                "C-STAR: Unable to find ROMS executable. Run Component.build() first."
+            raise ValueError(
+                "C-STAR: ROMSComponent.exe_path is None; unable to find ROMS executable."
+                + "\nRun Component.build() first. "
                 + "\n If you have already run Component.build(), either run it again or "
                 + " add the executable path manually using Component.exe_path='YOUR/PATH'."
             )

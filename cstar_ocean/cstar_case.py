@@ -199,11 +199,10 @@ class Case:
         base_str += f"\nstart_date: {self.start_date}"
         base_str += f"\nend_date: {self.end_date}"
         base_str += f"\nIs setup: {self.is_setup}"
-        base_str += f"\nValid date range:"
+        base_str += "\nValid date range:"
         base_str += f"\nvalid_start_date: {self.valid_start_date}"
         base_str += f"\nvalid_end_date: {self.valid_end_date}"
         base_str += "\n"
-
 
         if self.is_from_blueprint:
             base_str += "\nThis case was instantiated from the blueprint file:"
@@ -714,6 +713,7 @@ class Case:
 
         # Assuming for now that ROMS presence implies it is the master program
         # TODO add more advanced logic for this
+        # 20240807 - TN - set first component as main?
         for component in self.components:
             if component.base_model.name == "ROMS":
                 # Calculate number of time steps:
