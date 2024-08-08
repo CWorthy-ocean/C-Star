@@ -39,7 +39,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python - V
-           python -m pip install -e cstar_ocean --no-deps --force-reinstall
+           python -m pip install -e . --no-deps --force-reinstall
 
       - name: Running Tests
         shell: bash -l {0}
