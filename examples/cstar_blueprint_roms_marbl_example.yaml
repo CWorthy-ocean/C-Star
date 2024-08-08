@@ -22,7 +22,7 @@ components:
       base_model:
         name: 'ROMS'
         source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
-        checkout_target: '1ab203d5334a17bf398cd86765b9fa268e0065a8'
+        checkout_target: '2a4e9107ffc771d2833fbea3e08f1e169759b5ff'
       discretization:
         nx: 24
         ny: 24
