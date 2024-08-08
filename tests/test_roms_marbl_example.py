@@ -17,3 +17,5 @@ with patch("builtins.input", return_value="y"):
     roms_marbl_case.pre_run()
     roms_marbl_case.run()
     roms_marbl_case.post_run()
+
+print('TEST COMPLETE!')
