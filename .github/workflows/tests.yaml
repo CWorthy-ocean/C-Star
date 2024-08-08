@@ -45,7 +45,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           python -u -m coverage run --rcfile=coverage.toml -u cstar_ocean/tests/test_roms_marbl_example.py
+           python -u -m coverage run --rcfile=coverage.toml cstar_ocean/tests/test_roms_marbl_example.py
 
       - name: Get coverage report
         shell: bash -l {0}
