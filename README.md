@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/gh/CWorthy-ocean/C-Star/graph/badge.svg?token=HAPZGL2LWF)](https://codecov.io/gh/CWorthy-ocean/C-Star)
+
 # Installation
 ### i. Create a new conda environment containing any dependencies:
 
@@ -10,10 +12,10 @@
 It may also be worth including `ipython`,`xarray`,`numpy`, `matplotlib` and `jupyter` in the environment to work with any output, though these are not needed to run C-Star.
 
 ### ii. Install C-Star locally with pip
-With your C-star conda environment active, use `pip install -e $CSTAR_ROOT/cstar_ocean` where `CSTAR_ROOT` is the top-level directory of this repository.
+With your C-star conda environment active, use `pip install -e .` at the top level of this repository.
 
 # Using C-Star:
-It is recommended that first-time users see the example notebook `<repository_top_level>/cstar_ocean/examples/cstar_example_notebook.ipynb`. A summary is provided here:
+It is recommended that first-time users see the example notebook `examples/cstar_example_notebook.ipynb`. A summary is provided here:
 
 ## Overview of C-Star structures
 - A Case (`cstar.Case`) is the primary object of C-Star. It contains all the necessary information for a user to run a reproducable Earth system simulation.
