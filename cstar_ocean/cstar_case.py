@@ -103,21 +103,32 @@ class Case:
                 if isinstance(valid_start_date, dt.datetime)
                 else dateutil.parser.parse(valid_start_date)
             )
+        else:
+            warnings.warn(
+                "Valid start date not provided."
+                + " Unable to check if simulation dates are out of range. "
+                + "Case objects should be initialized with valid_start_date "
+                + "and valid_end_date attributes.",
+                RuntimeWarning,
+            )
+            self.valid_start_date = None
+            
         if valid_end_date is not None:
             self.valid_end_date: Optional[dt.datetime] = (
                 valid_end_date
                 if isinstance(valid_end_date, dt.datetime)
                 else dateutil.parser.parse(valid_end_date)
             )
-        # Warn user if valid dates are not present:
-        if valid_end_date is None or valid_start_date is None:
+        else:
             warnings.warn(
-                "Range of valid dates not provided."
+                "Valid end date not provided."
                 + " Unable to check if simulation dates are out of range. "
                 + "Case objects should be initialized with valid_start_date "
                 + "and valid_end_date attributes.",
                 RuntimeWarning,
             )
+            self.valid_end_date=None
+            
 
         # Make sure Case start_date is set and is a datetime object:
         if start_date is not None:

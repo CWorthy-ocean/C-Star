@@ -11,8 +11,8 @@ components:
         source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
         checkout_target: 'marbl0.45.0'
       additional_code:
-        source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-        checkout_target: 'cstar_latest'
+        source_repo: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example'
+        checkout_target: '69ee87b554082c46e3f138a9b3faf17439966e90'
         namelists:
           - "namelists/MARBL/marbl_in"
           - "namelists/MARBL/marbl_tracer_output_list"
@@ -31,8 +31,8 @@ components:
         n_procs_y: 3
         time_step: 360
       additional_code:
-        source_repo: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-        checkout_target: 'cstar_latest'
+        source_repo: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example'
+        checkout_target: '69ee87b554082c46e3f138a9b3faf17439966e90'
         source_mods:
           - "source_mods/ROMS/bgc.opt"
           - "source_mods/ROMS/bulk_frc.opt"
