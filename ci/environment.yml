@@ -11,5 +11,5 @@ dependencies:
   - compilers
   - netcdf-fortran
   - mpich
-  - nco
-  - ncview
+  - xarray
+  - netCDF4

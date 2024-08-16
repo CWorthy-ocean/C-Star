@@ -487,9 +487,13 @@ class Case:
 
         # Add start date to valid_date_range if it exists
         if self.valid_start_date is not None:
-            bp_dict["registry_attrs"].setdefault("valid_date_range", {})["start_date"] = str(self.valid_start_date)
+            bp_dict["registry_attrs"].setdefault("valid_date_range", {})[
+                "start_date"
+            ] = str(self.valid_start_date)
         if self.valid_end_date is not None:
-            bp_dict["registry_attrs"].setdefault("valid_date_range", {})["end_date"] = str(self.valid_end_date)        
+            bp_dict["registry_attrs"].setdefault("valid_date_range", {})["end_date"] = (
+                str(self.valid_end_date)
+            )
 
         bp_dict["components"] = []
 
@@ -577,12 +581,12 @@ class Case:
                     # Create a dictionary of file_info for each dataset file:
                     if "files" not in input_dataset_info[dct_key].keys():
                         input_dataset_info[dct_key]["files"] = []
-                    file_info={"source":ind.source,"hash":ind.file_hash}
-                    if hasattr(ind,"start_date"):
-                        file_info["start_date"]=ind.start_date
-                    if hasattr(ind,"end_date"):
-                        file_info["end_date"]=ind.end_date
-                    
+                    file_info = {"source": ind.source, "hash": ind.file_hash}
+                    if hasattr(ind, "start_date"):
+                        file_info["start_date"] = str(ind.start_date)
+                    if hasattr(ind, "end_date"):
+                        file_info["end_date"] = str(ind.end_date)
+
                     input_dataset_info[dct_key]["files"].append(file_info)
 
                 component_info["input_datasets"] = input_dataset_info
