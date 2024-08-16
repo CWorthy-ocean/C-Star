@@ -112,7 +112,7 @@ class Case:
                 RuntimeWarning,
             )
             self.valid_start_date = None
-            
+
         if valid_end_date is not None:
             self.valid_end_date: Optional[dt.datetime] = (
                 valid_end_date
@@ -127,8 +127,7 @@ class Case:
                 + "and valid_end_date attributes.",
                 RuntimeWarning,
             )
-            self.valid_end_date=None
-            
+            self.valid_end_date = None
 
         # Make sure Case start_date is set and is a datetime object:
         if start_date is not None:
@@ -611,13 +610,12 @@ class Case:
             ]
         elif isinstance(self.components, list):
             component_list = self.components
-
         for component in component_list:
             if component.base_model.local_config_status != 0:
                 return False
 
             # Check AdditionalCode
-            if (component.additional_code is not None) and (
+            if (component.additional_code is None) or not (
                 component.additional_code.check_exists_locally(self.caseroot)
             ):
                 return False

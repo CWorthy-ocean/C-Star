@@ -112,12 +112,12 @@ class Component(ABC):
             if isinstance(self.input_datasets, InputDataset)
             else 0
         )
-        base_str += f"\n{NAC} AdditionalCode repositories (query using ROMSComponent.additional_code)"
+        base_str += f"\n{NAC} AdditionalCode repositories (query using Component.additional_code)"
         base_str += (
-            f"\n{NID} InputDataset objects (query using ROMSComponent.input_datasets"
+            f"\n{NID} InputDataset objects (query using Component.input_datasets"
         )
 
-        disc_str=''
+        disc_str = ""
         if hasattr(self, "time_step") and self.time_step is not None:
             disc_str += "\ntime_step: " + str(self.time_step)
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
@@ -141,9 +141,9 @@ class Component(ABC):
         if hasattr(self, "exe_path") and self.exe_path is not None:
             disc_str += "\n\nIs compiled: True"
             disc_str += "\n exe_path: " + self.exe_path
-        if len(disc_str)>0:
-            disc_str = "\n\nDiscretization info:"+disc_str
-        base_str+=disc_str
+        if len(disc_str) > 0:
+            disc_str = "\n\nDiscretization info:" + disc_str
+        base_str += disc_str
         return base_str
 
     def __repr__(self):

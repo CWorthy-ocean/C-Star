@@ -4,6 +4,7 @@ import hashlib
 import datetime as dt
 import dateutil.parser
 from typing import Optional
+from cstar_ocean.utils import _get_source_type
 from cstar_ocean.base_model import BaseModel
 
 
@@ -16,13 +17,13 @@ class InputDataset:
     base_model: BaseModel
         The base model with which this input dataset is associated
     source: str
-        URL pointing to the netCDF file containing this input dataset
+        local path or URL pointing to the netCDF file containing this input dataset
     file_hash: str
         The 256 bit SHA sum associated with the file for verifying downloads
     exists_locally: bool, default None
-        True if the input dataset has been fetched to the local machine, set when `check_exists_locally()` method is called
+        True if the input dataset exists on the local machine, set by `check_exists_locally()` method if source is a URL
     local_path: str, default None
-        The path to where the input dataset has been fetched locally, set when `get()` method is called
+        The path where the input dataset exists locally, set when `get()` is called if source is a URL
 
     Methods:
     --------
@@ -48,17 +49,23 @@ class InputDataset:
         base_model: BaseModel
             The base model with which this input dataset is associated
         source: str
-            URL pointing to the netCDF file containing this input dataset
+            URL or path pointing to the netCDF file containing this input dataset
         file_hash: str
-            The 256 bit SHA sum associated with the file for verifying downloads
+            The 256 bit SHA sum associated with the file for verification
 
         """
 
         self.base_model: BaseModel = base_model
+
         self.source: str = source
         self.file_hash: str = file_hash
+
         self.exists_locally: Optional[bool] = None
         self.local_path: Optional[str] = None
+        if _get_source_type(source) == "path":
+            self.exists_locally = True
+            self.local_path = source
+
         self.start_date = start_date
         self.end_date = end_date
         if isinstance(start_date, str):
@@ -76,7 +83,7 @@ class InputDataset:
         base_str += "\n" + "-" * (len(name) + 7)
 
         base_str += f"\nBase model: {self.base_model.name}"
-        base_str += f"\nRemote path URL: {self.source}"
+        base_str += f"\nsource: {self.source}"
         if self.start_date is not None:
             base_str += f"\nstart_date: {self.start_date}"
         if self.end_date is not None:
@@ -91,35 +98,55 @@ class InputDataset:
     def __repr__(self):
         return self.__str__()
 
-    def get(self, local_path: str):
+    def get(self, local_dir: str):
         """
-        Fetch the file containing this input dataset and save it to `local_path` using Pooch.
+        Fetch the file containing this input dataset and save it within `local_dir/input_datasets` using Pooch.
 
         This method updates the `local_path` attribute of the calling InputDataset object
 
         Parameters:
         -----------
-        local_path: str
-            The local path where this input dataset will be saved.
+        local_dir: str
+            The local directory in which this input dataset will be saved.
 
         """
-
-        tgt_dir = local_path + "/input_datasets/" + self.base_model.name + "/"
+        tgt_dir = local_dir + "/input_datasets/" + self.base_model.name + "/"
         os.makedirs(tgt_dir, exist_ok=True)
+        tgt_path = tgt_dir + os.path.basename(self.source)
 
-        # NOTE: default timeout was leading to a lot of timeouterrors
-        downloader = pooch.HTTPDownloader(timeout=120)
-        to_fetch = pooch.create(
-            path=tgt_dir,
-            base_url=os.path.dirname(self.source),
-            registry={os.path.basename(self.source): self.file_hash},
-        )
+        if self.exists_locally:
+            assert (
+                self.local_path is not None
+            ), "local_path should always be set when exists_locally is True"
+            if os.path.abspath(self.local_path) != os.path.abspath(tgt_path):
+                if os.path.exists(tgt_path):
+                    raise FileExistsError(
+                        f"A file by the name of {os.path.basename(self.source)}"
+                        + f"already exists at {tgt_dir}."
+                    )
+                    # TODO maybe this should check the hash and just `return` if it matches?
+                else:
+                    # If the file is somewhere else on the system, make a symbolic link where we want it
+                    os.symlink(self.local_path, tgt_path)
+                return
+            else:
+                # nothing to do as file is already at tgt_path
+                return
 
-        to_fetch.fetch(os.path.basename(self.source), downloader=downloader)
-        self.exists_locally = True
-        self.local_path = tgt_dir + "/" + os.path.basename(self.source)
+        else:
+            # NOTE: default timeout was leading to a lot of timeouterrors
+            downloader = pooch.HTTPDownloader(timeout=120)
+            to_fetch = pooch.create(
+                path=tgt_dir,
+                base_url=os.path.dirname(self.source),
+                registry={os.path.basename(self.source): self.file_hash},
+            )
 
-    def check_exists_locally(self, local_path: str) -> bool:
+            to_fetch.fetch(os.path.basename(self.source), downloader=downloader)
+            self.exists_locally = True
+            self.local_path = tgt_dir + "/" + os.path.basename(self.source)
+
+    def check_exists_locally(self, local_dir: str) -> bool:
         """
         Checks whether this InputDataset has already been fetched to the local machine
 
@@ -128,38 +155,38 @@ class InputDataset:
 
         Parameters:
         -----------
-        local_path (str):
-            The local path to check for the existence of this input dataset
+        local_dir (str):
+            The local directory in which to check for the existence of this input dataset
 
         Returns:
         --------
         exists_locally (bool):
             True if the method has verified the local existence of the dataset
         """
-        tgt_dir = local_path + "/input_datasets/" + self.base_model.name + "/"
-        fpath = tgt_dir + os.path.basename(self.source)
-        if os.path.exists(fpath):
-            sha256_hash = hashlib.sha256()
-            with open(fpath, "rb") as f:
-                for chunk in iter(lambda: f.read(4096), b""):
-                    sha256_hash.update(chunk)
 
-            hash_hex = sha256_hash.hexdigest()
-            if self.file_hash != hash_hex:
-                raise ValueError(
-                    f"{fpath} exists locally but the local file hash {hash_hex}"
-                    + "does not match that associated with this InputDataset object"
-                    + f"{self.file_hash}"
-                )
+        if self.exists_locally is None:
+            tgt_dir = local_dir + "/input_datasets/" + self.base_model.name + "/"
+            fpath = tgt_dir + os.path.basename(self.source)
+            if os.path.exists(fpath):
+                sha256_hash = hashlib.sha256()
+                with open(fpath, "rb") as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        sha256_hash.update(chunk)
+
+                hash_hex = sha256_hash.hexdigest()
+                if self.file_hash != hash_hex:
+                    raise ValueError(
+                        f"{fpath} exists locally but the local file hash {hash_hex}"
+                        + "does not match that associated with this InputDataset object"
+                        + f"{self.file_hash}"
+                    )
+                else:
+                    self.exists_locally = True
+                    self.local_path = tgt_dir
             else:
-                self.exists_locally = True
+                self.exists_locally = False
 
-        if self.exists_locally:
-            self.local_path = tgt_dir
-            return True
-        else:
-            self.exists_locally = False
-            return False
+        return self.exists_locally
 
 
 class ModelGrid(InputDataset):
