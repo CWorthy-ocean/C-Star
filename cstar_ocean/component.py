@@ -101,7 +101,6 @@ class Component(ABC):
         base_str += "\n" + "-" * (len(name) + 7)
 
         # Attrs
-        base_str += f"\ntime_step: {self.time_step} seconds"
         base_str += "\nBuilt from: "
 
         NAC = 0 if self.additional_code is None else 1
@@ -118,30 +117,33 @@ class Component(ABC):
             f"\n{NID} InputDataset objects (query using ROMSComponent.input_datasets"
         )
 
-        base_str += "\n\nDiscretization info:"
+        disc_str=''
         if hasattr(self, "time_step") and self.time_step is not None:
-            base_str += "\ntime_step: " + str(self.time_step)
+            disc_str += "\ntime_step: " + str(self.time_step)
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            base_str += (
+            disc_str += (
                 "\nn_procs_x: "
                 + str(self.n_procs_x)
                 + " (Number of x-direction processors)"
             )
         if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
-            base_str += (
+            disc_str += (
                 "\nn_procs_y:"
                 + str(self.n_procs_y)
                 + " (Number of y-direction processors)"
             )
         if hasattr(self, "n_levels") and self.n_levels is not None:
-            base_str += "\nn_levels:" + str(self.n_levels)
+            disc_str += "\nn_levels:" + str(self.n_levels)
         if hasattr(self, "nx") and self.nx is not None:
-            base_str += "\nnx:" + str(self.nx)
+            disc_str += "\nnx:" + str(self.nx)
         if hasattr(self, "ny") and self.ny is not None:
-            base_str += "\nny:" + str(self.ny)
+            disc_str += "\nny:" + str(self.ny)
         if hasattr(self, "exe_path") and self.exe_path is not None:
-            base_str += "\n\nIs compiled: True"
-            base_str += "\n exe_path: " + self.exe_path
+            disc_str += "\n\nIs compiled: True"
+            disc_str += "\n exe_path: " + self.exe_path
+        if len(disc_str)>0:
+            disc_str = "\n\nDiscretization info:"+disc_str
+        base_str+=disc_str
         return base_str
 
     def __repr__(self):
