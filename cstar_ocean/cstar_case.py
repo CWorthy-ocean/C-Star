@@ -484,14 +484,12 @@ class Case:
 
         # Add metadata to dictionary
         bp_dict["registry_attrs"] = {"name": self.name}
+
+        # Add start date to valid_date_range if it exists
         if self.valid_start_date is not None:
-            bp_dict["registry_attrs"]["valid_date_range"] = {
-                "start_date": str(self.valid_start_date)
-            }
+            bp_dict["registry_attrs"].setdefault("valid_date_range", {})["start_date"] = str(self.valid_start_date)
         if self.valid_end_date is not None:
-            bp_dict["registry_attrs"]["valid_date_range"] = {
-                "end_date": str(self.valid_end_date)
-            }
+            bp_dict["registry_attrs"].setdefault("valid_date_range", {})["end_date"] = str(self.valid_end_date)        
 
         bp_dict["components"] = []
 
@@ -562,6 +560,7 @@ class Case:
             if isinstance(input_datasets, list):
                 input_dataset_info: dict = {}
                 for ind in input_datasets:
+                    # Determine what kind of input dataset we are adding
                     if isinstance(ind, ModelGrid):
                         dct_key = "model_grid"
                     elif isinstance(ind, InitialConditions):
@@ -574,11 +573,17 @@ class Case:
                         dct_key = "surface_forcing"
                     if dct_key not in input_dataset_info.keys():
                         input_dataset_info[dct_key] = {}
+
+                    # Create a dictionary of file_info for each dataset file:
                     if "files" not in input_dataset_info[dct_key].keys():
                         input_dataset_info[dct_key]["files"] = []
-                    input_dataset_info[dct_key]["files"].append(
-                        {"source": ind.source, "file_hash": ind.file_hash}
-                    )
+                    file_info={"source":ind.source,"hash":ind.file_hash}
+                    if hasattr(ind,"start_date"):
+                        file_info["start_date"]=ind.start_date
+                    if hasattr(ind,"end_date"):
+                        file_info["end_date"]=ind.end_date
+                    
+                    input_dataset_info[dct_key]["files"].append(file_info)
 
                 component_info["input_datasets"] = input_dataset_info
 
