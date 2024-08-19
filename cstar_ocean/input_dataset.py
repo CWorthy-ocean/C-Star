@@ -100,9 +100,12 @@ class InputDataset:
 
     def get(self, local_dir: str):
         """
-        Fetch the file containing this input dataset and save it within `local_dir/input_datasets` using Pooch.
+        Make the file containing this input dataset available in `local_dir/input_datasets`
 
-        This method updates the `local_path` attribute of the calling InputDataset object
+        If InputDataset.source is...
+           - ...a local path: create a symbolic link to the file in `local_dir/input_datasets`.
+           - ...a URL: fetch the file to `local_dir/input_datasets` using Pooch
+                       (updating the `local_path` attribute of the calling InputDataset)
 
         Parameters:
         -----------
@@ -114,6 +117,7 @@ class InputDataset:
         os.makedirs(tgt_dir, exist_ok=True)
         tgt_path = tgt_dir + os.path.basename(self.source)
 
+        # If the file is somewhere else on the system, make a symbolic link where we want it        
         if self.exists_locally:
             assert (
                 self.local_path is not None
@@ -126,7 +130,6 @@ class InputDataset:
                     )
                     # TODO maybe this should check the hash and just `return` if it matches?
                 else:
-                    # If the file is somewhere else on the system, make a symbolic link where we want it
                     os.symlink(self.local_path, tgt_path)
                 return
             else:
@@ -134,6 +137,7 @@ class InputDataset:
                 return
 
         else:
+        # Otherwise, download the file
             # NOTE: default timeout was leading to a lot of timeouterrors
             downloader = pooch.HTTPDownloader(timeout=120)
             to_fetch = pooch.create(
