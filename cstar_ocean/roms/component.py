@@ -7,7 +7,7 @@ from typing import List, Optional, Any
 
 from cstar_ocean.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar_ocean.base import ROMSBaseModel, Component
-from cstar_ocean.input_dataset import (
+from cstar_ocean.base.input_dataset import (
     InputDataset,
     InitialConditions,
     ModelGrid,

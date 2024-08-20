@@ -112,7 +112,7 @@ class Case:
                 RuntimeWarning,
             )
             self.valid_start_date = None
-            
+
         if valid_end_date is not None:
             self.valid_end_date: Optional[dt.datetime] = (
                 valid_end_date
@@ -127,8 +127,7 @@ class Case:
                 + "and valid_end_date attributes.",
                 RuntimeWarning,
             )
-            self.valid_end_date=None
-            
+            self.valid_end_date = None
 
         # Make sure Case start_date is set and is a datetime object:
         if start_date is not None:
@@ -485,14 +484,16 @@ class Case:
 
         # Add metadata to dictionary
         bp_dict["registry_attrs"] = {"name": self.name}
+
+        # Add start date to valid_date_range if it exists
         if self.valid_start_date is not None:
-            bp_dict["registry_attrs"]["valid_date_range"] = {
-                "start_date": str(self.valid_start_date)
-            }
+            bp_dict["registry_attrs"].setdefault("valid_date_range", {})[
+                "start_date"
+            ] = str(self.valid_start_date)
         if self.valid_end_date is not None:
-            bp_dict["registry_attrs"]["valid_date_range"] = {
-                "end_date": str(self.valid_end_date)
-            }
+            bp_dict["registry_attrs"].setdefault("valid_date_range", {})["end_date"] = (
+                str(self.valid_end_date)
+            )
 
         bp_dict["components"] = []
 
@@ -563,6 +564,7 @@ class Case:
             if isinstance(input_datasets, list):
                 input_dataset_info: dict = {}
                 for ind in input_datasets:
+                    # Determine what kind of input dataset we are adding
                     if isinstance(ind, ModelGrid):
                         dct_key = "model_grid"
                     elif isinstance(ind, InitialConditions):
@@ -575,11 +577,17 @@ class Case:
                         dct_key = "surface_forcing"
                     if dct_key not in input_dataset_info.keys():
                         input_dataset_info[dct_key] = {}
+
+                    # Create a dictionary of file_info for each dataset file:
                     if "files" not in input_dataset_info[dct_key].keys():
                         input_dataset_info[dct_key]["files"] = []
-                    input_dataset_info[dct_key]["files"].append(
-                        {"source": ind.source, "file_hash": ind.file_hash}
-                    )
+                    file_info = {"source": ind.source, "hash": ind.file_hash}
+                    if hasattr(ind, "start_date"):
+                        file_info["start_date"] = str(ind.start_date)
+                    if hasattr(ind, "end_date"):
+                        file_info["end_date"] = str(ind.end_date)
+
+                    input_dataset_info[dct_key]["files"].append(file_info)
 
                 component_info["input_datasets"] = input_dataset_info
 
@@ -611,13 +619,12 @@ class Case:
             ]
         elif isinstance(self.components, list):
             component_list = self.components
-
         for component in component_list:
             if component.base_model.local_config_status != 0:
                 return False
 
             # Check AdditionalCode
-            if (component.additional_code is not None) and (
+            if (component.additional_code is None) or not (
                 component.additional_code.check_exists_locally(self.caseroot)
             ):
                 return False
