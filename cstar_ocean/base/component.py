@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Any, TYPE_CHECKING
 
-from cstar_ocean.base import BaseModel
+from cstar_ocean.base.basemodel import BaseModel
 from cstar_ocean.base.input_dataset import InputDataset
 
 
