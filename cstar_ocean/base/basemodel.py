@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from abc import ABC, abstractmethod
 
@@ -6,6 +7,7 @@ from cstar_ocean.base.utils import (
     _get_repo_remote,
     _get_repo_head_hash,
 )
+from cstar_ocean.base.environment import _CSTAR_ROOT
 
 class BaseModel(ABC):
     """

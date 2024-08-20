@@ -5,6 +5,7 @@ import datetime as dt
 import dateutil.parser
 from typing import List, Type, Any, Optional, TYPE_CHECKING
 
+from cstar_ocean.base import Component
 from cstar_ocean.base.additional_code import AdditionalCode
 from cstar_ocean.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar_ocean.base.input_dataset import (
@@ -17,7 +18,7 @@ from cstar_ocean.base.input_dataset import (
 )
 
 if TYPE_CHECKING:
-    from cstar_ocean.base import Component, BaseModel
+    from cstar_ocean.base import BaseModel
 
 
 class Case:
@@ -301,7 +302,7 @@ class Case:
 
             base_model_info = component_info["component"]["base_model"]
             ThisComponent: Type["Component"]
-            ThisBaseModel: Type[BaseModel]
+            ThisBaseModel: Type["BaseModel"]
 
             match base_model_info["name"].casefold():
                 case "roms":
@@ -502,7 +503,7 @@ class Case:
 
         bp_dict["components"] = []
 
-        if isinstance(self.components, "Component"):
+        if isinstance(self.components, Component):
             component_list = [
                 self.components,
             ]
@@ -618,7 +619,7 @@ class Case:
             True if all components are correctly set up in the caseroot directory
 
         """
-        if isinstance(self.components, "Component"):
+        if isinstance(self.components, Component):
             component_list = [
                 self.components,
             ]
