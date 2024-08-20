@@ -29,7 +29,7 @@ A Case can be instantiated in one of two ways:
 - using the standard constructor (after manually constructing the Component objects that will make up the Case):
 
 ```
-	my_case=cstar_ocean.Case(list_of_component_objects,\
+	my_case=cstar.Case(list_of_component_objects,\
 	 	  	 name='case_name',\
 	  		 caseroot='/path/to/where/case/will/be/run')
 ```
@@ -38,12 +38,12 @@ A Case can be instantiated in one of two ways:
 - From a pre-defined "blueprint", using
 
 ```
-	my_case=cstar_ocean.Case.from_blueprint('path/to/blueprint.yaml')
+	my_case=cstar.Case.from_blueprint('path/to/blueprint.yaml')
 ```
 
 An example blueprint file is provided at
 
-```<repository_top_level>/cstar_ocean/examples/cstar_blueprint_roms_marbl_example.yaml```
+```<repository_top_level>/cstar/examples/cstar_blueprint_roms_marbl_example.yaml```
 
 ## Running a C-Star Case:
 Once a case has been constructed, the sequence of steps to run it is as follows:

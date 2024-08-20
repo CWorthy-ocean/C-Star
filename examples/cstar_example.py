@@ -3,7 +3,7 @@ This is a condensed version of the cstar_example_notebook.ipynb designed to be r
 For more details, see ../README.md or cstar_example_notebook.ipynb
 """
 
-import cstar_ocean as cstar
+import cstar as cstar
 
 
 roms_marbl_case = cstar.Case.from_blueprint(

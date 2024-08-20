@@ -1,5 +1,5 @@
 from unittest.mock import patch
-import cstar_ocean as cstar
+import cstar as cstar
 
 roms_marbl_case = cstar.Case.from_blueprint(
     blueprint=(cstar.environment._CSTAR_ROOT)
