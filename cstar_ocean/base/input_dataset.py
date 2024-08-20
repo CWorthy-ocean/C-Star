@@ -6,6 +6,7 @@ import dateutil.parser
 from typing import Optional
 
 from cstar_ocean.base import BaseModel
+from cstar_ocean.base.utils import _get_source_type
 
 
 class InputDataset:

@@ -6,7 +6,7 @@ from cstar_ocean.base.utils import (
     _clone_and_checkout,
     _write_to_config_file,
 )
-from cstar_ocean.base.environment import _CSTAR_ROOT, _CSTAR_COMPILER
+from cstar_ocean.base.environment import _CSTAR_COMPILER
 
 
 class MARBLBaseModel(BaseModel):

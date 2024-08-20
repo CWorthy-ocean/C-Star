@@ -6,7 +6,7 @@ import dateutil.parser
 from typing import List, Type, Any, Optional
 
 from cstar_ocean.base import Component, BaseModel, AdditionalCode
-from cstar_ocean.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar_ocean.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar_ocean.base.input_dataset import (
     InputDataset,
     ModelGrid,
