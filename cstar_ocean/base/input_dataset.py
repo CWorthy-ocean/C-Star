@@ -4,7 +4,7 @@ import hashlib
 import datetime as dt
 import dateutil.parser
 from typing import Optional
-from cstar_ocean.base_model import BaseModel
+from cstar_ocean.base import BaseModel
 
 
 class InputDataset:
