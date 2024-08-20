@@ -9,11 +9,12 @@ from cstar_ocean.utils import _calculate_node_distribution, _replace_text_in_fil
 from cstar_ocean.base_model import ROMSBaseModel, BaseModel
 from cstar_ocean.input_dataset import (
     InputDataset,
-    InitialConditions,
-    ModelGrid,
-    SurfaceForcing,
-    BoundaryForcing,
-    TidalForcing,
+    ROMSInputDataset,
+    ROMSInitialConditions,
+    ROMSModelGrid,
+    ROMSSurfaceForcing,
+    ROMSBoundaryForcing,
+    ROMSTidalForcing,
 )
 from cstar_ocean.additional_code import AdditionalCode
 
@@ -327,7 +328,7 @@ class ROMSComponent(Component):
 
         # Partition input datasets
         if self.input_datasets is not None:
-            if isinstance(self.input_datasets, InputDataset):
+            if isinstance(self.input_datasets, ROMSInputDataset):
                 dataset_list = [
                     self.input_datasets,
                 ]
@@ -340,7 +341,7 @@ class ROMSComponent(Component):
 
             for f in datasets_to_partition:
                 dspath = f.local_path
-                fname = os.path.basename(f.source)
+                fname = f.source.basename
 
                 os.makedirs(os.path.dirname(dspath) + "/PARTITIONED", exist_ok=True)
                 subprocess.run(
@@ -366,17 +367,21 @@ class ROMSComponent(Component):
                     + "/PARTITIONED/"
                     + os.path.basename(f.local_path)
                 )
-                if isinstance(f, ModelGrid):
+                if isinstance(f, ROMSModelGrid):
                     gridstr = "     " + partitioned_path + "\n"
                     _replace_text_in_file(
                         namelist_path, "__GRID_FILE_PLACEHOLDER__", gridstr
                     )
-                elif isinstance(f, InitialConditions):
+                elif isinstance(f, ROMSInitialConditions):
                     icstr = "     " + partitioned_path + "\n"
                     _replace_text_in_file(
                         namelist_path, "__INITIAL_CONDITION_FILE_PLACEHOLDER__", icstr
                     )
-                elif type(f) in [SurfaceForcing, TidalForcing, BoundaryForcing]:
+                elif type(f) in [
+                    ROMSSurfaceForcing,
+                    ROMSTidalForcing,
+                    ROMSBoundaryForcing,
+                ]:
                     forstr += "     " + partitioned_path + "\n"
 
             _replace_text_in_file(

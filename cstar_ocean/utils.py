@@ -1,23 +1,8 @@
 import os
 import re
 import subprocess
-import pathlib
 from math import ceil
-from urllib.parse import urlparse
 from cstar_ocean.environment import _CSTAR_CONFIG_FILE
-
-
-def _get_source_type(source):
-    """Determine whether a string (source) describes a local path or url"""
-    urlparsed_source = urlparse(source)
-    if all([urlparsed_source.scheme, urlparsed_source.netloc]):
-        return "url"
-    elif pathlib.Path(source).exists():
-        return "path"
-    else:
-        raise ValueError(
-            f"{source} is not a recognised URL or local path pointing to an existing file"
-        )
 
 
 def _write_to_config_file(config_file_str):

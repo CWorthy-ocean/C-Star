@@ -10,12 +10,13 @@ from cstar_ocean.base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
 from cstar_ocean.additional_code import AdditionalCode
 from cstar_ocean.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar_ocean.input_dataset import (
+    DataSource,
     InputDataset,
-    ModelGrid,
-    InitialConditions,
-    TidalForcing,
-    BoundaryForcing,
-    SurfaceForcing,
+    ROMSModelGrid,
+    ROMSInitialConditions,
+    ROMSTidalForcing,
+    ROMSBoundaryForcing,
+    ROMSSurfaceForcing,
 )
 
 
@@ -371,24 +372,27 @@ class Case:
                 # ModelGrid
                 if "model_grid" not in input_dataset_info.keys():
                     model_grid = None
-                else:
+                elif isinstance(base_model, ROMSBaseModel):
                     model_grid = [
-                        ModelGrid(
+                        ROMSModelGrid(
                             base_model=base_model,
-                            source=f["source"],
+                            source=DataSource(f["source"]),
                             file_hash=f["hash"],
                         )
                         for f in input_dataset_info["model_grid"]["files"]
                     ]
                     input_datasets += model_grid
+                else:
+                    raise NotImplementedError("Model grid is only supported for ROMS")
+
                 # InitialConditions
                 if "initial_conditions" not in input_dataset_info.keys():
                     initial_conditions = None
-                else:
+                elif isinstance(base_model, ROMSBaseModel):
                     initial_conditions = [
-                        InitialConditions(
+                        ROMSInitialConditions(
                             base_model=base_model,
-                            source=f["source"],
+                            source=DataSource(f["source"]),
                             file_hash=f["hash"],
                             start_date=f["start_date"],
                             end_date=f["end_date"],
@@ -396,29 +400,37 @@ class Case:
                         for f in input_dataset_info["initial_conditions"]["files"]
                     ]
                     input_datasets += initial_conditions
+                else:
+                    raise NotImplementedError(
+                        "Initial conditions are only supported for ROMS"
+                    )
 
                 # TidalForcing
                 if "tidal_forcing" not in input_dataset_info.keys():
                     tidal_forcing = None
-                else:
+                elif isinstance(base_model, ROMSBaseModel):
                     tidal_forcing = [
-                        TidalForcing(
+                        ROMSTidalForcing(
                             base_model=base_model,
-                            source=f["source"],
+                            source=DataSource(f["source"]),
                             file_hash=f["hash"],
                         )
                         for f in input_dataset_info["tidal_forcing"]["files"]
                     ]
                     input_datasets += tidal_forcing
+                else:
+                    raise NotImplementedError(
+                        "Tidal forcing is only supported for ROMS"
+                    )
 
                 # BoundaryForcing
                 if "boundary_forcing" not in input_dataset_info.keys():
                     boundary_forcing = None
-                else:
+                elif isinstance(base_model, ROMSBaseModel):
                     boundary_forcing = [
-                        BoundaryForcing(
+                        ROMSBoundaryForcing(
                             base_model=base_model,
-                            source=f["source"],
+                            source=DataSource(f["source"]),
                             file_hash=f["hash"],
                             start_date=f["start_date"],
                             end_date=f["end_date"],
@@ -426,23 +438,30 @@ class Case:
                         for f in input_dataset_info["boundary_forcing"]["files"]
                     ]
                     input_datasets += boundary_forcing
+                else:
+                    raise NotImplementedError(
+                        "Boundary forcing is only supported for ROMS"
+                    )
 
                 # SurfaceForcing
                 if "surface_forcing" not in input_dataset_info.keys():
                     surface_forcing = None
-                else:
+                elif isinstance(base_model, ROMSBaseModel):
                     surface_forcing = [
-                        SurfaceForcing(
+                        ROMSSurfaceForcing(
                             base_model=base_model,
-                            source=f["source"],
+                            source=DataSource(f["source"]),
                             file_hash=f["hash"],
                             start_date=f["start_date"],
                             end_date=f["end_date"],
                         )
                         for f in input_dataset_info["surface_forcing"]["files"]
                     ]
-
                     input_datasets += surface_forcing
+                else:
+                    raise NotImplementedError(
+                        "Surface forcing is only supported for ROMS"
+                    )
 
                 component_kwargs["input_datasets"] = input_datasets
 
@@ -565,15 +584,15 @@ class Case:
                 input_dataset_info: dict = {}
                 for ind in input_datasets:
                     # Determine what kind of input dataset we are adding
-                    if isinstance(ind, ModelGrid):
+                    if isinstance(ind, ROMSModelGrid):
                         dct_key = "model_grid"
-                    elif isinstance(ind, InitialConditions):
+                    elif isinstance(ind, ROMSInitialConditions):
                         dct_key = "initial_conditions"
-                    elif isinstance(ind, TidalForcing):
+                    elif isinstance(ind, ROMSTidalForcing):
                         dct_key = "tidal_forcing"
-                    elif isinstance(ind, BoundaryForcing):
+                    elif isinstance(ind, ROMSBoundaryForcing):
                         dct_key = "boundary_forcing"
-                    elif isinstance(ind, SurfaceForcing):
+                    elif isinstance(ind, ROMSSurfaceForcing):
                         dct_key = "surface_forcing"
                     if dct_key not in input_dataset_info.keys():
                         input_dataset_info[dct_key] = {}
@@ -581,7 +600,7 @@ class Case:
                     # Create a dictionary of file_info for each dataset file:
                     if "files" not in input_dataset_info[dct_key].keys():
                         input_dataset_info[dct_key]["files"] = []
-                    file_info = {"source": ind.source, "hash": ind.file_hash}
+                    file_info = {"source": ind.source.location, "hash": ind.file_hash}
                     if hasattr(ind, "start_date"):
                         file_info["start_date"] = str(ind.start_date)
                     if hasattr(ind, "end_date"):

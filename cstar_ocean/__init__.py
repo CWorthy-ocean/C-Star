@@ -9,11 +9,12 @@ from cstar_ocean.base_model import (
 from cstar_ocean.additional_code import AdditionalCode
 from cstar_ocean.input_dataset import (
     InputDataset,
-    ModelGrid,
-    TidalForcing,
-    BoundaryForcing,
-    SurfaceForcing,
-    InitialConditions,
+    ROMSInputDataset,
+    ROMSModelGrid,
+    ROMSTidalForcing,
+    ROMSBoundaryForcing,
+    ROMSSurfaceForcing,
+    ROMSInitialConditions,
 )
 
 from cstar_ocean.component import (
@@ -28,12 +29,14 @@ __all__ = [
     "ROMSBaseModel",
     "MARBLBaseModel",
     "AdditionalCode",
+    "DataSource",
     "InputDataset",
-    "ModelGrid",
-    "TidalForcing",
-    "BoundaryForcing",
-    "SurfaceForcing",
-    "InitialConditions",
+    "ROMSInputDataset",
+    "ROMSModelGrid",
+    "ROMSTidalForcing",
+    "ROMSBoundaryForcing",
+    "ROMSSurfaceForcing",
+    "ROMSInitialConditions",
     "Component",
     "ROMSComponent",
     "MARBLComponent",

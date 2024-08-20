@@ -1,14 +1,54 @@
 import os
 import pooch
 import hashlib
+import pathlib
+from abc import ABC
 import datetime as dt
 import dateutil.parser
 from typing import Optional
-from cstar_ocean.utils import _get_source_type
+from urllib.parse import urlparse
 from cstar_ocean.base_model import BaseModel
 
 
-class InputDataset:
+class DataSource:
+    """yep"""
+
+    # TODO add docstring and str fn
+
+    def __init__(self, location: str):
+        self.location = location
+
+    @property
+    def location_type(self) -> str:
+        urlparsed_location = urlparse(self.location)
+        if all([urlparsed_location.scheme, urlparsed_location.netloc]):
+            return "url"
+        elif pathlib.Path(self.location).exists():
+            return "path"
+        else:
+            raise ValueError(
+                f"{self.location} is not a recognised URL or local path pointing to an existing file"
+            )
+
+    @property
+    def source_type(self) -> str:
+        if self.location.lower().endswith((".yaml", ".yml")):
+            return "yaml"
+        elif self.location.lower().endswith(".nc"):
+            return "netcdf"
+        elif self.location.lower().endswith(".git"):
+            return "repo"
+        else:
+            raise ValueError(
+                f"{os.path.splitext(self.location)[-1]} is not a supported file type"
+            )
+
+    @property
+    def basename(self) -> str:
+        return os.path.basename(self.location)
+
+
+class InputDataset(ABC):
     """
     Describes spatiotemporal data needed to run a unique instance of a base model
 
@@ -16,8 +56,8 @@ class InputDataset:
     -----------
     base_model: BaseModel
         The base model with which this input dataset is associated
-    source: str
-        local path or URL pointing to the netCDF file containing this input dataset
+    source: DataSource
+        Describes the location and type of the source data
     file_hash: str
         The 256 bit SHA sum associated with the file for verifying downloads
     exists_locally: bool, default None
@@ -36,7 +76,7 @@ class InputDataset:
     def __init__(
         self,
         base_model: BaseModel,
-        source: str,
+        source: DataSource,
         file_hash: str,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
@@ -57,14 +97,14 @@ class InputDataset:
 
         self.base_model: BaseModel = base_model
 
-        self.source: str = source
+        self.source: DataSource = source
         self.file_hash: str = file_hash
 
         self.exists_locally: Optional[bool] = None
         self.local_path: Optional[str] = None
-        if _get_source_type(source) == "path":
+        if self.source.location_type == "path":
             self.exists_locally = True
-            self.local_path = source
+            self.local_path = source.location
 
         self.start_date = start_date
         self.end_date = end_date
@@ -83,7 +123,7 @@ class InputDataset:
         base_str += "\n" + "-" * (len(name) + 7)
 
         base_str += f"\nBase model: {self.base_model.name}"
-        base_str += f"\nsource: {self.source}"
+        base_str += f"\nsource: {self.source.location}"
         if self.start_date is not None:
             base_str += f"\nstart_date: {self.start_date}"
         if self.end_date is not None:
@@ -102,7 +142,7 @@ class InputDataset:
         """
         Make the file containing this input dataset available in `local_dir/input_datasets`
 
-        If InputDataset.source is...
+        If InputDataset.source.location_type is...
            - ...a local path: create a symbolic link to the file in `local_dir/input_datasets`.
            - ...a URL: fetch the file to `local_dir/input_datasets` using Pooch
                        (updating the `local_path` attribute of the calling InputDataset)
@@ -115,9 +155,9 @@ class InputDataset:
         """
         tgt_dir = local_dir + "/input_datasets/" + self.base_model.name + "/"
         os.makedirs(tgt_dir, exist_ok=True)
-        tgt_path = tgt_dir + os.path.basename(self.source)
+        tgt_path = tgt_dir + self.source.basename
 
-        # If the file is somewhere else on the system, make a symbolic link where we want it        
+        # If the file is somewhere else on the system, make a symbolic link where we want it
         if self.exists_locally:
             assert (
                 self.local_path is not None
@@ -125,30 +165,30 @@ class InputDataset:
             if os.path.abspath(self.local_path) != os.path.abspath(tgt_path):
                 if os.path.exists(tgt_path):
                     raise FileExistsError(
-                        f"A file by the name of {os.path.basename(self.source)}"
+                        f"A file by the name of {self.source.basename}"
                         + f"already exists at {tgt_dir}."
                     )
                     # TODO maybe this should check the hash and just `return` if it matches?
                 else:
+                    # QUESTION: Should this now update self.local_path to point to the symlink?
                     os.symlink(self.local_path, tgt_path)
                 return
             else:
                 # nothing to do as file is already at tgt_path
                 return
-
         else:
-        # Otherwise, download the file
+            # Otherwise, download the file
             # NOTE: default timeout was leading to a lot of timeouterrors
             downloader = pooch.HTTPDownloader(timeout=120)
             to_fetch = pooch.create(
                 path=tgt_dir,
-                base_url=os.path.dirname(self.source),
-                registry={os.path.basename(self.source): self.file_hash},
+                base_url=os.path.dirname(self.source.location),
+                registry={self.source.basename: self.file_hash},
             )
 
-            to_fetch.fetch(os.path.basename(self.source), downloader=downloader)
+            to_fetch.fetch(self.source.basename, downloader=downloader)
             self.exists_locally = True
-            self.local_path = tgt_dir + "/" + os.path.basename(self.source)
+            self.local_path = tgt_dir + "/" + self.source.basename
 
     def check_exists_locally(self, local_dir: str) -> bool:
         """
@@ -170,7 +210,7 @@ class InputDataset:
 
         if self.exists_locally is None:
             tgt_dir = local_dir + "/input_datasets/" + self.base_model.name + "/"
-            fpath = tgt_dir + os.path.basename(self.source)
+            fpath = tgt_dir + self.source.basename
             if os.path.exists(fpath):
                 sha256_hash = hashlib.sha256()
                 with open(fpath, "rb") as f:
@@ -193,41 +233,61 @@ class InputDataset:
         return self.exists_locally
 
 
-class ModelGrid(InputDataset):
+class ROMSInputDataset(InputDataset, ABC):
+    (
+        """
+    ROMS-specific implementation of `InputDataset` (doc below)
+
+    Extends `get()` method to generate dataset using roms-tools in the case that `source`
+    points to a yaml file.
+
+    Docstring for InputDataset:
+    ---------------------------
     """
-    An implementation of the InputDataset class for model grid files.
+    ) + (InputDataset.__doc__ or "")
+
+
+class ROMSModelGrid(ROMSInputDataset):
+    """
+    An implementation of the ROMSInputDataset class for model grid files.
+    """
+
+    def get(self, local_dir):
+        if self.source.source_type == "yaml":
+            print("You are trying to make a ROMS grid from a yaml file!")
+        else:
+            super().get(local_dir)
+
+    pass
+
+
+class ROMSInitialConditions(ROMSInputDataset):
+    """
+    An implementation of the ROMSInputDataset class for model initial condition files.
     """
 
     pass
 
 
-class InitialConditions(InputDataset):
+class ROMSTidalForcing(ROMSInputDataset):
     """
-    An implementation of the InputDataset class for model initial condition files.
-    """
-
-    pass
-
-
-class TidalForcing(InputDataset):
-    """
-    An implementation of the InputDataset class for model tidal forcing files.
+    An implementation of the ROMSInputDataset class for model tidal forcing files.
     """
 
     pass
 
 
-class BoundaryForcing(InputDataset):
+class ROMSBoundaryForcing(ROMSInputDataset):
     """
-    An implementation of the InputDataset class for model boundary condition files.
+    An implementation of the ROMSInputDataset class for model boundary condition files.
     """
 
     pass
 
 
-class SurfaceForcing(InputDataset):
+class ROMSSurfaceForcing(ROMSInputDataset):
     """
-    An implementation of the InputDataset class for model surface forcing files.
+    An implementation of the ROMSInputDataset class for model surface forcing files.
     """
 
     pass
