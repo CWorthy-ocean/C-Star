@@ -3,9 +3,9 @@ import yaml
 import warnings
 import datetime as dt
 import dateutil.parser
-from typing import List, Type, Any, Optional
+from typing import List, Type, Any, Optional, TYPE_CHECKING
 
-from cstar_ocean.base import Component, BaseModel, AdditionalCode
+from cstar_ocean.base import AdditionalCode
 from cstar_ocean.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar_ocean.base.input_dataset import (
     InputDataset,
@@ -16,7 +16,8 @@ from cstar_ocean.base.input_dataset import (
     SurfaceForcing,
 )
 
-
+if TYPE_CHECKING:
+    from cstar_ocean.base import Component, BaseModel
 
 
 class Case:

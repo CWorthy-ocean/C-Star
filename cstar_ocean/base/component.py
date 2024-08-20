@@ -1,19 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Any
+from typing import List, Optional, Any, TYPE_CHECKING
 
 from cstar_ocean.base import BaseModel
 from cstar_ocean.base.input_dataset import InputDataset
 
-from cstar_ocean.base.additional_code import AdditionalCode
 
-from cstar_ocean.base.environment import (
-    _CSTAR_COMPILER,
-    _CSTAR_SCHEDULER,
-    _CSTAR_SYSTEM,
-    _CSTAR_SYSTEM_MAX_WALLTIME,
-    _CSTAR_SYSTEM_DEFAULT_PARTITION,
-    _CSTAR_SYSTEM_CORES_PER_NODE,
-)
+
+if TYPE_CHECKING:
+    from cstar_ocean.base.additional_code import AdditionalCode
 
 
 class Component(ABC):

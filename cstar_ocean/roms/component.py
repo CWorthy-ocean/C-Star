@@ -2,10 +2,10 @@ import os
 import glob
 import warnings
 import subprocess
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from cstar_ocean.base.utils import _calculate_node_distribution, _replace_text_in_file
-from cstar_ocean.base import ROMSBaseModel, Component
+from cstar_ocean.base import Component
 from cstar_ocean.base.input_dataset import (
     InputDataset,
     InitialConditions,
@@ -24,6 +24,9 @@ from cstar_ocean.base.environment import (
     _CSTAR_SYSTEM_DEFAULT_PARTITION,
     _CSTAR_SYSTEM_CORES_PER_NODE,
 )
+
+if TYPE_CHECKING:
+    from cstar_ocean.base import ROMSBaseModel
 
 
 class ROMSComponent(Component):

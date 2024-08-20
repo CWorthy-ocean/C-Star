@@ -3,10 +3,13 @@ import pooch
 import hashlib
 import datetime as dt
 import dateutil.parser
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-from cstar_ocean.base import BaseModel
 from cstar_ocean.base.utils import _get_source_type
+
+
+if TYPE_CHECKING:
+    from cstar_ocean.base import BaseModel
 
 
 class InputDataset:

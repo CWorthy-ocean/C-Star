@@ -1,7 +1,7 @@
 from typing import Optional
 from abc import ABC, abstractmethod
 
-from cstar_ocean.utils import (
+from cstar_ocean.base.utils import (
     _get_hash_from_checkout_target,
     _get_repo_remote,
     _get_repo_head_hash,
