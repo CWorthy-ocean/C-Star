@@ -65,7 +65,7 @@ class Case:
 
     def __init__(
         self,
-        components: Component | List[Component],
+        components: "Component" | List["Component"],
         name: str,
         caseroot: str,
         start_date: Optional[str | dt.datetime] = None,
@@ -91,7 +91,7 @@ class Case:
             An initialized Case object
         """
 
-        self.components: Component | List[Component] = components
+        self.components: "Component" | List["Component"] = components
         self.caseroot: str = os.path.abspath(caseroot)
         self.name: str = name
         self.is_from_blueprint: bool = False
@@ -290,7 +290,7 @@ class Case:
         if isinstance(end_date, str):
             end_date = dateutil.parser.parse(end_date)
 
-        components: Component | List[Component]
+        components: "Component" | List["Component"]
         components = []
 
         for component_info in bp_dict["components"]:
@@ -300,7 +300,7 @@ class Case:
             # QUESTION : is this the best way to handle the need for different subclasses here?
 
             base_model_info = component_info["component"]["base_model"]
-            ThisComponent: Type[Component]
+            ThisComponent: Type["Component"]
             ThisBaseModel: Type[BaseModel]
 
             match base_model_info["name"].casefold():
@@ -502,7 +502,7 @@ class Case:
 
         bp_dict["components"] = []
 
-        if isinstance(self.components, Component):
+        if isinstance(self.components, "Component"):
             component_list = [
                 self.components,
             ]
@@ -618,7 +618,7 @@ class Case:
             True if all components are correctly set up in the caseroot directory
 
         """
-        if isinstance(self.components, Component):
+        if isinstance(self.components, "Component"):
             component_list = [
                 self.components,
             ]

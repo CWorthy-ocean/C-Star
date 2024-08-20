@@ -69,7 +69,7 @@ class Component(ABC):
             )
         self.base_model: BaseModel = kwargs["base_model"]
 
-        self.additional_code: Optional[AdditionalCode] = kwargs.get(
+        self.additional_code: Optional["AdditionalCode"] = kwargs.get(
             "additional_code", None
         )
         self.input_datasets: Optional[InputDataset | List[InputDataset]] = kwargs.get(

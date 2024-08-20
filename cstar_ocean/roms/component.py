@@ -72,7 +72,7 @@ class ROMSComponent(Component):
 
     def __init__(
         self,
-        base_model: ROMSBaseModel,
+        base_model: "ROMSBaseModel",
         additional_code: Optional[AdditionalCode] = None,
         input_datasets: Optional[InputDataset | List[InputDataset]] = None,
         time_step: int = 1,
