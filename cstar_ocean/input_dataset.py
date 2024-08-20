@@ -11,15 +11,43 @@ from cstar_ocean.base_model import BaseModel
 
 
 class DataSource:
-    """yep"""
+    """
+    Describes the source of an InputDataset
 
-    # TODO add docstring and str fn
+    Attributes:
+    -----------
+    location: str
+       The location of the data, e.g. a URL or local path
+
+    Properties:
+    -----------
+    location_type: str (read-only)
+       "url" or "path"
+    source_type: str (read only)
+       Typically describes file type (e.g. "netcdf") but can also be "repository"
+    basename: str (read-only)
+       The basename of self.location, typically the file name
+    """
 
     def __init__(self, location: str):
+        """
+        Initialize a DataSource from a location string
+
+        Parameters:
+        -----------
+        location: str
+           The location of the data, e.g. a URL or local path
+
+        Returns:
+        --------
+        DataSource
+            An initialized DataSource
+        """
         self.location = location
 
     @property
     def location_type(self) -> str:
+        """Get the location type (e.g. "path" or "url") from the "location" attribute"""
         urlparsed_location = urlparse(self.location)
         if all([urlparsed_location.scheme, urlparsed_location.netloc]):
             return "url"
@@ -32,12 +60,13 @@ class DataSource:
 
     @property
     def source_type(self) -> str:
+        """Get the source type (e.g. "netcdf" from the "location" attribute"""
         if self.location.lower().endswith((".yaml", ".yml")):
             return "yaml"
         elif self.location.lower().endswith(".nc"):
             return "netcdf"
         elif self.location.lower().endswith(".git"):
-            return "repo"
+            return "repository"
         else:
             raise ValueError(
                 f"{os.path.splitext(self.location)[-1]} is not a supported file type"
@@ -45,7 +74,18 @@ class DataSource:
 
     @property
     def basename(self) -> str:
+        """Get the basename (typically a file name) from the location attribute"""
         return os.path.basename(self.location)
+    
+    def __str__(self):
+        base_str = f"{self.__class__.__name__}"
+        base_str += "\n" + "-" * len(base_str)
+        base_str += f"\n location: {self.location}"
+        base_str += f"\n basename: {self.basename}"        
+        base_str += f"\n location type: {self.location_type}"
+        base_str += f"\n source type: {self.source_type}"
+
+        
 
 
 class InputDataset(ABC):
