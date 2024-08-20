@@ -6,7 +6,7 @@ import cstar_ocean as cstar
 
 ## First test uses URLs to point to input datasets
 roms_marbl_remote_case = cstar.Case.from_blueprint(
-    blueprint=(cstar.environment._CSTAR_ROOT)
+    blueprint=(cstar.base.environment._CSTAR_ROOT)
     + "/../examples/cstar_blueprint_roms_marbl_example.yaml",
     caseroot="roms_marbl_example_case/",
     start_date="20120103 12:00:00",
