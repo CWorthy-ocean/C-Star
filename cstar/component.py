@@ -5,9 +5,9 @@ import subprocess
 from abc import ABC, abstractmethod
 from typing import List, Optional, Any
 
-from cstar_ocean.utils import _calculate_node_distribution, _replace_text_in_file
-from cstar_ocean.base_model import ROMSBaseModel, BaseModel
-from cstar_ocean.input_dataset import (
+from cstar.utils import _calculate_node_distribution, _replace_text_in_file
+from cstar.base_model import ROMSBaseModel, BaseModel
+from cstar.input_dataset import (
     InputDataset,
     InitialConditions,
     ModelGrid,
@@ -15,9 +15,9 @@ from cstar_ocean.input_dataset import (
     BoundaryForcing,
     TidalForcing,
 )
-from cstar_ocean.additional_code import AdditionalCode
+from cstar.additional_code import AdditionalCode
 
-from cstar_ocean.environment import (
+from cstar.environment import (
     _CSTAR_COMPILER,
     _CSTAR_SCHEDULER,
     _CSTAR_SYSTEM,
@@ -580,7 +580,7 @@ class ROMSComponent(Component):
         """
 
         out_path = self.additional_code.local_path + "/output/"
-        # run_path='/Users/dafyddstephenson/Code/my_c_star/cstar_ocean/rme_case/output/'
+        # run_path='/Users/dafyddstephenson/Code/my_c_star/cstar/rme_case/output/'
         files = glob.glob(out_path + "PARTITIONED/*.0.nc")
         if not files:
             print("no suitable output found")

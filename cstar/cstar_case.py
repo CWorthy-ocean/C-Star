@@ -5,11 +5,11 @@ import datetime as dt
 import dateutil.parser
 from typing import List, Type, Any, Optional
 
-from cstar_ocean.component import Component, MARBLComponent, ROMSComponent
-from cstar_ocean.base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
-from cstar_ocean.additional_code import AdditionalCode
-from cstar_ocean.environment import _CSTAR_SYSTEM_MAX_WALLTIME
-from cstar_ocean.input_dataset import (
+from cstar.component import Component, MARBLComponent, ROMSComponent
+from cstar.base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
+from cstar.additional_code import AdditionalCode
+from cstar.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar.input_dataset import (
     InputDataset,
     ModelGrid,
     InitialConditions,
