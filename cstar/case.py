@@ -5,10 +5,10 @@ import datetime as dt
 import dateutil.parser
 from typing import List, Type, Any, Optional, TYPE_CHECKING
 
-from cstar_ocean.base import Component
-from cstar_ocean.base.additional_code import AdditionalCode
-from cstar_ocean.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
-from cstar_ocean.base.input_dataset import (
+from cstar.base import Component
+from cstar.base.additional_code import AdditionalCode
+from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar.base.input_dataset import (
     InputDataset,
     ModelGrid,
     InitialConditions,
@@ -18,7 +18,7 @@ from cstar_ocean.base.input_dataset import (
 )
 
 if TYPE_CHECKING:
-    from cstar_ocean.base import BaseModel
+    from cstar.base import BaseModel
 
 
 class Case:
@@ -306,12 +306,12 @@ class Case:
 
             match base_model_info["name"].casefold():
                 case "roms":
-                    from cstar_ocean.roms import ROMSBaseModel, ROMSComponent
+                    from cstar.roms import ROMSBaseModel, ROMSComponent
 
                     ThisComponent = ROMSComponent
                     ThisBaseModel = ROMSBaseModel
                 case "marbl":
-                    from cstar_ocean.marbl import MARBLBaseModel, MARBLComponent
+                    from cstar.marbl import MARBLBaseModel, MARBLComponent
 
                     ThisComponent = MARBLComponent
                     ThisBaseModel = MARBLBaseModel

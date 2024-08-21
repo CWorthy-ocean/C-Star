@@ -1,2 +1,2 @@
-from cstar_ocean.roms.basemodel import ROMSBaseModel
-from cstar_ocean.roms.component import ROMSComponent
+from cstar.roms.basemodel import ROMSBaseModel
+from cstar.roms.component import ROMSComponent

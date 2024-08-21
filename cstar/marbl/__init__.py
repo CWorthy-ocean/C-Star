@@ -1,2 +1,2 @@
-from cstar_ocean.marbl.basemodel import MARBLBaseModel
-from cstar_ocean.marbl.component import MARBLComponent
+from cstar.marbl.basemodel import MARBLBaseModel
+from cstar.marbl.component import MARBLComponent

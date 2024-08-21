@@ -2,12 +2,12 @@ import os
 import shutil
 import subprocess
 
-from cstar_ocean.base.basemodel import BaseModel
-from cstar_ocean.base.utils import (
+from cstar.base.basemodel import BaseModel
+from cstar.base.utils import (
     _clone_and_checkout,
     _write_to_config_file,
 )
-from cstar_ocean.base.environment import _CSTAR_ROOT, _CSTAR_COMPILER
+from cstar.base.environment import _CSTAR_ROOT, _CSTAR_COMPILER
 
 
 class ROMSBaseModel(BaseModel):
