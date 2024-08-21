@@ -5,9 +5,13 @@ import pathlib
 from abc import ABC
 import datetime as dt
 import dateutil.parser
-from typing import Optional
 from urllib.parse import urlparse
-from cstar_ocean.base_model import BaseModel
+from typing import Optional, TYPE_CHECKING
+
+from cstar_ocean.base.utils import _get_source_type
+
+if TYPE_CHECKING:
+    from cstar_ocean.base import BaseModel
 
 
 class DataSource:
@@ -115,8 +119,8 @@ class InputDataset(ABC):
 
     def __init__(
         self,
-        base_model: BaseModel,
-        source: DataSource,
+        base_model: "BaseModel",
+        source: DataSource
         file_hash: str,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
@@ -135,7 +139,7 @@ class InputDataset(ABC):
 
         """
 
-        self.base_model: BaseModel = base_model
+        self.base_model: "BaseModel" = base_model
 
         self.source: DataSource = source
         self.file_hash: str = file_hash

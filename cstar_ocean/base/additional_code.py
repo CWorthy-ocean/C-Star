@@ -2,8 +2,8 @@ import os
 import shutil
 import tempfile
 from typing import Optional, List
-from cstar_ocean.base_model import BaseModel
-from cstar_ocean.utils import _clone_and_checkout
+from cstar_ocean.base.basemodel import BaseModel
+from cstar_ocean.base.utils import _clone_and_checkout
 
 
 class AdditionalCode:
