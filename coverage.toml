@@ -1,5 +1,5 @@
 [tool.coverage.run]
-source = ["cstar_ocean"]
+source = ["cstar"]
 omit = [
     "tests/*",
     "**/__init__.py",
