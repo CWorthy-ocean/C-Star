@@ -9,6 +9,7 @@ from cstar_ocean.base.utils import (
 )
 from cstar_ocean.base.environment import _CSTAR_ROOT
 
+
 class BaseModel(ABC):
     """
     The model from which this component is derived (e.g. MARBL v0.45.0)
