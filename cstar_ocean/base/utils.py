@@ -4,7 +4,7 @@ import subprocess
 import pathlib
 from math import ceil
 from urllib.parse import urlparse
-from cstar_ocean.environment import _CSTAR_CONFIG_FILE
+from cstar_ocean.base.environment import _CSTAR_CONFIG_FILE
 
 
 def _get_source_type(source):

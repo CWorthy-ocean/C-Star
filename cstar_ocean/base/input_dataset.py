@@ -3,9 +3,13 @@ import pooch
 import hashlib
 import datetime as dt
 import dateutil.parser
-from typing import Optional
-from cstar_ocean.utils import _get_source_type
-from cstar_ocean.base_model import BaseModel
+from typing import Optional, TYPE_CHECKING
+
+from cstar_ocean.base.utils import _get_source_type
+
+
+if TYPE_CHECKING:
+    from cstar_ocean.base import BaseModel
 
 
 class InputDataset:
@@ -35,7 +39,7 @@ class InputDataset:
 
     def __init__(
         self,
-        base_model: BaseModel,
+        base_model: "BaseModel",
         source: str,
         file_hash: str,
         start_date: Optional[str | dt.datetime] = None,
@@ -55,7 +59,7 @@ class InputDataset:
 
         """
 
-        self.base_model: BaseModel = base_model
+        self.base_model: "BaseModel" = base_model
 
         self.source: str = source
         self.file_hash: str = file_hash

@@ -3,13 +3,12 @@ import yaml
 import warnings
 import datetime as dt
 import dateutil.parser
-from typing import List, Type, Any, Optional
+from typing import List, Type, Any, Optional, TYPE_CHECKING
 
-from cstar_ocean.component import Component, MARBLComponent, ROMSComponent
-from cstar_ocean.base_model import MARBLBaseModel, ROMSBaseModel, BaseModel
-from cstar_ocean.additional_code import AdditionalCode
-from cstar_ocean.environment import _CSTAR_SYSTEM_MAX_WALLTIME
-from cstar_ocean.input_dataset import (
+from cstar_ocean.base import Component
+from cstar_ocean.base.additional_code import AdditionalCode
+from cstar_ocean.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar_ocean.base.input_dataset import (
     InputDataset,
     ModelGrid,
     InitialConditions,
@@ -17,6 +16,9 @@ from cstar_ocean.input_dataset import (
     BoundaryForcing,
     SurfaceForcing,
 )
+
+if TYPE_CHECKING:
+    from cstar_ocean.base import BaseModel
 
 
 class Case:
@@ -64,7 +66,7 @@ class Case:
 
     def __init__(
         self,
-        components: Component | List[Component],
+        components: "Component" | List["Component"],
         name: str,
         caseroot: str,
         start_date: Optional[str | dt.datetime] = None,
@@ -90,7 +92,7 @@ class Case:
             An initialized Case object
         """
 
-        self.components: Component | List[Component] = components
+        self.components: "Component" | List["Component"] = components
         self.caseroot: str = os.path.abspath(caseroot)
         self.name: str = name
         self.is_from_blueprint: bool = False
@@ -289,7 +291,7 @@ class Case:
         if isinstance(end_date, str):
             end_date = dateutil.parser.parse(end_date)
 
-        components: Component | List[Component]
+        components: "Component" | List["Component"]
         components = []
 
         for component_info in bp_dict["components"]:
@@ -299,14 +301,18 @@ class Case:
             # QUESTION : is this the best way to handle the need for different subclasses here?
 
             base_model_info = component_info["component"]["base_model"]
-            ThisComponent: Type[Component]
-            ThisBaseModel: Type[BaseModel]
+            ThisComponent: Type["Component"]
+            ThisBaseModel: Type["BaseModel"]
 
             match base_model_info["name"].casefold():
                 case "roms":
+                    from cstar_ocean.roms import ROMSBaseModel, ROMSComponent
+
                     ThisComponent = ROMSComponent
                     ThisBaseModel = ROMSBaseModel
                 case "marbl":
+                    from cstar_ocean.marbl import MARBLBaseModel, MARBLComponent
+
                     ThisComponent = MARBLComponent
                     ThisBaseModel = MARBLBaseModel
                 case _:
