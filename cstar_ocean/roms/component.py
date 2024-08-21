@@ -6,8 +6,9 @@ from typing import List, Optional, TYPE_CHECKING
 
 from cstar_ocean.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar_ocean.base import Component
-from cstar_ocean.base.input_dataset import (
-    InputDataset,
+
+
+from cstar_ocean.roms.input_dataset import (
     ROMSInputDataset,
     ROMSInitialConditions,
     ROMSModelGrid,
@@ -27,7 +28,8 @@ from cstar_ocean.base.environment import (
 )
 
 if TYPE_CHECKING:
-    from cstar_ocean.base import ROMSBaseModel
+    from cstar_ocean.roms import ROMSBaseModel
+    from cstar_ocean.base.input_dataset import InputDataset
 
 
 class ROMSComponent(Component):
@@ -75,7 +77,7 @@ class ROMSComponent(Component):
         self,
         base_model: "ROMSBaseModel",
         additional_code: Optional[AdditionalCode] = None,
-        input_datasets: Optional[InputDataset | List[InputDataset]] = None,
+        input_datasets: Optional["InputDataset" | List["InputDataset"]] = None,
         time_step: int = 1,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
@@ -438,4 +440,3 @@ class ROMSComponent(Component):
             for f in files:
                 print(f)
                 subprocess.run("ncjoin " + f[:-4] + "?.nc", cwd=out_path, shell=True)
-

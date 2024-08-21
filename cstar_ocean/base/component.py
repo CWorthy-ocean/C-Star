@@ -5,7 +5,6 @@ from cstar_ocean.base.basemodel import BaseModel
 from cstar_ocean.base.input_dataset import InputDataset
 
 
-
 if TYPE_CHECKING:
     from cstar_ocean.base.additional_code import AdditionalCode
 
@@ -100,7 +99,7 @@ class Component(ABC):
             f"\n{NID} InputDataset objects (query using ROMSComponent.input_datasets"
         )
 
-        disc_str=''
+        disc_str = ""
         if hasattr(self, "time_step") and self.time_step is not None:
             disc_str += "\ntime_step: " + str(self.time_step)
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
@@ -124,9 +123,9 @@ class Component(ABC):
         if hasattr(self, "exe_path") and self.exe_path is not None:
             disc_str += "\n\nIs compiled: True"
             disc_str += "\n exe_path: " + self.exe_path
-        if len(disc_str)>0:
-            disc_str = "\n\nDiscretization info:"+disc_str
-        base_str+=disc_str
+        if len(disc_str) > 0:
+            disc_str = "\n\nDiscretization info:" + disc_str
+        base_str += disc_str
         return base_str
 
     def __repr__(self):

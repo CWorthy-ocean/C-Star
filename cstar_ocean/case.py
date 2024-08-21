@@ -8,9 +8,8 @@ from typing import List, Type, Any, Optional, TYPE_CHECKING
 from cstar_ocean.base import Component
 from cstar_ocean.base.additional_code import AdditionalCode
 from cstar_ocean.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
-from cstar_ocean.base.input_dataset import (
-    DataSource,
-    InputDataset,
+from cstar_ocean.base.input_dataset import DataSource, InputDataset
+from cstar_ocean.roms.input_dataset import (
     ROMSModelGrid,
     ROMSInitialConditions,
     ROMSTidalForcing,

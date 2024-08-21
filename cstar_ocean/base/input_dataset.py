@@ -8,8 +8,6 @@ import dateutil.parser
 from urllib.parse import urlparse
 from typing import Optional, TYPE_CHECKING
 
-from cstar_ocean.base.utils import _get_source_type
-
 if TYPE_CHECKING:
     from cstar_ocean.base import BaseModel
 
@@ -80,16 +78,14 @@ class DataSource:
     def basename(self) -> str:
         """Get the basename (typically a file name) from the location attribute"""
         return os.path.basename(self.location)
-    
+
     def __str__(self):
         base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
         base_str += f"\n location: {self.location}"
-        base_str += f"\n basename: {self.basename}"        
+        base_str += f"\n basename: {self.basename}"
         base_str += f"\n location type: {self.location_type}"
         base_str += f"\n source type: {self.source_type}"
-
-        
 
 
 class InputDataset(ABC):
@@ -120,7 +116,7 @@ class InputDataset(ABC):
     def __init__(
         self,
         base_model: "BaseModel",
-        source: DataSource
+        source: DataSource,
         file_hash: str,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
@@ -275,63 +271,3 @@ class InputDataset(ABC):
                 self.exists_locally = False
 
         return self.exists_locally
-
-
-class ROMSInputDataset(InputDataset, ABC):
-    (
-        """
-    ROMS-specific implementation of `InputDataset` (doc below)
-
-    Extends `get()` method to generate dataset using roms-tools in the case that `source`
-    points to a yaml file.
-
-    Docstring for InputDataset:
-    ---------------------------
-    """
-    ) + (InputDataset.__doc__ or "")
-
-
-class ROMSModelGrid(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model grid files.
-    """
-
-    def get(self, local_dir):
-        if self.source.source_type == "yaml":
-            print("You are trying to make a ROMS grid from a yaml file!")
-        else:
-            super().get(local_dir)
-
-    pass
-
-
-class ROMSInitialConditions(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model initial condition files.
-    """
-
-    pass
-
-
-class ROMSTidalForcing(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model tidal forcing files.
-    """
-
-    pass
-
-
-class ROMSBoundaryForcing(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model boundary condition files.
-    """
-
-    pass
-
-
-class ROMSSurfaceForcing(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model surface forcing files.
-    """
-
-    pass

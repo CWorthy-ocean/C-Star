@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 from abc import ABC, abstractmethod
+import subprocess
 
 from cstar_ocean.base.utils import (
     _get_hash_from_checkout_target,
