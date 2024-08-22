@@ -1,6 +1,6 @@
-from cstar_ocean.roms.basemodel import ROMSBaseModel
-from cstar_ocean.roms.component import ROMSComponent
-from cstar_ocean.roms.input_dataset import (
+from cstar.roms.basemodel import ROMSBaseModel
+from cstar.roms.component import ROMSComponent
+from cstar.roms.input_dataset import (
     ROMSInputDataset,
     ROMSModelGrid,
     ROMSInitialConditions,

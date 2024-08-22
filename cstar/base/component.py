@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Any, TYPE_CHECKING
 
-from cstar_ocean.base.basemodel import BaseModel
-from cstar_ocean.base.input_dataset import InputDataset
+from cstar.base.basemodel import BaseModel
+from cstar.base.input_dataset import InputDataset
 
 
 if TYPE_CHECKING:
-    from cstar_ocean.base.additional_code import AdditionalCode
+    from cstar.base.additional_code import AdditionalCode
 
 
 class Component(ABC):

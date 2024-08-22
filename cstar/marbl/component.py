@@ -1,4 +1,4 @@
-from cstar_ocean.base import Component
+from cstar.base import Component
 
 
 class MARBLComponent(Component):

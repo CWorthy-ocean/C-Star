@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cstar_ocean.base import BaseModel
+    from cstar.base import BaseModel
 
 
 class DataSource:

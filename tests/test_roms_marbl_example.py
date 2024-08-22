@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 from unittest.mock import patch
-import cstar_ocean as cstar
+import cstar
 
 ## First test uses URLs to point to input datasets
 roms_marbl_remote_case = cstar.Case.from_blueprint(

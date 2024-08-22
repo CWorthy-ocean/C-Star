@@ -175,7 +175,7 @@ elif (
 
 _CSTAR_CONFIG_FILE = _CSTAR_ROOT + "/cstar_local_config.py"
 if os.path.exists(_CSTAR_CONFIG_FILE):
-    from cstar_ocean.cstar_local_config import set_local_environment
+    from cstar.cstar_local_config import set_local_environment
 
     set_local_environment()
 

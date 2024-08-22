@@ -1,5 +1,5 @@
 from abc import ABC
-from cstar_ocean.base.input_dataset import InputDataset
+from cstar.base.input_dataset import InputDataset
 
 
 class ROMSInputDataset(InputDataset, ABC):
