@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 from typing import Optional, List
+from cstar.base.datasource import DataSource
 from cstar.base.base_model import BaseModel
 from cstar.base.utils import _clone_and_checkout
 
@@ -43,8 +44,8 @@ class AdditionalCode:
     def __init__(
         self,
         base_model: BaseModel,
-        source_repo: str,
-        checkout_target: str,
+        source: DataSource,
+        checkout_target: Optional[str] = None,
         source_mods: Optional[List[str]] = None,
         namelists: Optional[List[str]] = None,
     ):
@@ -73,8 +74,8 @@ class AdditionalCode:
 
         # TODO:  Type check here
         self.base_model: BaseModel = base_model
-        self.source_repo: str = source_repo
-        self.checkout_target: str = checkout_target
+        self.source: DataSource = source
+        self.checkout_target: Optional[str] = checkout_target
         self.source_mods: Optional[List[str]] = source_mods
         self.namelists: Optional[List[str]] = namelists
         self.exists_locally: Optional[bool] = None
@@ -84,7 +85,8 @@ class AdditionalCode:
         base_str = "AdditionalCode object"  # associated with {self.base_model.name} base model"
         base_str += "\n---------------------"
         base_str += f"\nBase model: {self.base_model.name}"
-        base_str += f"\nAdditional code repository URL: {self.source_repo} (checkout target: {self.checkout_target})"
+        # FIXME update after sorting all this ish out
+        #base_str += f"\nAdditional code repository URL: {self.source_repo} (checkout target: {self.checkout_target})"
         if self.exists_locally is not None:
             base_str += f"\n Exists locally: {self.exists_locally}"
         if self.local_path is not None:
@@ -121,31 +123,33 @@ class AdditionalCode:
         local_path: str
             The local path (typically `Case.caseroot`) where the additional code will be curated
         """
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            _clone_and_checkout(
-                source_repo=self.source_repo,
-                local_path=tmp_dir,
-                checkout_target=self.checkout_target,
+
+        if (self.source.location_type == "url") and (self.source.source_type == "repository"):
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                _clone_and_checkout(
+                    source_repo=self.source.location,
+                    local_path=tmp_dir,
+                    checkout_target=self.checkout_target,
             )
 
-            for file_type in ["source_mods", "namelists"]:
-                file_list = getattr(self, file_type)
-                if file_list is None:
-                    continue
-                tgt_dir = local_path + "/" + file_type + "/" + self.base_model.name
-                os.makedirs(tgt_dir, exist_ok=True)
-                for f in file_list:
-                    tmp_file_path = tmp_dir + "/" + f
-                    tgt_file_path = tgt_dir + "/" + os.path.basename(f)
-                    print("moving " + tmp_file_path + " to " + tgt_file_path)
-                    if os.path.exists(tmp_file_path):
-                        shutil.move(tmp_file_path, tgt_file_path)
-                    else:
-                        raise FileNotFoundError(
-                            f"Error: {tmp_file_path} does not exist."
+                for file_type in ["source_mods", "namelists"]:
+                    file_list = getattr(self, file_type)
+                    if file_list is None:
+                        continue
+                    tgt_dir = local_path + "/" + file_type + "/" + self.base_model.name
+                    os.makedirs(tgt_dir, exist_ok=True)
+                    for f in file_list:
+                        tmp_file_path = tmp_dir + "/" + f
+                        tgt_file_path = tgt_dir + "/" + os.path.basename(f)
+                        print("moving " + tmp_file_path + " to " + tgt_file_path)
+                        if os.path.exists(tmp_file_path):
+                            shutil.move(tmp_file_path, tgt_file_path)
+                        else:
+                            raise FileNotFoundError(
+                                f"Error: {tmp_file_path} does not exist."
                         )
-        self.local_path = local_path
-        self.exists_locally = True
+            self.local_path = local_path
+            self.exists_locally = True
 
     def check_exists_locally(self, local_path: str) -> bool:
         """
