@@ -98,7 +98,7 @@ class InputDataset(ABC):
         The base model with which this input dataset is associated
     source: DataSource
         Describes the location and type of the source data
-    file_hash: str
+    file_hash: str, default None
         The 256 bit SHA sum associated with the file for verifying downloads
     exists_locally: bool, default None
         True if the input dataset exists on the local machine, set by `check_exists_locally()` method if source is a URL
@@ -117,7 +117,7 @@ class InputDataset(ABC):
         self,
         base_model: "BaseModel",
         source: DataSource,
-        file_hash: str,
+        file_hash: Optional[str] = None,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
     ):
@@ -138,7 +138,14 @@ class InputDataset(ABC):
         self.base_model: "BaseModel" = base_model
 
         self.source: DataSource = source
-        self.file_hash: str = file_hash
+        self.file_hash: Optional[str] = file_hash
+
+        if (self.file_hash is None) and (self.source.location_type == "url"):
+            raise ValueError(
+                f"Cannot create InputDataset for \n {self.source.location}:\n "
+                + "InputDataset.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
+                + "A file hash is required to verify files downloaded from remote sources."
+            )
 
         self.exists_locally: Optional[bool] = None
         self.local_path: Optional[str] = None
