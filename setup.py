@@ -3,8 +3,8 @@ from setuptools import setup, find_packages
 ################################################################################
 
 setup(
-    name="cstar_ocean",
-    packages=find_packages(),  # ['cstar_ocean'],
+    name="cstar",
+    packages=find_packages(),  # ['cstar'],
     version="0.0.0",
     description="Computation Systems for Tracking Ocean Carbon (CSTAR) python package",
     author="Dafydd Stephenson, Thomas Nicholas, Matt Long, and others",

@@ -1,9 +1,23 @@
-import os
-import shutil
-import subprocess
-from unittest.mock import patch
 import cstar
+import shutil
+from pathlib import Path
+from unittest.mock import patch
 
+## Delete output of any previous run of this script
+for oldfiles in ["local_input_files/",
+                 "roms_marbl_example_case/",
+                 "roms_marbl_local_case/",
+                 "test_blueprint.yaml",
+                 "modified_test_blueprint.yaml",
+                 "test_blueprint_local.yaml"]:
+    
+    oldpath=Path(oldfiles)
+    if oldpath.exists():
+        if oldpath.is_dir():
+            shutil.rmtree(oldpath)
+        else:
+            oldpath.unlink()
+    
 ## First test uses URLs to point to input datasets
 roms_marbl_remote_case = cstar.Case.from_blueprint(
     blueprint=(cstar.base.environment._CSTAR_ROOT)
@@ -37,9 +51,9 @@ for i,line in enumerate(test_blueprint):
     url_prefix="https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/"
     if url_prefix in line:
         fileurl=line.split()[-1] # Just isolate URL from e.g. source: URL
-        filepath=f"{os.getcwd()}/local_input_files/{os.path.basename(fileurl)}"
-        if os.path.exists(filepath):
-            test_blueprint[i]=line.replace(fileurl,filepath)
+        filepath=Path(f"{Path.cwd()}/local_input_files/{Path(fileurl).name}")
+        if filepath.exists():
+            test_blueprint[i]=line.replace(fileurl,str(filepath))
 
 with open('modified_test_blueprint.yaml', 'w') as f:
     f.writelines(test_blueprint)
