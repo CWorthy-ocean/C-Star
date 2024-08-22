@@ -2,7 +2,7 @@ import os
 import shutil
 import tempfile
 from typing import Optional, List
-from cstar.base.basemodel import BaseModel
+from cstar.base.base_model import BaseModel
 from cstar.base.utils import _clone_and_checkout
 
 

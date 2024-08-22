@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Any, TYPE_CHECKING
 
-from cstar.base.basemodel import BaseModel
+from cstar.base.base_model import BaseModel
 from cstar.base.input_dataset import InputDataset
 
 

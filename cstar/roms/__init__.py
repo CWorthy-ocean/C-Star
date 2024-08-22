@@ -1,4 +1,4 @@
-from cstar.roms.basemodel import ROMSBaseModel
+from cstar.roms.base_model import ROMSBaseModel
 from cstar.roms.component import ROMSComponent
 from cstar.roms.input_dataset import (
     ROMSInputDataset,
