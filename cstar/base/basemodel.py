@@ -2,12 +2,12 @@ import os
 from typing import Optional
 from abc import ABC, abstractmethod
 
-from cstar_ocean.base.utils import (
+from cstar.base.utils import (
     _get_hash_from_checkout_target,
     _get_repo_remote,
     _get_repo_head_hash,
 )
-from cstar_ocean.base.environment import _CSTAR_ROOT
+from cstar.base.environment import _CSTAR_ROOT
 
 
 class BaseModel(ABC):

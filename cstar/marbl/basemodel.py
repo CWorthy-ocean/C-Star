@@ -1,12 +1,12 @@
 import os
 import subprocess
 
-from cstar_ocean.base import BaseModel
-from cstar_ocean.base.utils import (
+from cstar.base import BaseModel
+from cstar.base.utils import (
     _clone_and_checkout,
     _write_to_config_file,
 )
-from cstar_ocean.base.environment import _CSTAR_COMPILER
+from cstar.base.environment import _CSTAR_COMPILER
 
 
 class MARBLBaseModel(BaseModel):

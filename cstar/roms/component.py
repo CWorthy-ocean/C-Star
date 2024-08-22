@@ -4,9 +4,9 @@ import warnings
 import subprocess
 from typing import List, Optional, TYPE_CHECKING
 
-from cstar_ocean.base.utils import _calculate_node_distribution, _replace_text_in_file
-from cstar_ocean.base import Component
-from cstar_ocean.base.input_dataset import (
+from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
+from cstar.base import Component
+from cstar.base.input_dataset import (
     InputDataset,
     InitialConditions,
     ModelGrid,
@@ -14,9 +14,9 @@ from cstar_ocean.base.input_dataset import (
     BoundaryForcing,
     TidalForcing,
 )
-from cstar_ocean.base.additional_code import AdditionalCode
+from cstar.base.additional_code import AdditionalCode
 
-from cstar_ocean.base.environment import (
+from cstar.base.environment import (
     _CSTAR_COMPILER,
     _CSTAR_SCHEDULER,
     _CSTAR_SYSTEM,
@@ -26,7 +26,7 @@ from cstar_ocean.base.environment import (
 )
 
 if TYPE_CHECKING:
-    from cstar_ocean.base import ROMSBaseModel
+    from cstar.base import ROMSBaseModel
 
 
 class ROMSComponent(Component):
@@ -425,7 +425,7 @@ class ROMSComponent(Component):
         """
 
         out_path = self.additional_code.local_path + "/output/"
-        # run_path='/Users/dafyddstephenson/Code/my_c_star/cstar_ocean/rme_case/output/'
+        # run_path='/Users/dafyddstephenson/Code/my_c_star/cstar/rme_case/output/'
         files = glob.glob(out_path + "PARTITIONED/*.0.nc")
         if not files:
             print("no suitable output found")
