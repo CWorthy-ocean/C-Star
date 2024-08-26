@@ -17,7 +17,7 @@ setup(
     include_package_data=True,
     # install_requires = dependency_list,
     # setup_requires=['pytest-runner'],
-    # tests_require=['pytest'],
+    tests_require=['pytest'],
     license="MIT",
     # classifiers=[list of even more metadata],
     # long_description=<print contents of a README here>,

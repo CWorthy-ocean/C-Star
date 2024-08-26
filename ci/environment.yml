@@ -13,3 +13,4 @@ dependencies:
   - mpich
   - xarray
   - netCDF4
+  - pytest
