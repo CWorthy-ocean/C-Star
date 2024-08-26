@@ -343,8 +343,8 @@ class Case:
             else:
                 additional_code_info = component_info["component"]["additional_code"]
 
-                source=DataSource(additional_code_info.get("location"))
-                checkout_target = additional_code_info.get("checkout_target",None)
+                source = DataSource(additional_code_info.get("location"))
+                checkout_target = additional_code_info.get("checkout_target", None)
                 source_mods = (
                     [f for f in additional_code_info["source_mods"]]
                     if "source_mods" in additional_code_info.keys()
@@ -605,13 +605,13 @@ class Case:
                     # Create a dictionary of file_info for each dataset file:
                     if "files" not in input_dataset_info[dct_key].keys():
                         input_dataset_info[dct_key]["files"] = []
-                    file_info={}
-                    file_info["location"]=ind.source.location
-                    if hasattr(ind,"file_hash"):
+                    file_info = {}
+                    file_info["location"] = ind.source.location
+                    if hasattr(ind, "file_hash") and (ind.file_hash is not None):
                         file_info["hash"] = ind.file_hash
-                    if hasattr(ind, "start_date"):
+                    if hasattr(ind, "start_date") and (ind.start_date is not None):
                         file_info["start_date"] = str(ind.start_date)
-                    if hasattr(ind, "end_date"):
+                    if hasattr(ind, "end_date") and (ind.end_date is not None):
                         file_info["end_date"] = str(ind.end_date)
 
                     input_dataset_info[dct_key]["files"].append(file_info)

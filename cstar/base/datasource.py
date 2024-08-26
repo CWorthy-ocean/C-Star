@@ -1,6 +1,7 @@
 from urllib.parse import urlparse
 from pathlib import Path
 
+
 class DataSource:
     """
     Holds information on various types of data sources used by C-Star.
@@ -52,19 +53,19 @@ class DataSource:
     @property
     def source_type(self) -> str:
         """Get the source type (e.g. "netcdf") from the "location" attribute"""
-        loc=Path(self.location)
+        loc = Path(self.location)
         if loc.is_dir():
             return "directory"
         elif (loc.suffix.lower() == ".git") or ((loc / ".git").is_dir()):
-            #TODO: a remote repository might not have a .git suffix, more advanced handling needed
-            return "repository"            
-        elif loc.suffix.lower() in {"yaml","yml"}:
+            # TODO: a remote repository might not have a .git suffix, more advanced handling needed
+            return "repository"
+        elif loc.suffix.lower() in {"yaml", "yml"}:
             return "yaml"
         elif loc.suffix.lower() == ".nc":
             return "netcdf"
         else:
             raise ValueError(
-                f"{os.path.splitext(self.location)[-1]} is not a supported file type"
+                f"{Path(self.location).suffix} is not a supported file type"
             )
 
     @property
@@ -79,4 +80,3 @@ class DataSource:
         base_str += f"\n basename: {self.basename}"
         base_str += f"\n location type: {self.location_type}"
         base_str += f"\n source type: {self.source_type}"
-

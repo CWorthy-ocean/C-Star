@@ -74,7 +74,7 @@ class InputDataset(ABC):
         self.local_path: Optional[str] = None
         if self.source.location_type == "path":
             self.exists_locally = True
-            self.local_path = source.location
+            self.local_path = self.source.location
 
         self.start_date = start_date
         self.end_date = end_date

@@ -1,4 +1,4 @@
-exclude: '^(?!cstar_ocean/).*'
+exclude: '^(?!cstar/).*'
 ci:
   autoupdate_schedule: monthly
 
