@@ -72,6 +72,9 @@ class InputDataset(ABC):
 
         self.exists_locally: Optional[bool] = None
         self.local_path: Optional[str] = None
+
+        # If the input dataset is on the machine, set local_path to its current location
+        # this will be updated by .get() which creates a symlink in the user's chosen workspace:
         if self.source.location_type == "path":
             self.exists_locally = True
             self.local_path = self.source.location
@@ -140,8 +143,9 @@ class InputDataset(ABC):
                     )
                     # TODO maybe this should check the hash and just `return` if it matches?
                 else:
-                    # QUESTION: Should this now update self.local_path to point to the symlink?
+                    # QUESTION: Should this now update self.local_path to point to the symlink? 20240827 - YES
                     os.symlink(self.local_path, tgt_path)
+                    self.local_path = tgt_path
                 return
             else:
                 # nothing to do as file is already at tgt_path

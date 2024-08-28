@@ -170,6 +170,7 @@ class AdditionalCode:
 
             for file_type in ["source_mods", "namelists"]:
                 file_list = getattr(self, file_type)
+
                 if file_list is None:
                     continue
                 tgt_dir = Path(local_dir) / file_type / self.base_model.name
@@ -178,7 +179,6 @@ class AdditionalCode:
                 for f in file_list:
                     src_file_path = source_dir / f
                     tgt_file_path = tgt_dir / Path(f).name
-                    # tgt_file_path = tgt_dir + "/" + os.path.basename(f)
                     print(f"copying {src_file_path} to {tgt_file_path}")
                     if src_file_path.exists():
                         shutil.copy(src_file_path, tgt_file_path)

@@ -1,7 +1,10 @@
 import os
 import glob
+import shutil
 import warnings
 import subprocess
+
+from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
@@ -172,6 +175,16 @@ class ROMSComponent(Component):
            `ROMSComponent.additional_code.local_path/namelists/ROMS`.
 
         """
+        # We will need to modify namelist entries, so copy the original namelist
+        original_namelist = (
+            Path(self.additional_code.local_path) / self.additional_code.namelists[0]
+        )
+        modified_namelist = Path(original_namelist.parent) / (
+            original_namelist.stem
+            + ".in_MODIFIED"  # e.g. roms.in_TEMPLATE -> roms.in_MODIFIED
+        )
+        if not modified_namelist.exists():
+            shutil.copy(original_namelist, modified_namelist)
 
         # Partition input datasets
         if self.input_datasets is not None:
@@ -203,11 +216,6 @@ class ROMSComponent(Component):
                 )
             # Edit namelist file to contain dataset paths
             forstr = ""
-            namelist_path = (
-                self.additional_code.local_path
-                + "/"
-                + self.additional_code.namelists[0]
-            )
             for f in datasets_to_partition:
                 partitioned_path = (
                     os.path.dirname(f.local_path)
@@ -217,12 +225,14 @@ class ROMSComponent(Component):
                 if isinstance(f, ROMSModelGrid):
                     gridstr = "     " + partitioned_path + "\n"
                     _replace_text_in_file(
-                        namelist_path, "__GRID_FILE_PLACEHOLDER__", gridstr
+                        str(modified_namelist), "__GRID_FILE_PLACEHOLDER__", gridstr
                     )
                 elif isinstance(f, ROMSInitialConditions):
                     icstr = "     " + partitioned_path + "\n"
                     _replace_text_in_file(
-                        namelist_path, "__INITIAL_CONDITION_FILE_PLACEHOLDER__", icstr
+                        str(modified_namelist),
+                        "__INITIAL_CONDITION_FILE_PLACEHOLDER__",
+                        icstr,
                     )
                 elif type(f) in [
                     ROMSSurfaceForcing,
@@ -232,13 +242,13 @@ class ROMSComponent(Component):
                     forstr += "     " + partitioned_path + "\n"
 
             _replace_text_in_file(
-                namelist_path, "__FORCING_FILES_PLACEHOLDER__", forstr
+                str(modified_namelist), "__FORCING_FILES_PLACEHOLDER__", forstr
             )
 
         ################################################################################
         ## NOTE: we assume that roms.in is the ONLY entry in additional_code.namelists, hence [0]
         _replace_text_in_file(
-            self.additional_code.local_path + "/" + self.additional_code.namelists[0],
+            str(modified_namelist),
             "INPUT_DIR",
             self.additional_code.local_path + "/input_datasets/ROMS",
         )
@@ -293,6 +303,7 @@ class ROMSComponent(Component):
             run_path = self.additional_code.local_path + "/output/PARTITIONED/"
 
         # Add number of timesteps to namelist
+
         # Check if n_time_steps is None, indicating it was not explicitly set
         if n_time_steps is None:
             n_time_steps = 1
@@ -309,9 +320,18 @@ class ROMSComponent(Component):
                 "A namelist file (typically roms.in) is needed to run ROMS."
                 " ROMSComponent.additional_code.namelists should be a non-empty list of filenames."
             )
+        original_namelist = (
+            Path(self.additional_code.local_path) / self.additional_code.namelists[0]
+        )
+        modified_namelist = Path(original_namelist.parent) / (
+            original_namelist.stem
+            + ".in_MODIFIED"  # e.g. roms.in_TEMPLATE -> roms.in_MODIFIED
+        ) 
+        if not modified_namelist.exists():
+            shutil.copy(original_namelist, modified_namelist)
 
         _replace_text_in_file(
-            self.additional_code.local_path + "/" + self.additional_code.namelists[0],
+            str(modified_namelist),
             "__NTIMES_PLACEHOLDER__",
             str(n_time_steps),
         )
@@ -345,7 +365,7 @@ class ROMSComponent(Component):
 
             roms_exec_cmd = (
                 f"{exec_pfx} -n {self.n_procs_tot} {self.exe_path} "
-                + f"{self.additional_code.local_path}/{self.additional_code.namelists[0]}"
+                + f"{modified_namelist}"
             )
 
             if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
