@@ -125,8 +125,8 @@ class AdditionalCode:
             base_str += "\nNamelist files (paths relative to above location):"
             for filename in self.namelists:
                 base_str += f"\n    {filename}"
-                if filename[-9:]=="_TEMPLATE":
-                    base_str+=f"      ({filename[:-9]} will be used by C-Star based on this template)"
+                if filename[-9:] == "_TEMPLATE":
+                    base_str += f"      ({filename[:-9]} will be used by C-Star based on this template)"
         return base_str
 
     def __repr__(self):

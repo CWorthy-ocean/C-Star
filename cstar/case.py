@@ -8,7 +8,7 @@ from typing import List, Type, Any, Optional, TYPE_CHECKING
 from cstar.base import Component
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
-from cstar.base.input_dataset import DataSource, InputDataset
+from cstar.base.input_dataset import InputDataset
 from cstar.roms.input_dataset import (
     ROMSModelGrid,
     ROMSInitialConditions,

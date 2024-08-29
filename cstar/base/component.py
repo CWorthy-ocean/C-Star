@@ -99,10 +99,10 @@ class Component(ABC):
             f"\n{NID} InputDataset objects (query using Component.input_datasets"
         )
 
-        #Discretisation
+        # Discretisation
         disc_str = ""
         if hasattr(self, "time_step") and self.time_step is not None:
-            disc_str += "\ntime_step: " + str(self.time_step) +"s"
+            disc_str += "\ntime_step: " + str(self.time_step) + "s"
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
             disc_str += (
                 "\nn_procs_x: "
