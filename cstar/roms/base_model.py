@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 
-from cstar.base.basemodel import BaseModel
+from cstar.base.base_model import BaseModel
 from cstar.base.utils import (
     _clone_and_checkout,
     _write_to_config_file,

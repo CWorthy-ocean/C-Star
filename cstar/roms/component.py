@@ -6,13 +6,15 @@ from typing import List, Optional, TYPE_CHECKING
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base import Component
-from cstar.base.input_dataset import (
-    InputDataset,
-    InitialConditions,
-    ModelGrid,
-    SurfaceForcing,
-    BoundaryForcing,
-    TidalForcing,
+
+
+from cstar.roms.input_dataset import (
+    ROMSInputDataset,
+    ROMSInitialConditions,
+    ROMSModelGrid,
+    ROMSSurfaceForcing,
+    ROMSBoundaryForcing,
+    ROMSTidalForcing,
 )
 from cstar.base.additional_code import AdditionalCode
 
@@ -26,7 +28,8 @@ from cstar.base.environment import (
 )
 
 if TYPE_CHECKING:
-    from cstar.base import ROMSBaseModel
+    from cstar.roms import ROMSBaseModel
+    from cstar.base.input_dataset import InputDataset
 
 
 class ROMSComponent(Component):
@@ -74,7 +77,7 @@ class ROMSComponent(Component):
         self,
         base_model: "ROMSBaseModel",
         additional_code: Optional[AdditionalCode] = None,
-        input_datasets: Optional[InputDataset | List[InputDataset]] = None,
+        input_datasets: Optional["InputDataset" | List["InputDataset"]] = None,
         time_step: int = 1,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
@@ -172,7 +175,7 @@ class ROMSComponent(Component):
 
         # Partition input datasets
         if self.input_datasets is not None:
-            if isinstance(self.input_datasets, InputDataset):
+            if isinstance(self.input_datasets, ROMSInputDataset):
                 dataset_list = [
                     self.input_datasets,
                 ]
@@ -185,7 +188,7 @@ class ROMSComponent(Component):
 
             for f in datasets_to_partition:
                 dspath = f.local_path
-                fname = os.path.basename(f.source)
+                fname = f.source.basename
 
                 os.makedirs(os.path.dirname(dspath) + "/PARTITIONED", exist_ok=True)
                 subprocess.run(
@@ -211,17 +214,21 @@ class ROMSComponent(Component):
                     + "/PARTITIONED/"
                     + os.path.basename(f.local_path)
                 )
-                if isinstance(f, ModelGrid):
+                if isinstance(f, ROMSModelGrid):
                     gridstr = "     " + partitioned_path + "\n"
                     _replace_text_in_file(
                         namelist_path, "__GRID_FILE_PLACEHOLDER__", gridstr
                     )
-                elif isinstance(f, InitialConditions):
+                elif isinstance(f, ROMSInitialConditions):
                     icstr = "     " + partitioned_path + "\n"
                     _replace_text_in_file(
                         namelist_path, "__INITIAL_CONDITION_FILE_PLACEHOLDER__", icstr
                     )
-                elif type(f) in [SurfaceForcing, TidalForcing, BoundaryForcing]:
+                elif type(f) in [
+                    ROMSSurfaceForcing,
+                    ROMSTidalForcing,
+                    ROMSBoundaryForcing,
+                ]:
                     forstr += "     " + partitioned_path + "\n"
 
             _replace_text_in_file(
@@ -433,4 +440,3 @@ class ROMSComponent(Component):
             for f in files:
                 print(f)
                 subprocess.run("ncjoin " + f[:-4] + "?.nc", cwd=out_path, shell=True)
-
