@@ -39,7 +39,7 @@ class InputDataset(ABC):
     def __init__(
         self,
         base_model: "BaseModel",
-        source: DataSource,
+        location: str,
         file_hash: Optional[str] = None,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
@@ -51,16 +51,16 @@ class InputDataset(ABC):
         -----------
         base_model: BaseModel
             The base model with which this input dataset is associated
-        source: str
-            URL or path pointing to the netCDF file containing this input dataset
-        file_hash: str
+        location: str
+            URL or path pointing to a file either containing this dataset or instructions for creating it.
+            Used to set the `source` attribute.
+        file_hash: str, optional
             The 256 bit SHA sum associated with the file for verification
 
         """
 
         self.base_model: "BaseModel" = base_model
-
-        self.source: DataSource = source
+        self.source: DataSource = DataSource(location)
         self.file_hash: Optional[str] = file_hash
 
         if (self.file_hash is None) and (self.source.location_type == "url"):

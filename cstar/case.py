@@ -343,7 +343,7 @@ class Case:
             else:
                 additional_code_info = component_info["component"]["additional_code"]
 
-                source = DataSource(additional_code_info.get("location"))
+                location = additional_code_info.get("location")
                 checkout_target = additional_code_info.get("checkout_target", None)
                 source_mods = (
                     [f for f in additional_code_info["source_mods"]]
@@ -359,7 +359,7 @@ class Case:
 
                 additional_code = AdditionalCode(
                     base_model=base_model,
-                    source=source,
+                    location=location,
                     checkout_target=checkout_target,
                     source_mods=source_mods,
                     namelists=namelists,
@@ -381,7 +381,7 @@ class Case:
                     model_grid = [
                         ROMSModelGrid(
                             base_model=base_model,
-                            source=DataSource(f.get("location")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                         )
                         for f in input_dataset_info["model_grid"]["files"]
@@ -397,7 +397,7 @@ class Case:
                     initial_conditions = [
                         ROMSInitialConditions(
                             base_model=base_model,
-                            source=DataSource(f.get("location")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                             start_date=f.get("start_date", None),
                             end_date=f.get("end_date", None),
@@ -417,7 +417,7 @@ class Case:
                     tidal_forcing = [
                         ROMSTidalForcing(
                             base_model=base_model,
-                            source=DataSource(f.get("location")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                         )
                         for f in input_dataset_info["tidal_forcing"]["files"]
@@ -435,7 +435,7 @@ class Case:
                     boundary_forcing = [
                         ROMSBoundaryForcing(
                             base_model=base_model,
-                            source=DataSource(f.get("location")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                             start_date=f.get("start_date", None),
                             end_date=f.get("end_date", None),
@@ -455,7 +455,7 @@ class Case:
                     surface_forcing = [
                         ROMSSurfaceForcing(
                             base_model=base_model,
-                            source=DataSource(f.get("location")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                             start_date=f.get("start_date", None),
                             end_date=f.get("end_date", None),

@@ -11,59 +11,73 @@ class AdditionalCode:
     """
     Additional code contributing to a unique instance of a base model, e.g. namelists, source modifications, etc.
 
-    Additional code is assumed to be kept in a git-controlled repository (`source_repo`), and obtaining the code
-    is handled by git commands.
+    Additional code is assumed to be kept in a single directory or repository (described by the `source` attribute)
+    with this structure:
+
+    <additional_code_dir>
+       ├── namelists
+       |      └ <base_model_name>
+       |              ├ <namelist_file_1>
+       |              |       ...
+       |              └ <namelist_file_N>
+       └── source_mods
+              └ <base_model_name>
+                      ├ <source_code_file_1>
+                      |       ...
+                      └ <source_code_file_N>
 
     Attributes:
     -----------
     base_model: BaseModel
         The base model with which this additional code is associated
-    source_repo: str
-        URL pointing to a git-controlled repository containing the additional code
-    checkout_target: str
-        A tag, git hash, or other target to check out the source repo at the correct point in its history
-    source_mods: str or list of strs
-        Path(s) from the top level of `source_repo` to any code that is needed to compile a unique instance of the base model
+    source: DataSource
+        Describes the location and type of source data (e.g. repository,directory)
+    checkout_target: Optional, str
+        Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
+    source_mods: Optional, str or list of strs
+        Path(s) relative to the top level of `source.location` to any code that is needed to compile a unique instance of the base model
     namelists: str or list of strs
-        Path(s) from the top level of `source_repo` to any code that is needed at runtime for the base model
+        Path(s) relative to the top level of `source.location` to any code that is needed at runtime for the base model
     exists_locally: bool, default None
-        True if the additional code has been fetched to the local machine, set when `check_exists_locally()` method is called
-
+        Set to True if source.location_type is 'path', or if AdditionalCode.get() has been called.
+        Is also set by the `check_exists_locally()` method.
     local_path: str, default None
-        The path to where the additional code has been fetched locally, set when the `get()` method is called
+        The local path to the additional code. Set when `get()` method is called, or if source.location_type is 'path'.
 
     Methods:
     --------
-    get(local_path):
-       Clone the `source_repo` repository to a temporary directory, checkout `checkout_target`,
-       and move files associated with this AdditionalCode instance to `local_path`.
-    check_exists_locally(local_path):
-       Verify whether the files associated with this AdditionalCode instance can be found at `local_path`
+    get(local_dir):
+       Fetch the directory containing this additional code and copy it to `local_dir`.
+       If source.source_type is 'repository', and source.location_type is 'url',
+       clone repository to a temporary directory, checkout `checkout_target`,
+       and move files associated with this AdditionalCode instance to `local_dir`.
+    check_exists_locally(local_dir):
+       Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
     """
 
     def __init__(
         self,
         base_model: BaseModel,
-        source: DataSource,
+        location: str,
         checkout_target: Optional[str] = None,
         source_mods: Optional[List[str]] = None,
         namelists: Optional[List[str]] = None,
     ):
         """
-        Initialize an AdditionalCode object from a repository URL and a list of code files
+        Initialize an AdditionalCode object from a DataSource  and a list of code files
 
         Parameters:
         -----------
         base_model: BaseModel
             The base model with which this additional code is associated
-        source_repo: str
-            URL pointing to a git-controlled repository containing the additional code
-        checkout_target: str
-            A tag, git hash, or other target to check out the source repo at the correct point in its history
-        source_mods: str or list of strs
-            Path(s) from the top level of `source_repo` to any code that is needed to compile a unique instance of the base model
-        namelists: str or list of strs
-            Path(s) from the top level of `source_repo` to any code that is needed at runtime for the base model
+        location: str
+            url or path pointing to the additional code directory or repository, used to set `source` attribute
+        checkout_target: Optional, str
+            Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
+        source_mods: Optional, str or list of strs
+            Path(s) relative to the top level of `source.location` to any code that is needed to compile a unique instance of the base model
+        namelists: Optional, str or list of strs
+            Path(s) relative to the top level of `source.location` to any code that is needed at runtime for the base model
 
         Returns:
         --------
@@ -74,12 +88,17 @@ class AdditionalCode:
 
         # TODO:  Type check here
         self.base_model: BaseModel = base_model
-        self.source: DataSource = source
+        self.source: DataSource = DataSource(location)
         self.checkout_target: Optional[str] = checkout_target
         self.source_mods: Optional[List[str]] = source_mods
         self.namelists: Optional[List[str]] = namelists
         self.exists_locally: Optional[bool] = None
         self.local_path: Optional[str] = None
+
+        # If there are namelists, make a parallel attribute to keep track of the ones we are editing
+        # AdditionalCode.get() determines which namelists are editable templates and updates this list
+        if self.namelists:
+            self.modified_namelists: list = []
 
         if self.source.location_type == "path":
             self.exists_locally = True
@@ -91,20 +110,23 @@ class AdditionalCode:
         )
         base_str += "\n---------------------"
         base_str += f"\nBase model: {self.base_model.name}"
-        # FIXME update after sorting all this ish out
-        # base_str += f"\nAdditional code repository URL: {self.source_repo} (checkout target: {self.checkout_target})"
+        base_str += f"\nLocation: {self.source.location}"
         if self.exists_locally is not None:
             base_str += f"\n Exists locally: {self.exists_locally}"
         if self.local_path is not None:
             base_str += f"\n Local path: {self.local_path}"
         if self.source_mods is not None:
-            base_str += "\nSource code modification files (paths relative to repository top level):"
+            base_str += (
+                "\nSource code modification files (paths relative to above location)):"
+            )
             for filename in self.source_mods:
                 base_str += f"\n    {filename}"
         if self.namelists is not None:
-            base_str += "\nNamelist files (paths relative to repository top level):"
+            base_str += "\nNamelist files (paths relative to above location):"
             for filename in self.namelists:
                 base_str += f"\n    {filename}"
+                if filename[-9:]=="_TEMPLATE":
+                    base_str+=f"      ({filename[:-9]} will be used by C-Star based on this template)"
         return base_str
 
     def __repr__(self):
@@ -112,17 +134,9 @@ class AdditionalCode:
 
     def get(self, local_dir: str):
         """
-        Clone `source_repo` into a temporary directory and move required files to `local_dir`.
+        Copy the required AdditionalCode files to `local_dir`
 
-        This method:
-        1. Clones the `source_repo` repository into a temporary directory (deleted after call)
-        2. Checks out the `checkout_target` (a tag or commit hash) to move to the correct point in the commit history
-        3. Loops over the paths described in `source_mods` and `namelists` and
-           moves those files to `local_dir/source_mods/base_model.name/` and `local_dir/namelists/base_model.name`,
-           respectively.
-
-        Clone the `source_repo` repository to a temporary directory, checkout `checkout_target`,
-        and move files associated with this AdditionalCode instance to `local_dir`.
+        If AdditionalCode.source describes a remote repository, this is cloned into a temporary directory first.
 
         Parameters:
         -----------
@@ -133,6 +147,7 @@ class AdditionalCode:
         try:
             tmp_dir = None  # initialise the tmp_dir variable in case we need it later
 
+            # CASE 1: Additional code is in a remote repository:
             if (self.source.location_type == "url") and (
                 self.source.source_type == "repository"
             ):
@@ -151,7 +166,7 @@ class AdditionalCode:
                     checkout_target=self.checkout_target,
                 )
                 source_dir = Path(tmp_dir)
-
+            # CASE 2: Additional code is in a local directory/repository
             elif (self.source.location_type == "path") and (
                 (self.source.source_type == "directory")
                 or (self.source.source_type == "repository")
@@ -165,9 +180,10 @@ class AdditionalCode:
                     + "AdditionalCode.source.source_type should be "
                     + "'url' and 'repository', or 'path' and 'repository', or"
                     + "'path' and 'directory', not"
-                    + f"{self.source.location_type} and {self.source.source_type}"
+                    + f"'{self.source.location_type}' and '{self.source.source_type}'"
                 )
 
+            # Now go through the files and copy them to local_dir
             for file_type in ["source_mods", "namelists"]:
                 file_list = getattr(self, file_type)
 
@@ -186,6 +202,18 @@ class AdditionalCode:
                         raise FileNotFoundError(
                             f"Error: {src_file_path} does not exist."
                         )
+                    # Special case for template namelists:
+                    if (
+                        file_type == "namelists"
+                        and str(src_file_path)[-9:] == "_TEMPLATE"
+                    ):
+                        print(
+                            f"copying {tgt_file_path} to editable namelist {str(tgt_file_path)[:-9]}"
+                        )
+                        shutil.copy(tgt_file_path, str(tgt_file_path)[:-9])
+                        if hasattr(self, "modified_namelists"):
+                            self.modified_namelists.append(f[:-9])
+
             self.local_path = local_dir
             self.exists_locally = True
         finally:
