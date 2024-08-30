@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Optional
 from abc import ABC, abstractmethod
 import subprocess
@@ -85,7 +86,7 @@ class BaseModel(ABC):
         self.checkout_hash = _get_hash_from_checkout_target(
             self.source_repo, self.checkout_target
         )
-        self.repo_basename = os.path.basename(self.source_repo).replace(".git", "")
+        self.repo_basename = Path(self.source_repo).name.replace(".git", "")
 
         self.local_config_status = self.get_local_config_status()
 
@@ -172,7 +173,7 @@ class BaseModel(ABC):
 
         # check 2: X_ROOT points to the correct repository
         if env_var_exists:
-            local_root = os.environ[self.expected_env_var]
+            local_root = Path(os.environ[self.expected_env_var])
             env_var_repo_remote = _get_repo_remote(local_root)
             env_var_matches_repo = self.source_repo == env_var_repo_remote
             if not env_var_matches_repo:
@@ -207,7 +208,7 @@ class BaseModel(ABC):
               -> prompt installation of the base model
         """
         local_root = [
-            os.environ[self.expected_env_var]
+            Path(os.environ[self.expected_env_var])
             if self.expected_env_var in os.environ
             else None
         ]
@@ -277,7 +278,7 @@ class BaseModel(ABC):
                         raise EnvironmentError()
                     elif yn.casefold() == "custom":
                         custom_path = input("Enter custom path for install:\n")
-                        self.get(os.path.abspath(custom_path))
+                        self.get(Path(custom_path).resolve())
                         break
                     else:
                         print("invalid selection; enter 'y','n',or 'custom'")

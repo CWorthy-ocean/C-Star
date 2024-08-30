@@ -1,8 +1,8 @@
-import os
 import yaml
 import warnings
 import datetime as dt
 import dateutil.parser
+from pathlib import Path
 from typing import List, Type, Any, Optional, TYPE_CHECKING
 
 from cstar.base import Component
@@ -31,7 +31,7 @@ class Case:
         The unique model component(s) that make up this case
     name: str
         The name of this case
-    caseroot: str
+    caseroot: Path
         The local directory in which this case will be set up
     valid_start_date: str or datetime.datetime, Optional, default=None
         The earliest start date at which this Case is considered valid
@@ -68,7 +68,7 @@ class Case:
         self,
         components: "Component" | List["Component"],
         name: str,
-        caseroot: str,
+        caseroot: str | Path,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
         valid_start_date: Optional[str | dt.datetime] = None,
@@ -93,7 +93,7 @@ class Case:
         """
 
         self.components: "Component" | List["Component"] = components
-        self.caseroot: str = os.path.abspath(caseroot)
+        self.caseroot: Path = Path(caseroot).resolve()
         self.name: str = name
         self.is_from_blueprint: bool = False
         self.blueprint: Optional[str] = None
@@ -235,7 +235,7 @@ class Case:
     def from_blueprint(
         cls,
         blueprint: str,
-        caseroot: str,
+        caseroot: Path,
         start_date: Optional[str | dt.datetime],
         end_date: Optional[str | dt.datetime],
     ):

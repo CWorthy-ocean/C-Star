@@ -1,4 +1,5 @@
 from abc import ABC
+from pathlib import Path
 from cstar.base.input_dataset import InputDataset
 
 
@@ -21,7 +22,7 @@ class ROMSModelGrid(ROMSInputDataset):
     An implementation of the ROMSInputDataset class for model grid files.
     """
 
-    def get(self, local_dir):
+    def get(self, local_dir: str | Path):
         if self.source.source_type == "yaml":
             print("You are trying to make a ROMS grid from a yaml file!")
         else:

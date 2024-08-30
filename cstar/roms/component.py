@@ -1,5 +1,3 @@
-import os
-import glob
 import warnings
 import subprocess
 from pathlib import Path
@@ -7,10 +5,9 @@ from typing import List, Optional, TYPE_CHECKING
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base import Component
-
+from cstar.base.input_dataset import InputDataset
 
 from cstar.roms.input_dataset import (
-    ROMSInputDataset,
     ROMSInitialConditions,
     ROMSModelGrid,
     ROMSSurfaceForcing,
@@ -30,7 +27,6 @@ from cstar.base.environment import (
 
 if TYPE_CHECKING:
     from cstar.roms import ROMSBaseModel
-    from cstar.base.input_dataset import InputDataset
 
 
 class ROMSComponent(Component):
@@ -78,8 +74,8 @@ class ROMSComponent(Component):
         self,
         base_model: "ROMSBaseModel",
         time_step: int,
+        additional_code: AdditionalCode,
         input_datasets: Optional["InputDataset" | List["InputDataset"]] = None,
-        additional_code: Optional[AdditionalCode] = None,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
         n_levels: Optional[int] = None,
@@ -115,10 +111,10 @@ class ROMSComponent(Component):
             An intialized ROMSComponent object
         """
 
-        super().__init__(
-            base_model=base_model,
-            additional_code=additional_code,
-            input_datasets=input_datasets,
+        self.base_model: "ROMSBaseModel" = base_model
+        self.additional_code: AdditionalCode = additional_code
+        self.input_datasets: Optional["InputDataset" | List["InputDataset"]] = (
+            input_datasets
         )
 
         # QUESTION: should all these attrs be passed in as a single "discretization" arg of type dict?
@@ -128,7 +124,7 @@ class ROMSComponent(Component):
         self.n_levels: Optional[int] = n_levels
         self.n_procs_x: Optional[int] = n_procs_x
         self.n_procs_y: Optional[int] = n_procs_y
-        self.exe_path: Optional[str] = None
+        self.exe_path: Optional[Path] = None
 
     @property
     def n_procs_tot(self) -> Optional[int]:
@@ -138,7 +134,7 @@ class ROMSComponent(Component):
         else:
             return self.n_procs_x * self.n_procs_y
 
-    def build(self):
+    def build(self) -> None:
         """
         Compiles any code associated with this configuration of ROMS.
 
@@ -147,17 +143,21 @@ class ROMSComponent(Component):
         This method sets the ROMSComponent `exe_path` attribute.
 
         """
-
         local_path = self.additional_code.local_path
-
-        builddir = local_path + "/source_mods/ROMS/"
-        if os.path.isdir(builddir + "Compile"):
+        if local_path is None:
+            raise ValueError(
+                "Unable to compile ROMSComponent: "
+                + "\nROMSComponent.additional_code.local_path is None."
+                + "\n Call ROMSComponent.additional_code.get() and try again"
+            )
+        builddir = local_path / "source_mods/ROMS/"
+        if (builddir / "Compile").is_dir():
             subprocess.run("make compile_clean", cwd=builddir, shell=True)
         subprocess.run(f"make COMPILER={_CSTAR_COMPILER}", cwd=builddir, shell=True)
 
-        self.exe_path = builddir + "roms"
+        self.exe_path = builddir / "roms"
 
-    def pre_run(self):
+    def pre_run(self) -> None:
         """
         Performs pre-processing steps associated with this ROMSComponent object.
 
@@ -179,7 +179,7 @@ class ROMSComponent(Component):
 
         # Partition input datasets
         if self.input_datasets is not None:
-            if isinstance(self.input_datasets, ROMSInputDataset):
+            if isinstance(self.input_datasets, InputDataset):
                 dataset_list = [
                     self.input_datasets,
                 ]
@@ -190,11 +190,40 @@ class ROMSComponent(Component):
 
             datasets_to_partition = [d for d in dataset_list if d.exists_locally]
 
+            # Preliminary checks
+            if self.additional_code.local_path is None:
+                raise ValueError(
+                    "Unable to prepare ROMSComponent for execution: "
+                    + "\nROMSComponent.additional_code.local_path is None."
+                    + "\n Call ROMSComponent.additional_code.get() and try again"
+                )
+
+            if not hasattr(self.additional_code, "modified_namelists"):
+                raise ValueError(
+                    "No editable namelist found in which to set ROMS runtime parameters. "
+                    + "Expected to find a file in ROMSComponent.additional_code.namelists"
+                    + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
+                )
+            else:
+                mod_namelist = (
+                    self.additional_code.local_path
+                    / self.additional_code.modified_namelists[0]
+                )
+
+            namelist_forcing_str = ""
+            # Partition input datasets and add paths to namelist
             for f in datasets_to_partition:
                 dspath = f.local_path
                 fname = f.source.basename
 
-                os.makedirs(os.path.dirname(dspath) + "/PARTITIONED", exist_ok=True)
+                if dspath is None:
+                    raise ValueError(
+                        f"local_path of InputDataset {f} is None."
+                        + "\n call InputDataset.get() and try again."
+                    )
+                # Partitioning step
+                partdir = dspath.parent / "PARTITIONED"
+                partdir.mkdir(parents=True, exist_ok=True)
                 subprocess.run(
                     "partit "
                     + str(self.n_procs_x)
@@ -202,57 +231,39 @@ class ROMSComponent(Component):
                     + str(self.n_procs_y)
                     + " ../"
                     + fname,
-                    cwd=os.path.dirname(dspath) + "/PARTITIONED",
+                    cwd=partdir,
                     shell=True,
                 )
-            # Edit namelist file to contain dataset paths
-            if hasattr(self.additional_code, "modified_namelists"):
-                mod_namelist = (
-                    Path(self.additional_code.local_path)
-                    / self.additional_code.modified_namelists[0]
-                )
-                forstr = ""
-                for f in datasets_to_partition:
-                    partitioned_path = (
-                        os.path.dirname(f.local_path)
-                        + "/PARTITIONED/"
-                        + os.path.basename(f.local_path)
+                # Namelist modification step
+                if isinstance(f, ROMSModelGrid):
+                    namelist_grid_str = f"     {partdir / dspath.name} \n"
+                    _replace_text_in_file(
+                        mod_namelist, "__GRID_FILE_PLACEHOLDER__", namelist_grid_str
                     )
-                    if isinstance(f, ROMSModelGrid):
-                        gridstr = "     " + partitioned_path + "\n"
-                        _replace_text_in_file(
-                            str(mod_namelist), "__GRID_FILE_PLACEHOLDER__", gridstr
-                        )
-                    elif isinstance(f, ROMSInitialConditions):
-                        icstr = "     " + partitioned_path + "\n"
-                        _replace_text_in_file(
-                            str(mod_namelist),
-                            "__INITIAL_CONDITION_FILE_PLACEHOLDER__",
-                            icstr,
-                        )
-                    elif type(f) in [
-                        ROMSSurfaceForcing,
-                        ROMSTidalForcing,
-                        ROMSBoundaryForcing,
-                    ]:
-                        forstr += "     " + partitioned_path + "\n"
+                elif isinstance(f, ROMSInitialConditions):
+                    namelist_ic_str = f"     {partdir / dspath.name} \n"
+                    _replace_text_in_file(
+                        mod_namelist,
+                        "__INITIAL_CONDITION_FILE_PLACEHOLDER__",
+                        namelist_ic_str,
+                    )
+                elif type(f) in [
+                    ROMSSurfaceForcing,
+                    ROMSTidalForcing,
+                    ROMSBoundaryForcing,
+                ]:
+                    namelist_forcing_str += f"     {partdir / dspath.name} \n"
 
-                _replace_text_in_file(
-                    str(mod_namelist), "__FORCING_FILES_PLACEHOLDER__", forstr
-                )
+            _replace_text_in_file(
+                mod_namelist, "__FORCING_FILES_PLACEHOLDER__", namelist_forcing_str
+            )
 
-                ##FIXME: it doesn't make any sense to have the next line in ROMSComponent, does it?
-                _replace_text_in_file(
-                    str(mod_namelist),
-                    "MARBL_NAMELIST_DIR",
-                    self.additional_code.local_path + "/namelists/MARBL",
-                )
-            else:
-                raise ValueError(
-                    "No editable namelist found in which to set ROMS runtime parameters. "
-                    + "Expected to find a file in ROMSComponent.additional_code.namelists"
-                    + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
-                )
+            ##FIXME: it doesn't make any sense to have the next line in ROMSComponent, does it?
+            _replace_text_in_file(
+                mod_namelist,
+                "MARBL_NAMELIST_DIR",
+                str(self.additional_code.local_path / "namelists/MARBL"),
+            )
 
     def run(
         self,
@@ -292,7 +303,7 @@ class ROMSComponent(Component):
             )
             return
         else:
-            run_path = self.additional_code.local_path + "/output/PARTITIONED/"
+            run_path = self.additional_code.local_path / "output/PARTITIONED/"
 
         # Add number of timesteps to namelist
 
@@ -309,16 +320,16 @@ class ROMSComponent(Component):
 
         if hasattr(self.additional_code, "modified_namelists"):
             mod_namelist = (
-                Path(self.additional_code.local_path)
+                self.additional_code.local_path
                 / self.additional_code.modified_namelists[0]
             )
             _replace_text_in_file(
-                str(mod_namelist),
+                mod_namelist,
                 "__NTIMES_PLACEHOLDER__",
                 str(n_time_steps),
             )
             _replace_text_in_file(
-                str(mod_namelist),
+                mod_namelist,
                 "__TIMESTEP_PLACEHOLDER__",
                 str(self.time_step),
             )
@@ -329,8 +340,8 @@ class ROMSComponent(Component):
                 + "Expected to find a file in ROMSComponent.additional_code.namelists"
                 + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
             )
+        run_path.mkdir(parents=True, exist_ok=True)
 
-        os.makedirs(run_path, exist_ok=True)
         if self.exe_path is None:
             raise ValueError(
                 "C-STAR: ROMSComponent.exe_path is None; unable to find ROMS executable."
@@ -355,9 +366,23 @@ class ROMSComponent(Component):
                 f"{exec_pfx} -n {self.n_procs_tot} {self.exe_path} " + f"{mod_namelist}"
             )
 
-            if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
-                nnodes, ncores = _calculate_node_distribution(
-                    self.n_procs_tot, _CSTAR_SYSTEM_CORES_PER_NODE
+            if self.n_procs_tot is not None:
+                if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
+                    nnodes, ncores = _calculate_node_distribution(
+                        self.n_procs_tot, _CSTAR_SYSTEM_CORES_PER_NODE
+                    )
+                else:
+                    raise ValueError(
+                        f"Unable to calculate node distribution for system: {_CSTAR_SYSTEM}."
+                        + "\nC-Star is unaware of your system's node configuration (cores per node)."
+                        + "\nYour system may be unsupported. Please raise an issue at: "
+                        + "\n https://github.com/CWorthy-ocean/C-Star/issues/new"
+                        + "\n Thank you in advance for your contribution!"
+                    )
+            else:
+                raise ValueError(
+                    "Unable to calculate node distribution for this Component. "
+                    + "Component.n_procs_tot is not set"
                 )
 
             match _CSTAR_SCHEDULER:
@@ -382,7 +407,7 @@ class ROMSComponent(Component):
                     scheduler_script += f"\n\n{roms_exec_cmd}"
 
                     script_fname = "cstar_run_script.pbs"
-                    with open(run_path + script_fname, "w") as f:
+                    with open(run_path / script_fname, "w") as f:
                         f.write(scheduler_script)
                     subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
 
@@ -415,7 +440,7 @@ class ROMSComponent(Component):
                     scheduler_script += f"\n\n{roms_exec_cmd}"
 
                     script_fname = "cstar_run_script.sh"
-                    with open(run_path + script_fname, "w") as f:
+                    with open(run_path / script_fname, "w") as f:
                         f.write(scheduler_script)
                     subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path)
 
@@ -438,12 +463,16 @@ class ROMSComponent(Component):
             The path where this ROMS component is being assembled
         """
 
-        out_path = self.additional_code.local_path + "/output/"
-        # run_path='/Users/dafyddstephenson/Code/my_c_star/cstar/rme_case/output/'
-        files = glob.glob(out_path + "PARTITIONED/*.0.nc")
+        out_path = self.additional_code.local_path / "output/"
+        files = list(out_path.glob("PARTITIONED/*.*0.nc"))
         if not files:
             print("no suitable output found")
         else:
             for f in files:
                 print(f)
-                subprocess.run("ncjoin " + f[:-4] + "?.nc", cwd=out_path, shell=True)
+                # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
+                subprocess.run(
+                    f"ncjoin {Path(f.stem).stem}.*.nc",
+                    cwd=out_path / "PARTITIONED",
+                    shell=True,
+                )

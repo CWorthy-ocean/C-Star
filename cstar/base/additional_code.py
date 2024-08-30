@@ -41,7 +41,7 @@ class AdditionalCode:
     exists_locally: bool, default None
         Set to True if source.location_type is 'path', or if AdditionalCode.get() has been called.
         Is also set by the `check_exists_locally()` method.
-    local_path: str, default None
+    local_path: Path, default None
         The local path to the additional code. Set when `get()` method is called, or if source.location_type is 'path'.
 
     Methods:
@@ -93,7 +93,7 @@ class AdditionalCode:
         self.source_mods: Optional[List[str]] = source_mods
         self.namelists: Optional[List[str]] = namelists
         self.exists_locally: Optional[bool] = None
-        self.local_path: Optional[str] = None
+        self.local_path: Optional[Path] = None
 
         # If there are namelists, make a parallel attribute to keep track of the ones we are editing
         # AdditionalCode.get() determines which namelists are editable templates and updates this list
@@ -102,7 +102,7 @@ class AdditionalCode:
 
         if self.source.location_type == "path":
             self.exists_locally = True
-            self.local_path = self.source.location
+            self.local_path = Path(self.source.location).resolve()
 
     def __str__(self):
         base_str = (
@@ -132,7 +132,7 @@ class AdditionalCode:
     def __repr__(self):
         return self.__str__()
 
-    def get(self, local_dir: str):
+    def get(self, local_dir: str | Path) -> None:
         """
         Copy the required AdditionalCode files to `local_dir`
 
@@ -143,7 +143,7 @@ class AdditionalCode:
         local_dir: str
             The local path (typically `Case.caseroot`) where the additional code will be curated
         """
-
+        local_dir = Path(local_dir).resolve()
         try:
             tmp_dir = None  # initialise the tmp_dir variable in case we need it later
 
@@ -183,13 +183,13 @@ class AdditionalCode:
                     + f"'{self.source.location_type}' and '{self.source.source_type}'"
                 )
 
-            # Now go through the files and copy them to local_dir
+            # Now go through the file and copy them to local_dir
             for file_type in ["source_mods", "namelists"]:
                 file_list = getattr(self, file_type)
 
                 if file_list is None:
                     continue
-                tgt_dir = Path(local_dir) / file_type / self.base_model.name
+                tgt_dir = local_dir / file_type / self.base_model.name
                 tgt_dir.mkdir(parents=True, exist_ok=True)
 
                 for f in file_list:
@@ -220,7 +220,7 @@ class AdditionalCode:
             if tmp_dir:
                 shutil.rmtree(tmp_dir)
 
-    def check_exists_locally(self, local_dir: str) -> bool:
+    def check_exists_locally(self, local_dir: str | Path) -> bool:
         """
         Checks whether this AdditionalCode  has already been fetched to the local machine
 
@@ -237,6 +237,7 @@ class AdditionalCode:
         exists_locally (bool):
             True if the method has verified the local existence of the additional code
         """
+        local_dir = Path(local_dir).resolve()
 
         # FIXME: this method, unlike InputDataset.check_exists_locally(), only matches filenames
 
@@ -245,10 +246,8 @@ class AdditionalCode:
             if file_list is None:
                 continue
 
-            # tgt_dir = local_dir + "/" + file_type + "/" + self.base_model.name
-            tgt_dir = Path(local_dir) / file_type / self.base_model.name
+            tgt_dir = local_dir / file_type / self.base_model.name
             for f in file_list:
-                # tgt_file_path = tgt_dir + "/" + os.path.basename(f)
                 tgt_file_path = tgt_dir / Path(f).name
                 if not tgt_file_path.exists():
                     self.exists_locally = False
