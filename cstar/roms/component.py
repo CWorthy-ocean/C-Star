@@ -50,7 +50,7 @@ class ROMSComponent(Component):
     additional_code: AdditionalCode or list of AdditionalCodes
         Additional code contributing to a unique instance of this ROMS run
         e.g. namelists, source modifications, etc.
-    time_step: int, Optional, default=1
+    time_step: int
         The time step with which to run ROMS in this configuration
     nx,ny,n_levels: int
         The number of x and y points and vertical levels in the domain associated with this object
@@ -77,9 +77,9 @@ class ROMSComponent(Component):
     def __init__(
         self,
         base_model: "ROMSBaseModel",
+        time_step: int,
         input_datasets: Optional["InputDataset" | List["InputDataset"]] = None,
         additional_code: Optional[AdditionalCode] = None,
-        time_step: int = 1,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
         n_levels: Optional[int] = None,
@@ -94,6 +94,8 @@ class ROMSComponent(Component):
         base_model: ROMSBaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
+        time_step: int
+            The time step with which to run ROMS in this configuration
         input_datasets: InputDataset or list of InputDatasets
             Any spatiotemporal data needed to run this instance of the base model
             e.g. initial conditions, surface forcing, etc.
@@ -315,6 +317,12 @@ class ROMSComponent(Component):
                 "__NTIMES_PLACEHOLDER__",
                 str(n_time_steps),
             )
+            _replace_text_in_file(
+                str(mod_namelist),
+                "__TIMESTEP_PLACEHOLDER__",
+                str(self.time_step),
+            )
+
         else:
             raise ValueError(
                 "No editable namelist found to set ROMS runtime parameters. "
