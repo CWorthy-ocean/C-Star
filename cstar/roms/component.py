@@ -40,7 +40,7 @@ class ROMSComponent(Component):
     -----------
     base_model: ROMSBaseModel
         An object pointing to the unmodified source code of ROMS at a specific commit
-    input_datasets: InputDataset or list of InputDatasets
+    input_datasets: list of InputDatasets
         Any spatiotemporal data needed to run this instance of ROMS
         e.g. initial conditions, surface forcing, etc.
     additional_code: AdditionalCode or list of AdditionalCodes
@@ -75,7 +75,7 @@ class ROMSComponent(Component):
         base_model: "ROMSBaseModel",
         time_step: int,
         additional_code: AdditionalCode,
-        input_datasets: Optional["InputDataset" | List["InputDataset"]] = None,
+        input_datasets: Optional[List["InputDataset"]] = None,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
         n_levels: Optional[int] = None,
@@ -92,7 +92,7 @@ class ROMSComponent(Component):
             aspect of the simulation such as biogeochemistry or ocean circulation
         time_step: int
             The time step with which to run ROMS in this configuration
-        input_datasets: InputDataset or list of InputDatasets
+        input_datasets:  list of InputDatasets
             Any spatiotemporal data needed to run this instance of the base model
             e.g. initial conditions, surface forcing, etc.
         additional_code: AdditionalCode
@@ -113,9 +113,7 @@ class ROMSComponent(Component):
 
         self.base_model: "ROMSBaseModel" = base_model
         self.additional_code: AdditionalCode = additional_code
-        self.input_datasets: Optional["InputDataset" | List["InputDataset"]] = (
-            input_datasets
-        )
+        self.input_datasets: Optional[List["InputDataset"]] = input_datasets
 
         # QUESTION: should all these attrs be passed in as a single "discretization" arg of type dict?
         self.time_step: int = time_step
@@ -179,16 +177,7 @@ class ROMSComponent(Component):
 
         # Partition input datasets
         if self.input_datasets is not None:
-            if isinstance(self.input_datasets, InputDataset):
-                dataset_list = [
-                    self.input_datasets,
-                ]
-            elif isinstance(self.input_datasets, list):
-                dataset_list = self.input_datasets
-            else:
-                dataset_list = []
-
-            datasets_to_partition = [d for d in dataset_list if d.exists_locally]
+            datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
 
             # Preliminary checks
             if self.additional_code.local_path is None:

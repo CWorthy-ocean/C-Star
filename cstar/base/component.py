@@ -21,7 +21,7 @@ class Component(ABC):
     additional_code: AdditionalCode or list of AdditionalCodes
         Additional code contributing to a unique instance of a base model,
         e.g. namelists, source modifications, etc.
-    input_datasets: InputDataset or list of InputDatasets
+    input_datasets: list of InputDatasets
         Any spatiotemporal data needed to run this instance of the base model
         e.g. initial conditions, surface forcing, etc.
 
@@ -49,7 +49,7 @@ class Component(ABC):
         additional_code: AdditionalCode or list of AdditionalCodes
             Additional code contributing to a unique instance of a base model,
             e.g. namelists, source modifications, etc.
-        input_datasets: InputDataset or list of InputDatasets
+        input_datasets: list of InputDatasets
             Any spatiotemporal data needed to run this instance of the base model
             e.g. initial conditions, surface forcing, etc.
 
@@ -71,7 +71,7 @@ class Component(ABC):
         self.additional_code: Optional["AdditionalCode"] = kwargs.get(
             "additional_code", None
         )
-        self.input_datasets: Optional[InputDataset | List[InputDataset]] = kwargs.get(
+        self.input_datasets: Optional[List[InputDataset]] = kwargs.get(
             "input_datasets", None
         )
 
@@ -87,13 +87,8 @@ class Component(ABC):
 
         NAC = 0 if self.additional_code is None else 1
 
-        NID = (
-            len(self.input_datasets)
-            if isinstance(self.input_datasets, list)
-            else 1
-            if isinstance(self.input_datasets, InputDataset)
-            else 0
-        )
+        NID = 0 if self.input_datasets is None else len(self.input_datasets)
+
         base_str += f"\n{NAC} AdditionalCode repositories (query using Component.additional_code)"
         base_str += (
             f"\n{NID} InputDataset objects (query using Component.input_datasets"

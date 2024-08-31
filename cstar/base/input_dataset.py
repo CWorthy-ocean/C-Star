@@ -80,13 +80,11 @@ class InputDataset(ABC):
             self.local_path = Path(self.source.location)
 
         if isinstance(start_date, str):
-            self.start_date = dateutil.parser.parse(start_date)
-        elif isinstance(start_date, dt.datetime):
-            self.start_date = start_date
+            start_date = dateutil.parser.parse(start_date)
+        self.start_date = start_date
         if isinstance(end_date, str):
-            self.end_date = dateutil.parser.parse(end_date)
-        elif isinstance(end_date, dt.datetime):
-            self.end_date = end_date
+            end_date = dateutil.parser.parse(end_date)
+        self.end_date = end_date
         assert self.start_date is None or isinstance(self.start_date, dt.datetime)
         assert self.end_date is None or isinstance(self.end_date, dt.datetime)
 

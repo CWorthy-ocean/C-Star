@@ -28,7 +28,7 @@ class Case:
 
     Attributes
     ---------
-    components: Component or list of Components
+    components: list of Components
         The unique model component(s) that make up this case
     name: str
         The name of this case
@@ -67,7 +67,7 @@ class Case:
 
     def __init__(
         self,
-        components: "Component" | List["Component"],
+        components: List["Component"],
         name: str,
         caseroot: str | Path,
         start_date: Optional[str | dt.datetime] = None,
@@ -80,7 +80,7 @@ class Case:
 
         Parameters:
         ----------
-        components: Component or list of Components
+        components: list of Components
             The unique model component(s) that make up this case
         name: str
             The name of this case
@@ -93,7 +93,7 @@ class Case:
             An initialized Case object
         """
 
-        self.components: "Component" | List["Component"] = components
+        self.components: List["Component"] = components
         self.caseroot: Path = Path(caseroot).resolve()
         self.name: str = name
         self.is_from_blueprint: bool = False
@@ -224,14 +224,7 @@ class Case:
         base_str += "\n"
         base_str += "\nIt is built from the following Component base models (query using Case.components): "
 
-        component_list = (
-            self.components
-            if isinstance(self.components, list)
-            else [
-                self.components,
-            ]
-        )
-        for C in component_list:
+        for C in self.components:
             base_str += "\n   " + C.base_model.name
 
         return base_str
@@ -299,7 +292,7 @@ class Case:
         if isinstance(end_date, str):
             end_date = dateutil.parser.parse(end_date)
 
-        components: "Component" | List["Component"]
+        components: List["Component"]
         components = []
 
         for component_info in bp_dict["components"]:
@@ -376,7 +369,7 @@ class Case:
                 component_kwargs["additional_code"] = additional_code
 
             # Construct any InputDataset instances:
-            input_datasets: InputDataset | List[InputDataset] | None
+            input_datasets: List[InputDataset] | None
             if "input_datasets" not in component_info["component"].keys():
                 input_datasets = None
             else:
@@ -480,9 +473,6 @@ class Case:
 
             components.append(ThisComponent(**component_kwargs))
 
-        if len(components) == 1:
-            components = components[0]
-
         caseinstance = cls(
             components=components,
             name=casename,
@@ -529,14 +519,7 @@ class Case:
 
         bp_dict["components"] = []
 
-        if isinstance(self.components, Component):
-            component_list = [
-                self.components,
-            ]
-        elif isinstance(self.components, list):
-            component_list = self.components
-
-        for component in component_list:
+        for component in self.components:
             component_info: dict = {}
             # This will be bp_dict["components"]["component"]=component_info
 
@@ -589,10 +572,7 @@ class Case:
 
             # InputDataset
             input_datasets = component.input_datasets
-            if isinstance(input_datasets, InputDataset):
-                input_datasets = [
-                    input_datasets,
-                ]
+
             if isinstance(input_datasets, list):
                 input_dataset_info: dict = {}
                 for ind in input_datasets:
@@ -649,13 +629,7 @@ class Case:
 
         """
 
-        if isinstance(self.components, Component):
-            component_list = [
-                self.components,
-            ]
-        elif isinstance(self.components, list):
-            component_list = self.components
-        for component in component_list:
+        for component in self.components:
             if component.base_model.local_config_status != 0:
                 return False
 
@@ -666,16 +640,9 @@ class Case:
                 return False
 
             # Check InputDatasets
-            if isinstance(component.input_datasets, InputDataset):
-                dataset_list = [
-                    component.input_datasets,
-                ]
-            elif isinstance(component.input_datasets, list):
-                dataset_list = component.input_datasets
-            else:
-                dataset_list = []
-
-            for inp in dataset_list:
+            if component.input_datasets is None:
+                continue
+            for inp in component.input_datasets:
                 if not inp.check_exists_locally(self.caseroot):
                     # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
                     if (not isinstance(inp.start_date, dt.datetime)) or (
@@ -710,14 +677,7 @@ class Case:
             print(f"This case appears to have already been set up at {self.caseroot}")
             return
 
-        component_list = (
-            self.components
-            if isinstance(self.components, list)
-            else [
-                self.components,
-            ]
-        )
-        for component in component_list:
+        for component in self.components:
             # Check BaseModel
             component.base_model.handle_config_status()
 
@@ -729,17 +689,10 @@ class Case:
 
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
-            if isinstance(component.input_datasets, InputDataset):
-                dataset_list = [
-                    component.input_datasets,
-                ]
-            elif isinstance(component.input_datasets, list):
-                dataset_list = component.input_datasets
-            else:
-                dataset_list = []
-
             # Verify dates line up before running .get():
-            for inp in dataset_list:
+            if component.input_datasets is None:
+                continue
+            for inp in component.input_datasets:
                 # Download input dataset if its date range overlaps Case's date range
                 if (
                     ((inp.start_date is None) or (inp.end_date is None))
@@ -754,27 +707,13 @@ class Case:
     def build(self) -> None:
         """Compile any necessary additional code associated with this case
         by calling component.build() on each Component object making up this case"""
-        component_list = (
-            self.components
-            if isinstance(self.components, list)
-            else [
-                self.components,
-            ]
-        )
-        for component in component_list:
+        for component in self.components:
             component.build()
 
     def pre_run(self) -> None:
         """For each Component associated with this case, execute
         pre-processing actions by calling component.pre_run()"""
-        component_list = (
-            self.components
-            if isinstance(self.components, list)
-            else [
-                self.components,
-            ]
-        )
-        for component in component_list:
+        for component in self.components:
             component.pre_run()
 
     def run(
@@ -789,15 +728,8 @@ class Case:
         # Assuming for now that ROMS presence implies it is the master program
         # TODO add more advanced logic for this
         # 20240807 - TN - set first component as main?
-        component_list = (
-            self.components
-            if isinstance(self.components, list)
-            else [
-                self.components,
-            ]
-        )
 
-        for component in component_list:
+        for component in self.components:
             if isinstance(component, ROMSComponent):
                 # Calculate number of time steps:
                 if (self.end_date is not None) and (self.start_date is not None):
@@ -819,12 +751,5 @@ class Case:
     def post_run(self) -> None:
         """For each Component associated with this case, execute
         post-processing actions by calling component.post_run()"""
-        component_list = (
-            self.components
-            if isinstance(self.components, list)
-            else [
-                self.components,
-            ]
-        )
-        for component in component_list:
+        for component in self.components:
             component.post_run()
