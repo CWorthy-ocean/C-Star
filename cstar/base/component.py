@@ -75,7 +75,7 @@ class Component(ABC):
             "input_datasets", None
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         # Header
         name = self.__class__.__name__
         base_str = f"{name} object "
@@ -129,11 +129,11 @@ class Component(ABC):
         base_str += disc_str
         return base_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
     @abstractmethod
-    def build(self):
+    def build(self) -> None:
         """
         Compile any Component-specific code on this machine
 
@@ -141,7 +141,7 @@ class Component(ABC):
         """
 
     @abstractmethod
-    def pre_run(self):
+    def pre_run(self) -> None:
         """
         Execute any pre-processing actions necessary to run this component.
 
@@ -149,7 +149,7 @@ class Component(ABC):
         """
 
     @abstractmethod
-    def run(self):
+    def run(self) -> None:
         """
         Run this component
 
@@ -158,7 +158,7 @@ class Component(ABC):
         pass
 
     @abstractmethod
-    def post_run(self):
+    def post_run(self) -> None:
         """
         Execute any pre-processing actions associated with this component.
 

@@ -79,17 +79,18 @@ class InputDataset(ABC):
             self.exists_locally = True
             self.local_path = Path(self.source.location)
 
-        self.start_date = start_date
-        self.end_date = end_date
         if isinstance(start_date, str):
             self.start_date = dateutil.parser.parse(start_date)
+        elif isinstance(start_date, dt.datetime):
+            self.start_date = start_date
         if isinstance(end_date, str):
             self.end_date = dateutil.parser.parse(end_date)
-
+        elif isinstance(end_date, dt.datetime):
+            self.end_date = end_date
         assert self.start_date is None or isinstance(self.start_date, dt.datetime)
         assert self.end_date is None or isinstance(self.end_date, dt.datetime)
 
-    def __str__(self):
+    def __str__(self) -> str:
         name = self.__class__.__name__
         base_str = f"{name} object "
         base_str = "-" * (len(name) + 7) + "\n" + base_str
@@ -108,10 +109,10 @@ class InputDataset(ABC):
 
         return base_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
-    def get(self, local_dir: str | Path):
+    def get(self, local_dir: str | Path) -> None:
         """
         Make the file containing this input dataset available in `local_dir/input_datasets`
 

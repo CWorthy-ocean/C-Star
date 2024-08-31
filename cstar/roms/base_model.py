@@ -1,7 +1,7 @@
 import os
 import shutil
 import subprocess
-
+from pathlib import Path
 from cstar.base.base_model import BaseModel
 from cstar.base.utils import (
     _clone_and_checkout,
@@ -39,7 +39,7 @@ class ROMSBaseModel(BaseModel):
     def expected_env_var(self) -> str:
         return "ROMS_ROOT"
 
-    def _base_model_adjustments(self):
+    def _base_model_adjustments(self) -> None:
         """
         Perform C-Star specific adjustments to stock ROMS code.
 
@@ -52,7 +52,7 @@ class ROMSBaseModel(BaseModel):
             dirs_exist_ok=True,
         )
 
-    def get(self, target: str):
+    def get(self, target: str | Path) -> None:
         """
         Clone ROMS code to local machine, set environment, compile libraries
 
@@ -79,8 +79,8 @@ class ROMSBaseModel(BaseModel):
         )
 
         # Set environment variables for this session:
-        os.environ["ROMS_ROOT"] = target
-        os.environ["PATH"] += ":" + target + "/Tools-Roms/"
+        os.environ["ROMS_ROOT"] = str(target)
+        os.environ["PATH"] += f":{target}/Tools-Roms/"
 
         # Set the configuration file to be read by __init__.py for future sessions:
         config_file_str = (
@@ -95,8 +95,12 @@ class ROMSBaseModel(BaseModel):
 
         # Make things
         subprocess.run(
-            f"make nhmg COMPILER={_CSTAR_COMPILER}", cwd=target + "/Work", shell=True
+            f"make nhmg COMPILER={_CSTAR_COMPILER}",
+            cwd=str(target) + "/Work",
+            shell=True,
         )
         subprocess.run(
-            f"make COMPILER={_CSTAR_COMPILER}", cwd=target + "/Tools-Roms", shell=True
+            f"make COMPILER={_CSTAR_COMPILER}",
+            cwd=str(target) + "/Tools-Roms",
+            shell=True,
         )

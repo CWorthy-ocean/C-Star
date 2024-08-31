@@ -104,7 +104,7 @@ class AdditionalCode:
             self.exists_locally = True
             self.local_path = Path(self.source.location).resolve()
 
-    def __str__(self):
+    def __str__(self) -> str:
         base_str = (
             "AdditionalCode"  # associated with {self.base_model.name} base model"
         )
@@ -129,7 +129,7 @@ class AdditionalCode:
                     base_str += f"      ({filename[:-9]} will be used by C-Star based on this template)"
         return base_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
     def get(self, local_dir: str | Path) -> None:

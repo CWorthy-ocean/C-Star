@@ -90,7 +90,7 @@ class BaseModel(ABC):
 
         self.local_config_status = self.get_local_config_status()
 
-    def __str__(self):
+    def __str__(self) -> str:
         base_str = f"{self.__class__.__name__} object "
         base_str += "\n" + "-" * len(base_str)
         base_str += f"\nsource_repo = {self.source_repo}"
@@ -116,31 +116,31 @@ class BaseModel(ABC):
 
         return base_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
     @property
     @abstractmethod
-    def name(self):
+    def name(self) -> str:
         """The name of the base model"""
 
     @property
     @abstractmethod
-    def default_source_repo(self):
+    def default_source_repo(self) -> str:
         """Default source repository, defined in subclasses, e.g. https://github.com/marbl-ecosys/MARBL.git"""
 
     @property
     @abstractmethod
-    def default_checkout_target(self):
+    def default_checkout_target(self) -> str:
         """Default checkout target, defined in subclasses, e.g. marblv0.45.0"""
 
     @property
     @abstractmethod
-    def expected_env_var(self):
+    def expected_env_var(self) -> str:
         """environment variable associated with the base model, e.g. MARBL_ROOT"""
 
     @abstractmethod
-    def _base_model_adjustments(self):
+    def _base_model_adjustments(self) -> None:
         """
         Perform any C-Star specific adjustments to the base model that would
         be needed after a clean checkout.
@@ -190,7 +190,7 @@ class BaseModel(ABC):
         else:  # env_var_exists False (e.g. ROMS_ROOT not defined)
             return 3
 
-    def handle_config_status(self):
+    def handle_config_status(self) -> None:
         """
         Perform actions depending on the output of BaseModel.get_local_config_status()
 
@@ -207,11 +207,13 @@ class BaseModel(ABC):
            3: The expected environment variable is not present and it is assumed the base model is not installed locally
               -> prompt installation of the base model
         """
-        local_root = [
-            Path(os.environ[self.expected_env_var])
-            if self.expected_env_var in os.environ
-            else None
-        ]
+
+        local_root = Path(os.environ.get(self.expected_env_var, ""))
+
+        if local_root is None:
+            raise EnvironmentError(
+                f"System environment variable {self.expected_env_var} is not set."
+            )
         match self.local_config_status:
             case None:
                 self.get_local_config_status()
@@ -254,7 +256,7 @@ class BaseModel(ABC):
                     else:
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
-                ext_dir = _CSTAR_ROOT + "/externals/" + self.repo_basename
+                ext_dir = Path(_CSTAR_ROOT) / f"externals/{self.repo_basename}"
                 print(
                     "#######################################################\n"
                     + f"C-STAR: {self.expected_env_var}"
@@ -284,5 +286,5 @@ class BaseModel(ABC):
                         print("invalid selection; enter 'y','n',or 'custom'")
 
     @abstractmethod
-    def get(self, target: str):
+    def get(self, target: str | Path) -> None:
         """clone the basemodel code to your local machine"""

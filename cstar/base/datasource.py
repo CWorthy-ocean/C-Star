@@ -73,10 +73,11 @@ class DataSource:
         """Get the basename (typically a file name) from the location attribute"""
         return Path(self.location).name
 
-    def __str__(self):
+    def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
         base_str += f"\n location: {self.location}"
         base_str += f"\n basename: {self.basename}"
         base_str += f"\n location type: {self.location_type}"
         base_str += f"\n source type: {self.source_type}"
+        return base_str

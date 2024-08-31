@@ -271,7 +271,7 @@ class ROMSComponent(Component):
         account_key: Optional[str] = None,
         walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
         job_name: str = "my_roms_run",
-    ):
+    ) -> None:
         """
         Runs the executable created by `build()`
 
@@ -447,7 +447,7 @@ class ROMSComponent(Component):
                 case None:
                     subprocess.run(roms_exec_cmd, shell=True, cwd=run_path)
 
-    def post_run(self):
+    def post_run(self) -> None:
         """
         Performs post-processing steps associated with this ROMSComponent object.
 
@@ -463,6 +463,12 @@ class ROMSComponent(Component):
             The path where this ROMS component is being assembled
         """
 
+        if self.additional_code.local_path is None:
+            raise ValueError(
+                "Unable to prepare ROMSComponent for execution: "
+                + "\nROMSComponent.additional_code.local_path is None."
+                + "\n Call ROMSComponent.additional_code.get() and try again"
+            )
         out_path = self.additional_code.local_path / "output/"
         files = list(out_path.glob("PARTITIONED/*.*0.nc"))
         if not files:
