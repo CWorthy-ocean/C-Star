@@ -71,9 +71,7 @@ class Component(ABC):
         self.additional_code: Optional["AdditionalCode"] = kwargs.get(
             "additional_code", None
         )
-        self.input_datasets: Optional[List[InputDataset]] = kwargs.get(
-            "input_datasets", None
-        )
+        self.input_datasets: List[InputDataset] = kwargs.get("input_datasets") or []
 
     def __str__(self) -> str:
         # Header
@@ -87,7 +85,7 @@ class Component(ABC):
 
         NAC = 0 if self.additional_code is None else 1
 
-        NID = 0 if self.input_datasets is None else len(self.input_datasets)
+        NID = len(self.input_datasets)
 
         base_str += f"\n{NAC} AdditionalCode repositories (query using Component.additional_code)"
         base_str += (

@@ -75,7 +75,7 @@ class ROMSComponent(Component):
         base_model: "ROMSBaseModel",
         time_step: int,
         additional_code: AdditionalCode,
-        input_datasets: Optional[List["InputDataset"]] = None,
+        input_datasets: Optional[List["InputDataset"]] = [],
         nx: Optional[int] = None,
         ny: Optional[int] = None,
         n_levels: Optional[int] = None,
@@ -113,7 +113,7 @@ class ROMSComponent(Component):
 
         self.base_model: "ROMSBaseModel" = base_model
         self.additional_code: AdditionalCode = additional_code
-        self.input_datasets: Optional[List["InputDataset"]] = input_datasets
+        self.input_datasets: List["InputDataset"] = input_datasets or []
 
         # QUESTION: should all these attrs be passed in as a single "discretization" arg of type dict?
         self.time_step: int = time_step
@@ -467,7 +467,7 @@ class ROMSComponent(Component):
                 print(f)
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
                 subprocess.run(
-                    f"ncjoin {Path(f.stem).stem}.*.nc",
-                    cwd=out_path / "PARTITIONED",
+                    f"ncjoin PARTITIONED/{Path(f.stem).stem}.*.nc",
+                    cwd=out_path,
                     shell=True,
                 )
