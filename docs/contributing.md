@@ -13,7 +13,6 @@ This conda environment is useful for any of the following steps:
 
 1. Running the example notebooks
 2. Contributing code and running the testing suite
-3. Building the documentation locally
 
 
 ## Running the tests
@@ -37,10 +36,13 @@ Some things will automatically be reformatted, others need manual fixes. Follow 
 
 ## Building the documentation locally
 
-Activate the environment:
+There is a separate conda environment for building the docs.
+Install and activate the environment:
 
 ```
-conda activate cstar_env
+cd C-Star
+conda env create -f docs/environment.yml
+conda activate cstar-docs
 ```
 Then navigate to the docs folder and build the docs via:
 ```
