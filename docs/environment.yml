@@ -6,6 +6,8 @@ dependencies:
   - python>=3.10
   - pooch
   - pyyaml
+  - pip
+  - ipython
   # docs
   - sphinx
   - nbsphinx
@@ -14,4 +16,4 @@ dependencies:
   - myst-parser
   - pip:
     - readthedocs-sphinx-ext
-    - -e "."
+    - -e "../."
