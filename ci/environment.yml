@@ -13,3 +13,5 @@ dependencies:
   - mpich
   - xarray
   - netCDF4
+  # for running jupyter notebooks
+  - ipykernel

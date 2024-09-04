@@ -213,6 +213,10 @@ class AdditionalCode:
                         shutil.copy(tgt_file_path, str(tgt_file_path)[:-9])
                         if hasattr(self, "modified_namelists"):
                             self.modified_namelists.append(f[:-9])
+                        else:
+                            self.modified_namelists = [
+                                f[:-9],
+                            ]
 
             self.local_path = local_dir
             self.exists_locally = True
