@@ -1,7 +1,7 @@
 Welcome to the C-Star Documentation!
 ====================================
 
-**C-Star** is a python package that orchestrates the execution of a complete start-to-finish run of ROMS-MARBL.
+**C-Star** is a python package for setting up and running ocean model simulations, with a particular focus on marine carbon dioxide removal (mCDR) applications.
 
 .. toctree::
    :maxdepth: 1
