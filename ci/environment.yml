@@ -13,3 +13,11 @@ dependencies:
   - mpich
   - xarray
   - netCDF4
+  # docs
+  - sphinx
+  - nbsphinx
+  - sphinx-book-theme
+  - sphinxcontrib-bibtex
+  - myst-parser
+  # for running jupyter notebooks
+  - ipykernel
