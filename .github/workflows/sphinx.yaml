@@ -1,0 +1,29 @@
+
+name: Build Documentation
+on:
+  pull_request:
+    branches:
+      - "*"
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: docs/environment.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+      - name: Install C-Star
+        shell: micromamba-shell {0}
+        run: |
+           python - V
+      - name: Build Docs
+        shell: bash -l {0}
+        run: |
+          cd docs ; make fresh; make html
