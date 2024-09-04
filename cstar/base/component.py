@@ -94,14 +94,15 @@ class Component(ABC):
             if isinstance(self.input_datasets, InputDataset)
             else 0
         )
-        base_str += f"\n{NAC} AdditionalCode repositories (query using ROMSComponent.additional_code)"
+        base_str += f"\n{NAC} AdditionalCode repositories (query using Component.additional_code)"
         base_str += (
-            f"\n{NID} InputDataset objects (query using ROMSComponent.input_datasets"
+            f"\n{NID} InputDataset objects (query using Component.input_datasets"
         )
 
+        # Discretisation
         disc_str = ""
         if hasattr(self, "time_step") and self.time_step is not None:
-            disc_str += "\ntime_step: " + str(self.time_step)
+            disc_str += "\ntime_step: " + str(self.time_step) + "s"
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
             disc_str += (
                 "\nn_procs_x: "

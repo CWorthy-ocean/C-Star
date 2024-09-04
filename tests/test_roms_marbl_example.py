@@ -1,10 +1,14 @@
 import cstar
-import shutil
-from pathlib import Path
 from unittest.mock import patch
+##
+from pathlib import Path
+import shutil
+
+
 
 ## Delete output of any previous run of this script
 for oldfiles in ["local_input_files/",
+                 "local_additional_code/",
                  "roms_marbl_example_case/",
                  "roms_marbl_local_case/",
                  "test_blueprint.yaml",
@@ -18,7 +22,7 @@ for oldfiles in ["local_input_files/",
         else:
             oldpath.unlink()
     
-## First test uses URLs to point to input datasets
+## First step makes/runs Case using URLs to point to input datasets
 roms_marbl_remote_case = cstar.Case.from_blueprint(
     blueprint=(cstar.base.environment._CSTAR_ROOT)
     + "/../examples/cstar_blueprint_roms_marbl_example.yaml",
@@ -38,26 +42,38 @@ with patch("builtins.input", return_value="y"):
 
 print("Test complete with remote input dataset files")
 
-## Second test modifies the yaml created above to use available local input datasets
-
+## Second step modifies the yaml created above to use available local input datasets and additional code
+rmr_dir=Path(roms_marbl_remote_case.caseroot)
 # Move the input datasets to a new location
-shutil.move(roms_marbl_remote_case.caseroot+'/input_datasets/ROMS/','local_input_files')
+shutil.move(rmr_dir/"input_datasets/ROMS" , "local_input_files")
+
+# Move the additional code to a new location
+
+lac_dir=Path.cwd()/"local_additional_code"
+lac_dir.mkdir(parents=True,exist_ok=True)
+shutil.move(rmr_dir/"namelists/ROMS" , lac_dir/"namelists/ROMS")
+shutil.move(rmr_dir/"namelists/MARBL" , lac_dir/"namelists/MARBL")
+shutil.move(rmr_dir/"source_mods/ROMS" , lac_dir/"source_mods/ROMS")
 
 # Modify the blueprint file to point to local paths whenever we have the files:
 with open('test_blueprint.yaml') as f:
     test_blueprint=f.readlines()
 
 for i,line in enumerate(test_blueprint):
-    url_prefix="https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/"
-    if url_prefix in line:
+    id_url_prefix="https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/"
+    ac_url="https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git"
+    if id_url_prefix in line:
         fileurl=line.split()[-1] # Just isolate URL from e.g. source: URL
-        filepath=Path(f"{Path.cwd()}/local_input_files/{Path(fileurl).name}")
+        filepath=Path.cwd()/"local_input_files"/Path(fileurl).name
         if filepath.exists():
             test_blueprint[i]=line.replace(fileurl,str(filepath))
+    elif ac_url in line:
+             test_blueprint[i]=line.replace(str(ac_url),str(lac_dir))
 
 with open('modified_test_blueprint.yaml', 'w') as f:
     f.writelines(test_blueprint)
-##
+
+## Third step creates and runs Case with local input datasets and additional code
 
 roms_marbl_local_case = cstar.Case.from_blueprint(
     blueprint="modified_test_blueprint.yaml",

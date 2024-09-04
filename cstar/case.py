@@ -8,7 +8,7 @@ from typing import List, Type, Any, Optional, TYPE_CHECKING
 from cstar.base import Component
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
-from cstar.base.input_dataset import DataSource, InputDataset
+from cstar.base.input_dataset import InputDataset
 from cstar.roms.input_dataset import (
     ROMSModelGrid,
     ROMSInitialConditions,
@@ -343,8 +343,8 @@ class Case:
             else:
                 additional_code_info = component_info["component"]["additional_code"]
 
-                source_repo = additional_code_info["source_repo"]
-                checkout_target = additional_code_info["checkout_target"]
+                location = additional_code_info.get("location")
+                checkout_target = additional_code_info.get("checkout_target", None)
                 source_mods = (
                     [f for f in additional_code_info["source_mods"]]
                     if "source_mods" in additional_code_info.keys()
@@ -359,7 +359,7 @@ class Case:
 
                 additional_code = AdditionalCode(
                     base_model=base_model,
-                    source_repo=source_repo,
+                    location=location,
                     checkout_target=checkout_target,
                     source_mods=source_mods,
                     namelists=namelists,
@@ -381,7 +381,7 @@ class Case:
                     model_grid = [
                         ROMSModelGrid(
                             base_model=base_model,
-                            source=DataSource(f.get("source")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                         )
                         for f in input_dataset_info["model_grid"]["files"]
@@ -397,7 +397,7 @@ class Case:
                     initial_conditions = [
                         ROMSInitialConditions(
                             base_model=base_model,
-                            source=DataSource(f.get("source")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                             start_date=f.get("start_date", None),
                             end_date=f.get("end_date", None),
@@ -417,7 +417,7 @@ class Case:
                     tidal_forcing = [
                         ROMSTidalForcing(
                             base_model=base_model,
-                            source=DataSource(f.get("source")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                         )
                         for f in input_dataset_info["tidal_forcing"]["files"]
@@ -435,7 +435,7 @@ class Case:
                     boundary_forcing = [
                         ROMSBoundaryForcing(
                             base_model=base_model,
-                            source=DataSource(f.get("source")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                             start_date=f.get("start_date", None),
                             end_date=f.get("end_date", None),
@@ -455,7 +455,7 @@ class Case:
                     surface_forcing = [
                         ROMSSurfaceForcing(
                             base_model=base_model,
-                            source=DataSource(f.get("source")),
+                            location=f.get("location"),
                             file_hash=f.get("hash", None),
                             start_date=f.get("start_date", None),
                             end_date=f.get("end_date", None),
@@ -566,7 +566,7 @@ class Case:
             if additional_code is not None:
                 additional_code_info: dict = {}
                 # This will be component_info["component"]["additional_code"]=additional_code_info
-                additional_code_info["source_repo"] = additional_code.source_repo
+                additional_code_info["location"] = additional_code.source.location
                 additional_code_info["checkout_target"] = (
                     additional_code.checkout_target
                 )
@@ -605,10 +605,13 @@ class Case:
                     # Create a dictionary of file_info for each dataset file:
                     if "files" not in input_dataset_info[dct_key].keys():
                         input_dataset_info[dct_key]["files"] = []
-                    file_info = {"source": ind.source.location, "hash": ind.file_hash}
-                    if hasattr(ind, "start_date"):
+                    file_info = {}
+                    file_info["location"] = ind.source.location
+                    if hasattr(ind, "file_hash") and (ind.file_hash is not None):
+                        file_info["hash"] = ind.file_hash
+                    if hasattr(ind, "start_date") and (ind.start_date is not None):
                         file_info["start_date"] = str(ind.start_date)
-                    if hasattr(ind, "end_date"):
+                    if hasattr(ind, "end_date") and (ind.end_date is not None):
                         file_info["end_date"] = str(ind.end_date)
 
                     input_dataset_info[dct_key]["files"].append(file_info)

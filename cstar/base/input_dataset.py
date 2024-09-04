@@ -1,91 +1,14 @@
 import os
 import pooch
 import hashlib
-import pathlib
 from abc import ABC
 import datetime as dt
 import dateutil.parser
-from urllib.parse import urlparse
+from cstar.base.datasource import DataSource
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from cstar.base import BaseModel
-
-
-class DataSource:
-    """
-    Describes the source of an InputDataset
-
-    Attributes:
-    -----------
-    location: str
-       The location of the data, e.g. a URL or local path
-
-    Properties:
-    -----------
-    location_type: str (read-only)
-       "url" or "path"
-    source_type: str (read only)
-       Typically describes file type (e.g. "netcdf") but can also be "repository"
-    basename: str (read-only)
-       The basename of self.location, typically the file name
-    """
-
-    def __init__(self, location: str):
-        """
-        Initialize a DataSource from a location string
-
-        Parameters:
-        -----------
-        location: str
-           The location of the data, e.g. a URL or local path
-
-        Returns:
-        --------
-        DataSource
-            An initialized DataSource
-        """
-        self.location = location
-
-    @property
-    def location_type(self) -> str:
-        """Get the location type (e.g. "path" or "url") from the "location" attribute"""
-        urlparsed_location = urlparse(self.location)
-        if all([urlparsed_location.scheme, urlparsed_location.netloc]):
-            return "url"
-        elif pathlib.Path(self.location).exists():
-            return "path"
-        else:
-            raise ValueError(
-                f"{self.location} is not a recognised URL or local path pointing to an existing file"
-            )
-
-    @property
-    def source_type(self) -> str:
-        """Get the source type (e.g. "netcdf" from the "location" attribute"""
-        if self.location.lower().endswith((".yaml", ".yml")):
-            return "yaml"
-        elif self.location.lower().endswith(".nc"):
-            return "netcdf"
-        elif self.location.lower().endswith(".git"):
-            return "repository"
-        else:
-            raise ValueError(
-                f"{os.path.splitext(self.location)[-1]} is not a supported file type"
-            )
-
-    @property
-    def basename(self) -> str:
-        """Get the basename (typically a file name) from the location attribute"""
-        return os.path.basename(self.location)
-
-    def __str__(self):
-        base_str = f"{self.__class__.__name__}"
-        base_str += "\n" + "-" * len(base_str)
-        base_str += f"\n location: {self.location}"
-        base_str += f"\n basename: {self.basename}"
-        base_str += f"\n location type: {self.location_type}"
-        base_str += f"\n source type: {self.source_type}"
 
 
 class InputDataset(ABC):
@@ -116,7 +39,7 @@ class InputDataset(ABC):
     def __init__(
         self,
         base_model: "BaseModel",
-        source: DataSource,
+        location: str,
         file_hash: Optional[str] = None,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
@@ -128,16 +51,16 @@ class InputDataset(ABC):
         -----------
         base_model: BaseModel
             The base model with which this input dataset is associated
-        source: str
-            URL or path pointing to the netCDF file containing this input dataset
-        file_hash: str
+        location: str
+            URL or path pointing to a file either containing this dataset or instructions for creating it.
+            Used to set the `source` attribute.
+        file_hash: str, optional
             The 256 bit SHA sum associated with the file for verification
 
         """
 
         self.base_model: "BaseModel" = base_model
-
-        self.source: DataSource = source
+        self.source: DataSource = DataSource(location)
         self.file_hash: Optional[str] = file_hash
 
         if (self.file_hash is None) and (self.source.location_type == "url"):
@@ -149,9 +72,12 @@ class InputDataset(ABC):
 
         self.exists_locally: Optional[bool] = None
         self.local_path: Optional[str] = None
+
+        # If the input dataset is on the machine, set local_path to its current location
+        # this will be updated by .get() which creates a symlink in the user's chosen workspace:
         if self.source.location_type == "path":
             self.exists_locally = True
-            self.local_path = source.location
+            self.local_path = self.source.location
 
         self.start_date = start_date
         self.end_date = end_date
@@ -217,8 +143,9 @@ class InputDataset(ABC):
                     )
                     # TODO maybe this should check the hash and just `return` if it matches?
                 else:
-                    # QUESTION: Should this now update self.local_path to point to the symlink?
+                    # QUESTION: Should this now update self.local_path to point to the symlink? 20240827 - YES
                     os.symlink(self.local_path, tgt_path)
+                    self.local_path = tgt_path
                 return
             else:
                 # nothing to do as file is already at tgt_path

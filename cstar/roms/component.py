@@ -2,6 +2,7 @@ import os
 import glob
 import warnings
 import subprocess
+from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
@@ -43,12 +44,12 @@ class ROMSComponent(Component):
     -----------
     base_model: ROMSBaseModel
         An object pointing to the unmodified source code of ROMS at a specific commit
-    additional_code: AdditionalCode or list of AdditionalCodes
-        Additional code contributing to a unique instance of this ROMS run
-        e.g. namelists, source modifications, etc.
     input_datasets: InputDataset or list of InputDatasets
         Any spatiotemporal data needed to run this instance of ROMS
         e.g. initial conditions, surface forcing, etc.
+    additional_code: AdditionalCode or list of AdditionalCodes
+        Additional code contributing to a unique instance of this ROMS run
+        e.g. namelists, source modifications, etc.
     time_step: int, Optional, default=1
         The time step with which to run ROMS in this configuration
     nx,ny,n_levels: int
@@ -76,8 +77,8 @@ class ROMSComponent(Component):
     def __init__(
         self,
         base_model: "ROMSBaseModel",
-        additional_code: Optional[AdditionalCode] = None,
         input_datasets: Optional["InputDataset" | List["InputDataset"]] = None,
+        additional_code: Optional[AdditionalCode] = None,
         time_step: int = 1,
         nx: Optional[int] = None,
         ny: Optional[int] = None,
@@ -93,12 +94,12 @@ class ROMSComponent(Component):
         base_model: ROMSBaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        additional_code: AdditionalCode
-            Additional code contributing to a unique instance of a base model,
-            e.g. namelists, source modifications, etc.
         input_datasets: InputDataset or list of InputDatasets
             Any spatiotemporal data needed to run this instance of the base model
             e.g. initial conditions, surface forcing, etc.
+        additional_code: AdditionalCode
+            Additional code contributing to a unique instance of a base model,
+            e.g. namelists, source modifications, etc.
         nx,ny,n_levels: int
             The number of x and y points and vertical levels in the domain associated with this object
         n_procs_x,n_procs_y: int
@@ -117,6 +118,7 @@ class ROMSComponent(Component):
             additional_code=additional_code,
             input_datasets=input_datasets,
         )
+
         # QUESTION: should all these attrs be passed in as a single "discretization" arg of type dict?
         self.time_step: int = time_step
         self.nx: Optional[int] = nx
@@ -202,55 +204,53 @@ class ROMSComponent(Component):
                     shell=True,
                 )
             # Edit namelist file to contain dataset paths
-            forstr = ""
-            namelist_path = (
-                self.additional_code.local_path
-                + "/"
-                + self.additional_code.namelists[0]
-            )
-            for f in datasets_to_partition:
-                partitioned_path = (
-                    os.path.dirname(f.local_path)
-                    + "/PARTITIONED/"
-                    + os.path.basename(f.local_path)
+            if hasattr(self.additional_code, "modified_namelists"):
+                mod_namelist = (
+                    Path(self.additional_code.local_path)
+                    / self.additional_code.modified_namelists[0]
                 )
-                if isinstance(f, ROMSModelGrid):
-                    gridstr = "     " + partitioned_path + "\n"
-                    _replace_text_in_file(
-                        namelist_path, "__GRID_FILE_PLACEHOLDER__", gridstr
+                forstr = ""
+                for f in datasets_to_partition:
+                    partitioned_path = (
+                        os.path.dirname(f.local_path)
+                        + "/PARTITIONED/"
+                        + os.path.basename(f.local_path)
                     )
-                elif isinstance(f, ROMSInitialConditions):
-                    icstr = "     " + partitioned_path + "\n"
-                    _replace_text_in_file(
-                        namelist_path, "__INITIAL_CONDITION_FILE_PLACEHOLDER__", icstr
-                    )
-                elif type(f) in [
-                    ROMSSurfaceForcing,
-                    ROMSTidalForcing,
-                    ROMSBoundaryForcing,
-                ]:
-                    forstr += "     " + partitioned_path + "\n"
+                    if isinstance(f, ROMSModelGrid):
+                        gridstr = "     " + partitioned_path + "\n"
+                        _replace_text_in_file(
+                            str(mod_namelist), "__GRID_FILE_PLACEHOLDER__", gridstr
+                        )
+                    elif isinstance(f, ROMSInitialConditions):
+                        icstr = "     " + partitioned_path + "\n"
+                        _replace_text_in_file(
+                            str(mod_namelist),
+                            "__INITIAL_CONDITION_FILE_PLACEHOLDER__",
+                            icstr,
+                        )
+                    elif type(f) in [
+                        ROMSSurfaceForcing,
+                        ROMSTidalForcing,
+                        ROMSBoundaryForcing,
+                    ]:
+                        forstr += "     " + partitioned_path + "\n"
 
-            _replace_text_in_file(
-                namelist_path, "__FORCING_FILES_PLACEHOLDER__", forstr
-            )
+                _replace_text_in_file(
+                    str(mod_namelist), "__FORCING_FILES_PLACEHOLDER__", forstr
+                )
 
-        ################################################################################
-        ## NOTE: we assume that roms.in is the ONLY entry in additional_code.namelists, hence [0]
-        _replace_text_in_file(
-            self.additional_code.local_path + "/" + self.additional_code.namelists[0],
-            "INPUT_DIR",
-            self.additional_code.local_path + "/input_datasets/ROMS",
-        )
-
-        ##FIXME: it doesn't make any sense to have the next line in ROMSComponent, does it?
-        _replace_text_in_file(
-            self.additional_code.local_path + "/" + self.additional_code.namelists[0],
-            "MARBL_NAMELIST_DIR",
-            self.additional_code.local_path + "/namelists/MARBL",
-        )
-
-        ################################################################################
+                ##FIXME: it doesn't make any sense to have the next line in ROMSComponent, does it?
+                _replace_text_in_file(
+                    str(mod_namelist),
+                    "MARBL_NAMELIST_DIR",
+                    self.additional_code.local_path + "/namelists/MARBL",
+                )
+            else:
+                raise ValueError(
+                    "No editable namelist found in which to set ROMS runtime parameters. "
+                    + "Expected to find a file in ROMSComponent.additional_code.namelists"
+                    + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
+                )
 
     def run(
         self,
@@ -293,6 +293,7 @@ class ROMSComponent(Component):
             run_path = self.additional_code.local_path + "/output/PARTITIONED/"
 
         # Add number of timesteps to namelist
+
         # Check if n_time_steps is None, indicating it was not explicitly set
         if n_time_steps is None:
             n_time_steps = 1
@@ -302,19 +303,24 @@ class ROMSComponent(Component):
                 "to specify the length of the run.",
                 UserWarning,
             )
-            assert isinstance(n_time_steps, int)
+        assert isinstance(n_time_steps, int)
 
-        if self.additional_code.namelists is None:
-            raise ValueError(
-                "A namelist file (typically roms.in) is needed to run ROMS."
-                " ROMSComponent.additional_code.namelists should be a non-empty list of filenames."
+        if hasattr(self.additional_code, "modified_namelists"):
+            mod_namelist = (
+                Path(self.additional_code.local_path)
+                / self.additional_code.modified_namelists[0]
             )
-
-        _replace_text_in_file(
-            self.additional_code.local_path + "/" + self.additional_code.namelists[0],
-            "__NTIMES_PLACEHOLDER__",
-            str(n_time_steps),
-        )
+            _replace_text_in_file(
+                str(mod_namelist),
+                "__NTIMES_PLACEHOLDER__",
+                str(n_time_steps),
+            )
+        else:
+            raise ValueError(
+                "No editable namelist found to set ROMS runtime parameters. "
+                + "Expected to find a file in ROMSComponent.additional_code.namelists"
+                + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
+            )
 
         os.makedirs(run_path, exist_ok=True)
         if self.exe_path is None:
@@ -323,12 +329,6 @@ class ROMSComponent(Component):
                 + "\nRun Component.build() first. "
                 + "\n If you have already run Component.build(), either run it again or "
                 + " add the executable path manually using Component.exe_path='YOUR/PATH'."
-            )
-        elif self.additional_code.namelists is None:
-            raise ValueError(
-                "C-STAR: This ROMS Component object's AdditionalCode"
-                + " does not contain any namelists."
-                + "Cannot run ROMS without a namelist file, e.g. roms.in"
             )
         else:
             match _CSTAR_SYSTEM:
@@ -344,8 +344,7 @@ class ROMSComponent(Component):
                     exec_pfx = "mpirun"
 
             roms_exec_cmd = (
-                f"{exec_pfx} -n {self.n_procs_tot} {self.exe_path} "
-                + f"{self.additional_code.local_path}/{self.additional_code.namelists[0]}"
+                f"{exec_pfx} -n {self.n_procs_tot} {self.exe_path} " + f"{mod_namelist}"
             )
 
             if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
