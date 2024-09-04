@@ -19,5 +19,7 @@ dependencies:
   - sphinx-book-theme
   - sphinxcontrib-bibtex
   - myst-parser
+  - pip:
+    - readthedocs-sphinx-ext
   # for running jupyter notebooks
   - ipykernel
