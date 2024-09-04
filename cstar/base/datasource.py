@@ -47,7 +47,7 @@ class DataSource:
             return "path"
         else:
             raise ValueError(
-                f"{self.location} is not a recognised URL or local path pointing to an existing file"
+                f"{self.location} is not a recognised URL or local path pointing to an existing file or directory"
             )
 
     @property
