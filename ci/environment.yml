@@ -13,7 +13,6 @@ dependencies:
   - mpich
   - xarray
   - netCDF4
-  - sphinx
   # docs
   - sphinx
   - nbsphinx
