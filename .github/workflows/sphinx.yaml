@@ -19,7 +19,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-      - name: Install roms-tools
+      - name: Install C-Star
         shell: micromamba-shell {0}
         run: |
            python - V
