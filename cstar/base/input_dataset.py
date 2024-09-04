@@ -1,9 +1,10 @@
-import os
 import pooch
 import hashlib
 from abc import ABC
 import datetime as dt
 import dateutil.parser
+from pathlib import Path
+from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
 from typing import Optional, TYPE_CHECKING
 
@@ -25,7 +26,7 @@ class InputDataset(ABC):
         The 256 bit SHA sum associated with the file for verifying downloads
     exists_locally: bool, default None
         True if the input dataset exists on the local machine, set by `check_exists_locally()` method if source is a URL
-    local_path: str, default None
+    local_path: Path, default None
         The path where the input dataset exists locally, set when `get()` is called if source is a URL
 
     Methods:
@@ -62,6 +63,8 @@ class InputDataset(ABC):
         self.base_model: "BaseModel" = base_model
         self.source: DataSource = DataSource(location)
         self.file_hash: Optional[str] = file_hash
+        self.exists_locally: Optional[bool] = None
+        self.local_path: Optional[Path] = None
 
         if (self.file_hash is None) and (self.source.location_type == "url"):
             raise ValueError(
@@ -70,26 +73,22 @@ class InputDataset(ABC):
                 + "A file hash is required to verify files downloaded from remote sources."
             )
 
-        self.exists_locally: Optional[bool] = None
-        self.local_path: Optional[str] = None
-
         # If the input dataset is on the machine, set local_path to its current location
         # this will be updated by .get() which creates a symlink in the user's chosen workspace:
         if self.source.location_type == "path":
             self.exists_locally = True
-            self.local_path = self.source.location
+            self.local_path = Path(self.source.location)
 
-        self.start_date = start_date
-        self.end_date = end_date
         if isinstance(start_date, str):
-            self.start_date = dateutil.parser.parse(start_date)
+            start_date = dateutil.parser.parse(start_date)
+        self.start_date = start_date
         if isinstance(end_date, str):
-            self.end_date = dateutil.parser.parse(end_date)
-
+            end_date = dateutil.parser.parse(end_date)
+        self.end_date = end_date
         assert self.start_date is None or isinstance(self.start_date, dt.datetime)
         assert self.end_date is None or isinstance(self.end_date, dt.datetime)
 
-    def __str__(self):
+    def __str__(self) -> str:
         name = self.__class__.__name__
         base_str = f"{name} object "
         base_str = "-" * (len(name) + 7) + "\n" + base_str
@@ -108,10 +107,10 @@ class InputDataset(ABC):
 
         return base_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
-    def get(self, local_dir: str):
+    def get(self, local_dir: str | Path) -> None:
         """
         Make the file containing this input dataset available in `local_dir/input_datasets`
 
@@ -126,17 +125,19 @@ class InputDataset(ABC):
             The local directory in which this input dataset will be saved.
 
         """
-        tgt_dir = local_dir + "/input_datasets/" + self.base_model.name + "/"
-        os.makedirs(tgt_dir, exist_ok=True)
-        tgt_path = tgt_dir + self.source.basename
+        local_dir = Path(local_dir).resolve()
+
+        tgt_dir = local_dir / f"input_datasets/{self.base_model.name}/"
+        tgt_dir.mkdir(parents=True, exist_ok=True)
+        tgt_path = tgt_dir / str(self.source.basename)
 
         # If the file is somewhere else on the system, make a symbolic link where we want it
         if self.exists_locally:
             assert (
                 self.local_path is not None
             ), "local_path should always be set when exists_locally is True"
-            if os.path.abspath(self.local_path) != os.path.abspath(tgt_path):
-                if os.path.exists(tgt_path):
+            if self.local_path.resolve() != tgt_path.resolve():
+                if tgt_path.exists():
                     raise FileExistsError(
                         f"A file by the name of {self.source.basename}"
                         + f"already exists at {tgt_dir}."
@@ -144,7 +145,7 @@ class InputDataset(ABC):
                     # TODO maybe this should check the hash and just `return` if it matches?
                 else:
                     # QUESTION: Should this now update self.local_path to point to the symlink? 20240827 - YES
-                    os.symlink(self.local_path, tgt_path)
+                    tgt_path.symlink_to(self.local_path)
                     self.local_path = tgt_path
                 return
             else:
@@ -156,15 +157,16 @@ class InputDataset(ABC):
             downloader = pooch.HTTPDownloader(timeout=120)
             to_fetch = pooch.create(
                 path=tgt_dir,
-                base_url=os.path.dirname(self.source.location),
+                # FIXME Cannot find a urllib equivalent to this:
+                base_url=urljoin(self.source.location, "."),
                 registry={self.source.basename: self.file_hash},
             )
 
             to_fetch.fetch(self.source.basename, downloader=downloader)
             self.exists_locally = True
-            self.local_path = tgt_dir + "/" + self.source.basename
+            self.local_path = tgt_dir / self.source.basename
 
-    def check_exists_locally(self, local_dir: str) -> bool:
+    def check_exists_locally(self, local_dir: str | Path) -> bool:
         """
         Checks whether this InputDataset has already been fetched to the local machine
 
@@ -181,11 +183,11 @@ class InputDataset(ABC):
         exists_locally (bool):
             True if the method has verified the local existence of the dataset
         """
-
+        local_dir = Path(local_dir).resolve()
         if self.exists_locally is None:
-            tgt_dir = local_dir + "/input_datasets/" + self.base_model.name + "/"
-            fpath = tgt_dir + self.source.basename
-            if os.path.exists(fpath):
+            tgt_dir = local_dir / f"input_datasets/{self.base_model.name}/"
+            fpath = tgt_dir / self.source.basename
+            if fpath.exists():
                 sha256_hash = hashlib.sha256()
                 with open(fpath, "rb") as f:
                     for chunk in iter(lambda: f.read(4096), b""):

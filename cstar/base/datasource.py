@@ -21,13 +21,13 @@ class DataSource:
        The basename of self.location, typically the file name
     """
 
-    def __init__(self, location: str):
+    def __init__(self, location: str | Path):
         """
         Initialize a DataSource from a location string
 
         Parameters:
         -----------
-        location: str
+        location: str or Path
            The location of the data, e.g. a URL or local path
 
         Returns:
@@ -35,7 +35,7 @@ class DataSource:
         DataSource
             An initialized DataSource
         """
-        self.location = location
+        self.location = str(location)
 
     @property
     def location_type(self) -> str:
@@ -73,10 +73,11 @@ class DataSource:
         """Get the basename (typically a file name) from the location attribute"""
         return Path(self.location).name
 
-    def __str__(self):
+    def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
         base_str += f"\n location: {self.location}"
         base_str += f"\n basename: {self.basename}"
         base_str += f"\n location type: {self.location_type}"
         base_str += f"\n source type: {self.source_type}"
+        return base_str

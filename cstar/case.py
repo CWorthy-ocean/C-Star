@@ -1,8 +1,8 @@
-import os
 import yaml
 import warnings
 import datetime as dt
 import dateutil.parser
+from pathlib import Path
 from typing import List, Type, Any, Optional, TYPE_CHECKING
 
 from cstar.base import Component
@@ -16,6 +16,7 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
 )
+from cstar.roms.component import ROMSComponent
 
 if TYPE_CHECKING:
     from cstar.base import BaseModel
@@ -27,11 +28,11 @@ class Case:
 
     Attributes
     ---------
-    components: Component or list of Components
+    components: list of Components
         The unique model component(s) that make up this case
     name: str
         The name of this case
-    caseroot: str
+    caseroot: Path
         The local directory in which this case will be set up
     valid_start_date: str or datetime.datetime, Optional, default=None
         The earliest start date at which this Case is considered valid
@@ -66,9 +67,9 @@ class Case:
 
     def __init__(
         self,
-        components: "Component" | List["Component"],
+        components: List["Component"],
         name: str,
-        caseroot: str,
+        caseroot: str | Path,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
         valid_start_date: Optional[str | dt.datetime] = None,
@@ -79,7 +80,7 @@ class Case:
 
         Parameters:
         ----------
-        components: Component or list of Components
+        components: list of Components
             The unique model component(s) that make up this case
         name: str
             The name of this case
@@ -92,8 +93,8 @@ class Case:
             An initialized Case object
         """
 
-        self.components: "Component" | List["Component"] = components
-        self.caseroot: str = os.path.abspath(caseroot)
+        self.components: List["Component"] = components
+        self.caseroot: Path = Path(caseroot).resolve()
         self.name: str = name
         self.is_from_blueprint: bool = False
         self.blueprint: Optional[str] = None
@@ -201,7 +202,7 @@ class Case:
         # Lastly, check if everything is set up
         self.is_setup: bool = self.check_is_setup()
 
-    def __str__(self):
+    def __str__(self) -> str:
         base_str = "------------------"
         base_str += "\nC-Star case object "
         base_str += "\n------------------"
@@ -228,17 +229,17 @@ class Case:
 
         return base_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
     @classmethod
     def from_blueprint(
         cls,
         blueprint: str,
-        caseroot: str,
-        start_date: Optional[str | dt.datetime],
-        end_date: Optional[str | dt.datetime],
-    ):
+        caseroot: Path,
+        start_date: Optional[str | dt.datetime] = None,
+        end_date: Optional[str | dt.datetime] = None,
+    ) -> "Case":
         """
         Initialize a Case object from a blueprint.
 
@@ -291,7 +292,7 @@ class Case:
         if isinstance(end_date, str):
             end_date = dateutil.parser.parse(end_date)
 
-        components: "Component" | List["Component"]
+        components: List["Component"]
         components = []
 
         for component_info in bp_dict["components"]:
@@ -368,7 +369,7 @@ class Case:
                 component_kwargs["additional_code"] = additional_code
 
             # Construct any InputDataset instances:
-            input_datasets: InputDataset | List[InputDataset] | None
+            input_datasets: List[InputDataset] | None
             if "input_datasets" not in component_info["component"].keys():
                 input_datasets = None
             else:
@@ -472,9 +473,6 @@ class Case:
 
             components.append(ThisComponent(**component_kwargs))
 
-        if len(components) == 1:
-            components = components[0]
-
         caseinstance = cls(
             components=components,
             name=casename,
@@ -490,7 +488,7 @@ class Case:
 
         return caseinstance
 
-    def persist(self, filename: str):
+    def persist(self, filename: str) -> None:
         """
         Write this case to a yaml file.
 
@@ -521,14 +519,7 @@ class Case:
 
         bp_dict["components"] = []
 
-        if isinstance(self.components, Component):
-            component_list = [
-                self.components,
-            ]
-        elif isinstance(self.components, list):
-            component_list = self.components
-
-        for component in component_list:
+        for component in self.components:
             component_info: dict = {}
             # This will be bp_dict["components"]["component"]=component_info
 
@@ -581,10 +572,7 @@ class Case:
 
             # InputDataset
             input_datasets = component.input_datasets
-            if isinstance(input_datasets, InputDataset):
-                input_datasets = [
-                    input_datasets,
-                ]
+
             if isinstance(input_datasets, list):
                 input_dataset_info: dict = {}
                 for ind in input_datasets:
@@ -640,13 +628,8 @@ class Case:
             True if all components are correctly set up in the caseroot directory
 
         """
-        if isinstance(self.components, Component):
-            component_list = [
-                self.components,
-            ]
-        elif isinstance(self.components, list):
-            component_list = self.components
-        for component in component_list:
+
+        for component in self.components:
             if component.base_model.local_config_status != 0:
                 return False
 
@@ -657,16 +640,9 @@ class Case:
                 return False
 
             # Check InputDatasets
-            if isinstance(component.input_datasets, InputDataset):
-                dataset_list = [
-                    component.input_datasets,
-                ]
-            elif isinstance(component.input_datasets, list):
-                dataset_list = component.input_datasets
-            else:
-                dataset_list = []
-
-            for inp in dataset_list:
+            if component.input_datasets is None:
+                continue
+            for inp in component.input_datasets:
                 if not inp.check_exists_locally(self.caseroot):
                     # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
                     if (not isinstance(inp.start_date, dt.datetime)) or (
@@ -683,7 +659,7 @@ class Case:
                         return False
         return True
 
-    def setup(self):
+    def setup(self) -> None:
         """
         Fetch all code and files necessary to run this case in the local `caseroot` folder
 
@@ -713,37 +689,30 @@ class Case:
 
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
-            if isinstance(component.input_datasets, InputDataset):
-                dataset_list = [
-                    component.input_datasets,
-                ]
-            elif isinstance(component.input_datasets, list):
-                dataset_list = component.input_datasets
-            else:
-                dataset_list = []
-
             # Verify dates line up before running .get():
-            for inp in dataset_list:
+            if component.input_datasets is None:
+                continue
+            for inp in component.input_datasets:
                 # Download input dataset if its date range overlaps Case's date range
-                if ((inp.start_date is None) or (inp.end_date is None)) or (
-                    (inp.start_date <= self.end_date)
-                    and (inp.end_date >= self.start_date)
+                if (
+                    ((inp.start_date is None) or (inp.end_date is None))
+                    or ((self.start_date is None) or (self.end_date is None))
+                    or (inp.start_date <= self.end_date)
+                    and (self.end_date >= self.start_date)
                 ):
                     inp.get(self.caseroot)
 
         self.is_setup = True
 
-    def build(self):
+    def build(self) -> None:
         """Compile any necessary additional code associated with this case
         by calling component.build() on each Component object making up this case"""
-
         for component in self.components:
             component.build()
 
-    def pre_run(self):
+    def pre_run(self) -> None:
         """For each Component associated with this case, execute
         pre-processing actions by calling component.pre_run()"""
-
         for component in self.components:
             component.pre_run()
 
@@ -752,31 +721,35 @@ class Case:
         account_key=None,
         walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
         job_name="my_case_run",
-    ):
+    ) -> None:
         """Run the case by calling `component.run(caseroot)`
         on the primary component (to which others are coupled)."""
 
         # Assuming for now that ROMS presence implies it is the master program
         # TODO add more advanced logic for this
         # 20240807 - TN - set first component as main?
+
         for component in self.components:
-            if component.base_model.name == "ROMS":
+            if isinstance(component, ROMSComponent):
                 # Calculate number of time steps:
-                run_length_seconds = int(
-                    (self.end_date - self.start_date).total_seconds()
-                )
+                if (self.end_date is not None) and (self.start_date is not None):
+                    run_length_seconds = int(
+                        (self.end_date - self.start_date).total_seconds()
+                    )
+                    ntimesteps = run_length_seconds // component.time_step
+                else:
+                    ntimesteps = None
 
                 # After that you need to run some verification stuff on the downloaded files
                 component.run(
-                    n_time_steps=(run_length_seconds // component.time_step),
+                    n_time_steps=ntimesteps,
                     account_key=account_key,
                     walltime=walltime,
                     job_name=job_name,
                 )
 
-    def post_run(self):
+    def post_run(self) -> None:
         """For each Component associated with this case, execute
         post-processing actions by calling component.post_run()"""
-
         for component in self.components:
             component.post_run()

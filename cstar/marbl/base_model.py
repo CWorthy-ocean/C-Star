@@ -1,6 +1,7 @@
 import os
 import subprocess
 
+from pathlib import Path
 from cstar.base import BaseModel
 from cstar.base.utils import (
     _clone_and_checkout,
@@ -38,23 +39,23 @@ class MARBLBaseModel(BaseModel):
     def expected_env_var(self) -> str:
         return "MARBL_ROOT"
 
-    def _base_model_adjustments(self):
+    def _base_model_adjustments(self) -> None:
         pass
 
-    def get(self, target: str):
+    def get(self, target: str | Path) -> None:
         """
-        Clone MARBL code to local machine, set environment, compile libraries
+                Clone MARBL code to local machine, set environment, compile libraries
 
-        This method:
-        1. clones MARBL from `source_repo`
-        2. checks out the correct commit from `checkout_target`
-        3. Sets environment variable MARBL_ROOT
-        4. Compiles MARBL
+                This method:
+                1. clones MARBL from `source_repo`
+                2. checks out the correct commit from `checkout_target`
+                3. Sets environment variable MARBL_ROOT
+                4. Compiles MARBL
 
-        Parameters:
-        -----------
-        target: str
-            The local path where MARBL will be cloned and compiled
+                Parameters:
+        z        -----------
+                target: str
+                    The local path where MARBL will be cloned and compiled
         """
         _clone_and_checkout(
             source_repo=self.source_repo,
@@ -63,7 +64,7 @@ class MARBLBaseModel(BaseModel):
         )
 
         # Set environment variables for this session:
-        os.environ["MARBL_ROOT"] = target
+        os.environ["MARBL_ROOT"] = str(target)
 
         # Set the configuration file to be read by __init__.py for future sessions:
         # QUESTION: how better to handle this?
@@ -72,5 +73,5 @@ class MARBLBaseModel(BaseModel):
 
         # Make things
         subprocess.run(
-            f"make {_CSTAR_COMPILER} USEMPI=TRUE", cwd=target + "/src", shell=True
+            f"make {_CSTAR_COMPILER} USEMPI=TRUE", cwd=f"{target}/src", shell=True
         )

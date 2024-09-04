@@ -21,7 +21,7 @@ class Component(ABC):
     additional_code: AdditionalCode or list of AdditionalCodes
         Additional code contributing to a unique instance of a base model,
         e.g. namelists, source modifications, etc.
-    input_datasets: InputDataset or list of InputDatasets
+    input_datasets: list of InputDatasets
         Any spatiotemporal data needed to run this instance of the base model
         e.g. initial conditions, surface forcing, etc.
 
@@ -49,7 +49,7 @@ class Component(ABC):
         additional_code: AdditionalCode or list of AdditionalCodes
             Additional code contributing to a unique instance of a base model,
             e.g. namelists, source modifications, etc.
-        input_datasets: InputDataset or list of InputDatasets
+        input_datasets: list of InputDatasets
             Any spatiotemporal data needed to run this instance of the base model
             e.g. initial conditions, surface forcing, etc.
 
@@ -71,11 +71,9 @@ class Component(ABC):
         self.additional_code: Optional["AdditionalCode"] = kwargs.get(
             "additional_code", None
         )
-        self.input_datasets: Optional[InputDataset | List[InputDataset]] = kwargs.get(
-            "input_datasets", None
-        )
+        self.input_datasets: List[InputDataset] = kwargs.get("input_datasets") or []
 
-    def __str__(self):
+    def __str__(self) -> str:
         # Header
         name = self.__class__.__name__
         base_str = f"{name} object "
@@ -87,13 +85,8 @@ class Component(ABC):
 
         NAC = 0 if self.additional_code is None else 1
 
-        NID = (
-            len(self.input_datasets)
-            if isinstance(self.input_datasets, list)
-            else 1
-            if isinstance(self.input_datasets, InputDataset)
-            else 0
-        )
+        NID = len(self.input_datasets)
+
         base_str += f"\n{NAC} AdditionalCode repositories (query using Component.additional_code)"
         base_str += (
             f"\n{NID} InputDataset objects (query using Component.input_datasets"
@@ -129,11 +122,11 @@ class Component(ABC):
         base_str += disc_str
         return base_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
     @abstractmethod
-    def build(self):
+    def build(self) -> None:
         """
         Compile any Component-specific code on this machine
 
@@ -141,7 +134,7 @@ class Component(ABC):
         """
 
     @abstractmethod
-    def pre_run(self):
+    def pre_run(self) -> None:
         """
         Execute any pre-processing actions necessary to run this component.
 
@@ -149,7 +142,7 @@ class Component(ABC):
         """
 
     @abstractmethod
-    def run(self):
+    def run(self) -> None:
         """
         Run this component
 
@@ -158,7 +151,7 @@ class Component(ABC):
         pass
 
     @abstractmethod
-    def post_run(self):
+    def post_run(self) -> None:
         """
         Execute any pre-processing actions associated with this component.
 
