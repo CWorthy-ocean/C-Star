@@ -12,7 +12,7 @@ components:
         checkout_target: 'marbl0.45.0'
       additional_code:
         location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
-        checkout_target: '69ee87b554082c46e3f138a9b3faf17439966e90'
+        checkout_target: 'b621f3ab0986262cad82438f15043d5f8f660daf'
         namelists:
           - "namelists/MARBL/marbl_in"
           - "namelists/MARBL/marbl_tracer_output_list"
@@ -32,7 +32,7 @@ components:
         time_step: 360
       additional_code:
         location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
-        checkout_target: '69ee87b554082c46e3f138a9b3faf17439966e90'
+        checkout_target: 'b621f3ab0986262cad82438f15043d5f8f660daf'
         source_mods:
           - "source_mods/ROMS/bgc.opt"
           - "source_mods/ROMS/bulk_frc.opt"
