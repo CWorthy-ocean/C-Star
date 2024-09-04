@@ -21,6 +21,8 @@ jobs:
             python=${{ matrix.python-version }}
       - name: Install C-Star
         shell: micromamba-shell {0}
+        run: |
+           python - V
       - name: Build Docs
         shell: bash -l {0}
         run: |
