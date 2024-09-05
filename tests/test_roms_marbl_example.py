@@ -51,9 +51,9 @@ shutil.move(rmr_dir/"input_datasets/ROMS" , "local_input_files")
 
 lac_dir=Path.cwd()/"local_additional_code"
 lac_dir.mkdir(parents=True,exist_ok=True)
-shutil.move(rmr_dir/"namelists/ROMS" , lac_dir/"namelists/ROMS")
-shutil.move(rmr_dir/"namelists/MARBL" , lac_dir/"namelists/MARBL")
-shutil.move(rmr_dir/"source_mods/ROMS" , lac_dir/"source_mods/ROMS")
+shutil.copytree(rmr_dir/"namelists/ROMS" , lac_dir/"namelists/ROMS")
+shutil.copytree(rmr_dir/"namelists/MARBL" , lac_dir/"namelists/MARBL")
+shutil.copytree(rmr_dir/"source_mods/ROMS" , lac_dir/"source_mods/ROMS")
 
 # Modify the blueprint file to point to local paths whenever we have the files:
 with open('test_blueprint.yaml') as f:
