@@ -90,11 +90,12 @@ class Component(ABC):
 
         NID = len(self.input_datasets)
 
-        base_str += f"\n{NAC} AdditionalCode repositories (query using Component.additional_code)"
+        base_str += f"\n{NAC} AdditionalCode instances (query using Component.additional_code)"
         base_str += (
-            f"\n{NID} InputDataset objects (query using Component.input_datasets"
+            f"\n{NID} Input datasets (query using Component.input_datasets)"
         )
         if hasattr(self, "discretization") and self.discretization is not None:
+            base_str += "\n\nDiscretization:\n"
             base_str += self.discretization.__str__()
         if hasattr(self, "exe_path") and self.exe_path is not None:
             base_str += "\n\nIs compiled: True"
@@ -183,27 +184,20 @@ class Discretization:
 
     def __str__(self) -> str:
         # Discretisation
-        disc_str = ""
+        disc_str=""
+        
         if hasattr(self, "time_step") and self.time_step is not None:
             disc_str += "\ntime_step: " + str(self.time_step) + "s"
-        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            disc_str += (
-                "\nn_procs_x: "
-                + str(self.n_procs_x)
-                + " (Number of x-direction processors)"
-            )
-        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
-            disc_str += (
-                "\nn_procs_y:"
-                + str(self.n_procs_y)
-                + " (Number of y-direction processors)"
-            )
         if hasattr(self, "n_levels") and self.n_levels is not None:
-            disc_str += "\nn_levels:" + str(self.n_levels)
+            disc_str += "\nn_levels: " + str(self.n_levels)
         if hasattr(self, "nx") and self.nx is not None:
-            disc_str += "\nnx:" + str(self.nx)
+            disc_str += "\nnx: " + str(self.nx)
         if hasattr(self, "ny") and self.ny is not None:
-            disc_str += "\nny:" + str(self.ny)
+            disc_str += "\nny: " + str(self.ny)
         if len(disc_str) > 0:
-            disc_str = "\n\nDiscretization info:" + disc_str
+            classname=self.__class__.__name__
+            header = classname
+            disc_str=header+"\n"+"-"*len(classname)+disc_str
+
+            
         return disc_str

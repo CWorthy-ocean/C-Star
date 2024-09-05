@@ -501,3 +501,21 @@ class ROMSDiscretization(Discretization):
             return None
         else:
             return self.n_procs_x * self.n_procs_y
+
+    def __str__(self) -> str:
+
+        disc_str = super().__str__()
+        
+        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
+            disc_str += (
+                "\nn_procs_x: "
+                + str(self.n_procs_x)
+                + " (Number of x-direction processors)"
+            )
+        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
+            disc_str += (
+                "\nn_procs_y: "
+                + str(self.n_procs_y)
+                + " (Number of y-direction processors)"
+            )
+        return disc_str
