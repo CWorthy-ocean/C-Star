@@ -123,7 +123,16 @@ class Component(ABC):
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str=f"{self.__class__.__name__}("
+        repr_str+=f"\nbase_model = ({self.base_model.__class__.__name__} instance)"
+        repr_str+=f"\nadditional_code = ({self.additional_code.__class__.__name__} instance)"
+        repr_str+=f"\ninput_datasets = ["
+        for i,inp in enumerate(self.input_datasets):
+            repr_str+=f"\n    {inp.__class__.__name__} (from {inp.source.basename}),"
+        repr_str+="]"
+        repr_str=repr_str.replace(",]","\n    ]")
+        repr_str+="\n)"
+        return repr_str
 
     @abstractmethod
     def build(self) -> None:

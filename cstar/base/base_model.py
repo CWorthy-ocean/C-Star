@@ -91,7 +91,7 @@ class BaseModel(ABC):
         self.local_config_status = self.get_local_config_status()
 
     def __str__(self) -> str:
-        base_str = f"{self.__class__.__name__} object "
+        base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
         base_str += f"\nsource_repo = {self.source_repo}"
         if self.source_repo == self.default_source_repo:
@@ -117,7 +117,12 @@ class BaseModel(ABC):
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str=f"{self.__class__.__name__}("
+        repr_str+=f"\nsource_repo = {self.source_repo},"
+        repr_str+=f"\ncheckout_target = {self.checkout_target},"
+        repr_str+=f"\nlocal_config_status = {self.local_config_status},"
+        repr_str+="\n)"
+        return repr_str
 
     @property
     @abstractmethod

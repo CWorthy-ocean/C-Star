@@ -130,7 +130,17 @@ class AdditionalCode:
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str=f"{self.__class__.__name__}"
+        repr_str+=f"\nbase_model = ({self.base_model.__class__.__name__} instance),"
+        repr_str+=f"\nlocation = {self.source.location},"
+        if hasattr(self,"checkout_target"):
+            repr_str+=f"\ncheckout_target = {self.checkout_target}"
+        if hasattr(self,"source_mods"):
+            repr_str+=f"\nsource_mods = {self.source_mods},"
+        if hasattr(self,"namelists"):
+            repr_str+=f"\nnamelists = {self.namelists},"
+        repr_str+="\n)"
+        return repr_str
 
     def get(self, local_dir: str | Path) -> None:
         """
