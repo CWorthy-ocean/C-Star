@@ -457,7 +457,7 @@ class Case:
 
             # discretization info (if present)
             discretization_info = {}
-            if hasattr(component, "discretization"):
+            if hasattr(component, "discretization") and component.discretization is not None:
                 for thisattr in vars(component.discretization).keys():
                     discretization_info[thisattr] = getattr(
                         component.discretization, thisattr
