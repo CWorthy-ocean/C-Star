@@ -5,7 +5,7 @@ import dateutil.parser
 from pathlib import Path
 from typing import List, Type, Any, Optional, TYPE_CHECKING
 
-from cstar.base import Component
+from cstar.base.component import Component, Discretization
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar.base.input_dataset import InputDataset
@@ -16,7 +16,7 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
 )
-from cstar.roms.component import ROMSComponent
+from cstar.roms.component import ROMSComponent, ROMSDiscretization
 
 if TYPE_CHECKING:
     from cstar.base import BaseModel
@@ -281,12 +281,25 @@ class Case:
             bp_dict = yaml.safe_load(file)
 
         # Top-level metadata
-        casename = bp_dict["registry_attrs"]["name"]
+        registry_attrs = bp_dict.get("registry_attrs")
+        if registry_attrs is None:
+            raise ValueError(
+                f"No top-level metadata found in blueprint {blueprint}."
+                + "Ensure there is a 'registry_attrs' section containing 'name',and 'valid_date_range' entries"
+            )
 
+        casename = registry_attrs.get("name")
+        if casename is None:
+            raise ValueError(
+                f"'name' entry not found in 'registry_attrs' section of blueprint {blueprint}"
+            )
+
+        valid_date_range = registry_attrs.get("valid_date_range")
         valid_start_date: dt.datetime
         valid_end_date: dt.datetime
-        valid_start_date = bp_dict["registry_attrs"]["valid_date_range"]["start_date"]
-        valid_end_date = bp_dict["registry_attrs"]["valid_date_range"]["end_date"]
+        valid_start_date = valid_date_range.get("start_date")
+        valid_end_date = valid_date_range.get("end_date")
+
         if isinstance(start_date, str):
             start_date = dateutil.parser.parse(start_date)
         if isinstance(end_date, str):
@@ -295,22 +308,28 @@ class Case:
         components: List["Component"]
         components = []
 
-        for component_info in bp_dict["components"]:
+        if "components" not in bp_dict.keys():
+            raise ValueError(
+                f"No 'components' entry found in blueprint {blueprint}. "
+                + "Cannot create a Case with no components!"
+            )
+        for component in bp_dict["components"]:
+            component_info = component.get("component")
             component_kwargs: dict[str, Any] = {}
 
-            # Use "ThisComponent" as a reference that is set here and used throughout
-            # QUESTION : is this the best way to handle the need for different subclasses here?
-
-            base_model_info = component_info["component"]["base_model"]
             ThisComponent: Type["Component"]
             ThisBaseModel: Type["BaseModel"]
+            ThisDiscretization: Type["Discretization"]
 
+            # Construct the BaseModel instance
+            base_model_info = component_info.get("base_model")
             match base_model_info["name"].casefold():
                 case "roms":
                     from cstar.roms import ROMSBaseModel, ROMSComponent
 
                     ThisComponent = ROMSComponent
                     ThisBaseModel = ROMSBaseModel
+                    ThisDiscretization = ROMSDiscretization
                 case "marbl":
                     from cstar.marbl import MARBLBaseModel, MARBLComponent
 
@@ -323,152 +342,56 @@ class Case:
                         + 'Currently supported values are "ROMS" and "MARBL"'
                     )
 
-            # Construct the BaseModel instance
             base_model = ThisBaseModel(
                 base_model_info["source_repo"], base_model_info["checkout_target"]
             )
             component_kwargs["base_model"] = base_model
 
-            # Get discretization info:
-            if "discretization" not in component_info["component"].keys():
-                discretization_info = None
-            else:
-                discretization_info = component_info["component"]["discretization"]
-                for key in list(discretization_info.keys()):
-                    component_kwargs[key] = discretization_info[key]
+            # Construct the Discretization instance
+            discretization: Optional[Discretization] = None
+            if "discretization" in component_info.keys():
+                discretization_info = component_info.get("discretization")
+                discretization = ThisDiscretization(**discretization_info)
+                component_kwargs["discretization"] = discretization
 
             # Construct any AdditionalCode instances
-            additional_code: Optional[AdditionalCode]
-            if "additional_code" not in component_info["component"].keys():
-                additional_code = None
-            else:
-                additional_code_info = component_info["component"]["additional_code"]
-
-                location = additional_code_info.get("location")
-                checkout_target = additional_code_info.get("checkout_target", None)
-                source_mods = (
-                    [f for f in additional_code_info["source_mods"]]
-                    if "source_mods" in additional_code_info.keys()
-                    else None
-                )
-
-                namelists = (
-                    [f for f in additional_code_info["namelists"]]
-                    if "namelists" in additional_code_info.keys()
-                    else None
-                )
-
+            additional_code: Optional[AdditionalCode] = None
+            if "additional_code" in component_info.keys():
+                additional_code_info = component_info.get("additional_code")
                 additional_code = AdditionalCode(
-                    base_model=base_model,
-                    location=location,
-                    checkout_target=checkout_target,
-                    source_mods=source_mods,
-                    namelists=namelists,
+                    base_model=base_model, **additional_code_info
                 )
-
                 component_kwargs["additional_code"] = additional_code
 
             # Construct any InputDataset instances:
             input_datasets: List[InputDataset] | None
-            if "input_datasets" not in component_info["component"].keys():
-                input_datasets = None
-            else:
-                input_datasets = []
-                input_dataset_info = component_info["component"]["input_datasets"]
-                # ModelGrid
-                if "model_grid" not in input_dataset_info.keys():
-                    model_grid = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    model_grid = [
-                        ROMSModelGrid(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                        )
-                        for f in input_dataset_info["model_grid"]["files"]
-                    ]
-                    input_datasets += model_grid
-                else:
-                    raise NotImplementedError("Model grid is only supported for ROMS")
+            input_dataset_info = component_info.get("input_datasets", {})
+            input_datasets = []
 
-                # InitialConditions
-                if "initial_conditions" not in input_dataset_info.keys():
-                    initial_conditions = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    initial_conditions = [
-                        ROMSInitialConditions(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                            start_date=f.get("start_date", None),
-                            end_date=f.get("end_date", None),
-                        )
-                        for f in input_dataset_info["initial_conditions"]["files"]
-                    ]
-                    input_datasets += initial_conditions
-                else:
-                    raise NotImplementedError(
-                        "Initial conditions are only supported for ROMS"
-                    )
+            if base_model.name.casefold() == "roms":
+                idtype_class_map = {
+                    "model_grid": ROMSModelGrid,
+                    "initial_conditions": ROMSInitialConditions,
+                    "tidal_forcing": ROMSTidalForcing,
+                    "boundary_forcing": ROMSBoundaryForcing,
+                    "surface_forcing": ROMSSurfaceForcing,
+                }
 
-                # TidalForcing
-                if "tidal_forcing" not in input_dataset_info.keys():
-                    tidal_forcing = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    tidal_forcing = [
-                        ROMSTidalForcing(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                        )
-                        for f in input_dataset_info["tidal_forcing"]["files"]
-                    ]
-                    input_datasets += tidal_forcing
-                else:
-                    raise NotImplementedError(
-                        "Tidal forcing is only supported for ROMS"
-                    )
+                ## Loop over input_datasets entries,initialise appropriate class, append to list
+                for idtype, dataset_info in input_dataset_info.items():
+                    if idtype in idtype_class_map:
+                        # Get the class to be instantiated
+                        ThisInputDataset = idtype_class_map[idtype]
 
-                # BoundaryForcing
-                if "boundary_forcing" not in input_dataset_info.keys():
-                    boundary_forcing = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    boundary_forcing = [
-                        ROMSBoundaryForcing(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                            start_date=f.get("start_date", None),
-                            end_date=f.get("end_date", None),
+                        for file_info in dataset_info["files"]:
+                            input_datasets.append(
+                                ThisInputDataset(base_model=base_model, **file_info)
+                            )
+                    else:
+                        raise ValueError(
+                            f"InputDataset type {idtype} in {blueprint} not recognized"
                         )
-                        for f in input_dataset_info["boundary_forcing"]["files"]
-                    ]
-                    input_datasets += boundary_forcing
-                else:
-                    raise NotImplementedError(
-                        "Boundary forcing is only supported for ROMS"
-                    )
-
-                # SurfaceForcing
-                if "surface_forcing" not in input_dataset_info.keys():
-                    surface_forcing = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    surface_forcing = [
-                        ROMSSurfaceForcing(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                            start_date=f.get("start_date", None),
-                            end_date=f.get("end_date", None),
-                        )
-                        for f in input_dataset_info["surface_forcing"]["files"]
-                    ]
-                    input_datasets += surface_forcing
-                else:
-                    raise NotImplementedError(
-                        "Surface forcing is only supported for ROMS"
-                    )
-
+            if len(input_datasets) > 0:
                 component_kwargs["input_datasets"] = input_datasets
 
             components.append(ThisComponent(**component_kwargs))
@@ -534,19 +457,11 @@ class Case:
 
             # discretization info (if present)
             discretization_info = {}
-            if hasattr(component, "nx"):
-                discretization_info["nx"] = component.nx
-            if hasattr(component, "ny"):
-                discretization_info["ny"] = component.ny
-            if hasattr(component, "n_levels"):
-                discretization_info["n_levels"] = component.n_levels
-            if hasattr(component, "n_procs_x"):
-                discretization_info["n_procs_x"] = component.n_procs_x
-            if hasattr(component, "n_procs_y"):
-                discretization_info["n_procs_y"] = component.n_procs_y
-            if hasattr(component, "time_step"):
-                discretization_info["time_step"] = component.time_step
-
+            if hasattr(component, "discretization") and component.discretization is not None:
+                for thisattr in vars(component.discretization).keys():
+                    discretization_info[thisattr] = getattr(
+                        component.discretization, thisattr
+                    )
             if len(discretization_info) > 0:
                 component_info["discretization"] = discretization_info
 
@@ -573,36 +488,40 @@ class Case:
             # InputDataset
             input_datasets = component.input_datasets
 
-            if isinstance(input_datasets, list):
-                input_dataset_info: dict = {}
-                for ind in input_datasets:
-                    # Determine what kind of input dataset we are adding
-                    if isinstance(ind, ROMSModelGrid):
-                        dct_key = "model_grid"
-                    elif isinstance(ind, ROMSInitialConditions):
-                        dct_key = "initial_conditions"
-                    elif isinstance(ind, ROMSTidalForcing):
-                        dct_key = "tidal_forcing"
-                    elif isinstance(ind, ROMSBoundaryForcing):
-                        dct_key = "boundary_forcing"
-                    elif isinstance(ind, ROMSSurfaceForcing):
-                        dct_key = "surface_forcing"
-                    if dct_key not in input_dataset_info.keys():
-                        input_dataset_info[dct_key] = {}
+            input_dataset_info: dict = {}
+            for ind in input_datasets:
+                # Determine what kind of input dataset we are adding
+                if isinstance(ind, ROMSModelGrid):
+                    dct_key = "model_grid"
+                elif isinstance(ind, ROMSInitialConditions):
+                    dct_key = "initial_conditions"
+                elif isinstance(ind, ROMSTidalForcing):
+                    dct_key = "tidal_forcing"
+                elif isinstance(ind, ROMSBoundaryForcing):
+                    dct_key = "boundary_forcing"
+                elif isinstance(ind, ROMSSurfaceForcing):
+                    dct_key = "surface_forcing"
+                else:
+                    raise ValueError(f"Unknown dataset type: {type(ind)}")
 
-                    # Create a dictionary of file_info for each dataset file:
-                    if "files" not in input_dataset_info[dct_key].keys():
-                        input_dataset_info[dct_key]["files"] = []
-                    file_info = {}
-                    file_info["location"] = ind.source.location
-                    if hasattr(ind, "file_hash") and (ind.file_hash is not None):
-                        file_info["hash"] = ind.file_hash
-                    if hasattr(ind, "start_date") and (ind.start_date is not None):
-                        file_info["start_date"] = str(ind.start_date)
-                    if hasattr(ind, "end_date") and (ind.end_date is not None):
-                        file_info["end_date"] = str(ind.end_date)
+                # If there is not already an instance of this input dataset type,
+                # add an empty dict as the key so we can access/build it
+                if dct_key not in input_dataset_info.keys():
+                    input_dataset_info[dct_key] = {}
 
-                    input_dataset_info[dct_key]["files"].append(file_info)
+                # Create a dictionary of file_info for each dataset file:
+                if "files" not in input_dataset_info[dct_key].keys():
+                    input_dataset_info[dct_key]["files"] = []
+                file_info = {}
+                file_info["location"] = ind.source.location
+                if hasattr(ind, "file_hash") and (ind.file_hash is not None):
+                    file_info["file_hash"] = ind.file_hash
+                if hasattr(ind, "start_date") and (ind.start_date is not None):
+                    file_info["start_date"] = str(ind.start_date)
+                if hasattr(ind, "end_date") and (ind.end_date is not None):
+                    file_info["end_date"] = str(ind.end_date)
+
+                input_dataset_info[dct_key]["files"].append(file_info)
 
                 component_info["input_datasets"] = input_dataset_info
 
@@ -736,7 +655,9 @@ class Case:
                     run_length_seconds = int(
                         (self.end_date - self.start_date).total_seconds()
                     )
-                    ntimesteps = run_length_seconds // component.time_step
+                    ntimesteps = (
+                        run_length_seconds // component.discretization.time_step
+                    )
                 else:
                     ntimesteps = None
 
