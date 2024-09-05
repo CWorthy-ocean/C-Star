@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
-from cstar.base import Component
+from cstar.base.component import Component, Discretization
 from cstar.base.input_dataset import InputDataset
 
 from cstar.roms.input_dataset import (
@@ -73,14 +73,9 @@ class ROMSComponent(Component):
     def __init__(
         self,
         base_model: "ROMSBaseModel",
-        time_step: int,
         additional_code: AdditionalCode,
+        discretization: "ROMSDiscretization",
         input_datasets: Optional[List["InputDataset"]] = [],
-        nx: Optional[int] = None,
-        ny: Optional[int] = None,
-        n_levels: Optional[int] = None,
-        n_procs_x: Optional[int] = None,
-        n_procs_y: Optional[int] = None,
     ):
         """
         Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
@@ -114,23 +109,8 @@ class ROMSComponent(Component):
         self.base_model: "ROMSBaseModel" = base_model
         self.additional_code: AdditionalCode = additional_code
         self.input_datasets: List["InputDataset"] = input_datasets or []
-
-        # QUESTION: should all these attrs be passed in as a single "discretization" arg of type dict?
-        self.time_step: int = time_step
-        self.nx: Optional[int] = nx
-        self.ny: Optional[int] = ny
-        self.n_levels: Optional[int] = n_levels
-        self.n_procs_x: Optional[int] = n_procs_x
-        self.n_procs_y: Optional[int] = n_procs_y
+        self.discretization = discretization
         self.exe_path: Optional[Path] = None
-
-    @property
-    def n_procs_tot(self) -> Optional[int]:
-        """Total number of processors required by this ROMS configuration"""
-        if (self.n_procs_x is None) or (self.n_procs_y is None):
-            return None
-        else:
-            return self.n_procs_x * self.n_procs_y
 
     def build(self) -> None:
         """
@@ -215,9 +195,9 @@ class ROMSComponent(Component):
                 partdir.mkdir(parents=True, exist_ok=True)
                 subprocess.run(
                     "partit "
-                    + str(self.n_procs_x)
+                    + str(self.discretization.n_procs_x)
                     + " "
-                    + str(self.n_procs_y)
+                    + str(self.discretization.n_procs_y)
                     + " ../"
                     + fname,
                     cwd=partdir,
@@ -320,7 +300,7 @@ class ROMSComponent(Component):
             _replace_text_in_file(
                 mod_namelist,
                 "__TIMESTEP_PLACEHOLDER__",
-                str(self.time_step),
+                str(self.discretization.time_step),
             )
 
         else:
@@ -352,13 +332,14 @@ class ROMSComponent(Component):
                     exec_pfx = "mpirun"
 
             roms_exec_cmd = (
-                f"{exec_pfx} -n {self.n_procs_tot} {self.exe_path} " + f"{mod_namelist}"
+                f"{exec_pfx} -n {self.discretization.n_procs_tot} {self.exe_path} "
+                + f"{mod_namelist}"
             )
 
-            if self.n_procs_tot is not None:
+            if self.discretization.n_procs_tot is not None:
                 if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
                     nnodes, ncores = _calculate_node_distribution(
-                        self.n_procs_tot, _CSTAR_SYSTEM_CORES_PER_NODE
+                        self.discretization.n_procs_tot, _CSTAR_SYSTEM_CORES_PER_NODE
                     )
                 else:
                     raise ValueError(
@@ -471,3 +452,26 @@ class ROMSComponent(Component):
                     cwd=out_path,
                     shell=True,
                 )
+
+
+class ROMSDiscretization(Discretization):
+    def __init__(
+        self,
+        time_step: int,
+        nx: Optional[int] = None,
+        ny: Optional[int] = None,
+        n_levels: Optional[int] = None,
+        n_procs_x: Optional[int] = None,
+        n_procs_y: Optional[int] = None,
+    ):
+        super().__init__(time_step, nx, ny, n_levels)
+        self.n_procs_x = n_procs_x
+        self.n_procs_y = n_procs_y
+
+    @property
+    def n_procs_tot(self) -> Optional[int]:
+        """Total number of processors required by this ROMS configuration"""
+        if (self.n_procs_x is None) or (self.n_procs_y is None):
+            return None
+        else:
+            return self.n_procs_x * self.n_procs_y

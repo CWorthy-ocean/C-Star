@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Any, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 from cstar.base.base_model import BaseModel
 from cstar.base.input_dataset import InputDataset
@@ -37,7 +37,12 @@ class Component(ABC):
         Execute any post-processing actions associated with this component
     """
 
-    def __init__(self, **kwargs: Any):
+    def __init__(
+        self,
+        base_model: BaseModel,
+        additional_code: Optional["AdditionalCode"],
+        input_datasets: List[InputDataset] = [],
+    ):
         """
         Initialize a Component object from a base model and any additional_code or input_datasets
 
@@ -59,19 +64,21 @@ class Component(ABC):
             An intialized Component object
         """
 
-        # TODO: do Type checking here
-        if "base_model" not in kwargs or not isinstance(
-            kwargs["base_model"], BaseModel
-        ):
-            raise ValueError(
-                "base_model must be provided and must be an instance of BaseModel"
-            )
-        self.base_model: BaseModel = kwargs["base_model"]
+        # if "base_model" not in kwargs or not isinstance(
+        #     kwargs["base_model"], BaseModel
+        # ):
+        #     raise ValueError(
+        #         "base_model must be provided and must be an instance of BaseModel"
+        #     )
+        # self.base_model: BaseModel = kwargs["base_model"]
+        self.base_model = base_model
 
-        self.additional_code: Optional["AdditionalCode"] = kwargs.get(
-            "additional_code", None
-        )
-        self.input_datasets: List[InputDataset] = kwargs.get("input_datasets") or []
+        # self.additional_code: Optional["AdditionalCode"] = kwargs.get(
+        #     "additional_code", None
+        # )
+        self.additional_code: Optional["AdditionalCode"] = additional_code or None
+        # self.input_datasets: List[InputDataset] = kwargs.get("input_datasets") or []
+        self.input_datasets: List[InputDataset] = list(input_datasets)
 
     def __str__(self) -> str:
         # Header
@@ -158,3 +165,21 @@ class Component(ABC):
         This abstract method will be implemented differently by different Component types.
         """
         pass
+
+
+class Discretization(ABC):
+    """
+    Hold discretization information about a Component.
+    """
+
+    def __init__(
+        self,
+        time_step: int,
+        nx: Optional[int] = None,
+        ny: Optional[int] = None,
+        n_levels: Optional[int] = None,
+    ):
+        self.time_step = time_step
+        self.nx = nx
+        self.ny = ny
+        self.n_levels = n_levels

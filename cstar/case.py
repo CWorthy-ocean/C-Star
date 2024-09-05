@@ -5,7 +5,7 @@ import dateutil.parser
 from pathlib import Path
 from typing import List, Type, Any, Optional, TYPE_CHECKING
 
-from cstar.base import Component
+from cstar.base.component import Component, Discretization
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar.base.input_dataset import InputDataset
@@ -16,7 +16,7 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
 )
-from cstar.roms.component import ROMSComponent
+from cstar.roms.component import ROMSComponent, ROMSDiscretization
 
 if TYPE_CHECKING:
     from cstar.base import BaseModel
@@ -281,12 +281,25 @@ class Case:
             bp_dict = yaml.safe_load(file)
 
         # Top-level metadata
-        casename = bp_dict["registry_attrs"]["name"]
+        registry_attrs = bp_dict.get("registry_attrs")
+        if registry_attrs is None:
+            raise ValueError(
+                f"No top-level metadata found in blueprint {blueprint}."
+                + "Ensure there is a 'registry_attrs' section containing 'name',and 'valid_date_range' entries"
+            )
 
+        casename = registry_attrs.get("name")
+        if casename is None:
+            raise ValueError(
+                f"'name' entry not found in 'registry_attrs' section of blueprint {blueprint}"
+            )
+
+        valid_date_range = registry_attrs.get("valid_date_range")
         valid_start_date: dt.datetime
         valid_end_date: dt.datetime
-        valid_start_date = bp_dict["registry_attrs"]["valid_date_range"]["start_date"]
-        valid_end_date = bp_dict["registry_attrs"]["valid_date_range"]["end_date"]
+        valid_start_date = valid_date_range.get("start_date")
+        valid_end_date = valid_date_range.get("end_date")
+
         if isinstance(start_date, str):
             start_date = dateutil.parser.parse(start_date)
         if isinstance(end_date, str):
@@ -295,15 +308,20 @@ class Case:
         components: List["Component"]
         components = []
 
-        for component_info in bp_dict["components"]:
+        if "components" not in bp_dict.keys():
+            raise ValueError(
+                f"No 'components' entry found in blueprint {blueprint}. "
+                + "Cannot create a Case with no components!"
+            )
+        for component in bp_dict["components"]:
+            component_info = component.get("component")
             component_kwargs: dict[str, Any] = {}
 
-            # Use "ThisComponent" as a reference that is set here and used throughout
-            # QUESTION : is this the best way to handle the need for different subclasses here?
+            base_model_info = component_info.get("base_model")
 
-            base_model_info = component_info["component"]["base_model"]
             ThisComponent: Type["Component"]
             ThisBaseModel: Type["BaseModel"]
+            ThisDiscretization: Type["Discretization"]
 
             match base_model_info["name"].casefold():
                 case "roms":
@@ -311,6 +329,7 @@ class Case:
 
                     ThisComponent = ROMSComponent
                     ThisBaseModel = ROMSBaseModel
+                    ThisDiscretization = ROMSDiscretization
                 case "marbl":
                     from cstar.marbl import MARBLBaseModel, MARBLComponent
 
@@ -329,20 +348,17 @@ class Case:
             )
             component_kwargs["base_model"] = base_model
 
-            # Get discretization info:
-            if "discretization" not in component_info["component"].keys():
-                discretization_info = None
-            else:
-                discretization_info = component_info["component"]["discretization"]
-                for key in list(discretization_info.keys()):
-                    component_kwargs[key] = discretization_info[key]
+            # Construct the Discretization instance
+            discretization: Optional[Discretization] = None
+            if "discretization" in component_info.keys():
+                discretization_info = component_info.get("discretization")
+                discretization = ThisDiscretization(**discretization_info)
+                component_kwargs["discretization"] = discretization
 
             # Construct any AdditionalCode instances
-            additional_code: Optional[AdditionalCode]
-            if "additional_code" not in component_info["component"].keys():
-                additional_code = None
-            else:
-                additional_code_info = component_info["component"]["additional_code"]
+            additional_code: Optional[AdditionalCode] = None
+            if "additional_code" in component_info.keys():
+                additional_code_info = component_info.get("additional_code")
 
                 location = additional_code_info.get("location")
                 checkout_target = additional_code_info.get("checkout_target", None)
@@ -370,11 +386,11 @@ class Case:
 
             # Construct any InputDataset instances:
             input_datasets: List[InputDataset] | None
-            if "input_datasets" not in component_info["component"].keys():
+            if "input_datasets" not in component_info.keys():
                 input_datasets = None
             else:
                 input_datasets = []
-                input_dataset_info = component_info["component"]["input_datasets"]
+                input_dataset_info = component_info.get("input_datasets")
                 # ModelGrid
                 if "model_grid" not in input_dataset_info.keys():
                     model_grid = None
@@ -534,19 +550,11 @@ class Case:
 
             # discretization info (if present)
             discretization_info = {}
-            if hasattr(component, "nx"):
-                discretization_info["nx"] = component.nx
-            if hasattr(component, "ny"):
-                discretization_info["ny"] = component.ny
-            if hasattr(component, "n_levels"):
-                discretization_info["n_levels"] = component.n_levels
-            if hasattr(component, "n_procs_x"):
-                discretization_info["n_procs_x"] = component.n_procs_x
-            if hasattr(component, "n_procs_y"):
-                discretization_info["n_procs_y"] = component.n_procs_y
-            if hasattr(component, "time_step"):
-                discretization_info["time_step"] = component.time_step
-
+            if hasattr(component, "discretization"):
+                for thisattr in vars(component.discretization).keys():
+                    discretization_info[thisattr] = getattr(
+                        component.discretization, thisattr
+                    )
             if len(discretization_info) > 0:
                 component_info["discretization"] = discretization_info
 
@@ -736,7 +744,9 @@ class Case:
                     run_length_seconds = int(
                         (self.end_date - self.start_date).total_seconds()
                     )
-                    ntimesteps = run_length_seconds // component.time_step
+                    ntimesteps = (
+                        run_length_seconds // component.discretization.time_step
+                    )
                 else:
                     ntimesteps = None
 
