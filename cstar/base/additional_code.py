@@ -34,7 +34,7 @@ class AdditionalCode:
         Describes the location and type of source data (e.g. repository,directory)
     checkout_target: Optional, str
         Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
-    source_mods: Optional, str or list of strs
+    source_mods: Optional, list of strs
         Path(s) relative to the top level of `source.location` to any code that is needed to compile a unique instance of the base model
     namelists: str or list of strs
         Path(s) relative to the top level of `source.location` to any code that is needed at runtime for the base model
@@ -86,7 +86,6 @@ class AdditionalCode:
 
         """
 
-        # TODO:  Type check here
         self.base_model: BaseModel = base_model
         self.source: DataSource = DataSource(location)
         self.checkout_target: Optional[str] = checkout_target

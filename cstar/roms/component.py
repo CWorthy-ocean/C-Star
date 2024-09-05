@@ -33,8 +33,7 @@ class ROMSComponent(Component):
     """
     An implementation of the Component class for the UCLA Regional Ocean Modeling System
 
-    This subclass has unique attributes concerning parallelization, and ROMS-specific implementations
-    of the build(), pre_run(), run(), and post_run() methods.
+    This subclass contains ROMS-specific implementations of the build(), pre_run(), run(), and post_run() methods.
 
     Attributes:
     -----------
@@ -46,17 +45,9 @@ class ROMSComponent(Component):
     additional_code: AdditionalCode or list of AdditionalCodes
         Additional code contributing to a unique instance of this ROMS run
         e.g. namelists, source modifications, etc.
-    time_step: int
-        The time step with which to run ROMS in this configuration
-    nx,ny,n_levels: int
-        The number of x and y points and vertical levels in the domain associated with this object
-    n_procs_x,n_procs_y: int
-        The number of processes following the x and y directions, for running in parallel
-
-    Properties:
-    -----------
-    n_procs_tot: int
-        The value of n_procs_x * n_procs_y
+    discretization: ROMSDiscretization
+        Any information related to discretization of this ROMSComponent
+        e.g. time step, number of levels, number of CPUs following each direction, etc.
 
     Methods:
     --------
@@ -69,6 +60,8 @@ class ROMSComponent(Component):
     post_run()
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
     """
+
+    discretization: "ROMSDiscretization"  # mypy misses type hint in constructor and assumes Discretization|None
 
     def __init__(
         self,
@@ -85,20 +78,15 @@ class ROMSComponent(Component):
         base_model: ROMSBaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        time_step: int
-            The time step with which to run ROMS in this configuration
         input_datasets:  list of InputDatasets
             Any spatiotemporal data needed to run this instance of the base model
             e.g. initial conditions, surface forcing, etc.
         additional_code: AdditionalCode
             Additional code contributing to a unique instance of a base model,
             e.g. namelists, source modifications, etc.
-        nx,ny,n_levels: int
-            The number of x and y points and vertical levels in the domain associated with this object
-        n_procs_x,n_procs_y: int
-            The number of processes following the x and y directions, for running in parallel
-        exe_path:
-            The path to the ROMS executable, set when `build()` is called
+        discretization: ROMSDiscretization
+            Any information related to discretization of this ROMSComponent
+            e.g. time step, number of levels, number of CPUs following each direction, etc.
 
         Returns:
         --------
@@ -111,6 +99,8 @@ class ROMSComponent(Component):
         self.input_datasets: List["InputDataset"] = input_datasets or []
         self.discretization = discretization
         self.exe_path: Optional[Path] = None
+
+        assert isinstance(self.discretization, ROMSDiscretization)
 
     def build(self) -> None:
         """
@@ -455,6 +445,22 @@ class ROMSComponent(Component):
 
 
 class ROMSDiscretization(Discretization):
+    """
+    An implementation of the Discretization class for ROMS.
+
+
+    Additional attributes:
+    ----------------------
+    n_procs_x,n_procs_y: int
+        The number of processes following the x and y directions, for running in parallel
+
+    Properties:
+    -----------
+    n_procs_tot: int
+        The value of n_procs_x * n_procs_y
+
+    """
+
     def __init__(
         self,
         time_step: int,
@@ -464,6 +470,26 @@ class ROMSDiscretization(Discretization):
         n_procs_x: Optional[int] = None,
         n_procs_y: Optional[int] = None,
     ):
+        """
+        Initialize a ROMSDiscretization object from basic discretization parameters
+
+        Parameters:
+        -----------
+        time_step: int
+            The time step with which to run the Component
+        nx,ny,n_levels: int
+            The number of x and y points and vertical levels in the domain associated with this object
+        n_procs_x,n_procs_y: int
+            The number of processes following the x and y directions, for running in parallel
+
+
+        Returns:
+        --------
+        ROMSDiscretization:
+            An initialized ROMSDiscretization object
+
+        """
+
         super().__init__(time_step, nx, ny, n_levels)
         self.n_procs_x = n_procs_x
         self.n_procs_y = n_procs_y
