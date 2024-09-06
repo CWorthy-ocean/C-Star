@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cstar"
+version = "0.0.0"
+description = "Computational systems for tracking ocean carbon"
+readme = "README.md"  # Add if you have a README.md
+requires-python = ">=3.10"
+license = { text = "GNU GPL" }
+authors = [
+    { name = "Dafydd Stephenson", email = "dafydd@cworthy.org" },
+    { name = "Thomas Nicholas", email = "tom@cworthy.org" },
+    { name = "Matt Long", email = "matt@cworthy.org" }
+]
+urls = { "Homepage" = "https://github.com/CWorthy-ocean/C-Star" }
+
+keywords = ["MCDR", "CDR"]
+
+[project.optional-dependencies]
+# Example, you can define extra dependencies here
+# dev = ["pytest", "pytest-runner"]
+
+[tool.setuptools.packages.find]
+# Automatically find the packages
+where = ["."]
+include = ["cstar"]
+
+[tool.setuptools]
+include-package-data = true
