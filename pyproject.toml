@@ -2,32 +2,32 @@
 name = "cstar"
 version = "0.0.0"
 description = "Computational systems for tracking ocean carbon"
-readme = "README.md"  
-repository = "https://github.com/CWorthy-ocean/C-Star"
-homepage = "https://www.cworthy.org"
+readme = "README.md"
+urls = { repository = "https://github.com/CWorthy-ocean/C-Star", homepage = "https://www.cworthy.org" }
+
 authors = [
     { name = "Dafydd Stephenson", email = "dafydd@cworthy.org" },
     { name = "Thomas Nicholas", email = "tom@cworthy.org" },
-    { name = "Nora Loose", email = "nora@cowrthy.org" },
+    { name = "Nora Loose", email = "nora@cworthy.org" },
     { name = "Matt Long", email = "matt@cworthy.org" }
 ]
-license = { text = "GNU GPL" }
+license = { text = "GPL-3.0-only" }
 
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU GPL",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Oceanography"
 ]
 requires-python = ">=3.10"
+
 dependencies = [
     "python-dateutil>=2.8.2",
     "PyYAML==6.0.2",
     "pooch>=1.8.1"
 ]
-
 
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
@@ -35,19 +35,20 @@ keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
-#[project.optional-dependencies]
-# dev = ["pytest", "pytest-runner"]
+[project.optional-dependencies]
+dev = []
 
 # Configuration for mypy type checker
 [tool.mypy]
+# return to this one in a later PR:
+#strict = true
+ignore_missing_imports = true 
 exclude = "properties|asv_bench|docs"
-ignore_missing_imports = true
-strict = true
 
 # Configuration for ruff linter and formatter
 [tool.ruff]
 # return to these 3 in a later PR:
-#line-length = 120 
+#line-length = 79 
 #lint.select = ["E", "F", "I", "B"]
 #lint.ignore = ["E203"]
 fix = true
