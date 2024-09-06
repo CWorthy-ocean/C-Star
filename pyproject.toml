@@ -1,31 +1,65 @@
-[build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "cstar"
 version = "0.0.0"
 description = "Computational systems for tracking ocean carbon"
-readme = "README.md"  # Add if you have a README.md
-requires-python = ">=3.10"
-license = { text = "GNU GPL" }
+readme = "README.md"  
+repository = "https://github.com/CWorthy-ocean/C-Star"
+homepage = "https://www.cworthy.org"
 authors = [
     { name = "Dafydd Stephenson", email = "dafydd@cworthy.org" },
     { name = "Thomas Nicholas", email = "tom@cworthy.org" },
+    { name = "Nora Loose", email = "nora@cowrthy.org" },
     { name = "Matt Long", email = "matt@cworthy.org" }
 ]
-urls = { "Homepage" = "https://github.com/CWorthy-ocean/C-Star" }
+license = { text = "GNU GPL" }
 
-keywords = ["MCDR", "CDR"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU GPL",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Oceanography"
+]
+requires-python = ">=3.10"
+dependencies = [
+    "python-dateutil>=2.8.2",
+    "PyYAML==6.0.2",
+    "pooch>=1.8.1"
+]
 
-[project.optional-dependencies]
-# Example, you can define extra dependencies here
+
+keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+#[project.optional-dependencies]
 # dev = ["pytest", "pytest-runner"]
+
+# Configuration for mypy type checker
+[tool.mypy]
+exclude = "properties|asv_bench|docs"
+ignore_missing_imports = true
+strict = true
+
+# Configuration for ruff linter and formatter
+[tool.ruff]
+# return to these 3 in a later PR:
+#line-length = 120 
+#lint.select = ["E", "F", "I", "B"]
+#lint.ignore = ["E203"]
+fix = true
+
+[tool.pre-commit]
+config = ".pre-commit-config.yaml"
 
 [tool.setuptools.packages.find]
 # Automatically find the packages
 where = ["."]
 include = ["cstar"]
+exclude = ["tests*", "docs*", "examples*"]
 
 [tool.setuptools]
 include-package-data = true
