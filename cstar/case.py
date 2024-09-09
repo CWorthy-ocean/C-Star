@@ -8,6 +8,7 @@ from typing import List, Type, Any, Optional, TYPE_CHECKING
 from cstar.base.component import Component, Discretization
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar.base.utils import _dict_to_tree
 from cstar.base.input_dataset import InputDataset
 from cstar.roms.input_dataset import (
     ROMSModelGrid,
@@ -241,7 +242,49 @@ class Case:
         repr_str = repr_str.strip(", ")
         repr_str += "\n]"
         repr_str += ")"
+
         return repr_str
+
+    def tree(self):
+        """
+        Represent this Case using a `tree`-style visualisation
+
+        This function prints a representation of the Case to stdout.
+        It represents the directory structure that Case.caseroot takes after calling Case.setup(),
+        but does not require the user to have already called Case.setup().
+
+        """
+        # Build a dictionary of files connected to this case
+        case_tree_dict = {}
+        for component in self.components:
+            if len(component.input_datasets) > 0:
+                case_tree_dict.setdefault("input_datasets", {})
+                case_tree_dict["input_datasets"][component.base_model.name] = [
+                    dataset.source.basename for dataset in component.input_datasets
+                ]
+            if hasattr(component, "additional_code") and (
+                component.additional_code is not None
+            ):
+                if component.additional_code.namelists is not None:
+                    case_tree_dict.setdefault("namelists", {})
+                    case_tree_dict["namelists"][component.base_model.name] = [
+                        namelist.split("/")[-1]
+                        for namelist in component.additional_code.namelists
+                    ]
+                if component.additional_code.modified_namelists is not None:
+                    case_tree_dict.setdefault("namelists", {})
+                    case_tree_dict["namelists"][component.base_model.name] += [
+                        namelist.split("/")[-1]
+                        for namelist in component.additional_code.modified_namelists
+                    ]
+                if component.additional_code.source_mods is not None:
+                    case_tree_dict.setdefault("source_mods", {})
+                    case_tree_dict["source_mods"][component.base_model.name] = [
+                        sourcemod.split("/")[-1]
+                        for sourcemod in component.additional_code.source_mods
+                    ]
+
+        print(f"{self.caseroot}\n{_dict_to_tree(case_tree_dict)}")
 
     @classmethod
     def from_blueprint(
