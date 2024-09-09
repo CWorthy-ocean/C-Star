@@ -1,0 +1,60 @@
+[project]
+name = "cstar"
+version = "0.0.0"
+description = "Computational systems for tracking ocean carbon"
+readme = "README.md"
+urls = { repository = "https://github.com/CWorthy-ocean/C-Star", homepage = "https://www.cworthy.org" }
+
+authors = [
+    { name = "Dafydd Stephenson", email = "dafydd@cworthy.org" },
+    { name = "Thomas Nicholas", email = "tom@cworthy.org" },
+    { name = "Nora Loose", email = "nora@cworthy.org" },
+    { name = "Matt Long", email = "matt@cworthy.org" }
+]
+license = { text = "GPL-3.0-only" }
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Oceanography"
+]
+requires-python = ">=3.10"
+
+dependencies = [
+    "python-dateutil>=2.8.2",
+    "PyYAML==6.0.2",
+    "pooch>=1.8.1"
+]
+
+keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+dev = []
+
+# Configuration for mypy type checker
+[tool.mypy]
+ignore_missing_imports = true 
+exclude = "properties|asv_bench|docs"
+
+# Configuration for ruff linter and formatter
+[tool.ruff]
+fix = true
+
+[tool.pre-commit]
+config = ".pre-commit-config.yaml"
+
+[tool.setuptools.packages.find]
+# Automatically find the packages
+where = ["."]
+include = ["cstar"]
+exclude = ["tests*", "docs*", "examples*"]
+
+[tool.setuptools]
+include-package-data = true
