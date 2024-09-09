@@ -110,7 +110,9 @@ class Component(ABC):
         for i, inp in enumerate(self.input_datasets):
             repr_str += f"\n    <{inp.__class__.__name__} from {inp.source.basename}>, "
         repr_str = repr_str.strip(", ")
-        repr_str += "]\n)"
+        repr_str += "],"
+        repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
+        repr_str += "\n)"
 
         return repr_str
 
