@@ -203,9 +203,8 @@ class Case:
         self.is_setup: bool = self.check_is_setup()
 
     def __str__(self) -> str:
-        base_str = "------------------"
-        base_str += "\nC-Star case object "
-        base_str += "\n------------------"
+        base_str = "C-Star Case\n"
+        base_str += "-" * (len(base_str) - 1)
 
         base_str += f"\nName: {self.name}"
         base_str += f"\ncaseroot: {self.caseroot}"
@@ -215,22 +214,34 @@ class Case:
         base_str += "\nValid date range:"
         base_str += f"\nvalid_start_date: {self.valid_start_date}"
         base_str += f"\nvalid_end_date: {self.valid_end_date}"
-        base_str += "\n"
 
         if self.is_from_blueprint:
             base_str += "\nThis case was instantiated from the blueprint file:"
             base_str += f"\n   {self.blueprint}"
 
         base_str += "\n"
-        base_str += "\nIt is built from the following Component base models (query using Case.components): "
+        base_str += "\nIt is built from the following Components (query using Case.components): "
 
-        for C in self.components:
-            base_str += "\n   " + C.base_model.name
+        for component in self.components:
+            base_str += f"\n   <{component.__class__.__name__} instance>"
 
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nname = {self.name}, "
+        repr_str += f"\ncaseroot = {self.caseroot}, "
+        repr_str += f"\nstart_date = {self.start_date}, "
+        repr_str += f"\nend_date = {self.end_date}, "
+        repr_str += f"\nvalid_start_date = {self.valid_start_date}, "
+        repr_str += f"\nvalid_end_date = {self.valid_end_date}, "
+        repr_str += "\ncomponents = ["
+        for component in self.components:
+            repr_str += f"\n{component.__repr__()}, "
+        repr_str = repr_str.strip(", ")
+        repr_str += "\n]"
+        repr_str += ")"
+        return repr_str
 
     @classmethod
     def from_blueprint(
@@ -457,7 +468,10 @@ class Case:
 
             # discretization info (if present)
             discretization_info = {}
-            if hasattr(component, "discretization") and component.discretization is not None:
+            if (
+                hasattr(component, "discretization")
+                and component.discretization is not None
+            ):
                 for thisattr in vars(component.discretization).keys():
                     discretization_info[thisattr] = getattr(
                         component.discretization, thisattr

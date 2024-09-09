@@ -64,7 +64,7 @@ class Component(ABC):
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component
             e.g. time step, number of vertical levels, etc.
-        
+
 
         Returns:
         --------
@@ -79,9 +79,9 @@ class Component(ABC):
     def __str__(self) -> str:
         # Header
         name = self.__class__.__name__
-        base_str = f"{name} object "
-        base_str = "-" * (len(name) + 7) + "\n" + base_str
-        base_str += "\n" + "-" * (len(name) + 7)
+        base_str = f"{name}"
+        # base_str = "-" * len(name) + "\n" + base_str
+        base_str += "\n" + "-" * len(name)
 
         # Attrs
         base_str += "\nBuilt from: "
@@ -90,10 +90,10 @@ class Component(ABC):
 
         NID = len(self.input_datasets)
 
-        base_str += f"\n{NAC} AdditionalCode instances (query using Component.additional_code)"
         base_str += (
-            f"\n{NID} Input datasets (query using Component.input_datasets)"
+            f"\n{NAC} AdditionalCode instances (query using Component.additional_code)"
         )
+        base_str += f"\n{NID} Input datasets (query using Component.input_datasets)"
         if hasattr(self, "discretization") and self.discretization is not None:
             base_str += "\n\nDiscretization:\n"
             base_str += self.discretization.__str__()
@@ -103,15 +103,15 @@ class Component(ABC):
         return base_str
 
     def __repr__(self) -> str:
-        repr_str=f"{self.__class__.__name__}("
-        repr_str+=f"\nbase_model = ({self.base_model.__class__.__name__} instance)"
-        repr_str+=f"\nadditional_code = ({self.additional_code.__class__.__name__} instance)"
-        repr_str+=f"\ninput_datasets = ["
-        for i,inp in enumerate(self.input_datasets):
-            repr_str+=f"\n    {inp.__class__.__name__} (from {inp.source.basename}),"
-        repr_str+="]"
-        repr_str=repr_str.replace(",]","\n    ]")
-        repr_str+="\n)"
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>, "
+        repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
+        repr_str += "\ninput_datasets = ["
+        for i, inp in enumerate(self.input_datasets):
+            repr_str += f"\n    <{inp.__class__.__name__} from {inp.source.basename}>, "
+        repr_str = repr_str.strip(", ")
+        repr_str += "]\n)"
+
         return repr_str
 
     @abstractmethod
@@ -193,20 +193,33 @@ class Discretization:
 
     def __str__(self) -> str:
         # Discretisation
-        disc_str=""
-        
-        if hasattr(self, "time_step") and self.time_step is not None:
-            disc_str += "\ntime_step: " + str(self.time_step) + "s"
-        if hasattr(self, "n_levels") and self.n_levels is not None:
-            disc_str += "\nn_levels: " + str(self.n_levels)
-        if hasattr(self, "nx") and self.nx is not None:
-            disc_str += "\nnx: " + str(self.nx)
-        if hasattr(self, "ny") and self.ny is not None:
-            disc_str += "\nny: " + str(self.ny)
-        if len(disc_str) > 0:
-            classname=self.__class__.__name__
-            header = classname
-            disc_str=header+"\n"+"-"*len(classname)+disc_str
+        disc_str = ""
 
-            
+        if hasattr(self, "time_step") and self.time_step is not None:
+            disc_str += f"\ntime_step:  {self.time_step}s"
+        if hasattr(self, "n_levels") and self.n_levels is not None:
+            disc_str += f"\nn_levels: {self.n_levels}"
+        if hasattr(self, "nx") and self.nx is not None:
+            disc_str += f"\nnx: {self.nx}"
+        if hasattr(self, "ny") and self.ny is not None:
+            disc_str += f"\nny: {self.ny}"
+        if len(disc_str) > 0:
+            classname = self.__class__.__name__
+            header = classname
+            disc_str = header + "\n" + ("-" * len(classname) + disc_str)
+
         return disc_str
+
+    def __repr__(self) -> str:
+        repr_str = ""
+        repr_str = f"{self.__class__.__name__}("
+        if hasattr(self, "time_step") and self.time_step is not None:
+            repr_str += f"time_step = {self.time_step}, "
+        if hasattr(self, "n_levels") and self.n_levels is not None:
+            repr_str += f"n_levels = {self.n_levels}, "
+        if hasattr(self, "nx") and self.nx is not None:
+            repr_str += f"nx = {str(self.nx)}, "
+        if hasattr(self, "ny") and self.ny is not None:
+            repr_str += f"ny = {self.ny}"
+        repr_str += ")"
+        return repr_str

@@ -187,3 +187,51 @@ def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -
 
     file_path.unlink()
     temp_file_path.rename(file_path)
+
+
+def _list_to_concise_str(input_list, item_threshold=4, pad=16, show_item_count=True):
+    """
+    Take a list and return a concise string representation of it
+
+    Parameters:
+    -----------
+    input_list (list of str):
+       The list of to be represented
+    item_threshold (int, default = 4):
+       The number of items beyond which to truncate the str to item0,...itemN
+    pad (int, default = 16):
+       The number of whitespace characters to prepend newlines with
+    show_item_count (bool, default = True):
+       Will add <N items> to the end of a truncated representation
+
+    Returns:
+    -------
+    list_str: str
+       The string representation of the list
+
+    Examples:
+    --------
+    In: print("my_list: "+_list_to_concise_str(["myitem0","myitem1",
+                             "myitem2","myitem3","myitem4"],pad=11))
+    my_list: ['myitem0',
+              'myitem1',
+                  ...
+              'myitem4']<5 items>
+
+    """
+    list_str = ""
+    pad_str = " " * pad
+    if show_item_count:
+        count_str = f"<{len(input_list)} items>"
+    else:
+        count_str = ""
+    if len(input_list) > item_threshold:
+        list_str += f"[{input_list[0]!r},"
+        list_str += f"\n{pad_str}{input_list[1]!r},"
+        list_str += f"\n{pad_str}   ..."
+        list_str += f"\n{pad_str}{input_list[-1]!r}] {count_str}"
+    else:
+        list_str += "["
+        list_str += f",\n{pad_str}".join(repr(listitem) for listitem in input_list)
+        list_str += "]"
+    return list_str

@@ -90,12 +90,14 @@ class InputDataset(ABC):
 
     def __str__(self) -> str:
         name = self.__class__.__name__
-        base_str = f"{name} object "
-        base_str = "-" * (len(name) + 7) + "\n" + base_str
-        base_str += "\n" + "-" * (len(name) + 7)
+        base_str = f"{name}"
+        base_str = "-" * len(name) + "\n" + base_str
+        base_str += "\n" + "-" * len(name)
 
         base_str += f"\nBase model: {self.base_model.name}"
-        base_str += f"\nsource: {self.source.location}"
+        base_str += f"\nlocation: {self.source.location}"
+        if self.file_hash is not None:
+            base_str += f"\nfile_hash: {self.file_hash}"
         if self.start_date is not None:
             base_str += f"\nstart_date: {self.start_date}"
         if self.end_date is not None:
@@ -108,7 +110,21 @@ class InputDataset(ABC):
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        # Constructor-style section:
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>,"
+        repr_str += f"\nlocation = {self.source.location!r},"
+        repr_str += f"\nfile_hash = {self.file_hash}"
+        repr_str += "\n)"
+        info_str = ""
+        if self.exists_locally is not None:
+            info_str += f"exists_locally = {self.exists_locally},"
+        if self.local_path is not None:
+            info_str += f"local_path: {self.local_path},"
+        if len(info_str) > 0:
+            repr_str += f"\nState: <{info_str}>"
+        # Additional info
+        return repr_str
 
     def get(self, local_dir: str | Path) -> None:
         """
