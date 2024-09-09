@@ -40,17 +40,11 @@ dev = []
 
 # Configuration for mypy type checker
 [tool.mypy]
-# return to this one in a later PR:
-#strict = true
 ignore_missing_imports = true 
 exclude = "properties|asv_bench|docs"
 
 # Configuration for ruff linter and formatter
 [tool.ruff]
-# return to these 3 in a later PR:
-#line-length = 79 
-#lint.select = ["E", "F", "I", "B"]
-#lint.ignore = ["E203"]
 fix = true
 
 [tool.pre-commit]
