@@ -143,9 +143,8 @@ class InputDataset(ABC):
         """
         local_dir = Path(local_dir).resolve()
 
-        tgt_dir = local_dir / f"input_datasets/{self.base_model.name}/"
-        tgt_dir.mkdir(parents=True, exist_ok=True)
-        tgt_path = tgt_dir / str(self.source.basename)
+        local_dir.mkdir(parents=True, exist_ok=True)
+        tgt_path = local_dir / str(self.source.basename)
 
         # If the file is somewhere else on the system, make a symbolic link where we want it
         if self.exists_locally:
@@ -156,11 +155,11 @@ class InputDataset(ABC):
                 if tgt_path.exists():
                     raise FileExistsError(
                         f"A file by the name of {self.source.basename}"
-                        + f"already exists at {tgt_dir}."
+                        + f"already exists at {local_dir}."
                     )
                     # TODO maybe this should check the hash and just `return` if it matches?
                 else:
-                    # QUESTION: Should this now update self.local_path to point to the symlink? 20240827 - YES
+                    # Create a symlink and update the local path attribute
                     tgt_path.symlink_to(self.local_path)
                     self.local_path = tgt_path
                 return
@@ -172,15 +171,15 @@ class InputDataset(ABC):
             # NOTE: default timeout was leading to a lot of timeouterrors
             downloader = pooch.HTTPDownloader(timeout=120)
             to_fetch = pooch.create(
-                path=tgt_dir,
-                # FIXME Cannot find a urllib equivalent to this:
+                path=local_dir,
+                # urllib equivalent to Path.parent
                 base_url=urljoin(self.source.location, "."),
                 registry={self.source.basename: self.file_hash},
             )
 
             to_fetch.fetch(self.source.basename, downloader=downloader)
             self.exists_locally = True
-            self.local_path = tgt_dir / self.source.basename
+            self.local_path = local_dir / self.source.basename
 
     def check_exists_locally(self, local_dir: str | Path) -> bool:
         """

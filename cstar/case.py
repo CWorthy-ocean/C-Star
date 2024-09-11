@@ -619,7 +619,9 @@ class Case:
             if component.input_datasets is None:
                 continue
             for inp in component.input_datasets:
-                if not inp.check_exists_locally(self.caseroot):
+                if not inp.check_exists_locally(
+                    self.caseroot / f"input_datasets/{inp.base_model.name}"
+                ):
                     # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
                     if (not isinstance(inp.start_date, dt.datetime)) or (
                         not isinstance(inp.end_date, dt.datetime)
@@ -676,7 +678,7 @@ class Case:
                     or (inp.start_date <= self.end_date)
                     and (self.end_date >= self.start_date)
                 ):
-                    inp.get(self.caseroot)
+                    inp.get(self.caseroot / f"input_datasets/{inp.base_model.name}")
 
         self.is_setup = True
 

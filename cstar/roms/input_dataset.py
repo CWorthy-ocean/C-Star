@@ -1,10 +1,10 @@
-import pooch
+import yaml
+import shutil
 
 from abc import ABC
 from pathlib import Path
 from typing import Optional
 from cstar.base.input_dataset import InputDataset
-from cstar.roms.utils import _modify_roms_tools_yaml
 
 
 class ROMSInputDataset(InputDataset, ABC):
@@ -20,43 +20,80 @@ class ROMSInputDataset(InputDataset, ABC):
     """
     ) + (InputDataset.__doc__ or "")
 
+    def get(
+        self,
+        local_dir: str | Path,
+        yaml_entries_to_modify: dict = {},
+        np_xi: Optional[int] = None,
+        np_eta: Optional[int] = None,
+    ) -> None:
+        """
+        docstring
+        """
+        # Ensure we're working with a Path object
+        local_dir = Path(local_dir)
+
+        # First, get the file as usual
+        super().get(local_dir)
+
+        # If it's not a yaml, we're done
+        if self.source.source_type != "yaml":
+            return
+
+        # If it is a yaml, first make sure that the local copy is not a symlink
+        # (as InputDataset.get() symlinks files that didn't need to be downloaded)
+        yaml_file = local_dir / Path(self.source.location).name
+        if yaml_file.is_symlink():
+            linkpath = yaml_file.resolve()
+            yaml_file.unlink()
+            shutil.copy2(linkpath, yaml_file)
+            yaml_file = linkpath
+
+        # Now modify the local copy of the yaml file as needed:
+        with open(yaml_file, "r") as F:
+            _, header, yaml_data = F.read().split("---", 2)
+            yaml_dict = yaml.safe_load(yaml_data)
+
+        roms_tools_class_name = list(yaml_dict.keys())[-1]
+
+        for key, value in yaml_entries_to_modify.items():
+            if key in yaml_dict[roms_tools_class_name].keys():
+                yaml_dict[roms_tools_class_name][key] = value
+            else:
+                raise ValueError(
+                    f"Cannot replace entry {key} in "
+                    + f"roms_tools yaml file {yaml_file} under {roms_tools_class_name}. "
+                    + "No such entry."
+                )
+
+        with open(yaml_file, "w") as F:
+            F.write(f"---{header}---\n" + yaml.dump(yaml_dict))
+
+        # Finally, make a roms-tools object from the modified yaml
+        import roms_tools
+
+        roms_tools_class = getattr(roms_tools, roms_tools_class_name)
+        roms_tools_class_instance = roms_tools_class.from_yaml(self.source.location)
+
+        # ... and save:
+        if (np_eta is not None) and (np_xi is not None):
+            roms_tools_class_instance.save(
+                local_dir / "PARTITIONED" / yaml_file.stem, np_xi=np_xi, np_eta=np_eta
+            )
+            parted_dir = yaml_file.parent / "PARTITIONED"
+            self.local_partitioned_files = list(
+                parted_dir.glob(f"{yaml_file.stem}.*.nc")
+            )
+        else:
+            savepath = Path(f"{local_dir/yaml_file.stem}.nc")
+            roms_tools_class_instance.save(savepath)
+            self.local_path = savepath
+
 
 class ROMSModelGrid(ROMSInputDataset):
     """
     An implementation of the ROMSInputDataset class for model grid files.
     """
-
-    def get(
-        self,
-        local_dir: str | Path,
-        np_xi: Optional[int] = None,
-        np_eta: Optional[int] = None,
-    ) -> None:
-        local_dir = Path(local_dir)
-        if self.source.source_type == "yaml":
-            local_file = local_dir / Path(self.source.location).stem
-
-            if self.source.location_type == "url":
-                pooch.retrieve(
-                    self.source.location, known_hash=self.file_hash, path=local_file
-                )
-                yaml_location = local_file
-            elif self.source.location_type == "path":
-                yaml_location = Path(self.source.location)
-
-            import roms_tools as rt
-
-            # Copy the yaml
-            _modify_roms_tools_yaml(
-                input_file=yaml_location, output_file=local_file, new_entries={}
-            )
-
-            roms_grd = rt.Grid.from_yaml(self.source.location)
-            roms_grd.save(local_file.stem, np_xi=np_xi, np_eta=np_eta)
-            self.local_path = local_file
-
-        else:
-            super().get(local_dir)
 
     pass
 
