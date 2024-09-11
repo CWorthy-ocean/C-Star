@@ -1,3 +1,5 @@
+.. currentmodule:: cstar
+
 API Reference
 #############
 
