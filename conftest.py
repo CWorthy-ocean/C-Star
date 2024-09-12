@@ -4,6 +4,14 @@ from contextlib import contextmanager
 import pytest
 
 
+# Prevent errors caused by pytest trying to collect tests from externals 
+# (e.g. from errors whilst importing python code in the UCLA-roms repo)
+collect_ignore_glob = [
+    "cstar/cstar_local_config.py",
+    "cstar/externals/**"
+]
+
+
 @pytest.fixture
 def mock_user_input():
     """

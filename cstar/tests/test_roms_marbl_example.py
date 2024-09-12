@@ -1,52 +1,11 @@
 import builtins
 from pathlib import Path
 import yaml
-
-import cstar
-import pytest
-
-##
-import shutil
 from contextlib import contextmanager
 
+import pytest
 
-@pytest.fixture
-def mock_user_input():
-    """Monkeypatch wich will automatically respond "y" to any call for input"""
-
-    @contextmanager
-    def _mock_input(input_string):
-        original_input = builtins.input
-
-        def mock_input_function(_):
-            return input_string
-
-        builtins.input = mock_input_function
-        try:
-            yield
-        finally:
-            builtins.input = original_input
-
-    return _mock_input
-
-
-# TODO we want to make this unnecessary, ideally by defining fixtures that create temporary directories for all of these
-## Delete output of any previous run of this script
-for oldfiles in [
-    "local_input_files/",
-    "local_additional_code/",
-    "roms_marbl_example_case/",
-    "roms_marbl_local_case/",
-    "test_blueprint.yaml",
-    "modified_test_blueprint.yaml",
-    "test_blueprint_local.yaml",
-]:
-    oldpath = Path(oldfiles)
-    if oldpath.exists():
-        if oldpath.is_dir():
-            shutil.rmtree(oldpath)
-        else:
-            oldpath.unlink()
+import cstar
 
 
 # TODO this assumes you are running pytest from the root directory of the cloned repo, which is fragile
@@ -90,7 +49,7 @@ class TestRomsMarbl:
             roms_marbl_remote_case.setup()
 
             # why are we persisting this blueprint file then not using it again in the test?
-            roms_marbl_remote_case.persist(tmpdir / "test_blueprint.yaml")
+            #roms_marbl_remote_case.persist(tmpdir / "test_blueprint.yaml")
 
             roms_marbl_remote_case.build()
             roms_marbl_remote_case.pre_run()
