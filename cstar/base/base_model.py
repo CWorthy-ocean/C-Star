@@ -1,6 +1,8 @@
 import os
+from pathlib import Path
 from typing import Optional
 from abc import ABC, abstractmethod
+import subprocess
 
 from cstar.base.utils import (
     _get_hash_from_checkout_target,
@@ -84,11 +86,11 @@ class BaseModel(ABC):
         self.checkout_hash = _get_hash_from_checkout_target(
             self.source_repo, self.checkout_target
         )
-        self.repo_basename = os.path.basename(self.source_repo).replace(".git", "")
+        self.repo_basename = Path(self.source_repo).name.replace(".git", "")
 
         self.local_config_status = self.get_local_config_status()
 
-    def __str__(self):
+    def __str__(self) -> str:
         base_str = f"{self.__class__.__name__} object "
         base_str += "\n" + "-" * len(base_str)
         base_str += f"\nsource_repo = {self.source_repo}"
@@ -114,31 +116,31 @@ class BaseModel(ABC):
 
         return base_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
     @property
     @abstractmethod
-    def name(self):
+    def name(self) -> str:
         """The name of the base model"""
 
     @property
     @abstractmethod
-    def default_source_repo(self):
+    def default_source_repo(self) -> str:
         """Default source repository, defined in subclasses, e.g. https://github.com/marbl-ecosys/MARBL.git"""
 
     @property
     @abstractmethod
-    def default_checkout_target(self):
+    def default_checkout_target(self) -> str:
         """Default checkout target, defined in subclasses, e.g. marblv0.45.0"""
 
     @property
     @abstractmethod
-    def expected_env_var(self):
+    def expected_env_var(self) -> str:
         """environment variable associated with the base model, e.g. MARBL_ROOT"""
 
     @abstractmethod
-    def _base_model_adjustments(self):
+    def _base_model_adjustments(self) -> None:
         """
         Perform any C-Star specific adjustments to the base model that would
         be needed after a clean checkout.
@@ -171,7 +173,7 @@ class BaseModel(ABC):
 
         # check 2: X_ROOT points to the correct repository
         if env_var_exists:
-            local_root = os.environ[self.expected_env_var]
+            local_root = Path(os.environ[self.expected_env_var])
             env_var_repo_remote = _get_repo_remote(local_root)
             env_var_matches_repo = self.source_repo == env_var_repo_remote
             if not env_var_matches_repo:
@@ -188,7 +190,7 @@ class BaseModel(ABC):
         else:  # env_var_exists False (e.g. ROMS_ROOT not defined)
             return 3
 
-    def handle_config_status(self):
+    def handle_config_status(self) -> None:
         """
         Perform actions depending on the output of BaseModel.get_local_config_status()
 
@@ -205,11 +207,13 @@ class BaseModel(ABC):
            3: The expected environment variable is not present and it is assumed the base model is not installed locally
               -> prompt installation of the base model
         """
-        local_root = [
-            os.environ[self.expected_env_var]
-            if self.expected_env_var in os.environ
-            else None
-        ]
+
+        local_root = Path(os.environ.get(self.expected_env_var, ""))
+
+        if local_root is None:
+            raise EnvironmentError(
+                f"System environment variable {self.expected_env_var} is not set."
+            )
         match self.local_config_status:
             case None:
                 self.get_local_config_status()
@@ -252,7 +256,7 @@ class BaseModel(ABC):
                     else:
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
-                ext_dir = _CSTAR_ROOT + "/externals/" + self.repo_basename
+                ext_dir = Path(_CSTAR_ROOT) / f"externals/{self.repo_basename}"
                 print(
                     "#######################################################\n"
                     + f"C-STAR: {self.expected_env_var}"
@@ -276,11 +280,11 @@ class BaseModel(ABC):
                         raise EnvironmentError()
                     elif yn.casefold() == "custom":
                         custom_path = input("Enter custom path for install:\n")
-                        self.get(os.path.abspath(custom_path))
+                        self.get(Path(custom_path).resolve())
                         break
                     else:
                         print("invalid selection; enter 'y','n',or 'custom'")
 
     @abstractmethod
-    def get(self, target: str):
+    def get(self, target: str | Path) -> None:
         """clone the basemodel code to your local machine"""

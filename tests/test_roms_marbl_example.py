@@ -4,6 +4,31 @@ import yaml
 import cstar
 import pytest
 
+import cstar
+from unittest.mock import patch
+##
+from pathlib import Path
+import shutil
+
+
+
+# TODO we want to make this unnecessary
+## Delete output of any previous run of this script
+for oldfiles in ["local_input_files/",
+                 "local_additional_code/",
+                 "roms_marbl_example_case/",
+                 "roms_marbl_local_case/",
+                 "test_blueprint.yaml",
+                 "modified_test_blueprint.yaml",
+                 "test_blueprint_local.yaml"]:
+    
+    oldpath=Path(oldfiles)
+    if oldpath.exists():
+        if oldpath.is_dir():
+            shutil.rmtree(oldpath)
+        else:
+            oldpath.unlink()
+
 
 ROMS_MARBL_BASE_BLUEPRINT_PATH = 'test_blueprint.yaml'
 

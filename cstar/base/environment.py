@@ -2,6 +2,7 @@ import os
 import sys
 import platform
 import importlib.util
+from pathlib import Path
 from typing import Optional
 
 top_level_package_name = __name__.split(".")[0]
@@ -174,7 +175,7 @@ elif (
 # with C-Star (e.g. ROMS_ROOT)
 
 _CSTAR_CONFIG_FILE = _CSTAR_ROOT + "/cstar_local_config.py"
-if os.path.exists(_CSTAR_CONFIG_FILE):
+if Path(_CSTAR_CONFIG_FILE).exists():
     from cstar.cstar_local_config import set_local_environment
 
     set_local_environment()
