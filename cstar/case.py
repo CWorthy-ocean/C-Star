@@ -530,6 +530,7 @@ class Case:
                 additional_code_info: dict = {}
                 # This will be component_info["component"]["additional_code"]=additional_code_info
                 additional_code_info["location"] = additional_code.source.location
+                additional_code_info["subdir"] = additional_code.subdir
                 additional_code_info["checkout_target"] = (
                     additional_code.checkout_target
                 )
@@ -658,10 +659,8 @@ class Case:
             component.base_model.handle_config_status()
 
             # Get AdditionalCode
-            if isinstance(component.additional_code, list):
-                [ac.get(self.caseroot) for ac in component.additional_code]
-            elif isinstance(component.additional_code, AdditionalCode):
-                component.additional_code.get(self.caseroot)
+            if component.additional_code is not None:
+                component.additional_code.get(self.caseroot/"additional_code"/component.base_model.name)
 
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
@@ -722,6 +721,7 @@ class Case:
 
                 # After that you need to run some verification stuff on the downloaded files
                 component.run(
+                    output_dir=self.caseroot / "output",
                     n_time_steps=ntimesteps,
                     account_key=account_key,
                     walltime=walltime,
@@ -732,4 +732,5 @@ class Case:
         """For each Component associated with this case, execute
         post-processing actions by calling component.post_run()"""
         for component in self.components:
-            component.post_run()
+            if isinstance(component, ROMSComponent):
+                component.post_run(output_dir=self.caseroot / "output")

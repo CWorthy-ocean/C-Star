@@ -15,16 +15,14 @@ class AdditionalCode:
     with this structure:
 
     <additional_code_dir>
-       ├── namelists
-       |      └ <base_model_name>
-       |              ├ <namelist_file_1>
-       |              |       ...
-       |              └ <namelist_file_N>
-       └── source_mods
-              └ <base_model_name>
-                      ├ <source_code_file_1>
-                      |       ...
-                      └ <source_code_file_N>
+        ├ namelists
+        |       ├ <namelist_file_1>
+        |       |       ...
+        |       └ <namelist_file_N>
+        └ source_mods
+                     ├ <source_code_file_1>
+                     |       ...
+                     └ <source_code_file_N>
 
     Attributes:
     -----------
@@ -38,10 +36,8 @@ class AdditionalCode:
         Path(s) relative to the top level of `source.location` to any code that is needed to compile a unique instance of the base model
     namelists: str or list of strs
         Path(s) relative to the top level of `source.location` to any code that is needed at runtime for the base model
-    exists_locally: bool, default None
-        Set to True if source.location_type is 'path', or if AdditionalCode.get() has been called.
-        Is also set by the `check_exists_locally()` method.
-    local_path: Path, default None        The local path to the additional code. Set when `get()` method is called, or if source.location_type is 'path'.
+    working_path: Path, default None
+        The local path to the additional code. Set when `get()` method is called.
 
     Methods:
     --------
@@ -54,13 +50,13 @@ class AdditionalCode:
        Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
     """
 
-    def __init__(
-        self,
-        base_model: BaseModel,
-        location: str,
-        checkout_target: Optional[str] = None,
-        source_mods: Optional[List[str]] = None,
-        namelists: Optional[List[str]] = None,
+    def __init__(self,
+                 base_model: BaseModel,
+                 location: str,
+                 subdir: str = "",
+                 checkout_target: Optional[str] = None,
+                 source_mods: Optional[List[str]] = None,
+                 namelists: Optional[List[str]] = None,
     ):
         """
         Initialize an AdditionalCode object from a DataSource  and a list of code files
@@ -71,6 +67,8 @@ class AdditionalCode:
             The base model with which this additional code is associated
         location: str
             url or path pointing to the additional code directory or repository, used to set `source` attribute
+        subdir: str
+           Subdirectory of "location" in which to look for files (e.g. if location points to a remote repository)
         checkout_target: Optional, str
             Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
         source_mods: Optional, str or list of strs
@@ -87,30 +85,23 @@ class AdditionalCode:
 
         self.base_model: BaseModel = base_model
         self.source: DataSource = DataSource(location)
+        self.subdir: str = subdir
         self.checkout_target: Optional[str] = checkout_target
         self.source_mods: Optional[List[str]] = source_mods
         self.namelists: Optional[List[str]] = namelists
-        self.exists_locally: Optional[bool] = None
-        self.local_path: Optional[Path] = None
+        self.working_path: Optional[Path] = None
 
         # If there are namelists, make a parallel attribute to keep track of the ones we are editing
         # AdditionalCode.get() determines which namelists are editable templates and updates this list
         if self.namelists:
             self.modified_namelists: list = []
 
-        if self.source.location_type == "path":
-            self.exists_locally = True
-            self.local_path = Path(self.source.location).resolve()
-
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nBase model: {self.base_model.name}"
         base_str += f"\nLocation: {self.source.location}"
-        if self.exists_locally is not None:
-            base_str += f"\n Exists locally: {self.exists_locally}"
-        if self.local_path is not None:
-            base_str += f"\n Local path: {self.local_path}"
+        base_str += f"\n Working path: {self.working_path}"
         if self.source_mods is not None:
             base_str += (
                 "\nSource code modification files (paths relative to above location)):"
@@ -139,10 +130,8 @@ class AdditionalCode:
         repr_str += "\n)"
         # Additional info:
         info_str = ""
-        if self.exists_locally is not None:
-            info_str += f"exists_locally = {self.exists_locally},"
-        if self.local_path is not None:
-            info_str += f"local_path: {self.local_path},"
+        if self.working_path is not None:
+            info_str += f"working_path: {self.working_path},"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         return repr_str
@@ -151,12 +140,14 @@ class AdditionalCode:
         """
         Copy the required AdditionalCode files to `local_dir`
 
-        If AdditionalCode.source describes a remote repository, this is cloned into a temporary directory first.
+        If AdditionalCode.source describes a remote repository,
+        this is cloned into a temporary directory first.
 
         Parameters:
         -----------
-        local_dir: str
-            The local path (typically `Case.caseroot`) where the additional code will be curated
+        local_dir: str | Path
+            The local directory (typically `Case.caseroot`) in which to fetch the additional code.
+
         """
         local_dir = Path(local_dir).resolve()
         try:
@@ -180,13 +171,13 @@ class AdditionalCode:
                     local_path=tmp_dir,
                     checkout_target=self.checkout_target,
                 )
-                source_dir = Path(tmp_dir)
+                source_dir = Path(f"{tmp_dir}/{self.subdir}")
             # CASE 2: Additional code is in a local directory/repository
             elif (self.source.location_type == "path") and (
                 (self.source.source_type == "directory")
                 or (self.source.source_type == "repository")
             ):
-                source_dir = Path(self.source.location)
+                source_dir = Path(self.source.location)/self.subdir
 
             else:
                 raise ValueError(
@@ -204,12 +195,11 @@ class AdditionalCode:
 
                 if file_list is None:
                     continue
-                tgt_dir = local_dir / file_type / self.base_model.name
-                tgt_dir.mkdir(parents=True, exist_ok=True)
+                (local_dir/file_type).mkdir(parents=True, exist_ok=True)
 
                 for f in file_list:
                     src_file_path = source_dir / f
-                    tgt_file_path = tgt_dir / Path(f).name
+                    tgt_file_path = local_dir / file_type/ Path(f).name
                     print(f"copying {src_file_path} to {tgt_file_path}")
                     if src_file_path.exists():
                         shutil.copy(src_file_path, tgt_file_path)
@@ -233,8 +223,7 @@ class AdditionalCode:
                                 f[:-9],
                             ]
 
-            self.local_path = local_dir
-            self.exists_locally = True
+            self.working_path = local_dir
         finally:
             if tmp_dir:
                 shutil.rmtree(tmp_dir)
