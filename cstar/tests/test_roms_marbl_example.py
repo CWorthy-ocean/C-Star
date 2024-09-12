@@ -28,7 +28,7 @@ def mock_user_input():
     return _mock_input
 
 
-# TODO we want to make this unnecessary
+# TODO we want to make this unnecessary, ideally by defining fixtures that create temporary directories for all of these
 ## Delete output of any previous run of this script
 for oldfiles in ["local_input_files/",
                  "local_additional_code/",
