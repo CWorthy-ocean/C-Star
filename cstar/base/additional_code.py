@@ -147,6 +147,7 @@ class AdditionalCode:
             repr_str += f"\nState: <{info_str}>"
         return repr_str
 
+    # FIXME: namelist_dir and source_mods_dir should replace local_dir:
     def get(self, local_dir: str | Path) -> None:
         """
         Copy the required AdditionalCode files to `local_dir`

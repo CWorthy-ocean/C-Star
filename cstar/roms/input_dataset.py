@@ -1,5 +1,6 @@
 import yaml
 import shutil
+import datetime as dt
 
 from abc import ABC
 from pathlib import Path
@@ -20,34 +21,39 @@ class ROMSInputDataset(InputDataset, ABC):
     """
     ) + (InputDataset.__doc__ or "")
 
-    def get(
+    def get_from_yaml(
         self,
         local_dir: str | Path,
-        yaml_entries_to_modify: dict = {},
+        start_date: Optional[dt.datetime] = None,
+        end_date: Optional[dt.datetime] = None,
         np_xi: Optional[int] = None,
         np_eta: Optional[int] = None,
     ) -> None:
         """
         docstring
         """
+        # If it's not a yaml, we're done
+        if self.source.source_type != "yaml":
+            raise ValueError(
+                "Attempted to call `ROMSInputDataset.get_from_yaml() "
+                + "but ROMSInputDataset.source.source_type is "
+                + f"{self.source.source_type}, not 'yaml'"
+            )
+
         # Ensure we're working with a Path object
         local_dir = Path(local_dir)
 
         # First, get the file as usual
-        super().get(local_dir)
+        self.get(local_dir)
 
-        # If it's not a yaml, we're done
-        if self.source.source_type != "yaml":
-            return
-
-        # If it is a yaml, first make sure that the local copy is not a symlink
+        # Make sure that the local copy is not a symlink
         # (as InputDataset.get() symlinks files that didn't need to be downloaded)
         yaml_file = local_dir / Path(self.source.location).name
         if yaml_file.is_symlink():
-            linkpath = yaml_file.resolve()
+            actual_path = yaml_file.resolve()
             yaml_file.unlink()
-            shutil.copy2(linkpath, yaml_file)
-            yaml_file = linkpath
+            shutil.copy2(actual_path, yaml_file)
+            yaml_file = actual_path
 
         # Now modify the local copy of the yaml file as needed:
         with open(yaml_file, "r") as F:
@@ -56,15 +62,24 @@ class ROMSInputDataset(InputDataset, ABC):
 
         roms_tools_class_name = list(yaml_dict.keys())[-1]
 
+        start_time = start_date.isoformat() if start_date is not None else None
+        end_time = end_date.isoformat() if end_date is not None else None
+
+        yaml_entries_to_modify = {
+            "start_time": start_time,
+            "ini_time": start_time,
+            "end_time": end_time,
+        }
+
         for key, value in yaml_entries_to_modify.items():
             if key in yaml_dict[roms_tools_class_name].keys():
                 yaml_dict[roms_tools_class_name][key] = value
-            else:
-                raise ValueError(
-                    f"Cannot replace entry {key} in "
-                    + f"roms_tools yaml file {yaml_file} under {roms_tools_class_name}. "
-                    + "No such entry."
-                )
+            # else:
+            #     raise ValueError(
+            #         f"Cannot replace entry {key} in "
+            #         + f"roms_tools yaml file {yaml_file} under {roms_tools_class_name}. "
+            #         + "No such entry."
+            #     )
 
         with open(yaml_file, "w") as F:
             F.write(f"---{header}---\n" + yaml.dump(yaml_dict))
