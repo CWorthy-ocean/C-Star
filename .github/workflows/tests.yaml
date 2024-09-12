@@ -52,7 +52,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           python -u -m coverage run --rcfile=coverage.toml tests/test_roms_marbl_example.py
+           coverage run --rcfile=coverage.toml -m pytest --verbose cstar/tests/*
 
       - name: Get coverage report
         shell: bash -l {0}
