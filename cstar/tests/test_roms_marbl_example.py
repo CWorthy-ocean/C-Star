@@ -1,3 +1,4 @@
+import builtins
 from pathlib import Path
 import yaml
 
@@ -5,11 +6,26 @@ import cstar
 import pytest
 
 import cstar
-from unittest.mock import patch
 ##
 from pathlib import Path
 import shutil
+from contextlib import contextmanager
 
+@pytest.fixture
+def mock_user_input():
+    """Monkeypatch wich will automatically respond "y" to any call for input"""
+    @contextmanager
+    def _mock_input(input_string):
+        original_input = builtins.input
+        def mock_input_function(_):
+            return input_string
+        builtins.input = mock_input_function
+        try:
+            yield
+        finally:
+            builtins.input = original_input
+    
+    return _mock_input
 
 
 # TODO we want to make this unnecessary
@@ -30,7 +46,8 @@ for oldfiles in ["local_input_files/",
             oldpath.unlink()
 
 
-ROMS_MARBL_BASE_BLUEPRINT_PATH = 'test_blueprint.yaml'
+# TODO this assumes you are running pytest from the root directory of the cloned repo, which is fragile
+ROMS_MARBL_BASE_BLUEPRINT_PATH = './examples/cstar_blueprint_roms_marbl_example.yaml'
 
 
 @pytest.fixture
@@ -53,7 +70,7 @@ def roms_marbl_blueprint_remote_datasets(tmp_path) -> Path:
 
 
 class TestRomsMarbl:
-    def test_roms_marbl_remote_files(self, tmpdir, monkeypatch, roms_marbl_blueprint_remote_datasets):
+    def test_roms_marbl_remote_files(self, tmpdir, mock_user_input, roms_marbl_blueprint_remote_datasets):
         """Test using URLs to point to input datasets"""
 
         roms_marbl_remote_case = cstar.Case.from_blueprint(
@@ -63,9 +80,7 @@ class TestRomsMarbl:
             end_date="20120103 12:30:00",
         )
 
-        # monkeypatch will automatically respond "y" to any call for input
-        with monkeypatch.context() as m:
-            m.setattr("builtins.input", "y")
+        with mock_user_input("y"):
             
             # do we actually need user input for all these steps?
             roms_marbl_remote_case.setup()
