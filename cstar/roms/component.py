@@ -147,7 +147,11 @@ class ROMSComponent(Component):
 
         # Partition input datasets
         if self.input_datasets is not None:
-            datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
+            datasets_to_partition = [
+                d
+                for d in self.input_datasets
+                if ((d.working_path is not None) and (d.working_path.exists()))
+            ]
 
             # Preliminary checks
             if self.additional_code.local_path is None:
@@ -172,12 +176,13 @@ class ROMSComponent(Component):
             namelist_forcing_str = ""
             # Partition input datasets and add paths to namelist
             for f in datasets_to_partition:
-                dspath = f.local_path
+                dspath = f.working_path
                 fname = f.source.basename
 
-                if dspath is None:
+                if (dspath is None) or (not dspath.exists()):
                     raise ValueError(
-                        f"local_path of InputDataset {f} is None."
+                        f"working_path of InputDataset {f}, {dspath}, "
+                        + "refers to a non-existent file"
                         + "\n call InputDataset.get() and try again."
                     )
                 # Partitioning step

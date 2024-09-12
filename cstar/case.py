@@ -596,7 +596,7 @@ class Case:
         The method loops over each Component object makng up the case and
         1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
         2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
-        3. Loops over InputDataset instances in the component calling InputDataset.check_exists_locally(caseroot) on each
+        3. Loops over InputDataset instances in the component checking if InputDataset.working_path exists
 
         Returns:
         --------
@@ -619,7 +619,7 @@ class Case:
             if component.input_datasets is None:
                 continue
             for inp in component.input_datasets:
-                if not inp.check_exists_locally(self.caseroot):
+                if (inp.working_path is None) or (not inp.working_path.exists()):
                     # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
                     if (not isinstance(inp.start_date, dt.datetime)) or (
                         not isinstance(inp.end_date, dt.datetime)
@@ -676,7 +676,9 @@ class Case:
                     or (inp.start_date <= self.end_date)
                     and (self.end_date >= self.start_date)
                 ):
-                    inp.get(self.caseroot)
+                    inp.get(
+                        self.caseroot / f"input_datasets/{component.base_model.name}"
+                    )
 
         self.is_setup = True
 
