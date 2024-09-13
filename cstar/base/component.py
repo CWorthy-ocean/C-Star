@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, TYPE_CHECKING
+from typing import Sequence, Optional, TYPE_CHECKING
 
 from cstar.base.base_model import BaseModel
 from cstar.base.input_dataset import InputDataset
@@ -44,7 +44,7 @@ class Component(ABC):
         self,
         base_model: BaseModel,
         additional_code: Optional["AdditionalCode"] = None,
-        input_datasets: List[InputDataset] = [],
+        input_datasets: Sequence[InputDataset] = [],
         discretization: Optional["Discretization"] = None,
     ):
         """
@@ -73,7 +73,7 @@ class Component(ABC):
         """
         self.base_model = base_model
         self.additional_code: Optional["AdditionalCode"] = additional_code or None
-        self.input_datasets: List[InputDataset] = list(input_datasets)
+        self.input_datasets: Sequence[InputDataset] = list(input_datasets)
         self.discretization: Optional[Discretization] = discretization or None
 
     def __str__(self) -> str:

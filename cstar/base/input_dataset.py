@@ -91,7 +91,7 @@ class InputDataset(ABC):
         base_str += "\n" + "-" * len(name)
 
         base_str += f"\nBase model: {self.base_model.name}"
-        base_str += f"\nlocation: {self.source.location}"
+        base_str += f"\nSource location: {self.source.location}"
         if self.file_hash is not None:
             base_str += f"\nfile_hash: {self.file_hash}"
         if self.start_date is not None:
@@ -115,7 +115,7 @@ class InputDataset(ABC):
         repr_str += "\n)"
         info_str = ""
         if self.working_path is not None:
-            info_str += f"working_path= {self.working_path},"
+            info_str += f"working_path = {self.working_path},"
             if not self.exists_locally:
                 info_str += "(does not exist)"
         if len(info_str) > 0:
@@ -125,11 +125,11 @@ class InputDataset(ABC):
 
     def get(self, local_dir: str | Path) -> None:
         """
-        Make the file containing this input dataset available in `local_dir/input_datasets`
+        Make the file containing this input dataset available in `local_dir`
 
         If InputDataset.source.location_type is...
-           - ...a local path: create a symbolic link to the file in `local_dir/input_datasets`.
-           - ...a URL: fetch the file to `local_dir/input_datasets` using Pooch
+           - ...a local path: create a symbolic link to the file in `local_dir`.
+           - ...a URL: fetch the file to `local_dir` using Pooch
 
         This method updates the `InputDataset.working_path` attribute with the new location.
 

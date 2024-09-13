@@ -4,8 +4,9 @@ import datetime as dt
 
 from abc import ABC
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from cstar.base.input_dataset import InputDataset
+from cstar.base.utils import _list_to_concise_str
 
 
 class ROMSInputDataset(InputDataset, ABC):
@@ -21,6 +22,29 @@ class ROMSInputDataset(InputDataset, ABC):
     """
     ) + (InputDataset.__doc__ or "")
 
+    partitioned_files: List[Path] = []
+
+    def __str__(self) -> str:
+        base_str = super().__str__()
+        if hasattr(self, "partitioned_files"):
+            base_str += "\nPartitioned files: "
+            base_str += _list_to_concise_str(
+                [str(f) for f in self.partitioned_files], pad=20
+            )
+        return base_str
+
+    def __repr__(self) -> str:
+        repr_str = super().__repr__()
+        if hasattr(self, "partitioned_files"):
+            repr_str = repr_str.strip(",>")
+            repr_str += "\n" + (" " * 8) + "partitioned_files = "
+            repr_str += _list_to_concise_str(
+                [str(f) for f in self.partitioned_files], pad=29
+            )
+            repr_str += "\n>"
+
+        return repr_str
+
     def get_from_yaml(
         self,
         local_dir: str | Path,
@@ -30,8 +54,32 @@ class ROMSInputDataset(InputDataset, ABC):
         np_eta: Optional[int] = None,
     ) -> None:
         """
-        docstring
+        Make this input dataset available as a netCDF file in `local_dir`
+
+        This method uses the roms-tools python package to produce a UCLA-ROMS-compatible
+        netCDF file from a roms-tools compatible yaml file.
+
+        Steps:
+        i. Obtain a working copy of the yaml file in `local_dir`
+        from InputDataset.source.location.
+        ii. Modify the working copy of the yaml file so any time-varying datasets
+        are given the correct start and end date.
+        iii. Pass the modified yaml to roms-tools and save the resulting
+        object to netCDF.
+
+        Parameters:
+        -----------
+        local_dir (str or Path):
+           The directory in which to save the input dataset netCDF file
+        start_date,end_date (dt.datetime, optional):
+           If the dataset to be created is time-varying, it is made using these dates
+        np_xi, np_eta (int, optional):
+           If desired, save a partitioned copy of the input dataset to be used when
+           running ROMS in parallel. np_xi is the number of x-direction processors,
+           np_eta is the number of y-direction processors
+
         """
+
         # If it's not a yaml, we're done
         if self.source.source_type != "yaml":
             raise ValueError(
@@ -74,12 +122,6 @@ class ROMSInputDataset(InputDataset, ABC):
         for key, value in yaml_entries_to_modify.items():
             if key in yaml_dict[roms_tools_class_name].keys():
                 yaml_dict[roms_tools_class_name][key] = value
-            # else:
-            #     raise ValueError(
-            #         f"Cannot replace entry {key} in "
-            #         + f"roms_tools yaml file {yaml_file} under {roms_tools_class_name}. "
-            #         + "No such entry."
-            #     )
 
         with open(yaml_file, "w") as F:
             F.write(f"---{header}---\n" + yaml.dump(yaml_dict))
@@ -101,8 +143,8 @@ class ROMSInputDataset(InputDataset, ABC):
             savepath = roms_tools_class_instance.save(
                 Path(f"{local_dir/yaml_file.stem}.nc")
             )
-            if len(savepath) == 1:
-                self.working_path = savepath[0]
+
+            self.working_path = savepath[0] if len(savepath) == 1 else savepath
 
 
 class ROMSModelGrid(ROMSInputDataset):
