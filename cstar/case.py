@@ -200,8 +200,6 @@ class Case:
             raise ValueError(
                 f"start_date {self.start_date} is after end_date {self.end_date}."
             )
-        # Lastly, check if everything is set up
-        self.is_setup: bool = self.check_is_setup()
 
     def __str__(self) -> str:
         base_str = "C-Star Case\n"
@@ -244,6 +242,58 @@ class Case:
         repr_str += ")"
 
         return repr_str
+
+    @property
+    def is_setup(self):
+        """
+        Check whether all code and files necessary to run this case exist in the local `caseroot` folder
+
+        This method is called by Case.__init__() and sets the Case.is_setup attribute.
+
+        The method loops over each Component object makng up the case and
+        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
+        2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
+        3. Loops over InputDataset instances in the component checking if InputDataset.working_path exists
+
+        Returns:
+        --------
+        is_setup: bool
+            True if all components are correctly set up in the caseroot directory
+
+        """
+
+        for component in self.components:
+            if component.base_model.local_config_status != 0:
+                return False
+
+            # Check AdditionalCode
+            if (component.additional_code is not None) and (
+                not component.additional_code.exists_locally
+            ):
+                return False
+
+            # Check InputDatasets
+            if component.input_datasets is None:
+                continue
+            for inp in component.input_datasets:
+                if (inp.working_path is None) or (not inp.working_path.exists()):
+                    # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
+                    # If no start or end date, it should be found locally:
+                    if (not isinstance(inp.start_date, dt.datetime)) or (
+                        not isinstance(inp.end_date, dt.datetime)
+                    ):
+                        return False
+                    # If no start or end date for case, all files should be found locally:
+                    elif (not isinstance(self.start_date, dt.datetime)) or (
+                        not isinstance(self.end_date, dt.datetime)
+                    ):
+                        return False
+                    # If inp and case start and end dates overlap, should be found locally:
+                    elif (inp.start_date <= self.end_date) and (
+                        inp.end_date >= self.start_date
+                    ):
+                        return False
+        return True
 
     def tree(self):
         """
@@ -588,54 +638,6 @@ class Case:
         with open(filename, "w") as yaml_file:
             yaml.dump(bp_dict, yaml_file, default_flow_style=False, sort_keys=False)
 
-    def check_is_setup(self) -> bool:
-        """
-        Check whether all code and files necessary to run this case exist in the local `caseroot` folder
-
-        This method is called by Case.__init__() and sets the Case.is_setup attribute.
-
-        The method loops over each Component object makng up the case and
-        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
-        2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
-        3. Loops over InputDataset instances in the component checking if InputDataset.working_path exists
-
-        Returns:
-        --------
-        is_setup: bool
-            True if all components are correctly set up in the caseroot directory
-
-        """
-
-        for component in self.components:
-            if component.base_model.local_config_status != 0:
-                return False
-
-            # Check AdditionalCode
-            if (component.additional_code is None) or not (
-                component.additional_code.check_exists_locally(self.caseroot)
-            ):
-                return False
-
-            # Check InputDatasets
-            if component.input_datasets is None:
-                continue
-            for inp in component.input_datasets:
-                if (inp.working_path is None) or (not inp.working_path.exists()):
-                    # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
-                    if (not isinstance(inp.start_date, dt.datetime)) or (
-                        not isinstance(inp.end_date, dt.datetime)
-                    ):
-                        return False
-                    elif (not isinstance(self.start_date, dt.datetime)) or (
-                        not isinstance(self.end_date, dt.datetime)
-                    ):
-                        return False
-                    elif (inp.start_date <= self.end_date) and (
-                        inp.end_date >= self.start_date
-                    ):
-                        return False
-        return True
-
     def setup(self) -> None:
         """
         Fetch all code and files necessary to run this case in the local `caseroot` folder
@@ -680,8 +682,6 @@ class Case:
                     inp.get(
                         self.caseroot / f"input_datasets/{component.base_model.name}"
                     )
-
-        self.is_setup = True
 
     def build(self) -> None:
         """Compile any necessary additional code associated with this case

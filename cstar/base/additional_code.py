@@ -137,6 +137,19 @@ class AdditionalCode:
             repr_str += f"\nState: <{info_str}>"
         return repr_str
 
+    @property
+    def exists_locally(self):
+        if self.working_path is None:
+            return False
+
+        for file_type in ["source_mods", "namelists"]:
+            file_list = getattr(self, file_type)
+            for f in file_list:
+                if not (self.working_path / f).exists():
+                    return False
+
+        return True
+
     def get(self, local_dir: str | Path) -> None:
         """
         Copy the required AdditionalCode files to `local_dir`
@@ -228,41 +241,3 @@ class AdditionalCode:
         finally:
             if tmp_dir:
                 shutil.rmtree(tmp_dir)
-
-    def check_exists_locally(self, local_dir: str | Path) -> bool:
-        """
-        Checks whether this AdditionalCode  has already been fetched to the local machine
-
-        Behaves similarly to get() but verifies that the actions of get() have been performed.
-        Updates the "AdditionalCode.exists_locally" attribute.
-
-        Parameters:
-        -----------
-        local_dir (str):
-            The local path to check for the existence of this additional code
-
-        Returns:
-        --------
-        exists_locally (bool):
-            True if the method has verified the local existence of the additional code
-        """
-        local_dir = Path(local_dir).resolve()
-
-        # FIXME: this method, unlike InputDataset.check_exists_locally(), only matches filenames
-
-        for file_type in ["source_mods", "namelists"]:
-            file_list = getattr(self, file_type)
-            if file_list is None:
-                continue
-
-            tgt_dir = local_dir / file_type / self.base_model.name
-            for f in file_list:
-                tgt_file_path = tgt_dir / Path(f).name
-                if not tgt_file_path.exists():
-                    self.exists_locally = False
-                    return False
-
-        if not self.exists_locally:
-            self.local_path = local_dir
-            self.exists_locally = True
-        return True

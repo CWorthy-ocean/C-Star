@@ -75,6 +75,14 @@ class InputDataset(ABC):
         assert self.start_date is None or isinstance(self.start_date, dt.datetime)
         assert self.end_date is None or isinstance(self.end_date, dt.datetime)
 
+    @property
+    def exists_locally(self) -> bool:
+        return (
+            True
+            if ((self.working_path is not None) and (self.working_path.exists()))
+            else False
+        )
+
     def __str__(self) -> str:
         name = self.__class__.__name__
         base_str = f"{name}"
@@ -139,6 +147,8 @@ class InputDataset(ABC):
                 f"A file by the name of {self.source.basename} "
                 + f"already exists at {local_dir}"
             )
+            if self.working_path is None:
+                self.working_path = target_path
         else:
             if self.source.location_type == "path":
                 target_path.symlink_to(self.source.location)

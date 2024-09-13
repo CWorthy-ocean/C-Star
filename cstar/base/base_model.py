@@ -88,8 +88,6 @@ class BaseModel(ABC):
         )
         self.repo_basename = Path(self.source_repo).name.replace(".git", "")
 
-        self.local_config_status = self.get_local_config_status()
-
     def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
@@ -145,14 +143,8 @@ class BaseModel(ABC):
     def expected_env_var(self) -> str:
         """environment variable associated with the base model, e.g. MARBL_ROOT"""
 
-    @abstractmethod
-    def _base_model_adjustments(self) -> None:
-        """
-        Perform any C-Star specific adjustments to the base model that would
-        be needed after a clean checkout.
-        """
-
-    def get_local_config_status(self) -> int:
+    @property
+    def local_config_status(self) -> int:
         """
         Perform a series of checks to ensure that the base model is properly configured on this machine.
 
@@ -195,6 +187,10 @@ class BaseModel(ABC):
 
         else:  # env_var_exists False (e.g. ROMS_ROOT not defined)
             return 3
+
+    @property
+    def is_setup(self) -> bool:
+        return True if self.local_config_status == 0 else False
 
     def handle_config_status(self) -> None:
         """
@@ -294,3 +290,10 @@ class BaseModel(ABC):
     @abstractmethod
     def get(self, target: str | Path) -> None:
         """clone the basemodel code to your local machine"""
+
+    @abstractmethod
+    def _base_model_adjustments(self) -> None:
+        """
+        Perform any C-Star specific adjustments to the base model that would
+        be needed after a clean checkout.
+        """
