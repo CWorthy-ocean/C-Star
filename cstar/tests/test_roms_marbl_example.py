@@ -1,5 +1,6 @@
 from pathlib import Path
 import yaml
+from typing import Callable
 
 import pytest
 
@@ -7,35 +8,42 @@ import cstar
 
 
 # TODO this assumes you are running pytest from the root directory of the cloned repo, which is fragile
-ROMS_MARBL_BASE_BLUEPRINT_PATH = "./examples/cstar_blueprint_roms_marbl_example.yaml"
+# TODO move this somewhere more top-level
+EXAMPLE_BLUEPRINTS = {
+    "ROMS_MARBL_BASE": "./examples/cstar_blueprint_roms_marbl_example.yaml",
+}
 
 
 @pytest.fixture
-def roms_marbl_base_blueprint() -> dict:
-    """Returns ROMS-Marbl blueprint yaml as in-memory dict"""
+def blueprint_as_dict() -> Callable[[str], dict]:
+    """Given the name of a pre-defined blueprinm, return it as an in-memory dict."""
 
-    # TODO generalize this to pick from a preset list of different example blueprints?
+    def _base_blueprint_dict(name: str) -> dict:
+        base_blueprint_path = EXAMPLE_BLUEPRINTS[name]
 
-    with open(ROMS_MARBL_BASE_BLUEPRINT_PATH, "r") as file:
-        blueprint_dict = yaml.load(file, Loader=yaml.Loader)
+        with open(base_blueprint_path, "r") as file:
+            base_blueprint_dict = yaml.load(file, Loader=yaml.Loader)
 
-    return blueprint_dict
+        return base_blueprint_dict
+
+    return _base_blueprint_dict
 
 
 @pytest.fixture
-def roms_marbl_base_blueprint_filepath(
-    tmp_path: Path, roms_marbl_base_blueprint: dict
-) -> Path:
-    """Returns ROMS-Marbl blueprint yaml filepath."""
+def blueprint_as_path(blueprint_as_dict, tmp_path) -> Callable[[str], Path]:
+    """Given the name of a pre-defined blueprint, returns it as a (temporary) path to an on-disk file."""
 
-    # TODO parametrise this to accept any blueprint dict
-    blueprint_dict = roms_marbl_base_blueprint
+    def _blueprint_as_path(name: str) -> Path:
+        blueprint_dict = blueprint_as_dict(name)
 
-    blueprint_filepath = tmp_path / "blueprint.yaml"
-    with open(blueprint_filepath, "w") as file:
-        yaml.dump(blueprint_dict, file)
+        # save the blueprint to a temporary path
+        blueprint_filepath = tmp_path / "blueprint.yaml"
+        with open(blueprint_filepath, "w") as file:
+            yaml.dump(blueprint_dict, file)
 
-    return blueprint_filepath
+        return blueprint_filepath
+
+    return _blueprint_as_path
 
 
 # TODO fixture supplying blueprint file containing paths to local files / additional code instead
@@ -47,10 +55,10 @@ def roms_marbl_base_blueprint_filepath(
 
 
 class TestRomsMarbl:
-    def test_roms_marbl_remote_files(
-        self, tmpdir, mock_user_input, roms_marbl_base_blueprint_filepath
-    ):
+    def test_roms_marbl_remote_files(self, tmpdir, mock_user_input, blueprint_as_path):
         """Test using URLs to point to input datasets"""
+
+        roms_marbl_base_blueprint_filepath = blueprint_as_path("ROMS_MARBL_BASE")
 
         roms_marbl_remote_case = cstar.Case.from_blueprint(
             blueprint=roms_marbl_base_blueprint_filepath,
