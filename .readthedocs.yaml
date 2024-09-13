@@ -5,24 +5,25 @@
 # Required
 version: 2
 
-# Set the OS, Python version and other tools you might need
 build:
   os: ubuntu-22.04
   tools:
-    python: "mambaforge-22.9"
+    python: "3.12"
+  commands:
+    - make fresh  # Clean the build directory
+    - make  # Build the documentation
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
   configuration: docs/conf.py
 
+# Conda environment
 conda:
   environment: ci/environment.yml
+
+# Python dependencies and install method
 python:
   install:
     - method: pip
       path: .
 
-# Custom commands
-commands:
-  - make fresh  # Run `make fresh` to clean the build directory
-  - make  # Build the documentation using the `Makefile`
