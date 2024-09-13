@@ -30,11 +30,20 @@ def example_blueprint_as_dict() -> Callable[[str], dict]:
 
 
 @pytest.fixture
-def example_blueprint_as_path(example_blueprint_as_dict, tmp_path) -> Callable[[str], Path]:
+def example_blueprint_as_path(
+    example_blueprint_as_dict, tmp_path
+) -> Callable[[str], Path]:
     """Given the name of a pre-defined blueprint, returns it as a (temporary) path to an on-disk file."""
 
-    def _blueprint_as_path(name: str) -> Path:
+    def _blueprint_as_path(name: str, make_local: bool = False) -> Path:
+        # TODO add options to edit in-memory blueprints here?
+
         blueprint_dict = example_blueprint_as_dict(name)
+
+        # TODO define `make_local`function
+        if make_local:
+            # blueprint_dict = make_local(blueprint_dict)
+            raise NotImplementedError()
 
         # save the blueprint to a temporary path
         blueprint_filepath = tmp_path / "blueprint.yaml"
@@ -55,10 +64,14 @@ def example_blueprint_as_path(example_blueprint_as_dict, tmp_path) -> Callable[[
 
 
 class TestRomsMarbl:
-    def test_roms_marbl_remote_files(self, tmpdir, mock_user_input, example_blueprint_as_path):
+    def test_roms_marbl_remote_files(
+        self, tmpdir, mock_user_input, example_blueprint_as_path
+    ):
         """Test using URLs to point to input datasets"""
 
-        roms_marbl_base_blueprint_filepath = example_blueprint_as_path("ROMS_MARBL_BASE")
+        roms_marbl_base_blueprint_filepath = example_blueprint_as_path(
+            "ROMS_MARBL_BASE"
+        )
 
         roms_marbl_remote_case = cstar.Case.from_blueprint(
             blueprint=roms_marbl_base_blueprint_filepath,
@@ -79,10 +92,35 @@ class TestRomsMarbl:
             roms_marbl_remote_case.run()
             roms_marbl_remote_case.post_run()
 
-    @pytest.mark.skip(reason="not yet implemented")
-    def test_roms_marbl_local_files(self, tmpdir, roms_marbl_blueprint_local_datasets):
+    @pytest.mark.xfail(reason="not yet implemented")
+    def test_roms_marbl_local_files(
+        self, tmpdir, mock_user_input, example_blueprint_as_path
+    ):
         """Test using available local input datasets"""
 
-        # TODO have a fixture that downloads the files to a temporary directory
+        roms_marbl_base_blueprint_filepath_local_data = example_blueprint_as_path(
+            "ROMS_MARBL_BASE",
+            local=True,  # TODO use pytest.mark.parametrize to collapse these tests into one?
+        )
+
+        # TODO have a fixture that downloads the files to a temporary directory?
         # Does that basically just mean running case.setup()?
-        ...
+
+        roms_marbl_remote_case = cstar.Case.from_blueprint(
+            blueprint=roms_marbl_base_blueprint_filepath_local_data,
+            caseroot=tmpdir,
+            start_date="20120103 12:00:00",
+            end_date="20120103 12:30:00",
+        )
+
+        with mock_user_input("y"):
+            # do we actually need user input for all these steps?
+            roms_marbl_remote_case.setup()
+
+            # why are we persisting this blueprint file then not using it again in the test?
+            # roms_marbl_remote_case.persist(tmpdir / "test_blueprint.yaml")
+
+            roms_marbl_remote_case.build()
+            roms_marbl_remote_case.pre_run()
+            roms_marbl_remote_case.run()
+            roms_marbl_remote_case.post_run()
