@@ -15,7 +15,7 @@ EXAMPLE_BLUEPRINTS = {
 
 
 @pytest.fixture
-def blueprint_as_dict() -> Callable[[str], dict]:
+def example_blueprint_as_dict() -> Callable[[str], dict]:
     """Given the name of a pre-defined blueprinm, return it as an in-memory dict."""
 
     def _base_blueprint_dict(name: str) -> dict:
@@ -30,11 +30,11 @@ def blueprint_as_dict() -> Callable[[str], dict]:
 
 
 @pytest.fixture
-def blueprint_as_path(blueprint_as_dict, tmp_path) -> Callable[[str], Path]:
+def example_blueprint_as_path(example_blueprint_as_dict, tmp_path) -> Callable[[str], Path]:
     """Given the name of a pre-defined blueprint, returns it as a (temporary) path to an on-disk file."""
 
     def _blueprint_as_path(name: str) -> Path:
-        blueprint_dict = blueprint_as_dict(name)
+        blueprint_dict = example_blueprint_as_dict(name)
 
         # save the blueprint to a temporary path
         blueprint_filepath = tmp_path / "blueprint.yaml"
@@ -55,10 +55,10 @@ def blueprint_as_path(blueprint_as_dict, tmp_path) -> Callable[[str], Path]:
 
 
 class TestRomsMarbl:
-    def test_roms_marbl_remote_files(self, tmpdir, mock_user_input, blueprint_as_path):
+    def test_roms_marbl_remote_files(self, tmpdir, mock_user_input, example_blueprint_as_path):
         """Test using URLs to point to input datasets"""
 
-        roms_marbl_base_blueprint_filepath = blueprint_as_path("ROMS_MARBL_BASE")
+        roms_marbl_base_blueprint_filepath = example_blueprint_as_path("ROMS_MARBL_BASE")
 
         roms_marbl_remote_case = cstar.Case.from_blueprint(
             blueprint=roms_marbl_base_blueprint_filepath,
