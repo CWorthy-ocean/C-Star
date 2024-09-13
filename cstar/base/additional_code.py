@@ -118,9 +118,7 @@ class AdditionalCode:
         if not self.exists_locally:
             base_str += " (get with AdditionalCode.get())"
         if self.source_mods is not None:
-            base_str += (
-                "\nSource code modification files (paths relative to above location)):"
-            )
+            base_str += "\nSource code modification files (paths relative to above location and subdirectory)):"
             for filename in self.source_mods:
                 base_str += f"\n    {filename}"
         if self.namelists is not None:

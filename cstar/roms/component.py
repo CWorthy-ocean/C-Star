@@ -429,14 +429,18 @@ class ROMSComponent(Component):
         if not files:
             print("no suitable output found")
         else:
+            (output_dir / "PARTITIONED").mkdir(exist_ok=True)
             for f in files:
                 print(f)
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
+                wildcard_pattern = f"{Path(f.stem).stem}.*.nc"
                 subprocess.run(
-                    f"ncjoin {Path(f.stem).stem}.*.nc",
+                    f"ncjoin {wildcard_pattern}",
                     cwd=output_dir,
                     shell=True,
                 )
+                for F in output_dir.glob(wildcard_pattern):
+                    F.rename(output_dir / "PARTITIONED" / F.name)
 
 
 class ROMSDiscretization(Discretization):

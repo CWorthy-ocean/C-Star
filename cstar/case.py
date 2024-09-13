@@ -315,21 +315,37 @@ class Case:
             if hasattr(component, "additional_code") and (
                 component.additional_code is not None
             ):
+                case_tree_dict.setdefault("additional_code", {})
+                case_tree_dict["additional_code"].setdefault(
+                    component.base_model.name, {}
+                )
                 if component.additional_code.namelists is not None:
-                    case_tree_dict.setdefault("namelists", {})
-                    case_tree_dict["namelists"][component.base_model.name] = [
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("namelists", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "namelists"
+                    ] = [
                         namelist.split("/")[-1]
                         for namelist in component.additional_code.namelists
                     ]
                 if component.additional_code.modified_namelists is not None:
-                    case_tree_dict.setdefault("namelists", {})
-                    case_tree_dict["namelists"][component.base_model.name] += [
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("namelists", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "namelists"
+                    ] += [
                         namelist.split("/")[-1]
                         for namelist in component.additional_code.modified_namelists
                     ]
                 if component.additional_code.source_mods is not None:
-                    case_tree_dict.setdefault("source_mods", {})
-                    case_tree_dict["source_mods"][component.base_model.name] = [
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("source_mods", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "source_mods"
+                    ] = [
                         sourcemod.split("/")[-1]
                         for sourcemod in component.additional_code.source_mods
                     ]
