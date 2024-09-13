@@ -232,7 +232,7 @@ class ROMSComponent(Component):
         self,
         n_time_steps: Optional[int] = None,
         account_key: Optional[str] = None,
-        output_dir: Optional[str] = None,
+        output_dir: Optional[str | Path] = None,
         walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
         job_name: str = "my_roms_run",
     ) -> None:
@@ -264,6 +264,10 @@ class ROMSComponent(Component):
             )
         if output_dir is None:
             output_dir = self.exe_path.parent
+        output_dir = Path(output_dir)
+
+        # Set run path to output dir for clarity: we are running in the output dir but
+        # these are conceptually different:
         run_path = output_dir
 
         if self.additional_code is None:

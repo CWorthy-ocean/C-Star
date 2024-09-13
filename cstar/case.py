@@ -660,7 +660,9 @@ class Case:
 
             # Get AdditionalCode
             if component.additional_code is not None:
-                component.additional_code.get(self.caseroot/"additional_code"/component.base_model.name)
+                component.additional_code.get(
+                    self.caseroot / "additional_code" / component.base_model.name
+                )
 
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name

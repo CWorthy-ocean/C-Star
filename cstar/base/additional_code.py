@@ -50,13 +50,14 @@ class AdditionalCode:
        Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
     """
 
-    def __init__(self,
-                 base_model: BaseModel,
-                 location: str,
-                 subdir: str = "",
-                 checkout_target: Optional[str] = None,
-                 source_mods: Optional[List[str]] = None,
-                 namelists: Optional[List[str]] = None,
+    def __init__(
+        self,
+        base_model: BaseModel,
+        location: str,
+        subdir: str = "",
+        checkout_target: Optional[str] = None,
+        source_mods: Optional[List[str]] = None,
+        namelists: Optional[List[str]] = None,
     ):
         """
         Initialize an AdditionalCode object from a DataSource  and a list of code files
@@ -177,7 +178,7 @@ class AdditionalCode:
                 (self.source.source_type == "directory")
                 or (self.source.source_type == "repository")
             ):
-                source_dir = Path(self.source.location)/self.subdir
+                source_dir = Path(self.source.location) / self.subdir
 
             else:
                 raise ValueError(
@@ -195,11 +196,11 @@ class AdditionalCode:
 
                 if file_list is None:
                     continue
-                (local_dir/file_type).mkdir(parents=True, exist_ok=True)
+                (local_dir / file_type).mkdir(parents=True, exist_ok=True)
 
                 for f in file_list:
                     src_file_path = source_dir / f
-                    tgt_file_path = local_dir / file_type/ Path(f).name
+                    tgt_file_path = local_dir / file_type / Path(f).name
                     print(f"copying {src_file_path} to {tgt_file_path}")
                     if src_file_path.exists():
                         shutil.copy(src_file_path, tgt_file_path)
