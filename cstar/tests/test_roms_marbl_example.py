@@ -11,32 +11,49 @@ ROMS_MARBL_BASE_BLUEPRINT_PATH = "./examples/cstar_blueprint_roms_marbl_example.
 
 
 @pytest.fixture
-def roms_marbl_blueprint_remote_datasets(tmp_path) -> Path:
-    """Creates blueprint yaml file in temporary directory"""
+def roms_marbl_base_blueprint() -> dict:
+    """Returns ROMS-Marbl blueprint yaml as in-memory dict"""
+
+    # TODO generalize this to pick from a preset list of different example blueprints?
 
     with open(ROMS_MARBL_BASE_BLUEPRINT_PATH, "r") as file:
         blueprint_dict = yaml.load(file, Loader=yaml.Loader)
 
-    blueprint_filepath = tmp_path / "blueprint.yaml"
+    return blueprint_dict
 
+
+@pytest.fixture
+def roms_marbl_base_blueprint_filepath(
+    tmp_path: Path, roms_marbl_base_blueprint: dict
+) -> Path:
+    """Returns ROMS-Marbl blueprint yaml filepath."""
+
+    # TODO parametrise this to accept any blueprint dict
+    blueprint_dict = roms_marbl_base_blueprint
+
+    blueprint_filepath = tmp_path / "blueprint.yaml"
     with open(blueprint_filepath, "w") as file:
         yaml.dump(blueprint_dict, file)
 
     return blueprint_filepath
 
 
-# TODO similar fixture but the blueprint file contains paths to local files instead
-# TODO should these local files be in a given temporary directory?
+# TODO fixture supplying blueprint file containing paths to local files / additional code instead
+# TODO this should be implemented by altering the in-memory dict before returning
+# TODO then using the other fixture to write that altered dict to a temporary directory
+# TODO should these local files be in a specified temporary directory?
+
+# TODO move these fixtures to dedicated modules
 
 
 class TestRomsMarbl:
     def test_roms_marbl_remote_files(
-        self, tmpdir, mock_user_input, roms_marbl_blueprint_remote_datasets
+        self, tmpdir, mock_user_input, roms_marbl_base_blueprint_filepath
     ):
         """Test using URLs to point to input datasets"""
 
         roms_marbl_remote_case = cstar.Case.from_blueprint(
-            blueprint=roms_marbl_blueprint_remote_datasets,
+            blueprint=roms_marbl_base_blueprint_filepath,
             caseroot=tmpdir,
             start_date="20120103 12:00:00",
             end_date="20120103 12:30:00",
