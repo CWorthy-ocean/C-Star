@@ -21,3 +21,8 @@ python:
   install:
     - method: pip
       path: .
+
+# Custom commands
+commands:
+  - make fresh  # Run `make fresh` to clean the build directory
+  - make  # Build the documentation using the `Makefile`
