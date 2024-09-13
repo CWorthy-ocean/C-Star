@@ -3,7 +3,7 @@ from typing import List, Optional, TYPE_CHECKING
 
 from cstar.base.base_model import BaseModel
 from cstar.base.input_dataset import InputDataset
-
+from cstar.base.utils import _list_to_concise_str
 
 if TYPE_CHECKING:
     from cstar.base.additional_code import AdditionalCode
@@ -18,7 +18,7 @@ class Component(ABC):
     base_model: BaseModel
         An object pointing to the unmodified source code of a model handling an individual
         aspect of the simulation such as biogeochemistry or ocean circulation
-    additional_code: AdditionalCode or list of AdditionalCodes
+    additional_code: AdditionalCode
         Additional code contributing to a unique instance of a base model,
         e.g. namelists, source modifications, etc.
     input_datasets: list of InputDatasets
@@ -105,12 +105,15 @@ class Component(ABC):
     def __repr__(self) -> str:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>, "
-        repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
-        repr_str += "\ninput_datasets = ["
+        if self.additional_code is not None:
+            repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
+        else:
+            repr_str += "\n additional_code = None"
+        ID_list = []
         for i, inp in enumerate(self.input_datasets):
-            repr_str += f"\n    <{inp.__class__.__name__} from {inp.source.basename}>, "
-        repr_str = repr_str.strip(", ")
-        repr_str += "],"
+            ID_list.append(f"<{inp.__class__.__name__} from {inp.source.basename}>")
+
+        repr_str += f"\ninput_datasets = {_list_to_concise_str(ID_list,pad=18,items_are_strs=False)}"
         repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
         repr_str += "\n)"
 

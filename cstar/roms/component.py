@@ -42,7 +42,7 @@ class ROMSComponent(Component):
     input_datasets: list of InputDatasets
         Any spatiotemporal data needed to run this instance of ROMS
         e.g. initial conditions, surface forcing, etc.
-    additional_code: AdditionalCode or list of AdditionalCodes
+    additional_code: AdditionalCode
         Additional code contributing to a unique instance of this ROMS run
         e.g. namelists, source modifications, etc.
     discretization: ROMSDiscretization
@@ -131,13 +131,12 @@ class ROMSComponent(Component):
 
         This method:
         1. goes through any netcdf files associated with InputDataset objects belonging
-           to this ROMSComponent instance and runs `partit`, a ROMS program used to
-           partition netcdf files such that there is one file per processor.
+           to this ROMSComponent instance and partitions them such that there is one file per processor.
            The partitioned files are stored in a subdirectory `PARTITIONED` of
            InputDataset.working_path
 
-        2. Replaces the template strings INPUT_DIR and MARBL_NAMELIST_DIR (if present)
-           in the roms namelist file (typically `roms.in`) used to run the model with
+        2. Replaces placeholder strings (if present) representing, e.g. input file paths
+           in a template roms namelist file (typically `roms.in_TEMPLATE`) used to run the model with
            the respective paths to input datasets and any MARBL namelists (if this ROMS
            component belongs to a case for which MARBL is also a component).
            The namelist file is sought in
@@ -242,12 +241,15 @@ class ROMSComponent(Component):
         This method creates a temporary file to be submitted to the job scheduler (if any)
         on the calling machine, then submits it. By default the job requests the maximum
         walltime. It calculates the number of nodes and cores-per-node to request based on
-        the number of cores required by the job, `ROMSComponent.n_procs_tot`.
+        the number of cores required by the job, `ROMSComponent.discretization.n_procs_tot`.
 
         Parameters:
         -----------
         account_key: str, default None
             The users account key on the system
+        output_dir: str or Path:
+            The path to the directory in which model output will be saved. This is by default
+            the directory from which the ROMS executable will be called.
         walltime: str, default _CSTAR_SYSTEM_MAX_WALLTIME
             The requested length of the job, HH:MM:SS
         job_name: str, default 'my_roms_run'
@@ -415,8 +417,7 @@ class ROMSComponent(Component):
         Performs post-processing steps associated with this ROMSComponent object.
 
         This method goes through any netcdf files produced by the model in
-        `output_dir` and runs `ncjoin`,
-        a ROMS program used to join netcdf files that are produced separately by each processor.
+        `output_dir` and joins netcdf files that are produced separately by each processor.
 
         Parameters:
         -----------

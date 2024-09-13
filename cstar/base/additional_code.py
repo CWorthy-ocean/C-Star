@@ -9,9 +9,10 @@ from cstar.base.utils import _clone_and_checkout, _list_to_concise_str
 
 class AdditionalCode:
     """
-    Additional code contributing to a unique instance of a base model, e.g. namelists, source modifications, etc.
+    Additional code contributing to a unique instance of a base model
 
-    Additional code is assumed to be kept in a single directory or repository (described by the `source` attribute)
+    Additional code is assumed to be kept in a single directory or
+    subdirectory of a repository (described by the `source` attribute)
     with this structure:
 
     <additional_code_dir>
@@ -30,12 +31,18 @@ class AdditionalCode:
         The base model with which this additional code is associated
     source: DataSource
         Describes the location and type of source data (e.g. repository,directory)
+    subdir: str
+        Subdirectory of source.location in which the additional code is kept
+        (used if, e.g., source.location is a remote repository)
     checkout_target: Optional, str
-        Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
+        Used if source.source_type is 'repository'.
+        A tag, git hash, or other target to check out.
     source_mods: Optional, list of strs
-        Path(s) relative to the top level of `source.location` to any code that is needed to compile a unique instance of the base model
+        Path(s) relative to the subdirectory `subdir` of `source.location`
+        to any code that is needed to compile a unique instance of the base model
     namelists: str or list of strs
-        Path(s) relative to the top level of `source.location` to any code that is needed at runtime for the base model
+        Path(s) relative to the subdirectory `subdir` of `source.location`
+        to any code that is needed at runtime for the base model
     working_path: Path, default None
         The local path to the additional code. Set when `get()` method is called.
 
@@ -45,7 +52,7 @@ class AdditionalCode:
        Fetch the directory containing this additional code and copy it to `local_dir`.
        If source.source_type is 'repository', and source.location_type is 'url',
        clone repository to a temporary directory, checkout `checkout_target`,
-       and move files associated with this AdditionalCode instance to `local_dir`.
+       and move files in `subdir` associated with this AdditionalCode instance to `local_dir`.
     check_exists_locally(local_dir):
        Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
     """
@@ -69,13 +76,16 @@ class AdditionalCode:
         location: str
             url or path pointing to the additional code directory or repository, used to set `source` attribute
         subdir: str
-           Subdirectory of "location" in which to look for files (e.g. if location points to a remote repository)
+           Subdirectory of `location` in which to look for files
+           (e.g. if `location` points to a remote repository)
         checkout_target: Optional, str
             Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
         source_mods: Optional, str or list of strs
-            Path(s) relative to the top level of `source.location` to any code that is needed to compile a unique instance of the base model
+            Path(s) relative to the subdirectory `subdir` of `source.location`
+            to any code that is needed to compile a unique instance of the base model
         namelists: Optional, str or list of strs
-            Path(s) relative to the top level of `source.location` to any code that is needed at runtime for the base model
+            Path(s) relative to the subdirectory `subdir` of `source.location`
+            to any code that is needed at runtime for the base model
 
         Returns:
         --------
@@ -102,7 +112,11 @@ class AdditionalCode:
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nBase model: {self.base_model.name}"
         base_str += f"\nLocation: {self.source.location}"
-        base_str += f"\n Working path: {self.working_path}"
+        base_str += f"\nsubdirectory: {self.subdir}"
+        base_str += f"\nWorking path: {self.working_path}"
+        base_str += f"\nExists locally: {self.exists_locally}"
+        if not self.exists_locally:
+            base_str += " (get with AdditionalCode.get())"
         if self.source_mods is not None:
             base_str += (
                 "\nSource code modification files (paths relative to above location)):"
@@ -122,6 +136,7 @@ class AdditionalCode:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>,"
         repr_str += f"\nlocation = {self.source.location!r},"
+        repr_str += f"\nsubdir = {self.subdir!r}"
         if hasattr(self, "checkout_target"):
             repr_str += f"\ncheckout_target = {self.checkout_target!r},"
         if hasattr(self, "source_mods") and self.source_mods is not None:
@@ -132,13 +147,17 @@ class AdditionalCode:
         # Additional info:
         info_str = ""
         if self.working_path is not None:
-            info_str += f"working_path: {self.working_path},"
+            info_str += f"working_path = {self.working_path},"
+            info_str += f"exists_locally = {self.exists_locally}"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         return repr_str
 
     @property
     def exists_locally(self):
+        """
+        Determine whether a local working copy of the AdditionalCode exists at self.working_path (bool)
+        """
         if self.working_path is None:
             return False
 
