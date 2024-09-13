@@ -9,9 +9,6 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.12"
-  commands:
-    - make fresh  # Clean the build directory
-    - make  # Build the documentation
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
