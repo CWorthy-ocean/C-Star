@@ -146,11 +146,7 @@ class ROMSComponent(Component):
 
         # Partition input datasets
         if self.input_datasets is not None:
-            datasets_to_partition = [
-                d
-                for d in self.input_datasets
-                if ((d.working_path is not None) and (d.working_path.exists()))
-            ]
+            datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
 
             # Preliminary checks
             if self.additional_code.working_path is None:
@@ -174,18 +170,31 @@ class ROMSComponent(Component):
 
             namelist_forcing_str = ""
             # Partition input datasets and add paths to namelist
+            if len(datasets_to_partition) > 0:
+                pass
             for f in datasets_to_partition:
-                dspath = f.working_path
                 fname = f.source.basename
 
-                if (dspath is None) or (not dspath.exists()):
+                if f.exists_locally:
                     raise ValueError(
-                        f"working_path of InputDataset {f}, {dspath}, "
+                        f"working_path of InputDataset {f}, {f.working_path}, "
                         + "refers to a non-existent file"
                         + "\n call InputDataset.get() and try again."
                     )
                 # Partitioning step
-                partdir = dspath.parent / "PARTITIONED"
+                if f.working_path is None:
+                    raise ValueError(f"InputDataset has no working path: {f}")
+                elif isinstance(f.working_path, list):
+                    if all(
+                        [d.parent == f.working_path[0].parent for d in f.working_path]
+                    ):
+                        raise ValueError(
+                            f"A single input dataset exists in multiple directories: {f.working_path}."
+                        )
+                    else:
+                        partdir = f.working_path[0].parent / "PARTITIONED"
+                else:
+                    partdir = f.working_path.parent / "PARTITIONED"
                 partdir.mkdir(parents=True, exist_ok=True)
                 subprocess.run(
                     "partit "
@@ -197,14 +206,27 @@ class ROMSComponent(Component):
                     cwd=partdir,
                     shell=True,
                 )
+
                 # Namelist modification step
                 if isinstance(f, ROMSModelGrid):
-                    namelist_grid_str = f"     {partdir / dspath.name} \n"
+                    if f.working_path is None or isinstance(f.working_path, list):
+                        raise ValueError(
+                            f"ROMS only accepts a single grid file, found list {f.working_path}"
+                        )
+
+                    assert isinstance(f.working_path, Path), "silence, linter"
+
+                    namelist_grid_str = f"     {partdir / f.working_path.name} \n"
                     _replace_text_in_file(
                         mod_namelist, "__GRID_FILE_PLACEHOLDER__", namelist_grid_str
                     )
                 elif isinstance(f, ROMSInitialConditions):
-                    namelist_ic_str = f"     {partdir / dspath.name} \n"
+                    if f.working_path is None or isinstance(f.working_path, list):
+                        raise ValueError(
+                            f"ROMS only accepts a single initial conditions file, found list {f.working_path}"
+                        )
+                    assert isinstance(f.working_path, Path), "silence, linter"
+                    namelist_ic_str = f"     {partdir / f.working_path.name} \n"
                     _replace_text_in_file(
                         mod_namelist,
                         "__INITIAL_CONDITION_FILE_PLACEHOLDER__",
@@ -215,7 +237,15 @@ class ROMSComponent(Component):
                     ROMSTidalForcing,
                     ROMSBoundaryForcing,
                 ]:
-                    namelist_forcing_str += f"     {partdir / dspath.name} \n"
+                    if isinstance(f.working_path, Path):
+                        dslist = [
+                            f.working_path,
+                        ]
+                    elif isinstance(f.working_path, list):
+                        dslist = f.working_path
+                    namelist_forcing_str = ""
+                    for d in dslist:
+                        namelist_forcing_str += f"     {partdir / d.name} \n"
 
             _replace_text_in_file(
                 mod_namelist, "__FORCING_FILES_PLACEHOLDER__", namelist_forcing_str

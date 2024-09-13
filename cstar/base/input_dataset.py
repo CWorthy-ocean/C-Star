@@ -5,7 +5,7 @@ import dateutil.parser
 from pathlib import Path
 from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from cstar.base import BaseModel
@@ -23,8 +23,8 @@ class InputDataset(ABC):
         Describes the location and type of the source data
     file_hash: str, default None
         The 256 bit SHA sum associated with the file for verifying downloads
-    working_path: Path, default None
-        The path where the input dataset is being worked with locally, set when `get()` is called.
+    working_path: Path or list of Paths, default None
+        The path(s) where the input dataset is being worked with locally, set when `get()` is called.
 
     Methods:
     --------
@@ -58,7 +58,7 @@ class InputDataset(ABC):
         self.base_model: "BaseModel" = base_model
         self.source: DataSource = DataSource(location)
         self.file_hash: Optional[str] = file_hash
-        self.working_path: Optional[Path] = None
+        self.working_path: Optional[Path | List[Path]] = None
 
         if (self.file_hash is None) and (self.source.location_type == "url"):
             raise ValueError(
@@ -77,11 +77,12 @@ class InputDataset(ABC):
 
     @property
     def exists_locally(self) -> bool:
-        return (
-            True
-            if ((self.working_path is not None) and (self.working_path.exists()))
-            else False
-        )
+        if self.working_path is None:
+            return False
+        elif isinstance(self.working_path, list):
+            return True if all([f.exists() for f in self.working_path]) else False
+        elif isinstance(self.working_path, Path):
+            return self.working_path.exists()
 
     def __str__(self) -> str:
         name = self.__class__.__name__
@@ -98,7 +99,7 @@ class InputDataset(ABC):
         if self.end_date is not None:
             base_str += f"\nend_date: {self.end_date}"
         base_str += f"\nWorking path: {self.working_path}"
-        if (self.working_path is not None) and (self.working_path.exists()):
+        if self.exists_locally:
             base_str += " (exists)"
         else:
             base_str += " ( does not yet exist. Call InputDataset.get() )"
@@ -114,8 +115,8 @@ class InputDataset(ABC):
         repr_str += "\n)"
         info_str = ""
         if self.working_path is not None:
-            info_str += f"working_path= {self.working_path!r},"
-            if not self.working_path.exists():
+            info_str += f"working_path= {self.working_path},"
+            if not self.exists_locally:
                 info_str += "(does not exist)"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"

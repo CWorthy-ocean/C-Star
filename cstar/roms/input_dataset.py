@@ -92,17 +92,17 @@ class ROMSInputDataset(InputDataset, ABC):
 
         # ... and save:
         if (np_eta is not None) and (np_xi is not None):
-            roms_tools_class_instance.save(
+            savepath = roms_tools_class_instance.save(
                 local_dir / "PARTITIONED" / yaml_file.stem, np_xi=np_xi, np_eta=np_eta
             )
-            parted_dir = yaml_file.parent / "PARTITIONED"
-            self.local_partitioned_files = list(
-                parted_dir.glob(f"{yaml_file.stem}.*.nc")
-            )
+            self.partitioned_files = savepath
+
         else:
-            savepath = Path(f"{local_dir/yaml_file.stem}.nc")
-            roms_tools_class_instance.save(savepath)
-            self.local_path = savepath
+            savepath = roms_tools_class_instance.save(
+                Path(f"{local_dir/yaml_file.stem}.nc")
+            )
+            if len(savepath) == 1:
+                self.working_path = savepath[0]
 
 
 class ROMSModelGrid(ROMSInputDataset):
