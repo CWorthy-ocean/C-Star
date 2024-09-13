@@ -189,7 +189,9 @@ def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -
     temp_file_path.rename(file_path)
 
 
-def _list_to_concise_str(input_list, item_threshold=4, pad=16, show_item_count=True):
+def _list_to_concise_str(
+    input_list, item_threshold=4, pad=16, items_are_strs=True, show_item_count=True
+):
     """
     Take a list and return a concise string representation of it
 
@@ -201,6 +203,8 @@ def _list_to_concise_str(input_list, item_threshold=4, pad=16, show_item_count=T
        The number of items beyond which to truncate the str to item0,...itemN
     pad (int, default = 16):
        The number of whitespace characters to prepend newlines with
+    items_are_strs (bool, default = True):
+       Will use repr formatting ([item1,item2]->['item1','item2']) for lists of strings
     show_item_count (bool, default = True):
        Will add <N items> to the end of a truncated representation
 
@@ -226,13 +230,17 @@ def _list_to_concise_str(input_list, item_threshold=4, pad=16, show_item_count=T
     else:
         count_str = ""
     if len(input_list) > item_threshold:
-        list_str += f"[{input_list[0]!r},"
-        list_str += f"\n{pad_str}{input_list[1]!r},"
+        list_str += f"[{repr(input_list[0]) if items_are_strs else input_list[0]},"
+        list_str += (
+            f"\n{pad_str}{repr(input_list[1]) if items_are_strs else input_list[1]},"
+        )
         list_str += f"\n{pad_str}   ..."
-        list_str += f"\n{pad_str}{input_list[-1]!r}] {count_str}"
+        list_str += f"\n{pad_str}{repr(input_list[-1]) if items_are_strs else input_list[-1]}] {count_str}"
     else:
         list_str += "["
-        list_str += f",\n{pad_str}".join(repr(listitem) for listitem in input_list)
+        list_str += f",\n{pad_str}".join(
+            (repr(listitem) if items_are_strs else listitem) for listitem in input_list
+        )
         list_str += "]"
     return list_str
 
