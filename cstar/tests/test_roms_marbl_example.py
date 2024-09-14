@@ -10,7 +10,11 @@ import cstar
 # TODO this assumes you are running pytest from the root directory of the cloned repo, which is fragile
 # TODO move this somewhere more top-level
 EXAMPLE_BLUEPRINTS = {
-    "ROMS_MARBL_BASE": "./examples/cstar_blueprint_roms_marbl_example.yaml",
+    "ROMS_MARBL": {
+        "base": "./examples/cstar_blueprint_roms_marbl_example.yaml",
+        "input_datasets_url_prefix": "https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/",
+        "additional_code_url": "https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git",
+    },
 }
 
 
@@ -19,14 +23,72 @@ def example_blueprint_as_dict() -> Callable[[str], dict]:
     """Given the name of a pre-defined blueprinm, return it as an in-memory dict."""
 
     def _base_blueprint_dict(name: str) -> dict:
-        base_blueprint_path = EXAMPLE_BLUEPRINTS[name]
+        base_blueprint_path = EXAMPLE_BLUEPRINTS[name]["base"]
 
         with open(base_blueprint_path, "r") as file:
-            base_blueprint_dict = yaml.load(file, Loader=yaml.Loader)
+            base_blueprint_dict = yaml.safe_load(file)
 
         return base_blueprint_dict
 
     return _base_blueprint_dict
+
+
+def change_remote_paths_to_local_paths(
+    blueprint: dict,
+    name: str,
+) -> dict:
+    """
+    Alter an in-memory blueprint to point to the locally-downloaded versions of files downloaded from remote data sources.
+
+    Parameters
+    ----------
+    blueprint
+    name
+    """
+
+    input_datasets_url_prefix: str = EXAMPLE_BLUEPRINTS[name][
+        "input_datasets_url_prefix"
+    ]
+    additional_code_url: str = EXAMPLE_BLUEPRINTS[name]["additional_code_url"]  # noqa
+
+    def is_a_location_containing_input_datasets_url(key: str, value: str) -> bool:
+        return key == "location" and input_datasets_url_prefix in value
+
+    def update_path_to_input_datasets(key: str, value: str) -> str:
+        filename = Path(value).name
+        # TODO make "local_input_files" a parameter?
+        local_filepath = Path.cwd() / "local_input_files" / filename
+        return str(local_filepath)
+
+    blueprint_with_local_input_datasets = process_nested_dict(
+        dictionary=blueprint,
+        condition=is_a_location_containing_input_datasets_url,
+        update=update_path_to_input_datasets,
+    )
+
+    return blueprint_with_local_input_datasets
+
+    # TODO
+    # blueprint_with_local_additional_code = ...
+
+
+def process_nested_dict(
+    dictionary: dict,
+    condition: Callable[[str, str], bool],
+    update: Callable[[str, str], str],
+    parent_key: str = "",
+):
+    result = {}
+    for key, value in dictionary.items():
+        full_key = f"{parent_key}.{key}" if parent_key else key
+        if isinstance(value, dict):
+            result[key] = process_nested_dict(value, condition, update, full_key)
+        else:
+            if condition(full_key, value):
+                result[key] = update(full_key, value)
+            else:
+                result[key] = value
+    return result
 
 
 @pytest.fixture
@@ -40,15 +102,13 @@ def example_blueprint_as_path(
 
         blueprint_dict = example_blueprint_as_dict(name)
 
-        # TODO define `make_local`function
         if make_local:
-            # blueprint_dict = make_local(blueprint_dict)
-            raise NotImplementedError()
+            blueprint_dict = change_remote_paths_to_local_paths(blueprint_dict, name)
 
         # save the blueprint to a temporary path
         blueprint_filepath = tmp_path / "blueprint.yaml"
         with open(blueprint_filepath, "w") as file:
-            yaml.dump(blueprint_dict, file)
+            yaml.safe_dump(blueprint_dict, file)
 
         return blueprint_filepath
 
@@ -69,9 +129,7 @@ class TestRomsMarbl:
     ):
         """Test using URLs to point to input datasets"""
 
-        roms_marbl_base_blueprint_filepath = example_blueprint_as_path(
-            "ROMS_MARBL_BASE"
-        )
+        roms_marbl_base_blueprint_filepath = example_blueprint_as_path("ROMS_MARBL")
 
         roms_marbl_remote_case = cstar.Case.from_blueprint(
             blueprint=roms_marbl_base_blueprint_filepath,
@@ -92,15 +150,15 @@ class TestRomsMarbl:
             roms_marbl_remote_case.run()
             roms_marbl_remote_case.post_run()
 
-    @pytest.mark.xfail(reason="not yet implemented")
+    # @pytest.mark.xfail(reason="not yet implemented")
     def test_roms_marbl_local_files(
         self, tmpdir, mock_user_input, example_blueprint_as_path
     ):
         """Test using available local input datasets"""
 
         roms_marbl_base_blueprint_filepath_local_data = example_blueprint_as_path(
-            "ROMS_MARBL_BASE",
-            local=True,  # TODO use pytest.mark.parametrize to collapse these tests into one?
+            "ROMS_MARBL",
+            make_local=True,  # TODO use pytest.mark.parametrize to collapse these tests into one?
         )
 
         # TODO have a fixture that downloads the files to a temporary directory?
