@@ -39,6 +39,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python - V
+           pip install dask
            python -m pip install -e . --force-reinstall
 
       - name: pre-commit
