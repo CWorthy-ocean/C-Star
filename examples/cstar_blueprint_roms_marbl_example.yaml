@@ -15,7 +15,7 @@ components:
       base_model:
         name: 'ROMS'
         source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
-        checkout_target: '2a4e9107ffc771d2833fbea3e08f1e169759b5ff'
+        checkout_target: '594ac425e9dbe663ce48ced0915c0007c6cca843'
       discretization:
         nx: 24
         ny: 24
@@ -25,8 +25,8 @@ components:
         time_step: 360
       additional_code:
         location: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-        checkout_target: 'b7b402cf173ea8c496cc44af72a48fdc4f50ad91'
-        subdir: 'ROMS'
+        checkout_target: '368d729d9500b98d0f1126a1b56620df7a2bae65'
+        subdir: 'additional_code/ROMS'
         source_mods:
           - "source_mods/bgc.opt"
           - "source_mods/bulk_frc.opt"

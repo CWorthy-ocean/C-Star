@@ -252,7 +252,6 @@ class ROMSComponent(Component):
                         ]
                     elif isinstance(f.working_path, list):
                         dslist = f.working_path
-                    namelist_forcing_str = ""
                     for d in dslist:
                         namelist_forcing_str += f"     {partdir / d.name} \n"
 

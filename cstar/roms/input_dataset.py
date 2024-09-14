@@ -108,7 +108,16 @@ class ROMSInputDataset(InputDataset, ABC):
             _, header, yaml_data = F.read().split("---", 2)
             yaml_dict = yaml.safe_load(yaml_data)
 
-        roms_tools_class_name = list(yaml_dict.keys())[-1]
+        yaml_keys = list(yaml_dict.keys())
+        if len(yaml_keys) == 1:
+            roms_tools_class_name = yaml_keys[0]
+        elif len(yaml_keys) == 2:
+            roms_tools_class_name = [y for y in yaml_keys if y != "Grid"][0]
+        else:
+            raise ValueError(
+                f"roms tools yaml file has {len(yaml_keys)} sections. "
+                + "Expected 'Grid' and one other class"
+            )
 
         start_time = start_date.isoformat() if start_date is not None else None
         end_time = end_date.isoformat() if end_date is not None else None
@@ -130,9 +139,10 @@ class ROMSInputDataset(InputDataset, ABC):
         import roms_tools
 
         roms_tools_class = getattr(roms_tools, roms_tools_class_name)
-        roms_tools_class_instance = roms_tools_class.from_yaml(self.source.location)
+        roms_tools_class_instance = roms_tools_class.from_yaml(yaml_file)
 
         # ... and save:
+        print(f"Saving roms-tools dataset created from {yaml_file}...")
         if (np_eta is not None) and (np_xi is not None):
             savepath = roms_tools_class_instance.save(
                 local_dir / "PARTITIONED" / yaml_file.stem, np_xi=np_xi, np_eta=np_eta
