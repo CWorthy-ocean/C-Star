@@ -64,7 +64,7 @@ class Component(ABC):
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component
             e.g. time step, number of vertical levels, etc.
-        
+
 
         Returns:
         --------
@@ -90,10 +90,10 @@ class Component(ABC):
 
         NID = len(self.input_datasets)
 
-        base_str += f"\n{NAC} AdditionalCode instances (query using Component.additional_code)"
         base_str += (
-            f"\n{NID} Input datasets (query using Component.input_datasets)"
+            f"\n{NAC} AdditionalCode instances (query using Component.additional_code)"
         )
+        base_str += f"\n{NID} Input datasets (query using Component.input_datasets)"
         if hasattr(self, "discretization") and self.discretization is not None:
             base_str += "\n\nDiscretization:\n"
             base_str += self.discretization.__str__()
@@ -184,8 +184,8 @@ class Discretization:
 
     def __str__(self) -> str:
         # Discretisation
-        disc_str=""
-        
+        disc_str = ""
+
         if hasattr(self, "time_step") and self.time_step is not None:
             disc_str += "\ntime_step: " + str(self.time_step) + "s"
         if hasattr(self, "n_levels") and self.n_levels is not None:
@@ -195,9 +195,8 @@ class Discretization:
         if hasattr(self, "ny") and self.ny is not None:
             disc_str += "\nny: " + str(self.ny)
         if len(disc_str) > 0:
-            classname=self.__class__.__name__
+            classname = self.__class__.__name__
             header = classname
-            disc_str=header+"\n"+"-"*len(classname)+disc_str
+            disc_str = header + "\n" + "-" * len(classname) + disc_str
 
-            
         return disc_str

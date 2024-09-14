@@ -503,9 +503,8 @@ class ROMSDiscretization(Discretization):
             return self.n_procs_x * self.n_procs_y
 
     def __str__(self) -> str:
-
         disc_str = super().__str__()
-        
+
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
             disc_str += (
                 "\nn_procs_x: "
