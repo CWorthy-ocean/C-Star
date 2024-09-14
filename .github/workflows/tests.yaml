@@ -34,7 +34,14 @@ jobs:
         run: |
           conda info
           printenv
-
+          
+      - name: Clone roms_tools from GitHub
+        shell: bash
+        run: |        
+          git clone https://github.com/CWorthy-ocean/roms-tools.git
+          cd roms-tools
+          python -m pip install .
+    
       - name: Install C-Star
         shell: micromamba-shell {0}
         run: |
