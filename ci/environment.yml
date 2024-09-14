@@ -13,6 +13,10 @@ dependencies:
   - mpich
   - xarray
   - netCDF4
+  - pip
+  - pip:
+      - dask
+      - roms_tools
   # docs
   - sphinx
   - nbsphinx
