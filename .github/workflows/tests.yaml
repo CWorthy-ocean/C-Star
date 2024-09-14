@@ -30,16 +30,18 @@ jobs:
             python=${{ matrix.python-version }}
 
       - name: Environment info
-        shell: bash
+        shell: micromamba-shell {0}                
         run: |
           conda info
           printenv
 
       - name: Upgrade pip, setuptools, and wheel
+        shell: micromamba-shell {0}        
         run: |
           python -m pip install --upgrade pip setuptools wheel
           
       - name: Install roms_tools from GitHub directly via pip
+        shell: micromamba-shell {0}
         run: |
           python -m pip install git+https://github.com/CWorthy-ocean/roms-tools.git --no-build-isolation
     
@@ -57,13 +59,13 @@ jobs:
           pre-commit run --all-files
            
       - name: Running Tests
-        shell: bash -l {0}
+        shell: micromamba-shell {0}        
         run: |
            python -V
            python -u -m coverage run --rcfile=coverage.toml tests/test_roms_marbl_example.py
 
       - name: Get coverage report
-        shell: bash -l {0}
+        shell: micromamba-shell {0}                
         run: |
           coverage report -m ; coverage xml
 
