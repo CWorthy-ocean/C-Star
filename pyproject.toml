@@ -27,8 +27,7 @@ dependencies = [
     "python-dateutil>=2.8.2",
     "PyYAML==6.0.2",
     "pooch>=1.8.1",
-    "roms_tools",
-    "dask"
+    "roms_tools"
 ]
 
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
@@ -59,4 +58,4 @@ include = ["cstar"]
 exclude = ["tests*", "docs*", "examples*"]
 
 [tool.setuptools]
-include-package-data = trueu
+include-package-data = true
