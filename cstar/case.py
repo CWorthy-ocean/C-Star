@@ -397,6 +397,8 @@ class Case:
             An initalized Case object based on the provided blueprint
 
         """
+        import roms_tools  # noqa: F401
+        from roms_tools.utils import partition_netcdf  # noqa: F401
 
         with open(blueprint, "r") as file:
             bp_dict = yaml.safe_load(file)
