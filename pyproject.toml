@@ -28,7 +28,6 @@ dependencies = [
     "PyYAML==6.0.2",
     "pooch>=1.8.1",
     "roms_tools",
-    "dask"
 ]
 
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
