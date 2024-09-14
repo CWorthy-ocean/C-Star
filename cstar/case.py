@@ -398,8 +398,6 @@ class Case:
 
         """
 
-        from roms_tools.utils import partition_netcdf  # noqa: F401
-
         with open(blueprint, "r") as file:
             bp_dict = yaml.safe_load(file)
 
