@@ -59,4 +59,4 @@ include = ["cstar"]
 exclude = ["tests*", "docs*", "examples*"]
 
 [tool.setuptools]
-include-package-data = trueu
+include-package-data = true
