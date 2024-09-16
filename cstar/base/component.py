@@ -151,7 +151,7 @@ class Discretization:
     -----------
 
     time_step: int
-        The time step with which to run ROMS in this configuration
+        The time step with which to run the Component
     """
 
     def __init__(
