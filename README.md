@@ -3,18 +3,25 @@
 
 
 # Installation
-### i. Create a new conda environment containing any dependencies:
 
-```conda create -n "cstar_environment python=3.12 pooch pyyaml```
+To obtain the latest development version, clone [this repository](https://github.com/CWorthy-ocean/C-Star):
 
-**If you are installing on an M2 (Apple silicon) Mac**, you'll also need to add:
+```
+git clone https://github.com/CWorthy-ocean/C-Star.git
+cd C-Star
+``` 
 
-```compilers=1.6.0 netcdf-fortran=4.6.1 mpich=4.1.2 nco=5.1.8 -c conda-forge ```
+Next, install and activate the following conda environment:
 
-It may also be worth including `ipython`,`xarray`,`numpy`, `matplotlib` and `jupyter` in the environment to work with any output, though these are not needed to run C-Star.
+```
+conda env create -f ci/environment.yml
+conda activate cstar_env
+```
 
-### ii. Install C-Star locally with pip
-With your C-star conda environment active, use `pip install -e .` at the top level of this repository.
+Finally, install `C-Star` in the same environment:
+```
+pip install -e .
+``` 
 
 # Using C-Star:
 It is recommended that first-time users see the example notebook `examples/cstar_example_notebook.ipynb`. A summary is provided here:
