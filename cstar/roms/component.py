@@ -513,3 +513,15 @@ class ROMSDiscretization(Discretization):
                 + " (Number of y-direction processors)"
             )
         return disc_str
+
+    def __repr__(self) -> str:
+        repr_str = super().__repr__().strip(")")
+        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
+            repr_str += f", n_procs_x = {self.n_procs_x}, "
+        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
+            repr_str += f"n_procs_y = {self.n_procs_y}, "
+
+        repr_str = repr_str.strip(", ")
+        repr_str += ")"
+
+        return repr_str

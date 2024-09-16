@@ -82,9 +82,9 @@ class Component(ABC):
     def __str__(self) -> str:
         # Header
         name = self.__class__.__name__
-        base_str = f"{name} object "
-        base_str = "-" * (len(name) + 7) + "\n" + base_str
-        base_str += "\n" + "-" * (len(name) + 7)
+        base_str = f"{name}"
+        # base_str = "-" * len(name) + "\n" + base_str
+        base_str += "\n" + "-" * len(name)
 
         # Attrs
         base_str += "\nBuilt from: "
@@ -106,7 +106,18 @@ class Component(ABC):
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>, "
+        repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
+        repr_str += "\ninput_datasets = ["
+        for i, inp in enumerate(self.input_datasets):
+            repr_str += f"\n    <{inp.__class__.__name__} from {inp.source.basename}>, "
+        repr_str = repr_str.strip(", ")
+        repr_str += "],"
+        repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
+        repr_str += "\n)"
+
+        return repr_str
 
     @abstractmethod
     def build(self) -> None:
@@ -187,3 +198,11 @@ class Discretization(ABC):
             disc_str = header + "\n" + "-" * len(classname) + disc_str
 
         return disc_str
+
+    def __repr__(self) -> str:
+        repr_str = ""
+        repr_str = f"{self.__class__.__name__}("
+        if hasattr(self, "time_step") and self.time_step is not None:
+            repr_str += f"time_step = {self.time_step}, "
+        repr_str += ")"
+        return repr_str

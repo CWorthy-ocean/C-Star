@@ -4,7 +4,7 @@ from typing import Optional, List
 from pathlib import Path
 from cstar.base.datasource import DataSource
 from cstar.base.base_model import BaseModel
-from cstar.base.utils import _clone_and_checkout
+from cstar.base.utils import _clone_and_checkout, _list_to_concise_str
 
 
 class AdditionalCode:
@@ -41,8 +41,7 @@ class AdditionalCode:
     exists_locally: bool, default None
         Set to True if source.location_type is 'path', or if AdditionalCode.get() has been called.
         Is also set by the `check_exists_locally()` method.
-    local_path: Path, default None
-        The local path to the additional code. Set when `get()` method is called, or if source.location_type is 'path'.
+    local_path: Path, default None        The local path to the additional code. Set when `get()` method is called, or if source.location_type is 'path'.
 
     Methods:
     --------
@@ -104,10 +103,8 @@ class AdditionalCode:
             self.local_path = Path(self.source.location).resolve()
 
     def __str__(self) -> str:
-        base_str = (
-            "AdditionalCode"  # associated with {self.base_model.name} base model"
-        )
-        base_str += "\n---------------------"
+        base_str = self.__class__.__name__ + "\n"
+        base_str += "-" * (len(base_str) - 1)
         base_str += f"\nBase model: {self.base_model.name}"
         base_str += f"\nLocation: {self.source.location}"
         if self.exists_locally is not None:
@@ -129,7 +126,26 @@ class AdditionalCode:
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        # Constructor-style section:
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>,"
+        repr_str += f"\nlocation = {self.source.location!r},"
+        if hasattr(self, "checkout_target"):
+            repr_str += f"\ncheckout_target = {self.checkout_target!r},"
+        if hasattr(self, "source_mods") and self.source_mods is not None:
+            repr_str += "\nsource_mods = " + _list_to_concise_str(self.source_mods)
+        if hasattr(self, "namelists") and self.namelists is not None:
+            repr_str += "\nnamelists = " + _list_to_concise_str(self.namelists, pad=13)
+        repr_str += "\n)"
+        # Additional info:
+        info_str = ""
+        if self.exists_locally is not None:
+            info_str += f"exists_locally = {self.exists_locally},"
+        if self.local_path is not None:
+            info_str += f"local_path: {self.local_path},"
+        if len(info_str) > 0:
+            repr_str += f"\nState: <{info_str}>"
+        return repr_str
 
     def get(self, local_dir: str | Path) -> None:
         """
