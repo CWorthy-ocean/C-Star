@@ -24,6 +24,3 @@ python:
     - method: pip
       path: .
 
-env:
-  CONDA_PREFIX: "dummy_prefix"
-
