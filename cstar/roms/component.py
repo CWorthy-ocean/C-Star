@@ -100,8 +100,6 @@ class ROMSComponent(Component):
         self.discretization = discretization
         self.exe_path: Optional[Path] = None
 
-        assert isinstance(self.discretization, ROMSDiscretization)
-
     def build(self) -> None:
         """
         Compiles any code associated with this configuration of ROMS.
