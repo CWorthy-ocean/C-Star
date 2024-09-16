@@ -43,7 +43,7 @@ class Component(ABC):
     def __init__(
         self,
         base_model: BaseModel,
-        additional_code: Optional["AdditionalCode"],
+        additional_code: Optional["AdditionalCode"] = None,
         input_datasets: list[InputDataset] | None = None,
         discretization: Optional["Discretization"] = None,
     ):
