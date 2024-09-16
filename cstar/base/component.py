@@ -143,7 +143,7 @@ class Component(ABC):
         pass
 
 
-class Discretization:
+class Discretization(ABC):
     """
     Holds discretization information about a Component.
 
