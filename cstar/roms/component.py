@@ -451,8 +451,11 @@ class ROMSDiscretization(Discretization):
 
     Additional attributes:
     ----------------------
-    n_procs_x,n_procs_y: int
-        The number of processes following the x and y directions, for running in parallel
+    n_procs_x: int
+        The number of parallel processors over which to subdivide the x axis of the domain.
+    n_procs_y: int
+        The number of parallel processors over which to subdivide the y axis of the domain.
+
 
     Properties:
     -----------
@@ -464,11 +467,8 @@ class ROMSDiscretization(Discretization):
     def __init__(
         self,
         time_step: int,
-        nx: Optional[int] = None,
-        ny: Optional[int] = None,
-        n_levels: Optional[int] = None,
-        n_procs_x: Optional[int] = None,
-        n_procs_y: Optional[int] = None,
+        n_procs_x: int = 1,
+        n_procs_y: int = 1,
     ):
         """
         Initialize a ROMSDiscretization object from basic discretization parameters
@@ -477,10 +477,10 @@ class ROMSDiscretization(Discretization):
         -----------
         time_step: int
             The time step with which to run the Component
-        nx,ny,n_levels: int
-            The number of x and y points and vertical levels in the domain associated with this object
-        n_procs_x,n_procs_y: int
-            The number of processes following the x and y directions, for running in parallel
+        n_procs_x: int
+           The number of parallel processors over which to subdivide the x axis of the domain.
+        n_procs_y: int
+           The number of parallel processors over which to subdivide the y axis of the domain.
 
 
         Returns:
@@ -490,17 +490,14 @@ class ROMSDiscretization(Discretization):
 
         """
 
-        super().__init__(time_step, nx, ny, n_levels)
+        super().__init__(time_step)
         self.n_procs_x = n_procs_x
         self.n_procs_y = n_procs_y
 
     @property
-    def n_procs_tot(self) -> Optional[int]:
+    def n_procs_tot(self) -> int:
         """Total number of processors required by this ROMS configuration"""
-        if (self.n_procs_x is None) or (self.n_procs_y is None):
-            return None
-        else:
-            return self.n_procs_x * self.n_procs_y
+        return self.n_procs_x * self.n_procs_y
 
     def __str__(self) -> str:
         disc_str = super().__str__()

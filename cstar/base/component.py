@@ -62,8 +62,7 @@ class Component(ABC):
             Any spatiotemporal data needed to run this instance of the base model
             e.g. initial conditions, surface forcing, etc.
         discretization: Discretization (Optional, default None)
-            Any information related to the discretization of this Component
-            e.g. time step, number of vertical levels, etc.
+            Any information related to the discretization of this Component (e.g. time step)
 
 
         Returns:
@@ -71,10 +70,14 @@ class Component(ABC):
         Component:
             An intialized Component object
         """
+        if not isinstance(base_model, BaseModel):
+            raise ValueError(
+                "base_model must be provided and must be an instance of BaseModel"
+            )
         self.base_model = base_model
-        self.additional_code: Optional["AdditionalCode"] = additional_code or None
+        self.additional_code = additional_code or None
         self.input_datasets = [] if input_datasets is None else input_datasets
-        self.discretization: Optional[Discretization] = discretization or None
+        self.discretization = discretization or None
 
     def __str__(self) -> str:
         # Header
@@ -149,16 +152,11 @@ class Discretization:
 
     time_step: int
         The time step with which to run ROMS in this configuration
-    nx,ny,n_levels: int
-        The number of x and y points and vertical levels in the domain associated with this object
     """
 
     def __init__(
         self,
         time_step: int,
-        nx: Optional[int] = None,
-        ny: Optional[int] = None,
-        n_levels: Optional[int] = None,
     ):
         """
         Initialize a Discretization object from basic discretization parameters
@@ -167,8 +165,6 @@ class Discretization:
         -----------
         time_step: int
             The time step with which to run the Component
-        nx,ny,n_levels: int
-            The number of x and y points and vertical levels in the domain associated with this object
 
         Returns:
         --------
@@ -178,9 +174,6 @@ class Discretization:
         """
 
         self.time_step: int = time_step
-        self.nx: Optional[int] = nx
-        self.ny: Optional[int] = ny
-        self.n_levels: Optional[int] = n_levels
 
     def __str__(self) -> str:
         # Discretisation
@@ -188,12 +181,6 @@ class Discretization:
 
         if hasattr(self, "time_step") and self.time_step is not None:
             disc_str += "\ntime_step: " + str(self.time_step) + "s"
-        if hasattr(self, "n_levels") and self.n_levels is not None:
-            disc_str += "\nn_levels: " + str(self.n_levels)
-        if hasattr(self, "nx") and self.nx is not None:
-            disc_str += "\nnx: " + str(self.nx)
-        if hasattr(self, "ny") and self.ny is not None:
-            disc_str += "\nny: " + str(self.ny)
         if len(disc_str) > 0:
             classname = self.__class__.__name__
             header = classname
