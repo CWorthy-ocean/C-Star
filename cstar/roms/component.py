@@ -502,11 +502,15 @@ class ROMSDiscretization(Discretization):
 
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
             disc_str += (
-                f"\nn_procs_x: {self.n_procs_x} (Number of x-direction processors)"
+                "\nn_procs_x: "
+                + str(self.n_procs_x)
+                + " (Number of x-direction processors)"
             )
         if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
             disc_str += (
-                f"\nn_procs_y: {self.n_procs_y} (Number of y-direction processors)"
+                "\nn_procs_y: "
+                + str(self.n_procs_y)
+                + " (Number of y-direction processors)"
             )
         return disc_str
 

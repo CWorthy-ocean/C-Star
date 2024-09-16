@@ -204,11 +204,5 @@ class Discretization(ABC):
         repr_str = f"{self.__class__.__name__}("
         if hasattr(self, "time_step") and self.time_step is not None:
             repr_str += f"time_step = {self.time_step}, "
-        if hasattr(self, "n_levels") and self.n_levels is not None:
-            repr_str += f"n_levels = {self.n_levels}, "
-        if hasattr(self, "nx") and self.nx is not None:
-            repr_str += f"nx = {str(self.nx)}, "
-        if hasattr(self, "ny") and self.ny is not None:
-            repr_str += f"ny = {self.ny}"
         repr_str += ")"
         return repr_str
