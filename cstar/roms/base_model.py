@@ -94,13 +94,30 @@ class ROMSBaseModel(BaseModel):
         self._base_model_adjustments()
 
         # Make things
-        subprocess.run(
+        print("Compiling UCLA ROMS' NHMG library...")
+        make_nhmg_result = subprocess.run(
             f"make nhmg COMPILER={_CSTAR_COMPILER}",
             cwd=str(target) + "/Work",
+            capture_output=True,
+            text=True,
             shell=True,
         )
-        subprocess.run(
+        if make_nhmg_result.returncode != 0:
+            raise RuntimeError(
+                f"Error {make_nhmg_result.returncode} when compiling ROMS' NHMG library. STDERR stream: "
+                + f"\n {make_nhmg_result.stderr}"
+            )
+        print("Compiling Tools-Roms package for UCLA ROMS...")
+        make_tools_roms_result = subprocess.run(
             f"make COMPILER={_CSTAR_COMPILER}",
             cwd=str(target) + "/Tools-Roms",
             shell=True,
+            capture_output=True,
+            text=True,
         )
+        if make_tools_roms_result.returncode != 0:
+            raise RuntimeError(
+                f"Error {make_tools_roms_result.returncode} when compiling Tools-Roms. STDERR stream: "
+                + f"\n {make_tools_roms_result.stderr}"
+            )
+        print(f"UCLA-ROMS successfully installed at {target}")
