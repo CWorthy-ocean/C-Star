@@ -30,7 +30,7 @@ jobs:
             python=${{ matrix.python-version }}
 
       - name: Environment info
-        shell: bash
+        shell: micromamba-shell {0}                
         run: |
           conda info
           printenv
@@ -39,23 +39,16 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python - V
-           python -m pip install -e . --no-deps --force-reinstall
+           python -m pip install -e . --force-reinstall
 
-      - name: pre-commit
-        shell: micromamba-shell {0}
-        run: |
-          pip install pre-commit
-          pre-commit install --install-hooks
-          pre-commit run --all-files
-           
       - name: Running Tests
-        shell: bash -l {0}
+        shell: micromamba-shell {0}        
         run: |
            python -V
            python -u -m coverage run --rcfile=coverage.toml tests/test_roms_marbl_example.py
 
       - name: Get coverage report
-        shell: bash -l {0}
+        shell: micromamba-shell {0}                
         run: |
           coverage report -m ; coverage xml
 

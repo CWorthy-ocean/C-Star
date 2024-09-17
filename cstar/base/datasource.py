@@ -59,7 +59,7 @@ class DataSource:
         elif (loc.suffix.lower() == ".git") or ((loc / ".git").is_dir()):
             # TODO: a remote repository might not have a .git suffix, more advanced handling needed
             return "repository"
-        elif loc.suffix.lower() in {"yaml", "yml"}:
+        elif loc.suffix.lower() in {".yaml", ".yml"}:
             return "yaml"
         elif loc.suffix.lower() == ".nc":
             return "netcdf"

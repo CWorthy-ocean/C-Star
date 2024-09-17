@@ -8,8 +8,10 @@ from typing import List, Type, Any, Optional, TYPE_CHECKING
 from cstar.base.component import Component, Discretization
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar.base.utils import _dict_to_tree
 from cstar.base.input_dataset import InputDataset
 from cstar.roms.input_dataset import (
+    ROMSInputDataset,
     ROMSModelGrid,
     ROMSInitialConditions,
     ROMSTidalForcing,
@@ -199,13 +201,10 @@ class Case:
             raise ValueError(
                 f"start_date {self.start_date} is after end_date {self.end_date}."
             )
-        # Lastly, check if everything is set up
-        self.is_setup: bool = self.check_is_setup()
 
     def __str__(self) -> str:
-        base_str = "------------------"
-        base_str += "\nC-Star case object "
-        base_str += "\n------------------"
+        base_str = "C-Star Case\n"
+        base_str += "-" * (len(base_str) - 1)
 
         base_str += f"\nName: {self.name}"
         base_str += f"\ncaseroot: {self.caseroot}"
@@ -215,22 +214,144 @@ class Case:
         base_str += "\nValid date range:"
         base_str += f"\nvalid_start_date: {self.valid_start_date}"
         base_str += f"\nvalid_end_date: {self.valid_end_date}"
-        base_str += "\n"
 
         if self.is_from_blueprint:
             base_str += "\nThis case was instantiated from the blueprint file:"
             base_str += f"\n   {self.blueprint}"
 
         base_str += "\n"
-        base_str += "\nIt is built from the following Component base models (query using Case.components): "
+        base_str += "\nIt is built from the following Components (query using Case.components): "
 
-        for C in self.components:
-            base_str += "\n   " + C.base_model.name
+        for component in self.components:
+            base_str += f"\n   <{component.__class__.__name__} instance>"
 
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nname = {self.name}, "
+        repr_str += f"\ncaseroot = {self.caseroot}, "
+        repr_str += f"\nstart_date = {self.start_date}, "
+        repr_str += f"\nend_date = {self.end_date}, "
+        repr_str += f"\nvalid_start_date = {self.valid_start_date}, "
+        repr_str += f"\nvalid_end_date = {self.valid_end_date}, "
+        repr_str += "\ncomponents = ["
+        for component in self.components:
+            repr_str += f"\n{component.__repr__()}, "
+        repr_str = repr_str.strip(", ")
+        repr_str += "\n]"
+        repr_str += ")"
+
+        return repr_str
+
+    @property
+    def is_setup(self):
+        """
+        Check whether all code and files necessary to run this case exist in the local `caseroot` folder
+
+        This method is called by Case.__init__() and sets the Case.is_setup attribute.
+
+        The method loops over each Component object makng up the case and
+        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
+        2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
+        3. Loops over InputDataset instances in the component checking if InputDataset.working_path exists
+
+        Returns:
+        --------
+        is_setup: bool
+            True if all components are correctly set up in the caseroot directory
+
+        """
+
+        for component in self.components:
+            if component.base_model.local_config_status != 0:
+                return False
+
+            # Check AdditionalCode
+            if (component.additional_code is not None) and (
+                not component.additional_code.exists_locally
+            ):
+                return False
+
+            # Check InputDatasets
+            if component.input_datasets is None:
+                continue
+            for inp in component.input_datasets:
+                if (inp.working_path is None) or (not inp.working_path.exists()):
+                    # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
+                    # If no start or end date, it should be found locally:
+                    if (not isinstance(inp.start_date, dt.datetime)) or (
+                        not isinstance(inp.end_date, dt.datetime)
+                    ):
+                        return False
+                    # If no start or end date for case, all files should be found locally:
+                    elif (not isinstance(self.start_date, dt.datetime)) or (
+                        not isinstance(self.end_date, dt.datetime)
+                    ):
+                        return False
+                    # If inp and case start and end dates overlap, should be found locally:
+                    elif (inp.start_date <= self.end_date) and (
+                        inp.end_date >= self.start_date
+                    ):
+                        return False
+        return True
+
+    def tree(self):
+        """
+        Represent this Case using a `tree`-style visualisation
+
+        This function prints a representation of the Case to stdout.
+        It represents the directory structure that Case.caseroot takes after calling Case.setup(),
+        but does not require the user to have already called Case.setup().
+
+        """
+        # Build a dictionary of files connected to this case
+        case_tree_dict = {}
+        for component in self.components:
+            if len(component.input_datasets) > 0:
+                case_tree_dict.setdefault("input_datasets", {})
+                case_tree_dict["input_datasets"][component.base_model.name] = [
+                    dataset.source.basename for dataset in component.input_datasets
+                ]
+            if hasattr(component, "additional_code") and (
+                component.additional_code is not None
+            ):
+                case_tree_dict.setdefault("additional_code", {})
+                case_tree_dict["additional_code"].setdefault(
+                    component.base_model.name, {}
+                )
+                if component.additional_code.namelists is not None:
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("namelists", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "namelists"
+                    ] = [
+                        namelist.split("/")[-1]
+                        for namelist in component.additional_code.namelists
+                    ]
+                if component.additional_code.modified_namelists is not None:
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("namelists", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "namelists"
+                    ] += [
+                        namelist.split("/")[-1]
+                        for namelist in component.additional_code.modified_namelists
+                    ]
+                if component.additional_code.source_mods is not None:
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("source_mods", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "source_mods"
+                    ] = [
+                        sourcemod.split("/")[-1]
+                        for sourcemod in component.additional_code.source_mods
+                    ]
+
+        print(f"{self.caseroot}\n{_dict_to_tree(case_tree_dict)}")
 
     @classmethod
     def from_blueprint(
@@ -476,6 +597,7 @@ class Case:
                 additional_code_info: dict = {}
                 # This will be component_info["component"]["additional_code"]=additional_code_info
                 additional_code_info["location"] = additional_code.source.location
+                additional_code_info["subdir"] = additional_code.subdir
                 additional_code_info["checkout_target"] = (
                     additional_code.checkout_target
                 )
@@ -533,54 +655,6 @@ class Case:
         with open(filename, "w") as yaml_file:
             yaml.dump(bp_dict, yaml_file, default_flow_style=False, sort_keys=False)
 
-    def check_is_setup(self) -> bool:
-        """
-        Check whether all code and files necessary to run this case exist in the local `caseroot` folder
-
-        This method is called by Case.__init__() and sets the Case.is_setup attribute.
-
-        The method loops over each Component object makng up the case and
-        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
-        2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
-        3. Loops over InputDataset instances in the component calling InputDataset.check_exists_locally(caseroot) on each
-
-        Returns:
-        --------
-        is_setup: bool
-            True if all components are correctly set up in the caseroot directory
-
-        """
-
-        for component in self.components:
-            if component.base_model.local_config_status != 0:
-                return False
-
-            # Check AdditionalCode
-            if (component.additional_code is None) or not (
-                component.additional_code.check_exists_locally(self.caseroot)
-            ):
-                return False
-
-            # Check InputDatasets
-            if component.input_datasets is None:
-                continue
-            for inp in component.input_datasets:
-                if not inp.check_exists_locally(self.caseroot):
-                    # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
-                    if (not isinstance(inp.start_date, dt.datetime)) or (
-                        not isinstance(inp.end_date, dt.datetime)
-                    ):
-                        return False
-                    elif (not isinstance(self.start_date, dt.datetime)) or (
-                        not isinstance(self.end_date, dt.datetime)
-                    ):
-                        return False
-                    elif (inp.start_date <= self.end_date) and (
-                        inp.end_date >= self.start_date
-                    ):
-                        return False
-        return True
-
     def setup(self) -> None:
         """
         Fetch all code and files necessary to run this case in the local `caseroot` folder
@@ -604,10 +678,10 @@ class Case:
             component.base_model.handle_config_status()
 
             # Get AdditionalCode
-            if isinstance(component.additional_code, list):
-                [ac.get(self.caseroot) for ac in component.additional_code]
-            elif isinstance(component.additional_code, AdditionalCode):
-                component.additional_code.get(self.caseroot)
+            if component.additional_code is not None:
+                component.additional_code.get(
+                    self.caseroot / "additional_code" / component.base_model.name
+                )
 
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
@@ -622,9 +696,16 @@ class Case:
                     or (inp.start_date <= self.end_date)
                     and (self.end_date >= self.start_date)
                 ):
-                    inp.get(self.caseroot)
-
-        self.is_setup = True
+                    if isinstance(inp, ROMSInputDataset) and (
+                        inp.source.source_type == "yaml"
+                    ):
+                        inp.get_from_yaml(
+                            self.caseroot / f"input_datasets/{inp.base_model.name}",
+                            start_date=self.start_date,
+                            end_date=self.end_date,
+                        )
+                    else:
+                        inp.get(self.caseroot / f"input_datasets/{inp.base_model.name}")
 
     def build(self) -> None:
         """Compile any necessary additional code associated with this case
@@ -666,6 +747,7 @@ class Case:
 
                 # After that you need to run some verification stuff on the downloaded files
                 component.run(
+                    output_dir=self.caseroot / "output",
                     n_time_steps=ntimesteps,
                     account_key=account_key,
                     walltime=walltime,
@@ -676,4 +758,5 @@ class Case:
         """For each Component associated with this case, execute
         post-processing actions by calling component.post_run()"""
         for component in self.components:
-            component.post_run()
+            if isinstance(component, ROMSComponent):
+                component.post_run(output_dir=self.caseroot / "output")

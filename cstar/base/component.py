@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Sequence
 
 from cstar.base.base_model import BaseModel
 from cstar.base.input_dataset import InputDataset
-
+from cstar.base.utils import _list_to_concise_str
 
 if TYPE_CHECKING:
     from cstar.base.additional_code import AdditionalCode
@@ -18,7 +18,7 @@ class Component(ABC):
     base_model: BaseModel
         An object pointing to the unmodified source code of a model handling an individual
         aspect of the simulation such as biogeochemistry or ocean circulation
-    additional_code: AdditionalCode or list of AdditionalCodes
+    additional_code: AdditionalCode
         Additional code contributing to a unique instance of a base model,
         e.g. namelists, source modifications, etc.
     input_datasets: list of InputDatasets
@@ -40,11 +40,16 @@ class Component(ABC):
         Execute any post-processing actions associated with this component
     """
 
+    base_model: BaseModel
+    additional_code: Optional["AdditionalCode"]
+    input_datasets: Sequence[InputDataset]
+    discretization: Optional["Discretization"]
+
     def __init__(
         self,
         base_model: BaseModel,
-        additional_code: Optional["AdditionalCode"],
-        input_datasets: list[InputDataset] | None = None,
+        additional_code: Optional["AdditionalCode"] = None,
+        input_datasets: Optional[Sequence["InputDataset"]] = None,
         discretization: Optional["Discretization"] = None,
     ):
         """
@@ -64,7 +69,6 @@ class Component(ABC):
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component (e.g. time step)
 
-
         Returns:
         --------
         Component:
@@ -82,9 +86,9 @@ class Component(ABC):
     def __str__(self) -> str:
         # Header
         name = self.__class__.__name__
-        base_str = f"{name} object "
-        base_str = "-" * (len(name) + 7) + "\n" + base_str
-        base_str += "\n" + "-" * (len(name) + 7)
+        base_str = f"{name}"
+        # base_str = "-" * len(name) + "\n" + base_str
+        base_str += "\n" + "-" * len(name)
 
         # Attrs
         base_str += "\nBuilt from: "
@@ -106,7 +110,21 @@ class Component(ABC):
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>, "
+        if self.additional_code is not None:
+            repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
+        else:
+            repr_str += "\n additional_code = None"
+        ID_list = []
+        for i, inp in enumerate(self.input_datasets):
+            ID_list.append(f"<{inp.__class__.__name__} from {inp.source.basename}>")
+
+        repr_str += f"\ninput_datasets = {_list_to_concise_str(ID_list,pad=18,items_are_strs=False)}"
+        repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
+        repr_str += "\n)"
+
+        return repr_str
 
     @abstractmethod
     def build(self) -> None:
@@ -187,3 +205,11 @@ class Discretization(ABC):
             disc_str = header + "\n" + "-" * len(classname) + disc_str
 
         return disc_str
+
+    def __repr__(self) -> str:
+        repr_str = ""
+        repr_str = f"{self.__class__.__name__}("
+        if hasattr(self, "time_step") and self.time_step is not None:
+            repr_str += f"time_step = {self.time_step}, "
+        repr_str += ")"
+        return repr_str

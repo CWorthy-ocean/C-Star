@@ -88,22 +88,20 @@ class BaseModel(ABC):
         )
         self.repo_basename = Path(self.source_repo).name.replace(".git", "")
 
-        self.local_config_status = self.get_local_config_status()
-
     def __str__(self) -> str:
-        base_str = f"{self.__class__.__name__} object "
+        base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
-        base_str += f"\nsource_repo = {self.source_repo}"
+        base_str += f"\nsource_repo : {self.source_repo}"
         if self.source_repo == self.default_source_repo:
             base_str += " (default)"
 
-        base_str += f"\ncheckout_target = {self.checkout_target}"
+        base_str += f"\ncheckout_target : {self.checkout_target}"
         if self.checkout_target != self.checkout_hash:
-            base_str += f" corresponding to hash {self.checkout_hash}"
+            base_str += f" (corresponding to hash {self.checkout_hash})"
         if self.checkout_target == self.default_checkout_target:
             base_str += " (default)"
 
-        base_str += f"\nlocal_config_status={self.local_config_status} "
+        base_str += f"\nlocal_config_status: {self.local_config_status} "
         match self.local_config_status:
             case 0:
                 base_str += f"(Environment variable {self.expected_env_var} is present, points to the correct repository remote, and is checked out at the correct hash)"
@@ -117,7 +115,13 @@ class BaseModel(ABC):
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nsource_repo = {self.source_repo!r},"
+        repr_str += f"\ncheckout_target = {self.checkout_target!r}"
+        repr_str += "\n)"
+        repr_str += "\nState: <"
+        repr_str += f"local_config_status = {self.local_config_status}>"
+        return repr_str
 
     @property
     @abstractmethod
@@ -139,14 +143,8 @@ class BaseModel(ABC):
     def expected_env_var(self) -> str:
         """environment variable associated with the base model, e.g. MARBL_ROOT"""
 
-    @abstractmethod
-    def _base_model_adjustments(self) -> None:
-        """
-        Perform any C-Star specific adjustments to the base model that would
-        be needed after a clean checkout.
-        """
-
-    def get_local_config_status(self) -> int:
+    @property
+    def local_config_status(self) -> int:
         """
         Perform a series of checks to ensure that the base model is properly configured on this machine.
 
@@ -189,6 +187,10 @@ class BaseModel(ABC):
 
         else:  # env_var_exists False (e.g. ROMS_ROOT not defined)
             return 3
+
+    @property
+    def is_setup(self) -> bool:
+        return True if self.local_config_status == 0 else False
 
     def handle_config_status(self) -> None:
         """
@@ -288,3 +290,10 @@ class BaseModel(ABC):
     @abstractmethod
     def get(self, target: str | Path) -> None:
         """clone the basemodel code to your local machine"""
+
+    @abstractmethod
+    def _base_model_adjustments(self) -> None:
+        """
+        Perform any C-Star specific adjustments to the base model that would
+        be needed after a clean checkout.
+        """

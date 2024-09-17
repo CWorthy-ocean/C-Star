@@ -1,11 +1,10 @@
 import warnings
 import subprocess
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, List, Sequence
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base.component import Component, Discretization
-from cstar.base.input_dataset import InputDataset
 
 from cstar.roms.input_dataset import (
     ROMSInitialConditions,
@@ -26,7 +25,7 @@ from cstar.base.environment import (
 )
 
 if TYPE_CHECKING:
-    from cstar.roms import ROMSBaseModel
+    from cstar.roms import ROMSBaseModel, ROMSInputDataset
 
 
 class ROMSComponent(Component):
@@ -39,10 +38,10 @@ class ROMSComponent(Component):
     -----------
     base_model: ROMSBaseModel
         An object pointing to the unmodified source code of ROMS at a specific commit
-    input_datasets: list of InputDatasets
+    input_datasets: list of ROMSInputDatasets
         Any spatiotemporal data needed to run this instance of ROMS
         e.g. initial conditions, surface forcing, etc.
-    additional_code: AdditionalCode or list of AdditionalCodes
+    additional_code: AdditionalCode
         Additional code contributing to a unique instance of this ROMS run
         e.g. namelists, source modifications, etc.
     discretization: ROMSDiscretization
@@ -61,14 +60,17 @@ class ROMSComponent(Component):
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
     """
 
-    discretization: "ROMSDiscretization"  # mypy misses type hint in constructor and assumes Discretization|None
+    base_model: "ROMSBaseModel"
+    additional_code: "AdditionalCode"
+    input_datasets: Sequence["ROMSInputDataset"]
+    discretization: "ROMSDiscretization"
 
     def __init__(
         self,
         base_model: "ROMSBaseModel",
-        additional_code: AdditionalCode,
+        additional_code: "AdditionalCode",
         discretization: "ROMSDiscretization",
-        input_datasets: Optional[List["InputDataset"]] = [],
+        input_datasets: Optional[Sequence["ROMSInputDataset"]] = None,
     ):
         """
         Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
@@ -93,30 +95,32 @@ class ROMSComponent(Component):
         ROMSComponent:
             An intialized ROMSComponent object
         """
-
-        self.base_model: "ROMSBaseModel" = base_model
-        self.additional_code: AdditionalCode = additional_code
-        self.input_datasets: List["InputDataset"] = input_datasets or []
+        self.base_model = base_model
+        self.additional_code = additional_code
+        self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization
+
+        # roms-specific
         self.exe_path: Optional[Path] = None
+        self.partitioned_files: List[Path] | None = None
 
     def build(self) -> None:
         """
         Compiles any code associated with this configuration of ROMS.
 
         Compilation occurs in the directory
-        `ROMSComponent.additional_code.local_path/source_mods/ROMS`.
+        `ROMSComponent.additional_code.working_path/ROMS/source_mods/
         This method sets the ROMSComponent `exe_path` attribute.
 
         """
-        local_path = self.additional_code.local_path
-        if local_path is None:
+        working_path = self.additional_code.working_path
+        if working_path is None:
             raise ValueError(
                 "Unable to compile ROMSComponent: "
-                + "\nROMSComponent.additional_code.local_path is None."
+                + "\nROMSComponent.additional_code.working_path is None."
                 + "\n Call ROMSComponent.additional_code.get() and try again"
             )
-        builddir = local_path / "source_mods/ROMS/"
+        builddir = working_path / "source_mods"
         if (builddir / "Compile").is_dir():
             subprocess.run("make compile_clean", cwd=builddir, shell=True)
         subprocess.run(f"make COMPILER={_CSTAR_COMPILER}", cwd=builddir, shell=True)
@@ -129,29 +133,30 @@ class ROMSComponent(Component):
 
         This method:
         1. goes through any netcdf files associated with InputDataset objects belonging
-           to this ROMSComponent instance and runs `partit`, a ROMS program used to
-           partition netcdf files such that there is one file per processor.
+           to this ROMSComponent instance and partitions them such that there is one file per processor.
            The partitioned files are stored in a subdirectory `PARTITIONED` of
-           InputDataset.local_path
+           InputDataset.working_path
 
-        2. Replaces the template strings INPUT_DIR and MARBL_NAMELIST_DIR (if present)
-           in the roms namelist file (typically `roms.in`) used to run the model with
+        2. Replaces placeholder strings (if present) representing, e.g. input file paths
+           in a template roms namelist file (typically `roms.in_TEMPLATE`) used to run the model with
            the respective paths to input datasets and any MARBL namelists (if this ROMS
            component belongs to a case for which MARBL is also a component).
            The namelist file is sought in
-           `ROMSComponent.additional_code.local_path/namelists/ROMS`.
+           `ROMSComponent.additional_code.working_path/namelists`.
 
         """
+        from cstar.roms import ROMSInputDataset
 
         # Partition input datasets
-        if self.input_datasets is not None:
+        if self.input_datasets is not None and all(
+            [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
+        ):
             datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
-
             # Preliminary checks
-            if self.additional_code.local_path is None:
+            if self.additional_code.working_path is None:
                 raise ValueError(
                     "Unable to prepare ROMSComponent for execution: "
-                    + "\nROMSComponent.additional_code.local_path is None."
+                    + "\nROMSComponent.additional_code.working_path is None."
                     + "\n Call ROMSComponent.additional_code.get() and try again"
                 )
 
@@ -163,42 +168,79 @@ class ROMSComponent(Component):
                 )
             else:
                 mod_namelist = (
-                    self.additional_code.local_path
+                    self.additional_code.working_path
                     / self.additional_code.modified_namelists[0]
                 )
 
             namelist_forcing_str = ""
             # Partition input datasets and add paths to namelist
+            if len(datasets_to_partition) > 0:
+                from roms_tools.utils import partition_netcdf
             for f in datasets_to_partition:
-                dspath = f.local_path
-                fname = f.source.basename
+                # fname = f.source.basename
 
-                if dspath is None:
+                if not f.exists_locally:
                     raise ValueError(
-                        f"local_path of InputDataset {f} is None."
+                        f"working_path of InputDataset \n{f}\n\n {f.working_path}, "
+                        + "refers to a non-existent file"
                         + "\n call InputDataset.get() and try again."
                     )
                 # Partitioning step
-                partdir = dspath.parent / "PARTITIONED"
+                if f.working_path is None:
+                    # Raise if inputdataset has no local working path
+                    raise ValueError(f"InputDataset has no working path: {f}")
+                elif isinstance(f.working_path, list):
+                    # if single InputDataset corresponds to many files, check they're colocated
+                    if all(
+                        [d.parent == f.working_path[0].parent for d in f.working_path]
+                    ):
+                        raise ValueError(
+                            f"A single input dataset exists in multiple directories: {f.working_path}."
+                        )
+                    else:
+                        # If they are, we want to partition them all in the same place
+                        partdir = f.working_path[0].parent / "PARTITIONED"
+                        id_files_to_partition = f.working_path[:]
+                else:
+                    id_files_to_partition = [
+                        f.working_path,
+                    ]
+                    partdir = f.working_path.parent / "PARTITIONED"
+
                 partdir.mkdir(parents=True, exist_ok=True)
-                subprocess.run(
-                    "partit "
-                    + str(self.discretization.n_procs_x)
-                    + " "
-                    + str(self.discretization.n_procs_y)
-                    + " ../"
-                    + fname,
-                    cwd=partdir,
-                    shell=True,
-                )
+                parted_files = []
+                for idfile in id_files_to_partition:
+                    parted_files += partition_netcdf(
+                        idfile,
+                        np_xi=self.discretization.n_procs_x,
+                        np_eta=self.discretization.n_procs_y,
+                    )
+
+                    # [p.rename(partdir / p.name) for p in parted_files[-1]]
+                [p.rename(partdir / p.name) for p in parted_files]
+                parted_files = [partdir / p.name for p in parted_files]
+                f.partitioned_files = parted_files
+
                 # Namelist modification step
                 if isinstance(f, ROMSModelGrid):
-                    namelist_grid_str = f"     {partdir / dspath.name} \n"
+                    if f.working_path is None or isinstance(f.working_path, list):
+                        raise ValueError(
+                            f"ROMS only accepts a single grid file, found list {f.working_path}"
+                        )
+
+                    assert isinstance(f.working_path, Path), "silence, linter"
+
+                    namelist_grid_str = f"     {partdir / f.working_path.name} \n"
                     _replace_text_in_file(
                         mod_namelist, "__GRID_FILE_PLACEHOLDER__", namelist_grid_str
                     )
                 elif isinstance(f, ROMSInitialConditions):
-                    namelist_ic_str = f"     {partdir / dspath.name} \n"
+                    if f.working_path is None or isinstance(f.working_path, list):
+                        raise ValueError(
+                            f"ROMS only accepts a single initial conditions file, found list {f.working_path}"
+                        )
+                    assert isinstance(f.working_path, Path), "silence, linter"
+                    namelist_ic_str = f"     {partdir / f.working_path.name} \n"
                     _replace_text_in_file(
                         mod_namelist,
                         "__INITIAL_CONDITION_FILE_PLACEHOLDER__",
@@ -209,23 +251,30 @@ class ROMSComponent(Component):
                     ROMSTidalForcing,
                     ROMSBoundaryForcing,
                 ]:
-                    namelist_forcing_str += f"     {partdir / dspath.name} \n"
+                    if isinstance(f.working_path, Path):
+                        dslist = [
+                            f.working_path,
+                        ]
+                    elif isinstance(f.working_path, list):
+                        dslist = f.working_path
+                    for d in dslist:
+                        namelist_forcing_str += f"     {partdir / d.name} \n"
 
             _replace_text_in_file(
                 mod_namelist, "__FORCING_FILES_PLACEHOLDER__", namelist_forcing_str
             )
 
-            ##FIXME: it doesn't make any sense to have the next line in ROMSComponent, does it?
             _replace_text_in_file(
                 mod_namelist,
                 "MARBL_NAMELIST_DIR",
-                str(self.additional_code.local_path / "namelists/MARBL"),
+                str(self.additional_code.working_path / "namelists"),
             )
 
     def run(
         self,
         n_time_steps: Optional[int] = None,
         account_key: Optional[str] = None,
+        output_dir: Optional[str | Path] = None,
         walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
         job_name: str = "my_roms_run",
     ) -> None:
@@ -235,35 +284,44 @@ class ROMSComponent(Component):
         This method creates a temporary file to be submitted to the job scheduler (if any)
         on the calling machine, then submits it. By default the job requests the maximum
         walltime. It calculates the number of nodes and cores-per-node to request based on
-        the number of cores required by the job, `ROMSComponent.n_procs_tot`.
+        the number of cores required by the job, `ROMSComponent.discretization.n_procs_tot`.
 
         Parameters:
         -----------
         account_key: str, default None
             The users account key on the system
+        output_dir: str or Path:
+            The path to the directory in which model output will be saved. This is by default
+            the directory from which the ROMS executable will be called.
         walltime: str, default _CSTAR_SYSTEM_MAX_WALLTIME
             The requested length of the job, HH:MM:SS
         job_name: str, default 'my_roms_run'
             The name of the job submitted to the scheduler, which also sets the output file name
             `job_name.out`
         """
+
+        if self.exe_path is None:
+            raise ValueError(
+                "C-STAR: ROMSComponent.exe_path is None; unable to find ROMS executable."
+                + "\nRun Component.build() first. "
+                + "\n If you have already run Component.build(), either run it again or "
+                + " add the executable path manually using Component.exe_path='YOUR/PATH'."
+            )
+        if output_dir is None:
+            output_dir = self.exe_path.parent
+        output_dir = Path(output_dir)
+
+        # Set run path to output dir for clarity: we are running in the output dir but
+        # these are conceptually different:
+        run_path = output_dir
+
         if self.additional_code is None:
             print(
                 "C-STAR: Unable to find AdditionalCode associated with this Component."
             )
             return
-        elif self.additional_code.local_path is None:
-            print(
-                "C-STAR: Unable to find local copy of AdditionalCode. Run Component.get() first."
-                + "\nIf you have already run Component.get(), either run it again or "
-                + " add the local path manually using Component.additional_code.local_path='YOUR/PATH'."
-            )
-            return
-        else:
-            run_path = self.additional_code.local_path / "output/PARTITIONED/"
 
         # Add number of timesteps to namelist
-
         # Check if n_time_steps is None, indicating it was not explicitly set
         if n_time_steps is None:
             n_time_steps = 1
@@ -277,7 +335,7 @@ class ROMSComponent(Component):
 
         if hasattr(self.additional_code, "modified_namelists"):
             mod_namelist = (
-                self.additional_code.local_path
+                self.additional_code.working_path
                 / self.additional_code.modified_namelists[0]
             )
             _replace_text_in_file(
@@ -297,149 +355,135 @@ class ROMSComponent(Component):
                 + "Expected to find a file in ROMSComponent.additional_code.namelists"
                 + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
             )
-        run_path.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.exe_path is None:
-            raise ValueError(
-                "C-STAR: ROMSComponent.exe_path is None; unable to find ROMS executable."
-                + "\nRun Component.build() first. "
-                + "\n If you have already run Component.build(), either run it again or "
-                + " add the executable path manually using Component.exe_path='YOUR/PATH'."
-            )
-        else:
-            match _CSTAR_SYSTEM:
-                case "sdsc_expanse":
-                    exec_pfx = "srun --mpi=pmi2"
-                case "nersc_perlmutter":
-                    exec_pfx = "srun"
-                case "ncar_derecho":
-                    exec_pfx = "mpirun"
-                case "osx_arm64":
-                    exec_pfx = "mpirun"
-                case "linux_x86_64":
-                    exec_pfx = "mpirun"
+        match _CSTAR_SYSTEM:
+            case "sdsc_expanse":
+                exec_pfx = "srun --mpi=pmi2"
+            case "nersc_perlmutter":
+                exec_pfx = "srun"
+            case "ncar_derecho":
+                exec_pfx = "mpirun"
+            case "osx_arm64":
+                exec_pfx = "mpirun"
+            case "linux_x86_64":
+                exec_pfx = "mpirun"
 
-            roms_exec_cmd = (
-                f"{exec_pfx} -n {self.discretization.n_procs_tot} {self.exe_path} "
-                + f"{mod_namelist}"
-            )
+        roms_exec_cmd = (
+            f"{exec_pfx} -n {self.discretization.n_procs_tot} {self.exe_path} "
+            + f"{mod_namelist}"
+        )
 
-            if self.discretization.n_procs_tot is not None:
-                if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
-                    nnodes, ncores = _calculate_node_distribution(
-                        self.discretization.n_procs_tot, _CSTAR_SYSTEM_CORES_PER_NODE
-                    )
-                else:
-                    raise ValueError(
-                        f"Unable to calculate node distribution for system: {_CSTAR_SYSTEM}."
-                        + "\nC-Star is unaware of your system's node configuration (cores per node)."
-                        + "\nYour system may be unsupported. Please raise an issue at: "
-                        + "\n https://github.com/CWorthy-ocean/C-Star/issues/new"
-                        + "\n Thank you in advance for your contribution!"
-                    )
+        if self.discretization.n_procs_tot is not None:
+            if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
+                nnodes, ncores = _calculate_node_distribution(
+                    self.discretization.n_procs_tot, _CSTAR_SYSTEM_CORES_PER_NODE
+                )
             else:
                 raise ValueError(
-                    "Unable to calculate node distribution for this Component. "
-                    + "Component.n_procs_tot is not set"
+                    f"Unable to calculate node distribution for system: {_CSTAR_SYSTEM}."
+                    + "\nC-Star is unaware of your system's node configuration (cores per node)."
+                    + "\nYour system may be unsupported. Please raise an issue at: "
+                    + "\n https://github.com/CWorthy-ocean/C-Star/issues/new"
+                    + "\n Thank you in advance for your contribution!"
                 )
+        else:
+            raise ValueError(
+                "Unable to calculate node distribution for this Component. "
+                + "Component.n_procs_tot is not set"
+            )
 
-            match _CSTAR_SCHEDULER:
-                case "pbs":
-                    if account_key is None:
-                        raise ValueError(
-                            "please call Component.run() with a value for account_key"
-                        )
-                    scheduler_script = "#PBS -S /bin/bash"
-                    scheduler_script += f"\n#PBS -N {job_name}"
-                    scheduler_script += f"\n#PBS -o {job_name}.out"
-                    scheduler_script += f"\n#PBS -A {account_key}"
-                    scheduler_script += (
-                        f"\n#PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}"
+        match _CSTAR_SCHEDULER:
+            case "pbs":
+                if account_key is None:
+                    raise ValueError(
+                        "please call Component.run() with a value for account_key"
                     )
-                    scheduler_script += f"\n#PBS -q {_CSTAR_SYSTEM_DEFAULT_PARTITION}"
-                    scheduler_script += "\n#PBS -j oe"
-                    scheduler_script += "\n#PBS -k eod"
-                    scheduler_script += "\n#PBS -V"
-                    if _CSTAR_SYSTEM == "ncar_derecho":
-                        scheduler_script += "\ncd ${PBS_O_WORKDIR}"
-                    scheduler_script += f"\n\n{roms_exec_cmd}"
+                scheduler_script = "#PBS -S /bin/bash"
+                scheduler_script += f"\n#PBS -N {job_name}"
+                scheduler_script += f"\n#PBS -o {job_name}.out"
+                scheduler_script += f"\n#PBS -A {account_key}"
+                scheduler_script += (
+                    f"\n#PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}"
+                )
+                scheduler_script += f"\n#PBS -q {_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                scheduler_script += "\n#PBS -j oe"
+                scheduler_script += "\n#PBS -k eod"
+                scheduler_script += "\n#PBS -V"
+                if _CSTAR_SYSTEM == "ncar_derecho":
+                    scheduler_script += "\ncd ${PBS_O_WORKDIR}"
+                scheduler_script += f"\n\n{roms_exec_cmd}"
 
-                    script_fname = "cstar_run_script.pbs"
-                    with open(run_path / script_fname, "w") as f:
-                        f.write(scheduler_script)
-                    subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
+                script_fname = "cstar_run_script.pbs"
+                with open(run_path / script_fname, "w") as f:
+                    f.write(scheduler_script)
+                subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
 
-                case "slurm":
-                    # TODO: export ALL copies env vars, but will need to handle module load
-                    if account_key is None:
-                        raise ValueError(
-                            "please call Component.run() with a value for account_key"
-                        )
+            case "slurm":
+                # TODO: export ALL copies env vars, but will need to handle module load
+                if account_key is None:
+                    raise ValueError(
+                        "please call Component.run() with a value for account_key"
+                    )
 
-                    scheduler_script = "#!/bin/bash"
-                    scheduler_script += f"\n#SBATCH --job-name={job_name}"
-                    scheduler_script += f"\n#SBATCH --output={job_name}.out"
-                    if _CSTAR_SYSTEM == "nersc_perlmutter":
-                        scheduler_script += (
-                            f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
-                        )
-                        scheduler_script += "\n#SBATCH -C cpu"
-                    else:
-                        scheduler_script += (
-                            f"\n#SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
-                        )
+                scheduler_script = "#!/bin/bash"
+                scheduler_script += f"\n#SBATCH --job-name={job_name}"
+                scheduler_script += f"\n#SBATCH --output={job_name}.out"
+                if _CSTAR_SYSTEM == "nersc_perlmutter":
+                    scheduler_script += (
+                        f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                    )
+                    scheduler_script += "\n#SBATCH -C cpu"
+                else:
+                    scheduler_script += (
+                        f"\n#SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                    )
                     # FIXME: This ^^^ is a pretty ugly patch...
-                    scheduler_script += f"\n#SBATCH --nodes={nnodes}"
-                    scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
-                    scheduler_script += f"\n#SBATCH --account={account_key}"
-                    scheduler_script += "\n#SBATCH --export=ALL"
-                    scheduler_script += "\n#SBATCH --mail-type=ALL"
-                    scheduler_script += f"\n#SBATCH --time={walltime}"
-                    scheduler_script += f"\n\n{roms_exec_cmd}"
+                scheduler_script += f"\n#SBATCH --nodes={nnodes}"
+                scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
+                scheduler_script += f"\n#SBATCH --account={account_key}"
+                scheduler_script += "\n#SBATCH --export=ALL"
+                scheduler_script += "\n#SBATCH --mail-type=ALL"
+                scheduler_script += f"\n#SBATCH --time={walltime}"
+                scheduler_script += f"\n\n{roms_exec_cmd}"
 
-                    script_fname = "cstar_run_script.sh"
-                    with open(run_path / script_fname, "w") as f:
-                        f.write(scheduler_script)
-                    subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path)
+                script_fname = "cstar_run_script.sh"
+                with open(run_path / script_fname, "w") as f:
+                    f.write(scheduler_script)
+                subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path)
 
-                case None:
-                    subprocess.run(roms_exec_cmd, shell=True, cwd=run_path)
+            case None:
+                subprocess.run(roms_exec_cmd, shell=True, cwd=run_path)
 
-    def post_run(self) -> None:
+    def post_run(self, output_dir=None) -> None:
         """
         Performs post-processing steps associated with this ROMSComponent object.
 
         This method goes through any netcdf files produced by the model in
-        `additional_code.local_path/output/PARTITIONED` and runs `ncjoin`,
-        a ROMS program used to join netcdf files that are produced separately by each processor.
-        The joined files are saved in
-        `additional_code.local_path/output`
+        `output_dir` and joins netcdf files that are produced separately by each processor.
 
         Parameters:
         -----------
-        local_path: str
-            The path where this ROMS component is being assembled
+        output_dir: str | Path
+            The directory in which output was produced by the run
         """
-
-        if self.additional_code.local_path is None:
-            raise ValueError(
-                "Unable to prepare ROMSComponent for execution: "
-                + "\nROMSComponent.additional_code.local_path is None."
-                + "\n Call ROMSComponent.additional_code.get() and try again"
-            )
-        out_path = self.additional_code.local_path / "output/"
-        files = list(out_path.glob("PARTITIONED/*.*0.nc"))
+        output_dir = Path(output_dir)
+        files = list(output_dir.glob("*.*0.nc"))
         if not files:
             print("no suitable output found")
         else:
+            (output_dir / "PARTITIONED").mkdir(exist_ok=True)
             for f in files:
                 print(f)
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
+                wildcard_pattern = f"{Path(f.stem).stem}.*.nc"
                 subprocess.run(
-                    f"ncjoin PARTITIONED/{Path(f.stem).stem}.*.nc",
-                    cwd=out_path,
+                    f"ncjoin {wildcard_pattern}",
+                    cwd=output_dir,
                     shell=True,
                 )
+                for F in output_dir.glob(wildcard_pattern):
+                    F.rename(output_dir / "PARTITIONED" / F.name)
 
 
 class ROMSDiscretization(Discretization):
@@ -453,7 +497,6 @@ class ROMSDiscretization(Discretization):
         The number of parallel processors over which to subdivide the x axis of the domain.
     n_procs_y: int
         The number of parallel processors over which to subdivide the y axis of the domain.
-
 
     Properties:
     -----------
@@ -513,3 +556,15 @@ class ROMSDiscretization(Discretization):
                 + " (Number of y-direction processors)"
             )
         return disc_str
+
+    def __repr__(self) -> str:
+        repr_str = super().__repr__().strip(")")
+        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
+            repr_str += f", n_procs_x = {self.n_procs_x}, "
+        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
+            repr_str += f"n_procs_y = {self.n_procs_y}, "
+
+        repr_str = repr_str.strip(", ")
+        repr_str += ")"
+
+        return repr_str
