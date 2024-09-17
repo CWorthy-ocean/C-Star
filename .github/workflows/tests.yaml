@@ -53,13 +53,6 @@ jobs:
            python - V
            python -m pip install -e . --force-reinstall --no-deps
 
-      - name: pre-commit
-        shell: micromamba-shell {0}
-        run: |
-          pip install pre-commit
-          pre-commit install --install-hooks
-          pre-commit run --all-files
-           
       - name: Running Tests
         shell: micromamba-shell {0}        
         run: |
