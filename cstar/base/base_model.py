@@ -221,6 +221,9 @@ class BaseModel(ABC):
                 self.get_local_config_status()
                 self.handle_config_status()
             case 0:
+                print(
+                    f"{self.__class__.__name__} correctly configured. Nothing to be done"
+                )
                 return
             case 1:
                 env_var_repo_remote = _get_repo_remote(local_root)

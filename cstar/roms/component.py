@@ -161,7 +161,7 @@ class ROMSComponent(Component):
         """
         from cstar.roms import ROMSInputDataset
 
-        # Partition input datasets
+        # Partition input datasets and add their paths to namelist
         if self.input_datasets is not None and all(
             [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
         ):
@@ -187,7 +187,6 @@ class ROMSComponent(Component):
                 )
 
             namelist_forcing_str = ""
-            # Partition input datasets and add paths to namelist
             if len(datasets_to_partition) > 0:
                 from roms_tools.utils import partition_netcdf
             for f in datasets_to_partition:
@@ -224,6 +223,9 @@ class ROMSComponent(Component):
                 partdir.mkdir(parents=True, exist_ok=True)
                 parted_files = []
                 for idfile in id_files_to_partition:
+                    print(
+                        f"Partitioning {idfile} into ({self.discretization.n_procs_x},{self.discretization.n_procs_y})"
+                    )
                     parted_files += partition_netcdf(
                         idfile,
                         np_xi=self.discretization.n_procs_x,
@@ -236,6 +238,7 @@ class ROMSComponent(Component):
                 f.partitioned_files = parted_files
 
                 # Namelist modification step
+                print(f"Adding {idfile} to ROMS namelist file")
                 if isinstance(f, ROMSModelGrid):
                     if f.working_path is None or isinstance(f.working_path, list):
                         raise ValueError(

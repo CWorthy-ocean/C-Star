@@ -231,7 +231,7 @@ class AdditionalCode:
                     src_file_path = source_dir / f
                     tgt_file_path = local_dir / file_type / Path(f).name
                     print(
-                        f"   copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
+                        f"copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
                     )
                     if src_file_path.exists():
                         shutil.copy(src_file_path, tgt_file_path)
@@ -245,7 +245,7 @@ class AdditionalCode:
                         and str(src_file_path)[-9:] == "_TEMPLATE"
                     ):
                         print(
-                            f"   copying {tgt_file_path} to editable namelist {str(tgt_file_path)[:-9]}"
+                            f"copying {tgt_file_path} to editable namelist {str(tgt_file_path)[:-9]}"
                         )
                         shutil.copy(tgt_file_path, str(tgt_file_path)[:-9])
                         if hasattr(self, "modified_namelists"):

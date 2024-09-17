@@ -41,7 +41,7 @@ def _clone_and_checkout(
             + f"{source_repo} to {local_path}. Error messages: "
             + f"\n{clone_result.stderr}"
         )
-    print(f"   Cloned repository {source_repo} to {local_path}")
+    print(f"Cloned repository {source_repo} to {local_path}")
 
     checkout_result = subprocess.run(
         f"git checkout {checkout_target}",
@@ -56,7 +56,7 @@ def _clone_and_checkout(
             + f"{checkout_target} in git repository {local_path}. Error messages: "
             + f"\n{checkout_result.stderr}"
         )
-    print(f"   Checked out {checkout_target} in git repository {local_path}")
+    print(f"Checked out {checkout_target} in git repository {local_path}")
 
 
 def _get_repo_remote(local_root: str | Path) -> str:
