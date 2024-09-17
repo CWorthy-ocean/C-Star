@@ -722,12 +722,18 @@ class Case:
         """Compile any necessary additional code associated with this case
         by calling component.build() on each Component object making up this case"""
         for component in self.components:
+            infostr = f"Compiling {component.__class__.__name__}"
+            print(infostr + "\n" + "-" * len(infostr))
             component.build()
 
     def pre_run(self) -> None:
         """For each Component associated with this case, execute
         pre-processing actions by calling component.pre_run()"""
         for component in self.components:
+            infostr = (
+                f"Completing pre-processing steps for {component.__class__.__name__}"
+            )
+            print(infostr + "\n" + "-" * len(infostr))
             component.pre_run()
 
     def run(
@@ -757,6 +763,7 @@ class Case:
                     ntimesteps = None
 
                 # After that you need to run some verification stuff on the downloaded files
+                print("Running ROMS: " + "\n------------")
                 component.run(
                     output_dir=self.caseroot / "output",
                     n_time_steps=ntimesteps,
@@ -770,4 +777,6 @@ class Case:
         post-processing actions by calling component.post_run()"""
         for component in self.components:
             if isinstance(component, ROMSComponent):
+                infostr = f"Completing post-processing steps for {component.__class__.__name__}"
+                print(infostr + "\n" + "-" * len(infostr))
                 component.post_run(output_dir=self.caseroot / "output")
