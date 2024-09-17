@@ -41,7 +41,7 @@ class Component(ABC):
     """
 
     base_model: BaseModel
-    additional_code: Optional[AdditionalCode]
+    additional_code: Optional["AdditionalCode"]
     input_datasets: Sequence[InputDataset]
     discretization: Optional["Discretization"]
 

@@ -60,17 +60,17 @@ class ROMSComponent(Component):
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
     """
 
-    base_model: ROMSBaseModel
-    additional_code: AdditionalCode
-    input_datasets: Sequence[ROMSInputDataset]
+    base_model: "ROMSBaseModel"
+    additional_code: "AdditionalCode"
+    input_datasets: Sequence["ROMSInputDataset"]
     discretization: "ROMSDiscretization"
 
     def __init__(
         self,
         base_model: "ROMSBaseModel",
-        additional_code: AdditionalCode,
+        additional_code: "AdditionalCode",
         discretization: "ROMSDiscretization",
-        input_datasets: Optional[Sequence[ROMSInputDataset]] = None,
+        input_datasets: Optional[Sequence["ROMSInputDataset"]] = None,
     ):
         """
         Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
@@ -145,6 +145,7 @@ class ROMSComponent(Component):
            `ROMSComponent.additional_code.working_path/namelists`.
 
         """
+        from cstar.roms import ROMSInputDataset
 
         # Partition input datasets
         if self.input_datasets is not None and all(
