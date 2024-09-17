@@ -5,9 +5,10 @@ import dateutil.parser
 from pathlib import Path
 from typing import List, Type, Any, Optional, TYPE_CHECKING
 
-from cstar.base import Component
+from cstar.base.component import Component, Discretization
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar.base.utils import _dict_to_tree
 from cstar.base.input_dataset import InputDataset
 from cstar.roms.input_dataset import (
     ROMSModelGrid,
@@ -16,7 +17,7 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
 )
-from cstar.roms.component import ROMSComponent
+from cstar.roms.component import ROMSComponent, ROMSDiscretization
 
 if TYPE_CHECKING:
     from cstar.base import BaseModel
@@ -199,13 +200,10 @@ class Case:
             raise ValueError(
                 f"start_date {self.start_date} is after end_date {self.end_date}."
             )
-        # Lastly, check if everything is set up
-        self.is_setup: bool = self.check_is_setup()
 
     def __str__(self) -> str:
-        base_str = "------------------"
-        base_str += "\nC-Star case object "
-        base_str += "\n------------------"
+        base_str = "C-Star Case\n"
+        base_str += "-" * (len(base_str) - 1)
 
         base_str += f"\nName: {self.name}"
         base_str += f"\ncaseroot: {self.caseroot}"
@@ -215,22 +213,144 @@ class Case:
         base_str += "\nValid date range:"
         base_str += f"\nvalid_start_date: {self.valid_start_date}"
         base_str += f"\nvalid_end_date: {self.valid_end_date}"
-        base_str += "\n"
 
         if self.is_from_blueprint:
             base_str += "\nThis case was instantiated from the blueprint file:"
             base_str += f"\n   {self.blueprint}"
 
         base_str += "\n"
-        base_str += "\nIt is built from the following Component base models (query using Case.components): "
+        base_str += "\nIt is built from the following Components (query using Case.components): "
 
-        for C in self.components:
-            base_str += "\n   " + C.base_model.name
+        for component in self.components:
+            base_str += f"\n   <{component.__class__.__name__} instance>"
 
         return base_str
 
     def __repr__(self) -> str:
-        return self.__str__()
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nname = {self.name}, "
+        repr_str += f"\ncaseroot = {self.caseroot}, "
+        repr_str += f"\nstart_date = {self.start_date}, "
+        repr_str += f"\nend_date = {self.end_date}, "
+        repr_str += f"\nvalid_start_date = {self.valid_start_date}, "
+        repr_str += f"\nvalid_end_date = {self.valid_end_date}, "
+        repr_str += "\ncomponents = ["
+        for component in self.components:
+            repr_str += f"\n{component.__repr__()}, "
+        repr_str = repr_str.strip(", ")
+        repr_str += "\n]"
+        repr_str += ")"
+
+        return repr_str
+
+    @property
+    def is_setup(self):
+        """
+        Check whether all code and files necessary to run this case exist in the local `caseroot` folder
+
+        This method is called by Case.__init__() and sets the Case.is_setup attribute.
+
+        The method loops over each Component object makng up the case and
+        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
+        2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
+        3. Loops over InputDataset instances in the component checking if InputDataset.working_path exists
+
+        Returns:
+        --------
+        is_setup: bool
+            True if all components are correctly set up in the caseroot directory
+
+        """
+
+        for component in self.components:
+            if component.base_model.local_config_status != 0:
+                return False
+
+            # Check AdditionalCode
+            if (component.additional_code is not None) and (
+                not component.additional_code.exists_locally
+            ):
+                return False
+
+            # Check InputDatasets
+            if component.input_datasets is None:
+                continue
+            for inp in component.input_datasets:
+                if (inp.working_path is None) or (not inp.working_path.exists()):
+                    # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
+                    # If no start or end date, it should be found locally:
+                    if (not isinstance(inp.start_date, dt.datetime)) or (
+                        not isinstance(inp.end_date, dt.datetime)
+                    ):
+                        return False
+                    # If no start or end date for case, all files should be found locally:
+                    elif (not isinstance(self.start_date, dt.datetime)) or (
+                        not isinstance(self.end_date, dt.datetime)
+                    ):
+                        return False
+                    # If inp and case start and end dates overlap, should be found locally:
+                    elif (inp.start_date <= self.end_date) and (
+                        inp.end_date >= self.start_date
+                    ):
+                        return False
+        return True
+
+    def tree(self):
+        """
+        Represent this Case using a `tree`-style visualisation
+
+        This function prints a representation of the Case to stdout.
+        It represents the directory structure that Case.caseroot takes after calling Case.setup(),
+        but does not require the user to have already called Case.setup().
+
+        """
+        # Build a dictionary of files connected to this case
+        case_tree_dict = {}
+        for component in self.components:
+            if len(component.input_datasets) > 0:
+                case_tree_dict.setdefault("input_datasets", {})
+                case_tree_dict["input_datasets"][component.base_model.name] = [
+                    dataset.source.basename for dataset in component.input_datasets
+                ]
+            if hasattr(component, "additional_code") and (
+                component.additional_code is not None
+            ):
+                case_tree_dict.setdefault("additional_code", {})
+                case_tree_dict["additional_code"].setdefault(
+                    component.base_model.name, {}
+                )
+                if component.additional_code.namelists is not None:
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("namelists", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "namelists"
+                    ] = [
+                        namelist.split("/")[-1]
+                        for namelist in component.additional_code.namelists
+                    ]
+                if component.additional_code.modified_namelists is not None:
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("namelists", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "namelists"
+                    ] += [
+                        namelist.split("/")[-1]
+                        for namelist in component.additional_code.modified_namelists
+                    ]
+                if component.additional_code.source_mods is not None:
+                    case_tree_dict["additional_code"][
+                        component.base_model.name
+                    ].setdefault("source_mods", {})
+                    case_tree_dict["additional_code"][component.base_model.name][
+                        "source_mods"
+                    ] = [
+                        sourcemod.split("/")[-1]
+                        for sourcemod in component.additional_code.source_mods
+                    ]
+
+        print(f"{self.caseroot}\n{_dict_to_tree(case_tree_dict)}")
 
     @classmethod
     def from_blueprint(
@@ -254,7 +374,7 @@ class Case:
             - additional_code: optional, containing ["source_repo","checkout_target","source_mods","namelists"]
             - input_datasets: with options like "model_grid","initial_conditions","tidal_forcing","boundary_forcing","surface_forcing"
                               each containing "source" (a URL) and "hash" (a SHA-256 sum)
-            - discretization: containing e.g. grid "nx","ny","n_levels" and parallelization "n_procs_x","n_procs_y" information
+            - discretization: containing e.g. time step "time_step"  and parallelization "n_procs_x","n_procs_y" information
 
 
         The blueprint MUST contain a name and at least one component with a base_model
@@ -281,12 +401,25 @@ class Case:
             bp_dict = yaml.safe_load(file)
 
         # Top-level metadata
-        casename = bp_dict["registry_attrs"]["name"]
+        registry_attrs = bp_dict.get("registry_attrs")
+        if registry_attrs is None:
+            raise ValueError(
+                f"No top-level metadata found in blueprint {blueprint}."
+                + "Ensure there is a 'registry_attrs' section containing 'name',and 'valid_date_range' entries"
+            )
 
+        casename = registry_attrs.get("name")
+        if casename is None:
+            raise ValueError(
+                f"'name' entry not found in 'registry_attrs' section of blueprint {blueprint}"
+            )
+
+        valid_date_range = registry_attrs.get("valid_date_range")
         valid_start_date: dt.datetime
         valid_end_date: dt.datetime
-        valid_start_date = bp_dict["registry_attrs"]["valid_date_range"]["start_date"]
-        valid_end_date = bp_dict["registry_attrs"]["valid_date_range"]["end_date"]
+        valid_start_date = valid_date_range.get("start_date")
+        valid_end_date = valid_date_range.get("end_date")
+
         if isinstance(start_date, str):
             start_date = dateutil.parser.parse(start_date)
         if isinstance(end_date, str):
@@ -295,22 +428,28 @@ class Case:
         components: List["Component"]
         components = []
 
-        for component_info in bp_dict["components"]:
+        if "components" not in bp_dict.keys():
+            raise ValueError(
+                f"No 'components' entry found in blueprint {blueprint}. "
+                + "Cannot create a Case with no components!"
+            )
+        for component in bp_dict["components"]:
+            component_info = component.get("component")
             component_kwargs: dict[str, Any] = {}
 
-            # Use "ThisComponent" as a reference that is set here and used throughout
-            # QUESTION : is this the best way to handle the need for different subclasses here?
-
-            base_model_info = component_info["component"]["base_model"]
             ThisComponent: Type["Component"]
             ThisBaseModel: Type["BaseModel"]
+            ThisDiscretization: Type["Discretization"]
 
+            # Construct the BaseModel instance
+            base_model_info = component_info.get("base_model")
             match base_model_info["name"].casefold():
                 case "roms":
                     from cstar.roms import ROMSBaseModel, ROMSComponent
 
                     ThisComponent = ROMSComponent
                     ThisBaseModel = ROMSBaseModel
+                    ThisDiscretization = ROMSDiscretization
                 case "marbl":
                     from cstar.marbl import MARBLBaseModel, MARBLComponent
 
@@ -323,152 +462,56 @@ class Case:
                         + 'Currently supported values are "ROMS" and "MARBL"'
                     )
 
-            # Construct the BaseModel instance
             base_model = ThisBaseModel(
                 base_model_info["source_repo"], base_model_info["checkout_target"]
             )
             component_kwargs["base_model"] = base_model
 
-            # Get discretization info:
-            if "discretization" not in component_info["component"].keys():
-                discretization_info = None
-            else:
-                discretization_info = component_info["component"]["discretization"]
-                for key in list(discretization_info.keys()):
-                    component_kwargs[key] = discretization_info[key]
+            # Construct the Discretization instance
+            discretization: Optional[Discretization] = None
+            if "discretization" in component_info.keys():
+                discretization_info = component_info.get("discretization")
+                discretization = ThisDiscretization(**discretization_info)
+                component_kwargs["discretization"] = discretization
 
             # Construct any AdditionalCode instances
-            additional_code: Optional[AdditionalCode]
-            if "additional_code" not in component_info["component"].keys():
-                additional_code = None
-            else:
-                additional_code_info = component_info["component"]["additional_code"]
-
-                location = additional_code_info.get("location")
-                checkout_target = additional_code_info.get("checkout_target", None)
-                source_mods = (
-                    [f for f in additional_code_info["source_mods"]]
-                    if "source_mods" in additional_code_info.keys()
-                    else None
-                )
-
-                namelists = (
-                    [f for f in additional_code_info["namelists"]]
-                    if "namelists" in additional_code_info.keys()
-                    else None
-                )
-
+            additional_code: Optional[AdditionalCode] = None
+            if "additional_code" in component_info.keys():
+                additional_code_info = component_info.get("additional_code")
                 additional_code = AdditionalCode(
-                    base_model=base_model,
-                    location=location,
-                    checkout_target=checkout_target,
-                    source_mods=source_mods,
-                    namelists=namelists,
+                    base_model=base_model, **additional_code_info
                 )
-
                 component_kwargs["additional_code"] = additional_code
 
             # Construct any InputDataset instances:
             input_datasets: List[InputDataset] | None
-            if "input_datasets" not in component_info["component"].keys():
-                input_datasets = None
-            else:
-                input_datasets = []
-                input_dataset_info = component_info["component"]["input_datasets"]
-                # ModelGrid
-                if "model_grid" not in input_dataset_info.keys():
-                    model_grid = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    model_grid = [
-                        ROMSModelGrid(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                        )
-                        for f in input_dataset_info["model_grid"]["files"]
-                    ]
-                    input_datasets += model_grid
-                else:
-                    raise NotImplementedError("Model grid is only supported for ROMS")
+            input_dataset_info = component_info.get("input_datasets", {})
+            input_datasets = []
 
-                # InitialConditions
-                if "initial_conditions" not in input_dataset_info.keys():
-                    initial_conditions = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    initial_conditions = [
-                        ROMSInitialConditions(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                            start_date=f.get("start_date", None),
-                            end_date=f.get("end_date", None),
-                        )
-                        for f in input_dataset_info["initial_conditions"]["files"]
-                    ]
-                    input_datasets += initial_conditions
-                else:
-                    raise NotImplementedError(
-                        "Initial conditions are only supported for ROMS"
-                    )
+            if base_model.name.casefold() == "roms":
+                idtype_class_map = {
+                    "model_grid": ROMSModelGrid,
+                    "initial_conditions": ROMSInitialConditions,
+                    "tidal_forcing": ROMSTidalForcing,
+                    "boundary_forcing": ROMSBoundaryForcing,
+                    "surface_forcing": ROMSSurfaceForcing,
+                }
 
-                # TidalForcing
-                if "tidal_forcing" not in input_dataset_info.keys():
-                    tidal_forcing = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    tidal_forcing = [
-                        ROMSTidalForcing(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                        )
-                        for f in input_dataset_info["tidal_forcing"]["files"]
-                    ]
-                    input_datasets += tidal_forcing
-                else:
-                    raise NotImplementedError(
-                        "Tidal forcing is only supported for ROMS"
-                    )
+                ## Loop over input_datasets entries,initialise appropriate class, append to list
+                for idtype, dataset_info in input_dataset_info.items():
+                    if idtype in idtype_class_map:
+                        # Get the class to be instantiated
+                        ThisInputDataset = idtype_class_map[idtype]
 
-                # BoundaryForcing
-                if "boundary_forcing" not in input_dataset_info.keys():
-                    boundary_forcing = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    boundary_forcing = [
-                        ROMSBoundaryForcing(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                            start_date=f.get("start_date", None),
-                            end_date=f.get("end_date", None),
+                        for file_info in dataset_info["files"]:
+                            input_datasets.append(
+                                ThisInputDataset(base_model=base_model, **file_info)
+                            )
+                    else:
+                        raise ValueError(
+                            f"InputDataset type {idtype} in {blueprint} not recognized"
                         )
-                        for f in input_dataset_info["boundary_forcing"]["files"]
-                    ]
-                    input_datasets += boundary_forcing
-                else:
-                    raise NotImplementedError(
-                        "Boundary forcing is only supported for ROMS"
-                    )
-
-                # SurfaceForcing
-                if "surface_forcing" not in input_dataset_info.keys():
-                    surface_forcing = None
-                elif isinstance(base_model, ROMSBaseModel):
-                    surface_forcing = [
-                        ROMSSurfaceForcing(
-                            base_model=base_model,
-                            location=f.get("location"),
-                            file_hash=f.get("hash", None),
-                            start_date=f.get("start_date", None),
-                            end_date=f.get("end_date", None),
-                        )
-                        for f in input_dataset_info["surface_forcing"]["files"]
-                    ]
-                    input_datasets += surface_forcing
-                else:
-                    raise NotImplementedError(
-                        "Surface forcing is only supported for ROMS"
-                    )
-
+            if len(input_datasets) > 0:
                 component_kwargs["input_datasets"] = input_datasets
 
             components.append(ThisComponent(**component_kwargs))
@@ -534,19 +577,14 @@ class Case:
 
             # discretization info (if present)
             discretization_info = {}
-            if hasattr(component, "nx"):
-                discretization_info["nx"] = component.nx
-            if hasattr(component, "ny"):
-                discretization_info["ny"] = component.ny
-            if hasattr(component, "n_levels"):
-                discretization_info["n_levels"] = component.n_levels
-            if hasattr(component, "n_procs_x"):
-                discretization_info["n_procs_x"] = component.n_procs_x
-            if hasattr(component, "n_procs_y"):
-                discretization_info["n_procs_y"] = component.n_procs_y
-            if hasattr(component, "time_step"):
-                discretization_info["time_step"] = component.time_step
-
+            if (
+                hasattr(component, "discretization")
+                and component.discretization is not None
+            ):
+                for thisattr in vars(component.discretization).keys():
+                    discretization_info[thisattr] = getattr(
+                        component.discretization, thisattr
+                    )
             if len(discretization_info) > 0:
                 component_info["discretization"] = discretization_info
 
@@ -558,6 +596,7 @@ class Case:
                 additional_code_info: dict = {}
                 # This will be component_info["component"]["additional_code"]=additional_code_info
                 additional_code_info["location"] = additional_code.source.location
+                additional_code_info["subdir"] = additional_code.subdir
                 additional_code_info["checkout_target"] = (
                     additional_code.checkout_target
                 )
@@ -573,36 +612,40 @@ class Case:
             # InputDataset
             input_datasets = component.input_datasets
 
-            if isinstance(input_datasets, list):
-                input_dataset_info: dict = {}
-                for ind in input_datasets:
-                    # Determine what kind of input dataset we are adding
-                    if isinstance(ind, ROMSModelGrid):
-                        dct_key = "model_grid"
-                    elif isinstance(ind, ROMSInitialConditions):
-                        dct_key = "initial_conditions"
-                    elif isinstance(ind, ROMSTidalForcing):
-                        dct_key = "tidal_forcing"
-                    elif isinstance(ind, ROMSBoundaryForcing):
-                        dct_key = "boundary_forcing"
-                    elif isinstance(ind, ROMSSurfaceForcing):
-                        dct_key = "surface_forcing"
-                    if dct_key not in input_dataset_info.keys():
-                        input_dataset_info[dct_key] = {}
+            input_dataset_info: dict = {}
+            for ind in input_datasets:
+                # Determine what kind of input dataset we are adding
+                if isinstance(ind, ROMSModelGrid):
+                    dct_key = "model_grid"
+                elif isinstance(ind, ROMSInitialConditions):
+                    dct_key = "initial_conditions"
+                elif isinstance(ind, ROMSTidalForcing):
+                    dct_key = "tidal_forcing"
+                elif isinstance(ind, ROMSBoundaryForcing):
+                    dct_key = "boundary_forcing"
+                elif isinstance(ind, ROMSSurfaceForcing):
+                    dct_key = "surface_forcing"
+                else:
+                    raise ValueError(f"Unknown dataset type: {type(ind)}")
 
-                    # Create a dictionary of file_info for each dataset file:
-                    if "files" not in input_dataset_info[dct_key].keys():
-                        input_dataset_info[dct_key]["files"] = []
-                    file_info = {}
-                    file_info["location"] = ind.source.location
-                    if hasattr(ind, "file_hash") and (ind.file_hash is not None):
-                        file_info["hash"] = ind.file_hash
-                    if hasattr(ind, "start_date") and (ind.start_date is not None):
-                        file_info["start_date"] = str(ind.start_date)
-                    if hasattr(ind, "end_date") and (ind.end_date is not None):
-                        file_info["end_date"] = str(ind.end_date)
+                # If there is not already an instance of this input dataset type,
+                # add an empty dict as the key so we can access/build it
+                if dct_key not in input_dataset_info.keys():
+                    input_dataset_info[dct_key] = {}
 
-                    input_dataset_info[dct_key]["files"].append(file_info)
+                # Create a dictionary of file_info for each dataset file:
+                if "files" not in input_dataset_info[dct_key].keys():
+                    input_dataset_info[dct_key]["files"] = []
+                file_info = {}
+                file_info["location"] = ind.source.location
+                if hasattr(ind, "file_hash") and (ind.file_hash is not None):
+                    file_info["file_hash"] = ind.file_hash
+                if hasattr(ind, "start_date") and (ind.start_date is not None):
+                    file_info["start_date"] = str(ind.start_date)
+                if hasattr(ind, "end_date") and (ind.end_date is not None):
+                    file_info["end_date"] = str(ind.end_date)
+
+                input_dataset_info[dct_key]["files"].append(file_info)
 
                 component_info["input_datasets"] = input_dataset_info
 
@@ -610,54 +653,6 @@ class Case:
 
         with open(filename, "w") as yaml_file:
             yaml.dump(bp_dict, yaml_file, default_flow_style=False, sort_keys=False)
-
-    def check_is_setup(self) -> bool:
-        """
-        Check whether all code and files necessary to run this case exist in the local `caseroot` folder
-
-        This method is called by Case.__init__() and sets the Case.is_setup attribute.
-
-        The method loops over each Component object makng up the case and
-        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
-        2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
-        3. Loops over InputDataset instances in the component calling InputDataset.check_exists_locally(caseroot) on each
-
-        Returns:
-        --------
-        is_setup: bool
-            True if all components are correctly set up in the caseroot directory
-
-        """
-
-        for component in self.components:
-            if component.base_model.local_config_status != 0:
-                return False
-
-            # Check AdditionalCode
-            if (component.additional_code is None) or not (
-                component.additional_code.check_exists_locally(self.caseroot)
-            ):
-                return False
-
-            # Check InputDatasets
-            if component.input_datasets is None:
-                continue
-            for inp in component.input_datasets:
-                if not inp.check_exists_locally(self.caseroot):
-                    # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
-                    if (not isinstance(inp.start_date, dt.datetime)) or (
-                        not isinstance(inp.end_date, dt.datetime)
-                    ):
-                        return False
-                    elif (not isinstance(self.start_date, dt.datetime)) or (
-                        not isinstance(self.end_date, dt.datetime)
-                    ):
-                        return False
-                    elif (inp.start_date <= self.end_date) and (
-                        inp.end_date >= self.start_date
-                    ):
-                        return False
-        return True
 
     def setup(self) -> None:
         """
@@ -682,10 +677,10 @@ class Case:
             component.base_model.handle_config_status()
 
             # Get AdditionalCode
-            if isinstance(component.additional_code, list):
-                [ac.get(self.caseroot) for ac in component.additional_code]
-            elif isinstance(component.additional_code, AdditionalCode):
-                component.additional_code.get(self.caseroot)
+            if component.additional_code is not None:
+                component.additional_code.get(
+                    self.caseroot / "additional_code" / component.base_model.name
+                )
 
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
@@ -700,9 +695,9 @@ class Case:
                     or (inp.start_date <= self.end_date)
                     and (self.end_date >= self.start_date)
                 ):
-                    inp.get(self.caseroot)
-
-        self.is_setup = True
+                    inp.get(
+                        self.caseroot / f"input_datasets/{component.base_model.name}"
+                    )
 
     def build(self) -> None:
         """Compile any necessary additional code associated with this case
@@ -736,12 +731,15 @@ class Case:
                     run_length_seconds = int(
                         (self.end_date - self.start_date).total_seconds()
                     )
-                    ntimesteps = run_length_seconds // component.time_step
+                    ntimesteps = (
+                        run_length_seconds // component.discretization.time_step
+                    )
                 else:
                     ntimesteps = None
 
                 # After that you need to run some verification stuff on the downloaded files
                 component.run(
+                    output_dir=self.caseroot / "output",
                     n_time_steps=ntimesteps,
                     account_key=account_key,
                     walltime=walltime,
@@ -752,4 +750,5 @@ class Case:
         """For each Component associated with this case, execute
         post-processing actions by calling component.post_run()"""
         for component in self.components:
-            component.post_run()
+            if isinstance(component, ROMSComponent):
+                component.post_run(output_dir=self.caseroot / "output")
