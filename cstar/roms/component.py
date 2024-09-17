@@ -448,7 +448,62 @@ class ROMSComponent(Component):
                 subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path)
 
             case None:
-                subprocess.run(roms_exec_cmd, shell=True, cwd=run_path)
+                import time
+
+                romsprocess = subprocess.Popen(
+                    roms_exec_cmd,
+                    shell=True,
+                    cwd=run_path,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+
+                # Process stdout line-by-line
+                tstep = 0
+                roms_init_string = ""
+                T0 = time.time()
+                if romsprocess.stdout is None:
+                    raise RuntimeError("ROMS is not producing stdout")
+                for line in romsprocess.stdout:
+                    # Split the line by whitespace
+                    parts = line.split()
+
+                    # Check if there are exactly 9 parts and the first one is an integer
+                    if len(parts) == 9:
+                        try:
+                            # Try to convert the first part to an integer
+                            tstep = int(parts[0])
+                            if tstep == 0:
+                                tstep0 = tstep
+                            # Capture the first integer and print it
+                            ETA = (n_time_steps - (tstep - tstep0)) * (
+                                (tstep - tstep0) / (time.time() - T0)
+                            )
+                            print(
+                                f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA}s)"
+                            )
+                        except ValueError:
+                            pass
+                    elif tstep == 0 and len(roms_init_string) == 0:
+                        roms_init_string = "Running ROMS: Initializing run..."
+                        print(roms_init_string)
+
+                romsprocess.wait()
+
+                if romsprocess.returncode != 0:
+                    import datetime as dt
+
+                    errlog = (
+                        output_dir
+                        / f"ROMS_STDERR_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                    )
+                    if romsprocess.stderr is not None:
+                        with open(errlog, "w") as F:
+                            F.write(romsprocess.stderr.read())
+                    raise RuntimeError(
+                        f"ROMS terminated with errors. See {errlog} for further information."
+                    )
 
     def post_run(self, output_dir=None) -> None:
         """
