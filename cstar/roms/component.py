@@ -1,7 +1,7 @@
 import warnings
 import subprocess
 from pathlib import Path
-from typing import Sequence, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, List, Sequence
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base.component import Component, Discretization
@@ -38,7 +38,7 @@ class ROMSComponent(Component):
     -----------
     base_model: ROMSBaseModel
         An object pointing to the unmodified source code of ROMS at a specific commit
-    input_datasets: list of InputDatasets
+    input_datasets: list of ROMSInputDatasets
         Any spatiotemporal data needed to run this instance of ROMS
         e.g. initial conditions, surface forcing, etc.
     additional_code: AdditionalCode
@@ -60,14 +60,17 @@ class ROMSComponent(Component):
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
     """
 
-    discretization: "ROMSDiscretization"  # mypy misses type hint in constructor and assumes Discretization|None
+    base_model: "ROMSBaseModel"
+    additional_code: "AdditionalCode"
+    input_datasets: Sequence["ROMSInputDataset"]
+    discretization: "ROMSDiscretization"
 
     def __init__(
         self,
         base_model: "ROMSBaseModel",
-        additional_code: AdditionalCode,
+        additional_code: "AdditionalCode",
         discretization: "ROMSDiscretization",
-        input_datasets: Optional[Sequence["ROMSInputDataset"]] = [],
+        input_datasets: Optional[Sequence["ROMSInputDataset"]] = None,
     ):
         """
         Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
@@ -92,14 +95,14 @@ class ROMSComponent(Component):
         ROMSComponent:
             An intialized ROMSComponent object
         """
-
-        self.base_model: "ROMSBaseModel" = base_model
-        self.additional_code: AdditionalCode = additional_code
-        self.input_datasets: Sequence["ROMSInputDataset"] = input_datasets or []
+        self.base_model = base_model
+        self.additional_code = additional_code
+        self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization
-        self.exe_path: Optional[Path] = None
 
-        assert isinstance(self.discretization, ROMSDiscretization)
+        # roms-specific
+        self.exe_path: Optional[Path] = None
+        self.partitioned_files: List[Path] | None = None
 
     def build(self) -> None:
         """
@@ -142,11 +145,13 @@ class ROMSComponent(Component):
            `ROMSComponent.additional_code.working_path/namelists`.
 
         """
+        from cstar.roms import ROMSInputDataset
 
         # Partition input datasets
-        if self.input_datasets is not None:
+        if self.input_datasets is not None and all(
+            [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
+        ):
             datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
-
             # Preliminary checks
             if self.additional_code.working_path is None:
                 raise ValueError(
@@ -543,8 +548,10 @@ class ROMSDiscretization(Discretization):
 
     Additional attributes:
     ----------------------
-    n_procs_x,n_procs_y: int
-        The number of processes following the x and y directions, for running in parallel
+    n_procs_x: int
+        The number of parallel processors over which to subdivide the x axis of the domain.
+    n_procs_y: int
+        The number of parallel processors over which to subdivide the y axis of the domain.
 
     Properties:
     -----------
@@ -556,11 +563,8 @@ class ROMSDiscretization(Discretization):
     def __init__(
         self,
         time_step: int,
-        nx: Optional[int] = None,
-        ny: Optional[int] = None,
-        n_levels: Optional[int] = None,
-        n_procs_x: Optional[int] = None,
-        n_procs_y: Optional[int] = None,
+        n_procs_x: int = 1,
+        n_procs_y: int = 1,
     ):
         """
         Initialize a ROMSDiscretization object from basic discretization parameters
@@ -569,10 +573,10 @@ class ROMSDiscretization(Discretization):
         -----------
         time_step: int
             The time step with which to run the Component
-        nx,ny,n_levels: int
-            The number of x and y points and vertical levels in the domain associated with this object
-        n_procs_x,n_procs_y: int
-            The number of processes following the x and y directions, for running in parallel
+        n_procs_x: int
+           The number of parallel processors over which to subdivide the x axis of the domain.
+        n_procs_y: int
+           The number of parallel processors over which to subdivide the y axis of the domain.
 
 
         Returns:
@@ -582,28 +586,29 @@ class ROMSDiscretization(Discretization):
 
         """
 
-        super().__init__(time_step, nx, ny, n_levels)
+        super().__init__(time_step)
         self.n_procs_x = n_procs_x
         self.n_procs_y = n_procs_y
 
     @property
-    def n_procs_tot(self) -> Optional[int]:
+    def n_procs_tot(self) -> int:
         """Total number of processors required by this ROMS configuration"""
-        if (self.n_procs_x is None) or (self.n_procs_y is None):
-            return None
-        else:
-            return self.n_procs_x * self.n_procs_y
+        return self.n_procs_x * self.n_procs_y
 
     def __str__(self) -> str:
         disc_str = super().__str__()
 
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
             disc_str += (
-                f"\nn_procs_x: {self.n_procs_x} (Number of x-direction processors)"
+                "\nn_procs_x: "
+                + str(self.n_procs_x)
+                + " (Number of x-direction processors)"
             )
         if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
             disc_str += (
-                f"\nn_procs_y: {self.n_procs_y} (Number of y-direction processors)"
+                "\nn_procs_y: "
+                + str(self.n_procs_y)
+                + " (Number of y-direction processors)"
             )
         return disc_str
 
