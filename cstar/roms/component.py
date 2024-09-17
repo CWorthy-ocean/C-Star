@@ -500,7 +500,7 @@ class ROMSComponent(Component):
                                 (tstep - tstep0) / (time.time() - T0)
                             )
                             print(
-                                f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA}s)"
+                                f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
                             )
                         except ValueError:
                             pass
