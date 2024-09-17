@@ -1,7 +1,7 @@
 import warnings
 import subprocess
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING, List
+from typing import Optional, TYPE_CHECKING, List, Sequence
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base.component import Component, Discretization
@@ -60,14 +60,17 @@ class ROMSComponent(Component):
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
     """
 
-    discretization: "ROMSDiscretization"  # mypy misses type hint in constructor and assumes Discretization|None
+    base_model: ROMSBaseModel
+    additional_code: AdditionalCode
+    input_datasets: Sequence[ROMSInputDataset]
+    discretization: "ROMSDiscretization"
 
     def __init__(
         self,
         base_model: "ROMSBaseModel",
         additional_code: AdditionalCode,
         discretization: "ROMSDiscretization",
-        input_datasets: Optional[List[ROMSInputDataset]] = None,
+        input_datasets: Optional[Sequence[ROMSInputDataset]] = None,
     ):
         """
         Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
@@ -92,11 +95,12 @@ class ROMSComponent(Component):
         ROMSComponent:
             An intialized ROMSComponent object
         """
-
-        self.base_model: "ROMSBaseModel" = base_model
-        self.additional_code: AdditionalCode = additional_code
+        self.base_model = base_model
+        self.additional_code = additional_code
         self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization
+
+        # roms-specific
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
 
