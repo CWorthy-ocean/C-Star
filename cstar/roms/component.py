@@ -124,7 +124,7 @@ class ROMSComponent(Component):
         if (builddir / "Compile").is_dir():
             subprocess.run("make compile_clean", cwd=builddir, shell=True)
 
-        print("Compiling UCLA ROMS configuration...")
+        print("Compiling UCLA-ROMS configuration...")
         make_roms_result = subprocess.run(
             f"make COMPILER={_CSTAR_COMPILER}",
             cwd=builddir,
@@ -546,7 +546,6 @@ class ROMSComponent(Component):
         else:
             (output_dir / "PARTITIONED").mkdir(exist_ok=True)
             for f in files:
-                print(f)
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
                 wildcard_pattern = f"{Path(f.stem).stem}.*.nc"
                 print(f"Joining netCDF files {wildcard_pattern}...")
