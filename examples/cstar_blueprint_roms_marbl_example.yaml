@@ -17,9 +17,6 @@ components:
         source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
         checkout_target: '594ac425e9dbe663ce48ced0915c0007c6cca843'
       discretization:
-        nx: 24
-        ny: 24
-        n_levels: 100
         n_procs_x: 3
         n_procs_y: 3
         time_step: 360
