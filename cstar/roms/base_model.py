@@ -120,4 +120,4 @@ class ROMSBaseModel(BaseModel):
                 f"Error {make_tools_roms_result.returncode} when compiling Tools-Roms. STDERR stream: "
                 + f"\n {make_tools_roms_result.stderr}"
             )
-        print(f"UCLA-ROMS successfully installed at {target}")
+        print(f"UCLA-ROMS is installed at {target}")

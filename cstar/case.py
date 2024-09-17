@@ -674,11 +674,18 @@ class Case:
             return
 
         for component in self.components:
+            infostr = f"Setting up {component.__class__.__name__}"
+            print(infostr + "\n" + "-" * len(infostr))
+
             # Check BaseModel
+            infostr = f"Configuring {component.base_model.__class__.__name__}"
+            print(infostr + "\n" + "-" * len(infostr))
             component.base_model.handle_config_status()
 
             # Get AdditionalCode
             if component.additional_code is not None:
+                print("Fetching additional code...")
+                print("--------------------------")
                 component.additional_code.get(
                     self.caseroot / "additional_code" / component.base_model.name
                 )
@@ -686,8 +693,12 @@ class Case:
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
             # Verify dates line up before running .get():
-            if component.input_datasets is None:
+            if (component.input_datasets is None) or (
+                len(component.input_datasets) == 0
+            ):
                 continue
+            print("Fetching input datasets...")
+            print("--------------------------")
             for inp in component.input_datasets:
                 # Download input dataset if its date range overlaps Case's date range
                 if (

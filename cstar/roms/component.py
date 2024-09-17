@@ -123,7 +123,21 @@ class ROMSComponent(Component):
         builddir = working_path / "source_mods"
         if (builddir / "Compile").is_dir():
             subprocess.run("make compile_clean", cwd=builddir, shell=True)
-        subprocess.run(f"make COMPILER={_CSTAR_COMPILER}", cwd=builddir, shell=True)
+
+        print("Compiling UCLA ROMS configuration...")
+        make_roms_result = subprocess.run(
+            f"make COMPILER={_CSTAR_COMPILER}",
+            cwd=builddir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+        if make_roms_result.returncode != 0:
+            raise RuntimeError(
+                f"Error {make_roms_result.returncode} when compiling ROMS. STDERR stream: "
+                + f"\n {make_roms_result.stderr}"
+            )
+        print(f"UCLA-ROMS compiled at {builddir}")
 
         self.exe_path = builddir / "roms"
 
@@ -465,7 +479,7 @@ class ROMSComponent(Component):
                 )
 
                 # Process stdout line-by-line
-                tstep = 0
+                tstep0 = 0
                 roms_init_string = ""
                 T0 = time.time()
                 if romsprocess.stdout is None:
@@ -479,7 +493,7 @@ class ROMSComponent(Component):
                         try:
                             # Try to convert the first part to an integer
                             tstep = int(parts[0])
-                            if tstep == 0:
+                            if tstep0 == 0:
                                 tstep0 = tstep
                             # Capture the first integer and print it
                             ETA = (n_time_steps - (tstep - tstep0)) * (
@@ -490,7 +504,7 @@ class ROMSComponent(Component):
                             )
                         except ValueError:
                             pass
-                    elif tstep == 0 and len(roms_init_string) == 0:
+                    elif tstep0 == 0 and len(roms_init_string) == 0:
                         roms_init_string = "Running ROMS: Initializing run..."
                         print(roms_init_string)
 
@@ -532,11 +546,19 @@ class ROMSComponent(Component):
                 print(f)
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
                 wildcard_pattern = f"{Path(f.stem).stem}.*.nc"
-                subprocess.run(
+                print(f"Joining netCDF files {wildcard_pattern}...")
+                ncjoin_result = subprocess.run(
                     f"ncjoin {wildcard_pattern}",
                     cwd=output_dir,
+                    capture_output=True,
+                    text=True,
                     shell=True,
                 )
+                if ncjoin_result.returncode != 0:
+                    raise RuntimeError(
+                        f"Error {ncjoin_result.returncode} while joining ROMS output. "
+                        + f"STDERR stream:\n {ncjoin_result.stderr}"
+                    )
                 for F in output_dir.glob(wildcard_pattern):
                     F.rename(output_dir / "PARTITIONED" / F.name)
 
