@@ -8,6 +8,7 @@ dependencies:
   - python-dateutil
   - coverage
   - numpy
+  - dask
   - compilers
   - netcdf-fortran
   - mpich

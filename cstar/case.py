@@ -11,6 +11,7 @@ from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar.base.utils import _dict_to_tree
 from cstar.base.input_dataset import InputDataset
 from cstar.roms.input_dataset import (
+    ROMSInputDataset,
     ROMSModelGrid,
     ROMSInitialConditions,
     ROMSTidalForcing,
@@ -695,9 +696,16 @@ class Case:
                     or (inp.start_date <= self.end_date)
                     and (self.end_date >= self.start_date)
                 ):
-                    inp.get(
-                        self.caseroot / f"input_datasets/{component.base_model.name}"
-                    )
+                    if isinstance(inp, ROMSInputDataset) and (
+                        inp.source.source_type == "yaml"
+                    ):
+                        inp.get_from_yaml(
+                            self.caseroot / f"input_datasets/{inp.base_model.name}",
+                            start_date=self.start_date,
+                            end_date=self.end_date,
+                        )
+                    else:
+                        inp.get(self.caseroot / f"input_datasets/{inp.base_model.name}")
 
     def build(self) -> None:
         """Compile any necessary additional code associated with this case

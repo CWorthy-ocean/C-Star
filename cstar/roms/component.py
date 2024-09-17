@@ -1,11 +1,10 @@
 import warnings
 import subprocess
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, List, Sequence
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base.component import Component, Discretization
-from cstar.base.input_dataset import InputDataset
 
 from cstar.roms.input_dataset import (
     ROMSInitialConditions,
@@ -26,7 +25,7 @@ from cstar.base.environment import (
 )
 
 if TYPE_CHECKING:
-    from cstar.roms import ROMSBaseModel
+    from cstar.roms import ROMSBaseModel, ROMSInputDataset
 
 
 class ROMSComponent(Component):
@@ -39,7 +38,7 @@ class ROMSComponent(Component):
     -----------
     base_model: ROMSBaseModel
         An object pointing to the unmodified source code of ROMS at a specific commit
-    input_datasets: list of InputDatasets
+    input_datasets: list of ROMSInputDatasets
         Any spatiotemporal data needed to run this instance of ROMS
         e.g. initial conditions, surface forcing, etc.
     additional_code: AdditionalCode
@@ -61,14 +60,17 @@ class ROMSComponent(Component):
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
     """
 
-    discretization: "ROMSDiscretization"  # mypy misses type hint in constructor and assumes Discretization|None
+    base_model: "ROMSBaseModel"
+    additional_code: "AdditionalCode"
+    input_datasets: Sequence["ROMSInputDataset"]
+    discretization: "ROMSDiscretization"
 
     def __init__(
         self,
         base_model: "ROMSBaseModel",
-        additional_code: AdditionalCode,
+        additional_code: "AdditionalCode",
         discretization: "ROMSDiscretization",
-        input_datasets: Optional[List["InputDataset"]] = [],
+        input_datasets: Optional[Sequence["ROMSInputDataset"]] = None,
     ):
         """
         Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
@@ -93,12 +95,14 @@ class ROMSComponent(Component):
         ROMSComponent:
             An intialized ROMSComponent object
         """
-
-        self.base_model: "ROMSBaseModel" = base_model
-        self.additional_code: AdditionalCode = additional_code
-        self.input_datasets: List["InputDataset"] = input_datasets or []
+        self.base_model = base_model
+        self.additional_code = additional_code
+        self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization
+
+        # roms-specific
         self.exe_path: Optional[Path] = None
+        self.partitioned_files: List[Path] | None = None
 
     def build(self) -> None:
         """
@@ -141,15 +145,13 @@ class ROMSComponent(Component):
            `ROMSComponent.additional_code.working_path/namelists`.
 
         """
+        from cstar.roms import ROMSInputDataset
 
         # Partition input datasets
-        if self.input_datasets is not None:
-            datasets_to_partition = [
-                d
-                for d in self.input_datasets
-                if ((d.working_path is not None) and (d.working_path.exists()))
-            ]
-
+        if self.input_datasets is not None and all(
+            [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
+        ):
+            datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
             # Preliminary checks
             if self.additional_code.working_path is None:
                 raise ValueError(
@@ -172,37 +174,73 @@ class ROMSComponent(Component):
 
             namelist_forcing_str = ""
             # Partition input datasets and add paths to namelist
+            if len(datasets_to_partition) > 0:
+                from roms_tools.utils import partition_netcdf
             for f in datasets_to_partition:
-                dspath = f.working_path
-                fname = f.source.basename
+                # fname = f.source.basename
 
-                if (dspath is None) or (not dspath.exists()):
+                if not f.exists_locally:
                     raise ValueError(
-                        f"working_path of InputDataset {f}, {dspath}, "
+                        f"working_path of InputDataset \n{f}\n\n {f.working_path}, "
                         + "refers to a non-existent file"
                         + "\n call InputDataset.get() and try again."
                     )
                 # Partitioning step
-                partdir = dspath.parent / "PARTITIONED"
+                if f.working_path is None:
+                    # Raise if inputdataset has no local working path
+                    raise ValueError(f"InputDataset has no working path: {f}")
+                elif isinstance(f.working_path, list):
+                    # if single InputDataset corresponds to many files, check they're colocated
+                    if all(
+                        [d.parent == f.working_path[0].parent for d in f.working_path]
+                    ):
+                        raise ValueError(
+                            f"A single input dataset exists in multiple directories: {f.working_path}."
+                        )
+                    else:
+                        # If they are, we want to partition them all in the same place
+                        partdir = f.working_path[0].parent / "PARTITIONED"
+                        id_files_to_partition = f.working_path[:]
+                else:
+                    id_files_to_partition = [
+                        f.working_path,
+                    ]
+                    partdir = f.working_path.parent / "PARTITIONED"
+
                 partdir.mkdir(parents=True, exist_ok=True)
-                subprocess.run(
-                    "partit "
-                    + str(self.discretization.n_procs_x)
-                    + " "
-                    + str(self.discretization.n_procs_y)
-                    + " ../"
-                    + fname,
-                    cwd=partdir,
-                    shell=True,
-                )
+                parted_files = []
+                for idfile in id_files_to_partition:
+                    parted_files += partition_netcdf(
+                        idfile,
+                        np_xi=self.discretization.n_procs_x,
+                        np_eta=self.discretization.n_procs_y,
+                    )
+
+                    # [p.rename(partdir / p.name) for p in parted_files[-1]]
+                [p.rename(partdir / p.name) for p in parted_files]
+                parted_files = [partdir / p.name for p in parted_files]
+                f.partitioned_files = parted_files
+
                 # Namelist modification step
                 if isinstance(f, ROMSModelGrid):
-                    namelist_grid_str = f"     {partdir / dspath.name} \n"
+                    if f.working_path is None or isinstance(f.working_path, list):
+                        raise ValueError(
+                            f"ROMS only accepts a single grid file, found list {f.working_path}"
+                        )
+
+                    assert isinstance(f.working_path, Path), "silence, linter"
+
+                    namelist_grid_str = f"     {partdir / f.working_path.name} \n"
                     _replace_text_in_file(
                         mod_namelist, "__GRID_FILE_PLACEHOLDER__", namelist_grid_str
                     )
                 elif isinstance(f, ROMSInitialConditions):
-                    namelist_ic_str = f"     {partdir / dspath.name} \n"
+                    if f.working_path is None or isinstance(f.working_path, list):
+                        raise ValueError(
+                            f"ROMS only accepts a single initial conditions file, found list {f.working_path}"
+                        )
+                    assert isinstance(f.working_path, Path), "silence, linter"
+                    namelist_ic_str = f"     {partdir / f.working_path.name} \n"
                     _replace_text_in_file(
                         mod_namelist,
                         "__INITIAL_CONDITION_FILE_PLACEHOLDER__",
@@ -213,7 +251,14 @@ class ROMSComponent(Component):
                     ROMSTidalForcing,
                     ROMSBoundaryForcing,
                 ]:
-                    namelist_forcing_str += f"     {partdir / dspath.name} \n"
+                    if isinstance(f.working_path, Path):
+                        dslist = [
+                            f.working_path,
+                        ]
+                    elif isinstance(f.working_path, list):
+                        dslist = f.working_path
+                    for d in dslist:
+                        namelist_forcing_str += f"     {partdir / d.name} \n"
 
             _replace_text_in_file(
                 mod_namelist, "__FORCING_FILES_PLACEHOLDER__", namelist_forcing_str
@@ -452,7 +497,6 @@ class ROMSDiscretization(Discretization):
         The number of parallel processors over which to subdivide the x axis of the domain.
     n_procs_y: int
         The number of parallel processors over which to subdivide the y axis of the domain.
-
 
     Properties:
     -----------
