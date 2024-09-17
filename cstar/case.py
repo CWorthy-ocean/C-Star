@@ -674,11 +674,17 @@ class Case:
             return
 
         for component in self.components:
+            infostr = f"\nSetting up {component.__class__.__name__}"
+            print(infostr + "\n" + "-" * len(infostr))
+
             # Check BaseModel
+            infostr = f"\nConfiguring {component.base_model.__class__.__name__}"
+            print(infostr + "\n" + "-" * len(infostr))
             component.base_model.handle_config_status()
 
             # Get AdditionalCode
             if component.additional_code is not None:
+                print("\nFetching additional code... " + "\n--------------------------")
                 component.additional_code.get(
                     self.caseroot / "additional_code" / component.base_model.name
                 )
@@ -686,8 +692,11 @@ class Case:
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
             # Verify dates line up before running .get():
-            if component.input_datasets is None:
+            if (component.input_datasets is None) or (
+                len(component.input_datasets) == 0
+            ):
                 continue
+            print("\nFetching input datasets..." + "\n--------------------------")
             for inp in component.input_datasets:
                 # Download input dataset if its date range overlaps Case's date range
                 if (
@@ -711,12 +720,18 @@ class Case:
         """Compile any necessary additional code associated with this case
         by calling component.build() on each Component object making up this case"""
         for component in self.components:
+            infostr = f"\nCompiling {component.__class__.__name__}"
+            print(infostr + "\n" + "-" * len(infostr))
             component.build()
 
     def pre_run(self) -> None:
         """For each Component associated with this case, execute
         pre-processing actions by calling component.pre_run()"""
         for component in self.components:
+            infostr = (
+                f"\nCompleting pre-processing steps for {component.__class__.__name__}"
+            )
+            print(infostr + "\n" + "-" * len(infostr))
             component.pre_run()
 
     def run(
@@ -746,6 +761,7 @@ class Case:
                     ntimesteps = None
 
                 # After that you need to run some verification stuff on the downloaded files
+                print("\nRunning ROMS: " + "\n------------")
                 component.run(
                     output_dir=self.caseroot / "output",
                     n_time_steps=ntimesteps,
@@ -759,4 +775,6 @@ class Case:
         post-processing actions by calling component.post_run()"""
         for component in self.components:
             if isinstance(component, ROMSComponent):
+                infostr = f"\nCompleting post-processing steps for {component.__class__.__name__}"
+                print(infostr + "\n" + "-" * len(infostr))
                 component.post_run(output_dir=self.caseroot / "output")
