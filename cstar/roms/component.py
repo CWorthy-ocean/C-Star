@@ -123,7 +123,21 @@ class ROMSComponent(Component):
         builddir = working_path / "source_mods"
         if (builddir / "Compile").is_dir():
             subprocess.run("make compile_clean", cwd=builddir, shell=True)
-        subprocess.run(f"make COMPILER={_CSTAR_COMPILER}", cwd=builddir, shell=True)
+
+        print("Compiling UCLA-ROMS configuration...")
+        make_roms_result = subprocess.run(
+            f"make COMPILER={_CSTAR_COMPILER}",
+            cwd=builddir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+        if make_roms_result.returncode != 0:
+            raise RuntimeError(
+                f"Error {make_roms_result.returncode} when compiling ROMS. STDERR stream: "
+                + f"\n {make_roms_result.stderr}"
+            )
+        print(f"UCLA-ROMS compiled at {builddir}")
 
         self.exe_path = builddir / "roms"
 
@@ -147,7 +161,7 @@ class ROMSComponent(Component):
         """
         from cstar.roms import ROMSInputDataset
 
-        # Partition input datasets
+        # Partition input datasets and add their paths to namelist
         if self.input_datasets is not None and all(
             [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
         ):
@@ -173,7 +187,6 @@ class ROMSComponent(Component):
                 )
 
             namelist_forcing_str = ""
-            # Partition input datasets and add paths to namelist
             if len(datasets_to_partition) > 0:
                 from roms_tools.utils import partition_netcdf
             for f in datasets_to_partition:
@@ -210,6 +223,9 @@ class ROMSComponent(Component):
                 partdir.mkdir(parents=True, exist_ok=True)
                 parted_files = []
                 for idfile in id_files_to_partition:
+                    print(
+                        f"Partitioning {idfile} into ({self.discretization.n_procs_x},{self.discretization.n_procs_y})"
+                    )
                     parted_files += partition_netcdf(
                         idfile,
                         np_xi=self.discretization.n_procs_x,
@@ -222,6 +238,7 @@ class ROMSComponent(Component):
                 f.partitioned_files = parted_files
 
                 # Namelist modification step
+                print(f"Adding {idfile} to ROMS namelist file")
                 if isinstance(f, ROMSModelGrid):
                     if f.working_path is None or isinstance(f.working_path, list):
                         raise ValueError(
@@ -453,7 +470,62 @@ class ROMSComponent(Component):
                 subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path)
 
             case None:
-                subprocess.run(roms_exec_cmd, shell=True, cwd=run_path)
+                import time
+
+                romsprocess = subprocess.Popen(
+                    roms_exec_cmd,
+                    shell=True,
+                    cwd=run_path,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+
+                # Process stdout line-by-line
+                tstep0 = 0
+                roms_init_string = ""
+                T0 = time.time()
+                if romsprocess.stdout is None:
+                    raise RuntimeError("ROMS is not producing stdout")
+                for line in romsprocess.stdout:
+                    # Split the line by whitespace
+                    parts = line.split()
+
+                    # Check if there are exactly 9 parts and the first one is an integer
+                    if len(parts) == 9:
+                        try:
+                            # Try to convert the first part to an integer
+                            tstep = int(parts[0])
+                            if tstep0 == 0:
+                                tstep0 = tstep
+                            # Capture the first integer and print it
+                            ETA = (n_time_steps - (tstep - tstep0)) * (
+                                (tstep - tstep0) / (time.time() - T0)
+                            )
+                            print(
+                                f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
+                            )
+                        except ValueError:
+                            pass
+                    elif tstep0 == 0 and len(roms_init_string) == 0:
+                        roms_init_string = "Running ROMS: Initializing run..."
+                        print(roms_init_string)
+
+                romsprocess.wait()
+
+                if romsprocess.returncode != 0:
+                    import datetime as dt
+
+                    errlog = (
+                        output_dir
+                        / f"ROMS_STDERR_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                    )
+                    if romsprocess.stderr is not None:
+                        with open(errlog, "w") as F:
+                            F.write(romsprocess.stderr.read())
+                    raise RuntimeError(
+                        f"ROMS terminated with errors. See {errlog} for further information."
+                    )
 
     def post_run(self, output_dir=None) -> None:
         """
@@ -474,14 +546,21 @@ class ROMSComponent(Component):
         else:
             (output_dir / "PARTITIONED").mkdir(exist_ok=True)
             for f in files:
-                print(f)
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
                 wildcard_pattern = f"{Path(f.stem).stem}.*.nc"
-                subprocess.run(
+                print(f"Joining netCDF files {wildcard_pattern}...")
+                ncjoin_result = subprocess.run(
                     f"ncjoin {wildcard_pattern}",
                     cwd=output_dir,
+                    capture_output=True,
+                    text=True,
                     shell=True,
                 )
+                if ncjoin_result.returncode != 0:
+                    raise RuntimeError(
+                        f"Error {ncjoin_result.returncode} while joining ROMS output. "
+                        + f"STDERR stream:\n {ncjoin_result.stderr}"
+                    )
                 for F in output_dir.glob(wildcard_pattern):
                     F.rename(output_dir / "PARTITIONED" / F.name)
 

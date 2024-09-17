@@ -183,7 +183,6 @@ class AdditionalCode:
         local_dir = Path(local_dir).resolve()
         try:
             tmp_dir = None  # initialise the tmp_dir variable in case we need it later
-
             # CASE 1: Additional code is in a remote repository:
             if (self.source.location_type == "url") and (
                 self.source.source_type == "repository"
@@ -231,7 +230,9 @@ class AdditionalCode:
                 for f in file_list:
                     src_file_path = source_dir / f
                     tgt_file_path = local_dir / file_type / Path(f).name
-                    print(f"copying {src_file_path} to {tgt_file_path}")
+                    print(
+                        f"copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
+                    )
                     if src_file_path.exists():
                         shutil.copy(src_file_path, tgt_file_path)
                     else:
