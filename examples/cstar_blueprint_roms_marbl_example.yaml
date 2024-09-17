@@ -10,13 +10,6 @@ components:
         name: 'MARBL'
         source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
         checkout_target: 'marbl0.45.0'
-      additional_code:
-        location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
-        checkout_target: 'b621f3ab0986262cad82438f15043d5f8f660daf'
-        namelists:
-          - "namelists/MARBL/marbl_in"
-          - "namelists/MARBL/marbl_tracer_output_list"
-          - "namelists/MARBL/marbl_diagnostic_output_list"
 
   - component:
       base_model:
@@ -28,21 +21,26 @@ components:
         n_procs_y: 3
         time_step: 360
       additional_code:
-        location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
-        checkout_target: 'b621f3ab0986262cad82438f15043d5f8f660daf'
+        location: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
+        checkout_target: 'b7b402cf173ea8c496cc44af72a48fdc4f50ad91'
+        subdir: 'ROMS'
         source_mods:
-          - "source_mods/ROMS/bgc.opt"
-          - "source_mods/ROMS/bulk_frc.opt"
-          - "source_mods/ROMS/cppdefs.opt"
-          - "source_mods/ROMS/diagnostics.opt"
-          - "source_mods/ROMS/ocean_vars.opt"
-          - "source_mods/ROMS/param.opt"
-          - "source_mods/ROMS/tracers.opt"
-          - "source_mods/ROMS/Makefile"
-          - "source_mods/ROMS/get_makefile"
-          - "source_mods/ROMS/Make.depend"
+          - "source_mods/bgc.opt"
+          - "source_mods/bulk_frc.opt"
+          - "source_mods/cppdefs.opt"
+          - "source_mods/diagnostics.opt"
+          - "source_mods/ocean_vars.opt"
+          - "source_mods/param.opt"
+          - "source_mods/tracers.opt"
+          - "source_mods/Makefile"
+          - "source_mods/get_makefile"
+          - "source_mods/Make.depend"
         namelists:
-          - "namelists/ROMS/roms.in_TEMPLATE"
+          - "namelists/roms.in_TEMPLATE"
+          - "namelists/marbl_in"
+          - "namelists/marbl_tracer_output_list"
+          - "namelists/marbl_diagnostic_output_list"
+          
       input_datasets:
         model_grid:
           files:

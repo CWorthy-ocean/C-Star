@@ -51,9 +51,8 @@ shutil.move(rmr_dir/"input_datasets/ROMS" , "local_input_files")
 
 lac_dir=Path.cwd()/"local_additional_code"
 lac_dir.mkdir(parents=True,exist_ok=True)
-shutil.copytree(rmr_dir/"namelists/ROMS" , lac_dir/"namelists/ROMS")
-shutil.copytree(rmr_dir/"namelists/MARBL" , lac_dir/"namelists/MARBL")
-shutil.copytree(rmr_dir/"source_mods/ROMS" , lac_dir/"source_mods/ROMS")
+shutil.copytree(rmr_dir/"additional_code/ROMS/namelists" , lac_dir/"ROMS/namelists")
+shutil.copytree(rmr_dir/"additional_code/ROMS/source_mods" , lac_dir/"ROMS/source_mods")
 
 # Modify the blueprint file to point to local paths whenever we have the files:
 with open('test_blueprint.yaml') as f:
@@ -61,7 +60,7 @@ with open('test_blueprint.yaml') as f:
 
 for i,line in enumerate(test_blueprint):
     id_url_prefix="https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/"
-    ac_url="https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git"
+    ac_url="https://github.com/dafyddstephenson/roms_marbl_example.git"
     if id_url_prefix in line:
         fileurl=line.split()[-1] # Just isolate URL from e.g. source: URL
         filepath=Path.cwd()/"local_input_files"/Path(fileurl).name
