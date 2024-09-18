@@ -24,13 +24,12 @@ class TestRomsMarbl:
         )
 
         with mock_user_input("y"):
-            # TODO do we actually need user input for all these steps?
             roms_marbl_case.setup()
 
-            # TODO why are we persisting this blueprint file then not using it again in the test?
-            roms_marbl_case.persist(tmpdir / "test_blueprint.yaml")
+        # TODO why are we persisting this blueprint file then not using it again in the test?
+        roms_marbl_case.persist(tmpdir / "test_blueprint.yaml")
 
-            roms_marbl_case.build()
-            roms_marbl_case.pre_run()
-            roms_marbl_case.run()
-            roms_marbl_case.post_run()
+        roms_marbl_case.build()
+        roms_marbl_case.pre_run()
+        roms_marbl_case.run()
+        roms_marbl_case.post_run()
