@@ -6,6 +6,8 @@ from typing import Callable
 
 import pytest
 
+from cstar.tests.blueprints import TEST_BLUEPRINTS
+
 
 # Prevent errors caused by pytest trying to collect tests from externals 
 # (e.g. from errors whilst importing python code in the UCLA-roms repo, see https://github.com/CWorthy-ocean/C-Star/issues/53)
@@ -13,16 +15,6 @@ collect_ignore_glob = [
     "cstar/cstar_local_config.py",
     "cstar/externals/**"
 ]
-
-
-EXAMPLE_BLUEPRINTS = {
-    "ROMS_MARBL": {
-        # TODO this assumes you are running pytest from the root directory of the cloned repo, which is fragile
-        "base": "./examples/cstar_blueprint_roms_marbl_example.yaml",
-        "input_datasets_url_prefix": "https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/",
-        "additional_code_url": "https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git",
-    },
-}
 
 
 @pytest.fixture
@@ -57,7 +49,7 @@ def example_blueprint_as_dict() -> Callable[[str], dict]:
     """Given the name of a pre-defined blueprint, return it as an in-memory dict."""
 
     def _base_blueprint_dict(name: str) -> dict:
-        base_blueprint_path = EXAMPLE_BLUEPRINTS[name]["base"]
+        base_blueprint_path = TEST_BLUEPRINTS[name]["base"]
 
         with open(base_blueprint_path, "r") as file:
             base_blueprint_dict = yaml.safe_load(file)
@@ -82,10 +74,10 @@ def change_remote_paths_to_local_paths(
     name
     """
 
-    input_datasets_url_prefix: str = EXAMPLE_BLUEPRINTS[name][
+    input_datasets_url_prefix: str = TEST_BLUEPRINTS[name][
         "input_datasets_url_prefix"
     ]
-    additional_code_url: str = EXAMPLE_BLUEPRINTS[name]["additional_code_url"]  # noqa
+    additional_code_url: str = TEST_BLUEPRINTS[name]["additional_code_url"]  # noqa
 
     def is_a_location_containing_input_datasets_url(key: str, value: str) -> bool:
         return key == "location" and input_datasets_url_prefix in value
