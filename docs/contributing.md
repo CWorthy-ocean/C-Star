@@ -2,12 +2,23 @@
 
 ## Conda environment
 
-You can install and activate the following conda environment:
+Install **one** of the following conda environments, depending on whether you are working on a laptop or an HPC machine:
+
 ```
 cd C-Star
-conda env create -f ci/environment.yml
+# conda env create -f ci/environment.yml  # conda environment for laptop
+conda env create -f ci/environment_hpc.yml  # conda environment for HPC machine
+```
+
+Activate the conda environment:
+```
 conda activate cstar_env
 ```
+
+Install `C-Star` in the same environment:
+```
+pip install -e .
+``` 
 
 This conda environment is useful for any of the following steps:
 
