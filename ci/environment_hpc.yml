@@ -3,11 +3,14 @@ channels:
   - conda-forge
 dependencies:
   - python>=3.10
-  - coverage
   - numpy
   - xarray
   - netCDF4
   - pip
+  # testing
+  - pre-commit
+  - coverage
+  - pytest
   # docs
   - sphinx
   - nbsphinx
