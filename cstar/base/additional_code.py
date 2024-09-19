@@ -3,7 +3,6 @@ import tempfile
 from typing import Optional, List
 from pathlib import Path
 from cstar.base.datasource import DataSource
-from cstar.base.base_model import BaseModel
 from cstar.base.utils import _clone_and_checkout, _list_to_concise_str
 
 
@@ -27,8 +26,6 @@ class AdditionalCode:
 
     Attributes:
     -----------
-    base_model: BaseModel
-        The base model with which this additional code is associated
     source: DataSource
         Describes the location and type of source data (e.g. repository,directory)
     subdir: str
@@ -59,7 +56,6 @@ class AdditionalCode:
 
     def __init__(
         self,
-        base_model: BaseModel,
         location: str,
         subdir: str = "",
         checkout_target: Optional[str] = None,
@@ -71,8 +67,6 @@ class AdditionalCode:
 
         Parameters:
         -----------
-        base_model: BaseModel
-            The base model with which this additional code is associated
         location: str
             url or path pointing to the additional code directory or repository, used to set `source` attribute
         subdir: str
@@ -94,7 +88,6 @@ class AdditionalCode:
 
         """
 
-        self.base_model: BaseModel = base_model
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
         self.checkout_target: Optional[str] = checkout_target
@@ -110,7 +103,6 @@ class AdditionalCode:
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
-        base_str += f"\nBase model: {self.base_model.name}"
         base_str += f"\nLocation: {self.source.location}"
         base_str += f"\nsubdirectory: {self.subdir}"
         base_str += f"\nWorking path: {self.working_path}"
@@ -132,7 +124,6 @@ class AdditionalCode:
     def __repr__(self) -> str:
         # Constructor-style section:
         repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>,"
         repr_str += f"\nlocation = {self.source.location!r},"
         repr_str += f"\nsubdir = {self.subdir!r}"
         if hasattr(self, "checkout_target"):
