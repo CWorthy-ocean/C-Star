@@ -4,7 +4,7 @@ from contextlib import contextmanager
 import pytest
 
 # make fixtures for creating blueprints globally available
-from cstar.tests.blueprints.fixtures import example_blueprint_as_dict, example_blueprint_as_path
+from cstar.tests.blueprints.fixtures import test_blueprint_as_dict, test_blueprint_as_path
 
 
 # Prevent errors caused by pytest trying to collect tests from externals 
