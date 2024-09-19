@@ -40,7 +40,7 @@ components:
           - "namelists/marbl_in"
           - "namelists/marbl_tracer_output_list"
           - "namelists/marbl_diagnostic_output_list"
-          
+
       input_datasets:
         model_grid:
           files:
