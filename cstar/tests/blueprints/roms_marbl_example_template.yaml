@@ -21,7 +21,7 @@ components:
         n_procs_y: 3
         time_step: 360
       additional_code:
-        location: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
+        location: '<additional_code_location>'
         checkout_target: 'b7b402cf173ea8c496cc44af72a48fdc4f50ad91'
         subdir: 'ROMS'
         source_mods:

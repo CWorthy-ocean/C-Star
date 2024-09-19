@@ -42,6 +42,7 @@ def set_locations(
     """
 
     input_datasets_location = TEST_BLUEPRINTS[name]["input_datasets_location"]
+    additional_code_location = TEST_BLUEPRINTS[name]["additional_code_location"]
 
     def contains_input_datasets_location(path: str, value: YAMLValue) -> bool:
         if path.endswith("location") and isinstance(value, str):
@@ -70,8 +71,36 @@ def set_locations(
         modify_func=modify_func,  # type: ignore[arg-type]  # we will only be modifying values if they are strings
     )
 
+    # TODO this could probably be refactored to merge with the same code for modifying input_datasets_location
+    def contains_additional_code_location(path: str, value: YAMLValue) -> bool:
+        if path.endswith("location") and isinstance(value, str):
+            return "<additional_code_location>" in value
+        else:
+            return False
+
+    def modify_to_use_remote_path_to_additional_code(value: str) -> str:
+        return value.replace("<additional_code_location>", additional_code_location)
+
+    def modify_to_use_local_path_to_additional_code(value: str) -> str:
+        filename = value.removeprefix("<additional_code_location>")
+        # TODO make "local_input_files" a parameter?
+        local_filepath = Path.cwd() / "local_input_files" / filename
+
+        return value.replace("<additional_code_location>", str(local_filepath))
+
+    if local:
+        modify_func = modify_to_use_local_path_to_additional_code
+    else:
+        modify_func = modify_to_use_remote_path_to_additional_code
+
+    blueprint_with_updated_additional_code_location = modify_yaml(
+        blueprint_with_updated_input_datasets_location,
+        condition_func=contains_additional_code_location,
+        modify_func=modify_func,  # type: ignore[arg-type]  # we will only be modifying values if they are strings
+    )
+
     # cast because we know our blueprint yamls always have a dict as the top-level structure
-    return cast(dict, blueprint_with_updated_input_datasets_location)
+    return cast(dict, blueprint_with_updated_additional_code_location)
 
     # TODO
     # blueprint_with_local_additional_code = ...

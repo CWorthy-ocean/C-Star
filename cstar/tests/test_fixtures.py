@@ -19,11 +19,16 @@ class TestGetBluePrints:
         roms_component = blueprint_dict["components"][1]["component"]
         input_datasets = roms_component["input_datasets"]
         model_grid = input_datasets["model_grid"]
-        location = model_grid["files"][0]["location"]
-
+        input_dataset_location = model_grid["files"][0]["location"]
         assert (
-            location
+            input_dataset_location
             == "https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_grd.nc"
+        )
+
+        additional_code_location = roms_component["additional_code"]["location"]
+        assert (
+            additional_code_location
+            == "https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git"
         )
 
     def test_dict_equivalent_to_path(
