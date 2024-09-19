@@ -9,11 +9,11 @@ class TestRomsMarbl:
         self,
         tmpdir,
         mock_user_input,
-        example_blueprint_as_path,
+        test_blueprint_as_path,
         local_sources,
     ):
-        roms_marbl_base_blueprint_filepath = example_blueprint_as_path(
-            "ROMS_MARBL", make_local=local_sources
+        roms_marbl_base_blueprint_filepath = test_blueprint_as_path(
+            "ROMS_MARBL", local=local_sources
         )
 
         roms_marbl_case = cstar.Case.from_blueprint(
