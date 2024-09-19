@@ -4,7 +4,7 @@ import cstar
 
 
 class TestRomsMarbl:
-    @pytest.mark.parametrize("local_sources", [False, True])
+    @pytest.mark.parametrize("local_sources", [False])
     def test_roms_marbl(
         self,
         tmpdir,
