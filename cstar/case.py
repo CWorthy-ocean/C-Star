@@ -429,17 +429,18 @@ class Case:
                 + "Cannot create a Case with no components!"
             )
         for component_entry in bp_dict["components"]:
-            component_info = component_entry.get("component")
-            base_model_name = component_info.get("base_model")["name"].casefold()
 
-            match base_model_name:
-                case "ROMS":
+            component_info = component_entry.get("component")
+            component_name = component_info.get("name").casefold()
+
+            match component_name:
+                case "roms":
                     component = ROMSComponent.from_dict(component_info)
-                case "MARBL":
+                case "marbl":
                     component = MARBLComponent.from_dict(component_info)
                 case _:
                     raise ValueError(
-                        f"unrecognized base model name '{base_model_name}'"
+                        f"unrecognized component name '{component_name}'"
                     )
 
             components.append(component)
@@ -516,21 +517,20 @@ class Case:
             return
 
         for component in self.components:
-            infostr = f"\nSetting up {component.__class__.__name__}"
+            component_class = component.__class__.__name__
+            infostr = f"\nSetting up {component_class}"
             print(infostr + "\n" + "-" * len(infostr))
 
-            # Check BaseModel
-            infostr = f"\nConfiguring {component.base_model.__class__.__name__}"
-            print(infostr + "\n" + "-" * len(infostr))
-            component.base_model.handle_config_status()
-
-            # Get AdditionalCode
-            if component.additional_code is not None:
-                print("\nFetching additional code... " + "\n--------------------------")
-                component.additional_code.get(
-                    self.caseroot / "additional_code" / component.base_model.name
-                )
-
+            match component_class:
+                case "MARBLComponent":
+                    component.setup(
+                        additional_code_dir=self.caseroot / "additional_code/MARBL"
+                    )
+                case "ROMSComponent":
+                    component.setup(
+                        additional_code_dir=self.caseroot / "additional_code/ROMS",
+                        input_dataset_dir=self.caseroot / "input_datasets/ROMS",
+                    )
             # Get InputDatasets
             # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
             # Verify dates line up before running .get():

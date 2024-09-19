@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Optional, TYPE_CHECKING, get_type_hints
+from pathlib import Path
 
 from cstar.base.base_model import BaseModel
 
-if TYPE_CHECKING:
-    from cstar.base.additional_code import AdditionalCode
+#if TYPE_CHECKING:
+from cstar.base.additional_code import AdditionalCode
 
 
 class Component(ABC):
@@ -36,14 +37,12 @@ class Component(ABC):
     """
 
     base_model: BaseModel
-    discretization: Optional["Discretization"]
     additional_code: Optional["AdditionalCode"]
 
     def __init__(
         self,
         base_model: BaseModel,
         additional_code: Optional["AdditionalCode"] = None,
-        discretization: Optional["Discretization"] = None,
     ):
         """
         Initialize a Component object from a base model and any discretization information and additional_code
@@ -53,8 +52,6 @@ class Component(ABC):
         base_model: BaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        discretization: Discretization (Optional, default None)
-            Any information related to the discretization of this Component (e.g. time step)
         additional_code: AdditionalCode (Optional, default None)
             Additional code contributing to a unique instance of a base model,
             e.g. namelists, source modifications, etc.
@@ -70,7 +67,6 @@ class Component(ABC):
             )
         self.base_model = base_model
         self.additional_code = additional_code or None
-        self.discretization = discretization or None
 
     @classmethod
     def from_dict(cls, component_dict):
@@ -96,55 +92,10 @@ class Component(ABC):
         elif isinstance(additional_code_entry, dict):
             additional_code = AdditionalCode(**additional_code_entry)
 
-        # Discretization
-        discretization_entry = component_dict.get("discretization", None)
-        discretization_class = get_type_hints(cls).get("discretization")
-        if isinstance(discretization_entry, discretization_class) or (
-            discretization_entry is None
-        ):
-            discretization = discretization_entry
-        elif isinstance(discretization_entry, dict):
-            discretization = discretization_class(**discretization_entry)
-
         return cls(
             base_model=base_model,
             additional_code=additional_code,
-            discretization=discretization,
         )
-
-    def to_dict(self) -> dict:
-        component_dict = {}
-
-        # BaseModel
-        base_model_info = {}
-        base_model_info["name"] = self.base_model.name
-        base_model_info["source_repo"] = self.base_model.source_repo
-        base_model_info["checkout_target"] = self.base_model.checkout_target
-
-        component_dict["base_model"] = base_model_info
-
-        # Discretization
-        if self.discretization is not None:
-            discretization_info = {}
-            for thisattr in vars(self.discretization).keys():
-                discretization_info[thisattr] = getattr(self.discretization, thisattr)
-            component_dict["discretization"] = discretization_info
-
-        # AdditionalCode
-        if self.additional_code is not None:
-            additional_code_info: dict = {}
-            additional_code_info["location"] = self.additional_code.source.location
-            additional_code_info["subdir"] = self.additional_code.subdir
-            additional_code_info["checkout_target"] = (
-                self.additional_code.checkout_target
-            )
-            if self.additional_code.source_mods is not None:
-                additional_code_info["source_mods"] = self.additional_code.source_mods
-            if self.additional_code.namelists is not None:
-                additional_code_info["namelists"] = self.additional_code.namelists
-
-            component_dict["additional_code"] = additional_code_info
-        return component_dict
 
     def __str__(self) -> str:
         # Header
@@ -181,6 +132,53 @@ class Component(ABC):
 
         return repr_str
 
+    def to_dict(self) -> dict:
+        component_dict = {}
+
+        # BaseModel
+        base_model_info = {}
+        base_model_info["name"] = self.base_model.name
+        base_model_info["source_repo"] = self.base_model.source_repo
+        base_model_info["checkout_target"] = self.base_model.checkout_target
+
+        component_dict["base_model"] = base_model_info
+
+        # Discretization
+        if self.discretization is not None:
+            discretization_info = {}
+            for thisattr in vars(self.discretization).keys():
+                discretization_info[thisattr] = getattr(self.discretization, thisattr)
+            component_dict["discretization"] = discretization_info
+
+        # AdditionalCode
+        if self.additional_code is not None:
+            additional_code_info: dict = {}
+            additional_code_info["location"] = self.additional_code.source.location
+            additional_code_info["subdir"] = self.additional_code.subdir
+            additional_code_info["checkout_target"] = (
+                self.additional_code.checkout_target
+            )
+            if self.additional_code.source_mods is not None:
+                additional_code_info["source_mods"] = self.additional_code.source_mods
+            if self.additional_code.namelists is not None:
+                additional_code_info["namelists"] = self.additional_code.namelists
+
+            component_dict["additional_code"] = additional_code_info
+        return component_dict
+
+    def setup(self, additional_code_dir: str | Path) -> None:
+        """docstring"""
+
+        # Check BaseModel
+        infostr = f"\nConfiguring {self.base_model.__class__.__name__}"
+        print(infostr + "\n" + "-" * len(infostr))
+        self.base_model.handle_config_status()
+
+        # Get AdditionalCode
+        if self.additional_code is not None:
+            print("\nFetching additional code... " + "\n--------------------------")
+            self.additional_code.get(additional_code_dir)
+
     @abstractmethod
     def build(self) -> None:
         """
@@ -215,56 +213,3 @@ class Component(ABC):
         """
         pass
 
-
-class Discretization(ABC):
-    """
-    Holds discretization information about a Component.
-
-    Attributes:
-    -----------
-
-    time_step: int
-        The time step with which to run the Component
-    """
-
-    def __init__(
-        self,
-        time_step: int,
-    ):
-        """
-        Initialize a Discretization object from basic discretization parameters
-
-        Parameters:
-        -----------
-        time_step: int
-            The time step with which to run the Component
-
-        Returns:
-        --------
-        Discretization:
-            An initialized Discretization object
-
-        """
-
-        self.time_step: int = time_step
-
-    def __str__(self) -> str:
-        # Discretisation
-        disc_str = ""
-
-        if hasattr(self, "time_step") and self.time_step is not None:
-            disc_str += "\ntime_step: " + str(self.time_step) + "s"
-        if len(disc_str) > 0:
-            classname = self.__class__.__name__
-            header = classname
-            disc_str = header + "\n" + "-" * len(classname) + disc_str
-
-        return disc_str
-
-    def __repr__(self) -> str:
-        repr_str = ""
-        repr_str = f"{self.__class__.__name__}("
-        if hasattr(self, "time_step") and self.time_step is not None:
-            repr_str += f"time_step = {self.time_step}, "
-        repr_str += ")"
-        return repr_str

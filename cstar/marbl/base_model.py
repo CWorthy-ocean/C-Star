@@ -22,7 +22,7 @@ class MARBLBaseModel(BaseModel):
     get()
         overrides BaseModel.get() to clone the MARBL repository, set environment, and compile library.
     """
-
+    
     @property
     def name(self) -> str:
         return "MARBL"

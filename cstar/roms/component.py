@@ -1,11 +1,14 @@
 import warnings
 import subprocess
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING, List, Sequence
+from typing import Optional, TYPE_CHECKING, List
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
-from cstar.base.component import Component, Discretization
+from cstar.base.component import Component
 
+
+from cstar.roms.base_model import ROMSBaseModel
+from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.input_dataset import (
     ROMSInitialConditions,
     ROMSModelGrid,
@@ -24,8 +27,7 @@ from cstar.base.environment import (
     _CSTAR_SYSTEM_CORES_PER_NODE,
 )
 
-if TYPE_CHECKING:
-    from cstar.roms import ROMSBaseModel, ROMSInputDataset
+
 
 
 class ROMSComponent(Component):
@@ -38,9 +40,6 @@ class ROMSComponent(Component):
     -----------
     base_model: ROMSBaseModel
         An object pointing to the unmodified source code of ROMS at a specific commit
-    input_datasets: list of ROMSInputDatasets
-        Any spatiotemporal data needed to run this instance of ROMS
-        e.g. initial conditions, surface forcing, etc.
     additional_code: AdditionalCode
         Additional code contributing to a unique instance of this ROMS run
         e.g. namelists, source modifications, etc.
@@ -61,16 +60,19 @@ class ROMSComponent(Component):
     """
 
     base_model: "ROMSBaseModel"
-    additional_code: "AdditionalCode"
-    input_datasets: Sequence["ROMSInputDataset"]
     discretization: "ROMSDiscretization"
+    additional_code: "AdditionalCode"
 
     def __init__(
         self,
         base_model: "ROMSBaseModel",
-        additional_code: "AdditionalCode",
         discretization: "ROMSDiscretization",
-        input_datasets: Optional[Sequence["ROMSInputDataset"]] = None,
+        additional_code: "AdditionalCode" = None,
+        model_grid: "ROMSModelGrid" = None,
+        initial_conditions: "ROMSInitialConditions" = None,
+        tidal_forcing: "ROMSTidalForcing" = None,
+        surface_forcing: list["ROMSSurfaceForcing"] = None,
+        boundary_forcing: list["ROMSBoundaryForcing"] = None,
     ):
         """
         Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
@@ -80,29 +82,116 @@ class ROMSComponent(Component):
         base_model: ROMSBaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        input_datasets:  list of InputDatasets
-            Any spatiotemporal data needed to run this instance of the base model
-            e.g. initial conditions, surface forcing, etc.
-        additional_code: AdditionalCode
-            Additional code contributing to a unique instance of a base model,
-            e.g. namelists, source modifications, etc.
         discretization: ROMSDiscretization
             Any information related to discretization of this ROMSComponent
             e.g. time step, number of levels, number of CPUs following each direction, etc.
+        additional_code: AdditionalCode
+            Additional code contributing to a unique instance of a base model,
+            e.g. namelists, source modifications, etc.
 
         Returns:
         --------
         ROMSComponent:
             An intialized ROMSComponent object
         """
+        # Should be super
         self.base_model = base_model
-        self.additional_code = additional_code
-        self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization
+        self.additional_code = additional_code
 
         # roms-specific
+        self.model_grid = model_grid
+        self.initial_conditions = initial_conditions
+        self.tidal_forcing = tidal_forcing
+        self.surface_forcing = [] if surface_forcing is None else surface_forcing
+        self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
+
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
+
+    @classmethod
+    def from_dict(cls, component_dict):
+        """docstring"""
+        base_instance = super().from_dict(component_dict)
+
+
+        # Discretization
+        discretization_entry = component_dict.get("discretization", None)
+        if isinstance(discretization_entry, "ROMSDiscretization") or (
+            discretization_entry is None
+        ):
+            kwarg_dict["discretization"] = discretization_entry
+        elif isinstance(discretization_entry, dict):
+            kwarg_dict["discretization"] = ROMSDiscretization(**discretization_entry)
+        
+        # Do more stuff here
+        single_file_input_dataset_classes = {
+            "model_grid": ROMSModelGrid,
+            "initial_conditions": ROMSInitialConditions,
+            "tidal_forcing": ROMSTidalForcing,
+        }
+        kwarg_dict = {}
+        for id_attr, id_class in single_file_input_dataset_classes.items:
+            id_entry = component_dict.get(id_attr, None)
+            if isinstance(id_entry, id_class) or (id_entry is None):
+                kwarg_dict[id_attr] = id_entry
+            elif isinstance(id_entry, dict):
+                kwarg_dict = id_class(**id_entry)
+            else:
+                raise ValueError(
+                    f"Dictionary key {id_attr} value is "
+                    + f"not of type dict, {id_class} or None"
+                )
+
+        multi_file_input_dataset_classes = {
+            "surface_forcing": ROMSSurfaceForcing,
+            "boundary_forcing": ROMSBoundaryForcing,
+        }
+
+        for id_attr, id_class in multi_file_input_dataset_classes.items:
+            id_entry = component_dict.get(id_attr, None)
+
+            if id_entry is None:
+                kwarg_dict[id_attr] = None
+            elif isinstance(id_entry, id_class):
+                kwarg_dict[id_attr] = [
+                    id_entry,
+                ]
+            elif isinstance(id_entry, list) and all(
+                isinstance(i, id_class) for i in id_entry
+            ):
+                kwarg_dict[id_attr] = id_entry
+            elif isinstance(id_entry, dict):
+                kwarg_dict[id_attr] = [
+                    id_class(**id_entry),
+                ]
+            elif isinstance(id_entry, list) and all(
+                isinstance(i, dict) for i in id_entry
+            ):
+                id_list = []
+                for id_dict in id_entry:
+                    id_list.append(id_class(**id_dict))
+                kwarg_dict[id_attr] = id_list
+            else:
+                raise ValueError(
+                    f"Dictionary key {id_attr} has value that is "
+                    + f"not of type NoneType, {id_class}, list[{id_class}], "
+                    + "dict, or list[dict]."
+                )
+
+        return cls(
+            base_instance.base_model,
+            base_instance.additional_code,
+            **kwarg_dict,
+        )
+
+    def setup(self) -> None:
+        """docstring"""
+        pass
+
+    def to_dict(self) -> dict:
+        """docstring"""
+        pass
 
     def build(self) -> None:
         """
@@ -159,36 +248,44 @@ class ROMSComponent(Component):
            `ROMSComponent.additional_code.working_path/namelists`.
 
         """
-        from cstar.roms import ROMSInputDataset
 
-        # Partition input datasets and add their paths to namelist
-        if self.input_datasets is not None and all(
-            [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
-        ):
-            datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
-            # Preliminary checks
-            if self.additional_code.working_path is None:
-                raise ValueError(
-                    "Unable to prepare ROMSComponent for execution: "
-                    + "\nROMSComponent.additional_code.working_path is None."
-                    + "\n Call ROMSComponent.additional_code.get() and try again"
-                )
+        datasets_to_partition = []
 
-            if not hasattr(self.additional_code, "modified_namelists"):
-                raise ValueError(
-                    "No editable namelist found in which to set ROMS runtime parameters. "
-                    + "Expected to find a file in ROMSComponent.additional_code.namelists"
-                    + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
-                )
-            else:
-                mod_namelist = (
-                    self.additional_code.working_path
-                    / self.additional_code.modified_namelists[0]
-                )
+        if isinstance(self.model_grid, ROMSModelGrid):
+            datasets_to_partition.append(self.model_grid)
+        if isinstance(self.initial_conditions, ROMSInitialConditions):
+            datasets_to_partition.append(self.initial_conditions)
+        if isinstance(self.tidal_forcing, ROMSTidalForcing):
+            datasets_to_partition.append(self.tidal_forcing)
+        if len(self.boundary_forcing) > 0:
+            datasets_to_partition.extend(self.boundary_forcing)
+        if len(self.surface_forcing) > 0:
+            datasets_to_partition.extend(self.surface_forcing)
 
-            namelist_forcing_str = ""
-            if len(datasets_to_partition) > 0:
-                from roms_tools.utils import partition_netcdf
+        # Preliminary checks
+        if self.additional_code.working_path is None:
+            raise ValueError(
+                "Unable to prepare ROMSComponent for execution: "
+                + "\nROMSComponent.additional_code.working_path is None."
+                + "\n Call ROMSComponent.additional_code.get() and try again"
+            )
+
+        if not hasattr(self.additional_code, "modified_namelists"):
+            raise ValueError(
+                "No editable namelist found in which to set ROMS runtime parameters. "
+                + "Expected to find a file in ROMSComponent.additional_code.namelists"
+                + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
+            )
+        else:
+            mod_namelist = (
+                self.additional_code.working_path
+                / self.additional_code.modified_namelists[0]
+            )
+
+        namelist_forcing_str = ""
+        if len(datasets_to_partition) > 0:
+            from roms_tools.utils import partition_netcdf
+
             for f in datasets_to_partition:
                 # fname = f.source.basename
 
@@ -564,86 +661,3 @@ class ROMSComponent(Component):
                 for F in output_dir.glob(wildcard_pattern):
                     F.rename(output_dir / "PARTITIONED" / F.name)
 
-
-class ROMSDiscretization(Discretization):
-    """
-    An implementation of the Discretization class for ROMS.
-
-
-    Additional attributes:
-    ----------------------
-    n_procs_x: int
-        The number of parallel processors over which to subdivide the x axis of the domain.
-    n_procs_y: int
-        The number of parallel processors over which to subdivide the y axis of the domain.
-
-    Properties:
-    -----------
-    n_procs_tot: int
-        The value of n_procs_x * n_procs_y
-
-    """
-
-    def __init__(
-        self,
-        time_step: int,
-        n_procs_x: int = 1,
-        n_procs_y: int = 1,
-    ):
-        """
-        Initialize a ROMSDiscretization object from basic discretization parameters
-
-        Parameters:
-        -----------
-        time_step: int
-            The time step with which to run the Component
-        n_procs_x: int
-           The number of parallel processors over which to subdivide the x axis of the domain.
-        n_procs_y: int
-           The number of parallel processors over which to subdivide the y axis of the domain.
-
-
-        Returns:
-        --------
-        ROMSDiscretization:
-            An initialized ROMSDiscretization object
-
-        """
-
-        super().__init__(time_step)
-        self.n_procs_x = n_procs_x
-        self.n_procs_y = n_procs_y
-
-    @property
-    def n_procs_tot(self) -> int:
-        """Total number of processors required by this ROMS configuration"""
-        return self.n_procs_x * self.n_procs_y
-
-    def __str__(self) -> str:
-        disc_str = super().__str__()
-
-        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            disc_str += (
-                "\nn_procs_x: "
-                + str(self.n_procs_x)
-                + " (Number of x-direction processors)"
-            )
-        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
-            disc_str += (
-                "\nn_procs_y: "
-                + str(self.n_procs_y)
-                + " (Number of y-direction processors)"
-            )
-        return disc_str
-
-    def __repr__(self) -> str:
-        repr_str = super().__repr__().strip(")")
-        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            repr_str += f", n_procs_x = {self.n_procs_x}, "
-        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
-            repr_str += f"n_procs_y = {self.n_procs_y}, "
-
-        repr_str = repr_str.strip(", ")
-        repr_str += ")"
-
-        return repr_str
