@@ -4,6 +4,10 @@ from cstar.base import Component
 class MARBLComponent(Component):
     # Inherits its docstring from Component
 
+    @property
+    def component_type(self) -> str:
+        return "MARBL"
+
     def build(self) -> None:
         print("No build steps to be completed for MARBLComponent")
         pass

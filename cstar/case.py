@@ -3,7 +3,7 @@ import warnings
 import datetime as dt
 import dateutil.parser
 from pathlib import Path
-from typing import List, Type, Any, Optional, TYPE_CHECKING
+from typing import List, Any, Optional, TYPE_CHECKING, Type
 
 from cstar.base.component import Component, Discretization
 from cstar.base.additional_code import AdditionalCode
@@ -21,7 +21,7 @@ from cstar.roms.input_dataset import (
 from cstar.roms.component import ROMSComponent, ROMSDiscretization
 
 if TYPE_CHECKING:
-    from cstar.base import BaseModel
+    pass
 
 
 class Case:
@@ -310,7 +310,7 @@ class Case:
         for component in self.components:
             if len(component.input_datasets) > 0:
                 case_tree_dict.setdefault("input_datasets", {})
-                case_tree_dict["input_datasets"][component.base_model.name] = [
+                case_tree_dict["input_datasets"][component.component_type] = [
                     dataset.source.basename for dataset in component.input_datasets
                 ]
             if hasattr(component, "additional_code") and (
@@ -318,13 +318,13 @@ class Case:
             ):
                 case_tree_dict.setdefault("additional_code", {})
                 case_tree_dict["additional_code"].setdefault(
-                    component.base_model.name, {}
+                    component.component_type, {}
                 )
                 if component.additional_code.namelists is not None:
                     case_tree_dict["additional_code"][
-                        component.base_model.name
+                        component.component_type
                     ].setdefault("namelists", {})
-                    case_tree_dict["additional_code"][component.base_model.name][
+                    case_tree_dict["additional_code"][component.component_type][
                         "namelists"
                     ] = [
                         namelist.split("/")[-1]
@@ -332,9 +332,9 @@ class Case:
                     ]
                 if component.additional_code.modified_namelists is not None:
                     case_tree_dict["additional_code"][
-                        component.base_model.name
+                        component.component_type
                     ].setdefault("namelists", {})
-                    case_tree_dict["additional_code"][component.base_model.name][
+                    case_tree_dict["additional_code"][component.component_type][
                         "namelists"
                     ] += [
                         namelist.split("/")[-1]
@@ -342,9 +342,9 @@ class Case:
                     ]
                 if component.additional_code.source_mods is not None:
                     case_tree_dict["additional_code"][
-                        component.base_model.name
+                        component.component_type
                     ].setdefault("source_mods", {})
-                    case_tree_dict["additional_code"][component.base_model.name][
+                    case_tree_dict["additional_code"][component.component_type][
                         "source_mods"
                     ] = [
                         sourcemod.split("/")[-1]
@@ -436,15 +436,15 @@ class Case:
             )
         for component in bp_dict["components"]:
             component_info = component.get("component")
+            component_type = component_info.get("component_type")
             component_kwargs: dict[str, Any] = {}
 
-            ThisComponent: Type["Component"]
-            ThisBaseModel: Type["BaseModel"]
-            ThisDiscretization: Type["Discretization"]
+            # Decide which subclasses to use
+            ThisComponent: Type["ROMSComponent"] | Type["MARBLComponent"]
+            ThisBaseModel: Type["ROMSBaseModel"] | Type["MARBLBaseModel"]
+            ThisDiscretization: Type["ROMSDiscretization"] | None
 
-            # Construct the BaseModel instance
-            base_model_info = component_info.get("base_model")
-            match base_model_info["name"].casefold():
+            match component_type.casefold():
                 case "roms":
                     from cstar.roms import ROMSBaseModel, ROMSComponent
 
@@ -458,22 +458,23 @@ class Case:
                     ThisBaseModel = MARBLBaseModel
                 case _:
                     raise ValueError(
-                        f'Base model name {base_model_info["name"]} in blueprint '
+                        f"component_type {component_type} in blueprint "
                         + f"{blueprint}  does not match a value that is supported by C-Star. "
                         + 'Currently supported values are "ROMS" and "MARBL"'
                     )
 
-            base_model = ThisBaseModel(
-                base_model_info["source_repo"], base_model_info["checkout_target"]
-            )
+            # Construct the BaseModel instance
+            base_model_info = component_info.get("base_model")
+            base_model = ThisBaseModel(**base_model_info)
             component_kwargs["base_model"] = base_model
 
             # Construct the Discretization instance
             discretization: Optional[Discretization] = None
             if "discretization" in component_info.keys():
                 discretization_info = component_info.get("discretization")
-                discretization = ThisDiscretization(**discretization_info)
-                component_kwargs["discretization"] = discretization
+                if ThisDiscretization is not None:
+                    discretization = ThisDiscretization(**discretization_info)
+                    component_kwargs["discretization"] = discretization
 
             # Construct any AdditionalCode instances
             additional_code: Optional[AdditionalCode] = None
@@ -487,7 +488,7 @@ class Case:
             input_dataset_info = component_info.get("input_datasets", {})
             input_datasets = []
 
-            if base_model.name.casefold() == "roms":
+            if component_type.casefold() == "roms":
                 idtype_class_map = {
                     "model_grid": ROMSModelGrid,
                     "initial_conditions": ROMSInitialConditions,
@@ -561,15 +562,13 @@ class Case:
 
         for component in self.components:
             component_info: dict = {}
+
+            component_info["component_type"] = component.component_type
             # This will be bp_dict["components"]["component"]=component_info
 
             base_model_info: dict = {}
-            # This will be component_info["base_model"] = base_model_info
-            base_model_info = {}
-            base_model_info["name"] = component.base_model.name
             base_model_info["source_repo"] = component.base_model.source_repo
             base_model_info["checkout_target"] = component.base_model.checkout_target
-
             component_info["base_model"] = base_model_info
 
             # discretization info (if present)
@@ -682,11 +681,10 @@ class Case:
             if component.additional_code is not None:
                 print("\nFetching additional code... " + "\n--------------------------")
                 component.additional_code.get(
-                    self.caseroot / "additional_code" / component.base_model.name
+                    self.caseroot / "additional_code" / component.component_type
                 )
 
             # Get InputDatasets
-            # tgt_dir=self.caseroot+'/input_datasets/'+component.base_model.name
             # Verify dates line up before running .get():
             if (component.input_datasets is None) or (
                 len(component.input_datasets) == 0
@@ -706,14 +704,13 @@ class Case:
                     ):
                         inp.get_from_yaml(
                             self.caseroot
-                            / f"input_datasets/{component.base_model.name}",
+                            / f"input_datasets/{component.component_type}",
                             start_date=self.start_date,
                             end_date=self.end_date,
                         )
                     else:
                         inp.get(
-                            self.caseroot
-                            / f"input_datasets/{component.base_model.name}"
+                            self.caseroot / f"input_datasets/{component.component_type}"
                         )
 
     def build(self) -> None:

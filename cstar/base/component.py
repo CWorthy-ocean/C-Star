@@ -126,6 +126,11 @@ class Component(ABC):
 
         return repr_str
 
+    @property
+    @abstractmethod
+    def component_type(self) -> str:
+        pass
+
     @abstractmethod
     def build(self) -> None:
         """
