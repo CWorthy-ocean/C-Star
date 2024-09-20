@@ -45,7 +45,7 @@ jobs:
         shell: micromamba-shell {0}        
         run: |
            python -V
-           python -u -m coverage run --rcfile=coverage.toml tests/test_roms_marbl_example.py
+           python -u -m coverage run --rcfile=coverage.toml cstar/tests_old/test_roms_marbl_example.py
            
       - name: Get coverage report
         shell: micromamba-shell {0}                
