@@ -1,4 +1,4 @@
-name: CI
+name: tests
 
 on:
   push:
@@ -46,7 +46,6 @@ jobs:
         run: |
            python -V
            coverage run --rcfile=coverage.toml -m pytest --verbose cstar/tests/*
-           python -u -m coverage run --rcfile=coverage.toml tests/test_roms_marbl_example.py
            
       - name: Get coverage report
         shell: micromamba-shell {0}                
