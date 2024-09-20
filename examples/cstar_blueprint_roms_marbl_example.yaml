@@ -21,8 +21,8 @@ components:
         n_procs_y: 3
         time_step: 360
       additional_code:
-        location: 'https://github.com/CWorthy-Ocean/cstar_blueprint_roms_marbl_example.git'
-        checkout_target: 'a07ba58168fdc7c1e7f8f8b0cda191e80f507541'
+        location: 'https://github.com/dafyddstephenson/cstar_blueprint_roms_marbl_example.git'
+        checkout_target: 'dab634b0a6bd1049814b82b5f13db28e07292e5f'
         subdir: 'additional_code/ROMS'
         source_mods:
           - "source_mods/bgc.opt"

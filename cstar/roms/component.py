@@ -281,10 +281,52 @@ class ROMSComponent(Component):
                 mod_namelist, "__FORCING_FILES_PLACEHOLDER__", namelist_forcing_str
             )
 
-            _replace_text_in_file(
+            marbl_settings_path = (
+                self.additional_code.working_path / "namelists/marbl_in"
+            )
+            marbl_placeholder_in_namelist = _replace_text_in_file(
                 mod_namelist,
-                "MARBL_NAMELIST_DIR",
-                str(self.additional_code.working_path / "namelists"),
+                "__MARBL_SETTINGS_FILE_PLACEHOLDER__",
+                str(marbl_settings_path),
+            )
+            if (marbl_placeholder_in_namelist) and (not marbl_settings_path.exists()):
+                raise FileNotFoundError(
+                    "Placeholder string for marbl_in file "
+                    + "found in ROMS namelist, but 'marbl_in' not found "
+                    + f"at {marbl_settings_path.parent}."
+                )
+
+            marbl_tracer_list_path = (
+                self.additional_code.working_path / "namelists/marbl_tracer_output_list"
+            )
+            marbl_placeholder_in_namelist = _replace_text_in_file(
+                mod_namelist,
+                "__MARBL_TRACER_LIST_FILE_PLACEHOLDER__",
+                str(
+                    self.additional_code.working_path
+                    / "namelists/marbl_tracer_output_list"
+                ),
+            )
+            if (marbl_placeholder_in_namelist) and (
+                not marbl_tracer_list_path.exists()
+            ):
+                raise FileNotFoundError(f"{marbl_tracer_list_path} not found.")
+
+            marbl_diag_list_path = (
+                self.additional_code.working_path
+                / "namelists/marbl_diagnostics_output_list"
+            )
+            if (marbl_placeholder_in_namelist) and (
+                not marbl_tracer_list_path.exists()
+            ):
+                raise FileNotFoundError(f"{marbl_diag_list_path} not found.")
+            marbl_placeholder_in_namelist = _replace_text_in_file(
+                mod_namelist,
+                "__MARBL_DIAG_LIST_FILE_PLACEHOLDER__",
+                str(
+                    self.additional_code.working_path
+                    / "namelists/marbl_diagnostics_output_list"
+                ),
             )
 
     def run(
