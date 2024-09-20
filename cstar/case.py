@@ -479,9 +479,7 @@ class Case:
             additional_code: Optional[AdditionalCode] = None
             if "additional_code" in component_info.keys():
                 additional_code_info = component_info.get("additional_code")
-                additional_code = AdditionalCode(
-                    base_model=base_model, **additional_code_info
-                )
+                additional_code = AdditionalCode(**additional_code_info)
                 component_kwargs["additional_code"] = additional_code
 
             # Construct any InputDataset instances:
@@ -505,9 +503,7 @@ class Case:
                         ThisInputDataset = idtype_class_map[idtype]
 
                         for file_info in dataset_info["files"]:
-                            input_datasets.append(
-                                ThisInputDataset(base_model=base_model, **file_info)
-                            )
+                            input_datasets.append(ThisInputDataset(**file_info))
                     else:
                         raise ValueError(
                             f"InputDataset type {idtype} in {blueprint} not recognized"
@@ -709,12 +705,16 @@ class Case:
                         inp.source.source_type == "yaml"
                     ):
                         inp.get_from_yaml(
-                            self.caseroot / f"input_datasets/{inp.base_model.name}",
+                            self.caseroot
+                            / f"input_datasets/{component.base_model.name}",
                             start_date=self.start_date,
                             end_date=self.end_date,
                         )
                     else:
-                        inp.get(self.caseroot / f"input_datasets/{inp.base_model.name}")
+                        inp.get(
+                            self.caseroot
+                            / f"input_datasets/{component.base_model.name}"
+                        )
 
     def build(self) -> None:
         """Compile any necessary additional code associated with this case

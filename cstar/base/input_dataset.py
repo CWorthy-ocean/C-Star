@@ -5,20 +5,15 @@ import dateutil.parser
 from pathlib import Path
 from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
-from typing import Optional, List, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from cstar.base import BaseModel
+from typing import Optional, List
 
 
 class InputDataset(ABC):
     """
-    Describes spatiotemporal data needed to run a unique instance of a base model
+    Describes spatiotemporal data needed to run a unique instance of a model component
 
     Attributes:
     -----------
-    base_model: BaseModel
-        The base model with which this input dataset is associated
     source: DataSource
         Describes the location and type of the source data
     file_hash: str, default None
@@ -34,19 +29,16 @@ class InputDataset(ABC):
 
     def __init__(
         self,
-        base_model: "BaseModel",
         location: str,
         file_hash: Optional[str] = None,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
     ):
         """
-        Initialize an InputDataset object associated with a base model using a source URL and file hash
+        Initialize an InputDataset object associated with a model component using a source URL and file hash
 
         Parameters:
         -----------
-        base_model: BaseModel
-            The base model with which this input dataset is associated
         location: str
             URL or path pointing to a file either containing this dataset or instructions for creating it.
             Used to set the `source` attribute.
@@ -55,7 +47,6 @@ class InputDataset(ABC):
 
         """
 
-        self.base_model: "BaseModel" = base_model
         self.source: DataSource = DataSource(location)
         self.file_hash: Optional[str] = file_hash
         self.working_path: Optional[Path | List[Path]] = None
@@ -90,7 +81,6 @@ class InputDataset(ABC):
         base_str = "-" * len(name) + "\n" + base_str
         base_str += "\n" + "-" * len(name)
 
-        base_str += f"\nBase model: {self.base_model.name}"
         base_str += f"\nSource location: {self.source.location}"
         if self.file_hash is not None:
             base_str += f"\nfile_hash: {self.file_hash}"
@@ -109,7 +99,6 @@ class InputDataset(ABC):
     def __repr__(self) -> str:
         # Constructor-style section:
         repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>,"
         repr_str += f"\nlocation = {self.source.location!r},"
         repr_str += f"\nfile_hash = {self.file_hash}"
         repr_str += "\n)"
