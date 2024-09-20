@@ -72,6 +72,17 @@ class MARBLBaseModel(BaseModel):
         _write_to_config_file(config_file_str)
 
         # Make things
-        subprocess.run(
-            f"make {_CSTAR_COMPILER} USEMPI=TRUE", cwd=f"{target}/src", shell=True
+        print("Compiling MARBL...")
+        make_marbl_result = subprocess.run(
+            f"make {_CSTAR_COMPILER} USEMPI=TRUE",
+            cwd=f"{target}/src",
+            shell=True,
+            text=True,
+            capture_output=True,
         )
+        if make_marbl_result.returncode != 0:
+            raise RuntimeError(
+                f"Error {make_marbl_result.returncode} when compiling MARBL. STDERR stream: "
+                + f"\n {make_marbl_result.stderr}"
+            )
+        print(f"MARBL successfully installed at {target}")

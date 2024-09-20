@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Sequence
 
 from cstar.base.base_model import BaseModel
 from cstar.base.input_dataset import InputDataset
@@ -40,11 +40,16 @@ class Component(ABC):
         Execute any post-processing actions associated with this component
     """
 
+    base_model: BaseModel
+    additional_code: Optional["AdditionalCode"]
+    input_datasets: Sequence[InputDataset]
+    discretization: Optional["Discretization"]
+
     def __init__(
         self,
         base_model: BaseModel,
         additional_code: Optional["AdditionalCode"] = None,
-        input_datasets: list[InputDataset] | None = None,
+        input_datasets: Optional[Sequence["InputDataset"]] = None,
         discretization: Optional["Discretization"] = None,
     ):
         """
@@ -63,7 +68,6 @@ class Component(ABC):
             e.g. initial conditions, surface forcing, etc.
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component (e.g. time step)
-
 
         Returns:
         --------
