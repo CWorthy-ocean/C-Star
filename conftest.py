@@ -3,6 +3,7 @@ from contextlib import contextmanager
 
 import pytest
 
+
 # make fixtures for creating blueprints globally available
 from cstar.tests.blueprints.fixtures import test_blueprint_as_dict, test_blueprint_as_path
 
@@ -12,6 +13,7 @@ from cstar.tests.blueprints.fixtures import test_blueprint_as_dict, test_bluepri
 collect_ignore_glob = [
     "cstar/cstar_local_config.py",
     "cstar/externals/**"
+    "tests/**.py"
 ]
 
 
