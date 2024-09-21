@@ -141,7 +141,7 @@ class InputDataset(ABC):
                 self.working_path = target_path
         else:
             if self.source.location_type == "path":
-                target_path.symlink_to(self.source.location)
+                target_path.symlink_to(Path(self.source.location).resolve())
             elif self.source.location_type == "url":
                 if hasattr(self, "file_hash") and self.file_hash is not None:
                     downloader = pooch.HTTPDownloader(timeout=120)
