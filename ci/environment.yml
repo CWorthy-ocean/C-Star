@@ -9,6 +9,8 @@ dependencies:
   - mpich
   - xarray
   - netCDF4
+  # tests
+  - pytest
   - pip
   # testing
   - pre-commit
