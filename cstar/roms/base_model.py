@@ -24,10 +24,6 @@ class ROMSBaseModel(BaseModel):
     """
 
     @property
-    def name(self) -> str:
-        return "ROMS"
-
-    @property
     def default_source_repo(self) -> str:
         return "https://github.com/CESR-lab/ucla-roms.git"
 

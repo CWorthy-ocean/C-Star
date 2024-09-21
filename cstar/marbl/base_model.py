@@ -24,10 +24,6 @@ class MARBLBaseModel(BaseModel):
     """
 
     @property
-    def name(self) -> str:
-        return "MARBL"
-
-    @property
     def default_source_repo(self) -> str:
         return "https://github.com/marbl-ecosys/MARBL.git"
 

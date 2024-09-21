@@ -104,6 +104,10 @@ class ROMSComponent(Component):
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
 
+    @property
+    def component_type(self) -> str:
+        return "ROMS"
+
     def build(self) -> None:
         """
         Compiles any code associated with this configuration of ROMS.

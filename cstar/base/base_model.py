@@ -125,11 +125,6 @@ class BaseModel(ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str:
-        """The name of the base model"""
-
-    @property
-    @abstractmethod
     def default_source_repo(self) -> str:
         """Default source repository, defined in subclasses, e.g. https://github.com/marbl-ecosys/MARBL.git"""
 
@@ -266,9 +261,10 @@ class BaseModel(ABC):
                     "#######################################################\n"
                     + f"C-STAR: {self.expected_env_var}"
                     + " not found in current environment. \n"
-                    + "if this is your first time running a C-Star case that "
-                    + f"uses {self.name}, you will need to set it up.\n"
-                    + f"It is recommended that you install {self.name} in \n"
+                    + "if this is your first time running C-Star with "
+                    + f"an instance of {self.__class__.__name__}, "
+                    + "you will need to set it up.\n"
+                    + "It is recommended that you install this base model in \n"
                     + f"{ext_dir}"
                     + "\nThis will also modify your `cstar_local_config.py` file."
                     + "\n#######################################################"
