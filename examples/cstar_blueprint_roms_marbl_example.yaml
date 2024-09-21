@@ -33,7 +33,6 @@ components:
           - "source_mods/param.opt"
           - "source_mods/tracers.opt"
           - "source_mods/Makefile"
-          - "source_mods/get_makefile"
           - "source_mods/Make.depend"
         namelists:
           - "namelists/roms.in_TEMPLATE"
