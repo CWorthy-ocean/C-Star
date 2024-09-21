@@ -122,7 +122,18 @@ class ROMSComponent(Component):
             )
         builddir = working_path / "source_mods"
         if (builddir / "Compile").is_dir():
-            subprocess.run("make compile_clean", cwd=builddir, shell=True)
+            make_clean_result = subprocess.run(
+                "make compile_clean",
+                cwd=builddir,
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            if make_clean_result.returncode != 0:
+                raise RuntimeError(
+                    f"Error {make_clean_result.returncode} when compiling ROMS. STDERR stream: "
+                    + f"\n {make_clean_result.stderr}"
+                )
 
         print("Compiling UCLA-ROMS configuration...")
         make_roms_result = subprocess.run(
@@ -137,6 +148,7 @@ class ROMSComponent(Component):
                 f"Error {make_roms_result.returncode} when compiling ROMS. STDERR stream: "
                 + f"\n {make_roms_result.stderr}"
             )
+
         print(f"UCLA-ROMS compiled at {builddir}")
 
         self.exe_path = builddir / "roms"
@@ -204,7 +216,7 @@ class ROMSComponent(Component):
                     raise ValueError(f"InputDataset has no working path: {f}")
                 elif isinstance(f.working_path, list):
                     # if single InputDataset corresponds to many files, check they're colocated
-                    if all(
+                    if not all(
                         [d.parent == f.working_path[0].parent for d in f.working_path]
                     ):
                         raise ValueError(
@@ -281,10 +293,52 @@ class ROMSComponent(Component):
                 mod_namelist, "__FORCING_FILES_PLACEHOLDER__", namelist_forcing_str
             )
 
-            _replace_text_in_file(
+            marbl_settings_path = (
+                self.additional_code.working_path / "namelists/marbl_in"
+            )
+            marbl_placeholder_in_namelist = _replace_text_in_file(
                 mod_namelist,
-                "MARBL_NAMELIST_DIR",
-                str(self.additional_code.working_path / "namelists"),
+                "__MARBL_SETTINGS_FILE_PLACEHOLDER__",
+                str(marbl_settings_path),
+            )
+            if (marbl_placeholder_in_namelist) and (not marbl_settings_path.exists()):
+                raise FileNotFoundError(
+                    "Placeholder string for marbl_in file "
+                    + "found in ROMS namelist, but 'marbl_in' not found "
+                    + f"at {marbl_settings_path.parent}."
+                )
+
+            marbl_tracer_list_path = (
+                self.additional_code.working_path / "namelists/marbl_tracer_output_list"
+            )
+            marbl_placeholder_in_namelist = _replace_text_in_file(
+                mod_namelist,
+                "__MARBL_TRACER_LIST_FILE_PLACEHOLDER__",
+                str(
+                    self.additional_code.working_path
+                    / "namelists/marbl_tracer_output_list"
+                ),
+            )
+            if (marbl_placeholder_in_namelist) and (
+                not marbl_tracer_list_path.exists()
+            ):
+                raise FileNotFoundError(f"{marbl_tracer_list_path} not found.")
+
+            marbl_diag_list_path = (
+                self.additional_code.working_path
+                / "namelists/marbl_diagnostics_output_list"
+            )
+            if (marbl_placeholder_in_namelist) and (
+                not marbl_tracer_list_path.exists()
+            ):
+                raise FileNotFoundError(f"{marbl_diag_list_path} not found.")
+            marbl_placeholder_in_namelist = _replace_text_in_file(
+                mod_namelist,
+                "__MARBL_DIAG_LIST_FILE_PLACEHOLDER__",
+                str(
+                    self.additional_code.working_path
+                    / "namelists/marbl_diagnostics_output_list"
+                ),
             )
 
     def run(
@@ -409,7 +463,6 @@ class ROMSComponent(Component):
                 "Unable to calculate node distribution for this Component. "
                 + "Component.n_procs_tot is not set"
             )
-
         match _CSTAR_SCHEDULER:
             case "pbs":
                 if account_key is None:
@@ -487,32 +540,45 @@ class ROMSComponent(Component):
                 T0 = time.time()
                 if romsprocess.stdout is None:
                     raise RuntimeError("ROMS is not producing stdout")
-                for line in romsprocess.stdout:
-                    # Split the line by whitespace
-                    parts = line.split()
 
-                    # Check if there are exactly 9 parts and the first one is an integer
-                    if len(parts) == 9:
-                        try:
-                            # Try to convert the first part to an integer
-                            tstep = int(parts[0])
-                            if tstep0 == 0:
-                                tstep0 = tstep
-                            # Capture the first integer and print it
-                            ETA = (n_time_steps - (tstep - tstep0)) * (
-                                (tstep - tstep0) / (time.time() - T0)
-                            )
-                            print(
-                                f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
-                            )
-                        except ValueError:
-                            pass
-                    elif tstep0 == 0 and len(roms_init_string) == 0:
-                        roms_init_string = "Running ROMS: Initializing run..."
-                        print(roms_init_string)
+                # 2024-09-21 : the following is included as in some instances ROMS
+                # will exit with code 0 even if a fatal error occurs, see:
+                # https://github.com/CESR-lab/ucla-roms/issues/42
+
+                debugging = False  # Print raw output if true
+                if debugging:
+                    while True:
+                        output = romsprocess.stdout.readline()
+                        if output == "" and romsprocess.poll() is not None:
+                            break
+                        if output:
+                            print(output.strip())
+                else:
+                    for line in romsprocess.stdout:
+                        # Split the line by whitespace
+                        parts = line.split()
+
+                        # Check if there are exactly 9 parts and the first one is an integer
+                        if len(parts) == 9:
+                            try:
+                                # Try to convert the first part to an integer
+                                tstep = int(parts[0])
+                                if tstep0 == 0:
+                                    tstep0 = tstep
+                                    # Capture the first integer and print it
+                                ETA = (n_time_steps - (tstep - tstep0)) * (
+                                    (tstep - tstep0) / (time.time() - T0)
+                                )
+                                print(
+                                    f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
+                                )
+                            except ValueError:
+                                pass
+                        elif tstep0 == 0 and len(roms_init_string) == 0:
+                            roms_init_string = "Running ROMS: Initializing run..."
+                            print(roms_init_string)
 
                 romsprocess.wait()
-
                 if romsprocess.returncode != 0:
                     import datetime as dt
 

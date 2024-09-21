@@ -31,7 +31,7 @@ for oldfiles in [
 
 roms_marbl_remote_case = cstar.Case.from_blueprint(
     blueprint=(cstar.base.environment._CSTAR_ROOT)
-    + "/../tests/cstar_blueprint_roms_tools_example.yaml",
+    + "/tests_old/cstar_blueprint_roms_tools_example.yaml",
     caseroot="roms_tools_remote_case/",
     start_date="20120101 12:00:00",
     end_date="20120101 12:30:00",

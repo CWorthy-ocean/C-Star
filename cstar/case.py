@@ -20,6 +20,7 @@ from cstar.roms.input_dataset import (
 )
 from cstar.roms.component import ROMSComponent, ROMSDiscretization
 
+
 if TYPE_CHECKING:
     from cstar.base import BaseModel
 
@@ -746,7 +747,6 @@ class Case:
         # Assuming for now that ROMS presence implies it is the master program
         # TODO add more advanced logic for this
         # 20240807 - TN - set first component as main?
-
         for component in self.components:
             if isinstance(component, ROMSComponent):
                 # Calculate number of time steps:

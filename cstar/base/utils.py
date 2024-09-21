@@ -162,7 +162,7 @@ def _calculate_node_distribution(
     return n_nodes_to_request, cores_to_request_per_node
 
 
-def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -> None:
+def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -> bool:
     """
     Find and replace a string in a text file.
 
@@ -177,17 +177,26 @@ def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -
         The text to be replaced
     new_text: str
         The text that will replace `old_text`
+
+    Returns:
+    --------
+    text_replaced: bool
+       True if text was found and replaced, False if not found
     """
+    text_replaced = False
     file_path = Path(file_path).resolve()
     temp_file_path = Path(str(file_path) + ".tmp")
 
     with open(file_path, "r") as read_file, open(temp_file_path, "w") as write_file:
         for line in read_file:
+            if old_text in line:
+                text_replaced = True
             new_line = line.replace(old_text, new_text)
             write_file.write(new_line)
 
-    file_path.unlink()
     temp_file_path.rename(file_path)
+
+    return text_replaced
 
 
 def _list_to_concise_str(
