@@ -22,7 +22,7 @@ components:
         time_step: 360
       additional_code:
         location: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-        checkout_target: '6ac50e2193dea8cae9cf921fdf889b71f9cb8bf1'
+        checkout_target: 'f6496b5ae968ccad9d5df0ed76acef749172dcc3'
         subdir: 'additional_code/ROMS'
         source_mods:
           - "source_mods/bgc.opt"

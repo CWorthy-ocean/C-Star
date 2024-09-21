@@ -37,11 +37,12 @@ roms_marbl_remote_case = cstar.Case.from_blueprint(
 # patch will automatically respond "y" to any call for input
 with patch("builtins.input", return_value="y"):
     roms_marbl_remote_case.setup()
-    roms_marbl_remote_case.persist("test_blueprint.yaml")
-    roms_marbl_remote_case.build()
-    roms_marbl_remote_case.pre_run()
-    roms_marbl_remote_case.run()
-    roms_marbl_remote_case.post_run()
+
+roms_marbl_remote_case.persist("test_blueprint.yaml")
+roms_marbl_remote_case.build()
+roms_marbl_remote_case.pre_run()
+roms_marbl_remote_case.run()
+roms_marbl_remote_case.post_run()
 
 print("Test complete with remote input dataset files")
 
