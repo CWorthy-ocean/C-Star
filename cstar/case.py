@@ -383,9 +383,9 @@ class Case:
 
         Parameters:
         -----------
-        blueprint: str
+        blueprint: str | Path
             Path to a yaml file containing the blueprint for the case
-        caseroot: str
+        caseroot: str | Path
             Path to the local directory where the case will be curated and run
         start_date: str or datetime, Optional, default=valid_start_date
            The date from which to begin running this Case.
@@ -438,6 +438,11 @@ class Case:
         for component in bp_dict["components"]:
             component_info = component.get("component")
             component_type = component_info.get("component_type")
+            if component_type is None:
+                raise ValueError(
+                    f"'component_type' not found for component entry in blueprint {blueprint}"
+                )
+
             component_kwargs: dict[str, Any] = {}
 
             # Decide which subclasses to use
