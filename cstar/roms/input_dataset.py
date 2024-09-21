@@ -139,7 +139,16 @@ class ROMSInputDataset(InputDataset, ABC):
         import roms_tools
 
         roms_tools_class = getattr(roms_tools, roms_tools_class_name)
-        roms_tools_class_instance = roms_tools_class.from_yaml(yaml_file)
+
+        # roms-tools currently requires dask for every class except Grid
+        # in order to use wildcards in filepaths (known xarray issue):
+
+        if roms_tools_class_name == "Grid":
+            roms_tools_class_instance = roms_tools_class.from_yaml(yaml_file)
+        else:
+            roms_tools_class_instance = roms_tools_class.from_yaml(
+                yaml_file, use_dask=True
+            )
 
         # ... and save:
         print(f"Saving roms-tools dataset created from {yaml_file}...")
