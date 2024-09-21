@@ -3,7 +3,7 @@ registry_attrs:
   valid_date_range:
     start_date: 2012-01-01 12:00:00
     end_date: 2012-12-31 23:00:00
-    
+
 components:
   - component:
       base_model:
@@ -40,7 +40,7 @@ components:
           - "namelists/marbl_in"
           - "namelists/marbl_tracer_output_list"
           - "namelists/marbl_diagnostic_output_list"
-          
+
       input_datasets:
         model_grid:
           files:
