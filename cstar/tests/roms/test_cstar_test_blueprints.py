@@ -4,16 +4,16 @@ import cstar
 
 
 class TestCStar:
-    @pytest.mark.parametrize("local_sources", [False])
+    @pytest.mark.parametrize("use_local_sources", [False])
     def test_cstar(
         self,
         tmpdir,
         mock_user_input,
         blueprint_as_path,
-        local_sources,
+        use_local_sources,
     ):
         cstar_test_base_blueprint = blueprint_as_path(
-            "cstar_test_with_netcdf_datasets", local=local_sources
+            "cstar_test_with_netcdf_datasets", use_local_sources=use_local_sources
         )
 
         cstar_test_case = cstar.Case.from_blueprint(

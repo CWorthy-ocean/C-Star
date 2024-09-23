@@ -15,14 +15,16 @@ YAMLValue = Union[dict[str, Any], list[Any], str, int, float, bool, None]
 def blueprint_as_dict() -> Callable[[str], dict]:
     """Given the name of a pre-defined blueprint, return it as an in-memory dict."""
 
-    def _template_blueprint_dict(name: str, local: bool = False) -> dict:
+    def _template_blueprint_dict(name: str, use_local_sources: bool = False) -> dict:
         template_blueprint_path = BLUEPRINTS_FOR_TESTING[name]["base"]
 
         with open(template_blueprint_path, "r") as file:
             template_blueprint_dict = yaml.safe_load(file)
 
         # replace all placeholder values
-        full_blueprint_dict = set_locations(template_blueprint_dict, name, local)
+        full_blueprint_dict = set_locations(
+            template_blueprint_dict, name, use_local_sources
+        )
 
         return full_blueprint_dict
 
@@ -35,7 +37,7 @@ def blueprint_as_dict() -> Callable[[str], dict]:
 def set_locations(
     template_blueprint: dict,
     name: str,
-    local: bool,
+    use_local_sources: bool,
 ) -> dict:
     """
     Alter an in-memory template blueprint to point to either the locally-downloaded versions of files or remote data sources.
@@ -60,7 +62,7 @@ def set_locations(
 
         return value.replace("<input_datasets_location>", str(local_filepath))
 
-    if local:
+    if use_local_sources:
         modify_func = modify_to_use_local_path_to_input_datasets
     else:
         modify_func = modify_to_use_remote_path_to_input_datasets
@@ -88,7 +90,7 @@ def set_locations(
 
         return value.replace("<additional_code_location>", str(local_filepath))
 
-    if local:
+    if use_local_sources:
         modify_func = modify_to_use_local_path_to_additional_code
     else:
         modify_func = modify_to_use_remote_path_to_additional_code
@@ -143,8 +145,8 @@ def modify_yaml(
 def blueprint_as_path(blueprint_as_dict, tmp_path) -> Callable[[str], Path]:
     """Given the name of a pre-defined blueprint, returns it as a (temporary) path to an on-disk file."""
 
-    def _blueprint_as_path(name: str, local: bool = False) -> Path:
-        blueprint_dict = blueprint_as_dict(name, local=local)
+    def _blueprint_as_path(name: str, use_local_sources: bool = False) -> Path:
+        blueprint_dict = blueprint_as_dict(name, use_local_sources=use_local_sources)
 
         # save the blueprint to a temporary path
         blueprint_filepath = tmp_path / "blueprint.yaml"

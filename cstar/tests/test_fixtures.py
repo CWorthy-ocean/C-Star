@@ -10,7 +10,7 @@ def test_mock_input_fixture(mock_user_input):
 class TestGetBluePrints:
     def test_get_blueprint(self, blueprint_as_dict):
         blueprint_dict = blueprint_as_dict(
-            "cstar_test_with_netcdf_datasets", local=False
+            "cstar_test_with_netcdf_datasets", use_local_sources=False
         )
 
         assert isinstance(blueprint_dict, dict)
