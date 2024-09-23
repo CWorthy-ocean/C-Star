@@ -9,10 +9,10 @@ class TestCStar:
         self,
         tmpdir,
         mock_user_input,
-        blueprint_to_path,
+        blueprint_as_path,
         local_sources,
     ):
-        cstar_test_base_blueprint = blueprint_to_path(
+        cstar_test_base_blueprint = blueprint_as_path(
             "cstar_test_with_netcdf_datasets", local=local_sources
         )
 

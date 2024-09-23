@@ -12,7 +12,7 @@ YAMLValue = Union[dict[str, Any], list[Any], str, int, float, bool, None]
 
 
 @pytest.fixture
-def blueprint_to_dict() -> Callable[[str], dict]:
+def blueprint_as_dict() -> Callable[[str], dict]:
     """Given the name of a pre-defined blueprint, return it as an in-memory dict."""
 
     def _template_blueprint_dict(name: str, local: bool = False) -> dict:
@@ -140,11 +140,11 @@ def modify_yaml(
 
 
 @pytest.fixture
-def blueprint_to_path(blueprint_to_dict, tmp_path) -> Callable[[str], Path]:
+def blueprint_as_path(blueprint_as_dict, tmp_path) -> Callable[[str], Path]:
     """Given the name of a pre-defined blueprint, returns it as a (temporary) path to an on-disk file."""
 
     def _blueprint_as_path(name: str, local: bool = False) -> Path:
-        blueprint_dict = blueprint_to_dict(name, local=local)
+        blueprint_dict = blueprint_as_dict(name, local=local)
 
         # save the blueprint to a temporary path
         blueprint_filepath = tmp_path / "blueprint.yaml"

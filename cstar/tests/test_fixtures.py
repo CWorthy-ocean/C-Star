@@ -8,8 +8,8 @@ def test_mock_input_fixture(mock_user_input):
 
 
 class TestGetBluePrints:
-    def test_get_blueprint(self, blueprint_to_dict):
-        blueprint_dict = blueprint_to_dict(
+    def test_get_blueprint(self, blueprint_as_dict):
+        blueprint_dict = blueprint_as_dict(
             "cstar_test_with_netcdf_datasets", local=False
         )
 
@@ -33,9 +33,9 @@ class TestGetBluePrints:
             == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
         )
 
-    def test_dict_equivalent_to_path(self, blueprint_to_dict, blueprint_to_path):
-        blueprint_dict = blueprint_to_dict("cstar_test_with_netcdf_datasets")
-        blueprint_filepath = blueprint_to_path("cstar_test_with_netcdf_datasets")
+    def test_dict_equivalent_to_path(self, blueprint_as_dict, blueprint_as_path):
+        blueprint_dict = blueprint_as_dict("cstar_test_with_netcdf_datasets")
+        blueprint_filepath = blueprint_as_path("cstar_test_with_netcdf_datasets")
 
         with open(blueprint_filepath, "r") as file:
             blueprint_dict_from_file = yaml.safe_load(file)
