@@ -9,10 +9,10 @@ class TestRomsMarbl:
         self,
         tmpdir,
         mock_user_input,
-        test_blueprint_as_path,
+        blueprint_to_path,
         local_sources,
     ):
-        roms_marbl_base_blueprint_filepath = test_blueprint_as_path(
+        roms_marbl_base_blueprint_filepath = blueprint_to_path(
             "ROMS_MARBL", local=local_sources
         )
 

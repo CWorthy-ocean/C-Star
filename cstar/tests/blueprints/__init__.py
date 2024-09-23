@@ -1,4 +1,4 @@
-TEST_BLUEPRINTS = {
+BLUEPRINTS_FOR_TESTING = {
     "ROMS_MARBL": {
         # TODO this assumes you are running pytest from the root directory of the cloned repo, which is fragile
         "base": "./cstar/tests/blueprints/roms_marbl_example_template.yaml",

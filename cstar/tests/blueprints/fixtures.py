@@ -4,7 +4,7 @@ from typing import Any, Callable, Union, cast
 
 import pytest
 
-from cstar.tests.blueprints import TEST_BLUEPRINTS
+from cstar.tests.blueprints import BLUEPRINTS_FOR_TESTING
 
 
 # Define a type alias for YAML-compatible types
@@ -12,11 +12,11 @@ YAMLValue = Union[dict[str, Any], list[Any], str, int, float, bool, None]
 
 
 @pytest.fixture
-def test_blueprint_as_dict() -> Callable[[str], dict]:
+def blueprint_to_dict() -> Callable[[str], dict]:
     """Given the name of a pre-defined blueprint, return it as an in-memory dict."""
 
     def _template_blueprint_dict(name: str, local: bool = False) -> dict:
-        template_blueprint_path = TEST_BLUEPRINTS[name]["base"]
+        template_blueprint_path = BLUEPRINTS_FOR_TESTING[name]["base"]
 
         with open(template_blueprint_path, "r") as file:
             template_blueprint_dict = yaml.safe_load(file)
@@ -41,8 +41,8 @@ def set_locations(
     Alter an in-memory template blueprint to point to either the locally-downloaded versions of files or remote data sources.
     """
 
-    input_datasets_location = TEST_BLUEPRINTS[name]["input_datasets_location"]
-    additional_code_location = TEST_BLUEPRINTS[name]["additional_code_location"]
+    input_datasets_location = BLUEPRINTS_FOR_TESTING[name]["input_datasets_location"]
+    additional_code_location = BLUEPRINTS_FOR_TESTING[name]["additional_code_location"]
 
     def contains_input_datasets_location(path: str, value: YAMLValue) -> bool:
         if path.endswith("location") and isinstance(value, str):
@@ -105,7 +105,7 @@ def set_locations(
     # TODO
     # blueprint_with_local_additional_code = ...
     #
-    # additional_code_url: str = TEST_BLUEPRINTS[name]["additional_code_url"]  # noqa
+    # additional_code_url: str = BLUEPRINTS_FOR_TESTING[name]["additional_code_url"]  # noqa
 
 
 def modify_yaml(
@@ -140,11 +140,11 @@ def modify_yaml(
 
 
 @pytest.fixture
-def test_blueprint_as_path(test_blueprint_as_dict, tmp_path) -> Callable[[str], Path]:
+def blueprint_to_path(blueprint_to_dict, tmp_path) -> Callable[[str], Path]:
     """Given the name of a pre-defined blueprint, returns it as a (temporary) path to an on-disk file."""
 
     def _blueprint_as_path(name: str, local: bool = False) -> Path:
-        blueprint_dict = test_blueprint_as_dict(name, local=local)
+        blueprint_dict = blueprint_to_dict(name, local=local)
 
         # save the blueprint to a temporary path
         blueprint_filepath = tmp_path / "blueprint.yaml"

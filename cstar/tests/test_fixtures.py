@@ -8,8 +8,8 @@ def test_mock_input_fixture(mock_user_input):
 
 
 class TestGetBluePrints:
-    def test_get_blueprint(self, test_blueprint_as_dict):
-        blueprint_dict = test_blueprint_as_dict("ROMS_MARBL", local=False)
+    def test_get_blueprint(self, blueprint_to_dict):
+        blueprint_dict = blueprint_to_dict("ROMS_MARBL", local=False)
 
         assert isinstance(blueprint_dict, dict)
 
@@ -31,11 +31,9 @@ class TestGetBluePrints:
             == "https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git"
         )
 
-    def test_dict_equivalent_to_path(
-        self, test_blueprint_as_dict, test_blueprint_as_path
-    ):
-        blueprint_dict = test_blueprint_as_dict("ROMS_MARBL")
-        blueprint_filepath = test_blueprint_as_path("ROMS_MARBL")
+    def test_dict_equivalent_to_path(self, blueprint_to_dict, blueprint_to_path):
+        blueprint_dict = blueprint_to_dict("ROMS_MARBL")
+        blueprint_filepath = blueprint_to_path("ROMS_MARBL")
 
         with open(blueprint_filepath, "r") as file:
             blueprint_dict_from_file = yaml.safe_load(file)
