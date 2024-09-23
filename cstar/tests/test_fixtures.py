@@ -9,7 +9,9 @@ def test_mock_input_fixture(mock_user_input):
 
 class TestGetBluePrints:
     def test_get_blueprint(self, blueprint_to_dict):
-        blueprint_dict = blueprint_to_dict("ROMS_MARBL", local=False)
+        blueprint_dict = blueprint_to_dict(
+            "cstar_test_with_netcdf_datasets", local=False
+        )
 
         assert isinstance(blueprint_dict, dict)
 
@@ -22,18 +24,18 @@ class TestGetBluePrints:
         input_dataset_location = model_grid["files"][0]["location"]
         assert (
             input_dataset_location
-            == "https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_grd.nc"
+            == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/raw/main/input_datasets/ROMS/roms_grd.nc"
         )
 
         additional_code_location = roms_component["additional_code"]["location"]
         assert (
             additional_code_location
-            == "https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git"
+            == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
         )
 
     def test_dict_equivalent_to_path(self, blueprint_to_dict, blueprint_to_path):
-        blueprint_dict = blueprint_to_dict("ROMS_MARBL")
-        blueprint_filepath = blueprint_to_path("ROMS_MARBL")
+        blueprint_dict = blueprint_to_dict("cstar_test_with_netcdf_datasets")
+        blueprint_filepath = blueprint_to_path("cstar_test_with_netcdf_datasets")
 
         with open(blueprint_filepath, "r") as file:
             blueprint_dict_from_file = yaml.safe_load(file)
