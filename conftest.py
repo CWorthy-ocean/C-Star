@@ -1,8 +1,7 @@
 import builtins
 from contextlib import contextmanager
-
+from pathlib import Path
 import pytest
-
 
 # make fixtures for creating blueprints globally available
 from cstar.tests.blueprints.fixtures import blueprint_as_dict, blueprint_as_path

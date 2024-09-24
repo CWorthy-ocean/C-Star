@@ -4,7 +4,7 @@ from typing import Any, Callable, Union, cast
 
 import pytest
 
-from cstar.tests.blueprints import BLUEPRINTS_FOR_TESTING
+from cstar.tests.blueprints import BLUEPRINTS_FOR_TESTING, TEST_DIRECTORY
 
 
 # Define a type alias for YAML-compatible types
@@ -58,7 +58,7 @@ def set_locations(
     def modify_to_use_local_path_to_input_datasets(value: str) -> str:
         filename = value.removeprefix("<input_datasets_location>")
         # TODO make "local_input_files" a parameter?
-        local_filepath = Path.cwd() / "local_input_files" / filename
+        local_filepath = TEST_DIRECTORY / "local_input_files" / filename
 
         return value.replace("<input_datasets_location>", str(local_filepath))
 
@@ -86,7 +86,7 @@ def set_locations(
     def modify_to_use_local_path_to_additional_code(value: str) -> str:
         filename = value.removeprefix("<additional_code_location>")
         # TODO make "local_input_files" a parameter?
-        local_filepath = Path.cwd() / "local_input_files" / filename
+        local_filepath = TEST_DIRECTORY / "local_input_files" / filename
 
         return value.replace("<additional_code_location>", str(local_filepath))
 

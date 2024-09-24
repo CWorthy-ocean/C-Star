@@ -19,7 +19,7 @@ BLUEPRINTS_FOR_TESTING = {
     },
     # Blueprint to test roms-tools integration: input_datasets entries point to yaml files
     "cstar_test_with_yaml_datasets": {
-        "base": f"{TEST_DIRECTORY}/tests/blueprints/cstar_blueprint_with_yaml_datasets_template.yaml",
+        "base": f"{TEST_DIRECTORY}/blueprints/cstar_blueprint_with_yaml_datasets_template.yaml",
         "input_datasets_location": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/raw/main/roms_tools_yaml_files",
         "additional_code_location": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git",
     },

@@ -22,6 +22,7 @@ components:
         time_step: 60
       additional_code:
         location: '<additional_code_location>'
+        checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
         subdir: 'additional_code/ROMS'
         source_mods:
           - "source_mods/bgc.opt"
