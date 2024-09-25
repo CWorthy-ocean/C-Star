@@ -5,6 +5,7 @@ import zipfile
 from typing import Callable
 from pathlib import Path
 
+from cstar.tests.config import ROMS_TOOLS_DATA_DIRECTORY, CSTAR_TEST_DATA_DIRECTORY
 # TEST ALL THESE FIXTURES
 
 
@@ -16,9 +17,9 @@ def fetch_roms_tools_source_data(request) -> Callable[[str | Path], None]:
         if isinstance(symlink_path, str):
             symlink_path = Path(symlink_path)
 
-        cache_dir = Path(pooch.os_cache("roms_tools_datasets_for_cstar_test_case"))
+        # cache_dir = Path(pooch.os_cache("roms_tools_datasets_for_cstar_test_case"))
         pup_test_data = pooch.create(
-            path=cache_dir,
+            path=ROMS_TOOLS_DATA_DIRECTORY,
             base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
             # The registry specifies the files that can be fetched
             registry={
@@ -35,7 +36,7 @@ def fetch_roms_tools_source_data(request) -> Callable[[str | Path], None]:
         pup_test_data.fetch("CESM_BGC_2012.nc")
         pup_test_data.fetch("CESM_BGC_SURFACE_2012.nc")
 
-        symlink_path.symlink_to(cache_dir)
+        symlink_path.symlink_to(ROMS_TOOLS_DATA_DIRECTORY)
 
         def cleanup():
             if symlink_path.is_symlink():
@@ -48,8 +49,8 @@ def fetch_roms_tools_source_data(request) -> Callable[[str | Path], None]:
 
 
 @pytest.fixture
-def fetch_remote_test_case_data() -> Callable[[], Path]:
-    def _fetch_remote_test_case_data() -> Path:
+def fetch_remote_test_case_data() -> Callable[[], None]:
+    def _fetch_remote_test_case_data() -> None:
         """docstring"""
 
         test_case_repo_url = (
@@ -61,27 +62,25 @@ def fetch_remote_test_case_data() -> Callable[[], Path]:
         archive_url = f"{test_case_repo_url.rstrip('/')}/archive/{checkout_target}.zip"
 
         # Create a cache dir with pooch
-        cache_dir = Path(pooch.os_cache("cstar_test_case_data"))
+        # cache_dir = Path(pooch.os_cache("cstar_test_case_data"))
 
         # Download the zip with pooch
         zip_path = pooch.retrieve(
             url=archive_url,
             known_hash="e291bc79dd5f0ab88f486974075f3defe2076ff3706787131dae7fd0f01358b5",
             fname=f"{checkout_target}.zip",  # Name of the cached file
-            path=cache_dir,  # Set the cache directory (customize as needed)
+            path=CSTAR_TEST_DATA_DIRECTORY,  # Set the cache directory (customize as needed)
         )
 
         # Unzip the files into a subdirectory `extract_dir` of `cache_dir`
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
             extract_list = zip_ref.namelist()
-            extract_dir = cache_dir / extract_list[0]
-            zip_ref.extractall(cache_dir)
+            extract_dir = CSTAR_TEST_DATA_DIRECTORY / extract_list[0]
+            zip_ref.extractall(CSTAR_TEST_DATA_DIRECTORY)
 
         # Copy the contents of the subdirectory up one and remove it and the zip file
-        shutil.copytree(extract_dir, cache_dir, dirs_exist_ok=True)
+        shutil.copytree(extract_dir, CSTAR_TEST_DATA_DIRECTORY, dirs_exist_ok=True)
         shutil.rmtree(extract_dir)
         Path(zip_path).unlink()
-
-        return cache_dir
 
     return _fetch_remote_test_case_data

@@ -3,9 +3,6 @@ from contextlib import contextmanager
 from pathlib import Path
 import pytest
 
-# make fixtures for creating blueprints globally available
-from cstar.tests.blueprints.fixtures import blueprint_as_dict, blueprint_as_path
-
 
 # Prevent errors caused by pytest trying to collect tests from externals 
 # (e.g. from errors whilst importing python code in the UCLA-roms repo, see https://github.com/CWorthy-ocean/C-Star/issues/53)
@@ -14,7 +11,6 @@ collect_ignore_glob = [
     "cstar/externals/**"
     "tests/**.py"
 ]
-
 
 @pytest.fixture
 def mock_user_input():
@@ -41,3 +37,4 @@ def mock_user_input():
             builtins.input = original_input
     
     return _mock_input
+
