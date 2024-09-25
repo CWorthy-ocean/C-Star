@@ -1,3 +1,15 @@
+"""
+Configuration module for testing C-Star with pytest.
+
+The first section sets or gets any globally accessible paths (e.g. that of the test directory itself, TEST_DIRECTORY).
+
+The second section defines the `TEST_CONFIG` dictionary, whose keys serve as parameters for the primary test in
+cstar/tests/roms/test_cstar_test_blueprints.py.
+The entries in this dictionary should specify a path to a template blueprint file to be modified, and a dictionary
+of substrings in that file to modify (e.g. {"oldstr" : "newstr"}). These will be combined to make a modified blueprint
+from which the test case is constructed.
+"""
+
 from pathlib import Path
 from pooch import os_cache
 
