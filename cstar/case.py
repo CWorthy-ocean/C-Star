@@ -8,13 +8,6 @@ from typing import List, Optional, TYPE_CHECKING
 from cstar.base.component import Component
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar.base.utils import _dict_to_tree
-from cstar.roms.input_dataset import (
-    ROMSModelGrid,
-    ROMSInitialConditions,
-    ROMSTidalForcing,
-    ROMSBoundaryForcing,
-    ROMSSurfaceForcing,
-)
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
 
@@ -502,90 +495,7 @@ class Case:
         bp_dict["components"] = []
 
         for component in self.components:
-            component_info: dict = {}
-
-            component_info["component_type"] = component.component_type
-            # This will be bp_dict["components"]["component"]=component_info
-
-            base_model_info: dict = {}
-            base_model_info["source_repo"] = component.base_model.source_repo
-            base_model_info["checkout_target"] = component.base_model.checkout_target
-            component_info["base_model"] = base_model_info
-
-            # discretization info (if present)
-            discretization_info = {}
-            if (
-                hasattr(component, "discretization")
-                and component.discretization is not None
-            ):
-                for thisattr in vars(component.discretization).keys():
-                    discretization_info[thisattr] = getattr(
-                        component.discretization, thisattr
-                    )
-            if len(discretization_info) > 0:
-                component_info["discretization"] = discretization_info
-
-            # AdditionalCode instances - can also be None
-            # Loop over additional code
-            additional_code = component.additional_code
-
-            if additional_code is not None:
-                additional_code_info: dict = {}
-                # This will be component_info["component"]["additional_code"]=additional_code_info
-                additional_code_info["location"] = additional_code.source.location
-                additional_code_info["subdir"] = additional_code.subdir
-                additional_code_info["checkout_target"] = (
-                    additional_code.checkout_target
-                )
-                if additional_code.source_mods is not None:
-                    additional_code_info["source_mods"] = (
-                        additional_code.source_mods
-                    )  # this is a list
-                if additional_code.namelists is not None:
-                    additional_code_info["namelists"] = additional_code.namelists
-
-                component_info["additional_code"] = additional_code_info
-
-            # InputDataset
-            input_datasets = component.input_datasets
-
-            input_dataset_info: dict = {}
-            for ind in input_datasets:
-                # Determine what kind of input dataset we are adding
-                if isinstance(ind, ROMSModelGrid):
-                    dct_key = "model_grid"
-                elif isinstance(ind, ROMSInitialConditions):
-                    dct_key = "initial_conditions"
-                elif isinstance(ind, ROMSTidalForcing):
-                    dct_key = "tidal_forcing"
-                elif isinstance(ind, ROMSBoundaryForcing):
-                    dct_key = "boundary_forcing"
-                elif isinstance(ind, ROMSSurfaceForcing):
-                    dct_key = "surface_forcing"
-                else:
-                    raise ValueError(f"Unknown dataset type: {type(ind)}")
-
-                # If there is not already an instance of this input dataset type,
-                # add an empty dict as the key so we can access/build it
-                if dct_key not in input_dataset_info.keys():
-                    input_dataset_info[dct_key] = {}
-
-                # Create a dictionary of file_info for each dataset file:
-                if "files" not in input_dataset_info[dct_key].keys():
-                    input_dataset_info[dct_key]["files"] = []
-                file_info = {}
-                file_info["location"] = ind.source.location
-                if hasattr(ind, "file_hash") and (ind.file_hash is not None):
-                    file_info["file_hash"] = ind.file_hash
-                if hasattr(ind, "start_date") and (ind.start_date is not None):
-                    file_info["start_date"] = str(ind.start_date)
-                if hasattr(ind, "end_date") and (ind.end_date is not None):
-                    file_info["end_date"] = str(ind.end_date)
-
-                input_dataset_info[dct_key]["files"].append(file_info)
-
-                component_info["input_datasets"] = input_dataset_info
-
+            component_info = component.to_dict()
             bp_dict["components"].append({"component": component_info})
 
         with open(filename, "w") as yaml_file:

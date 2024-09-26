@@ -89,6 +89,11 @@ class Component(ABC):
     def from_dict(self):
         pass
 
+    @abstractmethod
+    def to_dict(self):
+        # TODO stop this being an abstractmethod
+        pass
+
     def __str__(self) -> str:
         # Header
         name = self.__class__.__name__
