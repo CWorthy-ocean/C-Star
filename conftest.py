@@ -4,14 +4,6 @@ from pathlib import Path
 import pytest
 
 
-# Prevent errors caused by pytest trying to collect tests from externals 
-# (e.g. from errors whilst importing python code in the UCLA-roms repo, see https://github.com/CWorthy-ocean/C-Star/issues/53)
-collect_ignore_glob = [
-    "cstar/cstar_local_config.py",
-    "cstar/externals/**"
-    "tests/**.py"
-]
-
 @pytest.fixture
 def mock_user_input():
     """
