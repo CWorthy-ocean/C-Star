@@ -1,3 +1,4 @@
+from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Optional, TYPE_CHECKING, Sequence
 
@@ -83,6 +84,11 @@ class Component(ABC):
         self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization or None
 
+    @classmethod
+    @abstractmethod
+    def from_dict(self):
+        pass
+
     def __str__(self) -> str:
         # Header
         name = self.__class__.__name__
@@ -116,12 +122,14 @@ class Component(ABC):
             repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
         else:
             repr_str += "\n additional_code = None"
-        ID_list = []
-        for i, inp in enumerate(self.input_datasets):
-            ID_list.append(f"<{inp.__class__.__name__} from {inp.source.basename}>")
+        if hasattr(self, "input_datasets"):
+            ID_list = []
+            for i, inp in enumerate(self.input_datasets):
+                ID_list.append(f"<{inp.__class__.__name__} from {inp.source.basename}>")
 
-        repr_str += f"\ninput_datasets = {_list_to_concise_str(ID_list,pad=18,items_are_strs=False)}"
-        repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
+            repr_str += f"\ninput_datasets = {_list_to_concise_str(ID_list,pad=18,items_are_strs=False)}"
+        if hasattr(self, "discretization"):
+            repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
         repr_str += "\n)"
 
         return repr_str
@@ -130,6 +138,17 @@ class Component(ABC):
     @abstractmethod
     def component_type(self) -> str:
         pass
+
+    def setup(self, additional_code_target_dir: str | Path) -> None:
+        # Setup BaseModel
+        infostr = f"Configuring {self.__class__.__name__}"
+        print(infostr + "\n" + "-" * len(infostr))
+        self.base_model.handle_config_status()
+
+        # AdditionalCode
+        print("\nFetching additional code... " + "\n--------------------------")
+        if self.additional_code is not None:
+            self.additional_code.get(additional_code_target_dir)
 
     @abstractmethod
     def build(self) -> None:
