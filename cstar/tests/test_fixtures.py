@@ -3,8 +3,9 @@ Test suite to test fixtures defined in conftest.py and fixtures.py files.
 
 """
 
+import yaml
 from pathlib import Path
-from cstar import Case
+from _pytest._py.path import LocalPath
 from cstar.tests.config import (
     ROMS_TOOLS_DATA_DIRECTORY,
     CSTAR_TEST_DATA_DIRECTORY,
@@ -18,43 +19,40 @@ def test_mock_input_fixture(mock_user_input):
         assert input("Enter your choice: ") == "yes"
 
 
-def test_template_blueprint_to_case(template_blueprint_to_case, tmpdir):
+def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
     """
-    This test verifies that the template_blueprint_to_case fixture correctly reads a
+    This test verifies that the modify_template_blueprint fixture correctly reads a
     specified blueprint, performs string replacements, and returns a Case instance with
     the correct parameters corresponding to the string replacements.
 
     Parameters
     ----------
-    template_blueprint_to_case : Callable
-        A fixture that converts a template blueprint into a Case object with specific
-        string replacements.
+    modify_template_blueprint : Callable
+        A fixture that modifies a template blueprint with specific string replacements.
     tmpdir : Path
         Built-in pytest fixture for creating a temporary directory during the test
 
     Asserts
     -------
-    - The returned object is an instance of Case.
+    - The returned object is an instance of Path.
     - The additional_code location matches that expected after replacement
     """
-    test_case = template_blueprint_to_case(
+    test_blueprint = modify_template_blueprint(
         template_blueprint_path=TEST_DIRECTORY
         / "blueprints/cstar_blueprint_with_netcdf_datasets_template.yaml",
         strs_to_replace={
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
         },
-        caseroot=tmpdir / "fixture_test_case",
-        start_date="2012-01-01 12:00:00",
-        end_date="2012-01-01 12:10:00",
     )
 
     assert isinstance(
-        test_case, Case
-    ), f"expected test_template_blueprint_to_case to return a Case instance, not {type(test_case)}"
-    additional_code_location = test_case.components[1].additional_code.source.location
+        test_blueprint, LocalPath
+    ), f"Expected type LocalPath, but got {type(test_blueprint)}"
+    with open(test_blueprint, "r") as bpfile:
+        bpyaml = yaml.safe_load(bpfile)
 
     assert (
-        additional_code_location
+        bpyaml["components"][1]["component"]["additional_code"]["location"]
         == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
     )
 

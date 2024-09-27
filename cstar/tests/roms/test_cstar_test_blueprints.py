@@ -1,4 +1,5 @@
 import pytest
+from cstar import Case
 from cstar.tests.config import TEST_CONFIG
 
 
@@ -16,7 +17,7 @@ class TestCStar:
         self,
         tmpdir,
         mock_user_input,
-        template_blueprint_to_case,
+        modify_template_blueprint,
         fetch_roms_tools_source_data,
         fetch_remote_test_case_data,
         test_config_key,
@@ -33,9 +34,12 @@ class TestCStar:
         strs_to_replace = config.get("strs_to_replace")
 
         print(f"Creating Case in {tmpdir / 'cstar_test_case'}")
-        cstar_test_case = template_blueprint_to_case(
-            template_blueprint_path=template_blueprint,
-            strs_to_replace=strs_to_replace,
+        modified_blueprint = modify_template_blueprint(
+            template_blueprint_path=template_blueprint, strs_to_replace=strs_to_replace
+        )
+
+        cstar_test_case = Case.from_blueprint(
+            modified_blueprint,
             caseroot=tmpdir / "cstar_test_case",
             start_date="20120101 12:00:00",
             end_date="20120101 12:10:00",

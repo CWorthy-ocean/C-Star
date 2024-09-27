@@ -2,17 +2,14 @@ import pytest
 from pathlib import Path
 from typing import Callable
 
-from cstar import Case
-
 
 @pytest.fixture
-def template_blueprint_to_case(tmpdir) -> Callable[[Path | str, dict[str, str]], Case]:
+def modify_template_blueprint(tmpdir) -> Callable[[Path | str, dict[str, str]], Path]:
     """
-    Fixture that provides a factory function for creating `Case` objects from a blueprint template.
+    Fixture that provides a factory function for modifying template blueprint files.
 
-    This fixture returns a function that can generate `Case` instances by modifying a blueprint
-    template file based on specified string replacements. When `template_blueprint_to_case` is
-    used in a test, this function is then available to call at a user-specified point in that test.
+    This fixture returns a function that can returns a path to a modified a blueprint
+    template file based on specified string replacements.
 
     Parameters:
     -----
@@ -22,29 +19,19 @@ def template_blueprint_to_case(tmpdir) -> Callable[[Path | str, dict[str, str]],
 
     Returns:
     --------
-    _template_blueprint_to_case, Callable[[Path | str, dict[str, str]], Case]:
+    _modify_template_blueprint, Callable[[Path | str, dict[str, str]], Path]:
        The factory function
-
-    Examples:
-    ------
-        def test_case_creation(template_blueprint_to_case):
-            case = template_blueprint_to_case(
-                "template.yaml",
-                {"PLACEHOLDER": "actual_value"}
-            )
-            assert isinstance(case, Case)
     """
 
-    def _template_blueprint_to_case(
+    def _modify_template_blueprint(
         template_blueprint_path: Path | str, strs_to_replace: dict, **kwargs
-    ) -> Case:
+    ) -> Path:
         """
-        Creates a `Case` object from a modified blueprint template.
+        Creates a temporary, customized blueprint file from a template.
 
         This function reads a blueprint template file, performs string replacements as specified
         by `strs_to_replace`, saves the modified content to a temporary file within the `tmpdir`
-        provided by pytest, and then uses this temporary blueprint file to create a `Case` instance.
-        Additional keyword arguments can be passed to the `Case.from_blueprint` method.
+        provided by pytest.
 
         Parameters:
         -----------
@@ -53,12 +40,11 @@ def template_blueprint_to_case(tmpdir) -> Callable[[Path | str, dict[str, str]],
         strs_to_replace (dict[str, str]):
            A dictionary where keys are substrings to find in the template,
            and values are the replacements.
-        **kwargs:
-           Additional keyword arguments passed to `Case.from_blueprint`.
 
         Returns:
         --------
-            Case: An instance of the `Case` class created from the modified blueprint.
+        modified_blueprint_path:
+           A temporary path to a modified version of the template blueprint file.
         """
 
         template_blueprint_path = Path(template_blueprint_path)
@@ -75,6 +61,6 @@ def template_blueprint_to_case(tmpdir) -> Callable[[Path | str, dict[str, str]],
         with open(temp_path, "w") as temp_file:
             temp_file.write(modified_template_content)
 
-        return Case.from_blueprint(temp_path, **kwargs)
+        return temp_path
 
-    return _template_blueprint_to_case
+    return _modify_template_blueprint
