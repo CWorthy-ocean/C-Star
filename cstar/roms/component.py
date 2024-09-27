@@ -2,7 +2,7 @@ import warnings
 import subprocess
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING, List, Sequence
+from typing import Optional, TYPE_CHECKING, List
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base.component import Component, Discretization
@@ -27,7 +27,7 @@ from cstar.base.environment import (
 )
 
 if TYPE_CHECKING:
-    from cstar.roms import ROMSBaseModel, ROMSInputDataset
+    from cstar.roms import ROMSBaseModel
 
 
 class ROMSComponent(Component):
@@ -40,15 +40,30 @@ class ROMSComponent(Component):
     -----------
     base_model: ROMSBaseModel
         An object pointing to the unmodified source code of ROMS at a specific commit
-    input_datasets: list of ROMSInputDatasets
-        Any spatiotemporal data needed to run this instance of ROMS
-        e.g. initial conditions, surface forcing, etc.
     additional_code: AdditionalCode
         Additional code contributing to a unique instance of this ROMS run
         e.g. namelists, source modifications, etc.
     discretization: ROMSDiscretization
         Any information related to discretization of this ROMSComponent
         e.g. time step, number of levels, number of CPUs following each direction, etc.
+    model_grid: ROMSModelGrid, optional
+        The model grid InputDataset associated with this ROMSComponent
+    initial_conditions: ROMSInitialConditions, optional
+        The initial conditions InputDataset associated with this ROMSComponent
+    tidal_forcing: ROMSTidalForcing, optional
+        The tidal forcing InputDataset associated with this ROMSComponent
+    surface_forcing: (list of) ROMSSurfaceForcing, optional
+        list of surface forcing InputDataset objects associated with this ROMSComponent
+    boundary_forcing: (list of) ROMSBoundaryForcing, optional
+        list of boundary forcing InputDataset objects associated with this ROMSComponent
+
+
+    Properties:
+    -----------
+    component_type: str
+       The type of Component, in this case "ROMS"
+    input_datasets: list
+       A list of any input datasets associated with this instance of ROMSComponent
 
     Methods:
     --------
@@ -60,11 +75,11 @@ class ROMSComponent(Component):
         Runs the executable created by `build()`
     post_run()
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
+
     """
 
     base_model: "ROMSBaseModel"
     additional_code: "AdditionalCode"
-    input_datasets: Sequence["ROMSInputDataset"]
     discretization: "ROMSDiscretization"
 
     def __init__(
@@ -72,7 +87,11 @@ class ROMSComponent(Component):
         base_model: "ROMSBaseModel",
         additional_code: "AdditionalCode",
         discretization: "ROMSDiscretization",
-        input_datasets: Optional[Sequence["ROMSInputDataset"]] = None,
+        model_grid: Optional["ROMSModelGrid"] = None,
+        initial_conditions: Optional["ROMSInitialConditions"] = None,
+        tidal_forcing: Optional["ROMSTidalForcing"] = None,
+        boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
+        surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
     ):
         """
         Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
@@ -82,15 +101,22 @@ class ROMSComponent(Component):
         base_model: ROMSBaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        input_datasets:  list of InputDatasets
-            Any spatiotemporal data needed to run this instance of the base model
-            e.g. initial conditions, surface forcing, etc.
         additional_code: AdditionalCode
             Additional code contributing to a unique instance of a base model,
             e.g. namelists, source modifications, etc.
         discretization: ROMSDiscretization
             Any information related to discretization of this ROMSComponent
             e.g. time step, number of levels, number of CPUs following each direction, etc.
+        model_grid: ROMSModelGrid, optional
+            The model grid InputDataset associated with this ROMSComponent
+        initial_conditions: ROMSInitialConditions, optional
+            The initial conditions InputDataset associated with this ROMSComponent
+        tidal_forcing: ROMSTidalForcing, optional
+            The tidal forcing InputDataset associated with this ROMSComponent
+        surface_forcing: (list of) ROMSSurfaceForcing, optional
+            list of surface forcing InputDataset objects associated with this ROMSComponent
+        boundary_forcing: (list of) ROMSBoundaryForcing, optional
+            list of boundary forcing InputDataset objects associated with this ROMSComponent
 
         Returns:
         --------
@@ -100,21 +126,25 @@ class ROMSComponent(Component):
 
         self.base_model = base_model
         self.additional_code = additional_code
-        self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization
+        self.model_grid = model_grid
+        self.initial_conditions = initial_conditions
+        self.tidal_forcing = tidal_forcing
+        self.surface_forcing = [] if surface_forcing is None else surface_forcing
+        self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
 
         # roms-specific
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
 
     @classmethod
-    def from_dict(cls, component_info):
+    def from_dict(cls, component_dict):
         """
         Construct a ROMSComponent instance from a dictionary of kwargs.
 
         Parameters:
         -----------
-        component_info (dict):
+        component_dict (dict):
            A dictionary of keyword arguments used to construct this component.
 
         Returns:
@@ -125,62 +155,78 @@ class ROMSComponent(Component):
 
         component_kwargs = {}
         # Construct the BaseModel instance
-        base_model_info = component_info.get("base_model")
-        if base_model_info is None:
+        base_model_kwargs = component_dict.get("base_model")
+        if base_model_kwargs is None:
             raise ValueError(
                 "Cannot construct a ROMSComponent instance without a "
                 + "ROMSBaseModel object, but could not find 'base_model' entry"
             )
-        base_model = ROMSBaseModel(**base_model_info)
+        base_model = ROMSBaseModel(**base_model_kwargs)
 
         component_kwargs["base_model"] = base_model
 
         # Construct the Discretization instance
-        discretization_info = component_info.get("discretization")
-        if discretization_info is None:
+        discretization_kwargs = component_dict.get("discretization")
+        if discretization_kwargs is None:
             raise ValueError(
                 "Cannot construct a ROMSComponent instance without a "
                 + "ROMSDiscretization object, but could not find 'discretization' entry"
             )
-        discretization = ROMSDiscretization(**discretization_info)
+        discretization = ROMSDiscretization(**discretization_kwargs)
 
         component_kwargs["discretization"] = discretization
 
         # Construct any AdditionalCode instances
-        additional_code_info = component_info.get("additional_code")
-        if additional_code_info is None:
+        additional_code_kwargs = component_dict.get("additional_code")
+        if additional_code_kwargs is None:
             raise ValueError(
                 "Cannot construct a ROMSComponent instance without an "
                 + "AdditionalCode object, but could not find 'additional_code' entry"
             )
-        additional_code = AdditionalCode(**additional_code_info)
+        additional_code = AdditionalCode(**additional_code_kwargs)
 
         component_kwargs["additional_code"] = additional_code
 
-        # Construct any InputDataset instances:
-        input_dataset_info = component_info.get("input_datasets", {})
-        input_datasets = []
+        # Construct any ROMSModelGrid instance:
+        model_grid_kwargs = component_dict.get("model_grid")
+        if model_grid_kwargs is not None:
+            component_kwargs["model_grid"] = ROMSModelGrid(**model_grid_kwargs)
 
-        idtype_class_map = {
-            "model_grid": ROMSModelGrid,
-            "initial_conditions": ROMSInitialConditions,
-            "tidal_forcing": ROMSTidalForcing,
-            "boundary_forcing": ROMSBoundaryForcing,
-            "surface_forcing": ROMSSurfaceForcing,
-        }
+        # Construct any ROMSInitialConditions instance:
+        initial_conditions_kwargs = component_dict.get("initial_conditions")
+        if initial_conditions_kwargs is not None:
+            component_kwargs["initial_conditions"] = ROMSInitialConditions(
+                **initial_conditions_kwargs
+            )
 
-        ## Loop over input_datasets entries,initialise appropriate class, append to list
-        for idtype, dataset_info in input_dataset_info.items():
-            if idtype in idtype_class_map:
-                # Get the class to be instantiated
-                ThisInputDataset = idtype_class_map[idtype]
+        # Construct any ROMSTidalForcing instance:
+        tidal_forcing_kwargs = component_dict.get("tidal_forcing")
+        if tidal_forcing_kwargs is not None:
+            component_kwargs["tidal_forcing"] = ROMSTidalForcing(**tidal_forcing_kwargs)
 
-                for file_info in dataset_info["files"]:
-                    input_datasets.append(ThisInputDataset(**file_info))
-            else:
-                raise ValueError(f"InputDataset type {idtype} not recognized")
-        if len(input_datasets) > 0:
-            component_kwargs["input_datasets"] = input_datasets
+        # Construct any ROMSBoundaryForcing instances:
+        boundary_forcing_entries = component_dict.get("boundary_forcing", [])
+        if len(boundary_forcing_entries) > 0:
+            component_kwargs["boundary_forcing"] = []
+        if isinstance(boundary_forcing_entries, dict):
+            boundary_forcing_entries = [
+                boundary_forcing_entries,
+            ]
+        for bf_kwargs in boundary_forcing_entries:
+            component_kwargs["boundary_forcing"].append(
+                ROMSBoundaryForcing(**bf_kwargs)
+            )
+
+        # Construct any ROMSSurfaceForcing instances:
+        surface_forcing_entries = component_dict.get("surface_forcing", [])
+        if len(surface_forcing_entries) > 0:
+            component_kwargs["surface_forcing"] = []
+        if isinstance(surface_forcing_entries, dict):
+            surface_forcing_entries = [
+                surface_forcing_entries,
+            ]
+        for sf_kwargs in surface_forcing_entries:
+            component_kwargs["surface_forcing"].append(ROMSSurfaceForcing(**sf_kwargs))
 
         return cls(**component_kwargs)
 
@@ -188,59 +234,48 @@ class ROMSComponent(Component):
     def component_type(self) -> str:
         return "ROMS"
 
+    @property
+    def input_datasets(self) -> list:
+        """list all ROMSInputDataset objects associated with this ROMSComponent"""
+
+        input_datasets: List[ROMSInputDataset] = []
+        if self.model_grid is not None:
+            input_datasets.append(self.model_grid)
+        if self.initial_conditions is not None:
+            input_datasets.append(self.initial_conditions)
+        if self.tidal_forcing is not None:
+            input_datasets.append(self.tidal_forcing)
+        if len(self.boundary_forcing) > 0:
+            input_datasets.extend(self.boundary_forcing)
+        if len(self.surface_forcing) > 0:
+            input_datasets.extend(self.surface_forcing)
+        return input_datasets
+
     def to_dict(self) -> dict:
         # Docstring is inherited
 
-        component_info = super().to_dict()
+        component_dict = super().to_dict()
 
         # Discretization
-        discretization_info = {}
-        for thisattr in vars(self.discretization).keys():
-            discretization_info[thisattr] = getattr(self.discretization, thisattr)
-        component_info["discretization"] = discretization_info
+        component_dict["discretization"] = self.discretization.__dict__
 
-        # InputDataset
-        input_datasets = self.input_datasets
+        # InputDatasets:
+        if self.model_grid is not None:
+            component_dict["model_grid"] = self.model_grid.to_dict()
+        if self.initial_conditions is not None:
+            component_dict["initial_conditions"] = self.initial_conditions.to_dict()
+        if self.tidal_forcing is not None:
+            component_dict["tidal_forcing"] = self.tidal_forcing.to_dict()
+        if len(self.surface_forcing) > 0:
+            component_dict["surface_forcing"] = [
+                sf.to_dict() for sf in self.surface_forcing
+            ]
+        if len(self.boundary_forcing) > 0:
+            component_dict["boundary_forcing"] = [
+                bf.to_dict() for bf in self.boundary_forcing
+            ]
 
-        input_dataset_info: dict = {}
-        for ind in input_datasets:
-            # Determine what kind of input dataset we are adding
-            if isinstance(ind, ROMSModelGrid):
-                dct_key = "model_grid"
-            elif isinstance(ind, ROMSInitialConditions):
-                dct_key = "initial_conditions"
-            elif isinstance(ind, ROMSTidalForcing):
-                dct_key = "tidal_forcing"
-            elif isinstance(ind, ROMSBoundaryForcing):
-                dct_key = "boundary_forcing"
-            elif isinstance(ind, ROMSSurfaceForcing):
-                dct_key = "surface_forcing"
-            else:
-                raise ValueError(f"Unknown dataset type: {type(ind)}")
-
-            # If there is not already an instance of this input dataset type,
-            # add an empty dict as the key so we can access/build it
-            if dct_key not in input_dataset_info.keys():
-                input_dataset_info[dct_key] = {}
-
-            # Create a dictionary of file_info for each dataset file:
-            if "files" not in input_dataset_info[dct_key].keys():
-                input_dataset_info[dct_key]["files"] = []
-            file_info = {}
-            file_info["location"] = ind.source.location
-            if hasattr(ind, "file_hash") and (ind.file_hash is not None):
-                file_info["file_hash"] = ind.file_hash
-            if hasattr(ind, "start_date") and (ind.start_date is not None):
-                file_info["start_date"] = str(ind.start_date)
-            if hasattr(ind, "end_date") and (ind.end_date is not None):
-                file_info["end_date"] = str(ind.end_date)
-
-            input_dataset_info[dct_key]["files"].append(file_info)
-
-        if len(input_dataset_info) > 0:
-            component_info["input_datasets"] = input_dataset_info
-
-        return component_info
+        return component_dict
 
     def setup(
         self,
@@ -373,7 +408,6 @@ class ROMSComponent(Component):
            `ROMSComponent.additional_code.working_path/namelists`.
 
         """
-        from cstar.roms import ROMSInputDataset
 
         # Partition input datasets and add their paths to namelist
         if self.input_datasets is not None and all(

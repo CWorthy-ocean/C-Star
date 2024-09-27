@@ -21,8 +21,8 @@ components:
         n_procs_y: 3
         time_step: 60
       additional_code:
-        location: 'https://github.com/dafyddstephenson/roms_marbl_example.git'
-        checkout_target: '368d729d9500b98d0f1126a1b56620df7a2bae65'
+        location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
+        checkout_target: 'a9762a46a36c09225423305a1aaa59bdeb984074'
         subdir: 'additional_code/ROMS'
         source_mods:
           - "source_mods/bgc.opt"
@@ -33,36 +33,28 @@ components:
           - "source_mods/param.opt"
           - "source_mods/tracers.opt"
           - "source_mods/Makefile"
-          - "source_mods/get_makefile"
           - "source_mods/Make.depend"
         namelists:
           - "namelists/roms.in_TEMPLATE"
           - "namelists/marbl_in"
           - "namelists/marbl_tracer_output_list"
           - "namelists/marbl_diagnostic_output_list"
-
-      input_datasets:
-        model_grid:
-          files:
-            - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_grd.yaml'
-              file_hash: 'ddf0e83297f13cd780d4569b7809b3bf3d1bd077e5a469a7f6be0c7f65788eba'
-        initial_conditions:
-          files:
-            - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_ini.yaml'
-              file_hash: 'c77d933ae5dc273c06190e89ed5818b56025beb76a54da24172fa03ec34603b2'
-        tidal_forcing:
-          files:
-            - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_tides.yaml'
-              file_hash: '1805949a1e8f29db11cb6b6603f266ea4a895384ae2892364965a59fc4b25e09'
-        boundary_forcing:
-          files:
-            - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_bry.yaml'
-              file_hash: '0095b8595faddd3a211683df04511182179827deda180f8cb81296d0549b73a3'
-            - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_bry_bgc.yaml'
-              file_hash: 'cb4afe279dd619edb66e0973339ebdb94e6b9c06fa9cdc48af2359050287a49d'
-        surface_forcing:
-          files:
-            - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_frc.yaml'
-              file_hash: '532801f9f7217fdcd228965fa271e6c3618e3e066d1843e0008f2d7dc9477486'
-            - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_frc_bgc.yaml'
-              file_hash: '775c6a4fef99a6c5a32a409b52743c73307773314e609c6b598c4541be0372b5'
+      model_grid:
+        location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_grd.yaml'
+        file_hash: 'ddf0e83297f13cd780d4569b7809b3bf3d1bd077e5a469a7f6be0c7f65788eba'
+      initial_conditions:
+        location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_ini.yaml'
+        file_hash: 'c77d933ae5dc273c06190e89ed5818b56025beb76a54da24172fa03ec34603b2'
+      tidal_forcing:
+        location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_tides.yaml'
+        file_hash: '1805949a1e8f29db11cb6b6603f266ea4a895384ae2892364965a59fc4b25e09'
+      boundary_forcing:
+        - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_bry.yaml'
+          file_hash: '0095b8595faddd3a211683df04511182179827deda180f8cb81296d0549b73a3'
+        - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_bry_bgc.yaml'
+          file_hash: 'cb4afe279dd619edb66e0973339ebdb94e6b9c06fa9cdc48af2359050287a49d'
+      surface_forcing:
+        - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_frc.yaml'
+          file_hash: '532801f9f7217fdcd228965fa271e6c3618e3e066d1843e0008f2d7dc9477486'
+        - location: 'https://github.com/dafyddstephenson/roms_marbl_example/raw/main/roms_tools_yaml_files/roms_frc_bgc.yaml'
+          file_hash: '775c6a4fef99a6c5a32a409b52743c73307773314e609c6b598c4541be0372b5'

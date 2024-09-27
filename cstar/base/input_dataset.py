@@ -112,6 +112,27 @@ class InputDataset(ABC):
         # Additional info
         return repr_str
 
+    def to_dict(self):
+        """
+        Represent this InputDataset object as a dictionary of kwargs
+
+        Returns:
+        --------
+        input_dataset_dict (dict):
+           A dictionary of kwargs that can be used to initialize the
+           InputDataset object.
+        """
+        input_dataset_dict = {}
+        input_dataset_dict["location"] = self.source.location
+        if self.file_hash is not None:
+            input_dataset_dict["file_hash"] = self.file_hash
+        if self.start_date is not None:
+            input_dataset_dict["start_date"] = self.start_date.__str__()
+        if self.end_date is not None:
+            input_dataset_dict["end_date"] = self.end_date.__str__()
+
+        return input_dataset_dict
+
     def get(self, local_dir: str | Path) -> None:
         """
         Make the file containing this input dataset available in `local_dir`

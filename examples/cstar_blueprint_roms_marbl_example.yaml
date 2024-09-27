@@ -41,81 +41,76 @@ components:
           - "namelists/marbl_diagnostic_output_list"
           
       input_datasets:
-        model_grid:
-          files:
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_grd.nc'
-              file_hash: 'fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d'
-        initial_conditions:
-          files:
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/MARBL_rst.20120103120000.nc'
-              file_hash: 'fc3bbd039256edc89c898efda0eebc5c53773995598d59310bc6d57f454a6ddd'
-              start_date: 2012-01-03 11:59:24
-              end_date: 2012-01-03 12:00:00
-        tidal_forcing:
-          files:
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_tides.nc'
-              file_hash: '90db174ab174909f9bf27c13fa19995c03f680bcb80e7d012268505b48590338'
-        boundary_forcing:
-          files:
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_bry_2012.nc'
-              file_hash: 'c3b0e14aae6dd5a0d54703fa04cf95960c1970e732c0a230427bf8b0fbbd8bf1'
-              start_date: 2012-01-01 01:00:00
-              end_date: 2012-12-30 00:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_bry_bgc_MARBL.nc'
-              file_hash: '897a8df8ed45841a98b3906f2dd07750decc5c2b50095ba648a855c869c7d3ee'
-              start_date: 2012-01-01 01:00:00
-              end_date: 2012-12-01 01:00:00
-        surface_forcing:
-          files:
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc_bgc.nc'
-              file_hash: '621dd23691d87aa93c5cc582daf6c5f18333ed062ff934777d50b63346c3f84d'
-              start_date: 2012-01-01 01:00:00
-              end_date: 2012-11-30 19:30:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201201.nc'
-              file_hash: '923049a9c2ab9ce77fa4a0211585e6848a12e87bf237e7aa310f693c3ac6abfa'
-              start_date: 2012-01-01 01:00:00
-              end_date: 2012-01-31 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201202.nc'
-              file_hash: '5a5d99cdfaacdcda7b531916f6af0f7cef4aea595ea634dac809226ea2a8a4fe'
-              start_date: 2012-02-01 00:00:00
-              end_date: 2012-02-29 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201203.nc'
-              file_hash: '8251bd08d435444da7c38fe11eba082365ee7b68453b6dc61460ddcb72c07671'
-              start_date: 2012-03-01 00:00:00
-              end_date: 2012-03-31 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201204.nc'
-              file_hash: '0b62ab974bd718af1d421a715dc2b0968f65ec99856513f2ee988d996ff3d059'
-              start_date: 2012-04-01 00:00:00
-              end_date: 2012-04-30 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201205.nc'
-              file_hash: 'b82797f91c0741245e58b90f787c9597f342faa49c45ebb27e2df964006d6df5'
-              start_date: 2012-05-01 00:00:00
-              end_date: 2012-05-31 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201206.nc'
-              file_hash: '8cf6f2413ae45dddc1680a19aea0d40a04def82366d626a7fe33dfe5eef7ea7f'
-              start_date: 2012-06-01 00:00:00
-              end_date: 2012-06-30 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201207.nc'
-              file_hash: '4ec7284f2bdc222b961483af5f6a01ecd6feea5236bb57d2101171f38ea8653b'
-              start_date: 2012-07-01 00:00:00
-              end_date: 2012-07-31 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201208.nc'
-              file_hash: '4eec008592337e0da87c2fac8c41a1400cc7067fcdc146a665db5b3a74213828'
-              start_date: 2012-08-01 00:00:00
-              end_date: 2012-08-31 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201209.nc'
-              file_hash: 'feb5718c45c4d0874919367fbadfca6784dfddaa2b193ef767a37d92a554eed4'
-              start_date: 2012-09-01 00:00:00
-              end_date: 2012-09-30 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201210.nc'
-              file_hash: '74538789218a2815c5a5532756e1282958d22026da7513ced0131febfce1012b'
-              start_date: 2012-10-01 00:00:00
-              end_date: 2012-10-31 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201211.nc'
-              file_hash: 'c79d4b2a9d1c41f9c603454c2b023995a6c3ea78c01d17b7428257c3c66f8750'
-              start_date: 2012-11-01 00:00:00
-              end_date: 2012-11-30 23:00:00
-            - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201212.nc'
-              file_hash: '477d1c0f2abcb0d5227594777521ce30d30c2376f5a8b2f08c25e25a77fd1fa5'
-              start_date: 2012-12-01 00:00:00
-              end_date: 2012-12-31 23:00:00
+      model_grid:
+        location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_grd.nc'
+        file_hash: 'fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d'
+      initial_conditions:
+        location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/MARBL_rst.20120103120000.nc'
+        file_hash: 'fc3bbd039256edc89c898efda0eebc5c53773995598d59310bc6d57f454a6ddd'
+        start_date: 2012-01-03 11:59:24
+        end_date: 2012-01-03 12:00:00
+      tidal_forcing:
+        location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_tides.nc'
+        file_hash: '90db174ab174909f9bf27c13fa19995c03f680bcb80e7d012268505b48590338'
+      boundary_forcing:
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_bry_2012.nc'
+          file_hash: 'c3b0e14aae6dd5a0d54703fa04cf95960c1970e732c0a230427bf8b0fbbd8bf1'
+          start_date: 2012-01-01 01:00:00
+          end_date: 2012-12-30 00:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_bry_bgc_MARBL.nc'
+          file_hash: '897a8df8ed45841a98b3906f2dd07750decc5c2b50095ba648a855c869c7d3ee'
+          start_date: 2012-01-01 01:00:00
+          end_date: 2012-12-01 01:00:00
+      surface_forcing:
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc_bgc.nc'
+          file_hash: '621dd23691d87aa93c5cc582daf6c5f18333ed062ff934777d50b63346c3f84d'
+          start_date: 2012-01-01 01:00:00
+          end_date: 2012-11-30 19:30:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201201.nc'
+          file_hash: '923049a9c2ab9ce77fa4a0211585e6848a12e87bf237e7aa310f693c3ac6abfa'
+          start_date: 2012-01-01 01:00:00
+          end_date: 2012-01-31 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201202.nc'
+          file_hash: '5a5d99cdfaacdcda7b531916f6af0f7cef4aea595ea634dac809226ea2a8a4fe'
+          start_date: 2012-02-01 00:00:00
+          end_date: 2012-02-29 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201203.nc'
+          file_hash: '8251bd08d435444da7c38fe11eba082365ee7b68453b6dc61460ddcb72c07671'
+          start_date: 2012-03-01 00:00:00
+          end_date: 2012-03-31 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201204.nc'
+          file_hash: '0b62ab974bd718af1d421a715dc2b0968f65ec99856513f2ee988d996ff3d059'
+          start_date: 2012-04-01 00:00:00
+          end_date: 2012-04-30 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201205.nc'
+          file_hash: 'b82797f91c0741245e58b90f787c9597f342faa49c45ebb27e2df964006d6df5'
+          start_date: 2012-05-01 00:00:00
+          end_date: 2012-05-31 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201206.nc'
+          file_hash: '8cf6f2413ae45dddc1680a19aea0d40a04def82366d626a7fe33dfe5eef7ea7f'
+          start_date: 2012-06-01 00:00:00
+          end_date: 2012-06-30 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201207.nc'
+          file_hash: '4ec7284f2bdc222b961483af5f6a01ecd6feea5236bb57d2101171f38ea8653b'
+          start_date: 2012-07-01 00:00:00
+          end_date: 2012-07-31 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201208.nc'
+          file_hash: '4eec008592337e0da87c2fac8c41a1400cc7067fcdc146a665db5b3a74213828'
+          start_date: 2012-08-01 00:00:00
+          end_date: 2012-08-31 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201209.nc'
+          file_hash: 'feb5718c45c4d0874919367fbadfca6784dfddaa2b193ef767a37d92a554eed4'
+          start_date: 2012-09-01 00:00:00
+          end_date: 2012-09-30 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201210.nc'
+          file_hash: '74538789218a2815c5a5532756e1282958d22026da7513ced0131febfce1012b'
+          start_date: 2012-10-01 00:00:00
+          end_date: 2012-10-31 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201211.nc'
+          file_hash: 'c79d4b2a9d1c41f9c603454c2b023995a6c3ea78c01d17b7428257c3c66f8750'
+          start_date: 2012-11-01 00:00:00
+          end_date: 2012-11-30 23:00:00
+        - location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_frc.201212.nc'
+          file_hash: '477d1c0f2abcb0d5227594777521ce30d30c2376f5a8b2f08c25e25a77fd1fa5'
+          start_date: 2012-12-01 00:00:00
+          end_date: 2012-12-31 23:00:00
