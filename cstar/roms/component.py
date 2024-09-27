@@ -175,39 +175,13 @@ class ROMSComponent(Component):
         return "ROMS"
 
     def to_dict(self) -> dict:
-        component_info: dict = {}
-
-        component_info["component_type"] = "ROMS"
-
-        # BaseModel:
-        base_model_info: dict = {}
-        base_model_info["source_repo"] = self.base_model.source_repo
-        base_model_info["checkout_target"] = self.base_model.checkout_target
-
-        component_info["base_model"] = base_model_info
+        component_info = super().to_dict()
 
         # Discretization
         discretization_info = {}
         for thisattr in vars(self.discretization).keys():
             discretization_info[thisattr] = getattr(self.discretization, thisattr)
         component_info["discretization"] = discretization_info
-
-        # AdditionalCode
-        additional_code = self.additional_code
-
-        if additional_code is not None:
-            additional_code_info: dict = {}
-
-            additional_code_info["location"] = additional_code.source.location
-            additional_code_info["subdir"] = additional_code.subdir
-            additional_code_info["checkout_target"] = additional_code.checkout_target
-
-            if additional_code.source_mods is not None:
-                additional_code_info["source_mods"] = additional_code.source_mods
-            if additional_code.namelists is not None:
-                additional_code_info["namelists"] = additional_code.namelists
-
-            component_info["additional_code"] = additional_code_info
 
         # InputDataset
         input_datasets = self.input_datasets
