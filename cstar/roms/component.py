@@ -109,6 +109,20 @@ class ROMSComponent(Component):
 
     @classmethod
     def from_dict(cls, component_info):
+        """
+        Construct a ROMSComponent instance from a dictionary of kwargs.
+
+        Parameters:
+        -----------
+        component_info (dict):
+           A dictionary of keyword arguments used to construct this component.
+
+        Returns:
+        --------
+        ROMSComponent
+           An initialized ROMSComponent object
+        """
+
         component_kwargs = {}
         # Construct the BaseModel instance
         base_model_info = component_info.get("base_model")
@@ -123,7 +137,7 @@ class ROMSComponent(Component):
 
         # Construct the Discretization instance
         discretization_info = component_info.get("discretization")
-        if base_model_info is None:
+        if discretization_info is None:
             raise ValueError(
                 "Cannot construct a ROMSComponent instance without a "
                 + "ROMSDiscretization object, but could not find 'discretization' entry"
@@ -175,6 +189,8 @@ class ROMSComponent(Component):
         return "ROMS"
 
     def to_dict(self) -> dict:
+        # Docstring is inherited
+
         component_info = super().to_dict()
 
         # Discretization
@@ -233,7 +249,31 @@ class ROMSComponent(Component):
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
     ) -> None:
-        """docstring"""
+        """
+        Set up this ROMSComponent instance locally.
+
+        This method ensures the ROMSBaseModel is correctly configured, and
+        that any additional code and input datasets corresponding to the
+        chosen simulation period (defined by `start_date` and `end_date`)
+        are made available in the chosen `additional_code_target_dir` and
+        `input_datasets_target_dir` directories
+
+        Parameters:
+        -----------
+        additional_code_target_dir (str or Path):
+           The directory in which to save local copies of the files described by
+           ROMSComponent.additional_code
+        input_datasets_target_dir (str or Path):
+           The directory in which to make locally accessible the input datasets
+           described by ROMSComponent.input_datasets
+        start_date (datetime.datetime):
+           The date from which the ROMSComponent is expected to be run. Used to
+           determine which input datasets are needed as part of this setup call.
+        end_date (datetime.datetime):
+           The date until which the ROMSComponent is expected to be run. Used to
+           determine which input datasets are needed as part of this setup call.
+
+        """
 
         super().setup(additional_code_target_dir=additional_code_target_dir)
 

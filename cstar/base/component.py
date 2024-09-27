@@ -87,18 +87,31 @@ class Component(ABC):
     @classmethod
     @abstractmethod
     def from_dict(self):
+        """
+        Construct this component instance from a dictionary of kwargs.
+
+        This method is implemented separately for different subclasses of Component.
+        """
         pass
 
     def to_dict(self):
-        component_info: dict = {}
+        """
+        Create a dictionary representation of this Component object.
 
-        component_info["component_type"] = self.component_type
+        Returns:
+        --------
+        component_dict (dict):
+           A dictionary representation of this Component.
+        """
+        component_dict: dict = {}
+
+        component_dict["component_type"] = self.component_type
 
         # BaseModel:
         base_model_info: dict = {}
         base_model_info["source_repo"] = self.base_model.source_repo
         base_model_info["checkout_target"] = self.base_model.checkout_target
-        component_info["base_model"] = base_model_info
+        component_dict["base_model"] = base_model_info
 
         # AdditionalCode
         additional_code = self.additional_code
@@ -115,9 +128,9 @@ class Component(ABC):
             if additional_code.namelists is not None:
                 additional_code_info["namelists"] = additional_code.namelists
 
-            component_info["additional_code"] = additional_code_info
+            component_dict["additional_code"] = additional_code_info
 
-        return component_info
+        return component_dict
 
     def __str__(self) -> str:
         # Header
