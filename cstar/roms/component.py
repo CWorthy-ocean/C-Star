@@ -256,7 +256,22 @@ class ROMSComponent(Component):
 
     @property
     def _namelist_modifications(self) -> list[dict]:
-        """docstring"""
+        """List of modifications to be made to template namelist files
+
+        This property takes the current state of ROMSComponent and returns a
+        list of dictionaries (one dictionary per namelist file) whose keys
+        are placeholder strings to replace in the template namelist,
+        and whose values are their replacements.
+
+        The property uses the `partitioned_files_to_namelist_string` local
+        helper function to format input dataset paths such that ROMS can
+        recognise them.
+
+        Related:
+        --------
+        ROMSComponent.update_namelists():
+           uses this property to create a modified namelist from a template
+        """
 
         # Helper function for formatting:
         def partitioned_files_to_namelist_string(input_dataset):
@@ -389,6 +404,16 @@ class ROMSComponent(Component):
         return namelist_modifications
 
     def update_namelists(self):
+        """
+        Update ROMSComponent.namelists.modified_files based on current state.
+
+        This method loops over the ROMSComponent.namelists.files list, and:
+        1. Creates modifiable copies of any template namelist files
+        2. Replaces placeholder strings in the modifiable namelists based on
+           the current ROMSComponent state
+        3. Updates ROMSComponent.namelists.modified_files
+        """
+
         no_template_found = True
         for nl_idx, nl_fname in enumerate(self.namelists.files):
             nl_path = self.namelists.working_path / nl_fname
