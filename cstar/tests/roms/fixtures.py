@@ -130,9 +130,6 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
         # Construct the URL of this commit as a zip archive:
         archive_url = f"{test_case_repo_url.rstrip('/')}/archive/{checkout_target}.zip"
 
-        # Create a cache dir with pooch
-        # cache_dir = Path(pooch.os_cache("cstar_test_case_data"))
-
         # Download the zip with pooch
         zip_path = pooch.retrieve(
             url=archive_url,
