@@ -390,15 +390,16 @@ class ROMSComponent(Component):
 
     def update_namelists(self):
         no_template_found = True
-        for nl_idx, nl_path in enumerate(self.namelists.files):
-            if str(nl_path)[-9:] == "_TEMPLATE":
+        for nl_idx, nl_fname in enumerate(self.namelists.files):
+            nl_path = self.namelists.working_path / nl_fname
+            if str(nl_fname)[-9:] == "_TEMPLATE":
                 no_template_found = False
                 mod_nl_path = Path(str(nl_path)[:-9])
                 shutil.copy(nl_path, mod_nl_path)
                 for placeholder, replacement in self._namelist_modifications[
                     nl_idx
                 ].items():
-                    _replace_text_in_file(mod_nl_path, placeholder, replacement)
+                    _replace_text_in_file(mod_nl_path, placeholder, str(replacement))
                 self.namelists.modified_files[nl_idx] = mod_nl_path
         if no_template_found:
             raise FileNotFoundError(
