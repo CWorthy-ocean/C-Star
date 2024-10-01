@@ -254,6 +254,111 @@ class ROMSComponent(Component):
         return "ROMS"
 
     @property
+    def _namelist_modifications(self) -> list[dict]:
+        #init
+        namelist_modifications = [{} for f in self.namelists]
+        
+        ################################################################################
+        # 'roms.in' file modifications (the only namelist to modify as of 2024-10-01):
+        ################################################################################
+        # First figure out which namelist is the one to modify
+        if "roms.in_TEMPLATE" in self.namelists:
+            nl_idx = self.namelists.index("roms.in_TEMPLATE")
+        else:
+            raise ValueError("could not find expected template namelist file "+
+                             "roms.in_TEMPLATE to modify. "+
+                             "ROMS requires a namelist file to run.")
+
+        # Number of time steps entry
+        namelist_modifications["__NTIMES_PLACEHOLDER__"] = ???
+        
+        # Time step entry
+        namelist_modifications[nl_idx]["__TIMESTEP_PLACEHOLDER__"]=self.discretization.time_step
+        
+        # Grid file entry
+        if self.model_grid is not None:
+            if len(self.model_grid.partitioned_files)==0:
+                raise ValueError("could not find a local path to a partitioned" +
+                                 "ROMS grid file. Run ROMSComponent.pre_run() [or "+
+                                 "Case.pre_run() if running a Case] to partition "+
+                                 "ROMS input datasets and try again.")
+
+            namelist_modifications[nl_idx]["__GRID_FILE_PLACEHOLDER__"] = \
+                partitioned_files_to_namelist_string(self.model_grid)
+
+        # Initial conditions
+        if self.initial_conditions is not None):
+            if len(self.initial_conditions.partitioned_files)==0:
+                raise ValueError("could not find a local path to a partitioned" +
+                                 "ROMS initial file. Run ROMSComponent.pre_run() [or "+
+                                 "Case.pre_run() if running a Case] to partition "+
+                                 "ROMS input datasets and try again.")
+
+            namelist_modifications[nl_idx]["__INITIAL_CONDITION_FILE_PLACEHOLDER__"] =\
+                partitioned_files_to_namelist_string(self.initial_conditions)
+        
+        # Forcing files
+        namelist_forcing_str=""
+        for sf in self.surface_forcing:
+            if len(sf.partitioned_files) >0:
+                namelist_forcing_str += \
+                    partitioned_files_to_namelist_string(sf)
+        for bf in self.boundary_forcing:
+            if len(bf.partitioned_files) >0:
+                namelist_forcing_str += \
+                    partitioned_files_to_namelist_string(bf)
+        if (self.tidal_forcing is not None):
+            if (len(self.tidal_forcing.partitioned_files)==0):
+                raise ValueError("ROMSComponent has tidal_forcing attribute "+
+                                 "but could not find a local path to a partitioned "+
+                                 "tidal forcing file. Run ROMSComponent.pre_run() "+
+                                 "[or Case.pre_run() if building a Case] "+
+                                 " to partition ROMS input datasets and try again.")
+            namelist_forcing_str += \
+                partitioned_files_to_namelist_string(self.tidal_forcing)
+        namelist_modifications[nl_idx]["__FORCING_FILES_PLACEHOLDER__"] =\
+            namelist_forcing_str
+        
+        # MARBL settings filepaths
+        if ("marbl_in" in self.namelists):
+            if (self.namelists.working_path is None):
+                raise ValueError("ROMSComponent.namelists does not have a "+
+                                 "'working_path' attribute. "+
+                                 "Run ROMSComponent.namelists.get() and try again")
+            namelist_modifications[nl_idx]["__MARBL_SETTINGS_FILE_PLACEHOLDER__"]=\
+                str(self.namelists.working_path/"marbl_in")
+            
+        if ("marbl_tracer_output_list" in self.namelists):
+            if (self.namelists.working_path is None):
+                raise ValueError("ROMSComponent.namelists does not have a "+
+                                 "'working_path' attribute. "+
+                                 "Run ROMSComponent.namelists.get() and try again")
+            
+            namelist_modifications[nl_idx]["__MARBL_TRACER_LIST_FILE_PLACEHOLDER__"]=\
+                str(self.namelists.working_path/"marbl_tracer_output_list")
+            
+        if ("marbl_diagnostics_output_list" in self.namelists):
+            if (self.namelists.working_path is None):
+                raise ValueError("ROMSComponent.namelists does not have a "+
+                                 "'working_path' attribute. "+
+                                 "Run ROMSComponent.namelists.get() and try again")
+            namelist_modifications[nl_idx]["__MARBL_DIAG_LIST_FILE_PLACEHOLDER__"]=\
+                str(self.namelists.working_path/"marbl_diagnostics_output_list")
+        
+                
+        def partitioned_files_to_namelist_string(input_dataset):
+            """ Take a ROMSInputDataset that has been partitioned 
+            and return a ROMS namelist-compatible string pointing to it
+            e.g. path/to/roms_file.232.nc -> '     path/to/roms_file.nc'
+            """
+
+            fullpath=input_dataset.partitioned_files[0]
+            path_nl = fullpath.parent / (Path(fullpath.stem).stem+".nc")
+            return f"     {str(path_nl)} \n"
+
+        return namelist_modifications
+
+    @property
     def input_datasets(self) -> list:
         """list all ROMSInputDataset objects associated with this ROMSComponent"""
 
