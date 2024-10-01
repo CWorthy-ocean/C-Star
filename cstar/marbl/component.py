@@ -14,10 +14,14 @@ class MARBLComponent(Component):
     def __init__(
         self,
         base_model: "MARBLBaseModel",
-        additional_code: Optional["AdditionalCode"] = None,
+        additional_source_code: Optional["AdditionalCode"] = None,
     ):
         self.base_model = base_model
-        self.additional_code = additional_code
+        if additional_source_code is not None:
+            raise NotImplementedError(
+                "Source code modifications to MARBL " + "are not yet supported"
+            )
+        self.additional_source_code = additional_source_code
 
     @classmethod
     def from_dict(cls, component_info):
@@ -33,46 +37,21 @@ class MARBLComponent(Component):
         component_kwargs["base_model"] = base_model
 
         # Construct any AdditionalCode instances
-        additional_code_info = component_info.get("additional_code")
+        additional_code_info = component_info.get("additional_source_code")
         if additional_code_info is not None:
-            additional_code = AdditionalCode(**additional_code_info)
-            component_kwargs["additional_code"] = additional_code
+            additional_source_code = AdditionalCode(**additional_code_info)
+            component_kwargs["additional_source_code"] = additional_source_code
         return cls(**component_kwargs)
 
     @property
     def component_type(self) -> str:
         return "MARBL"
 
-    # def to_dict(self):
-    #     # TODO add this to the component baseclass and call super in subclass
-    #     component_info = {}
-    #     component_info["component_type"] = "MARBL"
-
-    #     # BaseModel:
-    #     base_model_info = {}
-    #     base_model_info["source_repo"] = self.base_model.source_repo
-    #     base_model_info["checkout_target"] = self.base_model.checkout_target
-
-    #     component_info["base_model"] = base_model_info
-
-    #     # AdditionalCode
-    #     additional_code = self.additional_code
-
-    #     if additional_code is not None:
-    #         additional_code_info = {}
-
-    #         additional_code_info["location"] = additional_code.source.location
-    #         additional_code_info["subdir"] = additional_code.subdir
-    #         additional_code_info["checkout_target"] = additional_code.checkout_target
-
-    #         if additional_code.source_mods is not None:
-    #             additional_code_info["source_mods"] = additional_code.source_mods
-    #         if additional_code.namelists is not None:
-    #             additional_code_info["namelists"] = additional_code.namelists
-
-    #         component_info["additional_code"] = additional_code_info
-
-    #     return component_info
+    def setup(self) -> None:
+        # Setup BaseModel
+        infostr = f"Configuring {self.__class__.__name__}"
+        print(infostr + "\n" + "-" * len(infostr))
+        self.base_model.handle_config_status()
 
     def build(self) -> None:
         print("No build steps to be completed for MARBLComponent")

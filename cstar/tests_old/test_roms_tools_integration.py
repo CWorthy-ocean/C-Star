@@ -63,11 +63,11 @@ for f in (rmr_dir / "input_datasets/ROMS").glob("*.yaml"):
 lac_dir = Path.cwd() / "local_additional_code/"
 lac_dir.mkdir(parents=True, exist_ok=True)
 shutil.copytree(
-    rmr_dir / "additional_code/ROMS/namelists",
+    rmr_dir / "namelists/ROMS",
     lac_dir / "additional_code/ROMS/namelists",
 )
 shutil.copytree(
-    rmr_dir / "additional_code/ROMS/source_mods",
+    rmr_dir / "additional_source_code/ROMS",
     lac_dir / "additional_code/ROMS/source_mods",
 )
 

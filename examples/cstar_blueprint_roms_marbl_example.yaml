@@ -20,25 +20,29 @@ components:
         n_procs_x: 3
         n_procs_y: 3
         time_step: 360
-      additional_code:
+      namelists:
         location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
         checkout_target: 'a9762a46a36c09225423305a1aaa59bdeb984074'
-        subdir: 'additional_code/ROMS'
-        source_mods:
-          - "source_mods/bgc.opt"
-          - "source_mods/bulk_frc.opt"
-          - "source_mods/cppdefs.opt"
-          - "source_mods/diagnostics.opt"
-          - "source_mods/ocean_vars.opt"
-          - "source_mods/param.opt"
-          - "source_mods/tracers.opt"
-          - "source_mods/Makefile"
-          - "source_mods/Make.depend"
-        namelists:
-          - "namelists/roms.in_TEMPLATE"
-          - "namelists/marbl_in"
-          - "namelists/marbl_tracer_output_list"
-          - "namelists/marbl_diagnostic_output_list"
+        subdir: 'additional_code/ROMS/namelists'
+        files:
+          - "roms.in_TEMPLATE"
+          - "marbl_in"
+          - "marbl_tracer_output_list"
+          - "marbl_diagnostic_output_list"
+      additional_source_code:
+        location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git'
+        checkout_target: 'a9762a46a36c09225423305a1aaa59bdeb984074'
+        subdir: 'additional_code/ROMS/source_mods' 
+        files:
+          - "bgc.opt"
+          - "bulk_frc.opt"
+          - "cppdefs.opt"
+          - "diagnostics.opt"
+          - "ocean_vars.opt"
+          - "param.opt"
+          - "tracers.opt"
+          - "Makefile"
+          - "Make.depend"
           
       input_datasets:
       model_grid:

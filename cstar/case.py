@@ -259,8 +259,14 @@ class Case:
                 return False
 
             # Check AdditionalCode
-            if (component.additional_code is not None) and (
-                not component.additional_code.exists_locally
+            if (
+                (hasattr(component, "namelists"))
+                and (component.namelists is not None)
+                and (not component.namelists.exists_locally)
+            ):
+                return False
+            if (component.additional_source_code is not None) and (
+                not component.additional_source_code.exists_locally
             ):
                 return False
 
@@ -306,43 +312,26 @@ class Case:
                 case_tree_dict["input_datasets"][component.component_type] = [
                     dataset.source.basename for dataset in component.input_datasets
                 ]
-            if hasattr(component, "additional_code") and (
-                component.additional_code is not None
+            if hasattr(component, "namelists") and (component.namelists is not None):
+                case_tree_dict.setdefault("namelists", {})
+                case_tree_dict["namelists"].setdefault(component.component_type, {})
+                case_tree_dict["namelists"][component.component_type] = [
+                    namelist.split("/")[-1] for namelist in component.namelists.files
+                ]
+
+                # TODO return here and add any modified namelists that aren't temporary
+            if hasattr(component, "additional_source_code") and (
+                component.additional_source_code is not None
             ):
-                case_tree_dict.setdefault("additional_code", {})
-                case_tree_dict["additional_code"].setdefault(
+                case_tree_dict.setdefault("additional_source_code", {})
+                case_tree_dict["additional_source_code"].setdefault(
                     component.component_type, {}
                 )
-                if component.additional_code.namelists is not None:
-                    case_tree_dict["additional_code"][
-                        component.component_type
-                    ].setdefault("namelists", {})
-                    case_tree_dict["additional_code"][component.component_type][
-                        "namelists"
-                    ] = [
-                        namelist.split("/")[-1]
-                        for namelist in component.additional_code.namelists
-                    ]
-                if component.additional_code.modified_namelists is not None:
-                    case_tree_dict["additional_code"][
-                        component.component_type
-                    ].setdefault("namelists", {})
-                    case_tree_dict["additional_code"][component.component_type][
-                        "namelists"
-                    ] += [
-                        namelist.split("/")[-1]
-                        for namelist in component.additional_code.modified_namelists
-                    ]
-                if component.additional_code.source_mods is not None:
-                    case_tree_dict["additional_code"][
-                        component.component_type
-                    ].setdefault("source_mods", {})
-                    case_tree_dict["additional_code"][component.component_type][
-                        "source_mods"
-                    ] = [
-                        sourcemod.split("/")[-1]
-                        for sourcemod in component.additional_code.source_mods
-                    ]
+
+                case_tree_dict["additional_source_code"][component.component_type] = [
+                    namelist.split("/")[-1]
+                    for namelist in component.additional_source_code.files
+                ]
 
         print(f"{self.caseroot}\n{_dict_to_tree(case_tree_dict)}")
 
@@ -360,14 +349,15 @@ class Case:
         This method reads a YAML file containing the blueprint for a case
         and initializes a Case object based on the provided specifications.
 
-        A blueprint YAML file should be structured as follows:
+        A blueprint YAML file should be structured as follows TODO REWRITE:
 
         - registry_attrs: overall case metadata, including "name"
         - components: A list of components, containing, e.g.
             - base_model: containing ["name","source_repo",and "checkout_target"]
-            - additional_code: optional, containing ["source_repo","checkout_target","source_mods","namelists"]
-            - input_datasets: with options like "model_grid","initial_conditions","tidal_forcing","boundary_forcing","surface_forcing"
-                              each containing "source" (a URL) and "hash" (a SHA-256 sum)
+            - namelists: optional, containing ["source_repo","checkout_target","source_mods","files"]
+            - additional_source_code: optional, containing ["source_repo","checkout_target","source_mods","files"]
+            - <input dataset>: taking values like "model_grid","initial_conditions","tidal_forcing","boundary_forcing","surface_forcing"
+                              each containing "location" and "file_hash" (a SHA-256 sum) if the location is a URL
             - discretization: containing e.g. time step "time_step"  and parallelization "n_procs_x","n_procs_y" information
 
 
@@ -524,15 +514,15 @@ class Case:
             print(infostr + "\n" + "-" * len(infostr))
             if isinstance(component, ROMSComponent):
                 component.setup(
-                    additional_code_target_dir=self.caseroot / "additional_code/ROMS",
+                    namelist_dir=self.caseroot / "namelists/ROMS",
+                    additional_source_code_dir=self.caseroot
+                    / "additional_source_code/ROMS",
                     input_datasets_target_dir=self.caseroot / "input_datasets/ROMS",
                     start_date=self.start_date,
                     end_date=self.end_date,
                 )
             elif isinstance(component, MARBLComponent):
-                component.setup(
-                    additional_code_target_dir=self.caseroot / "additional_code/MARBL"
-                )
+                component.setup()
 
     def build(self) -> None:
         """Compile any necessary additional code associated with this case

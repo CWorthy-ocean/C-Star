@@ -56,11 +56,11 @@ shutil.move(rmr_dir / "input_datasets/ROMS", "local_input_files")
 lac_dir = Path.cwd() / "local_additional_code/"
 lac_dir.mkdir(parents=True, exist_ok=True)
 shutil.copytree(
-    rmr_dir / "additional_code/ROMS/namelists",
+    rmr_dir / "namelists/ROMS",
     lac_dir / "additional_code/ROMS/namelists",
 )
 shutil.copytree(
-    rmr_dir / "additional_code/ROMS/source_mods",
+    rmr_dir / "additional_source_code/ROMS",
     lac_dir / "additional_code/ROMS/source_mods",
 )
 
@@ -72,7 +72,7 @@ for i, line in enumerate(test_blueprint):
     id_url_prefix = (
         "https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/"
     )
-    ac_url = "https://github.com/dafyddstephenson/roms_marbl_example.git"
+    ac_url = "https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git"
     if id_url_prefix in line:
         fileurl = line.split()[-1]  # Just isolate URL from e.g. source: URL
         filepath = Path.cwd() / "local_input_files" / Path(fileurl).name
@@ -83,6 +83,7 @@ for i, line in enumerate(test_blueprint):
 
 with open("modified_test_blueprint.yaml", "w") as f:
     f.writelines(test_blueprint)
+
 
 ## Third step creates and runs Case with local input datasets and additional code
 
