@@ -929,7 +929,7 @@ class ROMSComponent(Component):
                 # will exit with code 0 even if a fatal error occurs, see:
                 # https://github.com/CESR-lab/ucla-roms/issues/42
 
-                debugging = True  # Print raw output if true
+                debugging = False  # Print raw output if true
                 if debugging:
                     while True:
                         output = romsprocess.stdout.readline()
