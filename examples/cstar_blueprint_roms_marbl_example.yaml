@@ -39,8 +39,6 @@ components:
           - "namelists/marbl_in"
           - "namelists/marbl_tracer_output_list"
           - "namelists/marbl_diagnostic_output_list"
-          
-      input_datasets:
       model_grid:
         location: 'https://github.com/CWorthy-ocean/input_datasets_roms_marbl_example/raw/main/roms_grd.nc'
         file_hash: 'fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d'
