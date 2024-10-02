@@ -1,0 +1,67 @@
+registry_attrs:
+  name: cstar_test_with_yaml_datasets
+  valid_date_range:
+    start_date: 2012-01-01 12:00:00
+    end_date: 2012-12-31 12:00:00
+
+components:
+  - component:
+      component_type: 'MARBL'
+      base_model:
+        source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
+        checkout_target: 'marbl0.45.0'
+
+  - component:
+      component_type: 'ROMS'
+      base_model:
+        source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
+        checkout_target: '246c11fa537145ba5868f2256dfb4964aeb09a25'
+      discretization:
+        n_procs_x: 2
+        n_procs_y: 2
+        time_step: 60
+      additional_code:
+        location: '<additional_code_location>'
+        checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
+        subdir: 'additional_code/ROMS'
+        source_mods:
+          - "source_mods/bgc.opt"
+          - "source_mods/bulk_frc.opt"
+          - "source_mods/cppdefs.opt"
+          - "source_mods/diagnostics.opt"
+          - "source_mods/ocean_vars.opt"
+          - "source_mods/param.opt"
+          - "source_mods/tides.opt"
+          - "source_mods/tracers.opt"
+          - "source_mods/Makefile"
+        namelists:
+          - "namelists/roms.in_TEMPLATE"
+          - "namelists/marbl_in"
+          - "namelists/marbl_tracer_output_list"
+          - "namelists/marbl_diagnostic_output_list"
+
+      input_datasets:
+        model_grid:
+          files:
+            - location: '<input_datasets_location>/roms_grd.yaml'
+              file_hash: '22d9d65c1ce25152f5181ccefdf97ac1a15a7b87fbf090b45b3c15b44fad65aa'
+        initial_conditions:
+          files:
+            - location: '<input_datasets_location>/roms_ini.yaml'
+              file_hash: '849577dad30e55ee4308bdfbef2e9d947b7182c920894a03787f34970b934949'
+        tidal_forcing:
+          files:
+            - location: '<input_datasets_location>/roms_tides.yaml'
+              file_hash: '15342ffc02a7dc7a5fcced2ba3b28736032fa586e2b0d96cd81414f589aeffb4'
+        boundary_forcing:
+          files:
+            - location: '<input_datasets_location>/roms_bry.yaml'
+              file_hash: 'ee2ba557bd45645a8ddd5da464a88b382a078265d15106ca4b4cf7e55f182a44'
+            - location: '<input_datasets_location>/roms_bry_bgc.yaml'
+              file_hash: '9d9e1e0129eb4f7a2cade1c36e0f5cce868e52f69b180fdc98901e7d20cdf736'
+        surface_forcing:
+          files:
+            - location: '<input_datasets_location>/roms_frc.yaml'
+              file_hash: '13238c6671683690f56e85674b3d7d5a8a3c6a9ae10cca96ba3a4e2fce112948'
+            - location: '<input_datasets_location>/roms_frc_bgc.yaml'
+              file_hash: 'f9953ca6c675f196e11036f24896ab40df3156207e3f870cc1f7de2b252fdf34'
