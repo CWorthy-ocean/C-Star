@@ -1,10 +1,8 @@
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING, Sequence
+from typing import Optional, TYPE_CHECKING
 
 from cstar.base.base_model import BaseModel
-from cstar.base.input_dataset import InputDataset
-from cstar.base.utils import _list_to_concise_str
 
 if TYPE_CHECKING:
     from cstar.base.additional_code import AdditionalCode
@@ -22,9 +20,6 @@ class Component(ABC):
     additional_code: AdditionalCode
         Additional code contributing to a unique instance of a base model,
         e.g. namelists, source modifications, etc.
-    input_datasets: list of InputDatasets
-        Any spatiotemporal data needed to run this instance of the base model
-        e.g. initial conditions, surface forcing, etc.
     discretization: Discretization
         Any information related to the discretization of this Component
         e.g. time step, number of vertical levels, etc.
@@ -43,18 +38,16 @@ class Component(ABC):
 
     base_model: BaseModel
     additional_code: Optional["AdditionalCode"]
-    input_datasets: Sequence[InputDataset]
     discretization: Optional["Discretization"]
 
     def __init__(
         self,
         base_model: BaseModel,
         additional_code: Optional["AdditionalCode"] = None,
-        input_datasets: Optional[Sequence["InputDataset"]] = None,
         discretization: Optional["Discretization"] = None,
     ):
         """
-        Initialize a Component object from a base model and any additional_code or input_datasets
+        Initialize a Component object from a base model and any additional_code
 
         Parameters:
         -----------
@@ -64,9 +57,6 @@ class Component(ABC):
         additional_code: AdditionalCode (Optional, default None)
             Additional code contributing to a unique instance of a base model,
             e.g. namelists, source modifications, etc.
-        input_datasets: list of InputDatasets (Optional, default [])
-            Any spatiotemporal data needed to run this instance of the base model
-            e.g. initial conditions, surface forcing, etc.
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component (e.g. time step)
 
@@ -81,7 +71,6 @@ class Component(ABC):
             )
         self.base_model = base_model
         self.additional_code = additional_code or None
-        self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization or None
 
     @classmethod
@@ -103,12 +92,12 @@ class Component(ABC):
         component_dict (dict):
            A dictionary representation of this Component.
         """
-        component_dict: dict = {}
+        component_dict = {}
 
         component_dict["component_type"] = self.component_type
 
         # BaseModel:
-        base_model_info: dict = {}
+        base_model_info = {}
         base_model_info["source_repo"] = self.base_model.source_repo
         base_model_info["checkout_target"] = self.base_model.checkout_target
         component_dict["base_model"] = base_model_info
@@ -117,7 +106,7 @@ class Component(ABC):
         additional_code = self.additional_code
 
         if additional_code is not None:
-            additional_code_info: dict = {}
+            additional_code_info = {}
 
             additional_code_info["location"] = additional_code.source.location
             additional_code_info["subdir"] = additional_code.subdir
@@ -144,12 +133,9 @@ class Component(ABC):
 
         NAC = 0 if self.additional_code is None else 1
 
-        NID = len(self.input_datasets)
-
         base_str += (
             f"\n{NAC} AdditionalCode instances (query using Component.additional_code)"
         )
-        base_str += f"\n{NID} Input datasets (query using Component.input_datasets)"
         if hasattr(self, "discretization") and self.discretization is not None:
             base_str += "\n\nDiscretization:\n"
             base_str += self.discretization.__str__()
@@ -165,12 +151,7 @@ class Component(ABC):
             repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
         else:
             repr_str += "\n additional_code = None"
-        if hasattr(self, "input_datasets"):
-            ID_list = []
-            for i, inp in enumerate(self.input_datasets):
-                ID_list.append(f"<{inp.__class__.__name__} from {inp.source.basename}>")
 
-            repr_str += f"\ninput_datasets = {_list_to_concise_str(ID_list,pad=18,items_are_strs=False)}"
         if hasattr(self, "discretization"):
             repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
         repr_str += "\n)"
