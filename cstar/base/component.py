@@ -1,3 +1,4 @@
+from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Optional, TYPE_CHECKING, Sequence
 
@@ -83,6 +84,54 @@ class Component(ABC):
         self.input_datasets = [] if input_datasets is None else input_datasets
         self.discretization = discretization or None
 
+    @classmethod
+    @abstractmethod
+    def from_dict(self):
+        """
+        Construct this component instance from a dictionary of kwargs.
+
+        This method is implemented separately for different subclasses of Component.
+        """
+        pass
+
+    def to_dict(self):
+        """
+        Create a dictionary representation of this Component object.
+
+        Returns:
+        --------
+        component_dict (dict):
+           A dictionary representation of this Component.
+        """
+        component_dict: dict = {}
+
+        component_dict["component_type"] = self.component_type
+
+        # BaseModel:
+        base_model_info: dict = {}
+        base_model_info["source_repo"] = self.base_model.source_repo
+        base_model_info["checkout_target"] = self.base_model.checkout_target
+        component_dict["base_model"] = base_model_info
+
+        # AdditionalCode
+        additional_code = self.additional_code
+
+        if additional_code is not None:
+            additional_code_info: dict = {}
+
+            additional_code_info["location"] = additional_code.source.location
+            additional_code_info["subdir"] = additional_code.subdir
+            additional_code_info["checkout_target"] = additional_code.checkout_target
+
+            if additional_code.source_mods is not None:
+                additional_code_info["source_mods"] = additional_code.source_mods
+            if additional_code.namelists is not None:
+                additional_code_info["namelists"] = additional_code.namelists
+
+            component_dict["additional_code"] = additional_code_info
+
+        return component_dict
+
     def __str__(self) -> str:
         # Header
         name = self.__class__.__name__
@@ -116,12 +165,14 @@ class Component(ABC):
             repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
         else:
             repr_str += "\n additional_code = None"
-        ID_list = []
-        for i, inp in enumerate(self.input_datasets):
-            ID_list.append(f"<{inp.__class__.__name__} from {inp.source.basename}>")
+        if hasattr(self, "input_datasets"):
+            ID_list = []
+            for i, inp in enumerate(self.input_datasets):
+                ID_list.append(f"<{inp.__class__.__name__} from {inp.source.basename}>")
 
-        repr_str += f"\ninput_datasets = {_list_to_concise_str(ID_list,pad=18,items_are_strs=False)}"
-        repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
+            repr_str += f"\ninput_datasets = {_list_to_concise_str(ID_list,pad=18,items_are_strs=False)}"
+        if hasattr(self, "discretization"):
+            repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
         repr_str += "\n)"
 
         return repr_str
@@ -130,6 +181,17 @@ class Component(ABC):
     @abstractmethod
     def component_type(self) -> str:
         pass
+
+    def setup(self, additional_code_target_dir: str | Path) -> None:
+        # Setup BaseModel
+        infostr = f"Configuring {self.__class__.__name__}"
+        print(infostr + "\n" + "-" * len(infostr))
+        self.base_model.handle_config_status()
+
+        # AdditionalCode
+        print("\nFetching additional code... " + "\n--------------------------")
+        if self.additional_code is not None:
+            self.additional_code.get(additional_code_target_dir)
 
     @abstractmethod
     def build(self) -> None:

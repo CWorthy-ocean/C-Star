@@ -3,23 +3,13 @@ import warnings
 import datetime as dt
 import dateutil.parser
 from pathlib import Path
-from typing import List, Any, Optional, TYPE_CHECKING, Type
+from typing import List, Optional, TYPE_CHECKING
 
-from cstar.base.component import Component, Discretization
-from cstar.base.additional_code import AdditionalCode
+from cstar.base.component import Component
 from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
 from cstar.base.utils import _dict_to_tree
-from cstar.base.input_dataset import InputDataset
-from cstar.roms.input_dataset import (
-    ROMSInputDataset,
-    ROMSModelGrid,
-    ROMSInitialConditions,
-    ROMSTidalForcing,
-    ROMSBoundaryForcing,
-    ROMSSurfaceForcing,
-)
-from cstar.roms.component import ROMSComponent, ROMSDiscretization
-
+from cstar.roms.component import ROMSComponent
+from cstar.marbl.component import MARBLComponent
 
 if TYPE_CHECKING:
     pass
@@ -275,7 +265,9 @@ class Case:
                 return False
 
             # Check InputDatasets
-            if component.input_datasets is None:
+            if (not hasattr(component, "input_datasets")) or (
+                component.input_datasets is None
+            ):
                 continue
             for inp in component.input_datasets:
                 if (inp.working_path is None) or (not inp.working_path.exists()):
@@ -438,87 +430,23 @@ class Case:
         for component in bp_dict["components"]:
             component_info = component.get("component")
             component_type = component_info.get("component_type")
+
             if component_type is None:
                 raise ValueError(
                     f"'component_type' not found for component entry in blueprint {blueprint}"
                 )
-
-            component_kwargs: dict[str, Any] = {}
-
-            # Decide which subclasses to use
-            ThisComponent: Type["ROMSComponent"] | Type["MARBLComponent"]
-            ThisBaseModel: Type["ROMSBaseModel"] | Type["MARBLBaseModel"]
-            ThisDiscretization: Type["ROMSDiscretization"] | None
-
+            component_info.pop("component_type")
             match component_type.casefold():
                 case "roms":
-                    from cstar.roms import ROMSBaseModel, ROMSComponent
-
-                    ThisComponent = ROMSComponent
-                    ThisBaseModel = ROMSBaseModel
-                    ThisDiscretization = ROMSDiscretization
+                    components.append(ROMSComponent.from_dict(component_info))
                 case "marbl":
-                    from cstar.marbl import MARBLBaseModel, MARBLComponent
-
-                    ThisComponent = MARBLComponent
-                    ThisBaseModel = MARBLBaseModel
+                    components.append(MARBLComponent.from_dict(component_info))
                 case _:
                     raise ValueError(
                         f"component_type {component_type} in blueprint "
                         + f"{blueprint}  does not match a value that is supported by C-Star. "
                         + 'Currently supported values are "ROMS" and "MARBL"'
                     )
-
-            # Construct the BaseModel instance
-            base_model_info = component_info.get("base_model")
-            base_model = ThisBaseModel(**base_model_info)
-            component_kwargs["base_model"] = base_model
-
-            # Construct the Discretization instance
-            discretization: Optional[Discretization] = None
-            if "discretization" in component_info.keys():
-                discretization_info = component_info.get("discretization")
-                if ThisDiscretization is not None:
-                    discretization = ThisDiscretization(**discretization_info)
-                    component_kwargs["discretization"] = discretization
-
-            # Construct any AdditionalCode instances
-            additional_code: Optional[AdditionalCode] = None
-            if "additional_code" in component_info.keys():
-                additional_code_info = component_info.get("additional_code")
-                additional_code = AdditionalCode(**additional_code_info)
-                component_kwargs["additional_code"] = additional_code
-
-            # Construct any InputDataset instances:
-            input_datasets: List[InputDataset] | None
-            input_dataset_info = component_info.get("input_datasets", {})
-            input_datasets = []
-
-            if component_type.casefold() == "roms":
-                idtype_class_map = {
-                    "model_grid": ROMSModelGrid,
-                    "initial_conditions": ROMSInitialConditions,
-                    "tidal_forcing": ROMSTidalForcing,
-                    "boundary_forcing": ROMSBoundaryForcing,
-                    "surface_forcing": ROMSSurfaceForcing,
-                }
-
-                ## Loop over input_datasets entries,initialise appropriate class, append to list
-                for idtype, dataset_info in input_dataset_info.items():
-                    if idtype in idtype_class_map:
-                        # Get the class to be instantiated
-                        ThisInputDataset = idtype_class_map[idtype]
-
-                        for file_info in dataset_info["files"]:
-                            input_datasets.append(ThisInputDataset(**file_info))
-                    else:
-                        raise ValueError(
-                            f"InputDataset type {idtype} in {blueprint} not recognized"
-                        )
-            if len(input_datasets) > 0:
-                component_kwargs["input_datasets"] = input_datasets
-
-            components.append(ThisComponent(**component_kwargs))
 
         caseinstance = cls(
             components=components,
@@ -567,90 +495,7 @@ class Case:
         bp_dict["components"] = []
 
         for component in self.components:
-            component_info: dict = {}
-
-            component_info["component_type"] = component.component_type
-            # This will be bp_dict["components"]["component"]=component_info
-
-            base_model_info: dict = {}
-            base_model_info["source_repo"] = component.base_model.source_repo
-            base_model_info["checkout_target"] = component.base_model.checkout_target
-            component_info["base_model"] = base_model_info
-
-            # discretization info (if present)
-            discretization_info = {}
-            if (
-                hasattr(component, "discretization")
-                and component.discretization is not None
-            ):
-                for thisattr in vars(component.discretization).keys():
-                    discretization_info[thisattr] = getattr(
-                        component.discretization, thisattr
-                    )
-            if len(discretization_info) > 0:
-                component_info["discretization"] = discretization_info
-
-            # AdditionalCode instances - can also be None
-            # Loop over additional code
-            additional_code = component.additional_code
-
-            if additional_code is not None:
-                additional_code_info: dict = {}
-                # This will be component_info["component"]["additional_code"]=additional_code_info
-                additional_code_info["location"] = additional_code.source.location
-                additional_code_info["subdir"] = additional_code.subdir
-                additional_code_info["checkout_target"] = (
-                    additional_code.checkout_target
-                )
-                if additional_code.source_mods is not None:
-                    additional_code_info["source_mods"] = (
-                        additional_code.source_mods
-                    )  # this is a list
-                if additional_code.namelists is not None:
-                    additional_code_info["namelists"] = additional_code.namelists
-
-                component_info["additional_code"] = additional_code_info
-
-            # InputDataset
-            input_datasets = component.input_datasets
-
-            input_dataset_info: dict = {}
-            for ind in input_datasets:
-                # Determine what kind of input dataset we are adding
-                if isinstance(ind, ROMSModelGrid):
-                    dct_key = "model_grid"
-                elif isinstance(ind, ROMSInitialConditions):
-                    dct_key = "initial_conditions"
-                elif isinstance(ind, ROMSTidalForcing):
-                    dct_key = "tidal_forcing"
-                elif isinstance(ind, ROMSBoundaryForcing):
-                    dct_key = "boundary_forcing"
-                elif isinstance(ind, ROMSSurfaceForcing):
-                    dct_key = "surface_forcing"
-                else:
-                    raise ValueError(f"Unknown dataset type: {type(ind)}")
-
-                # If there is not already an instance of this input dataset type,
-                # add an empty dict as the key so we can access/build it
-                if dct_key not in input_dataset_info.keys():
-                    input_dataset_info[dct_key] = {}
-
-                # Create a dictionary of file_info for each dataset file:
-                if "files" not in input_dataset_info[dct_key].keys():
-                    input_dataset_info[dct_key]["files"] = []
-                file_info = {}
-                file_info["location"] = ind.source.location
-                if hasattr(ind, "file_hash") and (ind.file_hash is not None):
-                    file_info["file_hash"] = ind.file_hash
-                if hasattr(ind, "start_date") and (ind.start_date is not None):
-                    file_info["start_date"] = str(ind.start_date)
-                if hasattr(ind, "end_date") and (ind.end_date is not None):
-                    file_info["end_date"] = str(ind.end_date)
-
-                input_dataset_info[dct_key]["files"].append(file_info)
-
-                component_info["input_datasets"] = input_dataset_info
-
+            component_info = component.to_dict()
             bp_dict["components"].append({"component": component_info})
 
         with open(filename, "w") as yaml_file:
@@ -677,47 +522,17 @@ class Case:
         for component in self.components:
             infostr = f"\nSetting up {component.__class__.__name__}"
             print(infostr + "\n" + "-" * len(infostr))
-
-            # Check BaseModel
-            infostr = f"\nConfiguring {component.base_model.__class__.__name__}"
-            print(infostr + "\n" + "-" * len(infostr))
-            component.base_model.handle_config_status()
-
-            # Get AdditionalCode
-            if component.additional_code is not None:
-                print("\nFetching additional code... " + "\n--------------------------")
-                component.additional_code.get(
-                    self.caseroot / "additional_code" / component.component_type
+            if isinstance(component, ROMSComponent):
+                component.setup(
+                    additional_code_target_dir=self.caseroot / "additional_code/ROMS",
+                    input_datasets_target_dir=self.caseroot / "input_datasets/ROMS",
+                    start_date=self.start_date,
+                    end_date=self.end_date,
                 )
-
-            # Get InputDatasets
-            # Verify dates line up before running .get():
-            if (component.input_datasets is None) or (
-                len(component.input_datasets) == 0
-            ):
-                continue
-            print("\nFetching input datasets..." + "\n--------------------------")
-            for inp in component.input_datasets:
-                # Download input dataset if its date range overlaps Case's date range
-                if (
-                    ((inp.start_date is None) or (inp.end_date is None))
-                    or ((self.start_date is None) or (self.end_date is None))
-                    or (inp.start_date <= self.end_date)
-                    and (self.end_date >= self.start_date)
-                ):
-                    if isinstance(inp, ROMSInputDataset) and (
-                        inp.source.source_type == "yaml"
-                    ):
-                        inp.get_from_yaml(
-                            self.caseroot
-                            / f"input_datasets/{component.component_type}",
-                            start_date=self.start_date,
-                            end_date=self.end_date,
-                        )
-                    else:
-                        inp.get(
-                            self.caseroot / f"input_datasets/{component.component_type}"
-                        )
+            elif isinstance(component, MARBLComponent):
+                component.setup(
+                    additional_code_target_dir=self.caseroot / "additional_code/MARBL"
+                )
 
     def build(self) -> None:
         """Compile any necessary additional code associated with this case

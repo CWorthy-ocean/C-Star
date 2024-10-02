@@ -1,12 +1,14 @@
 import warnings
 import subprocess
 from pathlib import Path
+from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List, Sequence
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base.component import Component, Discretization
-
+from cstar.roms.base_model import ROMSBaseModel
 from cstar.roms.input_dataset import (
+    ROMSInputDataset,
     ROMSInitialConditions,
     ROMSModelGrid,
     ROMSSurfaceForcing,
@@ -95,6 +97,7 @@ class ROMSComponent(Component):
         ROMSComponent:
             An intialized ROMSComponent object
         """
+
         self.base_model = base_model
         self.additional_code = additional_code
         self.input_datasets = [] if input_datasets is None else input_datasets
@@ -104,9 +107,204 @@ class ROMSComponent(Component):
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
 
+    @classmethod
+    def from_dict(cls, component_info):
+        """
+        Construct a ROMSComponent instance from a dictionary of kwargs.
+
+        Parameters:
+        -----------
+        component_info (dict):
+           A dictionary of keyword arguments used to construct this component.
+
+        Returns:
+        --------
+        ROMSComponent
+           An initialized ROMSComponent object
+        """
+
+        component_kwargs = {}
+        # Construct the BaseModel instance
+        base_model_info = component_info.get("base_model")
+        if base_model_info is None:
+            raise ValueError(
+                "Cannot construct a ROMSComponent instance without a "
+                + "ROMSBaseModel object, but could not find 'base_model' entry"
+            )
+        base_model = ROMSBaseModel(**base_model_info)
+
+        component_kwargs["base_model"] = base_model
+
+        # Construct the Discretization instance
+        discretization_info = component_info.get("discretization")
+        if discretization_info is None:
+            raise ValueError(
+                "Cannot construct a ROMSComponent instance without a "
+                + "ROMSDiscretization object, but could not find 'discretization' entry"
+            )
+        discretization = ROMSDiscretization(**discretization_info)
+
+        component_kwargs["discretization"] = discretization
+
+        # Construct any AdditionalCode instances
+        additional_code_info = component_info.get("additional_code")
+        if additional_code_info is None:
+            raise ValueError(
+                "Cannot construct a ROMSComponent instance without an "
+                + "AdditionalCode object, but could not find 'additional_code' entry"
+            )
+        additional_code = AdditionalCode(**additional_code_info)
+
+        component_kwargs["additional_code"] = additional_code
+
+        # Construct any InputDataset instances:
+        input_dataset_info = component_info.get("input_datasets", {})
+        input_datasets = []
+
+        idtype_class_map = {
+            "model_grid": ROMSModelGrid,
+            "initial_conditions": ROMSInitialConditions,
+            "tidal_forcing": ROMSTidalForcing,
+            "boundary_forcing": ROMSBoundaryForcing,
+            "surface_forcing": ROMSSurfaceForcing,
+        }
+
+        ## Loop over input_datasets entries,initialise appropriate class, append to list
+        for idtype, dataset_info in input_dataset_info.items():
+            if idtype in idtype_class_map:
+                # Get the class to be instantiated
+                ThisInputDataset = idtype_class_map[idtype]
+
+                for file_info in dataset_info["files"]:
+                    input_datasets.append(ThisInputDataset(**file_info))
+            else:
+                raise ValueError(f"InputDataset type {idtype} not recognized")
+        if len(input_datasets) > 0:
+            component_kwargs["input_datasets"] = input_datasets
+
+        return cls(**component_kwargs)
+
     @property
     def component_type(self) -> str:
         return "ROMS"
+
+    def to_dict(self) -> dict:
+        # Docstring is inherited
+
+        component_info = super().to_dict()
+
+        # Discretization
+        discretization_info = {}
+        for thisattr in vars(self.discretization).keys():
+            discretization_info[thisattr] = getattr(self.discretization, thisattr)
+        component_info["discretization"] = discretization_info
+
+        # InputDataset
+        input_datasets = self.input_datasets
+
+        input_dataset_info: dict = {}
+        for ind in input_datasets:
+            # Determine what kind of input dataset we are adding
+            if isinstance(ind, ROMSModelGrid):
+                dct_key = "model_grid"
+            elif isinstance(ind, ROMSInitialConditions):
+                dct_key = "initial_conditions"
+            elif isinstance(ind, ROMSTidalForcing):
+                dct_key = "tidal_forcing"
+            elif isinstance(ind, ROMSBoundaryForcing):
+                dct_key = "boundary_forcing"
+            elif isinstance(ind, ROMSSurfaceForcing):
+                dct_key = "surface_forcing"
+            else:
+                raise ValueError(f"Unknown dataset type: {type(ind)}")
+
+            # If there is not already an instance of this input dataset type,
+            # add an empty dict as the key so we can access/build it
+            if dct_key not in input_dataset_info.keys():
+                input_dataset_info[dct_key] = {}
+
+            # Create a dictionary of file_info for each dataset file:
+            if "files" not in input_dataset_info[dct_key].keys():
+                input_dataset_info[dct_key]["files"] = []
+            file_info = {}
+            file_info["location"] = ind.source.location
+            if hasattr(ind, "file_hash") and (ind.file_hash is not None):
+                file_info["file_hash"] = ind.file_hash
+            if hasattr(ind, "start_date") and (ind.start_date is not None):
+                file_info["start_date"] = str(ind.start_date)
+            if hasattr(ind, "end_date") and (ind.end_date is not None):
+                file_info["end_date"] = str(ind.end_date)
+
+            input_dataset_info[dct_key]["files"].append(file_info)
+
+        if len(input_dataset_info) > 0:
+            component_info["input_datasets"] = input_dataset_info
+
+        return component_info
+
+    def setup(
+        self,
+        additional_code_target_dir: str | Path,
+        input_datasets_target_dir: Optional[str | Path] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> None:
+        """
+        Set up this ROMSComponent instance locally.
+
+        This method ensures the ROMSBaseModel is correctly configured, and
+        that any additional code and input datasets corresponding to the
+        chosen simulation period (defined by `start_date` and `end_date`)
+        are made available in the chosen `additional_code_target_dir` and
+        `input_datasets_target_dir` directories
+
+        Parameters:
+        -----------
+        additional_code_target_dir (str or Path):
+           The directory in which to save local copies of the files described by
+           ROMSComponent.additional_code
+        input_datasets_target_dir (str or Path):
+           The directory in which to make locally accessible the input datasets
+           described by ROMSComponent.input_datasets
+        start_date (datetime.datetime):
+           The date from which the ROMSComponent is expected to be run. Used to
+           determine which input datasets are needed as part of this setup call.
+        end_date (datetime.datetime):
+           The date until which the ROMSComponent is expected to be run. Used to
+           determine which input datasets are needed as part of this setup call.
+
+        """
+
+        super().setup(additional_code_target_dir=additional_code_target_dir)
+
+        # InputDatasets
+        print("\nFetching input datasets..." + "\n--------------------------")
+        for inp in self.input_datasets:
+            # Download input dataset if its date range overlaps Case's date range
+            if (
+                ((inp.start_date is None) or (inp.end_date is None))
+                or ((start_date is None) or (end_date is None))
+                or (inp.start_date <= end_date)
+                and (end_date >= start_date)
+            ):
+                if input_datasets_target_dir is None:
+                    raise ValueError(
+                        "ROMSComponent.input_datasets has entries "
+                        + f" in the specified date range {start_date},{end_date}, "
+                        + "but ROMSComponent.setup() did not receive "
+                        + "a input_datasets_target_dir argument"
+                    )
+
+                if (isinstance(inp, ROMSInputDataset)) and (
+                    inp.source.source_type == "yaml"
+                ):
+                    inp.get_from_yaml(
+                        input_datasets_target_dir,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+                else:
+                    inp.get(input_datasets_target_dir)
 
     def build(self) -> None:
         """
