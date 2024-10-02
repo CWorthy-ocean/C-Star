@@ -1,5 +1,6 @@
 import warnings
 import subprocess
+import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
@@ -254,6 +255,192 @@ class ROMSComponent(Component):
         return "ROMS"
 
     @property
+    def _namelist_modifications(self) -> list[dict]:
+        """List of modifications to be made to template namelist files
+
+        This property takes the current state of ROMSComponent and returns a
+        list of dictionaries (one dictionary per namelist file) whose keys
+        are placeholder strings to replace in the template namelist,
+        and whose values are their replacements.
+
+        The property uses the `partitioned_files_to_namelist_string` local
+        helper function to format input dataset paths such that ROMS can
+        recognise them.
+
+        Related:
+        --------
+        ROMSComponent.update_namelists():
+           uses this property to create a modified namelist from a template
+        """
+
+        # Helper function for formatting:
+        def partitioned_files_to_namelist_string(input_dataset):
+            """Take a ROMSInputDataset that has been partitioned
+            and return a ROMS namelist-compatible string pointing to it
+            e.g. path/to/roms_file.232.nc -> '     path/to/roms_file.nc'
+            """
+
+            unique_paths = {
+                str(Path(f).parent / (Path(Path(f).stem).stem + ".nc"))
+                for f in input_dataset.partitioned_files
+            }
+            return "\n     ".join(sorted(list(unique_paths)))
+
+        # Initialise the list of dictionaries:
+        if self.namelists is None:
+            raise ValueError(
+                "attempted to access "
+                + "ROMSComponent._namelist_modifications, but "
+                + "ROMSComponent.namelists is None"
+            )
+
+        namelist_modifications: list[dict] = [{} for f in self.namelists.files]
+
+        ################################################################################
+        # 'roms.in' file modifications (the only namelist to modify as of 2024-10-01):
+        ################################################################################
+        # First figure out which namelist is the one to modify
+        if "roms.in_TEMPLATE" in self.namelists.files:
+            nl_idx = self.namelists.files.index("roms.in_TEMPLATE")
+        else:
+            raise ValueError(
+                "could not find expected template namelist file "
+                + "roms.in_TEMPLATE to modify. "
+                + "ROMS requires a namelist file to run."
+            )
+
+        # Time step entry
+        namelist_modifications[nl_idx]["__TIMESTEP_PLACEHOLDER__"] = (
+            self.discretization.time_step
+        )
+
+        # Grid file entry
+        if self.model_grid is not None:
+            if len(self.model_grid.partitioned_files) == 0:
+                raise ValueError(
+                    "could not find a local path to a partitioned"
+                    + "ROMS grid file. Run ROMSComponent.pre_run() [or "
+                    + "Case.pre_run() if running a Case] to partition "
+                    + "ROMS input datasets and try again."
+                )
+
+            namelist_modifications[nl_idx]["__GRID_FILE_PLACEHOLDER__"] = (
+                partitioned_files_to_namelist_string(self.model_grid)
+            )
+
+        # Initial conditions entry
+        if self.initial_conditions is not None:
+            if len(self.initial_conditions.partitioned_files) == 0:
+                raise ValueError(
+                    "could not find a local path to a partitioned"
+                    + "ROMS initial file. Run ROMSComponent.pre_run() [or "
+                    + "Case.pre_run() if running a Case] to partition "
+                    + "ROMS input datasets and try again."
+                )
+
+            namelist_modifications[nl_idx]["__INITIAL_CONDITION_FILE_PLACEHOLDER__"] = (
+                partitioned_files_to_namelist_string(self.initial_conditions)
+            )
+
+        # Forcing files entry
+        namelist_forcing_str = ""
+        for sf in self.surface_forcing:
+            if len(sf.partitioned_files) > 0:
+                namelist_forcing_str += (
+                    "\n     " + partitioned_files_to_namelist_string(sf)
+                )
+        for bf in self.boundary_forcing:
+            if len(bf.partitioned_files) > 0:
+                namelist_forcing_str += (
+                    "\n     " + partitioned_files_to_namelist_string(bf)
+                )
+        if self.tidal_forcing is not None:
+            if len(self.tidal_forcing.partitioned_files) == 0:
+                raise ValueError(
+                    "ROMSComponent has tidal_forcing attribute "
+                    + "but could not find a local path to a partitioned "
+                    + "tidal forcing file. Run ROMSComponent.pre_run() "
+                    + "[or Case.pre_run() if building a Case] "
+                    + " to partition ROMS input datasets and try again."
+                )
+            namelist_forcing_str += "\n     " + partitioned_files_to_namelist_string(
+                self.tidal_forcing
+            )
+
+        namelist_modifications[nl_idx]["__FORCING_FILES_PLACEHOLDER__"] = (
+            namelist_forcing_str.lstrip()
+        )
+
+        # MARBL settings filepaths entries
+        ## NOTE: WANT TO RAISE IF PLACEHOLDER IS IN NAMELIST BUT not Path(marbl_file.exists())
+        if "marbl_in" in self.namelists.files:
+            if self.namelists.working_path is None:
+                raise ValueError(
+                    "ROMSComponent.namelists does not have a "
+                    + "'working_path' attribute. "
+                    + "Run ROMSComponent.namelists.get() and try again"
+                )
+            namelist_modifications[nl_idx]["__MARBL_SETTINGS_FILE_PLACEHOLDER__"] = str(
+                self.namelists.working_path / "marbl_in"
+            )
+
+        if "marbl_tracer_output_list" in self.namelists.files:
+            if self.namelists.working_path is None:
+                raise ValueError(
+                    "ROMSComponent.namelists does not have a "
+                    + "'working_path' attribute. "
+                    + "Run ROMSComponent.namelists.get() and try again"
+                )
+
+            namelist_modifications[nl_idx]["__MARBL_TRACER_LIST_FILE_PLACEHOLDER__"] = (
+                str(self.namelists.working_path / "marbl_tracer_output_list")
+            )
+
+        if "marbl_diagnostic_output_list" in self.namelists.files:
+            if self.namelists.working_path is None:
+                raise ValueError(
+                    "ROMSComponent.namelists does not have a "
+                    + "'working_path' attribute. "
+                    + "Run ROMSComponent.namelists.get() and try again"
+                )
+
+            namelist_modifications[nl_idx]["__MARBL_DIAG_LIST_FILE_PLACEHOLDER__"] = (
+                str(self.namelists.working_path / "marbl_diagnostic_output_list")
+            )
+
+        return namelist_modifications
+
+    def update_namelists(self):
+        """
+        Update ROMSComponent.namelists.modified_files based on current state.
+
+        This method loops over the ROMSComponent.namelists.files list, and:
+        1. Creates modifiable copies of any template namelist files
+        2. Replaces placeholder strings in the modifiable namelists based on
+           the current ROMSComponent state
+        3. Updates ROMSComponent.namelists.modified_files
+        """
+
+        no_template_found = True
+        for nl_idx, nl_fname in enumerate(self.namelists.files):
+            nl_path = self.namelists.working_path / nl_fname
+            if str(nl_fname)[-9:] == "_TEMPLATE":
+                no_template_found = False
+                mod_nl_path = Path(str(nl_path)[:-9])
+                shutil.copy(nl_path, mod_nl_path)
+                for placeholder, replacement in self._namelist_modifications[
+                    nl_idx
+                ].items():
+                    _replace_text_in_file(mod_nl_path, placeholder, str(replacement))
+                self.namelists.modified_files[nl_idx] = mod_nl_path
+        if no_template_found:
+            raise FileNotFoundError(
+                "No editable namelist found to set ROMS runtime parameters. "
+                + "Expected to find a file in ROMSComponent.namelists"
+                + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
+            )
+
+    @property
     def input_datasets(self) -> list:
         """list all ROMSInputDataset objects associated with this ROMSComponent"""
 
@@ -473,32 +660,21 @@ class ROMSComponent(Component):
             ):
                 raise ValueError(
                     "Unable to prepare ROMSComponent for execution: "
-                    + "\nROMSComponent.additional_code.working_path is None."
-                    + "\n Call ROMSComponent.additional_code.get() and try again"
+                    + "\nROMSComponent.additional_source_code.working_path is None."
+                    + "\n Call ROMSComponent.additional_source_code.get() and try again"
                 )
 
-            if not hasattr(self.namelists, "modified_files"):
+            if self.namelists is None:
                 raise ValueError(
-                    "No editable namelist found in which to set ROMS runtime parameters. "
-                    + "Expected to find a file in ROMSComponent.namelists.files"
-                    + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
+                    "At least one namelist is required to run ROMS, but "
+                    + "ROMSComponent.namelists is None"
                 )
-            else:
-                if self.namelists is None:
-                    raise ValueError(
-                        "At least one namelist is required to run ROMS, but "
-                        + "ROMSComponent.namelists is None"
-                    )
-                if self.namelists.working_path is None:
-                    raise ValueError(
-                        "No working path found for ROMSComponent.namelists. "
-                        + "Call ROMSComponent.namelists.get() and try again"
-                    )
-                mod_namelist = (
-                    self.namelists.working_path / self.namelists.modified_files[0]
+            if self.namelists.working_path is None:
+                raise ValueError(
+                    "No working path found for ROMSComponent.namelists. "
+                    + "Call ROMSComponent.namelists.get() and try again"
                 )
 
-            namelist_forcing_str = ""
             if len(datasets_to_partition) > 0:
                 from roms_tools.utils import partition_netcdf
             for f in datasets_to_partition:
@@ -549,89 +725,6 @@ class ROMSComponent(Component):
                 parted_files = [partdir / p.name for p in parted_files]
                 f.partitioned_files = parted_files
 
-                # Namelist modification step
-                print(f"Adding {idfile} to ROMS namelist file")
-                if isinstance(f, ROMSModelGrid):
-                    if f.working_path is None or isinstance(f.working_path, list):
-                        raise ValueError(
-                            f"ROMS only accepts a single grid file, found list {f.working_path}"
-                        )
-
-                    assert isinstance(f.working_path, Path), "silence, linter"
-
-                    namelist_grid_str = f"     {partdir / f.working_path.name} \n"
-                    _replace_text_in_file(
-                        mod_namelist, "__GRID_FILE_PLACEHOLDER__", namelist_grid_str
-                    )
-                elif isinstance(f, ROMSInitialConditions):
-                    if f.working_path is None or isinstance(f.working_path, list):
-                        raise ValueError(
-                            f"ROMS only accepts a single initial conditions file, found list {f.working_path}"
-                        )
-                    assert isinstance(f.working_path, Path), "silence, linter"
-                    namelist_ic_str = f"     {partdir / f.working_path.name} \n"
-                    _replace_text_in_file(
-                        mod_namelist,
-                        "__INITIAL_CONDITION_FILE_PLACEHOLDER__",
-                        namelist_ic_str,
-                    )
-                elif type(f) in [
-                    ROMSSurfaceForcing,
-                    ROMSTidalForcing,
-                    ROMSBoundaryForcing,
-                ]:
-                    if isinstance(f.working_path, Path):
-                        dslist = [
-                            f.working_path,
-                        ]
-                    elif isinstance(f.working_path, list):
-                        dslist = f.working_path
-                    for d in dslist:
-                        namelist_forcing_str += f"     {partdir / d.name} \n"
-
-            _replace_text_in_file(
-                mod_namelist, "__FORCING_FILES_PLACEHOLDER__", namelist_forcing_str
-            )
-
-            marbl_settings_path = self.namelists.working_path / "marbl_in"
-            marbl_placeholder_in_namelist = _replace_text_in_file(
-                mod_namelist,
-                "__MARBL_SETTINGS_FILE_PLACEHOLDER__",
-                str(marbl_settings_path),
-            )
-            if (marbl_placeholder_in_namelist) and (not marbl_settings_path.exists()):
-                raise FileNotFoundError(
-                    "Placeholder string for marbl_in file "
-                    + "found in ROMS namelist, but 'marbl_in' not found "
-                    + f"at {marbl_settings_path.parent}."
-                )
-
-            marbl_tracer_list_path = (
-                self.namelists.working_path / "marbl_tracer_output_list"
-            )
-            marbl_placeholder_in_namelist = _replace_text_in_file(
-                mod_namelist,
-                "__MARBL_TRACER_LIST_FILE_PLACEHOLDER__",
-                str(self.namelists.working_path / "marbl_tracer_output_list"),
-            )
-            if (marbl_placeholder_in_namelist) and (
-                not marbl_tracer_list_path.exists()
-            ):
-                raise FileNotFoundError(f"{marbl_tracer_list_path} not found.")
-
-            marbl_diag_list_path = (
-                self.namelists.working_path / "marbl_diagnostics_output_list"
-            )
-            if (marbl_placeholder_in_namelist) and (
-                not marbl_tracer_list_path.exists()
-            ):
-                raise FileNotFoundError(f"{marbl_diag_list_path} not found.")
-            marbl_placeholder_in_namelist = _replace_text_in_file(
-                mod_namelist,
-                "__MARBL_DIAG_LIST_FILE_PLACEHOLDER__",
-                str(self.namelists.working_path / "marbl_diagnostics_output_list"),
-            )
-
     def run(
         self,
         n_time_steps: Optional[int] = None,
@@ -677,14 +770,20 @@ class ROMSComponent(Component):
         # these are conceptually different:
         run_path = output_dir
 
-        if self.namelists is None:
-            raise FileNotFoundError(
-                "C-STAR: Unable to find namelist file (typically roms.in) "
-                + "associated with this ROMSComponent."
-            )
-            return
+        # 1. MODIFY NAMELIST
+        # Copy template namelist and add all current known information
+        # from this Component instance:
+        self.update_namelists()
+        # if self.namelists is None:
+        #     raise FileNotFoundError(
+        #         "C-STAR: Unable to find namelist file (typically roms.in) "
+        #         + "associated with this ROMSComponent."
+        #     )
+        #     return
 
-        # Add number of timesteps to namelist
+        # Now need to manually update number of time steps as it is unknown
+        # outside of the context of this function:
+
         # Check if n_time_steps is None, indicating it was not explicitly set
         if n_time_steps is None:
             n_time_steps = 1
@@ -696,28 +795,22 @@ class ROMSComponent(Component):
             )
         assert isinstance(n_time_steps, int)
 
-        if hasattr(self.namelists, "modified_files"):
+        if (self.namelists is not None) and (
+            "roms.in_TEMPLATE" in self.namelists.files
+        ):
+            nl_idx = self.namelists.files.index("roms.in_TEMPLATE")
             mod_namelist = (
-                self.namelists.working_path / self.namelists.modified_files[0]
+                self.namelists.working_path / self.namelists.modified_files[nl_idx]
             )
             _replace_text_in_file(
                 mod_namelist,
                 "__NTIMES_PLACEHOLDER__",
                 str(n_time_steps),
             )
-            _replace_text_in_file(
-                mod_namelist,
-                "__TIMESTEP_PLACEHOLDER__",
-                str(self.discretization.time_step),
-            )
 
-        else:
-            raise ValueError(
-                "No editable namelist found to set ROMS runtime parameters. "
-                + "Expected to find a file in ROMSComponent.namelists"
-                + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
-            )
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        ## 2: RUN ON THIS MACHINE
 
         match _CSTAR_SYSTEM:
             case "sdsc_expanse":

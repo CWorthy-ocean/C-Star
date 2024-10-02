@@ -121,8 +121,8 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
             return checkout_target
         else:
             raise ValueError(
-                "supplied checkout_target does not appear "
-                + "to be a valid reference for this repository"
+                f"supplied checkout_target ({checkout_target}) does not appear "
+                + f"to be a valid reference for this repository ({repo_url})"
             )
     else:
         return ls_remote.split()[0]
