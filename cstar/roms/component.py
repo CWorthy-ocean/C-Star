@@ -280,9 +280,11 @@ class ROMSComponent(Component):
             e.g. path/to/roms_file.232.nc -> '     path/to/roms_file.nc'
             """
 
-            fullpath = input_dataset.partitioned_files[0]
-            path_nl = fullpath.parent / (Path(fullpath.stem).stem + ".nc")
-            return f"     {str(path_nl)} \n"
+            unique_paths = {
+                str(Path(f).parent / (Path(Path(f).stem).stem + ".nc"))
+                for f in input_dataset.partitioned_files
+            }
+            return "\n     ".join(sorted(list(unique_paths)))
 
         # Initialise the list of dictionaries:
         if self.namelists is None:
@@ -344,10 +346,14 @@ class ROMSComponent(Component):
         namelist_forcing_str = ""
         for sf in self.surface_forcing:
             if len(sf.partitioned_files) > 0:
-                namelist_forcing_str += partitioned_files_to_namelist_string(sf)
+                namelist_forcing_str += (
+                    "\n     " + partitioned_files_to_namelist_string(sf)
+                )
         for bf in self.boundary_forcing:
             if len(bf.partitioned_files) > 0:
-                namelist_forcing_str += partitioned_files_to_namelist_string(bf)
+                namelist_forcing_str += (
+                    "\n     " + partitioned_files_to_namelist_string(bf)
+                )
         if self.tidal_forcing is not None:
             if len(self.tidal_forcing.partitioned_files) == 0:
                 raise ValueError(
@@ -357,11 +363,12 @@ class ROMSComponent(Component):
                     + "[or Case.pre_run() if building a Case] "
                     + " to partition ROMS input datasets and try again."
                 )
-            namelist_forcing_str += partitioned_files_to_namelist_string(
+            namelist_forcing_str += "\n     " + partitioned_files_to_namelist_string(
                 self.tidal_forcing
             )
+
         namelist_modifications[nl_idx]["__FORCING_FILES_PLACEHOLDER__"] = (
-            namelist_forcing_str
+            namelist_forcing_str.lstrip()
         )
 
         # MARBL settings filepaths entries
@@ -389,7 +396,7 @@ class ROMSComponent(Component):
                 str(self.namelists.working_path / "marbl_tracer_output_list")
             )
 
-        if "marbl_diagnostics_output_list" in self.namelists.files:
+        if "marbl_diagnostic_output_list" in self.namelists.files:
             if self.namelists.working_path is None:
                 raise ValueError(
                     "ROMSComponent.namelists does not have a "
@@ -398,7 +405,7 @@ class ROMSComponent(Component):
                 )
 
             namelist_modifications[nl_idx]["__MARBL_DIAG_LIST_FILE_PLACEHOLDER__"] = (
-                str(self.namelists.working_path / "marbl_diagnostics_output_list")
+                str(self.namelists.working_path / "marbl_diagnostic_output_list")
             )
 
         return namelist_modifications
@@ -922,7 +929,7 @@ class ROMSComponent(Component):
                 # will exit with code 0 even if a fatal error occurs, see:
                 # https://github.com/CESR-lab/ucla-roms/issues/42
 
-                debugging = False  # Print raw output if true
+                debugging = True  # Print raw output if true
                 if debugging:
                     while True:
                         output = romsprocess.stdout.readline()
