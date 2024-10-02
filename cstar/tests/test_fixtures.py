@@ -35,7 +35,7 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
     Asserts
     -------
     - The returned object is an instance of Path.
-    - The additional_code location matches that expected after replacement
+    - The additional_source_code location matches that expected after replacement
     """
     test_blueprint = modify_template_blueprint(
         template_blueprint_path=TEST_DIRECTORY
@@ -52,7 +52,7 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
         bpyaml = yaml.safe_load(bpfile)
 
     assert (
-        bpyaml["components"][1]["component"]["additional_code"]["location"]
+        bpyaml["components"][1]["component"]["additional_source_code"]["location"]
         == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
     )
 

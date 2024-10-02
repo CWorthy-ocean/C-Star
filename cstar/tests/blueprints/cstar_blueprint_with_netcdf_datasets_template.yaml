@@ -20,25 +20,28 @@ components:
         n_procs_x: 2
         n_procs_y: 2
         time_step: 60
-      additional_code:
+      namelists:
         location: '<additional_code_location>'
         checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
-        subdir: 'additional_code/ROMS'
-        source_mods:
-          - "source_mods/bgc.opt"
-          - "source_mods/bulk_frc.opt"
-          - "source_mods/cppdefs.opt"
-          - "source_mods/diagnostics.opt"
-          - "source_mods/ocean_vars.opt"
-          - "source_mods/param.opt"
-          - "source_mods/tides.opt"
-          - "source_mods/tracers.opt"
-          - "source_mods/Makefile"
-        namelists:
-          - "namelists/roms.in_TEMPLATE"
-          - "namelists/marbl_in"
-          - "namelists/marbl_tracer_output_list"
-          - "namelists/marbl_diagnostic_output_list"
+        subdir: 'additional_code/ROMS/namelists'
+        files:
+          - "roms.in_TEMPLATE"
+          - "marbl_in"
+          - "marbl_tracer_output_list"
+          - "marbl_diagnostic_output_list"
+      additional_source_code:
+        location: '<additional_code_location>'
+        checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
+        subdir: 'additional_code/ROMS/source_mods'
+        files:
+          - "bgc.opt"
+          - "bulk_frc.opt"
+          - "cppdefs.opt"
+          - "diagnostics.opt"
+          - "ocean_vars.opt"
+          - "param.opt"
+          - "tracers.opt"
+          - "Makefile"
       model_grid:
         location: '<input_datasets_location>/roms_grd.nc'
         file_hash: '893aff53b3c1d08c9bb381244f4fecbf9782403ba7cde82200ccb9d0f328745d'

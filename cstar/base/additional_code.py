@@ -1,6 +1,6 @@
 import shutil
 import tempfile
-from typing import Optional, List
+from typing import Optional
 from pathlib import Path
 from cstar.base.datasource import DataSource
 from cstar.base.utils import _clone_and_checkout, _list_to_concise_str
@@ -11,18 +11,7 @@ class AdditionalCode:
     Additional code contributing to a model component
 
     Additional code is assumed to be kept in a single directory or
-    subdirectory of a repository (described by the `source` attribute)
-    with this structure:
-
-    <additional_code_dir>
-        ├ namelists
-        |       ├ <namelist_file_1>
-        |       |       ...
-        |       └ <namelist_file_N>
-        └ source_mods
-                     ├ <source_code_file_1>
-                     |       ...
-                     └ <source_code_file_N>
+    subdirectory of a repository (described by the `source` attribute).
 
     Attributes:
     -----------
@@ -34,12 +23,9 @@ class AdditionalCode:
     checkout_target: Optional, str
         Used if source.source_type is 'repository'.
         A tag, git hash, or other target to check out.
-    source_mods: Optional, list of strs
+    files: Optional, list of strs
         Path(s) relative to the subdirectory `subdir` of `source.location`
-        to any code that is needed to compile a unique instance of the model component
-    namelists: str or list of strs
-        Path(s) relative to the subdirectory `subdir` of `source.location`
-        to any code that is needed at runtime for the model component
+        to the additional code files
     working_path: Path, default None
         The local path to the additional code. Set when `get()` method is called.
 
@@ -54,13 +40,14 @@ class AdditionalCode:
        Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
     """
 
+    files: list[str]
+
     def __init__(
         self,
         location: str,
         subdir: str = "",
         checkout_target: Optional[str] = None,
-        source_mods: Optional[List[str]] = None,
-        namelists: Optional[List[str]] = None,
+        files: Optional[list[str]] = None,
     ):
         """
         Initialize an AdditionalCode object from a DataSource  and a list of code files
@@ -74,12 +61,9 @@ class AdditionalCode:
            (e.g. if `location` points to a remote repository)
         checkout_target: Optional, str
             Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
-        source_mods: Optional, str or list of strs
+        files: Optional, list of strs
             Path(s) relative to the subdirectory `subdir` of `source.location`
-            to any code that is needed to compile a unique instance of the model component
-        namelists: Optional, str or list of strs
-            Path(s) relative to the subdirectory `subdir` of `source.location`
-            to any code that is needed at runtime for the model component
+            to the additional code files
 
         Returns:
         --------
@@ -90,14 +74,13 @@ class AdditionalCode:
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
         self.checkout_target: Optional[str] = checkout_target
-        self.source_mods: Optional[List[str]] = source_mods
-        self.namelists: Optional[List[str]] = namelists
+        self.files: Optional[list[str]] = [] if files is None else files
         self.working_path: Optional[Path] = None
 
         # If there are namelists, make a parallel attribute to keep track of the ones we are editing
         # AdditionalCode.get() determines which namelists are editable templates and updates this list
-        if self.namelists:
-            self.modified_namelists: list = []
+        if self.files:
+            self.modified_files: list = []
 
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
@@ -108,13 +91,9 @@ class AdditionalCode:
         base_str += f"\nExists locally: {self.exists_locally}"
         if not self.exists_locally:
             base_str += " (get with AdditionalCode.get())"
-        if self.source_mods is not None:
-            base_str += "\nSource code modification files (paths relative to above location and subdirectory)):"
-            for filename in self.source_mods:
-                base_str += f"\n    {filename}"
-        if self.namelists is not None:
-            base_str += "\nNamelist files (paths relative to above location):"
-            for filename in self.namelists:
+        if self.files is not None:
+            base_str += "\nFiles (paths relative to above location):"
+            for filename in self.files:
                 base_str += f"\n    {filename}"
                 if filename[-9:] == "_TEMPLATE":
                     base_str += f"      ({filename[:-9]} will be used by C-Star based on this template)"
@@ -127,10 +106,8 @@ class AdditionalCode:
         repr_str += f"\nsubdir = {self.subdir!r}"
         if hasattr(self, "checkout_target"):
             repr_str += f"\ncheckout_target = {self.checkout_target!r},"
-        if hasattr(self, "source_mods") and self.source_mods is not None:
-            repr_str += "\nsource_mods = " + _list_to_concise_str(self.source_mods)
-        if hasattr(self, "namelists") and self.namelists is not None:
-            repr_str += "\nnamelists = " + _list_to_concise_str(self.namelists, pad=13)
+        if hasattr(self, "files") and self.files is not None:
+            repr_str += "\nfiles = " + _list_to_concise_str(self.files)
         repr_str += "\n)"
         # Additional info:
         info_str = ""
@@ -149,11 +126,9 @@ class AdditionalCode:
         if self.working_path is None:
             return False
 
-        for file_type in ["source_mods", "namelists"]:
-            file_list = getattr(self, file_type)
-            for f in file_list:
-                if not (self.working_path / f).exists():
-                    return False
+        for f in self.files:
+            if not (self.working_path / f).exists():
+                return False
 
         return True
 
@@ -210,40 +185,32 @@ class AdditionalCode:
                 )
 
             # Now go through the file and copy them to local_dir
-            for file_type in ["source_mods", "namelists"]:
-                file_list = getattr(self, file_type)
+            if len(self.files) == 0:
+                return
+            local_dir.mkdir(parents=True, exist_ok=True)
+            for f in self.files:
+                src_file_path = source_dir / f
+                tgt_file_path = local_dir / Path(f).name
 
-                if file_list is None:
-                    continue
-                (local_dir / file_type).mkdir(parents=True, exist_ok=True)
-
-                for f in file_list:
-                    src_file_path = source_dir / f
-                    tgt_file_path = local_dir / file_type / Path(f).name
+                print(
+                    f"copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
+                )
+                if src_file_path.exists():
+                    shutil.copy(src_file_path, tgt_file_path)
+                else:
+                    raise FileNotFoundError(f"Error: {src_file_path} does not exist.")
+                # Special case for template namelists:
+                if str(src_file_path)[-9:] == "_TEMPLATE":
                     print(
-                        f"copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
+                        f"copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
                     )
-                    if src_file_path.exists():
-                        shutil.copy(src_file_path, tgt_file_path)
+                    shutil.copy(tgt_file_path, str(tgt_file_path)[:-9])
+                    if hasattr(self, "modified_files"):
+                        self.modified_files.append(f[:-9])
                     else:
-                        raise FileNotFoundError(
-                            f"Error: {src_file_path} does not exist."
-                        )
-                    # Special case for template namelists:
-                    if (
-                        file_type == "namelists"
-                        and str(src_file_path)[-9:] == "_TEMPLATE"
-                    ):
-                        print(
-                            f"copying {tgt_file_path} to editable namelist {str(tgt_file_path)[:-9]}"
-                        )
-                        shutil.copy(tgt_file_path, str(tgt_file_path)[:-9])
-                        if hasattr(self, "modified_namelists"):
-                            self.modified_namelists.append(f[:-9])
-                        else:
-                            self.modified_namelists = [
-                                f[:-9],
-                            ]
+                        self.modified_files = [
+                            f[:-9],
+                        ]
 
             self.working_path = local_dir
         finally:

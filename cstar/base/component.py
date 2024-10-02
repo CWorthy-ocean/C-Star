@@ -1,4 +1,3 @@
-from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Optional, TYPE_CHECKING
 
@@ -17,9 +16,12 @@ class Component(ABC):
     base_model: BaseModel
         An object pointing to the unmodified source code of a model handling an individual
         aspect of the simulation such as biogeochemistry or ocean circulation
-    additional_code: AdditionalCode
-        Additional code contributing to a unique instance of a base model,
-        e.g. namelists, source modifications, etc.
+    additional_source_code: AdditionalCode (Optional, default None)
+        Additional source code contributing to a unique instance of a base model,
+        to be included at compile time
+    namelists: AdditionalCode (Optional, default None)
+        Namelist files contributing to a unique instance of the base model,
+        to be used at runtime
     discretization: Discretization
         Any information related to the discretization of this Component
         e.g. time step, number of vertical levels, etc.
@@ -37,13 +39,15 @@ class Component(ABC):
     """
 
     base_model: BaseModel
-    additional_code: Optional["AdditionalCode"]
+    namelists: Optional["AdditionalCode"]
+    additional_source_code: Optional["AdditionalCode"]
     discretization: Optional["Discretization"]
 
     def __init__(
         self,
         base_model: BaseModel,
-        additional_code: Optional["AdditionalCode"] = None,
+        namelists: Optional["AdditionalCode"] = None,
+        additional_source_code: Optional["AdditionalCode"] = None,
         discretization: Optional["Discretization"] = None,
     ):
         """
@@ -54,9 +58,12 @@ class Component(ABC):
         base_model: BaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        additional_code: AdditionalCode (Optional, default None)
-            Additional code contributing to a unique instance of a base model,
-            e.g. namelists, source modifications, etc.
+        additional_source_code: AdditionalCode (Optional, default None)
+            Additional source code contributing to a unique instance of a base model,
+            to be included at compile time
+        namelists: AdditionalCode (Optional, default None)
+            Namelist files contributing to a unique instance of the base model,
+            to be used at runtime
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component (e.g. time step)
 
@@ -70,7 +77,7 @@ class Component(ABC):
                 "base_model must be provided and must be an instance of BaseModel"
             )
         self.base_model = base_model
-        self.additional_code = additional_code or None
+        self.additional_source_code = additional_source_code or None
         self.discretization = discretization or None
 
     @classmethod
@@ -102,22 +109,19 @@ class Component(ABC):
         base_model_info["checkout_target"] = self.base_model.checkout_target
         component_dict["base_model"] = base_model_info
 
-        # AdditionalCode
-        additional_code = self.additional_code
+        # additional source code
+        additional_src = getattr(self, "additional_source_code")
+        if additional_src is not None:
+            additional_src_info = {}
+            additional_src_info["location"] = additional_src.source.location
+            if additional_src.subdir is not None:
+                additional_src_info["subdir"] = additional_src.subdir
+            if additional_src.checkout_target is not None:
+                additional_src_info["checkout_target"] = additional_src.checkout_target
+            if additional_src.files is not None:
+                additional_src_info["files"] = additional_src.files
 
-        if additional_code is not None:
-            additional_code_info = {}
-
-            additional_code_info["location"] = additional_code.source.location
-            additional_code_info["subdir"] = additional_code.subdir
-            additional_code_info["checkout_target"] = additional_code.checkout_target
-
-            if additional_code.source_mods is not None:
-                additional_code_info["source_mods"] = additional_code.source_mods
-            if additional_code.namelists is not None:
-                additional_code_info["namelists"] = additional_code.namelists
-
-            component_dict["additional_code"] = additional_code_info
+            component_dict["additional_source_code"] = additional_src_info
 
         return component_dict
 
@@ -131,11 +135,14 @@ class Component(ABC):
         # Attrs
         base_str += "\nBuilt from: "
 
-        NAC = 0 if self.additional_code is None else 1
-
-        base_str += (
-            f"\n{NAC} AdditionalCode instances (query using Component.additional_code)"
+        NN = 0 if self.namelists is None else len(self.namelists.files)
+        NS = (
+            0
+            if self.additional_source_code is None
+            else len(self.additional_source_code.files)
         )
+        base_str += f"\n{NN} namelist files (query using Component.namelists)"
+        base_str += f"\n{NS} additional source code files (query using Component.additional_source_code)"
         if hasattr(self, "discretization") and self.discretization is not None:
             base_str += "\n\nDiscretization:\n"
             base_str += self.discretization.__str__()
@@ -147,10 +154,19 @@ class Component(ABC):
     def __repr__(self) -> str:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>, "
-        if self.additional_code is not None:
-            repr_str += f"\nadditional_code = <{self.additional_code.__class__.__name__} instance>, "
+        if self.namelists is not None:
+            repr_str += (
+                f"\nnamelists = <{self.namelists.__class__.__name__} instance>, "
+            )
         else:
-            repr_str += "\n additional_code = None"
+            repr_str += "\n namelists = None"
+        if self.additional_source_code is not None:
+            repr_str += (
+                "\nadditional_source_code = "
+                + "<{self.additional_source_code.__class__.__name__} instance>, "
+            )
+        else:
+            repr_str += "\n additional_source_code = None"
 
         if hasattr(self, "discretization"):
             repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
@@ -162,17 +178,6 @@ class Component(ABC):
     @abstractmethod
     def component_type(self) -> str:
         pass
-
-    def setup(self, additional_code_target_dir: str | Path) -> None:
-        # Setup BaseModel
-        infostr = f"Configuring {self.__class__.__name__}"
-        print(infostr + "\n" + "-" * len(infostr))
-        self.base_model.handle_config_status()
-
-        # AdditionalCode
-        print("\nFetching additional code... " + "\n--------------------------")
-        if self.additional_code is not None:
-            self.additional_code.get(additional_code_target_dir)
 
     @abstractmethod
     def build(self) -> None:

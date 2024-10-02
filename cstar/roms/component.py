@@ -40,9 +40,12 @@ class ROMSComponent(Component):
     -----------
     base_model: ROMSBaseModel
         An object pointing to the unmodified source code of ROMS at a specific commit
-    additional_code: AdditionalCode
-        Additional code contributing to a unique instance of this ROMS run
-        e.g. namelists, source modifications, etc.
+    namelists: AdditionalCode (Optional, default None)
+        Namelist files contributing to a unique instance of the base model,
+        to be used at runtime
+    additional_source_code: AdditionalCode (Optional, default None)
+        Additional source code contributing to a unique instance of a base model,
+        to be included at compile time
     discretization: ROMSDiscretization
         Any information related to discretization of this ROMSComponent
         e.g. time step, number of levels, number of CPUs following each direction, etc.
@@ -85,8 +88,9 @@ class ROMSComponent(Component):
     def __init__(
         self,
         base_model: "ROMSBaseModel",
-        additional_code: "AdditionalCode",
         discretization: "ROMSDiscretization",
+        namelists: "AdditionalCode",
+        additional_source_code: "AdditionalCode",
         model_grid: Optional["ROMSModelGrid"] = None,
         initial_conditions: Optional["ROMSInitialConditions"] = None,
         tidal_forcing: Optional["ROMSTidalForcing"] = None,
@@ -101,9 +105,12 @@ class ROMSComponent(Component):
         base_model: ROMSBaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        additional_code: AdditionalCode
-            Additional code contributing to a unique instance of a base model,
-            e.g. namelists, source modifications, etc.
+        namelists: AdditionalCode (Optional, default None)
+            Namelist files contributing to a unique instance of the base model,
+            to be used at runtime
+        additional_source_code: AdditionalCode (Optional, default None)
+            Additional source code contributing to a unique instance of a base model,
+            to be included at compile time
         discretization: ROMSDiscretization
             Any information related to discretization of this ROMSComponent
             e.g. time step, number of levels, number of CPUs following each direction, etc.
@@ -125,7 +132,8 @@ class ROMSComponent(Component):
         """
 
         self.base_model = base_model
-        self.additional_code = additional_code
+        self.namelists = namelists
+        self.additional_source_code = additional_source_code
         self.discretization = discretization
         self.model_grid = model_grid
         self.initial_conditions = initial_conditions
@@ -176,16 +184,27 @@ class ROMSComponent(Component):
 
         component_kwargs["discretization"] = discretization
 
-        # Construct any AdditionalCode instances
-        additional_code_kwargs = component_dict.get("additional_code")
-        if additional_code_kwargs is None:
+        # Construct any AdditionalCode instance associated with namelists
+        namelists_kwargs = component_dict.get("namelists")
+        if namelists_kwargs is None:
             raise ValueError(
-                "Cannot construct a ROMSComponent instance without an "
-                + "AdditionalCode object, but could not find 'additional_code' entry"
+                "Cannot construct a ROMSComponent instance without a runtime "
+                + "namelist, but could not find 'namelists' entry"
             )
-        additional_code = AdditionalCode(**additional_code_kwargs)
+        namelists = AdditionalCode(**namelists_kwargs)
+        component_kwargs["namelists"] = namelists
 
-        component_kwargs["additional_code"] = additional_code
+        # Construct any AdditionalCode instance associated with source mods
+        additional_source_code_kwargs = component_dict.get("additional_source_code")
+        if additional_source_code_kwargs is None:
+            raise NotImplementedError(
+                "This version of C-Star does not support ROMSComponent instances "
+                + "without code to be included at compile time (.opt files, etc.), but "
+                + "could not find an 'additional_source_code' entry."
+            )
+
+        additional_source_code = AdditionalCode(**additional_source_code_kwargs)
+        component_kwargs["additional_source_code"] = additional_source_code
 
         # Construct any ROMSModelGrid instance:
         model_grid_kwargs = component_dict.get("model_grid")
@@ -255,6 +274,19 @@ class ROMSComponent(Component):
         # Docstring is inherited
 
         component_dict = super().to_dict()
+        # additional source code
+        namelists = getattr(self, "namelists")
+        if namelists is not None:
+            namelists_info = {}
+            namelists_info["location"] = namelists.source.location
+            if namelists.subdir is not None:
+                namelists_info["subdir"] = namelists.subdir
+            if namelists.checkout_target is not None:
+                namelists_info["checkout_target"] = namelists.checkout_target
+            if namelists.files is not None:
+                namelists_info["files"] = namelists.files
+
+            component_dict["namelists"] = namelists_info
 
         # Discretization
         component_dict["discretization"] = self.discretization.__dict__
@@ -279,7 +311,8 @@ class ROMSComponent(Component):
 
     def setup(
         self,
-        additional_code_target_dir: str | Path,
+        additional_source_code_dir: str | Path,
+        namelist_dir: str | Path,
         input_datasets_target_dir: Optional[str | Path] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
@@ -309,8 +342,23 @@ class ROMSComponent(Component):
            determine which input datasets are needed as part of this setup call.
 
         """
+        # Setup BaseModel
+        infostr = f"Configuring {self.__class__.__name__}"
+        print(infostr + "\n" + "-" * len(infostr))
+        self.base_model.handle_config_status()
 
-        super().setup(additional_code_target_dir=additional_code_target_dir)
+        # Additional source code
+        print(
+            "\nFetching additional source code..."
+            + "\n----------------------------------"
+        )
+        if self.additional_source_code is not None:
+            self.additional_source_code.get(additional_source_code_dir)
+
+        # Namelists
+        print("\nFetching namelists... " + "\n----------------------")
+        if self.namelists is not None:
+            self.namelists.get(namelist_dir)
 
         # InputDatasets
         print("\nFetching input datasets..." + "\n--------------------------")
@@ -344,24 +392,29 @@ class ROMSComponent(Component):
     def build(self) -> None:
         """
         Compiles any code associated with this configuration of ROMS.
-
         Compilation occurs in the directory
-        `ROMSComponent.additional_code.working_path/ROMS/source_mods/
+        `ROMSComponent.additional_source_code.working_path
         This method sets the ROMSComponent `exe_path` attribute.
 
         """
-        working_path = self.additional_code.working_path
-        if working_path is None:
+        if self.additional_source_code is None:
             raise ValueError(
                 "Unable to compile ROMSComponent: "
-                + "\nROMSComponent.additional_code.working_path is None."
-                + "\n Call ROMSComponent.additional_code.get() and try again"
+                + "\nROMSComponent.additional_source_code is None."
+                + "\n Compile-time files are needed to build ROMS"
             )
-        builddir = working_path / "source_mods"
-        if (builddir / "Compile").is_dir():
+
+        build_dir = self.additional_source_code.working_path
+        if build_dir is None:
+            raise ValueError(
+                "Unable to compile ROMSComponent: "
+                + "\nROMSComponent.additional_source_code.working_path is None."
+                + "\n Call ROMSComponent.additional_source_code.get() and try again"
+            )
+        if (build_dir / "Compile").is_dir():
             make_clean_result = subprocess.run(
                 "make compile_clean",
-                cwd=builddir,
+                cwd=build_dir,
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -375,7 +428,7 @@ class ROMSComponent(Component):
         print("Compiling UCLA-ROMS configuration...")
         make_roms_result = subprocess.run(
             f"make COMPILER={_CSTAR_COMPILER}",
-            cwd=builddir,
+            cwd=build_dir,
             shell=True,
             capture_output=True,
             text=True,
@@ -386,9 +439,9 @@ class ROMSComponent(Component):
                 + f"\n {make_roms_result.stderr}"
             )
 
-        print(f"UCLA-ROMS compiled at {builddir}")
+        print(f"UCLA-ROMS compiled at {build_dir}")
 
-        self.exe_path = builddir / "roms"
+        self.exe_path = build_dir / "roms"
 
     def pre_run(self) -> None:
         """
@@ -415,23 +468,34 @@ class ROMSComponent(Component):
         ):
             datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
             # Preliminary checks
-            if self.additional_code.working_path is None:
+            if (self.additional_source_code is None) or (
+                self.additional_source_code.working_path is None
+            ):
                 raise ValueError(
                     "Unable to prepare ROMSComponent for execution: "
                     + "\nROMSComponent.additional_code.working_path is None."
                     + "\n Call ROMSComponent.additional_code.get() and try again"
                 )
 
-            if not hasattr(self.additional_code, "modified_namelists"):
+            if not hasattr(self.namelists, "modified_files"):
                 raise ValueError(
                     "No editable namelist found in which to set ROMS runtime parameters. "
-                    + "Expected to find a file in ROMSComponent.additional_code.namelists"
+                    + "Expected to find a file in ROMSComponent.namelists.files"
                     + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
                 )
             else:
+                if self.namelists is None:
+                    raise ValueError(
+                        "At least one namelist is required to run ROMS, but "
+                        + "ROMSComponent.namelists is None"
+                    )
+                if self.namelists.working_path is None:
+                    raise ValueError(
+                        "No working path found for ROMSComponent.namelists. "
+                        + "Call ROMSComponent.namelists.get() and try again"
+                    )
                 mod_namelist = (
-                    self.additional_code.working_path
-                    / self.additional_code.modified_namelists[0]
+                    self.namelists.working_path / self.namelists.modified_files[0]
                 )
 
             namelist_forcing_str = ""
@@ -529,9 +593,7 @@ class ROMSComponent(Component):
                 mod_namelist, "__FORCING_FILES_PLACEHOLDER__", namelist_forcing_str
             )
 
-            marbl_settings_path = (
-                self.additional_code.working_path / "namelists/marbl_in"
-            )
+            marbl_settings_path = self.namelists.working_path / "marbl_in"
             marbl_placeholder_in_namelist = _replace_text_in_file(
                 mod_namelist,
                 "__MARBL_SETTINGS_FILE_PLACEHOLDER__",
@@ -545,15 +607,12 @@ class ROMSComponent(Component):
                 )
 
             marbl_tracer_list_path = (
-                self.additional_code.working_path / "namelists/marbl_tracer_output_list"
+                self.namelists.working_path / "marbl_tracer_output_list"
             )
             marbl_placeholder_in_namelist = _replace_text_in_file(
                 mod_namelist,
                 "__MARBL_TRACER_LIST_FILE_PLACEHOLDER__",
-                str(
-                    self.additional_code.working_path
-                    / "namelists/marbl_tracer_output_list"
-                ),
+                str(self.namelists.working_path / "marbl_tracer_output_list"),
             )
             if (marbl_placeholder_in_namelist) and (
                 not marbl_tracer_list_path.exists()
@@ -561,8 +620,7 @@ class ROMSComponent(Component):
                 raise FileNotFoundError(f"{marbl_tracer_list_path} not found.")
 
             marbl_diag_list_path = (
-                self.additional_code.working_path
-                / "namelists/marbl_diagnostics_output_list"
+                self.namelists.working_path / "marbl_diagnostics_output_list"
             )
             if (marbl_placeholder_in_namelist) and (
                 not marbl_tracer_list_path.exists()
@@ -571,10 +629,7 @@ class ROMSComponent(Component):
             marbl_placeholder_in_namelist = _replace_text_in_file(
                 mod_namelist,
                 "__MARBL_DIAG_LIST_FILE_PLACEHOLDER__",
-                str(
-                    self.additional_code.working_path
-                    / "namelists/marbl_diagnostics_output_list"
-                ),
+                str(self.namelists.working_path / "marbl_diagnostics_output_list"),
             )
 
     def run(
@@ -622,9 +677,10 @@ class ROMSComponent(Component):
         # these are conceptually different:
         run_path = output_dir
 
-        if self.additional_code is None:
-            print(
-                "C-STAR: Unable to find AdditionalCode associated with this Component."
+        if self.namelists is None:
+            raise FileNotFoundError(
+                "C-STAR: Unable to find namelist file (typically roms.in) "
+                + "associated with this ROMSComponent."
             )
             return
 
@@ -640,10 +696,9 @@ class ROMSComponent(Component):
             )
         assert isinstance(n_time_steps, int)
 
-        if hasattr(self.additional_code, "modified_namelists"):
+        if hasattr(self.namelists, "modified_files"):
             mod_namelist = (
-                self.additional_code.working_path
-                / self.additional_code.modified_namelists[0]
+                self.namelists.working_path / self.namelists.modified_files[0]
             )
             _replace_text_in_file(
                 mod_namelist,
@@ -659,7 +714,7 @@ class ROMSComponent(Component):
         else:
             raise ValueError(
                 "No editable namelist found to set ROMS runtime parameters. "
-                + "Expected to find a file in ROMSComponent.additional_code.namelists"
+                + "Expected to find a file in ROMSComponent.namelists"
                 + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
             )
         output_dir.mkdir(parents=True, exist_ok=True)
