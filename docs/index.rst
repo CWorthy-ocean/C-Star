@@ -14,6 +14,7 @@ Welcome to the C-Star Documentation!
    :caption: Examples
 
    Using C-Star <cstar_example_notebook>
+   Preparing the input data for a ROMS simulation <roms_tools_input>
 
 .. toctree::
    :maxdepth: 1

@@ -1,0 +1,64 @@
+registry_attrs:
+  name: cstar_test_with_netcdf_datasets
+  valid_date_range:
+    start_date: 2012-01-01 12:00:00
+    end_date: 2012-12-31 12:00:00
+
+components:
+  - component:
+      component_type: 'MARBL'
+      base_model:
+        source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
+        checkout_target: 'marbl0.45.0'
+
+  - component:
+      component_type: 'ROMS'
+      base_model:
+        source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
+        checkout_target: '246c11fa537145ba5868f2256dfb4964aeb09a25'
+      discretization:
+        n_procs_x: 2
+        n_procs_y: 2
+        time_step: 60
+      additional_code:
+        location: '<additional_code_location>'
+        checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
+        subdir: 'additional_code/ROMS'
+        source_mods:
+          - "source_mods/bgc.opt"
+          - "source_mods/bulk_frc.opt"
+          - "source_mods/cppdefs.opt"
+          - "source_mods/diagnostics.opt"
+          - "source_mods/ocean_vars.opt"
+          - "source_mods/param.opt"
+          - "source_mods/tides.opt"
+          - "source_mods/tracers.opt"
+          - "source_mods/Makefile"
+        namelists:
+          - "namelists/roms.in_TEMPLATE"
+          - "namelists/marbl_in"
+          - "namelists/marbl_tracer_output_list"
+          - "namelists/marbl_diagnostic_output_list"
+      model_grid:
+        location: '<input_datasets_location>/roms_grd.nc'
+        file_hash: '893aff53b3c1d08c9bb381244f4fecbf9782403ba7cde82200ccb9d0f328745d'
+      initial_conditions:
+        location: '<input_datasets_location>/roms_ini.nc'
+        file_hash: '20c2e62fcffe614e36f5948a16b2d941d85995a31cebbeecc5a3d6b8bf750907'
+      tidal_forcing:
+        location: '<input_datasets_location>/roms_tides.nc'
+        file_hash: '63e47c25604d9acf45439c7a555941c5a4b2ea84dd957f6ec23f68a6f429d47c'
+      boundary_forcing:
+        - location: '<input_datasets_location>/roms_bry_2012.nc'
+          file_hash: 'c501802a892320e5c915f6718da69ed6d1fbfa88106ce08a78a8661e0b2069a5'
+        - location: '<input_datasets_location>/roms_bry_bgc_2012.nc'
+          file_hash: '0fa5707547283cad4c0b0dd5cea4d4ec5be4b8451683430c4c89806ae9c4a0c8'
+      surface_forcing:
+        - location: '<input_datasets_location>/roms_frc_2012.nc'
+          file_hash: '02c817af1221657ad5a4a512e8c8151b110ea5b370599fc8a574017cfcd31bee'
+        - location: '<input_datasets_location>/roms_frc_2013.nc'
+          file_hash: '8fad7df6093643019e618f060056bbd97c1707ca08386a2494c9b098492d5efb'
+        - location: '<input_datasets_location>/roms_frc_bgc_2012.nc'
+          file_hash: '9f94cac6d689150bfeae6365af30a162eca9001fe649bc9562514dc99bb2ef3b'
+        - location: '<input_datasets_location>/roms_frc_bgc_2013.nc'
+          file_hash: 'd912f5700876e9126eabf4f5ebb2ddefcc34be143cb6d0f98e9a05f951947b4b'
