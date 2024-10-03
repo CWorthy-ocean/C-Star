@@ -1014,6 +1014,51 @@ class ROMSComponent(Component):
                 for F in output_dir.glob(wildcard_pattern):
                     F.rename(output_dir / "PARTITIONED" / F.name)
 
+    def restart(self, new_start_date: datetime, restart_dir: str | Path):
+        # TODO: # 1. Go through self.additional_code.source_mods and find ocean_vars.opt
+        #        2.  Parse OV.opt to output_period_rst, generate list of restart file dates
+        #        3. Check whether new_start_date corresponds to a restart file
+        #        4. Raise ValueError:
+        #        "new start date does not correspond to a restart file... nearest valid start date is"
+        #        5. Otherwise return a Component with:
+        #              i. initial condition changed to rst file name
+        #        6. Additional: need to check if running again with a different time step in the same
+        #           dir works
+
+        restart_dir = Path(restart_dir)
+
+        restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")
+        restart_wildcard = f"*_rst.{restart_date_string}.*.nc"
+        restart_files = list(restart_dir.glob(restart_wildcard))
+        if len(restart_files) == 0:
+            raise FileNotFoundError(
+                f"No files in {restart_dir} match the pattern "
+                + f"'*_rst.{restart_date_string}.*.nc"
+            )
+
+        # Filter out partitioning, e.g.
+        # ROMS_rst.20120102120000.*.nc -> ROMS_rst.20120102120000.nc
+        # and check if multiple matches:
+        unique_restarts = {Path(fname.stem).stem + ".nc" for fname in restart_files}
+        if len(unique_restarts) > 1:
+            raise ValueError(
+                "Found multiple distinct restart files corresponding to "
+                + f"{restart_date_string}: "
+                + "\n ".join(unique_restarts)
+            )
+
+        restart_file = restart_dir / list(unique_restarts)[0]
+        new_ic = ROMSInitialConditions(
+            location=str(restart_file.resolve()), start_date=new_start_date
+        )
+
+        import copy
+
+        new_component = copy.deepcopy(self)
+        new_component.initial_conditions = new_ic
+
+        return new_component
+
 
 class ROMSDiscretization(Discretization):
     """
