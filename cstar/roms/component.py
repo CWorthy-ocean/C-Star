@@ -1015,15 +1015,26 @@ class ROMSComponent(Component):
                     F.rename(output_dir / "PARTITIONED" / F.name)
 
     def restart(self, new_start_date: datetime, restart_dir: str | Path):
-        # TODO: # 1. Go through self.additional_code.source_mods and find ocean_vars.opt
-        #        2.  Parse OV.opt to output_period_rst, generate list of restart file dates
-        #        3. Check whether new_start_date corresponds to a restart file
-        #        4. Raise ValueError:
-        #        "new start date does not correspond to a restart file... nearest valid start date is"
-        #        5. Otherwise return a Component with:
-        #              i. initial condition changed to rst file name
-        #        6. Additional: need to check if running again with a different time step in the same
-        #           dir works
+        """
+        Returns a new ROMSComponent instance initialized from a restart file.
+
+        This method searches `restart_dir` for a ROMS restart file
+        corresponding to `new_start_date`, and returns a new ROMSComponent
+        instance whose initial_conditions attribute points to the
+        restart file.
+
+        Parameters:
+        -----------
+        new_start_date (datetime):
+           The desired start date of the restarted ROMSComponent
+        restart_dir (str or Path):
+           The directory in which to find a restart file
+        Returns:
+        --------
+        new_component (ROMSComponent):
+           The new ROMSComponent instance with initial conditions
+           specified by the restart file.
+        """
 
         restart_dir = Path(restart_dir)
 

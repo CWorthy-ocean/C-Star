@@ -588,7 +588,25 @@ class Case:
                 component.post_run(output_dir=self.caseroot / "output")
 
     def restart(self, new_end_date: str | datetime) -> "Case":
-        """docstring"""
+        """
+        Returns a new Case instance beginning at the end date of this Case
+
+        This method creates a deep copy of the current Case and replaces
+        any components that need to be updated by calling Component.restart()
+        on them.
+
+        Parameters:
+        -----------
+        new_end_date (str or datetime):
+           The end date for the restarted Case. The start date corresponds
+           to the end date of the existing Case.
+
+        Returns:
+        --------
+        new_case (cstar.Case):
+           The new Case instance with updated components and attributes
+           allowing the simulation to continue.
+        """
         import copy
 
         new_case = copy.deepcopy(self)
@@ -602,12 +620,13 @@ class Case:
                 f"Expected str or datetime for `new_end_date`, got {type(new_end_date)}"
             )
 
-        # call Component.restart() here
+        # Go through components and call restart() on them
         new_components = []
         for component in self.components:
             if hasattr(component, "restart"):
                 if component.component_type.lower() == "roms":
                     new_component = component.restart(
+                        # restart_dir is just output_dir from Case.run()
                         restart_dir=self.caseroot / "output",
                         new_start_date=new_case.start_date,
                     )
