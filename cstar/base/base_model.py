@@ -224,7 +224,7 @@ class BaseModel(ABC):
                 env_var_repo_remote = _get_repo_remote(local_root)
                 raise EnvironmentError(
                     "System environment variable "
-                    + f"'{self.expected_env_var}' points to"
+                    + f"'{self.expected_env_var}' points to "
                     + "a github repository whose "
                     + f"remote: \n '{env_var_repo_remote}' \n"
                     + "does not match that expected by C-Star: \n"

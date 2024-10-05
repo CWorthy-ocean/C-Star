@@ -307,7 +307,9 @@ class Case:
         # Build a dictionary of files connected to this case
         case_tree_dict = {}
         for component in self.components:
-            if len(component.input_datasets) > 0:
+            if hasattr(component, "input_datasets") and (
+                len(component.input_datasets) > 0
+            ):
                 case_tree_dict.setdefault("input_datasets", {})
                 case_tree_dict["input_datasets"][component.component_type] = [
                     dataset.source.basename for dataset in component.input_datasets

@@ -133,43 +133,28 @@ class Component(ABC):
         base_str += "\n" + "-" * len(name)
 
         # Attrs
-        base_str += "\nBuilt from: "
+        base_str += f"\nbase_model: {self.base_model.__class__.__name__} instance (query using Component.base_model)"
 
-        NN = 0 if self.namelists is None else len(self.namelists.files)
-        NS = (
-            0
-            if self.additional_source_code is None
-            else len(self.additional_source_code.files)
-        )
-        base_str += f"\n{NN} namelist files (query using Component.namelists)"
-        base_str += f"\n{NS} additional source code files (query using Component.additional_source_code)"
-        if hasattr(self, "discretization") and self.discretization is not None:
-            base_str += "\n\nDiscretization:\n"
-            base_str += self.discretization.__str__()
-        if hasattr(self, "exe_path") and self.exe_path is not None:
-            base_str += "\n\nIs compiled: True"
-            base_str += "\n exe_path: " + self.exe_path
+        if (
+            hasattr(self, "additional_source_code")
+            and self.additional_source_code is not None
+        ):
+            NS = len(self.additional_source_code.files)
+            base_str += (
+                f"\nadditional_source_code: {self.additional_source_code.__class__.__name__} instance with {NS} files "
+                + "(query using Component.additional_source_code)"
+            )
+
         return base_str
 
     def __repr__(self) -> str:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>, "
-        if self.namelists is not None:
-            repr_str += (
-                f"\nnamelists = <{self.namelists.__class__.__name__} instance>, "
-            )
-        else:
-            repr_str += "\n namelists = None"
         if self.additional_source_code is not None:
             repr_str += (
                 "\nadditional_source_code = "
-                + "<{self.additional_source_code.__class__.__name__} instance>, "
+                + f"<{self.additional_source_code.__class__.__name__} instance>, "
             )
-        else:
-            repr_str += "\n additional_source_code = None"
-
-        if hasattr(self, "discretization"):
-            repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
         repr_str += "\n)"
 
         return repr_str

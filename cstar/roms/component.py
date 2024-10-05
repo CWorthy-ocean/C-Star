@@ -140,11 +140,92 @@ class ROMSComponent(Component):
         self.initial_conditions = initial_conditions
         self.tidal_forcing = tidal_forcing
         self.surface_forcing = [] if surface_forcing is None else surface_forcing
+        if not all([isinstance(sf, ROMSSurfaceForcing) for sf in self.surface_forcing]):
+            raise TypeError(
+                "ROMSComponent.surface_forcing must be a list of ROMSSurfaceForcing instances"
+            )
         self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
+        if not all(
+            [isinstance(bf, ROMSBoundaryForcing) for bf in self.boundary_forcing]
+        ):
+            raise TypeError(
+                "ROMSComponent.boundary_forcing must be a list of ROMSBoundaryForcing instances"
+            )
 
         # roms-specific
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
+
+    def __str__(self) -> str:
+        base_str = super().__str__()
+        if hasattr(self, "namelists") and self.namelists is not None:
+            NN = len(self.namelists.files)
+        else:
+            NN = 0
+        base_str += f"\nnamelists: {self.namelists.__class__.__name__} instance with {NN} files (query using Component.namelists)"
+        if hasattr(self, "exe_path") and self.exe_path is not None:
+            base_str += "\n\nIs compiled: True"
+            base_str += "\n exe_path: " + str(self.exe_path)
+        if hasattr(self, "model_grid") and self.model_grid is not None:
+            base_str += (
+                f"\nmodel_grid = <{self.model_grid.__class__.__name__} instance>"
+            )
+        if hasattr(self, "initial_conditions") and self.initial_conditions is not None:
+            base_str += f"\ninitial_conditions = <{self.initial_conditions.__class__.__name__} instance>"
+        if hasattr(self, "tidal_forcing") and self.tidal_forcing is not None:
+            base_str += (
+                f"\ntidal_forcing = <{self.tidal_forcing.__class__.__name__} instance>"
+            )
+        if hasattr(self, "surface_forcing") and len(self.surface_forcing) > 0:
+            base_str += (
+                f"\nsurface_forcing = <list of {len(self.surface_forcing)} "
+                + f"{self.surface_forcing[0].__class__.__name__} instances>"
+            )
+        if hasattr(self, "boundary_forcing") and len(self.boundary_forcing) > 0:
+            base_str += (
+                f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
+            )
+
+        if hasattr(self, "discretization") and self.discretization is not None:
+            base_str += "\n\nDiscretization:\n"
+            base_str += self.discretization.__str__()
+
+        return base_str
+
+    def __repr__(self) -> str:
+        repr_str = super().__repr__().rstrip(")")
+
+        if hasattr(self, "namelists") and self.namelists is not None:
+            repr_str += (
+                f"\nnamelists = <{self.namelists.__class__.__name__} instance>, "
+            )
+        if hasattr(self, "discretization") and self.discretization is not None:
+            repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
+
+        if hasattr(self, "model_grid") and self.model_grid is not None:
+            repr_str += (
+                f"\nmodel_grid = <{self.model_grid.__class__.__name__} instance>"
+            )
+        if hasattr(self, "initial_conditions") and self.initial_conditions is not None:
+            repr_str += f"\ninitial_conditions = <{self.initial_conditions.__class__.__name__} instance>"
+        if hasattr(self, "tidal_forcing") and self.tidal_forcing is not None:
+            repr_str += (
+                f"\ntidal_forcing = <{self.tidal_forcing.__class__.__name__} instance>"
+            )
+        if hasattr(self, "surface_forcing") and len(self.surface_forcing) > 0:
+            repr_str += (
+                f"\nsurface_forcing = <list of {len(self.surface_forcing)} "
+                + f"{self.surface_forcing[0].__class__.__name__} instances>"
+            )
+        if hasattr(self, "boundary_forcing") and len(self.boundary_forcing) > 0:
+            repr_str += (
+                f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
+            )
+        repr_str += "\n)"
+
+        return repr_str
 
     @classmethod
     def from_dict(cls, component_dict):
@@ -921,7 +1002,6 @@ class ROMSComponent(Component):
                 # Process stdout line-by-line
                 tstep0 = 0
                 roms_init_string = ""
-                T0 = time.time()
                 if romsprocess.stdout is None:
                     raise RuntimeError("ROMS is not producing stdout")
 
@@ -949,13 +1029,20 @@ class ROMSComponent(Component):
                                 tstep = int(parts[0])
                                 if tstep0 == 0:
                                     tstep0 = tstep
+                                    T0 = time.time()
                                     # Capture the first integer and print it
-                                ETA = (n_time_steps - (tstep - tstep0)) * (
-                                    (tstep - tstep0) / (time.time() - T0)
-                                )
-                                print(
-                                    f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
-                                )
+                                else:
+                                    ETA = (n_time_steps - (tstep - tstep0)) * (
+                                        (time.time() - T0) / (tstep - tstep0)
+                                    )
+                                    total_print_statements = 50
+                                    print_frq = (
+                                        n_time_steps // total_print_statements + 1
+                                    )
+                                    if ((tstep - tstep0) % print_frq) == 0:
+                                        print(
+                                            f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
+                                        )
                             except ValueError:
                                 pass
                         elif tstep0 == 0 and len(roms_init_string) == 0:
@@ -1087,9 +1174,9 @@ class ROMSDiscretization(Discretization):
         return disc_str
 
     def __repr__(self) -> str:
-        repr_str = super().__repr__().strip(")")
+        repr_str = super().__repr__().rstrip(")")
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            repr_str += f", n_procs_x = {self.n_procs_x}, "
+            repr_str += f"n_procs_x = {self.n_procs_x}, "
         if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
             repr_str += f"n_procs_y = {self.n_procs_y}, "
 

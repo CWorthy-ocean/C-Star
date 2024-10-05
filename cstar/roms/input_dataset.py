@@ -26,7 +26,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
     def __str__(self) -> str:
         base_str = super().__str__()
-        if hasattr(self, "partitioned_files"):
+        if hasattr(self, "partitioned_files") and len(self.partitioned_files) > 0:
             base_str += "\nPartitioned files: "
             base_str += _list_to_concise_str(
                 [str(f) for f in self.partitioned_files], pad=20
@@ -35,7 +35,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
     def __repr__(self) -> str:
         repr_str = super().__repr__()
-        if hasattr(self, "partitioned_files"):
+        if hasattr(self, "partitioned_files") and len(self.partitioned_files) > 0:
             repr_str = repr_str.strip(",>")
             repr_str += "\n" + (" " * 8) + "partitioned_files = "
             repr_str += _list_to_concise_str(

@@ -92,7 +92,7 @@ class AdditionalCode:
         if not self.exists_locally:
             base_str += " (get with AdditionalCode.get())"
         if self.files is not None:
-            base_str += "\nFiles (paths relative to above location):"
+            base_str += "\nFiles:"
             for filename in self.files:
                 base_str += f"\n    {filename}"
                 if filename[-9:] == "_TEMPLATE":
@@ -107,7 +107,7 @@ class AdditionalCode:
         if hasattr(self, "checkout_target"):
             repr_str += f"\ncheckout_target = {self.checkout_target!r},"
         if hasattr(self, "files") and self.files is not None:
-            repr_str += "\nfiles = " + _list_to_concise_str(self.files)
+            repr_str += "\nfiles = " + _list_to_concise_str(self.files, pad=9)
         repr_str += "\n)"
         # Additional info:
         info_str = ""
