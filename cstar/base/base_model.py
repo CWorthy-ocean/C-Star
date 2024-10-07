@@ -144,11 +144,8 @@ class BaseModel(ABC):
 
         The method proceeds as follows:
         1. Check `BaseModel.expected_env_var` is present in the environment
-            (prompt installation of the base model if not)
         2. Check `BaseModel.expected_env_var` points to the correct remote repository
-            (raise an EnvironmentError if not)
         3. Check the repository is checked out to the correct target
-            (prompt checkout of the correct target if not)
 
         Returns:
         -------

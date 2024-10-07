@@ -40,7 +40,7 @@ class Case:
 
     Methods
     -------
-    from_blueprint(blueprint,caseroot)
+    from_blueprint(blueprint,caseroot,start_date,end_date)
         Instantiate a Case from a "blueprint" yaml file
     persist(filename)
         Create a "blueprint" yaml file for this Case object
@@ -237,8 +237,6 @@ class Case:
         """Check whether all code and files necessary to run this case exist in the
         local `caseroot` folder.
 
-        This method is called by Case.__init__() and sets the Case.is_setup attribute.
-
         The method loops over each Component object makng up the case and
         1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
         2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
@@ -344,7 +342,7 @@ class Case:
         This method reads a YAML file containing the blueprint for a case
         and initializes a Case object based on the provided specifications.
 
-        A blueprint YAML file should be structured as follows TODO REWRITE:
+        A blueprint YAML file should be structured as follows:
 
         - registry_attrs: overall case metadata, including "name"
         - components: A list of components, containing, e.g.
@@ -448,7 +446,7 @@ class Case:
         return caseinstance
 
     def persist(self, filename: str) -> None:
-        """Write this case to a yaml file.
+        """Write this case to a yaml 'blueprint' file.
 
         This effectively performs the actions of Case.from_blueprint(), but in reverse,
         populating a dictionary from a Case object and its components and their attributes,
@@ -488,14 +486,8 @@ class Case:
         """Fetch all code and files necessary to run this case in the local `caseroot`
         folder.
 
-        This method loops over each Component object making up the case, and performs three operations
-        1. Ensures the component's base model is present in the environment
-           and checked out to the correct point in the history by calling component.base_model.handle_config_status()
-        2. Retrieves any additional code associated with the component by calling the get() method
-           on each AdditionalCode object in component.additional_code. Depending on the nature of the additional code, these
-           are saved to `caseroot/namelists/component.name` or `caseroot/source_mods/component.base_model.name`
-        3. Fetches any input datasets necessary to run the component by calling the get() method
-           on each InputDataset object in component.input_datasets. These are saved to `caseroot`/input_datasets/`component.base_model.name`
+        This method loops over each Component object making up the case, and calls
+        Component.setup()
         """
 
         if self.is_setup:

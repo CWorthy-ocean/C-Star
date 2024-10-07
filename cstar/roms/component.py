@@ -97,8 +97,8 @@ class ROMSComponent(Component):
         boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
         surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
     ):
-        """Initialize a ROMSComponent object from a ROMSBaseModel object, code, input
-        datasets, and discretization information.
+        """Initialize a ROMSComponent object from a ROMSBaseModel object, additional
+        code, input datasets, and discretization information.
 
         Parameters:
         -----------
@@ -591,9 +591,12 @@ class ROMSComponent(Component):
 
         Parameters:
         -----------
-        additional_code_target_dir (str or Path):
+        additional_source_code_dir (str or Path):
            The directory in which to save local copies of the files described by
-           ROMSComponent.additional_code
+           ROMSComponent.additional_source_code
+        namelist_dir (str or Path):
+           The directory in which to save local copies of the files described by
+           ROMSComponent.namelists
         input_datasets_target_dir (str or Path):
            The directory in which to make locally accessible the input datasets
            described by ROMSComponent.input_datasets
@@ -718,7 +721,7 @@ class ROMSComponent(Component):
            the respective paths to input datasets and any MARBL namelists (if this ROMS
            component belongs to a case for which MARBL is also a component).
            The namelist file is sought in
-           `ROMSComponent.additional_code.working_path/namelists`.
+           `ROMSComponent.namelists.working_path
         """
 
         # Partition input datasets and add their paths to namelist

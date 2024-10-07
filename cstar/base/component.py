@@ -56,12 +56,12 @@ class Component(ABC):
         base_model: BaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        additional_source_code: AdditionalCode (Optional, default None)
-            Additional source code contributing to a unique instance of a base model,
-            to be included at compile time
         namelists: AdditionalCode (Optional, default None)
             Namelist files contributing to a unique instance of the base model,
             to be used at runtime
+        additional_source_code: AdditionalCode (Optional, default None)
+            Additional source code contributing to a unique instance of a base model,
+            to be included at compile time
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component (e.g. time step)
 

@@ -40,16 +40,16 @@ class MARBLBaseModel(BaseModel):
     def get(self, target: str | Path) -> None:
         """Clone MARBL code to local machine, set environment, compile libraries.
 
-                This method:
-                1. clones MARBL from `source_repo`
-                2. checks out the correct commit from `checkout_target`
-                3. Sets environment variable MARBL_ROOT
-                4. Compiles MARBL
+        This method:
+        1. clones MARBL from `source_repo`
+        2. checks out the correct commit from `checkout_target`
+        3. Sets environment variable MARBL_ROOT
+        4. Compiles MARBL
 
-                Parameters:
-        z        -----------
-                target: str
-                    The local path where MARBL will be cloned and compiled
+        Parameters:
+        -----------
+        target: str
+            The local path where MARBL will be cloned and compiled
         """
         _clone_and_checkout(
             source_repo=self.source_repo,

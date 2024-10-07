@@ -17,7 +17,7 @@ class InputDataset(ABC):
     source: DataSource
         Describes the location and type of the source data
     file_hash: str, default None
-        The 256 bit SHA sum associated with the file for verifying downloads
+        The 256 bit SHA sum associated with a (remote) file for verifying downloads
     working_path: Path or list of Paths, default None
         The path(s) where the input dataset is being worked with locally, set when `get()` is called.
 
@@ -43,7 +43,7 @@ class InputDataset(ABC):
             URL or path pointing to a file either containing this dataset or instructions for creating it.
             Used to set the `source` attribute.
         file_hash: str, optional
-            The 256 bit SHA sum associated with the file for verification
+            The 256 bit SHA sum associated with the file for verification if remote
         """
 
         self.source: DataSource = DataSource(location)
