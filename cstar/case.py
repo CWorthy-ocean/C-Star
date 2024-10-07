@@ -573,8 +573,7 @@ class Case:
                 component.post_run(output_dir=self.caseroot / "output")
 
     def restart(self, new_end_date: str | datetime) -> "Case":
-        """
-        Returns a new Case instance beginning at the end date of this Case
+        """Returns a new Case instance beginning at the end date of this Case.
 
         This method creates a deep copy of the current Case and replaces
         any components that need to be updated by calling Component.restart()
