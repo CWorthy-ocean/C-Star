@@ -1,5 +1,4 @@
-"""
-Configuration module for testing C-Star with pytest.
+"""Configuration module for testing C-Star with pytest.
 
 The first section sets or gets any globally accessible paths (e.g. that of the test directory itself, TEST_DIRECTORY).
 

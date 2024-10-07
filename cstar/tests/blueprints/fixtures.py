@@ -5,8 +5,7 @@ from typing import Callable
 
 @pytest.fixture
 def modify_template_blueprint(tmpdir) -> Callable[[Path | str, dict[str, str]], Path]:
-    """
-    Fixture that provides a factory function for modifying template blueprint files.
+    """Fixture that provides a factory function for modifying template blueprint files.
 
     This fixture returns a function that can returns a path to a modified a blueprint
     template file based on specified string replacements.
@@ -26,8 +25,7 @@ def modify_template_blueprint(tmpdir) -> Callable[[Path | str, dict[str, str]], 
     def _modify_template_blueprint(
         template_blueprint_path: Path | str, strs_to_replace: dict, **kwargs
     ) -> Path:
-        """
-        Creates a temporary, customized blueprint file from a template.
+        """Creates a temporary, customized blueprint file from a template.
 
         This function reads a blueprint template file, performs string replacements as specified
         by `strs_to_replace`, saves the modified content to a temporary file within the `tmpdir`

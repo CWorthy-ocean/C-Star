@@ -1,7 +1,4 @@
-"""
-Test suite to test fixtures defined in conftest.py and fixtures.py files.
-
-"""
+"""Test suite to test fixtures defined in conftest.py and fixtures.py files."""
 
 import yaml
 from pathlib import Path
@@ -20,8 +17,7 @@ def test_mock_input_fixture(mock_user_input):
 
 
 def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
-    """
-    This test verifies that the modify_template_blueprint fixture correctly reads a
+    """This test verifies that the modify_template_blueprint fixture correctly reads a
     specified blueprint, performs string replacements, and returns a Case instance with
     the correct parameters corresponding to the string replacements.
 
@@ -58,16 +54,14 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
 
 
 class TestFetchData:
-    """
-    Test class for testing data-fetching fixtures defined in the roms/fixtures.py file.
-
-    """
+    """Test class for testing data-fetching fixtures defined in the roms/fixtures.py
+    file."""
 
     def test_fetch_roms_tools_source_data(
         self, request, tmpdir, fetch_roms_tools_source_data
     ):
-        """
-        Test the fetch_roms_tools_source_data fixture by validating data fetching and symlink creation.
+        """Test the fetch_roms_tools_source_data fixture by validating data fetching and
+        symlink creation.
 
         This test checks that the fetch_roms_tools_source_data fixture correctly fetches the
         expected data files, creates a symlink to the data directory, and ensures all expected
@@ -112,8 +106,7 @@ class TestFetchData:
         assert not missing_files, f"missing expected files {missing_files}"
 
     def test_fetch_remote_test_case_data(self, fetch_remote_test_case_data):
-        """
-        Test the fetch_remote_test_case_data fixture.
+        """Test the fetch_remote_test_case_data fixture.
 
         This test verifies that the fetch_remote_test_case_data fixture correctly downloads
         the test data archive, unzips the necessary files into the test data directory, and
