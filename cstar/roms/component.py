@@ -32,8 +32,8 @@ if TYPE_CHECKING:
 
 
 class ROMSComponent(Component):
-    """
-    An implementation of the Component class for the UCLA Regional Ocean Modeling System
+    """An implementation of the Component class for the UCLA Regional Ocean Modeling
+    System.
 
     This subclass contains ROMS-specific implementations of the build(), pre_run(), run(), and post_run() methods.
 
@@ -79,7 +79,6 @@ class ROMSComponent(Component):
         Runs the executable created by `build()`
     post_run()
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
-
     """
 
     base_model: "ROMSBaseModel"
@@ -98,8 +97,8 @@ class ROMSComponent(Component):
         boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
         surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
     ):
-        """
-        Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
+        """Initialize a ROMSComponent object from a ROMSBaseModel object, code, input
+        datasets, and discretization information.
 
         Parameters:
         -----------
@@ -229,8 +228,7 @@ class ROMSComponent(Component):
 
     @classmethod
     def from_dict(cls, component_dict):
-        """
-        Construct a ROMSComponent instance from a dictionary of kwargs.
+        """Construct a ROMSComponent instance from a dictionary of kwargs.
 
         Parameters:
         -----------
@@ -337,7 +335,7 @@ class ROMSComponent(Component):
 
     @property
     def _namelist_modifications(self) -> list[dict]:
-        """List of modifications to be made to template namelist files
+        """List of modifications to be made to template namelist files.
 
         This property takes the current state of ROMSComponent and returns a
         list of dictionaries (one dictionary per namelist file) whose keys
@@ -356,10 +354,9 @@ class ROMSComponent(Component):
 
         # Helper function for formatting:
         def partitioned_files_to_namelist_string(input_dataset):
-            """Take a ROMSInputDataset that has been partitioned
-            and return a ROMS namelist-compatible string pointing to it
-            e.g. path/to/roms_file.232.nc -> '     path/to/roms_file.nc'
-            """
+            """Take a ROMSInputDataset that has been partitioned and return a ROMS
+            namelist-compatible string pointing to it e.g. path/to/roms_file.232.nc -> '
+            path/to/roms_file.nc'."""
 
             unique_paths = {
                 str(Path(f).parent / (Path(Path(f).stem).stem + ".nc"))
@@ -492,8 +489,7 @@ class ROMSComponent(Component):
         return namelist_modifications
 
     def update_namelists(self):
-        """
-        Update ROMSComponent.namelists.modified_files based on current state.
+        """Update ROMSComponent.namelists.modified_files based on current state.
 
         This method loops over the ROMSComponent.namelists.files list, and:
         1. Creates modifiable copies of any template namelist files
@@ -523,7 +519,7 @@ class ROMSComponent(Component):
 
     @property
     def input_datasets(self) -> list:
-        """list all ROMSInputDataset objects associated with this ROMSComponent"""
+        """List all ROMSInputDataset objects associated with this ROMSComponent."""
 
         input_datasets: List[ROMSInputDataset] = []
         if self.model_grid is not None:
@@ -585,8 +581,7 @@ class ROMSComponent(Component):
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
     ) -> None:
-        """
-        Set up this ROMSComponent instance locally.
+        """Set up this ROMSComponent instance locally.
 
         This method ensures the ROMSBaseModel is correctly configured, and
         that any additional code and input datasets corresponding to the
@@ -608,7 +603,6 @@ class ROMSComponent(Component):
         end_date (datetime.datetime):
            The date until which the ROMSComponent is expected to be run. Used to
            determine which input datasets are needed as part of this setup call.
-
         """
         # Setup BaseModel
         infostr = f"Configuring {self.__class__.__name__}"
@@ -658,12 +652,11 @@ class ROMSComponent(Component):
                     inp.get(input_datasets_target_dir)
 
     def build(self) -> None:
-        """
-        Compiles any code associated with this configuration of ROMS.
+        """Compiles any code associated with this configuration of ROMS.
+
         Compilation occurs in the directory
         `ROMSComponent.additional_source_code.working_path
         This method sets the ROMSComponent `exe_path` attribute.
-
         """
         if self.additional_source_code is None:
             raise ValueError(
@@ -712,8 +705,7 @@ class ROMSComponent(Component):
         self.exe_path = build_dir / "roms"
 
     def pre_run(self) -> None:
-        """
-        Performs pre-processing steps associated with this ROMSComponent object.
+        """Performs pre-processing steps associated with this ROMSComponent object.
 
         This method:
         1. goes through any netcdf files associated with InputDataset objects belonging
@@ -727,7 +719,6 @@ class ROMSComponent(Component):
            component belongs to a case for which MARBL is also a component).
            The namelist file is sought in
            `ROMSComponent.additional_code.working_path/namelists`.
-
         """
 
         # Partition input datasets and add their paths to namelist
@@ -814,8 +805,7 @@ class ROMSComponent(Component):
         walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
         job_name: str = "my_roms_run",
     ) -> None:
-        """
-        Runs the executable created by `build()`
+        """Runs the executable created by `build()`
 
         This method creates a temporary file to be submitted to the job scheduler (if any)
         on the calling machine, then submits it. By default the job requests the maximum
@@ -1065,8 +1055,7 @@ class ROMSComponent(Component):
                     )
 
     def post_run(self, output_dir=None) -> None:
-        """
-        Performs post-processing steps associated with this ROMSComponent object.
+        """Performs post-processing steps associated with this ROMSComponent object.
 
         This method goes through any netcdf files produced by the model in
         `output_dir` and joins netcdf files that are produced separately by each processor.
@@ -1103,9 +1092,7 @@ class ROMSComponent(Component):
 
 
 class ROMSDiscretization(Discretization):
-    """
-    An implementation of the Discretization class for ROMS.
-
+    """An implementation of the Discretization class for ROMS.
 
     Additional attributes:
     ----------------------
@@ -1118,7 +1105,6 @@ class ROMSDiscretization(Discretization):
     -----------
     n_procs_tot: int
         The value of n_procs_x * n_procs_y
-
     """
 
     def __init__(
@@ -1127,8 +1113,7 @@ class ROMSDiscretization(Discretization):
         n_procs_x: int = 1,
         n_procs_y: int = 1,
     ):
-        """
-        Initialize a ROMSDiscretization object from basic discretization parameters
+        """Initialize a ROMSDiscretization object from basic discretization parameters.
 
         Parameters:
         -----------
@@ -1144,7 +1129,6 @@ class ROMSDiscretization(Discretization):
         --------
         ROMSDiscretization:
             An initialized ROMSDiscretization object
-
         """
 
         super().__init__(time_step)
@@ -1153,7 +1137,7 @@ class ROMSDiscretization(Discretization):
 
     @property
     def n_procs_tot(self) -> int:
-        """Total number of processors required by this ROMS configuration"""
+        """Total number of processors required by this ROMS configuration."""
         return self.n_procs_x * self.n_procs_y
 
     def __str__(self) -> str:

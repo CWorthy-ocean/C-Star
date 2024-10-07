@@ -11,8 +11,8 @@ from cstar.base.environment import _CSTAR_ROOT, _CSTAR_COMPILER
 
 
 class ROMSBaseModel(BaseModel):
-    """
-    An implementation of the BaseModel class for the UCLA Regional Ocean Modeling System
+    """An implementation of the BaseModel class for the UCLA Regional Ocean Modeling
+    System.
 
     This subclass sets unique values for BaseModel properties specific to ROMS, and overrides
     the get() method to compile ROMS-specific libraries.
@@ -36,11 +36,11 @@ class ROMSBaseModel(BaseModel):
         return "ROMS_ROOT"
 
     def _base_model_adjustments(self) -> None:
-        """
-        Perform C-Star specific adjustments to stock ROMS code.
+        """Perform C-Star specific adjustments to stock ROMS code.
 
         In particular, this method replaces the default Makefiles with machine-agnostic
-        versions, allowing C-Star to be used with ROMS across multiple different computing systems.
+        versions, allowing C-Star to be used with ROMS across multiple different
+        computing systems.
         """
         shutil.copytree(
             _CSTAR_ROOT + "/additional_files/ROMS_Makefiles/",
@@ -49,8 +49,7 @@ class ROMSBaseModel(BaseModel):
         )
 
     def get(self, target: str | Path) -> None:
-        """
-        Clone ROMS code to local machine, set environment, compile libraries
+        """Clone ROMS code to local machine, set environment, compile libraries.
 
         This method:
         1. clones ROMS from `source_repo`

@@ -7,7 +7,8 @@ from cstar.base.environment import _CSTAR_CONFIG_FILE
 
 
 def _write_to_config_file(config_file_str: str) -> None:
-    """write config_file_str to C-Star config file to configure environment on import"""
+    """Write config_file_str to C-Star config file to configure environment on
+    import."""
 
     if not Path(_CSTAR_CONFIG_FILE).exists():
         print(f"Updating environment in C-Star configuration file {_CSTAR_CONFIG_FILE}")
@@ -60,7 +61,8 @@ def _clone_and_checkout(
 
 
 def _get_repo_remote(local_root: str | Path) -> str:
-    """Take a local repository path string (local_root) and return as a string the remote URL"""
+    """Take a local repository path string (local_root) and return as a string the
+    remote URL."""
     return subprocess.run(
         f"git -C {local_root} remote get-url origin",
         shell=True,
@@ -70,7 +72,8 @@ def _get_repo_remote(local_root: str | Path) -> str:
 
 
 def _get_repo_head_hash(local_root: str | Path) -> str:
-    """Take a local repository path string (local_root) and return as a string the commit hash of HEAD"""
+    """Take a local repository path string (local_root) and return as a string the
+    commit hash of HEAD."""
     return subprocess.run(
         f"git -C {local_root} rev-parse HEAD",
         shell=True,
@@ -80,8 +83,8 @@ def _get_repo_head_hash(local_root: str | Path) -> str:
 
 
 def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
-    """
-    Take a git checkout target (any `arg` accepted by `git checkout arg`) and return a commit hash.
+    """Take a git checkout target (any `arg` accepted by `git checkout arg`) and return
+    a commit hash.
 
     If the target is a 7 or 40 digit hexadecimal string, it is assumed `checkout_target`
     is already a git hash, so `checkout_target` is returned.
@@ -131,8 +134,7 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
 def _calculate_node_distribution(
     n_cores_required: int, tot_cores_per_node: int
 ) -> Tuple[int, int]:
-    """
-    Determine how many nodes and cores per node to request from a job scheduler.
+    """Determine how many nodes and cores per node to request from a job scheduler.
 
     For example, if requiring 192 cores for a job on a system with 128 cores per node,
     this method advises requesting 2 nodes with 96 cores each.
@@ -150,7 +152,6 @@ def _calculate_node_distribution(
         The number of nodes to request from the scheduler
     cores_to_request_per_node: int
         The number of cores per node to request from the scheduler
-
     """
     n_nodes_to_request = ceil(n_cores_required / tot_cores_per_node)
     cores_to_request_per_node = ceil(
@@ -163,8 +164,7 @@ def _calculate_node_distribution(
 
 
 def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -> bool:
-    """
-    Find and replace a string in a text file.
+    """Find and replace a string in a text file.
 
     This function creates a temporary file where the changes are written, then
     overwrites the original file.
@@ -202,8 +202,7 @@ def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -
 def _list_to_concise_str(
     input_list, item_threshold=4, pad=16, items_are_strs=True, show_item_count=True
 ):
-    """
-    Take a list and return a concise string representation of it
+    """Take a list and return a concise string representation of it.
 
     Parameters:
     -----------
@@ -231,7 +230,6 @@ def _list_to_concise_str(
               'myitem1',
                   ...
               'myitem4']<5 items>
-
     """
     list_str = ""
     pad_str = " " * pad
@@ -256,8 +254,7 @@ def _list_to_concise_str(
 
 
 def _dict_to_tree(input_dict: dict, prefix: str = "") -> str:
-    """
-    Recursively converts a dictionary into a tree-like string representation.
+    """Recursively converts a dictionary into a tree-like string representation.
 
     Parameters:
     -----------
@@ -289,7 +286,6 @@ def _dict_to_tree(input_dict: dict, prefix: str = "") -> str:
         │   └── twig2aii
         └── branch2b
             └── twig2bi
-
     """
     tree_str = ""
     keys = list(input_dict.keys())

@@ -53,8 +53,7 @@ class ROMSInputDataset(InputDataset, ABC):
         np_xi: Optional[int] = None,
         np_eta: Optional[int] = None,
     ) -> None:
-        """
-        Make this input dataset available as a netCDF file in `local_dir`
+        """Make this input dataset available as a netCDF file in `local_dir`
 
         This method uses the roms-tools python package to produce a UCLA-ROMS-compatible
         netCDF file from a roms-tools compatible yaml file.
@@ -77,7 +76,6 @@ class ROMSInputDataset(InputDataset, ABC):
            If desired, save a partitioned copy of the input dataset to be used when
            running ROMS in parallel. np_xi is the number of x-direction processors,
            np_eta is the number of y-direction processors
-
         """
 
         # If it's not a yaml, we're done
@@ -167,40 +165,33 @@ class ROMSInputDataset(InputDataset, ABC):
 
 
 class ROMSModelGrid(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model grid files.
-    """
+    """An implementation of the ROMSInputDataset class for model grid files."""
 
     pass
 
 
 class ROMSInitialConditions(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model initial condition files.
-    """
+    """An implementation of the ROMSInputDataset class for model initial condition
+    files."""
 
     pass
 
 
 class ROMSTidalForcing(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model tidal forcing files.
-    """
+    """An implementation of the ROMSInputDataset class for model tidal forcing files."""
 
     pass
 
 
 class ROMSBoundaryForcing(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model boundary condition files.
-    """
+    """An implementation of the ROMSInputDataset class for model boundary condition
+    files."""
 
     pass
 
 
 class ROMSSurfaceForcing(ROMSInputDataset):
-    """
-    An implementation of the ROMSInputDataset class for model surface forcing files.
-    """
+    """An implementation of the ROMSInputDataset class for model surface forcing
+    files."""
 
     pass

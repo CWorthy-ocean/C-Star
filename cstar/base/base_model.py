@@ -13,8 +13,7 @@ from cstar.base.environment import _CSTAR_ROOT
 
 
 class BaseModel(ABC):
-    """
-    The model from which this component is derived (e.g. MARBL v0.45.0)
+    """The model from which this component is derived (e.g. MARBL v0.45.0)
 
     Attributes
     -----------
@@ -58,8 +57,8 @@ class BaseModel(ABC):
     """
 
     def __init__(self, source_repo=Optional[str], checkout_target=Optional[str]):
-        """
-        Initialize a BaseModel object manually from a source repository and checkout target.
+        """Initialize a BaseModel object manually from a source repository and checkout
+        target.
 
         Parameters:
         -----------
@@ -131,17 +130,17 @@ class BaseModel(ABC):
     @property
     @abstractmethod
     def default_checkout_target(self) -> str:
-        """Default checkout target, defined in subclasses, e.g. marblv0.45.0"""
+        """Default checkout target, defined in subclasses, e.g. marblv0.45.0."""
 
     @property
     @abstractmethod
     def expected_env_var(self) -> str:
-        """environment variable associated with the base model, e.g. MARBL_ROOT"""
+        """Environment variable associated with the base model, e.g. MARBL_ROOT."""
 
     @property
     def local_config_status(self) -> int:
-        """
-        Perform a series of checks to ensure that the base model is properly configured on this machine.
+        """Perform a series of checks to ensure that the base model is properly
+        configured on this machine.
 
         The method proceeds as follows:
         1. Check `BaseModel.expected_env_var` is present in the environment
@@ -188,8 +187,8 @@ class BaseModel(ABC):
         return True if self.local_config_status == 0 else False
 
     def handle_config_status(self) -> None:
-        """
-        Perform actions depending on the output of BaseModel.get_local_config_status()
+        """Perform actions depending on the output of
+        BaseModel.get_local_config_status()
 
         The config_status attribute should be set by the get_local_config_status method
 
@@ -288,11 +287,9 @@ class BaseModel(ABC):
 
     @abstractmethod
     def get(self, target: str | Path) -> None:
-        """clone the basemodel code to your local machine"""
+        """Clone the basemodel code to your local machine."""
 
     @abstractmethod
     def _base_model_adjustments(self) -> None:
-        """
-        Perform any C-Star specific adjustments to the base model that would
-        be needed after a clean checkout.
-        """
+        """Perform any C-Star specific adjustments to the base model that would be
+        needed after a clean checkout."""

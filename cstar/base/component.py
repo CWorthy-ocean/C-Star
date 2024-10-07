@@ -8,8 +8,7 @@ if TYPE_CHECKING:
 
 
 class Component(ABC):
-    """
-    A model component that contributes to a unique Case instance.
+    """A model component that contributes to a unique Case instance.
 
     Attributes:
     ----------
@@ -50,8 +49,7 @@ class Component(ABC):
         additional_source_code: Optional["AdditionalCode"] = None,
         discretization: Optional["Discretization"] = None,
     ):
-        """
-        Initialize a Component object from a base model and any additional_code
+        """Initialize a Component object from a base model and any additional_code.
 
         Parameters:
         -----------
@@ -83,16 +81,14 @@ class Component(ABC):
     @classmethod
     @abstractmethod
     def from_dict(self):
-        """
-        Construct this component instance from a dictionary of kwargs.
+        """Construct this component instance from a dictionary of kwargs.
 
         This method is implemented separately for different subclasses of Component.
         """
         pass
 
     def to_dict(self):
-        """
-        Create a dictionary representation of this Component object.
+        """Create a dictionary representation of this Component object.
 
         Returns:
         --------
@@ -166,42 +162,41 @@ class Component(ABC):
 
     @abstractmethod
     def build(self) -> None:
-        """
-        Compile any Component-specific code on this machine
+        """Compile any Component-specific code on this machine.
 
-        This abstract method will be implemented differently by different Component types.
+        This abstract method will be implemented differently by different Component
+        types.
         """
 
     @abstractmethod
     def pre_run(self) -> None:
-        """
-        Execute any pre-processing actions necessary to run this component.
+        """Execute any pre-processing actions necessary to run this component.
 
-        This abstract method will be implemented differently by different Component types.
+        This abstract method will be implemented differently by different Component
+        types.
         """
 
     @abstractmethod
     def run(self) -> None:
-        """
-        Run this component
+        """Run this component.
 
-        This abstract method will be implemented differently by different Component types.
+        This abstract method will be implemented differently by different Component
+        types.
         """
         pass
 
     @abstractmethod
     def post_run(self) -> None:
-        """
-        Execute any pre-processing actions associated with this component.
+        """Execute any pre-processing actions associated with this component.
 
-        This abstract method will be implemented differently by different Component types.
+        This abstract method will be implemented differently by different Component
+        types.
         """
         pass
 
 
 class Discretization(ABC):
-    """
-    Holds discretization information about a Component.
+    """Holds discretization information about a Component.
 
     Attributes:
     -----------
@@ -214,8 +209,7 @@ class Discretization(ABC):
         self,
         time_step: int,
     ):
-        """
-        Initialize a Discretization object from basic discretization parameters
+        """Initialize a Discretization object from basic discretization parameters.
 
         Parameters:
         -----------
@@ -226,7 +220,6 @@ class Discretization(ABC):
         --------
         Discretization:
             An initialized Discretization object
-
         """
 
         self.time_step: int = time_step

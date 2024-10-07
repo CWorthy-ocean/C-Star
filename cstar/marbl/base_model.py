@@ -11,8 +11,7 @@ from cstar.base.environment import _CSTAR_COMPILER
 
 
 class MARBLBaseModel(BaseModel):
-    """
-    An implementation of the BaseModel class for the Marine Biogeochemistry Library
+    """An implementation of the BaseModel class for the Marine Biogeochemistry Library.
 
     This subclass sets unique values for BaseModel properties specific to MARBL, and overrides
     the get() method to compile MARBL.
@@ -39,8 +38,7 @@ class MARBLBaseModel(BaseModel):
         pass
 
     def get(self, target: str | Path) -> None:
-        """
-                Clone MARBL code to local machine, set environment, compile libraries
+        """Clone MARBL code to local machine, set environment, compile libraries.
 
                 This method:
                 1. clones MARBL from `source_repo`
