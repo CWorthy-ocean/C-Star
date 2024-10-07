@@ -9,15 +9,15 @@ from typing import Optional, List
 
 
 class InputDataset(ABC):
-    """
-    Describes spatiotemporal data needed to run a unique instance of a model component
+    """Describes spatiotemporal data needed to run a unique instance of a model
+    component.
 
     Attributes:
     -----------
     source: DataSource
         Describes the location and type of the source data
     file_hash: str, default None
-        The 256 bit SHA sum associated with the file for verifying downloads
+        The 256 bit SHA sum associated with a (remote) file for verifying downloads
     working_path: Path or list of Paths, default None
         The path(s) where the input dataset is being worked with locally, set when `get()` is called.
 
@@ -34,8 +34,8 @@ class InputDataset(ABC):
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
     ):
-        """
-        Initialize an InputDataset object associated with a model component using a source URL and file hash
+        """Initialize an InputDataset object associated with a model component using a
+        source URL and file hash.
 
         Parameters:
         -----------
@@ -43,8 +43,7 @@ class InputDataset(ABC):
             URL or path pointing to a file either containing this dataset or instructions for creating it.
             Used to set the `source` attribute.
         file_hash: str, optional
-            The 256 bit SHA sum associated with the file for verification
-
+            The 256 bit SHA sum associated with the file for verification if remote
         """
 
         self.source: DataSource = DataSource(location)
@@ -113,8 +112,7 @@ class InputDataset(ABC):
         return repr_str
 
     def to_dict(self):
-        """
-        Represent this InputDataset object as a dictionary of kwargs
+        """Represent this InputDataset object as a dictionary of kwargs.
 
         Returns:
         --------
@@ -134,8 +132,7 @@ class InputDataset(ABC):
         return input_dataset_dict
 
     def get(self, local_dir: str | Path) -> None:
-        """
-        Make the file containing this input dataset available in `local_dir`
+        """Make the file containing this input dataset available in `local_dir`
 
         If InputDataset.source.location_type is...
            - ...a local path: create a symbolic link to the file in `local_dir`.
@@ -147,7 +144,6 @@ class InputDataset(ABC):
         -----------
         local_dir: str
             The local directory in which this input dataset will be saved.
-
         """
         Path(local_dir).mkdir(parents=True, exist_ok=True)
         target_path = Path(local_dir).resolve() / self.source.basename

@@ -3,8 +3,7 @@ from pathlib import Path
 
 
 class DataSource:
-    """
-    Holds information on various types of data sources used by C-Star.
+    """Holds information on various types of data sources used by C-Star.
 
     Attributes:
     -----------
@@ -22,8 +21,7 @@ class DataSource:
     """
 
     def __init__(self, location: str | Path):
-        """
-        Initialize a DataSource from a location string
+        """Initialize a DataSource from a location string.
 
         Parameters:
         -----------
@@ -39,7 +37,8 @@ class DataSource:
 
     @property
     def location_type(self) -> str:
-        """Get the location type (e.g. "path" or "url") from the "location" attribute"""
+        """Get the location type (e.g. "path" or "url") from the "location"
+        attribute."""
         urlparsed_location = urlparse(self.location)
         if all([urlparsed_location.scheme, urlparsed_location.netloc]):
             return "url"
@@ -52,7 +51,7 @@ class DataSource:
 
     @property
     def source_type(self) -> str:
-        """Get the source type (e.g. "netcdf") from the "location" attribute"""
+        """Get the source type (e.g. "netcdf") from the "location" attribute."""
         loc = Path(self.location)
         if loc.is_dir():
             return "directory"
@@ -70,7 +69,7 @@ class DataSource:
 
     @property
     def basename(self) -> str:
-        """Get the basename (typically a file name) from the location attribute"""
+        """Get the basename (typically a file name) from the location attribute."""
         return Path(self.location).name
 
     def __str__(self) -> str:

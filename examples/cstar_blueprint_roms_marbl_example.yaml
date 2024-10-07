@@ -15,7 +15,7 @@ components:
       component_type: 'ROMS'
       base_model:
         source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
-        checkout_target: '594ac425e9dbe663ce48ced0915c0007c6cca843'
+        checkout_target: '246c11fa537145ba5868f2256dfb4964aeb09a25'
       discretization:
         n_procs_x: 3
         n_procs_y: 3
