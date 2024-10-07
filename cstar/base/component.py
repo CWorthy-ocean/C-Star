@@ -8,8 +8,7 @@ if TYPE_CHECKING:
 
 
 class Component(ABC):
-    """
-    A model component that contributes to a unique Case instance.
+    """A model component that contributes to a unique Case instance.
 
     Attributes:
     ----------
@@ -50,20 +49,19 @@ class Component(ABC):
         additional_source_code: Optional["AdditionalCode"] = None,
         discretization: Optional["Discretization"] = None,
     ):
-        """
-        Initialize a Component object from a base model and any additional_code
+        """Initialize a Component object from a base model and any additional_code.
 
         Parameters:
         -----------
         base_model: BaseModel
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
-        additional_source_code: AdditionalCode (Optional, default None)
-            Additional source code contributing to a unique instance of a base model,
-            to be included at compile time
         namelists: AdditionalCode (Optional, default None)
             Namelist files contributing to a unique instance of the base model,
             to be used at runtime
+        additional_source_code: AdditionalCode (Optional, default None)
+            Additional source code contributing to a unique instance of a base model,
+            to be included at compile time
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component (e.g. time step)
 
@@ -83,16 +81,14 @@ class Component(ABC):
     @classmethod
     @abstractmethod
     def from_dict(self):
-        """
-        Construct this component instance from a dictionary of kwargs.
+        """Construct this component instance from a dictionary of kwargs.
 
         This method is implemented separately for different subclasses of Component.
         """
         pass
 
     def to_dict(self):
-        """
-        Create a dictionary representation of this Component object.
+        """Create a dictionary representation of this Component object.
 
         Returns:
         --------
@@ -133,43 +129,28 @@ class Component(ABC):
         base_str += "\n" + "-" * len(name)
 
         # Attrs
-        base_str += "\nBuilt from: "
+        base_str += f"\nbase_model: {self.base_model.__class__.__name__} instance (query using Component.base_model)"
 
-        NN = 0 if self.namelists is None else len(self.namelists.files)
-        NS = (
-            0
-            if self.additional_source_code is None
-            else len(self.additional_source_code.files)
-        )
-        base_str += f"\n{NN} namelist files (query using Component.namelists)"
-        base_str += f"\n{NS} additional source code files (query using Component.additional_source_code)"
-        if hasattr(self, "discretization") and self.discretization is not None:
-            base_str += "\n\nDiscretization:\n"
-            base_str += self.discretization.__str__()
-        if hasattr(self, "exe_path") and self.exe_path is not None:
-            base_str += "\n\nIs compiled: True"
-            base_str += "\n exe_path: " + self.exe_path
+        if (
+            hasattr(self, "additional_source_code")
+            and self.additional_source_code is not None
+        ):
+            NS = len(self.additional_source_code.files)
+            base_str += (
+                f"\nadditional_source_code: {self.additional_source_code.__class__.__name__} instance with {NS} files "
+                + "(query using Component.additional_source_code)"
+            )
+
         return base_str
 
     def __repr__(self) -> str:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>, "
-        if self.namelists is not None:
-            repr_str += (
-                f"\nnamelists = <{self.namelists.__class__.__name__} instance>, "
-            )
-        else:
-            repr_str += "\n namelists = None"
         if self.additional_source_code is not None:
             repr_str += (
                 "\nadditional_source_code = "
-                + "<{self.additional_source_code.__class__.__name__} instance>, "
+                + f"<{self.additional_source_code.__class__.__name__} instance>, "
             )
-        else:
-            repr_str += "\n additional_source_code = None"
-
-        if hasattr(self, "discretization"):
-            repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
         repr_str += "\n)"
 
         return repr_str
@@ -181,42 +162,41 @@ class Component(ABC):
 
     @abstractmethod
     def build(self) -> None:
-        """
-        Compile any Component-specific code on this machine
+        """Compile any Component-specific code on this machine.
 
-        This abstract method will be implemented differently by different Component types.
+        This abstract method will be implemented differently by different Component
+        types.
         """
 
     @abstractmethod
     def pre_run(self) -> None:
-        """
-        Execute any pre-processing actions necessary to run this component.
+        """Execute any pre-processing actions necessary to run this component.
 
-        This abstract method will be implemented differently by different Component types.
+        This abstract method will be implemented differently by different Component
+        types.
         """
 
     @abstractmethod
     def run(self) -> None:
-        """
-        Run this component
+        """Run this component.
 
-        This abstract method will be implemented differently by different Component types.
+        This abstract method will be implemented differently by different Component
+        types.
         """
         pass
 
     @abstractmethod
     def post_run(self) -> None:
-        """
-        Execute any pre-processing actions associated with this component.
+        """Execute any pre-processing actions associated with this component.
 
-        This abstract method will be implemented differently by different Component types.
+        This abstract method will be implemented differently by different Component
+        types.
         """
         pass
 
 
 class Discretization(ABC):
-    """
-    Holds discretization information about a Component.
+    """Holds discretization information about a Component.
 
     Attributes:
     -----------
@@ -229,8 +209,7 @@ class Discretization(ABC):
         self,
         time_step: int,
     ):
-        """
-        Initialize a Discretization object from basic discretization parameters
+        """Initialize a Discretization object from basic discretization parameters.
 
         Parameters:
         -----------
@@ -241,7 +220,6 @@ class Discretization(ABC):
         --------
         Discretization:
             An initialized Discretization object
-
         """
 
         self.time_step: int = time_step

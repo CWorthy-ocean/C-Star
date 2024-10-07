@@ -32,8 +32,8 @@ if TYPE_CHECKING:
 
 
 class ROMSComponent(Component):
-    """
-    An implementation of the Component class for the UCLA Regional Ocean Modeling System
+    """An implementation of the Component class for the UCLA Regional Ocean Modeling
+    System.
 
     This subclass contains ROMS-specific implementations of the build(), pre_run(), run(), and post_run() methods.
 
@@ -79,7 +79,6 @@ class ROMSComponent(Component):
         Runs the executable created by `build()`
     post_run()
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
-
     """
 
     base_model: "ROMSBaseModel"
@@ -98,8 +97,8 @@ class ROMSComponent(Component):
         boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
         surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
     ):
-        """
-        Initialize a ROMSComponent object from a ROMSBaseModel object, code, input datasets, and discretization information
+        """Initialize a ROMSComponent object from a ROMSBaseModel object, additional
+        code, input datasets, and discretization information.
 
         Parameters:
         -----------
@@ -140,16 +139,96 @@ class ROMSComponent(Component):
         self.initial_conditions = initial_conditions
         self.tidal_forcing = tidal_forcing
         self.surface_forcing = [] if surface_forcing is None else surface_forcing
+        if not all([isinstance(sf, ROMSSurfaceForcing) for sf in self.surface_forcing]):
+            raise TypeError(
+                "ROMSComponent.surface_forcing must be a list of ROMSSurfaceForcing instances"
+            )
         self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
+        if not all(
+            [isinstance(bf, ROMSBoundaryForcing) for bf in self.boundary_forcing]
+        ):
+            raise TypeError(
+                "ROMSComponent.boundary_forcing must be a list of ROMSBoundaryForcing instances"
+            )
 
         # roms-specific
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
 
+    def __str__(self) -> str:
+        base_str = super().__str__()
+        if hasattr(self, "namelists") and self.namelists is not None:
+            NN = len(self.namelists.files)
+        else:
+            NN = 0
+        base_str += f"\nnamelists: {self.namelists.__class__.__name__} instance with {NN} files (query using Component.namelists)"
+        if hasattr(self, "exe_path") and self.exe_path is not None:
+            base_str += "\n\nIs compiled: True"
+            base_str += "\n exe_path: " + str(self.exe_path)
+        if hasattr(self, "model_grid") and self.model_grid is not None:
+            base_str += (
+                f"\nmodel_grid = <{self.model_grid.__class__.__name__} instance>"
+            )
+        if hasattr(self, "initial_conditions") and self.initial_conditions is not None:
+            base_str += f"\ninitial_conditions = <{self.initial_conditions.__class__.__name__} instance>"
+        if hasattr(self, "tidal_forcing") and self.tidal_forcing is not None:
+            base_str += (
+                f"\ntidal_forcing = <{self.tidal_forcing.__class__.__name__} instance>"
+            )
+        if hasattr(self, "surface_forcing") and len(self.surface_forcing) > 0:
+            base_str += (
+                f"\nsurface_forcing = <list of {len(self.surface_forcing)} "
+                + f"{self.surface_forcing[0].__class__.__name__} instances>"
+            )
+        if hasattr(self, "boundary_forcing") and len(self.boundary_forcing) > 0:
+            base_str += (
+                f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
+            )
+
+        if hasattr(self, "discretization") and self.discretization is not None:
+            base_str += "\n\nDiscretization:\n"
+            base_str += self.discretization.__str__()
+
+        return base_str
+
+    def __repr__(self) -> str:
+        repr_str = super().__repr__().rstrip(")")
+
+        if hasattr(self, "namelists") and self.namelists is not None:
+            repr_str += (
+                f"\nnamelists = <{self.namelists.__class__.__name__} instance>, "
+            )
+        if hasattr(self, "discretization") and self.discretization is not None:
+            repr_str += f"\ndiscretization = {self.discretization.__repr__()}"
+
+        if hasattr(self, "model_grid") and self.model_grid is not None:
+            repr_str += (
+                f"\nmodel_grid = <{self.model_grid.__class__.__name__} instance>"
+            )
+        if hasattr(self, "initial_conditions") and self.initial_conditions is not None:
+            repr_str += f"\ninitial_conditions = <{self.initial_conditions.__class__.__name__} instance>"
+        if hasattr(self, "tidal_forcing") and self.tidal_forcing is not None:
+            repr_str += (
+                f"\ntidal_forcing = <{self.tidal_forcing.__class__.__name__} instance>"
+            )
+        if hasattr(self, "surface_forcing") and len(self.surface_forcing) > 0:
+            repr_str += (
+                f"\nsurface_forcing = <list of {len(self.surface_forcing)} "
+                + f"{self.surface_forcing[0].__class__.__name__} instances>"
+            )
+        if hasattr(self, "boundary_forcing") and len(self.boundary_forcing) > 0:
+            repr_str += (
+                f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
+            )
+        repr_str += "\n)"
+
+        return repr_str
+
     @classmethod
     def from_dict(cls, component_dict):
-        """
-        Construct a ROMSComponent instance from a dictionary of kwargs.
+        """Construct a ROMSComponent instance from a dictionary of kwargs.
 
         Parameters:
         -----------
@@ -256,7 +335,7 @@ class ROMSComponent(Component):
 
     @property
     def _namelist_modifications(self) -> list[dict]:
-        """List of modifications to be made to template namelist files
+        """List of modifications to be made to template namelist files.
 
         This property takes the current state of ROMSComponent and returns a
         list of dictionaries (one dictionary per namelist file) whose keys
@@ -275,10 +354,9 @@ class ROMSComponent(Component):
 
         # Helper function for formatting:
         def partitioned_files_to_namelist_string(input_dataset):
-            """Take a ROMSInputDataset that has been partitioned
-            and return a ROMS namelist-compatible string pointing to it
-            e.g. path/to/roms_file.232.nc -> '     path/to/roms_file.nc'
-            """
+            """Take a ROMSInputDataset that has been partitioned and return a ROMS
+            namelist-compatible string pointing to it e.g. path/to/roms_file.232.nc -> '
+            path/to/roms_file.nc'."""
 
             unique_paths = {
                 str(Path(f).parent / (Path(Path(f).stem).stem + ".nc"))
@@ -411,8 +489,7 @@ class ROMSComponent(Component):
         return namelist_modifications
 
     def update_namelists(self):
-        """
-        Update ROMSComponent.namelists.modified_files based on current state.
+        """Update ROMSComponent.namelists.modified_files based on current state.
 
         This method loops over the ROMSComponent.namelists.files list, and:
         1. Creates modifiable copies of any template namelist files
@@ -442,7 +519,7 @@ class ROMSComponent(Component):
 
     @property
     def input_datasets(self) -> list:
-        """list all ROMSInputDataset objects associated with this ROMSComponent"""
+        """List all ROMSInputDataset objects associated with this ROMSComponent."""
 
         input_datasets: List[ROMSInputDataset] = []
         if self.model_grid is not None:
@@ -504,8 +581,7 @@ class ROMSComponent(Component):
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
     ) -> None:
-        """
-        Set up this ROMSComponent instance locally.
+        """Set up this ROMSComponent instance locally.
 
         This method ensures the ROMSBaseModel is correctly configured, and
         that any additional code and input datasets corresponding to the
@@ -515,9 +591,12 @@ class ROMSComponent(Component):
 
         Parameters:
         -----------
-        additional_code_target_dir (str or Path):
+        additional_source_code_dir (str or Path):
            The directory in which to save local copies of the files described by
-           ROMSComponent.additional_code
+           ROMSComponent.additional_source_code
+        namelist_dir (str or Path):
+           The directory in which to save local copies of the files described by
+           ROMSComponent.namelists
         input_datasets_target_dir (str or Path):
            The directory in which to make locally accessible the input datasets
            described by ROMSComponent.input_datasets
@@ -527,7 +606,6 @@ class ROMSComponent(Component):
         end_date (datetime.datetime):
            The date until which the ROMSComponent is expected to be run. Used to
            determine which input datasets are needed as part of this setup call.
-
         """
         # Setup BaseModel
         infostr = f"Configuring {self.__class__.__name__}"
@@ -577,12 +655,11 @@ class ROMSComponent(Component):
                     inp.get(input_datasets_target_dir)
 
     def build(self) -> None:
-        """
-        Compiles any code associated with this configuration of ROMS.
+        """Compiles any code associated with this configuration of ROMS.
+
         Compilation occurs in the directory
         `ROMSComponent.additional_source_code.working_path
         This method sets the ROMSComponent `exe_path` attribute.
-
         """
         if self.additional_source_code is None:
             raise ValueError(
@@ -631,8 +708,7 @@ class ROMSComponent(Component):
         self.exe_path = build_dir / "roms"
 
     def pre_run(self) -> None:
-        """
-        Performs pre-processing steps associated with this ROMSComponent object.
+        """Performs pre-processing steps associated with this ROMSComponent object.
 
         This method:
         1. goes through any netcdf files associated with InputDataset objects belonging
@@ -645,8 +721,7 @@ class ROMSComponent(Component):
            the respective paths to input datasets and any MARBL namelists (if this ROMS
            component belongs to a case for which MARBL is also a component).
            The namelist file is sought in
-           `ROMSComponent.additional_code.working_path/namelists`.
-
+           `ROMSComponent.namelists.working_path
         """
 
         # Partition input datasets and add their paths to namelist
@@ -733,8 +808,7 @@ class ROMSComponent(Component):
         walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
         job_name: str = "my_roms_run",
     ) -> None:
-        """
-        Runs the executable created by `build()`
+        """Runs the executable created by `build()`
 
         This method creates a temporary file to be submitted to the job scheduler (if any)
         on the calling machine, then submits it. By default the job requests the maximum
@@ -921,7 +995,6 @@ class ROMSComponent(Component):
                 # Process stdout line-by-line
                 tstep0 = 0
                 roms_init_string = ""
-                T0 = time.time()
                 if romsprocess.stdout is None:
                     raise RuntimeError("ROMS is not producing stdout")
 
@@ -949,13 +1022,20 @@ class ROMSComponent(Component):
                                 tstep = int(parts[0])
                                 if tstep0 == 0:
                                     tstep0 = tstep
+                                    T0 = time.time()
                                     # Capture the first integer and print it
-                                ETA = (n_time_steps - (tstep - tstep0)) * (
-                                    (tstep - tstep0) / (time.time() - T0)
-                                )
-                                print(
-                                    f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
-                                )
+                                else:
+                                    ETA = (n_time_steps - (tstep - tstep0)) * (
+                                        (time.time() - T0) / (tstep - tstep0)
+                                    )
+                                    total_print_statements = 50
+                                    print_frq = (
+                                        n_time_steps // total_print_statements + 1
+                                    )
+                                    if ((tstep - tstep0) % print_frq) == 0:
+                                        print(
+                                            f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
+                                        )
                             except ValueError:
                                 pass
                         elif tstep0 == 0 and len(roms_init_string) == 0:
@@ -978,8 +1058,7 @@ class ROMSComponent(Component):
                     )
 
     def post_run(self, output_dir=None) -> None:
-        """
-        Performs post-processing steps associated with this ROMSComponent object.
+        """Performs post-processing steps associated with this ROMSComponent object.
 
         This method goes through any netcdf files produced by the model in
         `output_dir` and joins netcdf files that are produced separately by each processor.
@@ -1072,9 +1151,7 @@ class ROMSComponent(Component):
 
 
 class ROMSDiscretization(Discretization):
-    """
-    An implementation of the Discretization class for ROMS.
-
+    """An implementation of the Discretization class for ROMS.
 
     Additional attributes:
     ----------------------
@@ -1087,7 +1164,6 @@ class ROMSDiscretization(Discretization):
     -----------
     n_procs_tot: int
         The value of n_procs_x * n_procs_y
-
     """
 
     def __init__(
@@ -1096,8 +1172,7 @@ class ROMSDiscretization(Discretization):
         n_procs_x: int = 1,
         n_procs_y: int = 1,
     ):
-        """
-        Initialize a ROMSDiscretization object from basic discretization parameters
+        """Initialize a ROMSDiscretization object from basic discretization parameters.
 
         Parameters:
         -----------
@@ -1113,7 +1188,6 @@ class ROMSDiscretization(Discretization):
         --------
         ROMSDiscretization:
             An initialized ROMSDiscretization object
-
         """
 
         super().__init__(time_step)
@@ -1122,7 +1196,7 @@ class ROMSDiscretization(Discretization):
 
     @property
     def n_procs_tot(self) -> int:
-        """Total number of processors required by this ROMS configuration"""
+        """Total number of processors required by this ROMS configuration."""
         return self.n_procs_x * self.n_procs_y
 
     def __str__(self) -> str:
@@ -1143,9 +1217,9 @@ class ROMSDiscretization(Discretization):
         return disc_str
 
     def __repr__(self) -> str:
-        repr_str = super().__repr__().strip(")")
+        repr_str = super().__repr__().rstrip(")")
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            repr_str += f", n_procs_x = {self.n_procs_x}, "
+            repr_str += f"n_procs_x = {self.n_procs_x}, "
         if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
             repr_str += f"n_procs_y = {self.n_procs_y}, "
 

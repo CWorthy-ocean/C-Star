@@ -11,8 +11,8 @@ from cstar.tests.config import ROMS_TOOLS_DATA_DIRECTORY, CSTAR_TEST_DATA_DIRECT
 
 @pytest.fixture
 def fetch_roms_tools_source_data(request) -> Callable[[str | Path], None]:
-    """
-    Fixture that provides a factory function to fetch source data needed by roms-tools.
+    """Fixture that provides a factory function to fetch source data needed by roms-
+    tools.
 
     This fixture returns a function that fetches necessary data files from a remote
     repository using pooch and creates a symlink to the fetched data directory. A cleanup
@@ -32,8 +32,8 @@ def fetch_roms_tools_source_data(request) -> Callable[[str | Path], None]:
     """
 
     def _fetch_roms_tools_source_data(symlink_path: str | Path) -> None:
-        """
-        Fetches ROMS tools source data and creates a symlink to the data directory at `symlink_path`.
+        """Fetches ROMS tools source data and creates a symlink to the data directory at
+        `symlink_path`.
 
         This function downloads the required data files from a specified remote repository
         to ROMS_TOOLS_DATA_DIRECTORY, specified in tests/config.py. After fetching the files,
@@ -97,8 +97,8 @@ def fetch_roms_tools_source_data(request) -> Callable[[str | Path], None]:
 
 @pytest.fixture
 def fetch_remote_test_case_data() -> Callable[[], None]:
-    """
-    Fixture that provides a function to fetch remote test case data from a GitHub repository.
+    """Fixture that provides a function to fetch remote test case data from a GitHub
+    repository.
 
     Returns
     -------
@@ -108,8 +108,7 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
     """
 
     def _fetch_remote_test_case_data() -> None:
-        """
-        Downloads and sets up the remote test case data for testing.
+        """Downloads and sets up the remote test case data for testing.
 
         This function downloads a zip archive of a specific commit of a repo containing test data,
         extracts the archive into the specified test data directory, and performs cleanup of

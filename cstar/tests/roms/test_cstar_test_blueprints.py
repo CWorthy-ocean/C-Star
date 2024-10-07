@@ -22,8 +22,7 @@ class TestCStar:
         fetch_remote_test_case_data,
         test_config_key,
     ):
-        """
-        Run the C-Star minimal test case from a selection of different blueprints.
+        """Run the C-Star minimal test case from a selection of different blueprints.
 
         Parameters:
         -----------

@@ -17,8 +17,7 @@ if TYPE_CHECKING:
 
 
 class Case:
-    """
-    A unique combination of Components that defines a C-Star simulation.
+    """A unique combination of Components that defines a C-Star simulation.
 
     Attributes
     ---------
@@ -42,7 +41,7 @@ class Case:
 
     Methods
     -------
-    from_blueprint(blueprint,caseroot)
+    from_blueprint(blueprint,caseroot,start_date,end_date)
         Instantiate a Case from a "blueprint" yaml file
     persist(filename)
         Create a "blueprint" yaml file for this Case object
@@ -56,7 +55,6 @@ class Case:
         Run this case
     post_run()
         Execute any post-processing actions associated with this case
-
     """
 
     def __init__(
@@ -69,8 +67,7 @@ class Case:
         valid_start_date: Optional[str | datetime] = None,
         valid_end_date: Optional[str | datetime] = None,
     ):
-        """
-        Initialize a Case object manually from components, name, and caseroot path.
+        """Initialize a Case object manually from components, name, and caseroot path.
 
         Parameters:
         ----------
@@ -238,10 +235,8 @@ class Case:
 
     @property
     def is_setup(self):
-        """
-        Check whether all code and files necessary to run this case exist in the local `caseroot` folder
-
-        This method is called by Case.__init__() and sets the Case.is_setup attribute.
+        """Check whether all code and files necessary to run this case exist in the
+        local `caseroot` folder.
 
         The method loops over each Component object makng up the case and
         1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
@@ -252,7 +247,6 @@ class Case:
         --------
         is_setup: bool
             True if all components are correctly set up in the caseroot directory
-
         """
 
         for component in self.components:
@@ -297,18 +291,18 @@ class Case:
         return True
 
     def tree(self):
-        """
-        Represent this Case using a `tree`-style visualisation
+        """Represent this Case using a `tree`-style visualisation.
 
-        This function prints a representation of the Case to stdout.
-        It represents the directory structure that Case.caseroot takes after calling Case.setup(),
-        but does not require the user to have already called Case.setup().
-
+        This function prints a representation of the Case to stdout. It represents the
+        directory structure that Case.caseroot takes after calling Case.setup(), but
+        does not require the user to have already called Case.setup().
         """
         # Build a dictionary of files connected to this case
         case_tree_dict = {}
         for component in self.components:
-            if len(component.input_datasets) > 0:
+            if hasattr(component, "input_datasets") and (
+                len(component.input_datasets) > 0
+            ):
                 case_tree_dict.setdefault("input_datasets", {})
                 case_tree_dict["input_datasets"][component.component_type] = [
                     dataset.source.basename for dataset in component.input_datasets
@@ -344,13 +338,12 @@ class Case:
         start_date: Optional[str | datetime] = None,
         end_date: Optional[str | datetime] = None,
     ) -> "Case":
-        """
-        Initialize a Case object from a blueprint.
+        """Initialize a Case object from a blueprint.
 
         This method reads a YAML file containing the blueprint for a case
         and initializes a Case object based on the provided specifications.
 
-        A blueprint YAML file should be structured as follows TODO REWRITE:
+        A blueprint YAML file should be structured as follows:
 
         - registry_attrs: overall case metadata, including "name"
         - components: A list of components, containing, e.g.
@@ -379,7 +372,6 @@ class Case:
         --------
         Case
             An initalized Case object based on the provided blueprint
-
         """
 
         with open(blueprint, "r") as file:
@@ -455,8 +447,7 @@ class Case:
         return caseinstance
 
     def persist(self, filename: str) -> None:
-        """
-        Write this case to a yaml file.
+        """Write this case to a yaml 'blueprint' file.
 
         This effectively performs the actions of Case.from_blueprint(), but in reverse,
         populating a dictionary from a Case object and its components and their attributes,
@@ -493,17 +484,11 @@ class Case:
             yaml.dump(bp_dict, yaml_file, default_flow_style=False, sort_keys=False)
 
     def setup(self) -> None:
-        """
-        Fetch all code and files necessary to run this case in the local `caseroot` folder
+        """Fetch all code and files necessary to run this case in the local `caseroot`
+        folder.
 
-        This method loops over each Component object making up the case, and performs three operations
-        1. Ensures the component's base model is present in the environment
-           and checked out to the correct point in the history by calling component.base_model.handle_config_status()
-        2. Retrieves any additional code associated with the component by calling the get() method
-           on each AdditionalCode object in component.additional_code. Depending on the nature of the additional code, these
-           are saved to `caseroot/namelists/component.name` or `caseroot/source_mods/component.base_model.name`
-        3. Fetches any input datasets necessary to run the component by calling the get() method
-           on each InputDataset object in component.input_datasets. These are saved to `caseroot`/input_datasets/`component.base_model.name`
+        This method loops over each Component object making up the case, and calls
+        Component.setup()
         """
 
         if self.is_setup:
@@ -526,16 +511,16 @@ class Case:
                 component.setup()
 
     def build(self) -> None:
-        """Compile any necessary additional code associated with this case
-        by calling component.build() on each Component object making up this case"""
+        """Compile any necessary additional code associated with this case by calling
+        component.build() on each Component object making up this case."""
         for component in self.components:
             infostr = f"\nCompiling {component.__class__.__name__}"
             print(infostr + "\n" + "-" * len(infostr))
             component.build()
 
     def pre_run(self) -> None:
-        """For each Component associated with this case, execute
-        pre-processing actions by calling component.pre_run()"""
+        """For each Component associated with this case, execute pre-processing actions
+        by calling component.pre_run()"""
         for component in self.components:
             infostr = (
                 f"\nCompleting pre-processing steps for {component.__class__.__name__}"
@@ -549,8 +534,8 @@ class Case:
         walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
         job_name="my_case_run",
     ) -> None:
-        """Run the case by calling `component.run(caseroot)`
-        on the primary component (to which others are coupled)."""
+        """Run the case by calling `component.run(caseroot)` on the primary component
+        (to which others are coupled)."""
 
         # Assuming for now that ROMS presence implies it is the master program
         # TODO add more advanced logic for this
@@ -579,8 +564,8 @@ class Case:
                 )
 
     def post_run(self) -> None:
-        """For each Component associated with this case, execute
-        post-processing actions by calling component.post_run()"""
+        """For each Component associated with this case, execute post-processing actions
+        by calling component.post_run()"""
         for component in self.components:
             if isinstance(component, ROMSComponent):
                 infostr = f"\nCompleting post-processing steps for {component.__class__.__name__}"

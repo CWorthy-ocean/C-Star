@@ -35,3 +35,10 @@ repos:
     hooks:
       - id: absolufy-imports
         args: [--application-directories=.]
+
+  - repo: https://github.com/PyCQA/docformatter
+    rev: v1.7.5  
+    hooks:
+      - id: docformatter
+        language: python
+        args: ["--in-place", "--recursive", "--wrap-summaries=88", "--wrap-descriptions=88"]

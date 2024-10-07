@@ -7,8 +7,7 @@ from cstar.base.utils import _clone_and_checkout, _list_to_concise_str
 
 
 class AdditionalCode:
-    """
-    Additional code contributing to a model component
+    """Additional code contributing to a model component.
 
     Additional code is assumed to be kept in a single directory or
     subdirectory of a repository (described by the `source` attribute).
@@ -49,8 +48,8 @@ class AdditionalCode:
         checkout_target: Optional[str] = None,
         files: Optional[list[str]] = None,
     ):
-        """
-        Initialize an AdditionalCode object from a DataSource  and a list of code files
+        """Initialize an AdditionalCode object from a DataSource  and a list of code
+        files.
 
         Parameters:
         -----------
@@ -69,7 +68,6 @@ class AdditionalCode:
         --------
         AdditionalCode
             An initialized AdditionalCode object
-
         """
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
@@ -92,7 +90,7 @@ class AdditionalCode:
         if not self.exists_locally:
             base_str += " (get with AdditionalCode.get())"
         if self.files is not None:
-            base_str += "\nFiles (paths relative to above location):"
+            base_str += "\nFiles:"
             for filename in self.files:
                 base_str += f"\n    {filename}"
                 if filename[-9:] == "_TEMPLATE":
@@ -107,7 +105,7 @@ class AdditionalCode:
         if hasattr(self, "checkout_target"):
             repr_str += f"\ncheckout_target = {self.checkout_target!r},"
         if hasattr(self, "files") and self.files is not None:
-            repr_str += "\nfiles = " + _list_to_concise_str(self.files)
+            repr_str += "\nfiles = " + _list_to_concise_str(self.files, pad=9)
         repr_str += "\n)"
         # Additional info:
         info_str = ""
@@ -120,9 +118,8 @@ class AdditionalCode:
 
     @property
     def exists_locally(self):
-        """
-        Determine whether a local working copy of the AdditionalCode exists at self.working_path (bool)
-        """
+        """Determine whether a local working copy of the AdditionalCode exists at
+        self.working_path (bool)"""
         if self.working_path is None:
             return False
 
@@ -133,8 +130,7 @@ class AdditionalCode:
         return True
 
     def get(self, local_dir: str | Path) -> None:
-        """
-        Copy the required AdditionalCode files to `local_dir`
+        """Copy the required AdditionalCode files to `local_dir`
 
         If AdditionalCode.source describes a remote repository,
         this is cloned into a temporary directory first.
@@ -143,7 +139,6 @@ class AdditionalCode:
         -----------
         local_dir: str | Path
             The local directory (typically `Case.caseroot`) in which to fetch the additional code.
-
         """
         local_dir = Path(local_dir).resolve()
         try:
