@@ -1,11 +1,10 @@
 import io
 import os
-import sys
 import platform
 import importlib.util
 from pathlib import Path
 from typing import Optional
-from contextlib import redirect_stderr,redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 top_level_package_name = __name__.split(".")[0]
 spec = importlib.util.find_spec(top_level_package_name)
@@ -30,10 +29,17 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
     # Dynamically load the env_modules_python module using pathlib
     module_path = Path(os.environ["LMOD_DIR"]).parent / "init" / "env_modules_python.py"
     spec = importlib.util.spec_from_file_location("env_modules_python", module_path)
+    if (spec is None) or (spec.loader is None):
+        raise EnvironmentError(
+            f"Could not find env_modules_python on this machine at {module_path}"
+        )
     env_modules = importlib.util.module_from_spec(spec)
+    if env_modules is None:
+        raise EnvironmentError(
+            f"No module found by importlib corresponding to spec {spec}"
+        )
     spec.loader.exec_module(env_modules)
     module = env_modules.module
-
 
     if "LMOD_SYSHOST" in list(os.environ):
         sysname = os.environ["LMOD_SYSHOST"].casefold()
@@ -44,21 +50,14 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             "unable to find LMOD_SYSHOST or LMOD_SYSTEM_NAME in environment. "
             + "Your system may be unsupported"
         )
-    
-    module_stdout=io.StringIO()
-    module_stderr=io.StringIO()
+
+    module_stdout = io.StringIO()
+    module_stderr = io.StringIO()
     with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
         module("reset")
 
     match sysname:
         case "expanse":
-            sdsc_default_modules = "slurm sdsc DefaultModules shared"
-            nc_prerequisite_modules = "cpu/0.15.4 intel/19.1.1.217 mvapich2/2.3.4"
-            module("load", sdsc_default_modules)
-            module("load", nc_prerequisite_modules)
-            module("load", "netcdf-c/4.7.4")
-            module("load", "netcdf-fortran/4.5.3")
-
             os.environ["NETCDFHOME"] = os.environ["NETCDF_FORTRANHOME"]
             os.environ["MPIHOME"] = os.environ["MVAPICH2HOME"]
             os.environ["NETCDF"] = os.environ["NETCDF_FORTRANHOME"]
@@ -76,10 +75,6 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MAX_WALLTIME = "48:00:00"  # (hostname/cpus/mem[MB]/walltime)
 
         case "derecho":
-            module("load" "intel")
-            module("load", "netcdf")
-            module("load", "cray-mpich/8.1.25")
-
             os.environ["MPIHOME"] = "/opt/cray/pe/mpich/8.1.25/ofi/intel/19.0/"
             os.environ["NETCDFHOME"] = os.environ["NETCDF"]
             os.environ["LD_LIBRARY_PATH"] = (
@@ -104,14 +99,6 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MAX_WALLTIME = "12:00:00"  # with grep or awk
 
         case "perlmutter":
-            with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
-                module("unload","gpu")
-                module("load", "cpu")
-                module("load", "cray-hdf5/1.12.2.9")
-                module("load", "cray-netcdf/4.9.0.9")
-
-            
-
             os.environ["MPIHOME"] = "/opt/cray/pe/mpich/8.1.28/ofi/gnu/12.3/"
             os.environ["NETCDFHOME"] = "/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/"
             os.environ["PATH"] = (
@@ -143,8 +130,22 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MEMGB_PER_NODE = 512  #  with `sinfo -o "%n %c %m %l"`
             _CSTAR_SYSTEM_MAX_WALLTIME = "24:00:00"  # (hostname/cpus/mem[MB]/walltime)
 
-    if any(keyword in module_stderr.getvalue().casefold() for keyword in ["fail", "error"]):
-        raise EnvironmentError("Error with linux environment modules: "+module_stderr.getvalue())
+    # Load Linux Environment Modules for this machine:
+    with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
+        module("reset")
+        with open(
+            f"{_CSTAR_ROOT}/additional_files/lmod_lists/{_CSTAR_SYSTEM}.lmod"
+        ) as F:
+            lmod_list = F.readlines()
+        for mod in lmod_list:
+            module("load", mod)
+
+    if any(
+        keyword in module_stderr.getvalue().casefold() for keyword in ["fail", "error"]
+    ):
+        raise EnvironmentError(
+            "Error with linux environment modules: " + module_stderr.getvalue()
+        )
 
 elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
     # if on MacOS arm64 all dependencies should have been installed by conda

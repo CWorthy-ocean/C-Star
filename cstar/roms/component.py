@@ -1094,8 +1094,7 @@ class ROMSComponent(Component):
                     F.rename(output_dir / "PARTITIONED" / F.name)
 
     def restart(self, new_start_date: datetime, restart_dir: str | Path):
-        """
-        Returns a new ROMSComponent instance initialized from a restart file.
+        """Returns a new ROMSComponent instance initialized from a restart file.
 
         This method searches `restart_dir` for a ROMS restart file
         corresponding to `new_start_date`, and returns a new ROMSComponent
