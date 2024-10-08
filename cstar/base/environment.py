@@ -1,9 +1,11 @@
+import io
 import os
 import sys
 import platform
 import importlib.util
 from pathlib import Path
 from typing import Optional
+from contextlib import redirect_stderr,redirect_stdout
 
 top_level_package_name = __name__.split(".")[0]
 spec = importlib.util.find_spec(top_level_package_name)
@@ -25,8 +27,13 @@ _CSTAR_SYSTEM_MAX_WALLTIME: Optional[str]
 
 
 if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
-    sys.path.append(os.environ["LMOD_DIR"] + "/../init")
-    from env_modules_python import module
+    # Dynamically load the env_modules_python module using pathlib
+    module_path = Path(os.environ["LMOD_DIR"]).parent / "init" / "env_modules_python.py"
+    spec = importlib.util.spec_from_file_location("env_modules_python", module_path)
+    env_modules = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(env_modules)
+    module = env_modules.module
+
 
     if "LMOD_SYSHOST" in list(os.environ):
         sysname = os.environ["LMOD_SYSHOST"].casefold()
@@ -37,8 +44,12 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             "unable to find LMOD_SYSHOST or LMOD_SYSTEM_NAME in environment. "
             + "Your system may be unsupported"
         )
+    
+    module_stdout=io.StringIO()
+    module_stderr=io.StringIO()
+    with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
+        module("reset")
 
-    module("restore")
     match sysname:
         case "expanse":
             sdsc_default_modules = "slurm sdsc DefaultModules shared"
@@ -93,9 +104,13 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MAX_WALLTIME = "12:00:00"  # with grep or awk
 
         case "perlmutter":
-            module("load", "cpu")
-            module("load", "cray-hdf5/1.12.2.9")
-            module("load", "cray-netcdf/4.9.0.9")
+            with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
+                module("unload","gpu")
+                module("load", "cpu")
+                module("load", "cray-hdf5/1.12.2.9")
+                module("load", "cray-netcdf/4.9.0.9")
+
+            
 
             os.environ["MPIHOME"] = "/opt/cray/pe/mpich/8.1.28/ofi/gnu/12.3/"
             os.environ["NETCDFHOME"] = "/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/"
@@ -128,6 +143,8 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MEMGB_PER_NODE = 512  #  with `sinfo -o "%n %c %m %l"`
             _CSTAR_SYSTEM_MAX_WALLTIME = "24:00:00"  # (hostname/cpus/mem[MB]/walltime)
 
+    if any(keyword in module_stderr.getvalue().casefold() for keyword in ["fail", "error"]):
+        raise EnvironmentError("Error with linux environment modules: "+module_stderr.getvalue())
 
 elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
     # if on MacOS arm64 all dependencies should have been installed by conda
