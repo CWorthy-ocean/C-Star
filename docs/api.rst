@@ -19,6 +19,7 @@ Components
 .. autosummary::
    :toctree: generated/
 
+   cstar.base.Component
    cstar.roms.ROMSComponent
    cstar.marbl.MARBLComponent
 
@@ -28,6 +29,7 @@ Base Models
 .. autosummary::
    :toctree: generated/
 
+   cstar.base.BaseModel
    cstar.roms.ROMSBaseModel
    cstar.marbl.MARBLBaseModel
 
@@ -45,6 +47,8 @@ Input Datasets
 .. autosummary::
    :toctree: generated/
 
+   cstar.base.InputDataset
+   cstar.roms.ROMSInputDataset
    cstar.roms.ROMSModelGrid
    cstar.roms.ROMSInitialConditions
    cstar.roms.ROMSTidalForcing
