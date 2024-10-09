@@ -4,6 +4,8 @@
 
 # Installation
 
+## Installation from GitHub
+
 To obtain the latest development version, clone [this repository](https://github.com/CWorthy-ocean/C-Star):
 
 ```
@@ -28,46 +30,26 @@ Finally, install `C-Star` in the same environment:
 pip install -e .
 ``` 
 
-# Using C-Star:
-It is recommended that first-time users see the example notebook `examples/cstar_example_notebook.ipynb`. A summary is provided here:
+## Run the tests
 
-## Overview of C-Star structures
-- A Case (`cstar.Case`) is the primary object of C-Star. It contains all the necessary information for a user to run a reproducable Earth system simulation.
-- A Case is built from Components (`cstar.base.Component`), each representing a specific configuration of a model of one part of the overall system being simulated. In this notebook we'll be working with an ocean circulation component and a biogeochemistry component.
-- A Component object, meanwhile, consists of, at least, a base model (`cstar.base.BaseModel`), and optionally additional code (`cstar.base.AdditionalCode`), input datasets (`cstar.base.InputDataset`), and discretization information needed to run the base model in the specific configuration in question. In the simplest scenario, we can imagine a Case consisting of a single Component which is just a base model in an bundled example configuration (like an ocean double gyre) with itsings run in serial withtical initial and forcing data (i.e. no additional code, input datasets, or parallelization information needed).
-- You can find more information on C-Star `Case`, `Component`, `BaseModel`, `AdditionalCode`, and `InputDataset` objects by querying, e.g., `cstar.base.Component?`.
-
-## Constructing a C-Star Case:
-A Case can be instantiated in one of two ways:
-
-- using the standard constructor (after manually constructing the Component objects that will make up the Case):
-
-```python
-	my_case = cstar.Case(
-		list_of_component_objects,
-		name='case_name',
-		caseroot='/path/to/where/case/will/be/run',
-	)
+Before running the tests, you can activate the conda environment created in the previous section:
+```
+conda activate cstar_env
 ```
 
-
-- From a pre-defined "blueprint", using
-
-```python
-	my_case = cstar.Case.from_blueprint('path/to/blueprint.yaml')
+Check the installation of `C-Star` has worked by running the test suite
+```
+cd C-Star
+pytest
 ```
 
-An example blueprint file is provided at
+# Getting Started
 
-```<repository_top_level>/cstar/examples/cstar_blueprint_roms_marbl_example.yaml```
+To learn how to use `C-Star`, check out the [documentation](https://c-star.readthedocs.io/en/latest/index.html).
 
-## Running a C-Star Case:
-Once a case has been constructed, the sequence of steps to run it is as follows:
+# Feedback and contributions
 
-- `my_case.setup()`:
-	- Prompts the user to install any external codebases that cannot be located on the machine
-	- Downloads local copies of any input datasets and additional code described by each component's `AdditionalCode` and `InputDataset` objects that are needed to run the case to the `Case.caseroot` directory
-- `my_case.build()` compiles an executable of the primary Component's BaseModel. The path to the executable is saved to the `BaseModel.exe_path` attribute
-- `my_case.pre_run()` performs any pre-processing steps necessary to run the model
-- `my_case.run(account_key='MY_ACCOUNT_KEY')` either executes the case or submits it to the appropriate job scheduler with the user's provided account key. If running on a machine without a scheduling system (such as a laptop), the optional `account_key` argument can be ignored. Additional arguments include `walltime='HH:MM:SS'` and `job_name='my_job_name'`
-- `my_case.post_run()` performs any necessary post-processing steps to work with the output.
+If you find a bug, have a feature suggestion, or any other kind of feedback, please start a Discussion.
+
+We also accept contributions in the form of Pull Requests.
+
