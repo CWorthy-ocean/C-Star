@@ -41,12 +41,9 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
         )
     spec.loader.exec_module(env_modules)
     module = env_modules.module
-
-    if "LMOD_SYSHOST" in list(os.environ):
-        sysname = os.environ["LMOD_SYSHOST"].casefold()
-    elif "LMOD_SYSTEM_NAME" in list(os.environ):
-        sysname = os.environ["LMOD_SYSTEM_NAME"].casefold()
-    else:
+    
+    sysname = os.environ.get("LMOD_SYSHOST") or os.environ.get("LMOD_SYSTEM_NAME")
+    if not sysname:
         raise EnvironmentError(
             "unable to find LMOD_SYSHOST or LMOD_SYSTEM_NAME in environment. "
             + "Your system may be unsupported"
@@ -78,7 +75,7 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_ENVIRONMENT_VARIABLES["NETCDF"] = os.environ["NETCDF_FORTRANHOME"]
             _CSTAR_ENVIRONMENT_VARIABLES["MPI_ROOT"] = os.environ["MVAPICH2HOME"]
             _CSTAR_COMPILER = "intel"
-            _CSTAR_SYSTEM = "sdsc_expanse"
+            _CSTAR_SYSTEM = "expanse"
             _CSTAR_SCHEDULER = (
                 "slurm"  # can get this with `scontrol show config` or `sinfo --version`
             )
@@ -100,7 +97,7 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             )
 
             _CSTAR_COMPILER = "intel"
-            _CSTAR_SYSTEM = "ncar_derecho"
+            _CSTAR_SYSTEM = "derecho"
             _CSTAR_SCHEDULER = (
                 "pbs"  # can determine dynamically by testing for `qstat --version`
             )
@@ -136,7 +133,7 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             )
 
             _CSTAR_COMPILER = "gnu"
-            _CSTAR_SYSTEM = "nersc_perlmutter"
+            _CSTAR_SYSTEM = "perlmutter"
             _CSTAR_SCHEDULER = "slurm"
             _CSTAR_SYSTEM_DEFAULT_PARTITION = "regular"
             _CSTAR_SYSTEM_CORES_PER_NODE = (

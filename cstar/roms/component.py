@@ -1,3 +1,5 @@
+import os
+import platform
 import warnings
 import subprocess
 import shutil
@@ -22,9 +24,11 @@ from cstar.base.environment import (
     _CSTAR_COMPILER,
     _CSTAR_SCHEDULER,
     _CSTAR_SYSTEM,
+    _CSTAR_ROOT,
     _CSTAR_SYSTEM_MAX_WALLTIME,
     _CSTAR_SYSTEM_DEFAULT_PARTITION,
     _CSTAR_SYSTEM_CORES_PER_NODE,
+    _CSTAR_ENVIRONMENT_VARIABLES
 )
 
 if TYPE_CHECKING:
@@ -828,7 +832,6 @@ class ROMSComponent(Component):
             The name of the job submitted to the scheduler, which also sets the output file name
             `job_name.out`
         """
-
         if self.exe_path is None:
             raise ValueError(
                 "C-STAR: ROMSComponent.exe_path is None; unable to find ROMS executable."
@@ -887,11 +890,11 @@ class ROMSComponent(Component):
         ## 2: RUN ON THIS MACHINE
 
         match _CSTAR_SYSTEM:
-            case "sdsc_expanse":
+            case "expanse":
                 exec_pfx = "srun --mpi=pmi2"
-            case "nersc_perlmutter":
+            case "perlmutter":
                 exec_pfx = "srun"
-            case "ncar_derecho":
+            case "derecho":
                 exec_pfx = "mpirun"
             case "osx_arm64":
                 exec_pfx = "mpirun"
@@ -938,7 +941,7 @@ class ROMSComponent(Component):
                 scheduler_script += "\n#PBS -j oe"
                 scheduler_script += "\n#PBS -k eod"
                 scheduler_script += "\n#PBS -V"
-                if _CSTAR_SYSTEM == "ncar_derecho":
+                if _CSTAR_SYSTEM == "derecho":
                     scheduler_script += "\ncd ${PBS_O_WORKDIR}"
                 scheduler_script += f"\n\n{roms_exec_cmd}"
 
@@ -949,6 +952,7 @@ class ROMSComponent(Component):
 
             case "slurm":
                 # TODO: export ALL copies env vars, but will need to handle module load
+
                 if account_key is None:
                     raise ValueError(
                         "please call Component.run() with a value for account_key"
@@ -957,7 +961,7 @@ class ROMSComponent(Component):
                 scheduler_script = "#!/bin/bash"
                 scheduler_script += f"\n#SBATCH --job-name={job_name}"
                 scheduler_script += f"\n#SBATCH --output={job_name}.out"
-                if _CSTAR_SYSTEM == "nersc_perlmutter":
+                if _CSTAR_SYSTEM == "perlmutter":
                     scheduler_script += (
                         f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
                     )
@@ -970,15 +974,34 @@ class ROMSComponent(Component):
                 scheduler_script += f"\n#SBATCH --nodes={nnodes}"
                 scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
                 scheduler_script += f"\n#SBATCH --account={account_key}"
-                scheduler_script += "\n#SBATCH --export=ALL"
+                scheduler_script +=  "\n#SBATCH --export=NONE"
                 scheduler_script += "\n#SBATCH --mail-type=ALL"
                 scheduler_script += f"\n#SBATCH --time={walltime}"
+
+                # Add linux environment modules to scheduler script
+                if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
+                    scheduler_script += "\nmodule reset"
+                    with open(f"{_CSTAR_ROOT}/additional_files/lmod_lists/{_CSTAR_SYSTEM}.lmod") as F:
+                        modules=F.readlines()
+                for m in modules:
+                    scheduler_script += f"\nmodule load {m}"
+
+                scheduler_script += f"\nprintenv"
+
+                # Add environment variables to scheduler script:
+                for var,value in _CSTAR_ENVIRONMENT_VARIABLES.items():
+                    scheduler_script +=f'\nexport {var}="{value}"'
+                
+                # Add roms command to scheduler script
                 scheduler_script += f"\n\n{roms_exec_cmd}"
 
                 script_fname = "cstar_run_script.sh"
                 with open(run_path / script_fname, "w") as f:
                     f.write(scheduler_script)
-                subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path)
+
+                # remove any slurm variables in case submitting from inside another slurm job
+                slurm_env = {k: v for k, v in os.environ.items() if not k.startswith("SLURM_")}
+                subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path, env=slurm_env)
 
             case None:
                 import time
@@ -1117,18 +1140,16 @@ class ROMSComponent(Component):
         restart_dir = Path(restart_dir)
 
         restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")
-        restart_wildcard = f"*_rst.{restart_date_string}.*.nc"
+        restart_wildcard = f"*_rst.{restart_date_string}.nc"
         restart_files = list(restart_dir.glob(restart_wildcard))
         if len(restart_files) == 0:
             raise FileNotFoundError(
                 f"No files in {restart_dir} match the pattern "
-                + f"'*_rst.{restart_date_string}.*.nc"
+                + f"'*_rst.{restart_date_string}.nc"
             )
 
-        # Filter out partitioning, e.g.
-        # ROMS_rst.20120102120000.*.nc -> ROMS_rst.20120102120000.nc
-        # and check if multiple matches:
-        unique_restarts = {Path(fname.stem).stem + ".nc" for fname in restart_files}
+        unique_restarts = {fname for fname in restart_files}
+        
         if len(unique_restarts) > 1:
             raise ValueError(
                 "Found multiple distinct restart files corresponding to "
