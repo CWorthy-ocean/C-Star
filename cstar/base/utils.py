@@ -18,8 +18,8 @@ def _write_to_config_file(config_file_str: str) -> None:
             + "# You can safely delete this file, but C-Star may prompt you to re-install things if so."
         )
 
-        base_conf_str += "\nimport os\n"
-        base_conf_str += "def set_local_environment():\n"
+        base_conf_str += "\nimport os\nfrom cstar.base.environment import _CSTAR_ENVIRONMENT_VARIABLES\n"
+        base_conf_str += "def get_user_environment():\n"
         config_file_str = base_conf_str + config_file_str
 
     with open(_CSTAR_CONFIG_FILE, "a") as f:
