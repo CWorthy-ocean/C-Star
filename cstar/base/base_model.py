@@ -56,7 +56,9 @@ class BaseModel(ABC):
         handle_local_config_status() prompts the user to run get() if the model cannot be found.
     """
 
-    def __init__(self, source_repo=Optional[str], checkout_target=Optional[str]):
+    def __init__(
+        self, source_repo: Optional[str] = None, checkout_target: Optional[str] = None
+    ):
         """Initialize a BaseModel object manually from a source repository and checkout
         target.
 
