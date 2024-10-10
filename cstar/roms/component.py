@@ -810,6 +810,7 @@ class ROMSComponent(Component):
         account_key: Optional[str] = None,
         output_dir: Optional[str | Path] = None,
         walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
+        queue: Optional[str] = _CSTAR_SYSTEM_DEFAULT_PARTITION,
         job_name: str = "my_roms_run",
     ) -> None:
         """Runs the executable created by `build()`
@@ -851,12 +852,6 @@ class ROMSComponent(Component):
         # Copy template namelist and add all current known information
         # from this Component instance:
         self.update_namelists()
-        # if self.namelists is None:
-        #     raise FileNotFoundError(
-        #         "C-STAR: Unable to find namelist file (typically roms.in) "
-        #         + "associated with this ROMSComponent."
-        #     )
-        #     return
 
         # Now need to manually update number of time steps as it is unknown
         # outside of the context of this function:
@@ -937,7 +932,7 @@ class ROMSComponent(Component):
                 scheduler_script += (
                     f"\n#PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}"
                 )
-                scheduler_script += f"\n#PBS -q {_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                scheduler_script += f"\n#PBS -q {queue}"
                 scheduler_script += "\n#PBS -j oe"
                 scheduler_script += "\n#PBS -k eod"
                 scheduler_script += "\n#PBS -V"
@@ -963,7 +958,7 @@ class ROMSComponent(Component):
                 scheduler_script += f"\n#SBATCH --output={job_name}.out"
                 if _CSTAR_SYSTEM == "perlmutter":
                     scheduler_script += (
-                        f"\n#SBATCH --qos={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
+                        f"\n#SBATCH --qos={queue}"
                     )
                     scheduler_script += "\n#SBATCH -C cpu"
                 else:
@@ -1092,14 +1087,15 @@ class ROMSComponent(Component):
             The directory in which output was produced by the run
         """
         output_dir = Path(output_dir)
-        files = list(output_dir.glob("*.*0.nc"))
+        files = list(output_dir.glob("*.??????????????.*.nc"))
+        unique_wildcards = {Path(fname.stem).stem+".*.nc" for fname in files}
         if not files:
             print("no suitable output found")
         else:
             (output_dir / "PARTITIONED").mkdir(exist_ok=True)
-            for f in files:
+            for wildcard_pattern in unique_wildcards:
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
-                wildcard_pattern = f"{Path(f.stem).stem}.*.nc"
+
                 print(f"Joining netCDF files {wildcard_pattern}...")
                 ncjoin_result = subprocess.run(
                     f"ncjoin {wildcard_pattern}",
