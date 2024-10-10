@@ -11,6 +11,12 @@ Welcome to the C-Star Documentation!
 
 .. toctree::
    :maxdepth: 1
+   :caption: Terminology
+
+   terminology
+
+.. toctree::
+   :maxdepth: 1
    :caption: Examples
 
    Using C-Star <cstar_example_notebook>
