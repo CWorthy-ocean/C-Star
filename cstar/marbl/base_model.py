@@ -62,7 +62,9 @@ class MARBLBaseModel(BaseModel):
 
         # Set the configuration file to be read by __init__.py for future sessions:
         # QUESTION: how better to handle this?
-        config_file_str = f'\n    os.environ["MARBL_ROOT"]="{target}"\n'
+        config_file_str = (
+            f'\n    _CSTAR_ENVIRONMENT_VARIABLES["MARBL_ROOT"]="{target}"\n'
+        )
         _write_to_config_file(config_file_str)
 
         # Make things
