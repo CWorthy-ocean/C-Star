@@ -172,7 +172,7 @@ elif (
     _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
         os.environ.get("LD_LIBRARY_PATH", default="")
         + ":"
-        + os.environ["NETCDFHOME"]
+        + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
         + "/lib"
     )
     _CSTAR_COMPILER = "gnu"
