@@ -6,6 +6,9 @@
 Case
   The primary object of `C-Star`. It contains all the necessary information for a user to run a reproducible Earth system simulation. A `Case` is built from {term}`component <Component>` objects, each representing a specific configuration of a model of one part of the overall system being simulated.
 
+blueprint
+  An on-disk representation of a {term}`Case <Case>`, stored in a `yaml` file. A `Case` can be exported to, or created from, a blueprint file. 
+
 Component
   An object that consists of, at least, a {term}`base model <Base Model>`, and optionally {term}`additional code <Additional Code>`, {term}`input datasets <Input Dataset>`, and {term}`discretization <Discretization>` information needed to run the {term}`base model <Base Model>` in the specific configuration in question.
 
