@@ -19,10 +19,10 @@ Welcome to the C-Star Documentation!
    :maxdepth: 1
    :caption: Examples
 
-   Building and exporting a `Case`  <1_building_and_exporting_a_case>
-   Importing and running a `Case` <2_importing_and_running_a_case>
-   Restarting and continuing a `Case` <3_restarting_and_continuing_a_case>
-   Preparing input datasets for a `Case` with ROMS <4_preparing_roms_input_datasets>
+   Building and exporting a Case  <1_building_and_exporting_a_case>
+   Importing and running a Case <2_importing_and_running_a_case>
+   Restarting and continuing a Case <3_restarting_and_continuing_a_case>
+   Preparing input datasets for a Case with ROMS using roms-tools <4_preparing_roms_input_datasets>
 
 .. toctree::
    :maxdepth: 1
