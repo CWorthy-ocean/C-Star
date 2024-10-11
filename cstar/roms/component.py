@@ -28,7 +28,7 @@ from cstar.base.environment import (
     _CSTAR_SYSTEM_MAX_WALLTIME,
     _CSTAR_SYSTEM_DEFAULT_PARTITION,
     _CSTAR_SYSTEM_CORES_PER_NODE,
-    _CSTAR_ENVIRONMENT_VARIABLES
+    _CSTAR_ENVIRONMENT_VARIABLES,
 )
 
 if TYPE_CHECKING:
@@ -957,9 +957,7 @@ class ROMSComponent(Component):
                 scheduler_script += f"\n#SBATCH --job-name={job_name}"
                 scheduler_script += f"\n#SBATCH --output={job_name}.out"
                 if _CSTAR_SYSTEM == "perlmutter":
-                    scheduler_script += (
-                        f"\n#SBATCH --qos={queue}"
-                    )
+                    scheduler_script += f"\n#SBATCH --qos={queue}"
                     scheduler_script += "\n#SBATCH -C cpu"
                 else:
                     scheduler_script += (
@@ -969,24 +967,26 @@ class ROMSComponent(Component):
                 scheduler_script += f"\n#SBATCH --nodes={nnodes}"
                 scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
                 scheduler_script += f"\n#SBATCH --account={account_key}"
-                scheduler_script +=  "\n#SBATCH --export=NONE"
+                scheduler_script += "\n#SBATCH --export=NONE"
                 scheduler_script += "\n#SBATCH --mail-type=ALL"
                 scheduler_script += f"\n#SBATCH --time={walltime}"
 
                 # Add linux environment modules to scheduler script
                 if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
                     scheduler_script += "\nmodule reset"
-                    with open(f"{_CSTAR_ROOT}/additional_files/lmod_lists/{_CSTAR_SYSTEM}.lmod") as F:
-                        modules=F.readlines()
+                    with open(
+                        f"{_CSTAR_ROOT}/additional_files/lmod_lists/{_CSTAR_SYSTEM}.lmod"
+                    ) as F:
+                        modules = F.readlines()
                 for m in modules:
                     scheduler_script += f"\nmodule load {m}"
 
-                scheduler_script += f"\nprintenv"
+                scheduler_script += "\nprintenv"
 
                 # Add environment variables to scheduler script:
-                for var,value in _CSTAR_ENVIRONMENT_VARIABLES.items():
-                    scheduler_script +=f'\nexport {var}="{value}"'
-                
+                for var, value in _CSTAR_ENVIRONMENT_VARIABLES.items():
+                    scheduler_script += f'\nexport {var}="{value}"'
+
                 # Add roms command to scheduler script
                 scheduler_script += f"\n\n{roms_exec_cmd}"
 
@@ -995,8 +995,12 @@ class ROMSComponent(Component):
                     f.write(scheduler_script)
 
                 # remove any slurm variables in case submitting from inside another slurm job
-                slurm_env = {k: v for k, v in os.environ.items() if not k.startswith("SLURM_")}
-                subprocess.run(f"sbatch {script_fname}", shell=True, cwd=run_path, env=slurm_env)
+                slurm_env = {
+                    k: v for k, v in os.environ.items() if not k.startswith("SLURM_")
+                }
+                subprocess.run(
+                    f"sbatch {script_fname}", shell=True, cwd=run_path, env=slurm_env
+                )
 
             case None:
                 import time
@@ -1088,7 +1092,7 @@ class ROMSComponent(Component):
         """
         output_dir = Path(output_dir)
         files = list(output_dir.glob("*.??????????????.*.nc"))
-        unique_wildcards = {Path(fname.stem).stem+".*.nc" for fname in files}
+        unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
             print("no suitable output found")
         else:
@@ -1145,12 +1149,12 @@ class ROMSComponent(Component):
             )
 
         unique_restarts = {fname for fname in restart_files}
-        
+
         if len(unique_restarts) > 1:
             raise ValueError(
                 "Found multiple distinct restart files corresponding to "
                 + f"{restart_date_string}: "
-                + "\n ".join(unique_restarts)
+                + "\n ".join([str(rst) for rst in list(unique_restarts)])
             )
 
         restart_file = restart_dir / list(unique_restarts)[0]

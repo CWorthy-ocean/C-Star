@@ -41,7 +41,7 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
         )
     spec.loader.exec_module(env_modules)
     module = env_modules.module
-    
+
     sysname = os.environ.get("LMOD_SYSHOST") or os.environ.get("LMOD_SYSTEM_NAME")
     if not sysname:
         raise EnvironmentError(
@@ -55,9 +55,7 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
     # Load Linux Environment Modules for this machine:
     with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
         module("reset")
-        with open(
-            f"{_CSTAR_ROOT}/additional_files/lmod_lists/{sysname}.lmod"
-        ) as F:
+        with open(f"{_CSTAR_ROOT}/additional_files/lmod_lists/{sysname}.lmod") as F:
             lmod_list = F.readlines()
         for mod in lmod_list:
             module("load", mod)
@@ -70,7 +68,9 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
 
     match sysname:
         case "expanse":
-            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ["NETCDF_FORTRANHOME"]
+            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ[
+                "NETCDF_FORTRANHOME"
+            ]
             _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = os.environ["MVAPICH2HOME"]
             _CSTAR_ENVIRONMENT_VARIABLES["NETCDF"] = os.environ["NETCDF_FORTRANHOME"]
             _CSTAR_ENVIRONMENT_VARIABLES["MPI_ROOT"] = os.environ["MVAPICH2HOME"]
@@ -87,7 +87,9 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MAX_WALLTIME = "48:00:00"  # (hostname/cpus/mem[MB]/walltime)
 
         case "derecho":
-            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = "/opt/cray/pe/mpich/8.1.25/ofi/intel/19.0/"
+            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = (
+                "/opt/cray/pe/mpich/8.1.25/ofi/intel/19.0/"
+            )
             _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ["NETCDF"]
             _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
                 os.environ.get("LD_LIBRARY_PATH", default="")
@@ -111,8 +113,12 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MAX_WALLTIME = "12:00:00"  # with grep or awk
 
         case "perlmutter":
-            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = "/opt/cray/pe/mpich/8.1.28/ofi/gnu/12.3/"
-            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = "/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/"
+            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = (
+                "/opt/cray/pe/mpich/8.1.28/ofi/gnu/12.3/"
+            )
+            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = (
+                "/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/"
+            )
             _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = (
                 os.environ.get("PATH", default="")
                 + ":"
@@ -191,8 +197,9 @@ elif (
 _CSTAR_CONFIG_FILE = _CSTAR_ROOT + "/cstar_local_config.py"
 if Path(_CSTAR_CONFIG_FILE).exists():
     from cstar.cstar_local_config import get_user_environment
+
     get_user_environment()
-for var,value in _CSTAR_ENVIRONMENT_VARIABLES.items():
-    os.environ[var]=value
+for var, value in _CSTAR_ENVIRONMENT_VARIABLES.items():
+    os.environ[var] = value
 
 ################################################################################

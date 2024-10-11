@@ -7,7 +7,10 @@ from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
 
 from cstar.base.component import Component
-from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME, _CSTAR_SYSTEM_DEFAULT_PARTITION
+from cstar.base.environment import (
+    _CSTAR_SYSTEM_MAX_WALLTIME,
+    _CSTAR_SYSTEM_DEFAULT_PARTITION,
+)
 from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
@@ -532,7 +535,7 @@ class Case:
         self,
         account_key=None,
         walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
-        queue = _CSTAR_SYSTEM_DEFAULT_PARTITION,
+        queue=_CSTAR_SYSTEM_DEFAULT_PARTITION,
         job_name="my_case_run",
     ) -> None:
         """Run the case by calling `component.run(caseroot)` on the primary component
