@@ -7,7 +7,8 @@ Welcome to the C-Star Documentation!
    :maxdepth: 1
    :caption: Getting Started
 
-   installation
+   What is C-Star?   <introduction>
+   Installing C-Star <installation>
 
 .. toctree::
    :maxdepth: 1
