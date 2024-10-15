@@ -7,7 +7,11 @@ from cstar.base.utils import (
     _clone_and_checkout,
     _write_to_config_file,
 )
-from cstar.base.environment import _CSTAR_ROOT, _CSTAR_COMPILER
+from cstar.base.environment import (
+    _CSTAR_ROOT,
+    _CSTAR_COMPILER,
+    _CSTAR_ENVIRONMENT_VARIABLES,
+)
 
 
 class ROMSBaseModel(BaseModel):
@@ -74,12 +78,16 @@ class ROMSBaseModel(BaseModel):
         )
 
         # Set environment variables for this session:
+
         os.environ["ROMS_ROOT"] = str(target)
+        _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"] = os.environ["ROMS_ROOT"]
         os.environ["PATH"] += f":{target}/Tools-Roms/"
+        _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = os.environ["PATH"]
 
         # Set the configuration file to be read by __init__.py for future sessions:
         config_file_str = (
-            f'    os.environ["ROMS_ROOT"]="{target}"\n    os.environ["PATH"]+=":'
+            f'    _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"]="{target}"'
+            + '\n    _CSTAR_ENVIRONMENT_VARIABLES["PATH"]+=":'
             + f'{target}/Tools-Roms"\n'
         )
 

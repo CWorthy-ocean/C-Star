@@ -1,12 +1,16 @@
 import yaml
 import warnings
-import datetime as dt
+
 import dateutil.parser
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
+from datetime import datetime
 
 from cstar.base.component import Component
-from cstar.base.environment import _CSTAR_SYSTEM_MAX_WALLTIME
+from cstar.base.environment import (
+    _CSTAR_SYSTEM_MAX_WALLTIME,
+    _CSTAR_SYSTEM_DEFAULT_PARTITION,
+)
 from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
@@ -61,10 +65,10 @@ class Case:
         components: List["Component"],
         name: str,
         caseroot: str | Path,
-        start_date: Optional[str | dt.datetime] = None,
-        end_date: Optional[str | dt.datetime] = None,
-        valid_start_date: Optional[str | dt.datetime] = None,
-        valid_end_date: Optional[str | dt.datetime] = None,
+        start_date: Optional[str | datetime] = None,
+        end_date: Optional[str | datetime] = None,
+        valid_start_date: Optional[str | datetime] = None,
+        valid_end_date: Optional[str | datetime] = None,
     ):
         """Initialize a Case object manually from components, name, and caseroot path.
 
@@ -91,9 +95,9 @@ class Case:
 
         # Make sure valid dates are datetime objects if present:
         if valid_start_date is not None:
-            self.valid_start_date: Optional[dt.datetime] = (
+            self.valid_start_date: Optional[datetime] = (
                 valid_start_date
-                if isinstance(valid_start_date, dt.datetime)
+                if isinstance(valid_start_date, datetime)
                 else dateutil.parser.parse(valid_start_date)
             )
         else:
@@ -107,9 +111,9 @@ class Case:
             self.valid_start_date = None
 
         if valid_end_date is not None:
-            self.valid_end_date: Optional[dt.datetime] = (
+            self.valid_end_date: Optional[datetime] = (
                 valid_end_date
-                if isinstance(valid_end_date, dt.datetime)
+                if isinstance(valid_end_date, datetime)
                 else dateutil.parser.parse(valid_end_date)
             )
         else:
@@ -125,9 +129,9 @@ class Case:
         # Make sure Case start_date is set and is a datetime object:
         if start_date is not None:
             # Set if provided
-            self.start_date: Optional[dt.datetime] = (
+            self.start_date: Optional[datetime] = (
                 start_date
-                if isinstance(start_date, dt.datetime)
+                if isinstance(start_date, datetime)
                 else dateutil.parser.parse(start_date)
             )
             # Set to earliest valid date if not provided and warn
@@ -144,15 +148,15 @@ class Case:
                 + " Unable to establish a simulation date range"
             )
         assert isinstance(
-            self.start_date, dt.datetime
+            self.start_date, datetime
         ), "At this point either the code has failed or start_date is a datetime object"
 
         # Make sure Case end_date is set and is a datetime object:
         if end_date is not None:
             # Set if provided
-            self.end_date: Optional[dt.datetime] = (
+            self.end_date: Optional[datetime] = (
                 end_date
-                if isinstance(end_date, dt.datetime)
+                if isinstance(end_date, datetime)
                 else dateutil.parser.parse(end_date)
             )
         elif valid_end_date is not None:
@@ -171,7 +175,7 @@ class Case:
             )
 
         assert isinstance(
-            self.end_date, dt.datetime
+            self.end_date, datetime
         ), "At this point either the code has failed or end_date is a datetime object"
 
         # Check provded dates are valid
@@ -273,13 +277,13 @@ class Case:
                 if (inp.working_path is None) or (not inp.working_path.exists()):
                     # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
                     # If no start or end date, it should be found locally:
-                    if (not isinstance(inp.start_date, dt.datetime)) or (
-                        not isinstance(inp.end_date, dt.datetime)
+                    if (not isinstance(inp.start_date, datetime)) or (
+                        not isinstance(inp.end_date, datetime)
                     ):
                         return False
                     # If no start or end date for case, all files should be found locally:
-                    elif (not isinstance(self.start_date, dt.datetime)) or (
-                        not isinstance(self.end_date, dt.datetime)
+                    elif (not isinstance(self.start_date, datetime)) or (
+                        not isinstance(self.end_date, datetime)
                     ):
                         return False
                     # If inp and case start and end dates overlap, should be found locally:
@@ -334,8 +338,8 @@ class Case:
         cls,
         blueprint: str,
         caseroot: Path,
-        start_date: Optional[str | dt.datetime] = None,
-        end_date: Optional[str | dt.datetime] = None,
+        start_date: Optional[str | datetime] = None,
+        end_date: Optional[str | datetime] = None,
     ) -> "Case":
         """Initialize a Case object from a blueprint.
 
@@ -391,8 +395,8 @@ class Case:
             )
 
         valid_date_range = registry_attrs.get("valid_date_range")
-        valid_start_date: dt.datetime
-        valid_end_date: dt.datetime
+        valid_start_date: datetime
+        valid_end_date: datetime
         valid_start_date = valid_date_range.get("start_date")
         valid_end_date = valid_date_range.get("end_date")
 
@@ -531,6 +535,7 @@ class Case:
         self,
         account_key=None,
         walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
+        queue=_CSTAR_SYSTEM_DEFAULT_PARTITION,
         job_name="my_case_run",
     ) -> None:
         """Run the case by calling `component.run(caseroot)` on the primary component
@@ -559,6 +564,7 @@ class Case:
                     n_time_steps=ntimesteps,
                     account_key=account_key,
                     walltime=walltime,
+                    queue=queue,
                     job_name=job_name,
                 )
 
@@ -570,3 +576,56 @@ class Case:
                 infostr = f"\nCompleting post-processing steps for {component.__class__.__name__}"
                 print(infostr + "\n" + "-" * len(infostr))
                 component.post_run(output_dir=self.caseroot / "output")
+
+    def restart(self, new_end_date: str | datetime) -> "Case":
+        """Returns a new Case instance beginning at the end date of this Case.
+
+        This method creates a deep copy of the current Case and replaces
+        any components that need to be updated by calling Component.restart()
+        on them.
+
+        Parameters:
+        -----------
+        new_end_date (str or datetime):
+           The end date for the restarted Case. The start date corresponds
+           to the end date of the existing Case.
+
+        Returns:
+        --------
+        new_case (cstar.Case):
+           The new Case instance with updated components and attributes
+           allowing the simulation to continue.
+        """
+        import copy
+
+        new_case = copy.deepcopy(self)
+        new_case.start_date = self.end_date
+        if isinstance(new_end_date, str):
+            new_case.end_date = dateutil.parser.parse(new_end_date)
+        elif isinstance(new_end_date, datetime):
+            new_case.end_date = new_end_date
+        else:
+            raise ValueError(
+                f"Expected str or datetime for `new_end_date`, got {type(new_end_date)}"
+            )
+
+        # Go through components and call restart() on them
+        new_components = []
+        for component in self.components:
+            if hasattr(component, "restart"):
+                if component.component_type.lower() == "roms":
+                    new_component = component.restart(
+                        # restart_dir is just output_dir from Case.run()
+                        restart_dir=self.caseroot / "output",
+                        new_start_date=new_case.start_date,
+                    )
+            else:
+                new_component = component
+            new_components.append(new_component)
+        new_case.components = new_components
+
+        # TODO: need handling of ROMSComponent.initial_conditions:
+        # - Somehow need to calculate what the restart file will be
+        #   and replace the IC with this
+
+        return new_case

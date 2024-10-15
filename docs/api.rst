@@ -1,5 +1,3 @@
-.. currentmodule:: cstar
-
 API Reference
 #############
 
@@ -54,3 +52,12 @@ Input Datasets
    cstar.roms.ROMSTidalForcing
    cstar.roms.ROMSBoundaryForcing
    cstar.roms.ROMSSurfaceForcing
+
+Discretization
+----------------
+
+.. autosummary::
+   :toctree: generated/
+
+   cstar.base.Discretization
+

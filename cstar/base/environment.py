@@ -1,9 +1,10 @@
+import io
 import os
-import sys
 import platform
 import importlib.util
 from pathlib import Path
 from typing import Optional
+from contextlib import redirect_stderr, redirect_stdout
 
 top_level_package_name = __name__.split(".")[0]
 spec = importlib.util.find_spec(top_level_package_name)
@@ -18,6 +19,7 @@ else:
 _CSTAR_COMPILER: str
 _CSTAR_SYSTEM: str
 _CSTAR_SCHEDULER: Optional[str]
+_CSTAR_ENVIRONMENT_VARIABLES: dict = {}
 _CSTAR_SYSTEM_DEFAULT_PARTITION: Optional[str]
 _CSTAR_SYSTEM_CORES_PER_NODE: Optional[int]
 _CSTAR_SYSTEM_MEMGB_PER_NODE: Optional[int]
@@ -25,35 +27,55 @@ _CSTAR_SYSTEM_MAX_WALLTIME: Optional[str]
 
 
 if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
-    sys.path.append(os.environ["LMOD_DIR"] + "/../init")
-    from env_modules_python import module
+    # Dynamically load the env_modules_python module using pathlib
+    module_path = Path(os.environ["LMOD_DIR"]).parent / "init" / "env_modules_python.py"
+    spec = importlib.util.spec_from_file_location("env_modules_python", module_path)
+    if (spec is None) or (spec.loader is None):
+        raise EnvironmentError(
+            f"Could not find env_modules_python on this machine at {module_path}"
+        )
+    env_modules = importlib.util.module_from_spec(spec)
+    if env_modules is None:
+        raise EnvironmentError(
+            f"No module found by importlib corresponding to spec {spec}"
+        )
+    spec.loader.exec_module(env_modules)
+    module = env_modules.module
 
-    if "LMOD_SYSHOST" in list(os.environ):
-        sysname = os.environ["LMOD_SYSHOST"].casefold()
-    elif "LMOD_SYSTEM_NAME" in list(os.environ):
-        sysname = os.environ["LMOD_SYSTEM_NAME"].casefold()
-    else:
+    sysname = os.environ.get("LMOD_SYSHOST") or os.environ.get("LMOD_SYSTEM_NAME")
+    if not sysname:
         raise EnvironmentError(
             "unable to find LMOD_SYSHOST or LMOD_SYSTEM_NAME in environment. "
             + "Your system may be unsupported"
         )
 
-    module("restore")
+    module_stdout = io.StringIO()
+    module_stderr = io.StringIO()
+
+    # Load Linux Environment Modules for this machine:
+    with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
+        module("reset")
+        with open(f"{_CSTAR_ROOT}/additional_files/lmod_lists/{sysname}.lmod") as F:
+            lmod_list = F.readlines()
+        for mod in lmod_list:
+            module("load", mod)
+    if any(
+        keyword in module_stderr.getvalue().casefold() for keyword in ["fail", "error"]
+    ):
+        raise EnvironmentError(
+            "Error with linux environment modules: " + module_stderr.getvalue()
+        )
+
     match sysname:
         case "expanse":
-            sdsc_default_modules = "slurm sdsc DefaultModules shared"
-            nc_prerequisite_modules = "cpu/0.15.4 intel/19.1.1.217 mvapich2/2.3.4"
-            module("load", sdsc_default_modules)
-            module("load", nc_prerequisite_modules)
-            module("load", "netcdf-c/4.7.4")
-            module("load", "netcdf-fortran/4.5.3")
-
-            os.environ["NETCDFHOME"] = os.environ["NETCDF_FORTRANHOME"]
-            os.environ["MPIHOME"] = os.environ["MVAPICH2HOME"]
-            os.environ["NETCDF"] = os.environ["NETCDF_FORTRANHOME"]
-            os.environ["MPI_ROOT"] = os.environ["MVAPICH2HOME"]
+            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ[
+                "NETCDF_FORTRANHOME"
+            ]
+            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = os.environ["MVAPICH2HOME"]
+            _CSTAR_ENVIRONMENT_VARIABLES["NETCDF"] = os.environ["NETCDF_FORTRANHOME"]
+            _CSTAR_ENVIRONMENT_VARIABLES["MPI_ROOT"] = os.environ["MVAPICH2HOME"]
             _CSTAR_COMPILER = "intel"
-            _CSTAR_SYSTEM = "sdsc_expanse"
+            _CSTAR_SYSTEM = "expanse"
             _CSTAR_SCHEDULER = (
                 "slurm"  # can get this with `scontrol show config` or `sinfo --version`
             )
@@ -65,21 +87,19 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MAX_WALLTIME = "48:00:00"  # (hostname/cpus/mem[MB]/walltime)
 
         case "derecho":
-            module("load" "intel")
-            module("load", "netcdf")
-            module("load", "cray-mpich/8.1.25")
-
-            os.environ["MPIHOME"] = "/opt/cray/pe/mpich/8.1.25/ofi/intel/19.0/"
-            os.environ["NETCDFHOME"] = os.environ["NETCDF"]
-            os.environ["LD_LIBRARY_PATH"] = (
+            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = (
+                "/opt/cray/pe/mpich/8.1.25/ofi/intel/19.0/"
+            )
+            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ["NETCDF"]
+            _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
                 os.environ.get("LD_LIBRARY_PATH", default="")
                 + ":"
-                + os.environ["NETCDFHOME"]
+                + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
                 + "/lib"
             )
 
             _CSTAR_COMPILER = "intel"
-            _CSTAR_SYSTEM = "ncar_derecho"
+            _CSTAR_SYSTEM = "derecho"
             _CSTAR_SCHEDULER = (
                 "pbs"  # can determine dynamically by testing for `qstat --version`
             )
@@ -93,33 +113,33 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
             _CSTAR_SYSTEM_MAX_WALLTIME = "12:00:00"  # with grep or awk
 
         case "perlmutter":
-            module("load", "cpu")
-            module("load", "cray-hdf5/1.12.2.9")
-            module("load", "cray-netcdf/4.9.0.9")
-
-            os.environ["MPIHOME"] = "/opt/cray/pe/mpich/8.1.28/ofi/gnu/12.3/"
-            os.environ["NETCDFHOME"] = "/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/"
-            os.environ["PATH"] = (
+            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = (
+                "/opt/cray/pe/mpich/8.1.28/ofi/gnu/12.3/"
+            )
+            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = (
+                "/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/"
+            )
+            _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = (
                 os.environ.get("PATH", default="")
                 + ":"
-                + os.environ["NETCDFHOME"]
+                + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
                 + "/bin"
             )
-            os.environ["LD_LIBRARY_PATH"] = (
+            _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
                 os.environ.get("LD_LIBRARY_PATH", default="")
                 + ":"
-                + os.environ["NETCDFHOME"]
+                + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
                 + "/lib"
             )
-            os.environ["LIBRARY_PATH"] = (
+            _CSTAR_ENVIRONMENT_VARIABLES["LIBRARY_PATH"] = (
                 os.environ.get("LIBRARY_PATH", default="")
                 + ":"
-                + os.environ["NETCDFHOME"]
+                + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
                 + "/lib"
             )
 
             _CSTAR_COMPILER = "gnu"
-            _CSTAR_SYSTEM = "nersc_perlmutter"
+            _CSTAR_SYSTEM = "perlmutter"
             _CSTAR_SCHEDULER = "slurm"
             _CSTAR_SYSTEM_DEFAULT_PARTITION = "regular"
             _CSTAR_SYSTEM_CORES_PER_NODE = (
@@ -132,12 +152,12 @@ if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
 elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
     # if on MacOS arm64 all dependencies should have been installed by conda
 
-    os.environ["MPIHOME"] = os.environ["CONDA_PREFIX"]
-    os.environ["NETCDFHOME"] = os.environ["CONDA_PREFIX"]
-    os.environ["LD_LIBRARY_PATH"] = (
+    _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = os.environ["CONDA_PREFIX"]
+    _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ["CONDA_PREFIX"]
+    _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
         os.environ.get("LD_LIBRARY_PATH", default="")
         + ":"
-        + os.environ["NETCDFHOME"]
+        + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
         + "/lib"
     )
     _CSTAR_COMPILER = "gnu"
@@ -153,12 +173,12 @@ elif (
     and (platform.machine() == "x86_64")
     and ("LMOD_DIR" not in list(os.environ))
 ):
-    os.environ["MPIHOME"] = os.environ["CONDA_PREFIX"]
-    os.environ["NETCDFHOME"] = os.environ["CONDA_PREFIX"]
-    os.environ["LD_LIBRARY_PATH"] = (
+    _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = os.environ["CONDA_PREFIX"]
+    _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ["CONDA_PREFIX"]
+    _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
         os.environ.get("LD_LIBRARY_PATH", default="")
         + ":"
-        + os.environ["NETCDFHOME"]
+        + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
         + "/lib"
     )
     _CSTAR_COMPILER = "gnu"
@@ -176,9 +196,10 @@ elif (
 
 _CSTAR_CONFIG_FILE = _CSTAR_ROOT + "/cstar_local_config.py"
 if Path(_CSTAR_CONFIG_FILE).exists():
-    from cstar.cstar_local_config import set_local_environment
+    from cstar.cstar_local_config import get_user_environment
 
-    set_local_environment()
-
+    get_user_environment()
+for var, value in _CSTAR_ENVIRONMENT_VARIABLES.items():
+    os.environ[var] = value
 
 ################################################################################
