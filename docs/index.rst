@@ -1,13 +1,12 @@
 Welcome to the C-Star Documentation!
 ====================================
 
-**C-Star** is a python package for setting up and running ocean model simulations, with a particular focus on marine carbon dioxide removal (mCDR) applications.
+introduction
 
 .. toctree::
    :maxdepth: 1
    :caption: Getting Started
 
-   What is C-Star?   <introduction>
    Installing C-Star <installation>
 
 .. toctree::
