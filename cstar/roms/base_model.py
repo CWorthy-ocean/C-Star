@@ -87,6 +87,7 @@ class ROMSBaseModel(BaseModel):
         # Set the configuration file to be read by __init__.py for future sessions:
         config_file_str = (
             f'    _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"]="{target}"'
+            + '\n    _CSTAR_ENVIRONMENT_VARIABLES.setdefault("PATH",os.environ.get("PATH",default=""))'
             + '\n    _CSTAR_ENVIRONMENT_VARIABLES["PATH"]+=":'
             + f'{target}/Tools-Roms"\n'
         )
