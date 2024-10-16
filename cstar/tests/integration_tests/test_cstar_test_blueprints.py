@@ -1,6 +1,6 @@
 import pytest
 from cstar import Case
-from cstar.tests.config import TEST_CONFIG
+from cstar.tests.integration_tests.config import TEST_CONFIG
 
 
 class TestCStar:

@@ -3,7 +3,7 @@
 import yaml
 from pathlib import Path
 from _pytest._py.path import LocalPath
-from cstar.tests.config import (
+from cstar.tests.integration_tests.config import (
     ROMS_TOOLS_DATA_DIRECTORY,
     CSTAR_TEST_DATA_DIRECTORY,
     TEST_DIRECTORY,
@@ -35,7 +35,7 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
     """
     test_blueprint = modify_template_blueprint(
         template_blueprint_path=TEST_DIRECTORY
-        / "blueprints/cstar_blueprint_with_netcdf_datasets_template.yaml",
+        / "integration_tests/blueprints/cstar_blueprint_with_netcdf_datasets_template.yaml",
         strs_to_replace={
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
         },
