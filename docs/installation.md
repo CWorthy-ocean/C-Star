@@ -25,6 +25,6 @@ conda activate cstar_env
 
 Finally, install `C-Star` in the same environment:
 ```
-pip install -e .
+pip install .
 ``` 
 
