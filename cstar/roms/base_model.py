@@ -81,6 +81,7 @@ class ROMSBaseModel(BaseModel):
 
         os.environ["ROMS_ROOT"] = str(target)
         _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"] = os.environ["ROMS_ROOT"]
+        os.environ.setdefault("PATH", "")
         os.environ["PATH"] += f":{target}/Tools-Roms/"
         _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = os.environ["PATH"]
 
