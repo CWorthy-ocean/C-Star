@@ -1,0 +1,59 @@
+name: integration_tests
+
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+
+  test:
+    name: integration-${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12",]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: ci/environment.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+
+      - name: Environment info
+        shell: micromamba-shell {0}                
+        run: |
+          conda info
+          printenv
+
+      - name: Install C-Star
+        shell: micromamba-shell {0}
+        run: |
+           python - V
+           python -m pip install -e . --force-reinstall
+
+      - name: Running Tests
+        shell: micromamba-shell {0}        
+        run: |
+           python -V
+           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/*
+           
+      - name: Get coverage report
+        shell: micromamba-shell {0}                
+        run: |
+          coverage report -m ; coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml

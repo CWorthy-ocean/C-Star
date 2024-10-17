@@ -5,8 +5,10 @@ import zipfile
 from typing import Callable
 from pathlib import Path
 
-from cstar.tests.config import ROMS_TOOLS_DATA_DIRECTORY, CSTAR_TEST_DATA_DIRECTORY
-# TEST ALL THESE FIXTURES
+from cstar.tests.integration_tests.config import (
+    ROMS_TOOLS_DATA_DIRECTORY,
+    CSTAR_TEST_DATA_DIRECTORY,
+)
 
 
 @pytest.fixture
