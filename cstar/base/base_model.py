@@ -84,7 +84,6 @@ class BaseModel(ABC):
             if checkout_target is not None
             else self.default_checkout_target
         )
-        self.repo_basename = Path(self.source_repo).name.replace(".git", "")
 
     def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
@@ -120,6 +119,10 @@ class BaseModel(ABC):
         repr_str += "\nState: <"
         repr_str += f"local_config_status = {self.local_config_status}>"
         return repr_str
+
+    @property
+    def repo_basename(self) -> str:
+        return Path(self.source_repo).name.replace(".git", "")
 
     @property
     def checkout_hash(self) -> str:
