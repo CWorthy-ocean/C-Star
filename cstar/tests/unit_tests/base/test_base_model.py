@@ -44,11 +44,33 @@ def generic_base_model():
     return MockBaseModel()
 
 
-def test_base_model_str():
-    pass
+def test_base_model_str(generic_base_model):
+    result_str = str(generic_base_model)
+
+    # Define the expected output
+    expected_str = (
+        "MockBaseModel\n"
+        "-------------\n"
+        "source_repo : https://github.com/test/repo.git (default)\n"
+        "checkout_target : test_target (corresponding to hash test123) (default)\n"
+        "local_config_status: 3 (Environment variable TEST_ROOT is not present and it is assumed the base model is not installed locally)"
+    )
+
+    # Compare the actual result with the expected result
+    assert result_str == expected_str
 
 
-def test_base_model_repr():
+def test_base_model_repr(generic_base_model):
+    result_repr = repr(generic_base_model)
+    expected_repr = (
+        "MockBaseModel("
+        + "\nsource_repo = 'https://github.com/test/repo.git',"
+        + "\ncheckout_target = 'test_target'"
+        + "\n)"
+        + "\nState: <local_config_status = 3>"
+    )
+
+    assert result_repr == expected_repr
     pass
 
 
