@@ -1,4 +1,4 @@
-name: tests
+name: unit_tests
 
 on:
   push:
@@ -9,9 +9,8 @@ on:
       - '*'
 
 jobs:
-
   test:
-    name: ${{ matrix.python-version }}-build
+    name: unit-${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -45,7 +44,7 @@ jobs:
         shell: micromamba-shell {0}        
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/*
+           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/unit_tests/*
            
       - name: Get coverage report
         shell: micromamba-shell {0}                

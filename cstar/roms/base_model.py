@@ -81,12 +81,14 @@ class ROMSBaseModel(BaseModel):
 
         os.environ["ROMS_ROOT"] = str(target)
         _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"] = os.environ["ROMS_ROOT"]
+        os.environ.setdefault("PATH", "")
         os.environ["PATH"] += f":{target}/Tools-Roms/"
         _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = os.environ["PATH"]
 
         # Set the configuration file to be read by __init__.py for future sessions:
         config_file_str = (
             f'    _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"]="{target}"'
+            + '\n    _CSTAR_ENVIRONMENT_VARIABLES.setdefault("PATH",os.environ.get("PATH",default=""))'
             + '\n    _CSTAR_ENVIRONMENT_VARIABLES["PATH"]+=":'
             + f'{target}/Tools-Roms"\n'
         )
