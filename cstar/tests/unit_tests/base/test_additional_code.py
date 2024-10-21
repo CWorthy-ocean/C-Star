@@ -75,6 +75,60 @@ def test_defaults():
     assert len(additional_code.files) == 0
 
 
+def test_repr_remote(remote_additional_code):
+    expected_repr = """AdditionalCode(
+location = 'https://github.com/test/repo.git',
+subdir = 'test/subdir'
+checkout_target = 'test123',
+files = ['test_file_1.F',
+         'test_file_2.py',
+         'test_file_3.opt']
+)"""
+    assert repr(remote_additional_code) == expected_repr
+
+
+def test_repr_local(local_additional_code):
+    expected_repr = """AdditionalCode(
+location = '/some/local/directory',
+subdir = 'some/subdirectory'
+checkout_target = None,
+files = ['test_file_1.F',
+         'test_file_2.py',
+         'test_file_3.opt']
+)"""
+    assert repr(local_additional_code) == expected_repr
+
+
+def test_str_remote(remote_additional_code):
+    expected_str = """AdditionalCode
+--------------
+Location: https://github.com/test/repo.git
+subdirectory: test/subdir
+Working path: None
+Exists locally: False (get with AdditionalCode.get())
+Files:
+    test_file_1.F
+    test_file_2.py
+    test_file_3.opt"""
+
+    assert str(remote_additional_code) == expected_str
+
+
+def test_str_local(local_additional_code):
+    expected_str = """AdditionalCode
+--------------
+Location: /some/local/directory
+subdirectory: some/subdirectory
+Working path: None
+Exists locally: False (get with AdditionalCode.get())
+Files:
+    test_file_1.F
+    test_file_2.py
+    test_file_3.opt"""
+
+    assert str(local_additional_code) == expected_str
+
+
 @mock.patch("pathlib.Path.exists", side_effect=[True, True, True])
 def test_exists_locally_all_files_exist(mock_exists, remote_additional_code):
     remote_additional_code.working_path = Path("/mock/local/dir")
