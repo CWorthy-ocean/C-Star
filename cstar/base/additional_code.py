@@ -199,7 +199,7 @@ class AdditionalCode:
                     print(
                         f"copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
                     )
-                    shutil.copy(tgt_file_path, str(tgt_file_path)[:-9])
+                    shutil.copy(tgt_file_path, Path(str(tgt_file_path)[:-9]))
                     if hasattr(self, "modified_files"):
                         self.modified_files.append(f[:-9])
                     else:
