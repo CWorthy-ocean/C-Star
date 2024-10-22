@@ -50,7 +50,7 @@ class InputDataset(ABC):
         self.file_hash: Optional[str] = file_hash
         self.working_path: Optional[Path | List[Path]] = None
 
-        if (self.file_hash is None) and (self.source.location_type == "url"):
+        if (self.source.location_type == "url") and (self.file_hash is None):
             raise ValueError(
                 f"Cannot create InputDataset for \n {self.source.location}:\n "
                 + "InputDataset.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
