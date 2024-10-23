@@ -1,34 +1,3 @@
-"""
-We are testing:
-
-# Standalone
-- AC initialises correctly with parameters for both remote and local examples
-- AC initialises correctly with no parameters (except required location)
-- Remote AC exists locally if all files marked as existing
-- Remote AC does not exist locally if at least one file is missing
-- Remote AC does not exists locally if no working path set
-
-# "Get"
-
-- Running get on Local AC calls 'mkdir' once with correct args
-- Running get on Local AC calls 'copy':
-   - once per file
-   - correctly for each file
-
-- Running get on Remote AC calls '_clone_and_checkout' once with correct args
-- Running get on Remote AC calls 'mkdir' called once
-- Running get on Remote AC calls 'copy':
-   - once per file
-   - correctly for each file
-
-- Running get on Remote AC with no 'checkout_target' raises a 'ValueError'
-- Running get on Remote AC with mismatched 'source' raises 'ValueError'
-- Running get on Local AC with at least one file missing raises 'FileNotFoundError'
-- Running get with _TEMPLATE files correctly leads to them being handled separately
-- Running get with Remote AC calls rmtree to cleanup the temporary repo clone
-
-"""
-
 import pytest
 from unittest import mock
 from pathlib import Path
