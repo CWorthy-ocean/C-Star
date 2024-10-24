@@ -49,7 +49,7 @@ def local_input_dataset():
         mock_basename.return_value = "local_file.nc"
 
         dataset = MockInputDataset(
-            location="some/local/source/path",
+            location="some/local/source/path/local_file.nc",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
         )
@@ -188,7 +188,7 @@ def test_local_str(local_input_dataset):
     expected_str = """----------------
 MockInputDataset
 ----------------
-Source location: some/local/source/path
+Source location: some/local/source/path/local_file.nc
 start_date: 2024-10-22 12:34:56
 end_date: 2024-12-31 23:59:59
 Working path: None ( does not yet exist. Call InputDataset.get() )"""
@@ -198,7 +198,7 @@ Working path: None ( does not yet exist. Call InputDataset.get() )"""
 def test_local_repr(local_input_dataset):
     """Test the repr representation of a local InputDataset."""
     expected_repr = """MockInputDataset(
-location = 'some/local/source/path',
+location = 'some/local/source/path/local_file.nc',
 file_hash = None
 start_date = datetime.datetime(2024, 10, 22, 12, 34, 56)
 end_date = datetime.datetime(2024, 12, 31, 23, 59, 59)

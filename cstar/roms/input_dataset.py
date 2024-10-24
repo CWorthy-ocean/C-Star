@@ -1,6 +1,7 @@
 import yaml
 import shutil
 import datetime as dt
+import roms_tools
 
 from abc import ABC
 from pathlib import Path
@@ -36,12 +37,15 @@ class ROMSInputDataset(InputDataset, ABC):
     def __repr__(self) -> str:
         repr_str = super().__repr__()
         if hasattr(self, "partitioned_files") and len(self.partitioned_files) > 0:
-            repr_str = repr_str.strip(",>")
-            repr_str += "\n" + (" " * 8) + "partitioned_files = "
-            repr_str += _list_to_concise_str(
+            info_str = "partitioned_files = "
+            info_str += _list_to_concise_str(
                 [str(f) for f in self.partitioned_files], pad=29
             )
-            repr_str += "\n>"
+            if "State:" in repr_str:
+                repr_str = repr_str.strip(",>")
+                repr_str += ",\n" + (" " * 8) + info_str + "\n>"
+            else:
+                repr_str += f"\nState: <{info_str}>"
 
         return repr_str
 
@@ -134,7 +138,7 @@ class ROMSInputDataset(InputDataset, ABC):
             F.write(f"---{header}---\n" + yaml.dump(yaml_dict))
 
         # Finally, make a roms-tools object from the modified yaml
-        import roms_tools
+        # import roms_tools
 
         roms_tools_class = getattr(roms_tools, roms_tools_class_name)
 
