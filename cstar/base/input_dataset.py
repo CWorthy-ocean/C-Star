@@ -50,7 +50,7 @@ class InputDataset(ABC):
         self.file_hash: Optional[str] = file_hash
         self.working_path: Optional[Path | List[Path]] = None
 
-        if (self.file_hash is None) and (self.source.location_type == "url"):
+        if (self.source.location_type == "url") and (self.file_hash is None):
             raise ValueError(
                 f"Cannot create InputDataset for \n {self.source.location}:\n "
                 + "InputDataset.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
@@ -100,12 +100,16 @@ class InputDataset(ABC):
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nlocation = {self.source.location!r},"
         repr_str += f"\nfile_hash = {self.file_hash}"
+        if self.start_date is not None:
+            repr_str += f"\nstart_date = {self.start_date!r}"
+        if self.end_date is not None:
+            repr_str += f"\nend_date = {self.end_date!r}"
         repr_str += "\n)"
         info_str = ""
         if self.working_path is not None:
-            info_str += f"working_path = {self.working_path},"
+            info_str += f"working_path = {self.working_path}"
             if not self.exists_locally:
-                info_str += "(does not exist)"
+                info_str += " (does not exist)"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         # Additional info
