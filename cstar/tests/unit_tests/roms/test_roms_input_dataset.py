@@ -181,6 +181,13 @@ class TestROMSInputDatasetGetFromYAML:
         - roms_tools.SurfaceForcing: represents all other classes in roms_tools except Grid
             - mocks the class itself (to simulate ROMSToolsClass.from_yaml)
             - mocks a specific instance (to simulate roms_tools_instance.save)
+
+        Tests:
+        ------
+        - test_get_from_yaml_raises_when_not_yaml
+        - test_get_grid_from_local_yaml_partitioned
+        - test_get_surface_forcing_from_local_yaml_unpartitioned
+        - test_get_from_yaml_raises_with_wrong_number_of_keys
         """
 
         # Mocking InputDataset.get()
