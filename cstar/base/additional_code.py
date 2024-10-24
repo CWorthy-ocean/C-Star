@@ -140,6 +140,11 @@ class AdditionalCode:
         local_dir: str | Path
             The local directory (typically `Case.caseroot`) in which to fetch the additional code.
         """
+        if len(self.files) == 0:
+            raise ValueError(
+                "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
+            )
+
         local_dir = Path(local_dir).resolve()
         try:
             tmp_dir = None  # initialise the tmp_dir variable in case we need it later
@@ -180,8 +185,6 @@ class AdditionalCode:
                 )
 
             # Now go through the file and copy them to local_dir
-            if len(self.files) == 0:
-                return
             local_dir.mkdir(parents=True, exist_ok=True)
             for f in self.files:
                 src_file_path = source_dir / f
@@ -199,13 +202,9 @@ class AdditionalCode:
                     print(
                         f"copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
                     )
-                    shutil.copy(tgt_file_path, str(tgt_file_path)[:-9])
-                    if hasattr(self, "modified_files"):
-                        self.modified_files.append(f[:-9])
-                    else:
-                        self.modified_files = [
-                            f[:-9],
-                        ]
+                    shutil.copy(tgt_file_path, Path(str(tgt_file_path)[:-9]))
+                    self.modified_files = getattr(self, "modified_files", [])
+                    self.modified_files.append(f[:-9])
 
             self.working_path = local_dir
         finally:
