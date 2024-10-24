@@ -1,5 +1,6 @@
 import yaml
 import shutil
+import dateutil
 import datetime as dt
 import roms_tools
 
@@ -52,8 +53,8 @@ class ROMSInputDataset(InputDataset, ABC):
     def get_from_yaml(
         self,
         local_dir: str | Path,
-        start_date: Optional[dt.datetime] = None,
-        end_date: Optional[dt.datetime] = None,
+        start_date: Optional[dt.datetime] | str = None,
+        end_date: Optional[dt.datetime] | str = None,
         np_xi: Optional[int] = None,
         np_eta: Optional[int] = None,
     ) -> None:
@@ -120,7 +121,10 @@ class ROMSInputDataset(InputDataset, ABC):
                 f"roms tools yaml file has {len(yaml_keys)} sections. "
                 + "Expected 'Grid' and one other class"
             )
-
+        if isinstance(start_date, str):
+            start_date = dateutil.parser.parse(start_date)
+        if isinstance(end_date, str):
+            end_date = dateutil.parser.parse(end_date)
         start_time = start_date.isoformat() if start_date is not None else None
         end_time = end_date.isoformat() if end_date is not None else None
 
