@@ -9,6 +9,9 @@ from cstar.base.base_model import BaseModel
 
 
 class MockBaseModel(BaseModel):
+    """A mock subclass of the `BaseModel` abstract base class used for testing
+    purposes."""
+
     @property
     def expected_env_var(self):
         return "TEST_ROOT"
@@ -32,6 +35,8 @@ class MockBaseModel(BaseModel):
 
 @pytest.fixture
 def generic_base_model():
+    """Yields a generic base model (instance of MockBaseModel defined above) for use in
+    testing."""
     # Correctly patch the imported _get_hash_from_checkout_target in the BaseModel's module
     with mock.patch(
         "cstar.base.base_model._get_hash_from_checkout_target", return_value="test123"
@@ -40,6 +45,25 @@ def generic_base_model():
 
 
 def test_base_model_str(generic_base_model):
+    """Test the string representation of the `BaseModel` class.
+
+    Fixtures
+    --------
+    generic_base_model : MockBaseModel
+        A mock instance of `BaseModel` with a predefined environment and repository configuration.
+
+    Mocks
+    -----
+    local_config_status : PropertyMock
+        Mocked to test different states of the local configuration, such as valid,
+        wrong repo, right repo/wrong hash, and repo not found.
+
+    Asserts
+    -------
+    str
+        Verifies that the expected string output matches the actual string representation
+        under various configurations of `local_config_status`.
+    """
     # Define the expected output
     expected_str = (
         "MockBaseModel\n"
@@ -83,6 +107,8 @@ def test_base_model_str(generic_base_model):
 
 
 def test_base_model_repr(generic_base_model):
+    """Test the repr representation of the `BaseModel` class."""
+
     result_repr = repr(generic_base_model)
     expected_repr = (
         "MockBaseModel("
@@ -97,6 +123,37 @@ def test_base_model_repr(generic_base_model):
 
 
 class TestBaseModelConfig:
+    """Unit tests for calculating the configuration status of BaseModel.
+
+    This test suite evaluates the `local_config_status` property of `BaseModel` (mocked by
+    `MockBaseModel`) to confirm correct repository and environment variable configurations.
+
+    Tests
+    -----
+    test_local_config_status_valid
+        Verifies that `local_config_status` is 0 when the configuration is valid.
+    test_local_config_status_wrong_remote
+        Checks that `local_config_status` is 1 when the repository remote URL is incorrect.
+    test_local_config_status_wrong_checkout
+        Confirms that `local_config_status` is 2 when the repository checkout hash is incorrect.
+    test_local_config_status_no_env_var
+        Ensures that `local_config_status` is 3 when the required environment variable is missing.
+
+    Fixtures
+    --------
+    generic_base_model : MockBaseModel
+        Provides a mock instance of `BaseModel` for use in the tests.
+
+    Mocks
+    -----
+    patch_get_repo_remote : MagicMock
+        Mocks `cstar.utils._get_repo_remote` function to simulate different repository remotes.
+    patch_get_repo_head_hash : MagicMock
+        Mocks `cstar.utils._get_repo_head_hash` function to simulate different repository head hashes.
+    patch_os_environ : MagicMock
+        Mocks `os.environ` to control the environment variable `TEST_ROOT`.
+    """
+
     def setup_method(self):
         self.patch_get_repo_remote = mock.patch(
             "cstar.base.base_model._get_repo_remote"
@@ -144,6 +201,52 @@ class TestBaseModelConfig:
 
 
 class TestBaseModelConfigHandling:
+    """Unit tests for handling various configuration statuses in `BaseModel`.
+
+    This suite evaluates `BaseModel`'s `handle_config_status` method by simulating different
+    environment and repository states. Each test checks the behavior of `handle_config_status`
+    under varying `local_config_status` values, user input responses, and repository setups.
+
+    Tests
+    -----
+    test_handle_config_status_valid
+        Confirms that no action is taken when the configuration is valid (local_config_status == 0).
+    test_handle_config_status_wrong_repo
+        Ensures an `EnvironmentError` is raised for incorrect repository remote (local_config_status == 1).
+    test_handle_config_status_wrong_checkout_user_invalid
+        Simulates an invalid user response when prompted to correct the checkout (local_config_status == 2).
+    test_handle_config_status_wrong_checkout_user_n
+        Confirms that an `EnvironmentError` is raised when user opts not to correct an incorrect checkout (local_config_status == 2).
+    test_handle_config_status_wrong_checkout_user_y
+        Verifies that the system attempts to correct the checkout when the user agrees (local_config_status == 2).
+    test_handle_config_status_no_env_var_user_y
+        Checks that `get` method is called to install `BaseModel` when the associated environment variable is missing (local_config_status == 3) and user opts to proceed.
+    test_handle_config_status_no_env_var_user_n
+        Ensures that an `EnvironmentError` is raised when user declines to set up a missing BaseModel (local_config_status == 3).
+    test_handle_config_status_no_env_var_user_invalid
+        Simulates an invalid user response when prompted to set up the BaseModel (local_config_status == 3).
+    test_handle_config_status_no_env_var_user_custom
+        Confirms that `BaseModel` installs to a custom path when user specifies a custom directory (local_config_status == 3).
+
+    Fixtures
+    --------
+    generic_base_model : MockBaseModel
+        Provides a mock instance of `BaseModel` for testing configuration handling.
+
+    Mocks
+    -----
+    patch_get_repo_remote : MagicMock
+        Mocks `cstar.utils._get_repo_remote` to control the repository remote URL.
+    patch_get_repo_head_hash : MagicMock
+        Mocks `cstar.utils._get_repo_head_hash` to control the repository head hash.
+    patch_local_config_status : MagicMock
+        Mocks `BaseModel.local_config_status` to simulate different configuration states.
+    patch_subprocess_run : MagicMock
+        Mocks `subprocess.run` to simulate command-line actions for `git checkout`.
+    patch_os_environ : MagicMock
+        Mocks `os.environ` to control environment variable presence and paths.
+    """
+
     def setup_method(self):
         self.patch_get_repo_remote = mock.patch(
             "cstar.base.base_model._get_repo_remote"
