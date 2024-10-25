@@ -7,6 +7,7 @@ from cstar.base.environment import _CSTAR_COMPILER
 
 @pytest.fixture
 def roms_base_model():
+    """Fixture providing a configured instance of `ROMSBaseModel` for testing."""
     source_repo = "https://github.com/CESR-lab/ucla-roms.git"
     checkout_target = "246c11fa537145ba5868f2256dfb4964aeb09a25"
     return ROMSBaseModel(source_repo=source_repo, checkout_target=checkout_target)
@@ -39,7 +40,47 @@ def test_defaults_are_set():
 
 
 class TestROMSBaseModelGet:
-    """Test cases for ROMSBaseModel.get method."""
+    """Test cases for the `get` method of `ROMSBaseModel`.
+
+    The original method:
+        1. clones ROMS from `ROMSBaseModel.source_repo`
+        2. checks out the correct commit from `ROMSBaseModel.checkout_target`
+        3. Sets environment variable ROMS_ROOT and appends $ROMS_ROOT/Tools-Roms to PATH
+        4. Replaces ROMS Makefiles for machine-agnostic compilation [_base_model_adjustments()]
+        5. Compiles the NHMG library
+        6. Compiles the Tools-Roms package
+
+    Tests
+    -----
+    test_get_success
+        Verifies that `get` completes successfully, setting environment variables and
+        calling necessary subprocesses when all commands succeed.
+    test_make_nhmg_failure
+        Ensures that `get` raises an error with a descriptive message when the `make nhmg`
+        command fails during installation.
+    test_make_tools_roms_failure
+        Confirms that `get` raises an error with an appropriate message if `make Tools-Roms`
+        fails after `make nhmg` succeeds.
+
+    Fixtures
+    --------
+    roms_base_model : ROMSBaseModel
+        A configured instance of `ROMSBaseModel` for testing purposes, with predefined
+        source repository and checkout target.
+    tmp_path : pathlib.Path
+        A temporary directory for isolating filesystem operations.
+
+    Mocks
+    -----
+    mock_subprocess_run : MagicMock
+        Mocks `subprocess.run` to simulate `make` commands and other shell commands.
+    mock_clone_and_checkout : MagicMock
+        Mocks `_clone_and_checkout` to simulate repository cloning and checkout processes.
+    mock_write_to_config_file : MagicMock
+        Mocks `_write_to_config_file` to simulate writing configuration data to files.
+    env_patch : MagicMock
+        Mocks `os.environ` to control and simulate environment variable modifications.
+    """
 
     def setup_method(self):
         """Common setup before each test method."""
