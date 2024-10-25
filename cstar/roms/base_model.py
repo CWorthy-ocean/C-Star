@@ -8,7 +8,6 @@ from cstar.base.utils import (
     _write_to_config_file,
 )
 from cstar.base.environment import (
-    _CSTAR_ROOT,
     _CSTAR_COMPILER,
     _CSTAR_ENVIRONMENT_VARIABLES,
 )
@@ -47,7 +46,7 @@ class ROMSBaseModel(BaseModel):
         computing systems.
         """
         shutil.copytree(
-            _CSTAR_ROOT + "/additional_files/ROMS_Makefiles/",
+            Path(os.environ[self.expected_env_var]) / "ci/ci_makefiles/",
             os.environ[self.expected_env_var],
             dirs_exist_ok=True,
         )
