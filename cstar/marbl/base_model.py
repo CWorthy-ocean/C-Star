@@ -34,9 +34,6 @@ class MARBLBaseModel(BaseModel):
     def expected_env_var(self) -> str:
         return "MARBL_ROOT"
 
-    def _base_model_adjustments(self) -> None:
-        pass
-
     def get(self, target: str | Path) -> None:
         """Clone MARBL code to local machine, set environment, compile libraries.
 
