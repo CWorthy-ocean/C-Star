@@ -78,6 +78,8 @@ class TestROMSBaseModelGet:
         Mocks `_clone_and_checkout` to simulate repository cloning and checkout processes.
     mock_write_to_config_file : MagicMock
         Mocks `_write_to_config_file` to simulate writing configuration data to files.
+    mock_copytree : MagicMock
+        Mocks `shutil.copytree` to avoid actual filesystem interactions during Makefile adjustments.
     env_patch : MagicMock
         Mocks `os.environ` to control and simulate environment variable modifications.
     """
@@ -92,6 +94,8 @@ class TestROMSBaseModelGet:
         self.mock_write_to_config_file = mock.patch(
             "cstar.roms.base_model._write_to_config_file"
         ).start()
+
+        self.mock_copytree = mock.patch("shutil.copytree").start()
 
         # Clear environment variables
         self.env_patch = mock.patch.dict(os.environ, {}, clear=True)
