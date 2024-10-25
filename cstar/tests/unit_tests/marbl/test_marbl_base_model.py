@@ -7,6 +7,7 @@ from cstar.base.environment import _CSTAR_COMPILER
 
 @pytest.fixture
 def marbl_base_model():
+    """Fixture providing a configured instance of `MARBLBaseModel` for testing."""
     source_repo = "https://github.com/marbl-ecosys/MARBL.git"
     checkout_target = "v0.45.0"
     return MARBLBaseModel(source_repo=source_repo, checkout_target=checkout_target)
@@ -31,7 +32,8 @@ def test_expected_env_var(marbl_base_model):
 
 
 def test_defaults_are_set():
-    """Test that the defaults are set correctly."""
+    """Test that the defaults are set correctly if MARBLBaseModel initialized without
+    args."""
 
     marbl_base_model = MARBLBaseModel()
     assert marbl_base_model.source_repo == "https://github.com/marbl-ecosys/MARBL.git"
@@ -39,7 +41,36 @@ def test_defaults_are_set():
 
 
 class TestMARBLBaseModelGet:
-    """Test cases for MARBLBaseModel.get method."""
+    """Test cases for the `get` method of `MARBLBaseModel`.
+
+    Tests
+    -----
+    test_get_success
+        Ensures that `get` completes successfully, setting environment variables and
+        calling necessary methods when subprocess calls succeed.
+    test_make_failure
+        Verifies that `get` raises an error with a descriptive message when the
+        `make` command fails during installation.
+
+    Fixtures
+    --------
+    marbl_base_model : MARBLBaseModel
+        Provides a mock instance of `MARBLBaseModel` with the default repository and
+        checkout target.
+    tmp_path : pathlib.Path
+        Supplies a temporary directory for isolated file operations during testing.
+
+    Mocks
+    -----
+    mock_subprocess_run : MagicMock
+        Mocks `subprocess.run` to simulate `make` commands and other shell operations.
+    mock_clone_and_checkout : MagicMock
+        Mocks `_clone_and_checkout` to simulate repository cloning and checkout.
+    mock_write_to_config_file : MagicMock
+        Mocks `_write_to_config_file` to simulate writing environment variables to a config file.
+    env_patch : MagicMock
+        Mocks `os.environ` to control environment variables during tests.
+    """
 
     def setup_method(self):
         """Common setup before each test method."""
