@@ -8,7 +8,7 @@ dependencies:
   - netCDF4
   - pip
   # testing
-  - pre-commit
+  - pre-commit==3.8.0
   - coverage
   - pytest
   # docs
