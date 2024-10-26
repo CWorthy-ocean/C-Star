@@ -105,9 +105,11 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
     """
 
     # First check if the checkout target is a 7 or 40 digit hexadecimal string
-    is_potential_hash = bool(re.match(r"^[0-9a-f]{7}$", checkout_target)) or bool(
-        re.match(r"^[0-9a-f]{40}$", checkout_target)
+    is_potential_hash = bool(re.fullmatch(r"^[0-9a-f]{7}$", checkout_target)) or bool(
+        re.fullmatch(r"^[0-9a-f]{40}$", checkout_target)
     )
+    if is_potential_hash:
+        return checkout_target
 
     # Then try ls-remote to see if there is a match
     # (no match if either invalid target or a valid hash):
@@ -119,14 +121,10 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
     ).stdout
 
     if len(ls_remote) == 0:
-        if is_potential_hash:
-            # just return the input target assuming a hash, but can't validate
-            return checkout_target
-        else:
-            raise ValueError(
-                f"supplied checkout_target ({checkout_target}) does not appear "
-                + f"to be a valid reference for this repository ({repo_url})"
-            )
+        raise ValueError(
+            f"supplied checkout_target ({checkout_target}) does not appear "
+            + f"to be a valid reference for this repository ({repo_url})"
+        )
     else:
         return ls_remote.split()[0]
 
