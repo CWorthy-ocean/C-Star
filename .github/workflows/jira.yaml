@@ -1,0 +1,21 @@
+name: Create Jira Ticket on Label
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  create_jira_ticket:
+    if: contains(github.event.label.name, 'jira-story')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Run Jira Ticket Creation Script
+        env:
+          JIRA_EMAIL_DAFYDD: ${{ secrets.JIRA_EMAIL_DAFYDD }}
+          JIRA_API_TOKEN_DAFYDD: ${{ secrets.JIRA_API_TOKEN_DAFYDD }}
+          ISSUE_TITLE: "${{ github.event.issue.title }}"
+          ISSUE_BODY: "${{ github.event.issue.body }}"
+        run: .github/workflows/create_jira_ticket.sh
