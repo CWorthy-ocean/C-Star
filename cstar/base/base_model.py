@@ -288,7 +288,7 @@ class BaseModel(ABC):
     def get(self, target: str | Path) -> None:
         """Clone the basemodel code to your local machine."""
 
-    @abstractmethod
     def _base_model_adjustments(self) -> None:
         """Perform any C-Star specific adjustments to the base model that would be
         needed after a clean checkout."""
+        pass
