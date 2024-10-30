@@ -18,4 +18,4 @@ jobs:
           JIRA_API_TOKEN_DAFYDD: ${{ secrets.JIRA_API_TOKEN_DAFYDD }}
           ISSUE_TITLE: "${{ github.event.issue.title }}"
           ISSUE_BODY: "${{ github.event.issue.body }}"
-        run: .github/workflows/create_jira_ticket.sh
+        run: .github/workflows/create_jira_tickets.sh
