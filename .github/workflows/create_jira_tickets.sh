@@ -1,21 +1,43 @@
 #!/bin/bash
 
-# Escape double quotes in ISSUE_TITLE and ISSUE_BODY
-# ESCAPED_TITLE=$(echo "$ISSUE_TITLE" | sed 's/"/\\"/g')
-# ESCAPED_BODY=$(echo "$ISSUE_BODY" | sed 's/"/\\"/g')
-
 # Escape double quotes in ISSUE_TITLE
 ESCAPED_TITLE="${ISSUE_TITLE//\"/\\\"}"
 
 # Escape double quotes and newlines in ISSUE_BODY
 ESCAPED_BODY="${ISSUE_BODY//\"/\\\"}"
-ESCAPED_BODY="${ESCAPED_BODY//$'\n'/\\n}"
+#ESCAPED_BODY="${ESCAPED_BODY//$'\n'/\\n}"
 
 # Use readarray to populate TASKS array directly from matching lines in ISSUE_BODY
 readarray -t TASKS < <(echo "$ISSUE_BODY" | grep -E '^- \[[ x]\] ')
 
-# Create the JSON payload directly
-cat > payload.json <<EOF
+# Trim and set GITHUB_ASSIGNEE_USERNAME if needed
+GITHUB_ASSIGNEE_USERNAME=$(echo "$GITHUB_ASSIGNEE_USERNAME" | xargs)
+
+# Map GitHub username to Jira account ID directly
+declare -A JIRA_IDS=(
+  ["TomNicholas"]="712020:035c37ae-65d0-49c2-aa10-89ecfde5257a"
+  ["NoraLoose"]="712020:383dc845-6121-46b3-a5f9-3b90a54478a5"
+  ["dafyddstephenson"]="712020:41094963-a473-4408-9c16-c445f195fd65"
+)
+
+JIRA_ASSIGNEE_ID="${JIRA_IDS[$GITHUB_ASSIGNEE_USERNAME]}"
+
+
+# Create the JSON payload, adding assignee if there is one
+if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then
+  cat > payload.json <<EOF
+{
+  "fields": {
+    "project": { "key": "CW" },
+    "summary": "$ESCAPED_TITLE",
+    "description": "$ESCAPED_BODY",
+    "issuetype": { "name": "Story" },
+    "assignee": { "accountId": "$JIRA_ASSIGNEE_ID" }
+  }
+}
+EOF
+else
+  cat > payload.json <<EOF
 {
   "fields": {
     "project": { "key": "CW" },
@@ -25,6 +47,7 @@ cat > payload.json <<EOF
   }
 }
 EOF
+fi
 
 # Display the JSON content for verification
 echo "Generated JSON payload:"
