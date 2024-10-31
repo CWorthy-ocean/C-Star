@@ -128,7 +128,23 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
     
     # Create JSON payload for each subtask with summary and description
     # issuetype id 10009 corresponds to subtask
-    cat > subtask.json <<EOF
+
+
+    if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then	
+	cat > subtask.json <<EOF
+{
+  "fields": {
+    "project": { "key": "CW" },
+    "summary": "$ESCAPED_TASK_SUMMARY",
+    "description": "$ESCAPED_TASK_DESCRIPTION",
+    "issuetype": { "id": "10009" },
+    "parent": { "key": "$STORY_ID" },
+    "assignee": { "accountId": "$JIRA_ASSIGNEE_ID" }
+  }
+}
+EOF
+    else
+	cat > subtask.json <<EOF
 {
   "fields": {
     "project": { "key": "CW" },
@@ -139,6 +155,7 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
   }
 }
 EOF
+    fi	
     echo "Generated JSON payload for subtask:"
     cat subtask.json
 
