@@ -1,14 +1,25 @@
 #!/bin/bash
 
+######################################
+# FORMAT THE TICKET SUMMARY:
+
 # Escape double quotes in ISSUE_TITLE
 ESCAPED_TITLE="${ISSUE_TITLE//\"/\\\"}"
 
-# Escape double quotes and newlines in ISSUE_BODY
-ESCAPED_BODY="${ISSUE_BODY//\"/\\\"}"
-#ESCAPED_BODY="${ESCAPED_BODY//$'\n'/\\n}"
+##############################
+# FORMAT THE TICKET DESCRIPTION:
 
-# Use readarray to populate TASKS array directly from matching lines in ISSUE_BODY
-readarray -t TASKS < <(echo "$ISSUE_BODY" | grep -E '^- \[[ x]\] ')
+## Escape double quotes and newlines in ISSUE_BODY
+ESCAPED_BODY="${ISSUE_BODY//\"/\\\"}"
+
+## This is literally the only way to replace newlines with spaces that the Jira API accepts:
+IFS=' ' read -r -d '' ESCAPED_BODY <<<"$ESCAPED_BODY"
+
+## Add link back to original GitHub URL
+ESCAPED_BODY="${ESCAPED_BODY} --- [View the original GitHub issue|$GITHUB_ISSUE_URL]"
+
+##############################
+# DETERMINE ASSIGNEES
 
 # Trim and set GITHUB_ASSIGNEE_USERNAME if needed
 GITHUB_ASSIGNEE_USERNAME=$(echo "$GITHUB_ASSIGNEE_USERNAME" | xargs)
@@ -22,6 +33,8 @@ declare -A JIRA_IDS=(
 
 JIRA_ASSIGNEE_ID="${JIRA_IDS[$GITHUB_ASSIGNEE_USERNAME]}"
 
+##############################
+# CREATE THE STORY
 
 # Create the JSON payload, adding assignee if there is one
 if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then
@@ -68,8 +81,10 @@ if [[ $? -ne 0 || "$RESPONSE" -ne 201 ]]; then
   exit 1
 fi
 
+##############################
+# FORMAT SUBTASKS:
 
-# Extract the ID of the created story
+# Extract the ID of the story created above
 STORY_ID=$(jq -r '.key' response.json)
 
 # Verify STORY_ID is not empty
@@ -77,6 +92,9 @@ if [[ -z "$STORY_ID" ]]; then
   echo "Error: STORY_ID is empty. Failed to retrieve a valid story ID."
   exit 1
 fi
+
+# Use readarray to populate TASKS array directly from matching lines in ISSUE_BODY
+readarray -t TASKS < <(echo "$ISSUE_BODY" | grep -E '^- \[[ x]\] ')
 
 # If there are tasks, create subtasks
 if [[ ${#TASKS[@]} -gt 0 ]]; then
@@ -98,17 +116,18 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
     fi
 
 
-    # Trim any extra whitespace or newlines in summary and description
+    ## Trim any extra whitespace or newlines in summary and description
     TASK_SUMMARY=$(echo "$TASK_SUMMARY" | tr -d '\n' | tr -d '\r' | xargs)
     TASK_DESCRIPTION=$(echo "$TASK_DESCRIPTION" | tr -d '\n' | tr -d '\r' | xargs)
     
-    # Escape double quotes in the summary and description
+    ## Escape double quotes in the summary and description
     ESCAPED_TASK_SUMMARY="${TASK_SUMMARY//\"/\\\"}"
     ESCAPED_TASK_DESCRIPTION="${TASK_DESCRIPTION//\"/\\\"}"
     ESCAPED_TASK_SUMMARY="${ESCAPED_TASK_SUMMARY//$'\n'/ }"
     ESCAPED_TASK_DESCRIPTION="${ESCAPED_TASK_DESCRIPTION//$'\n'/ }"
     
     # Create JSON payload for each subtask with summary and description
+    # issuetype id 10009 corresponds to subtask
     cat > subtask.json <<EOF
 {
   "fields": {

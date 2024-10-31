@@ -18,5 +18,6 @@ jobs:
           JIRA_API_TOKEN_DAFYDD: ${{ secrets.JIRA_API_TOKEN_DAFYDD }}
           ISSUE_TITLE: "${{ github.event.issue.title }}"
           ISSUE_BODY: "${{ github.event.issue.body }}"
+          GITHUB_ISSUE_URL: "https://github.com/${{ github.repository }}/issues/${{ github.event.issue.number }}"
           GITHUB_ASSIGNEE_USERNAME: "${{ github.event.issue.assignee.login }}"          
         run: .github/workflows/create_jira_tickets.sh
