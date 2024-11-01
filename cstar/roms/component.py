@@ -160,6 +160,52 @@ class ROMSComponent(Component):
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
 
+    @property
+    def in_file(self) -> Path:
+        """Find the .in file associated with this ROMSComponent in
+        ROMSComponent.namelists.
+
+        ROMS requires a text file containing runtime options to run. This file is typically
+        called `roms.in`, but variations occur and C-Star only enforces that
+        the file has a `.in` extension.
+
+        This property finds any ".in" or ".in_TEMPLATE" files in ROMSComponent.namelists.files
+        and assigns the result (less any _TEMPLATE suffix) to ROMSComponent.in_file.
+
+        If there are multiple `.in` files, or none, errors are raised.
+        This property is used by ROMSComponent.run()
+        """
+        in_files = []
+        if self.namelists is None:
+            raise ValueError(
+                "ROMSComponent.namelists not set."
+                + " ROMS reuires a runtime options file "
+                + "(typically roms.in)"
+            )
+
+        in_files = [
+            fname.replace(".in_TEMPLATE", ".in")
+            for fname in self.namelists.files
+            if (fname.endswith(".in") or fname.endswith(".in_TEMPLATE"))
+        ]
+        if len(in_files) > 1:
+            raise ValueError(
+                "Multiple '.in' files found:"
+                + "\n{in_files}"
+                + "\nROMS runtime file choice ambiguous"
+            )
+        elif len(in_files) == 0:
+            raise ValueError(
+                "No '.in' file found in ROMSComponent.namelists."
+                + "ROMS expects a runtime options file with the '.in'"
+                + "extension, e.g. roms.in"
+            )
+        else:
+            if self.namelists.working_path is not None:
+                return self.namelists.working_path / in_files[0]
+            else:
+                return Path(in_files[0])
+
     def __str__(self) -> str:
         base_str = super().__str__()
         if hasattr(self, "namelists") and self.namelists is not None:
@@ -516,10 +562,13 @@ class ROMSComponent(Component):
                     _replace_text_in_file(mod_nl_path, placeholder, str(replacement))
                 self.namelists.modified_files[nl_idx] = mod_nl_path
         if no_template_found:
-            raise FileNotFoundError(
-                "No editable namelist found to set ROMS runtime parameters. "
+            warnings.warn(
+                "WARNING: No editable namelist found to set ROMS runtime parameters. "
                 + "Expected to find a file in ROMSComponent.namelists"
                 + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
+                + "\n********************************************************"
+                + "\nANY MODEL PARAMETERS SET IN C-STAR WILL NOT BE APPLIED."
+                + "\n********************************************************"
             )
 
     @property
@@ -868,18 +917,13 @@ class ROMSComponent(Component):
             )
         assert isinstance(n_time_steps, int)
 
-        if (self.namelists is not None) and (
-            "roms.in_TEMPLATE" in self.namelists.files
-        ):
-            nl_idx = self.namelists.files.index("roms.in_TEMPLATE")
-            mod_namelist = (
-                self.namelists.working_path / self.namelists.modified_files[nl_idx]
-            )
-            _replace_text_in_file(
-                mod_namelist,
-                "__NTIMES_PLACEHOLDER__",
-                str(n_time_steps),
-            )
+        # run_infile = self.namelists.working_path / self.in_file
+        _replace_text_in_file(
+            # run_infile,
+            self.in_file,
+            "__NTIMES_PLACEHOLDER__",
+            str(n_time_steps),
+        )
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -899,7 +943,8 @@ class ROMSComponent(Component):
 
         roms_exec_cmd = (
             f"{exec_pfx} -n {self.discretization.n_procs_tot} {self.exe_path} "
-            + f"{mod_namelist}"
+            # + f"{run_infile}"
+            + f"{self.in_file}"
         )
 
         if self.discretization.n_procs_tot is not None:
@@ -1080,7 +1125,7 @@ class ROMSComponent(Component):
                         f"ROMS terminated with errors. See {errlog} for further information."
                     )
 
-    def post_run(self, output_dir=None) -> None:
+    def post_run(self, output_dir: Optional[str | Path] = None) -> None:
         """Performs post-processing steps associated with this ROMSComponent object.
 
         This method goes through any netcdf files produced by the model in
@@ -1091,6 +1136,13 @@ class ROMSComponent(Component):
         output_dir: str | Path
             The directory in which output was produced by the run
         """
+        if output_dir is None:
+            # This should not be necessary, it allows output_dir to appear
+            # optional for signature compatibility in linting, see
+            # https://github.com/CWorthy-ocean/C-Star/issues/115
+            # https://github.com/CWorthy-ocean/C-Star/issues/116
+            raise ValueError("ROMSComponent.post_run() expects an output_dir parameter")
+
         output_dir = Path(output_dir)
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
