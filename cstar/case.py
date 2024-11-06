@@ -46,7 +46,7 @@ class Case:
     -------
     from_blueprint(blueprint,caseroot,start_date,end_date)
         Instantiate a Case from a "blueprint" yaml file
-    persist(filename)
+    to_blueprint(filename)
         Create a "blueprint" yaml file for this Case object
     setup()
         Fetch all code and files necessary to run this case in the local caseroot folder
@@ -449,7 +449,7 @@ class Case:
 
         return caseinstance
 
-    def persist(self, filename: str) -> None:
+    def to_blueprint(self, filename: str) -> None:
         """Write this case to a yaml 'blueprint' file.
 
         This effectively performs the actions of Case.from_blueprint(), but in reverse,

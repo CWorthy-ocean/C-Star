@@ -29,8 +29,8 @@ A key strength of C-Star lies in its ability to run regional simulations using a
    :maxdepth: 1
    :caption: Examples
 
-   Building and exporting a Case  <1_building_and_exporting_a_case>
-   Importing and running a Case <2_importing_and_running_a_case>
+   Building a Case and exporting it as a blueprint <1_building_a_case_and_exporting_it_as_a_blueprint>
+   Importing and running a Case from a blueprint <2_importing_and_running_a_case_from_a_blueprint>
    Restarting and continuing a Case <3_restarting_and_continuing_a_case>
    Preparing input datasets for a Case with ROMS using roms-tools <4_preparing_roms_input_datasets>
 
