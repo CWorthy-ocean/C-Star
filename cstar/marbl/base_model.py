@@ -1,10 +1,8 @@
+import os
 import subprocess
-
 from pathlib import Path
 from cstar.base import BaseModel
-from cstar.base.utils import (
-    _clone_and_checkout,
-)
+from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
 from cstar.base.environment import environment
 
 
@@ -51,6 +49,15 @@ class MARBLBaseModel(BaseModel):
             local_path=target,
             checkout_target=self.checkout_target,
         )
+        # Set environment variables for this session:
+        os.environ["MARBL_ROOT"] = str(target)
+        environment.environment_variables["MARBL_ROOT"] = os.environ["MARBL_ROOT"]
+        env_file_str = f'MARBL_ROOT="{target}"\n'
+        _update_user_dotenv(env_file_str)
+
+        #     f'\n    _CSTAR_ENVIRONMENT_VARIABLES["MARBL_ROOT"]="{target}"\n'
+        # )
+        # _write_to_config_file(config_file_str)
 
         # TODO
         ################################################################################

@@ -105,11 +105,6 @@ class CStarEnvironment(ABC):
     def compiler(self) -> str:
         pass
 
-    # @property
-    # @abstractmethod
-    # def environment_variables(self) -> dict:
-    #     pass
-
     # Scheduler/MPI related
     @property
     @abstractmethod
@@ -271,3 +266,4 @@ def set_environment() -> CStarEnvironment:
 
 
 environment = set_environment()
+os.environ.update(environment.environment_variables)

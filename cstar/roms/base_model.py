@@ -3,9 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from cstar.base.base_model import BaseModel
-from cstar.base.utils import (
-    _clone_and_checkout,
-)
+from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
 from cstar.base.environment import environment
 
 
@@ -76,11 +74,18 @@ class ROMSBaseModel(BaseModel):
 
         # TODO
         ################################################################################
+        os.environ["ROMS_ROOT"] = str(target)
+        environment.environment_variables["ROMS_ROOT"] = os.environ["ROMS_ROOT"]
         # os.environ["ROMS_ROOT"] = str(target)
         # _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"] = os.environ["ROMS_ROOT"]
+        os.environ["PATH"] += f":{target}/Tools-Roms/"
+        environment.environment_variables["PATH"] = os.environ["PATH"]
         # os.environ["PATH"] += f":{target}/Tools-Roms/"
         # _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = os.environ["PATH"]
-
+        env_file_str = (
+            f"ROMS_ROOT={target}" + "\nPATH=${PATH}:" + f"{target}/Tools-Roms\n"
+        )
+        _update_user_dotenv(env_file_str)
         # Set the configuration file to be read by __init__.py for future sessions:
         # config_file_str = (
         #     f'    _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"]="{target}"'

@@ -264,7 +264,7 @@ class BaseModel(ABC):
                     + "you will need to set it up.\n"
                     + "It is recommended that you install this base model in \n"
                     + f"{ext_dir}"
-                    + "\nThis will also modify your `cstar_local_config.py` file."
+                    + "\nThis will also modify your `~/.cstar.env` file."
                     + "\n#######################################################"
                 )
                 while True:
