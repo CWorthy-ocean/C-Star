@@ -1,13 +1,11 @@
-import os
 import subprocess
 
 from pathlib import Path
 from cstar.base import BaseModel
 from cstar.base.utils import (
     _clone_and_checkout,
-    _write_to_config_file,
 )
-from cstar.base.environment import _CSTAR_COMPILER
+from cstar.base.environment import environment
 
 
 class MARBLBaseModel(BaseModel):
@@ -54,20 +52,23 @@ class MARBLBaseModel(BaseModel):
             checkout_target=self.checkout_target,
         )
 
+        # TODO
+        ################################################################################
         # Set environment variables for this session:
-        os.environ["MARBL_ROOT"] = str(target)
+        # os.environ["MARBL_ROOT"] = str(target)
 
-        # Set the configuration file to be read by __init__.py for future sessions:
-        # QUESTION: how better to handle this?
-        config_file_str = (
-            f'\n    _CSTAR_ENVIRONMENT_VARIABLES["MARBL_ROOT"]="{target}"\n'
-        )
-        _write_to_config_file(config_file_str)
+        # # Set the configuration file to be read by __init__.py for future sessions:
+        # # QUESTION: how better to handle this?
+        # config_file_str = (
+        #     f'\n    _CSTAR_ENVIRONMENT_VARIABLES["MARBL_ROOT"]="{target}"\n'
+        # )
+        # _write_to_config_file(config_file_str)
+        ################################################################################
 
         # Make things
         print("Compiling MARBL...")
         make_marbl_result = subprocess.run(
-            f"make {_CSTAR_COMPILER} USEMPI=TRUE",
+            f"make {environment.compiler} USEMPI=TRUE",
             cwd=f"{target}/src",
             shell=True,
             text=True,

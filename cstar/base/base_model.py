@@ -9,7 +9,7 @@ from cstar.base.utils import (
     _get_repo_remote,
     _get_repo_head_hash,
 )
-from cstar.base.environment import _CSTAR_ROOT
+from cstar.base.environment import environment
 
 
 class BaseModel(ABC):
@@ -254,7 +254,7 @@ class BaseModel(ABC):
                     else:
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
-                ext_dir = Path(_CSTAR_ROOT) / f"externals/{self.repo_basename}"
+                ext_dir = environment.root / f"externals/{self.repo_basename}"
                 print(
                     "#######################################################\n"
                     + f"C-STAR: {self.expected_env_var}"
