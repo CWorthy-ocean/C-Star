@@ -1,5 +1,4 @@
 import os
-import platform
 import warnings
 import subprocess
 import shutil
@@ -916,6 +915,8 @@ class ROMSComponent(Component):
                 scheduler_script += "\n#PBS -j oe"
                 scheduler_script += "\n#PBS -k eod"
                 scheduler_script += "\n#PBS -V"
+                for key, value in environment.other_scheduler_directives.items():
+                    scheduler_script += f"\n#PBS {key} {value}"
                 if environment.system_name == "derecho":
                     scheduler_script += "\ncd ${PBS_O_WORKDIR}"
                 scheduler_script += f"\n\n{roms_exec_cmd}"
@@ -936,23 +937,17 @@ class ROMSComponent(Component):
                 scheduler_script = "#!/bin/bash"
                 scheduler_script += f"\n#SBATCH --job-name={job_name}"
                 scheduler_script += f"\n#SBATCH --output={job_name}.out"
-                if environment.system_name == "perlmutter":
-                    scheduler_script += f"\n#SBATCH --qos={queue}"
-                    scheduler_script += "\n#SBATCH -C cpu"
-                else:
-                    scheduler_script += (
-                        f"\n#SBATCH --partition={environment.primary_queue}"
-                    )
-                    # FIXME: This ^^^ is a pretty ugly patch...
+                scheduler_script += f"\n#SBATCH --{environment.queue_flag}={queue}"
                 scheduler_script += f"\n#SBATCH --nodes={nnodes}"
                 scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
                 scheduler_script += f"\n#SBATCH --account={account_key}"
                 scheduler_script += "\n#SBATCH --export=NONE"
                 scheduler_script += "\n#SBATCH --mail-type=ALL"
                 scheduler_script += f"\n#SBATCH --time={walltime}"
-
+                for key, value in environment.other_scheduler_directives.items():
+                    scheduler_script += f"\n#SBATCH {key} {value}"
                 # Add linux environment modules to scheduler script
-                if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
+                if environment.uses_lmod:
                     scheduler_script += "\nmodule reset"
                     with open(
                         f"{environment.root}/additional_files/lmod_lists/{environment.system_name}.lmod"

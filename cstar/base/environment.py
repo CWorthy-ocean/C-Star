@@ -2,7 +2,6 @@ import io
 import os
 import platform
 from pathlib import Path
-from contextlib import contextmanager
 import importlib.util
 from abc import ABC, abstractmethod
 from typing import Optional, Final, Dict
@@ -135,8 +134,8 @@ class CStarEnvironment(ABC):
         return None
 
     @property
-    def other_scheduler_directives(self) -> Optional[dict]:
-        return None
+    def other_scheduler_directives(self) -> Dict[str, str]:
+        return {}
 
     @property
     def cores_per_node(self) -> Optional[int]:
@@ -149,20 +148,6 @@ class CStarEnvironment(ABC):
     @property
     def max_walltime(self) -> Optional[str]:
         return None
-
-    @contextmanager
-    def temporary_os_environment(self):
-        """Context manager to temporarily apply environment variables at the OS
-        level."""
-        original_env = os.environ.copy()
-        try:
-            if self.uses_lmod:
-                self.load_lmod_modules()
-            os.environ.update(self.environment_variables)
-            yield
-        finally:
-            os.environ.clear()
-            os.environ.update(original_env)
 
 
 class PerlmutterEnvironment(CStarEnvironment):
@@ -191,7 +176,7 @@ class PerlmutterEnvironment(CStarEnvironment):
     max_walltime: Final[str] = "24:00:00"
 
     @property
-    def other_scheduler_directives(self) -> dict:
+    def other_scheduler_directives(self) -> Dict[str, str]:
         return {"-C": "cpu"}
 
 
