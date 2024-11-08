@@ -55,3 +55,8 @@ Once a case has been constructed, the sequence of steps to run it is as follows:
 - `my_case.pre_run()` performs any pre-processing steps necessary to run the model
 - `my_case.run(account_key='MY_ACCOUNT_KEY')` either executes the case or submits it to the appropriate job scheduler with the user's provided account key. If running on a machine without a scheduling system (such as a laptop), the optional `account_key` argument can be ignored. Additional arguments include `walltime='HH:MM:SS'` and `job_name='my_job_name'`
 - `my_case.post_run()` performs any necessary post-processing steps to work with the output.
+
+
+## License
+
+C-Star is openly available for use and permissively licenced under Apache 2.0. 
