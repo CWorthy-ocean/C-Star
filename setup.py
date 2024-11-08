@@ -18,7 +18,7 @@ setup(
     # install_requires = dependency_list,
     # setup_requires=['pytest-runner'],
     # tests_require=['pytest'],
-    license="GNU",
+    license="Apache-2.0",
     # classifiers=[list of even more metadata],
     # long_description=<print contents of a README here>,
     # long_description_content_type='text/markdown',
