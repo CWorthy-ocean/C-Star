@@ -5,15 +5,22 @@ from pathlib import Path
 from contextlib import contextmanager
 import importlib.util
 from abc import ABC, abstractmethod
-from typing import Optional, Final
+from typing import Optional, Final, Dict
 from contextlib import redirect_stdout, redirect_stderr
 import subprocess
-
-# from dotenv import dotenv_values
+from dotenv import dotenv_values
 
 
 class CStarEnvironment(ABC):
     """Base class for C-Star environment configurations."""
+
+    def __init__(self):
+        default_env_vars = dotenv_values(
+            self.root / f"additional_files/env_files/{self.system_name}.env"
+        )
+        self.environment_variables: Dict[str, str] = default_env_vars
+        user_env_vars = dotenv_values(Path("~/.cstar.env").expanduser())
+        self.environment_variables.update(user_env_vars)
 
     # System-level properties
     @property
@@ -98,10 +105,10 @@ class CStarEnvironment(ABC):
     def compiler(self) -> str:
         pass
 
-    @property
-    @abstractmethod
-    def environment_variables(self) -> dict:
-        pass
+    # @property
+    # @abstractmethod
+    # def environment_variables(self) -> dict:
+    #     pass
 
     # Scheduler/MPI related
     @property
@@ -180,20 +187,6 @@ class PerlmutterEnvironment(CStarEnvironment):
     https://docs.nersc.gov/jobs/#available-memory-for-applications-on-compute-nodes
     """
 
-    @property
-    def environment_variables(self) -> dict:
-        env_vars = {}
-        env_vars["MPIHOME"] = os.environ.get("CRAY_MPI_PREFIX")
-        env_vars["NETCDFHOME"] = os.environ.get("CRAY_NETCDF_PREFIX")
-        env_vars["PATH"] = (
-            os.environ.get("PATH", default="") + f":{env_vars['NETCDFHOME']}/bin"
-        )
-        env_vars["LIBRARY_PATH"] = (
-            os.environ.get("LIBRARY_PATH", default="")
-            + f":{env_vars['NETCDFHOME']}/lib"
-        )
-        return env_vars
-
     mpi_exec_prefix: Final[str] = "srun"
     compiler: Final[str] = "gnu"
     queue_flag: Final[str] = "qos"
@@ -208,13 +201,6 @@ class PerlmutterEnvironment(CStarEnvironment):
 
 
 class ExpanseEnvironment(CStarEnvironment):
-    @property
-    def environment_variables(self) -> dict:
-        env_vars = {}
-        env_vars["NETCDFHOME"] = os.environ.get("NETCDF_FORTRANHOME")
-        env_vars["MPIHOME"] = env_vars["MPIROOT"] = os.environ.get("MVAPICH2HOME")
-        return env_vars
-
     mpi_exec_prefix: Final[str] = "srun --mpi=pmi2"
     compiler: Final[str] = "intel"
     queue_flag: Final[str] = "partition"
@@ -225,20 +211,6 @@ class ExpanseEnvironment(CStarEnvironment):
 
 
 class DerechoEnvironment(CStarEnvironment):
-    @property
-    def environment_variables(self) -> dict:
-        env_vars = {}
-        env_vars["MPIHOME"] = os.environ.get("CRAY_MPI_PREFIX")
-        env_vars["NETCDFHOME"] = os.environ.get("NETCDF")
-        env_vars["PATH"] = (
-            os.environ.get("PATH", default="") + f":{env_vars['NETCDFHOME']}/bin"
-        )
-        env_vars["LIBRARY_PATH"] = env_vars["LD_LIBRARY_PATH"] = (
-            os.environ.get("LIBRARY_PATH", default="")
-            + f":{env_vars['NETCDFHOME']}/lib"
-        )
-        return env_vars
-
     mpi_exec_prefix: Final[str] = "mpirun"
     compiler: Final[str] = "intel"
     queue_flag: Final[str] = "q"
@@ -249,16 +221,6 @@ class DerechoEnvironment(CStarEnvironment):
 
 
 class MacOSARMEnvironment(CStarEnvironment):
-    @property
-    def environment_variables(self) -> dict:
-        env_vars = {}
-        env_vars["MPIHOME"] = env_vars["NETCDFHOME"] = os.environ.get("CONDA_PREFIX")
-        env_vars["LD_LIBRARY_PATH"] = (
-            os.environ.get("LD_LIBRARY_PATH", default="")
-            + f":{env_vars['NETCDFHOME']}/lib"
-        )
-        return env_vars
-
     mpi_exec_prefix: Final[str] = "mpirun"
     compiler: Final[str] = "gnu"
 
@@ -272,16 +234,6 @@ class MacOSARMEnvironment(CStarEnvironment):
 
 
 class LinuxX86Environment(CStarEnvironment):
-    @property
-    def environment_variables(self) -> dict:
-        env_vars = {}
-        env_vars["MPIHOME"] = env_vars["NETCDFHOME"] = os.environ.get("CONDA_PREFIX")
-        env_vars["LD_LIBRARY_PATH"] = (
-            os.environ.get("LD_LIBRARY_PATH", default="")
-            + f":{env_vars['NETCDFHOME']}/lib"
-        )
-        return env_vars
-
     mpi_exec_prefix: Final[str] = "mpirun"
     compiler: Final[str] = "gnu"
 
