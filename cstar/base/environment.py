@@ -14,12 +14,15 @@ class CStarEnvironment(ABC):
     """Base class for C-Star environment configurations."""
 
     def __init__(self):
+        if self.uses_lmod:
+            self.load_lmod_modules()
         default_env_vars = dotenv_values(
             self.root / f"additional_files/env_files/{self.system_name}.env"
         )
         self.environment_variables: Dict[str, str] = default_env_vars
         user_env_vars = dotenv_values(Path("~/.cstar.env").expanduser())
         self.environment_variables.update(user_env_vars)
+        os.environ.update(self.environment_variables)
 
     # System-level properties
     @property
@@ -251,4 +254,3 @@ def set_environment() -> CStarEnvironment:
 
 
 environment = set_environment()
-os.environ.update(environment.environment_variables)
