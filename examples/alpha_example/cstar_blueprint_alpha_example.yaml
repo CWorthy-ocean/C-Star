@@ -54,9 +54,9 @@ components:
         file_hash: '17580432b557bc4b54048f561bf5d6edea57ec21c107135914bed4e1fed8a100'
       boundary_forcing:
         - location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/cstar_alpha/roms_tools_yaml_files/roms_bry.yaml'
-          file_hash: '9099d7649f32873dc1770df0f2a6aa76c22f2df7daf820d0c00d5e64bba3ad75'
+          file_hash: '0b10d9a5d77671d038fe203dfd80417dda3c411ae72a8f562c7d4e734f59756f'
         - location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/cstar_alpha/roms_tools_yaml_files/roms_bry_bgc.yaml'
-          file_hash: '910b5aa948a85279ad3d8dfb3fb565ee9d897be0a472407366929b15a9dd29a9'
+          file_hash: '16b6f41e58c664b890eb77c6f88ff843479f36f9363ed910450802b4a83b86ba'
       surface_forcing:
         - location: 'https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/cstar_alpha/roms_tools_yaml_files/roms_frc.yaml'
           file_hash: '8817ec14af2ef3582176180f88c5e1a718a371ecc4d697ccdfcc332f4df927c7'
