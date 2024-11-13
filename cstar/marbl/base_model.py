@@ -55,23 +55,6 @@ class MARBLBaseModel(BaseModel):
         env_file_str = f'MARBL_ROOT="{target}"\n'
         _update_user_dotenv(env_file_str)
 
-        #     f'\n    _CSTAR_ENVIRONMENT_VARIABLES["MARBL_ROOT"]="{target}"\n'
-        # )
-        # _write_to_config_file(config_file_str)
-
-        # TODO
-        ################################################################################
-        # Set environment variables for this session:
-        # os.environ["MARBL_ROOT"] = str(target)
-
-        # # Set the configuration file to be read by __init__.py for future sessions:
-        # # QUESTION: how better to handle this?
-        # config_file_str = (
-        #     f'\n    _CSTAR_ENVIRONMENT_VARIABLES["MARBL_ROOT"]="{target}"\n'
-        # )
-        # _write_to_config_file(config_file_str)
-        ################################################################################
-
         # Make things
         print("Compiling MARBL...")
         make_marbl_result = subprocess.run(

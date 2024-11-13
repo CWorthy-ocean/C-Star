@@ -72,30 +72,15 @@ class ROMSBaseModel(BaseModel):
 
         # Set environment variables for this session:
 
-        # TODO
-        ################################################################################
         os.environ["ROMS_ROOT"] = str(target)
         environment.environment_variables["ROMS_ROOT"] = os.environ["ROMS_ROOT"]
-        # os.environ["ROMS_ROOT"] = str(target)
-        # _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"] = os.environ["ROMS_ROOT"]
         os.environ["PATH"] += f":{target}/Tools-Roms/"
         environment.environment_variables["PATH"] = os.environ["PATH"]
-        # os.environ["PATH"] += f":{target}/Tools-Roms/"
-        # _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = os.environ["PATH"]
         env_file_str = (
             f"ROMS_ROOT={target}" + "\nPATH=${PATH}:" + f"{target}/Tools-Roms\n"
         )
         _update_user_dotenv(env_file_str)
-        # Set the configuration file to be read by __init__.py for future sessions:
-        # config_file_str = (
-        #     f'    _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"]="{target}"'
-        #     + '\n    _CSTAR_ENVIRONMENT_VARIABLES.setdefault("PATH",os.environ.get("PATH",default=""))'
-        #     + '\n    _CSTAR_ENVIRONMENT_VARIABLES["PATH"]+=":'
-        #     + f'{target}/Tools-Roms"\n'
-        # )
 
-        # _write_to_config_file(config_file_str)
-        ################################################################################
         # Distribute custom makefiles for ROMS
         self._base_model_adjustments()
 
