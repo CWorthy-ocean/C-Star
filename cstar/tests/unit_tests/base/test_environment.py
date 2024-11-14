@@ -465,31 +465,20 @@ class TestSetupEnvironmentFromFiles:
             "MPIHOME=${MVAPICH2HOME}/\n"
             "MPIROOT=${MVAPICH2HOME}/\n"
         )
-        print(f"System .env file written to: {system_env_file_path}")
-        print(f"System .env file contents:\n{system_env_file_path.read_text()}")
-
         # Write simulated user .env content with an overriding variable
         user_env_file_path.write_text(
             "MPIROOT=/override/mock/mpi\n" "CUSTOM_VAR=custom_value\n"
         )
-        print(f"User .env file written to: {user_env_file_path}")
-        print(f"User .env file contents:\n{user_env_file_path.read_text()}")
-
         # Patch the root path and expanduser to point to our temporary files
         with patch.object(
             cstar.base.environment.CStarEnvironment, "root", new=root_path
         ):
-            print(f"Patched root path: {cstar.base.environment.CStarEnvironment.root}")
             with patch(
                 "cstar.base.environment.Path.expanduser",
                 return_value=user_env_file_path,
             ):
                 # Instantiate the environment to trigger loading the environment variables
                 env = cstar.base.environment.PerlmutterEnvironment()
-
-                # Print the loaded environment variables for debugging
-                print("Loaded environment variables:")
-                print(dict(env.environment_variables))
 
                 # Define expected final environment variables after merging and expansion
                 expected_env_vars = {
