@@ -1,5 +1,5 @@
-import io
 import os
+import shutil
 import platform
 import subprocess
 import importlib.util
@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from dotenv import dotenv_values
 from typing import Optional, Final, Dict
-from contextlib import redirect_stdout, redirect_stderr
 
 
 class CStarEnvironment(ABC):
@@ -205,63 +204,48 @@ class CStarEnvironment(ABC):
 
         return (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ))
 
-    def load_lmod_modules(self):
-        """Loads Lmod environment modules by dynamically importing the
-        `env_modules_python` script and executing reset and load sequences based on
-        system-specific module lists.
+    def load_lmod_modules(self) -> None:
+        """Loads necessary modules for this machine using Linux Environment Modules.
 
-        Steps
-        -----
-        - Locates the `env_modules_python.py` script, typically found in the Lmod directory.
-        - Dynamically imports and initializes Lmod.
-        - Executes an Lmod reset, followed by loading each module listed in a configuration file.
+        This function:
+        - Resets the current module environment by executing `module reset`.
+        - Loads each module listed in the `.lmod` file for the system, located at
+          `<root>/additional_files/lmod_lists/<system_name>.lmod`.
 
         Raises
         ------
         EnvironmentError
-            If Lmod is not in use, the `env_modules_python` file cannot be found, or any module fails to load.
+            If the system does not use Lmod or `module reset` fails.
+        RuntimeError
+            If any `module load <module_name>` command fails.
         """
 
         if not self.uses_lmod:
             raise EnvironmentError(
                 "Your system does not appear to use Linux Environment Modules"
             )
-        # Dynamically load the env_modules_python module using pathlib
-        module_path = (
-            Path(os.environ["LMOD_DIR"]).parent / "init" / "env_modules_python.py"
+
+        reset_result = subprocess.run(
+            "module reset", capture_output=True, shell=True, text=True
         )
-        spec = importlib.util.spec_from_file_location("env_modules_python", module_path)
-        if (spec is None) or (spec.loader is None):
-            raise EnvironmentError(
-                f"Could not find env_modules_python on this machine at {module_path}"
+        if reset_result.returncode != 0:
+            raise RuntimeError(
+                f"Error {reset_result.returncode} when attempting to run module reset. Error Messages: "
+                + f"\n{reset_result.stderr}"
             )
-        env_modules = importlib.util.module_from_spec(spec)
-        if env_modules is None:
-            raise EnvironmentError(
-                f"No module found by importlib corresponding to spec {spec}"
-            )
-        spec.loader.exec_module(env_modules)
-        module = env_modules.module
-
-        module_stdout = io.StringIO()
-        module_stderr = io.StringIO()
-
-        # Load Linux Environment Modules for this machine:
-        with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
-            module("reset")
-            with open(
-                f"{self.root}/additional_files/lmod_lists/{self.system_name}.lmod"
-            ) as F:
-                lmod_list = F.readlines()
+        with open(
+            f"{self.root}/additional_files/lmod_lists/{self.system_name}.lmod"
+        ) as F:
+            lmod_list = F.readlines()
             for mod in lmod_list:
-                module("load", mod)
-        if any(
-            keyword in module_stderr.getvalue().casefold()
-            for keyword in ["fail", "error"]
-        ):
-            raise EnvironmentError(
-                "Error with linux environment modules: " + module_stderr.getvalue()
-            )
+                lmod_result = subprocess.run(
+                    f"module load {mod}", capture_output=True, shell=True, text=True
+                )
+                if lmod_result.returncode != 0:
+                    raise RuntimeError(
+                        f"Error {lmod_result.returncode} when attempting to run module load {mod}. Error Messages: "
+                        + f"\n{lmod_result.stderr}"
+                    )
 
     @property
     @abstractmethod
@@ -302,15 +286,9 @@ class CStarEnvironment(ABC):
         str or None
             Scheduler type (e.g., 'slurm', 'pbs') or None if no known scheduler is detected.
         """
-
-        if subprocess.run("sinfo --version", shell=True, text=True).returncode == 0:
+        if shutil.which("sinfo") or shutil.which("scontrol"):
             return "slurm"
-        elif (
-            subprocess.run("scontrol show config", shell=True, text=True).returncode
-            == 0
-        ):
-            return "slurm"
-        elif subprocess.run("qstat --version", shell=True, text=True).returncode == 0:
+        elif shutil.which("qstat"):
             return "pbs"
         else:
             return None
