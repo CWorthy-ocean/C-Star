@@ -145,7 +145,6 @@ class CStarEnvironment(ABC):
         EnvironmentError
             If the system name cannot be determined from environment variables or platform information.
         """
-
         if self.uses_lmod:
             sysname = os.environ.get("LMOD_SYSHOST") or os.environ.get(
                 "LMOD_SYSTEM_NAME"
@@ -202,7 +201,65 @@ class CStarEnvironment(ABC):
             True if the OS is Linux and `LMOD_DIR` is present in environment variables.
         """
 
-        return (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ))
+        return (platform.system() == "Linux") and ("LMOD_CMD" in list(os.environ))
+
+    def _call_lmod(self, *args) -> None:
+        """Calls Linux Environment Modules with specified arguments in python mode.
+
+        This method constructs and executes a command to interface with the Linux Environment
+        Modules system (Lmod), equivalently to `module <args>` from the shell.
+        The output of the command, which is Python code, is executed
+        directly to modify the current process environment persistently. Errors during the
+        command's execution are raised as exceptions.
+
+        Parameters
+        ----------
+        *args : str
+            Arguments for the Lmod command. For example, "reset", "load gcc", or "unload gcc".
+            These are concatenated into a single command string and passed to Lmod.
+
+        Raises
+        ------
+        EnvironmentError
+            If Lmod is not available on the system or the `LMOD_CMD` environment variable is
+            not set.
+        RuntimeError
+            If the Lmod command returns a non-zero exit code. The error message includes
+            details about the command and the stderr output from Lmod.
+
+        Examples
+        --------
+        Reset the environment managed by Lmod:
+
+        >>> CStarEnvironment._call_lmod("reset")
+
+        Load a module (e.g., gcc):
+
+        >>> CStarEnvironment._call_lmod("load", "gcc")
+
+        Unload a module (e.g., gcc):
+
+        >>> CStarEnvironment._call_lmod("unload", "gcc")
+        """
+        if not self.uses_lmod:
+            raise EnvironmentError(
+                "Your system does not appear to use Linux Environment Modules"
+            )
+
+        lmod_path = Path(os.environ.get("LMOD_CMD", ""))
+        command = f"{lmod_path} python {' '.join(list(args))}"
+        lmod_result = subprocess.run(
+            command, shell=True, text=True, capture_output=True
+        )
+        if lmod_result.returncode != 0:
+            raise RuntimeError(
+                "Linux Environment Modules command "
+                + f"\n{command} "
+                + f"\n failed with code {lmod_result.returncode}. STDERR: "
+                + f"{lmod_result.stderr}"
+            )
+        else:
+            exec(lmod_result.stdout)
 
     def load_lmod_modules(self) -> None:
         """Loads necessary modules for this machine using Linux Environment Modules.
@@ -224,28 +281,13 @@ class CStarEnvironment(ABC):
             raise EnvironmentError(
                 "Your system does not appear to use Linux Environment Modules"
             )
-
-        reset_result = subprocess.run(
-            "module reset", capture_output=True, shell=True, text=True
-        )
-        if reset_result.returncode != 0:
-            raise RuntimeError(
-                f"Error {reset_result.returncode} when attempting to run module reset. Error Messages: "
-                + f"\n{reset_result.stderr}"
-            )
+        self._call_lmod("reset")
         with open(
             f"{self.root}/additional_files/lmod_lists/{self.system_name}.lmod"
         ) as F:
             lmod_list = F.readlines()
             for mod in lmod_list:
-                lmod_result = subprocess.run(
-                    f"module load {mod}", capture_output=True, shell=True, text=True
-                )
-                if lmod_result.returncode != 0:
-                    raise RuntimeError(
-                        f"Error {lmod_result.returncode} when attempting to run module load {mod}. Error Messages: "
-                        + f"\n{lmod_result.stderr}"
-                    )
+                self._call_lmod(f"load {mod}")
 
     @property
     @abstractmethod
