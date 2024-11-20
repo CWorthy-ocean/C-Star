@@ -894,6 +894,8 @@ class ROMSComponent(Component):
                 exec_pfx = "mpirun"
             case "osx_arm64":
                 exec_pfx = "mpirun"
+            case "osx_x86_64":
+                exec_pfx = "mpirun"
             case "linux_x86_64":
                 exec_pfx = "mpirun"
 
