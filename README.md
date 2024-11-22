@@ -1,6 +1,11 @@
 [![codecov](https://codecov.io/gh/CWorthy-ocean/C-Star/graph/badge.svg?token=HAPZGL2LWF)](https://codecov.io/gh/CWorthy-ocean/C-Star)
 [![Documentation Status](https://readthedocs.org/projects/c-star/badge/?version=latest)](https://c-star.readthedocs.io/en/latest/?badge=latest)
 
+<mark>**DISCLAIMER**: 
+* This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout 2024. We do not recommend to use this software before this ALPHA development and test phase is completed.
+* Examples in the [documentation](https://c-star.readthedocs.io/en/latest/index.html) currently only work on the Perlmutter machine.
+</mark>
+
 # Installation
 
 ## Installation from GitHub
