@@ -5,7 +5,7 @@ Welcome to the C-Star Documentation!
 
    **DISCLAIMER**: 
 
-   - This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout Fall 2024. We do not recommend using this software before this ALPHA development and test phase is completed.
+   - This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout 2024. We do not recommend using this software before this ALPHA development and test phase is completed.
    - Examples in this documentation currently only work on the Perlmutter machine.
 
 **C-Star** is an open-source modeling system developed by a team of ocean/biogeochemical modelers and scientific software engineers at `[\C\]Worthy <https://cworthy.org>`_. It is designed to support Monitoring, Reporting, and Verification (MRV) for research and commercial ocean-based Carbon Dioxide Removal (CDR) projects. C-Star aims to provide an accessible, common, framework for creating, sharing, and reproducing ocean biogeochemical simulations.
