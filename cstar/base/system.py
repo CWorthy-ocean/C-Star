@@ -91,6 +91,7 @@ class CStarSystem:
                 compiler = "gnu"
                 queue_flag = None
                 primary_queue = None
+                max_walltime = None
                 cores_per_node = os.cpu_count()
                 mem_per_node_gb = (
                     os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / (1024**3)
