@@ -32,7 +32,6 @@ class MockEnvironment(cstar.base.environment.CStarEnvironment):
             max_walltime=max_walltime,
             other_scheduler_directives=other_scheduler_directives,
         )
-        self.__post_init__()
 
 
 class TestSetupEnvironmentFromFiles:
