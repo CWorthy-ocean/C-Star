@@ -1,344 +1,38 @@
 # cstar/base/environment.py                           169      9    95%   245, 262, 277, 290, 292, 306, 331, 472, 494
-import os
 import pytest
 from unittest.mock import patch, call, PropertyMock, mock_open
 import cstar
 import subprocess
 
 
-class TestSetEnvironment:
-    """Tests covering the set_environment() function in cstar.base.environment.
+class MockEnvironment(cstar.base.environment.CStarEnvironment):
+    def __init__(
+        self,
+        system_name="mock_system",
+        mpi_exec_prefix="mock_mpi_prefix",
+        compiler="mock_compiler",
+        queue_flag="mock_queue_flag",
+        primary_queue="mock_primary_queue",
+        mem_per_node_gb=0,
+        cores_per_node=0,
+        max_walltime="00:00:00",
+        other_scheduler_directives=None,
+    ):
+        if other_scheduler_directives is None:
+            other_scheduler_directives = {"--mock": "directive"}
 
-    Tests
-    -----
-    - test_set_environment_perlmutter: Validates that PerlmutterEnvironment is returned when conditions are met.
-    - test_set_environment_expanse: Validates that ExpanseEnvironment is returned when conditions are met.
-    - test_set_environment_derecho: Validates that DerechoEnvironment is returned when conditions are met.
-    - test_set_environment_macos_arm: Ensures MacOSARMEnvironment is returned for macOS ARM.
-    - test_set_environment_linux_x86: Ensures LinuxX86Environment is returned for generic Linux x86_64.
-    - test_set_environment_unsupported_system: Confirms EnvironmentError is raised for unsupported systems.
-    """
-
-    def setup_method(self):
-        """Sets up common patches for each test in this class.
-
-        Mocks
-        -----
-        - platform.system: Always returns "Linux" by default.
-        - platform.machine: Always returns "x86_64" by default.
-        - os.environ: Cleared and reset with default values for each test.
-        """
-
-        # Patch platform system and machine by default to "Linux" and "x86_64"
-        self.patcher_system = patch(
-            "cstar.base.environment.platform.system", return_value="Linux"
+        super().__init__(
+            system_name=system_name,
+            mpi_exec_prefix=mpi_exec_prefix,
+            compiler=compiler,
+            queue_flag=queue_flag,
+            primary_queue=primary_queue,
+            mem_per_node_gb=mem_per_node_gb,
+            cores_per_node=cores_per_node,
+            max_walltime=max_walltime,
+            other_scheduler_directives=other_scheduler_directives,
         )
-        self.patcher_machine = patch(
-            "cstar.base.environment.platform.machine", return_value="x86_64"
-        )
-        self.mock_system = self.patcher_system.start()
-        self.mock_machine = self.patcher_machine.start()
-
-        # Clear os.environ and set common environment variables
-        self.patcher_environ = patch.dict(
-            "cstar.base.environment.os.environ", clear=True
-        )
-        self.mock_environ = self.patcher_environ.start()
-
-    def teardown_method(self):
-        """Stops all patches after each test."""
-        patch.stopall()
-
-    def test_set_environment_perlmutter(self):
-        """Tests that set_environment returns PerlmutterEnvironment under appropriate
-        conditions.
-
-        Mocks
-        -----
-        - os.environ["LMOD_SYSHOST"] set to "perlmutter".
-
-        Asserts
-        -------
-        - The environment instance is of type PerlmutterEnvironment.
-        """
-        os.environ["LMOD_SYSHOST"] = "perlmutter"
-        env = cstar.base.environment.set_environment()
-        assert isinstance(env, cstar.base.environment.PerlmutterEnvironment)
-
-    def test_set_environment_expanse(self):
-        """Tests that set_environment returns ExpanseEnvironment under appropriate
-        conditions.
-
-        Mocks
-        -----
-        - os.environ["LMOD_SYSHOST"] set to "expanse".
-
-        Asserts
-        -------
-        - The environment instance is of type ExpanseEnvironment.
-        """
-
-        os.environ["LMOD_SYSHOST"] = "expanse"
-        env = cstar.base.environment.set_environment()
-        assert isinstance(env, cstar.base.environment.ExpanseEnvironment)
-
-    def test_set_environment_derecho(self):
-        """Tests that set_environment returns DerechoEnvironment under appropriate
-        conditions.
-
-        Mocks
-        -----
-        - os.environ["LMOD_SYSHOST"] set to "derecho".
-
-        Asserts
-        -------
-        - The environment instance is of type DerechoEnvironment.
-        """
-
-        os.environ["LMOD_SYSHOST"] = "derecho"
-        env = cstar.base.environment.set_environment()
-        assert isinstance(env, cstar.base.environment.DerechoEnvironment)
-
-    def test_set_environment_macos_arm(self):
-        """Tests that set_environment returns MacOSARMEnvironment for macOS ARM.
-
-        Mocks
-        -----
-        - platform.system set to "Darwin".
-        - platform.machine set to "arm64".
-
-        Asserts
-        -------
-        - The environment instance is of type MacOSARMEnvironment.
-        """
-
-        # Override return values for macOS ARM
-        self.mock_system.return_value = "Darwin"
-        self.mock_machine.return_value = "arm64"
-        env = cstar.base.environment.set_environment()
-        assert isinstance(env, cstar.base.environment.MacOSARMEnvironment)
-
-    def test_set_environment_linux_x86(self):
-        """Tests that set_environment returns LinuxX86Environment for generic Linux
-        x86_64.
-
-        Asserts
-        -------
-        - The environment instance is of type LinuxX86Environment.
-        """
-
-        env = cstar.base.environment.set_environment()
-        assert isinstance(env, cstar.base.environment.LinuxX86Environment)
-
-    def test_set_environment_unsupported_system(self):
-        """Tests that set_environment raises an error for unsupported environments.
-
-        Mocks
-        -----
-        - platform.system set to "Windows".
-        - platform.machine set to "AMD64".
-
-        Asserts
-        -------
-        - Raises EnvironmentError for unsupported systems.
-        """
-
-        # Override return values for an unsupported system
-        self.mock_system.return_value = "Windows"
-        self.mock_machine.return_value = "AMD64"
-        with pytest.raises(EnvironmentError):
-            cstar.base.environment.set_environment()
-
-
-class TestCStarEnvironmentSubclassDefaults:
-    """Tests default configuration of CStarEnvironment subclasses.
-
-    Tests
-    -----
-    - test_perlmutter_environment_defaults: Confirms PerlmutterEnvironment default configurations.
-    - test_derecho_environment_defaults: Confirms DerechoEnvironment default configurations.
-    - test_expanse_environment_defaults: Confirms ExpanseEnvironment default configurations.
-    - test_macos_arm_environment_defaults: Validates MacOSARMEnvironment configuration, including core count.
-    - test_linux_x86_environment_defaults: Validates LinuxX86Environment configuration, including core count.
-    """
-
-    def setup_method(self):
-        """Sets up patches for platform and environment-specific properties.
-
-        Mocks
-        -----
-        - platform.system and platform.machine return default values for Linux.
-        - os.environ is cleared for isolated environment testing.
-        - CStarEnvironment.uses_lmod and CStarEnvironment.load_lmod_modules are patched for control over Lmod settings.
-        """
-
-        # Set up default patches for platform, environment variables, uses_lmod, and load_lmod_modules
-        self.patch_system = patch(
-            "cstar.base.environment.platform.system", return_value="Linux"
-        )
-        self.patch_machine = patch(
-            "cstar.base.environment.platform.machine", return_value="x86_64"
-        )
-        self.patch_environ = patch.dict(
-            "cstar.base.environment.os.environ", {}, clear=True
-        )
-        self.patch_uses_lmod = patch.object(
-            cstar.base.environment.CStarEnvironment,
-            "uses_lmod",
-            new_callable=PropertyMock,
-        )
-        self.patch_load_lmod_modules = patch.object(
-            cstar.base.environment.CStarEnvironment,
-            "load_lmod_modules",
-            return_value=None,
-        )
-
-        # Start patches and assign mock objects for possible adjustments
-        self.mock_system = self.patch_system.start()
-        self.mock_machine = self.patch_machine.start()
-        self.mock_environ = self.patch_environ.start()
-        self.mock_uses_lmod = self.patch_uses_lmod.start()
-        self.mock_load_lmod_modules = self.patch_load_lmod_modules.start()
-
-    def teardown_method(self):
-        """Stops all patches after each test."""
-        patch.stopall()
-
-    def test_perlmutter_environment_defaults(self):
-        """Tests that PerlmutterEnvironment has the expected default configuration.
-
-        Mocks
-        -----
-        - os.environ["LMOD_SYSHOST"] set to "perlmutter".
-        - CStarEnvironment.uses_lmod returns True.
-
-        Asserts
-        -------
-        - Confirms values for Perlmutter-specific properties: mpi_exec_prefix, compiler, queue settings, and hardware specs.
-        """
-
-        # Set specific environment variables and uses_lmod for Perlmutter
-        os.environ["LMOD_SYSHOST"] = "perlmutter"
-        self.mock_uses_lmod.return_value = True
-
-        env = cstar.base.environment.PerlmutterEnvironment()
-        assert env.system_name == "perlmutter"
-        assert env.mpi_exec_prefix == "srun"
-        assert env.compiler == "gnu"
-        assert env.queue_flag == "qos"
-        assert env.primary_queue == "regular"
-        assert env.cores_per_node == 128
-        assert env.mem_per_node_gb == 512
-        assert env.max_walltime == "24:00:00"
-        assert env.other_scheduler_directives == {"-C": "cpu"}
-
-    def test_derecho_environment_defaults(self):
-        """Tests that DerechoEnvironment has the expected default configuration.
-
-        Mocks
-        -----
-        - os.environ["LMOD_SYSHOST"] set to "derecho".
-        - CStarEnvironment.uses_lmod returns True.
-
-        Asserts
-        -------
-        - Confirms values for Derecho-specific properties: mpi_exec_prefix, compiler, queue settings, and hardware specs.
-        """
-
-        # Set specific environment variables and uses_lmod for Derecho
-        os.environ["LMOD_SYSHOST"] = "derecho"
-        self.mock_uses_lmod.return_value = True
-
-        env = cstar.base.environment.DerechoEnvironment()
-        assert env.system_name == "derecho"
-        assert env.mpi_exec_prefix == "mpirun"
-        assert env.compiler == "intel"
-        assert env.queue_flag == "q"
-        assert env.primary_queue == "main"
-        assert env.cores_per_node == 128
-        assert env.mem_per_node_gb == 256
-        assert env.max_walltime == "12:00:00"
-
-    def test_expanse_environment_defaults(self):
-        """Tests that ExpanseEnvironment has the expected default configuration.
-
-        Mocks
-        -----
-        - os.environ["LMOD_SYSHOST"] set to "expanse".
-        - CStarEnvironment.uses_lmod returns True.
-
-        Asserts
-        -------
-        - Confirms values for Expanse-specific properties: mpi_exec_prefix, compiler, queue settings, and hardware specs.
-        """
-
-        # Set specific environment variables and uses_lmod for Expanse
-        os.environ["LMOD_SYSHOST"] = "expanse"
-        self.mock_uses_lmod.return_value = True
-
-        env = cstar.base.environment.ExpanseEnvironment()
-        assert env.system_name == "expanse"
-        assert env.mpi_exec_prefix == "srun --mpi=pmi2"
-        assert env.compiler == "intel"
-        assert env.queue_flag == "partition"
-        assert env.primary_queue == "compute"
-        assert env.cores_per_node == 128
-        assert env.mem_per_node_gb == 256
-        assert env.max_walltime == "48:00:00"
-
-    @patch("cstar.base.environment.os.cpu_count", return_value=10)
-    def test_macos_arm_environment_defaults(self, mock_cpu_count):
-        """Tests default configuration of MacOSARMEnvironment, including core count.
-
-        Mocks
-        -----
-        - platform.system set to "Darwin".
-        - platform.machine set to "arm64".
-        - CStarEnvironment.uses_lmod returns False.
-
-        Asserts
-        -------
-        - Confirms MacOS-specific defaults, including core count based on mocked os.cpu_count.
-        """
-
-        # Modify platform system and machine for macOS ARM test
-        self.mock_system.return_value = "Darwin"
-        self.mock_machine.return_value = "arm64"
-        self.mock_uses_lmod.return_value = False  # Ensure uses_lmod is False for Mac
-
-        env = cstar.base.environment.MacOSARMEnvironment()
-        assert env.system_name == "darwin_arm64"
-        assert env.mpi_exec_prefix == "mpirun"
-        assert env.compiler == "gnu"
-        assert env.cores_per_node == 10  # Based on mocked os.cpu_count() return value
-        assert env.primary_queue is None
-        assert env.other_scheduler_directives == {}
-        assert env.queue_flag is None
-
-    @patch("cstar.base.environment.os.cpu_count", return_value=12)
-    def test_linux_x86_environment_defaults(self, mock_cpu_count):
-        """Tests default configuration of LinuxX86Environment, including core count.
-
-        Mocks
-        -----
-        - platform and machine values set for Linux.
-        - os.cpu_count returns 12.
-
-        Asserts
-        -------
-        - Confirms core count and other Linux-specific defaults.
-        """
-
-        # No changes needed, as defaults match Linux x86_64 setup in setup_method
-        self.mock_uses_lmod.return_value = (
-            False  # Ensure uses_lmod is False for Linux X86
-        )
-
-        env = cstar.base.environment.LinuxX86Environment()
-        assert env.system_name == "linux_x86_64"
-        assert env.mpi_exec_prefix == "mpirun"
-        assert env.compiler == "gnu"
-        assert env.cores_per_node == 12  # Based on mocked os.cpu_count() return value
+        self.__post_init__()
 
 
 class TestSetupEnvironmentFromFiles:
@@ -346,19 +40,15 @@ class TestSetupEnvironmentFromFiles:
 
     Tests
     -----
-    - test_load_lmod_modules: Confirms correct module loading sequence for Lmod environments.
+    - test_load_lmod_modules: Confirms correct module loading sequence for systems with Linux Environment Modules.
     - test_env_file_loading: Validates environment variable loading and merging from .env files.
+
+    Methods
+    -------
     - get_expected_lmod_modules: Retrieves expected modules for each environment from system files.
     """
 
-    @pytest.mark.parametrize(
-        "env_class, lmod_syshost",
-        [
-            (cstar.base.environment.PerlmutterEnvironment, "perlmutter"),
-            (cstar.base.environment.DerechoEnvironment, "derecho"),
-            (cstar.base.environment.ExpanseEnvironment, "expanse"),
-        ],
-    )
+    @pytest.mark.parametrize("lmod_syshost", ["perlmutter", "derecho", "expanse"])
     @patch("cstar.base.environment.subprocess.run")
     @patch.object(
         cstar.base.environment.CStarEnvironment,
@@ -369,14 +59,20 @@ class TestSetupEnvironmentFromFiles:
     @patch.dict(
         "cstar.base.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
-    def test_load_lmod_modules(self, mock_uses_lmod, mock_run, env_class, lmod_syshost):
+    def test_load_lmod_modules(self, mock_uses_lmod, mock_run, lmod_syshost):
         """Tests that the load_lmod_modules function correctly interacts with Linux
         Envionment Modules.
 
+        This test uses the `get_expected_lmod_modules` method (below) to read the .lmod file
+        corresponding to the system being mocked, then checks that C-Star's `module load` calls
+        correspond to the modules described in the file.
+
         Mocks
         -----
-        - subprocess.run simulates successful 'module load' calls
+        - mock_run: used to simulate successful calls to subprocess for `module <command> python`
         - uses_lmod is mocked to always return True (system uses Linux Environment Modules)
+        - the $LMOD_SYSHOST environment variable is mocked to represent the system being tested
+        - the $LMOD_CMD environment variable is mocked to represent the system's Lmod command
 
         Asserts
         -------
@@ -391,15 +87,12 @@ class TestSetupEnvironmentFromFiles:
             mock_run.return_value.stdout = (
                 "os.environ['PATH'] = '/mocked/path:' + os.environ.get('PATH', '')"
             )
+            # # Simulate success for each subprocess call
             mock_run.return_value.returncode = 0
             mock_run.return_value.stderr = ""
-            # # Simulate success for each subprocess call
-            # mock_run.return_value.returncode = 0
-            # mock_run.return_value.stderr = ""
 
             # Instantiate the environment, which should trigger load_lmod_modules
-            env = env_class()
-
+            env = MockEnvironment(system_name=lmod_syshost)
             # Retrieve the expected modules for the given environment
             expected_modules = self.get_expected_lmod_modules(env)
 
@@ -421,14 +114,6 @@ class TestSetupEnvironmentFromFiles:
                 for mod in expected_modules
             ]
 
-            # expected_calls = [
-            #     call("module reset", capture_output=True, shell=True, text=True),
-            # ] + [
-            #     call(f"module load {mod}", capture_output=True, shell=True, text=True)
-            #     for mod in expected_modules
-            # ]
-
-            # Assert subprocess.run was called with the expected calls
             mock_run.assert_has_calls(expected_calls, any_order=False)
 
     def get_expected_lmod_modules(self, env):
@@ -437,14 +122,15 @@ class TestSetupEnvironmentFromFiles:
 
         Returns
         -------
-        list: Module names to be loaded, based on the system's `.lmod` file.
+        lmod_list: Module names to be loaded, based on the system's `.lmod` file.
         """
 
         lmod_file_path = (
-            f"{env.root}/additional_files/lmod_lists/{env.system_name}.lmod"
+            f"{env.package_root}/additional_files/lmod_lists/{env._system_name}.lmod"
         )
         with open(lmod_file_path) as file:
-            return file.readlines()
+            lmod_list = file.readlines()
+            return lmod_list
 
     @patch.dict(
         "os.environ",
@@ -468,8 +154,10 @@ class TestSetupEnvironmentFromFiles:
 
         Mocks
         -----
-        - Mock files are created (using tmp_path) for both system and user .env files.
-        - CStarEnvironment.root is patched to a temporary directory to load mock files.
+        - tmp_path creates temporary, emulated system and user .env files
+        - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
+        - CStarEnvironment.uses_lmod is patched to always be true
+        - load_lmod_modules is patched to do nothing
 
         Asserts
         -------
@@ -482,7 +170,7 @@ class TestSetupEnvironmentFromFiles:
         env_files_dir.mkdir(parents=True)
 
         # Define paths for the system and user .env files
-        system_env_file_path = env_files_dir / "perlmutter.env"
+        system_env_file_path = env_files_dir / "mock_system.env"
         user_env_file_path = tmp_path / ".cstar.env"
 
         # Write simulated system .env content to the appropriate location
@@ -497,15 +185,14 @@ class TestSetupEnvironmentFromFiles:
         )
         # Patch the root path and expanduser to point to our temporary files
         with patch.object(
-            cstar.base.environment.CStarEnvironment, "root", new=root_path
+            cstar.base.environment.CStarEnvironment, "package_root", new=root_path
         ):
             with patch(
                 "cstar.base.environment.Path.expanduser",
                 return_value=user_env_file_path,
             ):
-                # Instantiate the environment to trigger loading the environment variables
-                env = cstar.base.environment.PerlmutterEnvironment()
-
+                # # Instantiate the environment to trigger loading the environment variables
+                env = MockEnvironment()
                 # Define expected final environment variables after merging and expansion
                 expected_env_vars = {
                     "NETCDFHOME": "/mock/netcdf/",  # Expanded from ${NETCDF_FORTRANHOME}
@@ -516,32 +203,6 @@ class TestSetupEnvironmentFromFiles:
 
                 # Assert that environment variables were loaded, expanded, and merged as expected
                 assert dict(env.environment_variables) == expected_env_vars
-
-
-class MockEnvironment(cstar.base.environment.CStarEnvironment):
-    """Mock subclass to test __str__ and __repr__ outputs.
-
-    Properties
-    ----------
-    - compiler: Returns "mock_compiler" as the compiler type.
-    - mpi_exec_prefix: Returns "mock_mpi_prefix" as the MPI execution prefix.
-    """
-
-    @property
-    def compiler(self) -> str:
-        return "mock_compiler"
-
-    @property
-    def mpi_exec_prefix(self) -> str:
-        return "mock_mpi_prefix"
-
-    @property
-    def environment_variables(self) -> dict:
-        return {"VAR1": "value1", "VAR2": "value2"}
-
-    @property
-    def uses_lmod(self) -> bool:
-        return False
 
 
 class TestStrAndReprMethods:
@@ -556,13 +217,6 @@ class TestStrAndReprMethods:
     def setup_method(self):
         """Sets up common patches for MockEnvironment properties."""
         # Patch the `system_name` property
-        self.patch_system_name = patch.object(
-            MockEnvironment,
-            "system_name",
-            new_callable=PropertyMock,
-            return_value="mock_system",
-        )
-        self.mock_system_name = self.patch_system_name.start()
 
         self.patch_scheduler = patch.object(
             MockEnvironment, "scheduler", new_callable=PropertyMock, return_value=None
@@ -593,28 +247,35 @@ class TestStrAndReprMethods:
         - Confirms that str(env) matches the expected formatted output, including all key attributes
           like system name, scheduler, compiler, primary queue, and environment variables.
         """
+        # Set up our mock environment with some sample properties
+        with (
+            patch.object(
+                MockEnvironment, "environment_variables", new_callable=PropertyMock
+            ) as mock_env_vars,
+        ):
+            mock_env_vars.return_value = {"VAR1": "value1", "VAR2": "value2"}
 
-        env = MockEnvironment()
+            env = MockEnvironment()
+            print("HERE ARE YOUR ENV VARS")
+            print(env.environment_variables)
+            # Manually construct the expected string output
+            expected_str = (
+                "MockEnvironment\n"
+                "---------------\n"  # Length of dashes matches "MockEnvironment"
+                "Scheduler: None\n"
+                "Compiler: mock_compiler\n"
+                "Primary Queue: mock_primary_queue\n"
+                "MPI Exec Prefix: mock_mpi_prefix\n"
+                "Cores per Node: 0\n"
+                "Memory per Node (GB): 0\n"
+                "Max Walltime: 00:00:00\n"
+                "Uses Lmod: False\n"
+                "Environment Variables:\n"
+                "    VAR1: value1\n"
+                "    VAR2: value2"
+            )
 
-        # Manually construct the expected string output
-        expected_str = (
-            "MockEnvironment\n"
-            "---------------\n"
-            "System Name: mock_system\n"
-            "Scheduler: None\n"
-            "Compiler: mock_compiler\n"
-            "Primary Queue: None\n"
-            "MPI Exec Prefix: mock_mpi_prefix\n"
-            "Cores per Node: Not specified\n"
-            "Memory per Node (GB): Not specified\n"
-            "Max Walltime: Not specified\n"
-            "Uses Lmod: No\n"
-            "Environment Variables:\n"
-            "    VAR1: value1\n"
-            "    VAR2: value2"
-        )
-
-        assert str(env) == expected_str
+            assert str(env) == expected_str
 
     def test_repr_method(self):
         """Tests that __repr__ produces a detailed, state-reflective representation.
@@ -628,15 +289,15 @@ class TestStrAndReprMethods:
         - Confirms that repr(env) matches the expected output format, which includes initialization
           state and key properties like compiler, scheduler, and uses_lmod status.
         """
-
+        # Similar to above, with mock values
         env = MockEnvironment()
 
         # Manually construct the expected repr output
         expected_repr = (
-            "MockEnvironment() \n"
-            "State: <system_name='mock_system', compiler='mock_compiler', scheduler='None', "
-            "primary_queue='None', cores_per_node=None, mem_per_node_gb=None, "
-            "max_walltime='None', uses_lmod=False>"
+            "MockEnvironment(system_name='mock_system', compiler='mock_compiler', scheduler=None, "
+            "primary_queue='mock_primary_queue', cores_per_node=0, mem_per_node_gb=0, "
+            "max_walltime='00:00:00')"
+            "\nState: <uses_lmod=False>"
         )
 
         assert repr(env) == expected_repr
@@ -766,52 +427,12 @@ class TestExceptions:
         self.uses_lmod_patcher.stop()
         self.os_environ_patcher.stop()
 
-    @patch.dict("cstar.base.environment.os.environ", {}, clear=True)
-    @patch.object(MockEnvironment, "load_lmod_modules", return_value=None)
-    def test_system_name_raises_environment_error_for_missing_lmod_vars(
-        self, mock_lmod_load
-    ):
-        """Tests that missing Lmod variables raise an EnvironmentError.
-
-        Mocks
-        -----
-        - CStarEnvironment.uses_lmod: Returns True to indicate Lmod is used.
-        - os.environ: Cleared to remove required Lmod variables.
-
-        Asserts
-        -------
-        - Raises EnvironmentError with a message indicating missing 'LMOD_SYSHOST' or 'LMOD_SYSTEM_NAME'.
-        """
-        self.mock_uses_lmod.return_value = True
-        with pytest.raises(
-            EnvironmentError, match="LMOD_SYSHOST.*LMOD_SYSTEM_NAME.*not defined"
-        ):
-            MockEnvironment().system_name
-
-    @patch("cstar.base.environment.platform.system", return_value=None)
-    @patch("cstar.base.environment.platform.machine", return_value=None)
-    def test_system_name_raises_environment_error_for_missing_platform_info(
-        self, mock_system, mock_machine
-    ):
-        """Tests that missing platform info raises an EnvironmentError.
-
-        Mocks
-        -----
-        - platform.system: Returns None to simulate missing platform information.
-        - platform.machine: Returns None to simulate missing machine type information.
-
-        Asserts
-        -------
-        - Raises EnvironmentError with a message indicating system type determination failure.
-        """
-
-        self.mock_uses_lmod.return_value = False
-        with pytest.raises(EnvironmentError, match="cannot determine your system type"):
-            MockEnvironment().system_name
-
     @patch("cstar.base.environment.importlib.util.find_spec", return_value=None)
-    def test_root_raises_import_error_when_package_not_found(self, mock_find_spec):
-        """Tests that missing package spec raises an ImportError in root property.
+    def test_package_root_raises_import_error_when_package_not_found(
+        self, mock_find_spec
+    ):
+        """Tests that missing package spec raises an ImportError in package_root
+        property.
 
         Mocks
         -----
@@ -823,7 +444,7 @@ class TestExceptions:
         """
         self.mock_uses_lmod.return_value = False
         with pytest.raises(ImportError, match="Top-level package '.*' not found"):
-            MockEnvironment().root
+            MockEnvironment().package_root
 
     def test_load_lmod_modules_raises_environment_error_when_lmod_not_used(self):
         """Tests that load_lmod_modules raises an EnvironmentError if Lmod is not used.
@@ -842,7 +463,7 @@ class TestExceptions:
             EnvironmentError, match="does not appear to use Linux Environment Modules"
         ):
             env = MockEnvironment()
-            env.load_lmod_modules()
+            env.load_lmod_modules(lmod_file="/some/file")
 
     @patch.dict(
         "cstar.base.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
@@ -855,7 +476,7 @@ class TestExceptions:
 
         Mocks
         -----
-        - system_name: Returns "mock_system" as the system name for the environment.
+        - mock_subprocess mocks a failure for the `module reset` call
         - os.environ: Sets "LMOD_CMD" to a mock path ("/mock/lmod") to simulate Lmod availability.
 
         Asserts
@@ -882,27 +503,20 @@ class TestExceptions:
         "cstar.base.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
     @patch("builtins.open", new_callable=mock_open, read_data="module1\nmodule2\n")
-    @patch.object(
-        MockEnvironment,
-        "system_name",
-        new_callable=PropertyMock,
-        return_value="mock_system",
-    )
     def test_load_lmod_modules_raises_runtime_error_on_module_load_failure(
-        self, mock_syste_name, mock_open_file
+        self, mock_open_file
     ):
         """Tests that a RuntimeError is raised if `module load` fails.
 
         Mocks
         -----
-        - system_name: Returns "mock_system" as the system name for the environment.
         - builtins.open: Simulates the .lmod file with two modules ("module1" and "module2").
         - os.environ: Sets "LMOD_CMD" to a mock path ("/mock/lmod") to simulate Lmod availability.
 
         Asserts
         -------
         - Raises RuntimeError with a message indicating failure of the "module load" command.
-        - subprocess.run is called with the expected commands for `module reset` and `module load module1`.
+        - subprocess.run is called with the expected commands `reset` and `load`
         """
 
         # Define side effects for subprocess.run
@@ -919,49 +533,9 @@ class TestExceptions:
         self.mock_subprocess.side_effect = side_effects
 
         # Run the test and expect a RuntimeError
-        # env = MockEnvironment()
+
         with pytest.raises(
             RuntimeError,
             match=r"Linux Environment Modules command\s+\n/mock/lmod python load module1\s+\n failed with code 1\. STDERR: Module load error",
         ):
             MockEnvironment()
-
-        # Assert that subprocess.run was called for reset and module1
-        expected_calls = [
-            call("/mock/lmod python reset", shell=True, text=True, capture_output=True),
-            call(
-                "/mock/lmod python load module1\n",
-                shell=True,
-                text=True,
-                capture_output=True,
-            ),
-        ]
-        self.mock_subprocess.assert_has_calls(expected_calls, any_order=False)
-
-    @pytest.mark.parametrize(
-        "environment_class",
-        [
-            cstar.base.environment.MacOSARMEnvironment,
-            cstar.base.environment.LinuxX86Environment,
-        ],
-    )
-    @patch("cstar.base.environment.os.cpu_count", return_value=None)
-    def test_cores_per_node_raises_error_when_cpu_count_is_none(
-        self, mock_cpu_count, environment_class
-    ):
-        """Tests that cores_per_node raises an EnvironmentError when cpu_count is None.
-
-        Mocks
-        -----
-        - os.cpu_count: Returns None to simulate an undetectable CPU count.
-
-        Asserts
-        -------
-        - Raises EnvironmentError with a message indicating failure to determine CPU count.
-        """
-
-        env = environment_class()
-        with pytest.raises(
-            EnvironmentError, match="unable to determine number of cpus"
-        ):
-            _ = env.cores_per_node

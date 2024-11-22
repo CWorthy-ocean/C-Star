@@ -20,7 +20,7 @@ from cstar.roms.input_dataset import (
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.base.additional_code import AdditionalCode
 
-from cstar.base.environment import environment
+from cstar.base.system import cstar_system
 
 if TYPE_CHECKING:
     from cstar.roms import ROMSBaseModel
@@ -686,7 +686,7 @@ class ROMSComponent(Component):
 
         print("Compiling UCLA-ROMS configuration...")
         make_roms_result = subprocess.run(
-            f"make COMPILER={environment.compiler}",
+            f"make COMPILER={cstar_system.environment.compiler}",
             cwd=build_dir,
             shell=True,
             capture_output=True,
@@ -800,8 +800,8 @@ class ROMSComponent(Component):
         n_time_steps: Optional[int] = None,
         account_key: Optional[str] = None,
         output_dir: Optional[str | Path] = None,
-        walltime: Optional[str] = environment.max_walltime,
-        queue: Optional[str] = environment.primary_queue,
+        walltime: Optional[str] = cstar_system.environment.max_walltime,
+        queue: Optional[str] = cstar_system.environment.primary_queue,
         job_name: str = "my_roms_run",
     ) -> None:
         """Runs the executable created by `build()`
@@ -818,7 +818,7 @@ class ROMSComponent(Component):
         output_dir: str or Path:
             The path to the directory in which model output will be saved. This is by default
             the directory from which the ROMS executable will be called.
-        walltime: str, default cstar.environment.environment.max_walltime
+        walltime: str, default cstar.base.system.environment.environment.max_walltime
             The requested length of the job, HH:MM:SS
         job_name: str, default 'my_roms_run'
             The name of the job submitted to the scheduler, which also sets the output file name
@@ -876,18 +876,19 @@ class ROMSComponent(Component):
         ## 2: RUN ON THIS MACHINE
 
         roms_exec_cmd = (
-            f"{environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
+            f"{cstar_system.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
             + f"{mod_namelist}"
         )
 
         if self.discretization.n_procs_tot is not None:
-            if environment.cores_per_node is not None:
+            if cstar_system.environment.cores_per_node is not None:
                 nnodes, ncores = _calculate_node_distribution(
-                    self.discretization.n_procs_tot, environment.cores_per_node
+                    self.discretization.n_procs_tot,
+                    cstar_system.environment.cores_per_node,
                 )
             else:
                 raise ValueError(
-                    f"Unable to calculate node distribution for system: {environment.system_name}."
+                    f"Unable to calculate node distribution for system: {cstar_system.name}."
                     + "\nC-Star is unaware of your system's node configuration (cores per node)."
                     + "\nYour system may be unsupported. Please raise an issue at: "
                     + "\n https://github.com/CWorthy-ocean/C-Star/issues/new"
@@ -898,7 +899,7 @@ class ROMSComponent(Component):
                 "Unable to calculate node distribution for this Component. "
                 + "Component.n_procs_tot is not set"
             )
-        match environment.scheduler:
+        match cstar_system.environment.scheduler:
             case "pbs":
                 if account_key is None:
                     raise ValueError(
@@ -915,9 +916,12 @@ class ROMSComponent(Component):
                 scheduler_script += "\n#PBS -j oe"
                 scheduler_script += "\n#PBS -k eod"
                 scheduler_script += "\n#PBS -V"
-                for key, value in environment.other_scheduler_directives.items():
+                for (
+                    key,
+                    value,
+                ) in cstar_system.environment.other_scheduler_directives.items():
                     scheduler_script += f"\n#PBS {key} {value}"
-                if environment.system_name == "derecho":
+                if cstar_system.name == "derecho":
                     scheduler_script += "\ncd ${PBS_O_WORKDIR}"
                 scheduler_script += f"\n\n{roms_exec_cmd}"
 
@@ -937,20 +941,25 @@ class ROMSComponent(Component):
                 scheduler_script = "#!/bin/bash"
                 scheduler_script += f"\n#SBATCH --job-name={job_name}"
                 scheduler_script += f"\n#SBATCH --output={job_name}.out"
-                scheduler_script += f"\n#SBATCH --{environment.queue_flag}={queue}"
+                scheduler_script += (
+                    f"\n#SBATCH --{cstar_system.environment.queue_flag}={queue}"
+                )
                 scheduler_script += f"\n#SBATCH --nodes={nnodes}"
                 scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
                 scheduler_script += f"\n#SBATCH --account={account_key}"
                 scheduler_script += "\n#SBATCH --export=NONE"
                 scheduler_script += "\n#SBATCH --mail-type=ALL"
                 scheduler_script += f"\n#SBATCH --time={walltime}"
-                for key, value in environment.other_scheduler_directives.items():
+                for (
+                    key,
+                    value,
+                ) in cstar_system.environment.other_scheduler_directives.items():
                     scheduler_script += f"\n#SBATCH {key} {value}"
                 # Add linux environment modules to scheduler script
-                if environment.uses_lmod:
+                if cstar_system.environment.uses_lmod:
                     scheduler_script += "\nmodule reset"
                     with open(
-                        f"{environment.root}/additional_files/lmod_lists/{environment.system_name}.lmod"
+                        f"{cstar_system.environment.package_root}/additional_files/lmod_lists/{cstar_system.name}.lmod"
                     ) as F:
                         modules = F.readlines()
                 for m in modules:
@@ -959,7 +968,10 @@ class ROMSComponent(Component):
                 scheduler_script += "\nprintenv"
 
                 # Add environment variables to scheduler script:
-                for var, value in environment.environment_variables.items():
+                for (
+                    var,
+                    value,
+                ) in cstar_system.environment.environment_variables.items():
                     scheduler_script += f'\nexport {var}="{value}"'
 
                 # Add roms command to scheduler script

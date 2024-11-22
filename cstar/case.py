@@ -7,7 +7,9 @@ from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
 
 from cstar.base.component import Component
-from cstar.base.environment import environment
+
+# from cstar.base.environment import environment
+from cstar.base.system import cstar_system
 from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
@@ -531,8 +533,8 @@ class Case:
     def run(
         self,
         account_key=None,
-        walltime=environment.max_walltime,
-        queue=environment.primary_queue,
+        walltime=cstar_system.environment.max_walltime,
+        queue=cstar_system.environment.primary_queue,
         job_name="my_case_run",
     ) -> None:
         """Run the case by calling `component.run(caseroot)` on the primary component

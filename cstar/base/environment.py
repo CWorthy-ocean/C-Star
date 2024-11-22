@@ -3,56 +3,145 @@ import shutil
 import platform
 import subprocess
 import importlib.util
-from abc import ABC, abstractmethod
 from pathlib import Path
 from dotenv import dotenv_values
-from typing import Optional, Final, Dict
+from typing import Optional, Dict
 
 
-class CStarEnvironment(ABC):
-    """Abstract base class for configuring C-Star environments, managing environment
-    variables, system properties, and job scheduler configurations.
+class CStarEnvironment:
+    """Encapsulates the configuration and management of a computing environment for a
+    specific system, including compilers, job schedulers, memory, and core settings.
 
-    Properties
+    This class uses properties to avoid attribute modification after initialization.
+
+    This class also provides utilities for interacting with Linux Environment Modules
+    (Lmod) and dynamically setting up the environment based on user and system configurations.
+
+    Attributes
     ----------
-    environment_variables : dict
-        Combined dictionary of system and user environment variables.
     system_name : str
-        Name of the system, derived from environment variables or platform information.
-    root : Path
-        Root directory of the top-level package.
-    uses_lmod : bool
-        Indicates if Linux Environment Modules (Lmod) are used.
-    compiler : str
-        Compiler type used in the environment, implemented by subclasses.
+        The name of the system (e.g., "expanse", "perlmutter").
     mpi_exec_prefix : str
-        Command prefix for MPI execution, implemented by subclasses.
-    scheduler : str or None
-        Type of job scheduler detected on the system, such as 'slurm' or 'pbs'.
-    queue_flag : str or None
-        Scheduler-specific flag for specifying the job queue.
-    primary_queue : str or None
-        Primary job queue name.
-    other_scheduler_directives : dict
-        Additional directives for job scheduling.
-    cores_per_node : int or None
-        Number of CPU cores per node.
-    mem_per_node_gb : int or None
-        Memory available per node in GB.
-    max_walltime : str or None
-        Maximum allowed walltime for jobs in HH:MM:SS format.
+        The prefix command used for launching MPI jobs.
+    compiler : str
+        The compiler to be used in the environment (e.g., "intel", "gnu").
+    queue_flag : optional, str
+        The flag used for specifying the queue in job submissions.
+    primary_queue : optional, str
+        The default queue for job submissions.
+    mem_per_node_gb : optional, float
+        Memory available per node in gigabytes.
+    cores_per_node : optional, int
+        Number of CPU cores available per node.
+    max_walltime : optional, str
+        The maximum walltime allowed for a job in this environment.
+    other_scheduler_directives : optional, dict[str, str]
+        Additional directives for the scheduler.
+    environment_variables : dict
+        A dictionary containing combined environment variables from system and user `.env` files.
+    package_root : Path
+        The root directory of the package containing configuration files and utilities.
+    uses_lmod : bool
+        Indicates whether the system uses Linux Environment Modules (Lmod).
+    scheduler : Optional[str]
+        The type of job scheduler detected on the system (e.g., "slurm", "pbs"), or None if not detected.
+
+    Methods
+    -------
+    load_lmod_modules(lmod_file: str) -> None
+        Loads the necessary Lmod modules for the current system based on a `.lmod` configuration file.
+
+    _call_lmod(*args) -> None
+        Executes a Linux Environment Modules command with specified arguments.
+
+    Raises
+    ------
+    EnvironmentError
+        Raised when required resources, modules, or configurations are missing or incompatible.
+    RuntimeError
+        Raised when a command or operation fails during execution.
+
+    Examples
+    --------
+    >>> env = CStarEnvironment(
+    ...     system_name="expanse",
+    ...     mpi_exec_prefix="srun --mpi=pmi2",
+    ...     compiler="intel",
+    ...     queue_flag="partition",
+    ...     primary_queue="compute",
+    ...     mem_per_node_gb=256,
+    ...     cores_per_node=128,
+    ...     max_walltime="48:00:00",
+    ...     other_scheduler_directives={},
+    ... )
+    >>> print(env)
+    CStarEnvironment(...)
     """
 
-    def __init__(self):
-        """Initializes the environment by loading any required Lmod modules and updating
-        OS environment variables with both system and user configurations.
+    def __init__(
+        self,
+        system_name: str,
+        mpi_exec_prefix: str,
+        compiler: str,
+        queue_flag: Optional[str],
+        primary_queue: Optional[str],
+        mem_per_node_gb: Optional[float],
+        cores_per_node: Optional[int],
+        max_walltime: Optional[str],
+        other_scheduler_directives: Optional[Dict[str, str]],
+    ):
+        if other_scheduler_directives is None:
+            other_scheduler_directives = {}
 
-        - Loads Lmod modules if `uses_lmod` is True.
-        - Sets environment variables by combining values from system and user `.env` files.
-        """
+        # Initialize private attributes
+        self._system_name = system_name
+        self._mpi_exec_prefix = mpi_exec_prefix
+        self._compiler = compiler
+        self._queue_flag = queue_flag
+        self._primary_queue = primary_queue
+        self._mem_per_node_gb = mem_per_node_gb
+        self._cores_per_node = cores_per_node
+        self._max_walltime = max_walltime
+        self._other_scheduler_directives = other_scheduler_directives
 
+    @property
+    def mpi_exec_prefix(self):
+        return self._mpi_exec_prefix
+
+    @property
+    def compiler(self):
+        return self._compiler
+
+    @property
+    def queue_flag(self):
+        return self._queue_flag
+
+    @property
+    def primary_queue(self):
+        return self._primary_queue
+
+    @property
+    def mem_per_node_gb(self):
+        return self._mem_per_node_gb
+
+    @property
+    def cores_per_node(self):
+        return self._cores_per_node
+
+    @property
+    def max_walltime(self):
+        return self._max_walltime
+
+    @property
+    def other_scheduler_directives(self):
+        return self._other_scheduler_directives
+
+    def __post_init__(self):
         if self.uses_lmod:
-            self.load_lmod_modules()
+            self.load_lmod_modules(
+                lmod_file=f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
+            )
+
         os.environ.update(self.environment_variables)
 
     def __str__(self) -> str:
@@ -63,17 +152,17 @@ class CStarEnvironment(ABC):
         str
             Human-readable string representation of the environment's key attributes.
         """
+
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
-        base_str += f"\nSystem Name: {self.system_name}"
         base_str += f"\nScheduler: {self.scheduler or 'None'}"
         base_str += f"\nCompiler: {self.compiler}"
         base_str += f"\nPrimary Queue: {self.primary_queue or 'None'}"
         base_str += f"\nMPI Exec Prefix: {self.mpi_exec_prefix}"
-        base_str += f"\nCores per Node: {self.cores_per_node or 'Not specified'}"
-        base_str += f"\nMemory per Node (GB): {self.mem_per_node_gb or 'Not specified'}"
+        base_str += f"\nCores per Node: {self.cores_per_node}"
+        base_str += f"\nMemory per Node (GB): {self.mem_per_node_gb}"
         base_str += f"\nMax Walltime: {self.max_walltime or 'Not specified'}"
-        base_str += f"\nUses Lmod: {'Yes' if self.uses_lmod else 'No'}"
+        base_str += f"\nUses Lmod: {True if self.uses_lmod else False}"
         base_str += "\nEnvironment Variables:"
         for key, value in self.environment_variables.items():
             base_str += f"\n    {key}: {value}"
@@ -89,83 +178,30 @@ class CStarEnvironment(ABC):
             String representation distinguishing initialization from dynamic state.
         """
         return (
-            f"{self.__class__.__name__}() "
-            f"\nState: <system_name='{self.system_name}', "
-            f"compiler='{self.compiler}', "
-            f"scheduler='{self.scheduler}', "
-            f"primary_queue='{self.primary_queue}', "
-            f"cores_per_node={self.cores_per_node}, "
-            f"mem_per_node_gb={self.mem_per_node_gb}, "
-            f"max_walltime='{self.max_walltime}', "
-            f"uses_lmod={self.uses_lmod}>"
+            f"{self.__class__.__name__}("
+            f"system_name={self._system_name!r}, "
+            f"compiler={self.compiler!r}, "
+            f"scheduler={self.scheduler!r}, "
+            f"primary_queue={self.primary_queue!r}, "
+            f"cores_per_node={self.cores_per_node!r}, "
+            f"mem_per_node_gb={self.mem_per_node_gb!r}, "
+            f"max_walltime={self.max_walltime!r}"
+            ")\nState: <"
+            f"uses_lmod={self.uses_lmod!r}"
+            ">"
         )
 
     @property
     def environment_variables(self) -> dict:
-        """Loads environment variables from system-specific and user-defined `.env`
-        files.
-
-        Returns
-        -------
-        dict
-            Dictionary containing environment variables, where system-specific values
-            are loaded first, followed by user-specific overrides.
-
-        Notes
-        -----
-        - System-specific variables are sourced from an `.env` file under
-          `additional_files/env_files/` based on the system name.
-        - User-specific variables are loaded from `~/.cstar.env`.
-        """
-
         env_vars = dotenv_values(
-            self.root / f"additional_files/env_files/{self.system_name}.env"
+            self.package_root / f"additional_files/env_files/{self._system_name}.env"
         )
         user_env_vars = dotenv_values(Path("~/.cstar.env").expanduser())
         env_vars.update(user_env_vars)
         return env_vars
 
-    # System-level properties
     @property
-    def system_name(self) -> str:
-        """Determines the system name based on environment variables or platform
-        details.
-
-        Checks for Lmod-specific variables (`LMOD_SYSHOST` or `LMOD_SYSTEM_NAME`) if
-        `uses_lmod` is True. Otherwise, constructs a system name using `platform.system()` and
-        `platform.machine()`.
-
-        Returns
-        -------
-        str
-            The system's name in lowercase.
-
-        Raises
-        ------
-        EnvironmentError
-            If the system name cannot be determined from environment variables or platform information.
-        """
-        if self.uses_lmod:
-            sysname = os.environ.get("LMOD_SYSHOST") or os.environ.get(
-                "LMOD_SYSTEM_NAME"
-            )
-            if sysname is None:
-                raise EnvironmentError(
-                    "Your system appears to use Linux Environment Modules but C-Star cannot determine "
-                    + "the system name as either 'LMOD_SYSHOST' or 'LMOD_SYSTEM_NAME' are not defined "
-                    + "in your environment."
-                )
-        elif (platform.system() is not None) and (platform.machine() is not None):
-            sysname = platform.system() + "_" + platform.machine()
-        else:
-            raise EnvironmentError(
-                "C-Star cannot determine your system type using platform.system() and platform.machine()"
-            )
-
-        return sysname.casefold()
-
-    @property
-    def root(self) -> Path:
+    def package_root(self) -> Path:
         """Identifies the root directory of the top-level package.
 
         Uses `importlib.util.find_spec` to locate the package directory, enabling
@@ -241,10 +277,6 @@ class CStarEnvironment(ABC):
 
         >>> CStarEnvironment._call_lmod("unload", "gcc")
         """
-        if not self.uses_lmod:
-            raise EnvironmentError(
-                "Your system does not appear to use Linux Environment Modules"
-            )
 
         lmod_path = Path(os.environ.get("LMOD_CMD", ""))
         command = f"{lmod_path} python {' '.join(list(args))}"
@@ -261,7 +293,7 @@ class CStarEnvironment(ABC):
         else:
             exec(lmod_result.stdout)
 
-    def load_lmod_modules(self) -> None:
+    def load_lmod_modules(self, lmod_file) -> None:
         """Loads necessary modules for this machine using Linux Environment Modules.
 
         This function:
@@ -283,40 +315,11 @@ class CStarEnvironment(ABC):
             )
         self._call_lmod("reset")
         with open(
-            f"{self.root}/additional_files/lmod_lists/{self.system_name}.lmod"
+            f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
         ) as F:
             lmod_list = F.readlines()
             for mod in lmod_list:
                 self._call_lmod(f"load {mod}")
-
-    @property
-    @abstractmethod
-    def compiler(self) -> str:
-        """Abstract property representing the compiler used in the environment,
-        implemented by subclasses.
-
-        Returns
-        -------
-        str
-            Compiler type (e.g., 'gnu', 'intel').
-        """
-
-        pass
-
-    # Scheduler/MPI related
-    @property
-    @abstractmethod
-    def mpi_exec_prefix(self) -> str:
-        """Abstract property representing the prefix for MPI execution commands,
-        implemented by subclasses.
-
-        Returns
-        -------
-        str
-            Prefix for MPI execution commands (e.g., 'mpirun', 'srun').
-        """
-
-        pass
 
     @property
     def scheduler(self) -> Optional[str]:
@@ -334,243 +337,3 @@ class CStarEnvironment(ABC):
             return "pbs"
         else:
             return None
-
-    @property
-    def queue_flag(self) -> Optional[str]:
-        """Flag used by the scheduler for specifying queues in job submissions.
-
-        Returns
-        -------
-        str or None
-            Queue flag, or None if not applicable.
-        """
-
-        return None
-
-    @property
-    def primary_queue(self) -> Optional[str]:
-        """Name of the primary job queue for scheduling jobs.
-
-        Returns
-        -------
-        str or None
-            Name of the primary queue, or None if not specified.
-        """
-
-        return None
-
-    @property
-    def other_scheduler_directives(self) -> Dict[str, str]:
-        """Additional scheduler directives for job submissions, specific to the
-        environment.
-
-        Returns
-        -------
-        dict
-            Dictionary of additional scheduler directives.
-        """
-
-        return {}
-
-    @property
-    def cores_per_node(self) -> Optional[int]:
-        """Number of CPU cores per node in the environment.
-
-        Returns
-        -------
-        int or None
-            Number of CPU cores per node, or None if unspecified.
-        """
-
-        return None
-
-    @property
-    def mem_per_node_gb(self) -> Optional[int]:
-        """Memory available per node in gigabytes.
-
-        Returns
-        -------
-        int or None
-            Memory per node in GB, or None if unspecified.
-        """
-
-        return None
-
-    @property
-    def max_walltime(self) -> Optional[str]:
-        """Maximum allowed walltime for jobs in the environment.
-
-        Returns
-        -------
-        str or None
-            Maximum walltime in HH:MM:SS format, or None if unspecified.
-        """
-
-        return None
-
-
-class PerlmutterEnvironment(CStarEnvironment):
-    (
-        """
-    SDSC-Expanse-specific implementation of `CStarEnvironment` (doc below)
-
-    Docstring for CStarEnvironment:
-    -------------------------------
-    """
-    ) + (CStarEnvironment.__doc__ or "")
-
-    # Perlmutter manages jobs with both QoS and partition.
-
-    # The qos is what the user specifies to decide their "queue", and determines max walltime,
-    # priority, charges, and node limits. IF UNSPECIFIED, system default is "debug" - restrictive!
-    # https://docs.nersc.gov/jobs/policy/#perlmutter-cpu
-
-    # The partition can be specified, but seems to be largely ignored. With "-C cpu",
-    # the qos -> partition map seems to be:
-    # shared -> shared_milan_ss11
-    # regular -> regular_milan_ss11
-    # debug -> regular_milan_ss11
-
-    # Whether the user selects -C CPU determines memory per node:
-    # https://docs.nersc.gov/jobs/#available-memory-for-applications-on-compute-nodes
-
-    mpi_exec_prefix: Final[str] = "srun"
-    compiler: Final[str] = "gnu"
-    queue_flag: Final[str] = "qos"
-    primary_queue: Final[str] = "regular"
-    mem_per_node_gb: Final[int] = 512
-    cores_per_node: Final[int] = 128  # for CPU nodes
-    max_walltime: Final[str] = "24:00:00"
-
-    @property
-    def other_scheduler_directives(self) -> Dict[str, str]:
-        """Additional scheduler directives specific to Perlmutter.
-
-        Returns
-        -------
-        dict
-            Dictionary of scheduler directives, e.g., {'-C': 'cpu'}.
-        """
-        return {"-C": "cpu"}
-
-
-class ExpanseEnvironment(CStarEnvironment):
-    (
-        """
-    SDSC-Expanse-specific implementation of `CStarEnvironment` (doc below)
-
-    Docstring for CStarEnvironment:
-    -------------------------------
-    """
-    ) + (CStarEnvironment.__doc__ or "")
-
-    mpi_exec_prefix: Final[str] = "srun --mpi=pmi2"
-    compiler: Final[str] = "intel"
-    queue_flag: Final[str] = "partition"
-    primary_queue: Final[str] = "compute"
-    mem_per_node_gb: Final[int] = 256
-    cores_per_node: Final[int] = 128
-    max_walltime: Final[str] = "48:00:00"
-
-
-class DerechoEnvironment(CStarEnvironment):
-    (
-        """
-    NCAR-Derecho-specific implementation of `CStarEnvironment` (doc below)
-
-    Docstring for CStarEnvironment:
-    -------------------------------
-    """
-    ) + (CStarEnvironment.__doc__ or "")
-
-    mpi_exec_prefix: Final[str] = "mpirun"
-    compiler: Final[str] = "intel"
-    queue_flag: Final[str] = "q"
-    primary_queue: Final[str] = "main"
-    cores_per_node: Final[int] = 128
-    mem_per_node_gb: Final[int] = 256
-    max_walltime: Final[str] = "12:00:00"
-
-
-class MacOSARMEnvironment(CStarEnvironment):
-    (
-        """
-    MacOS-ARM64-specific implementation of `CStarEnvironment` (doc below)
-
-    Docstring for CStarEnvironment:
-    -------------------------------
-    """
-    ) + (CStarEnvironment.__doc__ or "")
-
-    mpi_exec_prefix: Final[str] = "mpirun"
-    compiler: Final[str] = "gnu"
-
-    @property
-    def cores_per_node(self) -> int:
-        cpu_count = os.cpu_count()
-        if cpu_count is not None:
-            return cpu_count
-        else:
-            raise EnvironmentError("unable to determine number of cpus")
-
-
-class LinuxX86Environment(CStarEnvironment):
-    (
-        """
-    Linux-X86-specific implementation of `CStarEnvironment` (doc below)
-
-    Docstring for CStarEnvironment:
-    -------------------------------
-    """
-    ) + (CStarEnvironment.__doc__ or "")
-
-    mpi_exec_prefix: Final[str] = "mpirun"
-    compiler: Final[str] = "gnu"
-
-    @property
-    def cores_per_node(self) -> int:
-        cpu_count = os.cpu_count()
-        if cpu_count is not None:
-            return cpu_count
-        else:
-            raise EnvironmentError("unable to determine number of cpus")
-
-
-# custom environment stuff here with dotenv
-
-
-def set_environment() -> CStarEnvironment:
-    """Factory function that detects and returns the appropriate environment based on
-    system details.
-
-    Returns
-    -------
-    CStarEnvironment
-        An instance of the correct environment subclass.
-
-    Raises
-    ------
-    EnvironmentError
-        If the system is unsupported.
-    """
-
-    sysname = os.environ.get("LMOD_SYSHOST", default="") or os.environ.get(
-        "LMOD_SYSTEM_NAME", default=""
-    )
-    match sysname:
-        case "expanse":
-            return ExpanseEnvironment()
-        case "derecho":
-            return DerechoEnvironment()
-        case "perlmutter":
-            return PerlmutterEnvironment()
-
-    if platform.system() == "Darwin" and platform.machine() == "arm64":
-        return MacOSARMEnvironment()
-    elif platform.system() == "Linux" and platform.machine() == "x86_64":
-        return LinuxX86Environment()
-    else:
-        raise EnvironmentError("Unsupported environment")
-
-
-environment = set_environment()
