@@ -11,12 +11,12 @@ authors = [
     { name = "Nora Loose", email = "nora@cworthy.org" },
     { name = "Matt Long", email = "matt@cworthy.org" }
 ]
-license = { text = "GPL-3.0-only" }
+license = { text = "Apache-2.0" }
 
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Oceanography"
