@@ -4,6 +4,7 @@ Welcome to the C-Star Documentation!
 .. important::
 
    **DISCLAIMER**: 
+
    - This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout Fall 2024. We do not recommend using this software before this ALPHA development and test phase is completed.
    - Examples in this documentation currently only work on the Perlmutter machine.
 
