@@ -104,6 +104,13 @@ class CStarEnvironment:
         self._max_walltime = max_walltime
         self._other_scheduler_directives = other_scheduler_directives
 
+        if self.uses_lmod:
+            self.load_lmod_modules(
+                lmod_file=f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
+            )
+
+        os.environ.update(self.environment_variables)
+
     @property
     def mpi_exec_prefix(self):
         return self._mpi_exec_prefix
@@ -135,14 +142,6 @@ class CStarEnvironment:
     @property
     def other_scheduler_directives(self):
         return self._other_scheduler_directives
-
-    def __post_init__(self):
-        if self.uses_lmod:
-            self.load_lmod_modules(
-                lmod_file=f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
-            )
-
-        os.environ.update(self.environment_variables)
 
     def __str__(self) -> str:
         """Provides a structured, readable summary of the environment's configuration.

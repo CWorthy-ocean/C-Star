@@ -6,6 +6,8 @@ from cstar.base.environment import CStarEnvironment
 
 
 class CStarSystem:
+    _environment: Optional[CStarEnvironment] = None
+
     @property
     def name(self) -> str:
         """Determines the system name based on environment variables or platform
@@ -47,6 +49,14 @@ class CStarSystem:
 
     @property
     def environment(self) -> CStarEnvironment:
+        """Returns a CStarEnvironment class instance corresponding to this machine.
+
+        The instance is created when the property is first accessed and cached for
+        future queries
+        """
+        if self._environment is not None:
+            return self._environment
+
         # mypy requires consistent typing across cases, declaring here:
         queue_flag: Optional[str]
         primary_queue: Optional[str]
@@ -100,7 +110,7 @@ class CStarSystem:
             case _:
                 raise EnvironmentError("Unsupported environment")
 
-        return CStarEnvironment(
+        self._environment = CStarEnvironment(
             system_name=self.name,
             mpi_exec_prefix=mpi_exec_prefix,
             compiler=compiler,
@@ -111,6 +121,7 @@ class CStarSystem:
             max_walltime=max_walltime,
             other_scheduler_directives=other_scheduler_directives,
         )
+        return self._environment
 
 
 cstar_system = CStarSystem()
