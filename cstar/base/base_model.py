@@ -84,10 +84,6 @@ class BaseModel(ABC):
             if checkout_target is not None
             else self.default_checkout_target
         )
-        self.checkout_hash = _get_hash_from_checkout_target(
-            self.source_repo, self.checkout_target
-        )
-        self.repo_basename = Path(self.source_repo).name.replace(".git", "")
 
     def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
@@ -123,6 +119,15 @@ class BaseModel(ABC):
         repr_str += "\nState: <"
         repr_str += f"local_config_status = {self.local_config_status}>"
         return repr_str
+
+    @property
+    def repo_basename(self) -> str:
+        return Path(self.source_repo).name.replace(".git", "")
+
+    @property
+    def checkout_hash(self) -> str:
+        """Get the hash associated with the checkout target."""
+        return _get_hash_from_checkout_target(self.source_repo, self.checkout_target)
 
     @property
     @abstractmethod
@@ -205,14 +210,7 @@ class BaseModel(ABC):
 
         local_root = Path(os.environ.get(self.expected_env_var, ""))
 
-        if local_root is None:
-            raise EnvironmentError(
-                f"System environment variable {self.expected_env_var} is not set."
-            )
         match self.local_config_status:
-            case None:
-                self.get_local_config_status()
-                self.handle_config_status()
             case 0:
                 print(
                     f"{self.__class__.__name__} correctly configured. Nothing to be done"

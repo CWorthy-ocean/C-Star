@@ -71,12 +71,12 @@ class ROMSBaseModel(BaseModel):
         )
 
         # Set environment variables for this session:
-
         os.environ["ROMS_ROOT"] = str(target)
         cstar_system.environment.environment_variables["ROMS_ROOT"] = os.environ[
             "ROMS_ROOT"
         ]
-        os.environ["PATH"] += f":{target}/Tools-Roms/"
+        os.environ["PATH"] = os.environ.get("PATH", "") + f":{target}/Tools-Roms/"
+        # os.environ["PATH"] += f":{target}/Tools-Roms/"
         cstar_system.environment.environment_variables["PATH"] = os.environ["PATH"]
         env_file_str = (
             f"ROMS_ROOT={target}" + "\nPATH=${PATH}:" + f"{target}/Tools-Roms\n"
