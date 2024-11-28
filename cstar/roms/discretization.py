@@ -70,7 +70,7 @@ class ROMSDiscretization(Discretization):
     def __repr__(self) -> str:
         repr_str = super().__repr__().rstrip(")")
         if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            repr_str += f"n_procs_x = {self.n_procs_x}, "
+            repr_str += f", n_procs_x = {self.n_procs_x}, "
         if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
             repr_str += f"n_procs_y = {self.n_procs_y}, "
 

@@ -48,5 +48,6 @@ class Discretization(ABC):
         repr_str = f"{self.__class__.__name__}("
         if hasattr(self, "time_step") and self.time_step is not None:
             repr_str += f"time_step = {self.time_step}, "
+        repr_str = repr_str.strip(", ")
         repr_str += ")"
         return repr_str
