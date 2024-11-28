@@ -108,7 +108,6 @@ class CStarEnvironment:
             self.load_lmod_modules(
                 lmod_file=f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
             )
-
         os.environ.update(self.environment_variables)
 
     @property
