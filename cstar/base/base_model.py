@@ -9,7 +9,7 @@ from cstar.base.utils import (
     _get_repo_remote,
     _get_repo_head_hash,
 )
-from cstar.base.environment import _CSTAR_ROOT
+from cstar.base.system import cstar_system
 
 
 class BaseModel(ABC):
@@ -84,10 +84,6 @@ class BaseModel(ABC):
             if checkout_target is not None
             else self.default_checkout_target
         )
-        self.checkout_hash = _get_hash_from_checkout_target(
-            self.source_repo, self.checkout_target
-        )
-        self.repo_basename = Path(self.source_repo).name.replace(".git", "")
 
     def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
@@ -123,6 +119,15 @@ class BaseModel(ABC):
         repr_str += "\nState: <"
         repr_str += f"local_config_status = {self.local_config_status}>"
         return repr_str
+
+    @property
+    def repo_basename(self) -> str:
+        return Path(self.source_repo).name.replace(".git", "")
+
+    @property
+    def checkout_hash(self) -> str:
+        """Get the hash associated with the checkout target."""
+        return _get_hash_from_checkout_target(self.source_repo, self.checkout_target)
 
     @property
     @abstractmethod
@@ -205,14 +210,7 @@ class BaseModel(ABC):
 
         local_root = Path(os.environ.get(self.expected_env_var, ""))
 
-        if local_root is None:
-            raise EnvironmentError(
-                f"System environment variable {self.expected_env_var} is not set."
-            )
         match self.local_config_status:
-            case None:
-                self.get_local_config_status()
-                self.handle_config_status()
             case 0:
                 print(
                     f"{self.__class__.__name__} correctly configured. Nothing to be done"
@@ -254,17 +252,20 @@ class BaseModel(ABC):
                     else:
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
-                ext_dir = Path(_CSTAR_ROOT) / f"externals/{self.repo_basename}"
+                ext_dir = (
+                    cstar_system.environment.package_root
+                    / f"externals/{self.repo_basename}"
+                )
                 print(
                     "#######################################################\n"
                     + f"C-STAR: {self.expected_env_var}"
-                    + " not found in current environment. \n"
+                    + " not found in current cstar_system.environment. \n"
                     + "if this is your first time running C-Star with "
                     + f"an instance of {self.__class__.__name__}, "
                     + "you will need to set it up.\n"
                     + "It is recommended that you install this base model in \n"
                     + f"{ext_dir}"
-                    + "\nThis will also modify your `cstar_local_config.py` file."
+                    + "\nThis will also modify your `~/.cstar.env` file."
                     + "\n#######################################################"
                 )
                 while True:
