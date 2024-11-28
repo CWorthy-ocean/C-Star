@@ -1,205 +1,338 @@
-import io
 import os
+import shutil
 import platform
+import subprocess
 import importlib.util
 from pathlib import Path
-from typing import Optional
-from contextlib import redirect_stderr, redirect_stdout
-
-top_level_package_name = __name__.split(".")[0]
-spec = importlib.util.find_spec(top_level_package_name)
-if spec is not None:
-    if isinstance(spec.submodule_search_locations, list):
-        _CSTAR_ROOT: str = spec.submodule_search_locations[0]
-else:
-    raise ImportError(f"Top-level package '{top_level_package_name}' not found.")
+from dotenv import dotenv_values
+from typing import Optional, Dict
 
 
-## Set environment variables according to system
-_CSTAR_COMPILER: str
-_CSTAR_SYSTEM: str
-_CSTAR_SCHEDULER: Optional[str]
-_CSTAR_ENVIRONMENT_VARIABLES: dict = {}
-_CSTAR_SYSTEM_DEFAULT_PARTITION: Optional[str]
-_CSTAR_SYSTEM_CORES_PER_NODE: Optional[int]
-_CSTAR_SYSTEM_MEMGB_PER_NODE: Optional[int]
-_CSTAR_SYSTEM_MAX_WALLTIME: Optional[str]
+class CStarEnvironment:
+    """Encapsulates the configuration and management of a computing environment for a
+    specific system, including compilers, job schedulers, memory, and core settings.
 
+    This class uses properties to avoid attribute modification after initialization.
 
-if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
-    # Dynamically load the env_modules_python module using pathlib
-    module_path = Path(os.environ["LMOD_DIR"]).parent / "init" / "env_modules_python.py"
-    spec = importlib.util.spec_from_file_location("env_modules_python", module_path)
-    if (spec is None) or (spec.loader is None):
-        raise EnvironmentError(
-            f"Could not find env_modules_python on this machine at {module_path}"
-        )
-    env_modules = importlib.util.module_from_spec(spec)
-    if env_modules is None:
-        raise EnvironmentError(
-            f"No module found by importlib corresponding to spec {spec}"
-        )
-    spec.loader.exec_module(env_modules)
-    module = env_modules.module
+    This class also provides utilities for interacting with Linux Environment Modules
+    (Lmod) and dynamically setting up the environment based on user and system configurations.
 
-    sysname = os.environ.get("LMOD_SYSHOST") or os.environ.get("LMOD_SYSTEM_NAME")
-    if not sysname:
-        raise EnvironmentError(
-            "unable to find LMOD_SYSHOST or LMOD_SYSTEM_NAME in environment. "
-            + "Your system may be unsupported"
-        )
+    Attributes
+    ----------
+    system_name : str
+        The name of the system (e.g., "expanse", "perlmutter").
+    mpi_exec_prefix : str
+        The prefix command used for launching MPI jobs.
+    compiler : str
+        The compiler to be used in the environment (e.g., "intel", "gnu").
+    queue_flag : optional, str
+        The flag used for specifying the queue in job submissions.
+    primary_queue : optional, str
+        The default queue for job submissions.
+    mem_per_node_gb : optional, float
+        Memory available per node in gigabytes.
+    cores_per_node : optional, int
+        Number of CPU cores available per node.
+    max_walltime : optional, str
+        The maximum walltime allowed for a job in this environment.
+    other_scheduler_directives : optional, dict[str, str]
+        Additional directives for the scheduler.
+    environment_variables : dict
+        A dictionary containing combined environment variables from system and user `.env` files.
+    package_root : Path
+        The root directory of the package containing configuration files and utilities.
+    uses_lmod : bool
+        Indicates whether the system uses Linux Environment Modules (Lmod).
+    scheduler : Optional[str]
+        The type of job scheduler detected on the system (e.g., "slurm", "pbs"), or None if not detected.
 
-    module_stdout = io.StringIO()
-    module_stderr = io.StringIO()
+    Methods
+    -------
+    load_lmod_modules(lmod_file: str) -> None
+        Loads the necessary Lmod modules for the current system based on a `.lmod` configuration file.
 
-    # Load Linux Environment Modules for this machine:
-    with redirect_stdout(module_stdout), redirect_stderr(module_stderr):
-        module("reset")
-        with open(f"{_CSTAR_ROOT}/additional_files/lmod_lists/{sysname}.lmod") as F:
-            lmod_list = F.readlines()
-        for mod in lmod_list:
-            module("load", mod)
-    if any(
-        keyword in module_stderr.getvalue().casefold() for keyword in ["fail", "error"]
+    _call_lmod(*args) -> None
+        Executes a Linux Environment Modules command with specified arguments.
+
+    Raises
+    ------
+    EnvironmentError
+        Raised when required resources, modules, or configurations are missing or incompatible.
+    RuntimeError
+        Raised when a command or operation fails during execution.
+
+    Examples
+    --------
+    >>> env = CStarEnvironment(
+    ...     system_name="expanse",
+    ...     mpi_exec_prefix="srun --mpi=pmi2",
+    ...     compiler="intel",
+    ...     queue_flag="partition",
+    ...     primary_queue="compute",
+    ...     mem_per_node_gb=256,
+    ...     cores_per_node=128,
+    ...     max_walltime="48:00:00",
+    ...     other_scheduler_directives={},
+    ... )
+    >>> print(env)
+    CStarEnvironment(...)
+    """
+
+    def __init__(
+        self,
+        system_name: str,
+        mpi_exec_prefix: str,
+        compiler: str,
+        queue_flag: Optional[str],
+        primary_queue: Optional[str],
+        mem_per_node_gb: Optional[float],
+        cores_per_node: Optional[int],
+        max_walltime: Optional[str],
+        other_scheduler_directives: Optional[Dict[str, str]],
     ):
-        raise EnvironmentError(
-            "Error with linux environment modules: " + module_stderr.getvalue()
+        if other_scheduler_directives is None:
+            other_scheduler_directives = {}
+
+        # Initialize private attributes
+        self._system_name = system_name
+        self._mpi_exec_prefix = mpi_exec_prefix
+        self._compiler = compiler
+        self._queue_flag = queue_flag
+        self._primary_queue = primary_queue
+        self._mem_per_node_gb = mem_per_node_gb
+        self._cores_per_node = cores_per_node
+        self._max_walltime = max_walltime
+        self._other_scheduler_directives = other_scheduler_directives
+
+        if self.uses_lmod:
+            self.load_lmod_modules(
+                lmod_file=f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
+            )
+
+        os.environ.update(self.environment_variables)
+
+    @property
+    def mpi_exec_prefix(self):
+        return self._mpi_exec_prefix
+
+    @property
+    def compiler(self):
+        return self._compiler
+
+    @property
+    def queue_flag(self):
+        return self._queue_flag
+
+    @property
+    def primary_queue(self):
+        return self._primary_queue
+
+    @property
+    def mem_per_node_gb(self):
+        return self._mem_per_node_gb
+
+    @property
+    def cores_per_node(self):
+        return self._cores_per_node
+
+    @property
+    def max_walltime(self):
+        return self._max_walltime
+
+    @property
+    def other_scheduler_directives(self):
+        return self._other_scheduler_directives
+
+    def __str__(self) -> str:
+        """Provides a structured, readable summary of the environment's configuration.
+
+        Returns
+        -------
+        str
+            Human-readable string representation of the environment's key attributes.
+        """
+
+        base_str = self.__class__.__name__ + "\n"
+        base_str += "-" * (len(base_str) - 1)
+        base_str += f"\nScheduler: {self.scheduler or 'None'}"
+        base_str += f"\nCompiler: {self.compiler}"
+        base_str += f"\nPrimary Queue: {self.primary_queue or 'None'}"
+        base_str += f"\nMPI Exec Prefix: {self.mpi_exec_prefix}"
+        base_str += f"\nCores per Node: {self.cores_per_node}"
+        base_str += f"\nMemory per Node (GB): {self.mem_per_node_gb}"
+        base_str += f"\nMax Walltime: {self.max_walltime or 'Not specified'}"
+        base_str += f"\nUses Lmod: {True if self.uses_lmod else False}"
+        base_str += "\nEnvironment Variables:"
+        for key, value in self.environment_variables.items():
+            base_str += f"\n    {key}: {value}"
+        return base_str
+
+    def __repr__(self):
+        """Provides a clear and structured representation of the environment, showing an
+        empty initialization call and a separate state section with key properties.
+
+        Returns
+        -------
+        str
+            String representation distinguishing initialization from dynamic state.
+        """
+        return (
+            f"{self.__class__.__name__}("
+            f"system_name={self._system_name!r}, "
+            f"compiler={self.compiler!r}, "
+            f"scheduler={self.scheduler!r}, "
+            f"primary_queue={self.primary_queue!r}, "
+            f"cores_per_node={self.cores_per_node!r}, "
+            f"mem_per_node_gb={self.mem_per_node_gb!r}, "
+            f"max_walltime={self.max_walltime!r}"
+            ")\nState: <"
+            f"uses_lmod={self.uses_lmod!r}"
+            ">"
         )
 
-    match sysname:
-        case "expanse":
-            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ[
-                "NETCDF_FORTRANHOME"
-            ]
-            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = os.environ["MVAPICH2HOME"]
-            _CSTAR_ENVIRONMENT_VARIABLES["NETCDF"] = os.environ["NETCDF_FORTRANHOME"]
-            _CSTAR_ENVIRONMENT_VARIABLES["MPI_ROOT"] = os.environ["MVAPICH2HOME"]
-            _CSTAR_COMPILER = "intel"
-            _CSTAR_SYSTEM = "expanse"
-            _CSTAR_SCHEDULER = (
-                "slurm"  # can get this with `scontrol show config` or `sinfo --version`
-            )
-            _CSTAR_SYSTEM_DEFAULT_PARTITION = "compute"
-            _CSTAR_SYSTEM_CORES_PER_NODE = (
-                128  # cpu nodes, can get dynamically node-by-node
-            )
-            _CSTAR_SYSTEM_MEMGB_PER_NODE = 256  #  with `sinfo -o "%n %c %m %l"`
-            _CSTAR_SYSTEM_MAX_WALLTIME = "48:00:00"  # (hostname/cpus/mem[MB]/walltime)
+    @property
+    def environment_variables(self) -> dict:
+        env_vars = dotenv_values(
+            self.package_root / f"additional_files/env_files/{self._system_name}.env"
+        )
+        user_env_vars = dotenv_values(Path("~/.cstar.env").expanduser())
+        env_vars.update(user_env_vars)
+        return env_vars
 
-        case "derecho":
-            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = (
-                "/opt/cray/pe/mpich/8.1.25/ofi/intel/19.0/"
-            )
-            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ["NETCDF"]
-            _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
-                os.environ.get("LD_LIBRARY_PATH", default="")
-                + ":"
-                + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
-                + "/lib"
-            )
+    @property
+    def package_root(self) -> Path:
+        """Identifies the root directory of the top-level package.
 
-            _CSTAR_COMPILER = "intel"
-            _CSTAR_SYSTEM = "derecho"
-            _CSTAR_SCHEDULER = (
-                "pbs"  # can determine dynamically by testing for `qstat --version`
+        Uses `importlib.util.find_spec` to locate the package directory, enabling
+        access to additional configuration files within the package structure.
+
+        Returns
+        -------
+        Path
+            Path to the root directory of the top-level package.
+
+        Raises
+        ------
+        ImportError
+            If the top-level package cannot be located.
+        """
+
+        top_level_package_name = __name__.split(".")[0]
+        spec = importlib.util.find_spec(top_level_package_name)
+        if spec is not None:
+            if isinstance(spec.submodule_search_locations, list):
+                return Path(spec.submodule_search_locations[0])
+        raise ImportError(f"Top-level package '{top_level_package_name}' not found.")
+
+    # Environment management related
+    @property
+    def uses_lmod(self) -> bool:
+        """Checks if the system uses Linux Environment Modules (Lmod) based on OS type
+        and presence of `LMOD_DIR` in environment variables.
+
+        Returns
+        -------
+        bool
+            True if the OS is Linux and `LMOD_DIR` is present in environment variables.
+        """
+
+        return (platform.system() == "Linux") and ("LMOD_CMD" in list(os.environ))
+
+    def _call_lmod(self, *args) -> None:
+        """Calls Linux Environment Modules with specified arguments in python mode.
+
+        This method constructs and executes a command to interface with the Linux Environment
+        Modules system (Lmod), equivalently to `module <args>` from the shell.
+        The output of the command, which is Python code, is executed
+        directly to modify the current process environment persistently. Errors during the
+        command's execution are raised as exceptions.
+
+        Parameters
+        ----------
+        *args : str
+            Arguments for the Lmod command. For example, "reset", "load gcc", or "unload gcc".
+            These are concatenated into a single command string and passed to Lmod.
+
+        Raises
+        ------
+        EnvironmentError
+            If Lmod is not available on the system or the `LMOD_CMD` environment variable is
+            not set.
+        RuntimeError
+            If the Lmod command returns a non-zero exit code. The error message includes
+            details about the command and the stderr output from Lmod.
+
+        Examples
+        --------
+        Reset the environment managed by Lmod:
+
+        >>> CStarEnvironment._call_lmod("reset")
+
+        Load a module (e.g., gcc):
+
+        >>> CStarEnvironment._call_lmod("load", "gcc")
+
+        Unload a module (e.g., gcc):
+
+        >>> CStarEnvironment._call_lmod("unload", "gcc")
+        """
+
+        lmod_path = Path(os.environ.get("LMOD_CMD", ""))
+        command = f"{lmod_path} python {' '.join(list(args))}"
+        lmod_result = subprocess.run(
+            command, shell=True, text=True, capture_output=True
+        )
+        if lmod_result.returncode != 0:
+            raise RuntimeError(
+                "Linux Environment Modules command "
+                + f"\n{command} "
+                + f"\n failed with code {lmod_result.returncode}. STDERR: "
+                + f"{lmod_result.stderr}"
             )
-            _CSTAR_SYSTEM_DEFAULT_PARTITION = "main"
-            _CSTAR_SYSTEM_CORES_PER_NODE = (
-                128  # Harder to dynamically get this info on PBS
+        else:
+            exec(lmod_result.stdout)
+
+    def load_lmod_modules(self, lmod_file) -> None:
+        """Loads necessary modules for this machine using Linux Environment Modules.
+
+        This function:
+        - Resets the current module environment by executing `module reset`.
+        - Loads each module listed in the `.lmod` file for the system, located at
+          `<root>/additional_files/lmod_lists/<system_name>.lmod`.
+
+        Raises
+        ------
+        EnvironmentError
+            If the system does not use Lmod or `module reset` fails.
+        RuntimeError
+            If any `module load <module_name>` command fails.
+        """
+
+        if not self.uses_lmod:
+            raise EnvironmentError(
+                "Your system does not appear to use Linux Environment Modules"
             )
-            _CSTAR_SYSTEM_MEMGB_PER_NODE = (
-                256  # Can combine `qstat -Qf` and `pbsnodes -a`
-            )
-            _CSTAR_SYSTEM_MAX_WALLTIME = "12:00:00"  # with grep or awk
+        self._call_lmod("reset")
+        with open(
+            f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
+        ) as F:
+            lmod_list = F.readlines()
+            for mod in lmod_list:
+                self._call_lmod(f"load {mod}")
 
-        case "perlmutter":
-            _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = (
-                "/opt/cray/pe/mpich/8.1.28/ofi/gnu/12.3/"
-            )
-            _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = (
-                "/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/"
-            )
-            _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = (
-                os.environ.get("PATH", default="")
-                + ":"
-                + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
-                + "/bin"
-            )
-            _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
-                os.environ.get("LD_LIBRARY_PATH", default="")
-                + ":"
-                + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
-                + "/lib"
-            )
-            _CSTAR_ENVIRONMENT_VARIABLES["LIBRARY_PATH"] = (
-                os.environ.get("LIBRARY_PATH", default="")
-                + ":"
-                + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
-                + "/lib"
-            )
+    @property
+    def scheduler(self) -> Optional[str]:
+        """Detects the job scheduler type by checking commands for known schedulers like
+        Slurm or PBS.
 
-            _CSTAR_COMPILER = "gnu"
-            _CSTAR_SYSTEM = "perlmutter"
-            _CSTAR_SCHEDULER = "slurm"
-            _CSTAR_SYSTEM_DEFAULT_PARTITION = "regular"
-            _CSTAR_SYSTEM_CORES_PER_NODE = (
-                128  # cpu nodes, can get dynamically node-by-node
-            )
-            _CSTAR_SYSTEM_MEMGB_PER_NODE = 512  #  with `sinfo -o "%n %c %m %l"`
-            _CSTAR_SYSTEM_MAX_WALLTIME = "24:00:00"  # (hostname/cpus/mem[MB]/walltime)
-
-
-elif (platform.system() == "Darwin") and (platform.machine() == "arm64"):
-    # if on MacOS arm64 all dependencies should have been installed by conda
-
-    _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = os.environ["CONDA_PREFIX"]
-    _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ["CONDA_PREFIX"]
-    _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
-        os.environ.get("LD_LIBRARY_PATH", default="")
-        + ":"
-        + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
-        + "/lib"
-    )
-    _CSTAR_COMPILER = "gnu"
-    _CSTAR_SYSTEM = "osx_arm64"
-    _CSTAR_SCHEDULER = None
-    _CSTAR_SYSTEM_DEFAULT_PARTITION = None
-    _CSTAR_SYSTEM_CORES_PER_NODE = os.cpu_count()
-    _CSTAR_SYSTEM_MEMGB_PER_NODE = None
-    _CSTAR_SYSTEM_MAX_WALLTIME = None
-
-elif (
-    (platform.system() == "Linux")
-    and (platform.machine() == "x86_64")
-    and ("LMOD_DIR" not in list(os.environ))
-):
-    _CSTAR_ENVIRONMENT_VARIABLES["MPIHOME"] = os.environ["CONDA_PREFIX"]
-    _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"] = os.environ["CONDA_PREFIX"]
-    _CSTAR_ENVIRONMENT_VARIABLES["LD_LIBRARY_PATH"] = (
-        os.environ.get("LD_LIBRARY_PATH", default="")
-        + ":"
-        + _CSTAR_ENVIRONMENT_VARIABLES["NETCDFHOME"]
-        + "/lib"
-    )
-    _CSTAR_COMPILER = "gnu"
-    _CSTAR_SYSTEM = "linux_x86_64"
-    _CSTAR_SCHEDULER = None
-    _CSTAR_SYSTEM_DEFAULT_PARTITION = None
-    _CSTAR_SYSTEM_CORES_PER_NODE = os.cpu_count()
-    _CSTAR_SYSTEM_MEMGB_PER_NODE = None
-    _CSTAR_SYSTEM_MAX_WALLTIME = None
-    # TODO: lots of this is repeat code, can determine a lot of these vars using functions rather than hardcoding
-
-# Now read the local/custom initialisation file
-# This sets variables associated with external codebases that are not installed
-# with C-Star (e.g. ROMS_ROOT)
-
-_CSTAR_CONFIG_FILE = _CSTAR_ROOT + "/cstar_local_config.py"
-if Path(_CSTAR_CONFIG_FILE).exists():
-    from cstar.cstar_local_config import get_user_environment
-
-    get_user_environment()
-for var, value in _CSTAR_ENVIRONMENT_VARIABLES.items():
-    os.environ[var] = value
-
-################################################################################
+        Returns
+        -------
+        str or None
+            Scheduler type (e.g., 'slurm', 'pbs') or None if no known scheduler is detected.
+        """
+        if shutil.which("sinfo") or shutil.which("scontrol"):
+            return "slurm"
+        elif shutil.which("qstat"):
+            return "pbs"
+        else:
+            return None
