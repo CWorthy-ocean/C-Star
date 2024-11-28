@@ -2,11 +2,36 @@ import os
 import platform
 from typing import Optional, Dict
 from cstar.base.environment import CStarEnvironment
-# from cstar.base.scheduler import Scheduler
+from cstar.base.scheduler import Scheduler, SlurmScheduler, SlurmQueue
 
 
 class CStarSystem:
     _environment: Optional[CStarEnvironment] = None
+    _scheduler: Optional[Scheduler] = None
+
+    @property
+    def scheduler(self) -> Scheduler:
+        """todo."""
+        if self._scheduler is not None:
+            return self._scheduler
+
+        match self.name:
+            case "perlmutter":
+                # regular -> regular_1 for < 124 nodes, regular_0 for >124 nodes
+                regular_q = SlurmQueue(name="regular", query_name="regular_1")
+                shared_q = SlurmQueue(name="shared")
+                debug_q = SlurmQueue(name="debug")
+
+                self._scheduler = SlurmScheduler(
+                    queues=[regular_q, shared_q, debug_q],
+                    primary_queue="regular",
+                    queue_flag="qos",
+                    other_scheduler_directives={"-C": "cpu"},
+                )
+        if self._scheduler is not None:
+            return self._scheduler
+        else:
+            raise ValueError("unable to determine scheduler")
 
     @property
     def name(self) -> str:
