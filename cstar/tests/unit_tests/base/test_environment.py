@@ -1,4 +1,3 @@
-# cstar/base/environment.py                           169      9    95%   245, 262, 277, 290, 292, 306, 331, 472, 494
 import pytest
 from unittest.mock import patch, call, PropertyMock, mock_open
 import cstar
@@ -213,27 +212,6 @@ class TestStrAndReprMethods:
     - test_repr_method: Confirms accurate representation of state in __repr__.
     """
 
-    def setup_method(self):
-        """Sets up common patches for MockEnvironment properties."""
-        # Patch the `system_name` property
-
-        self.patch_scheduler = patch.object(
-            MockEnvironment, "scheduler", new_callable=PropertyMock, return_value=None
-        )
-        self.mock_scheduler = self.patch_scheduler.start()
-
-        # Patch `builtins.open` to simulate reading a `.lmod` file
-        self.open_patcher = patch(
-            "builtins.open",
-            new_callable=mock_open,
-            read_data="mock_module1\nmock_module2\n",
-        )
-        self.mock_open = self.open_patcher.start()
-
-    def teardown_method(self):
-        """Stops all patches."""
-        patch.stopall()
-
     def test_str_method(self):
         """Tests that __str__ produces a formatted, readable summary.
 
@@ -255,8 +233,6 @@ class TestStrAndReprMethods:
             mock_env_vars.return_value = {"VAR1": "value1", "VAR2": "value2"}
 
             env = MockEnvironment()
-            print("HERE ARE YOUR ENV VARS")
-            print(env.environment_variables)
             # Manually construct the expected string output
             expected_str = (
                 "MockEnvironment\n"
