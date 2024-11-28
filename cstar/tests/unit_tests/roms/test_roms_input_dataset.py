@@ -490,10 +490,9 @@ class TestROMSInputDatasetGetFromYAML:
 
         with pytest.raises(ValueError) as exception_info:
             local_roms_yaml_dataset.get_from_yaml(local_dir="some/local/dir")
+        expected_message = (
+            "roms tools yaml file has 3 sections. "
+            + "Expected 'Grid' and one other class"
+        )
 
-            expected_message = (
-                "roms tools yaml file has 3 sections. "
-                + "Expected 'Grid' and one other class"
-            )
-
-            assert str(exception_info.value) == expected_message
+        assert str(exception_info.value) == expected_message
