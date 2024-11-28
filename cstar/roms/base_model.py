@@ -3,15 +3,8 @@ import shutil
 import subprocess
 from pathlib import Path
 from cstar.base.base_model import BaseModel
-from cstar.base.utils import (
-    _clone_and_checkout,
-    _write_to_config_file,
-)
-from cstar.base.environment import (
-    _CSTAR_ROOT,
-    _CSTAR_COMPILER,
-    _CSTAR_ENVIRONMENT_VARIABLES,
-)
+from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
+from cstar.base.system import cstar_system
 
 
 class ROMSBaseModel(BaseModel):
@@ -47,7 +40,7 @@ class ROMSBaseModel(BaseModel):
         computing systems.
         """
         shutil.copytree(
-            _CSTAR_ROOT + "/additional_files/ROMS_Makefiles/",
+            Path(os.environ[self.expected_env_var]) / "ci/ci_makefiles/",
             os.environ[self.expected_env_var],
             dirs_exist_ok=True,
         )
@@ -80,19 +73,15 @@ class ROMSBaseModel(BaseModel):
         # Set environment variables for this session:
 
         os.environ["ROMS_ROOT"] = str(target)
-        _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"] = os.environ["ROMS_ROOT"]
+        cstar_system.environment.environment_variables["ROMS_ROOT"] = os.environ[
+            "ROMS_ROOT"
+        ]
         os.environ["PATH"] += f":{target}/Tools-Roms/"
-        _CSTAR_ENVIRONMENT_VARIABLES["PATH"] = os.environ["PATH"]
-
-        # Set the configuration file to be read by __init__.py for future sessions:
-        config_file_str = (
-            f'    _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"]="{target}"'
-            + '\n    _CSTAR_ENVIRONMENT_VARIABLES.setdefault("PATH",os.environ.get("PATH",default=""))'
-            + '\n    _CSTAR_ENVIRONMENT_VARIABLES["PATH"]+=":'
-            + f'{target}/Tools-Roms"\n'
+        cstar_system.environment.environment_variables["PATH"] = os.environ["PATH"]
+        env_file_str = (
+            f"ROMS_ROOT={target}" + "\nPATH=${PATH}:" + f"{target}/Tools-Roms\n"
         )
-
-        _write_to_config_file(config_file_str)
+        _update_user_dotenv(env_file_str)
 
         # Distribute custom makefiles for ROMS
         self._base_model_adjustments()
@@ -100,7 +89,7 @@ class ROMSBaseModel(BaseModel):
         # Make things
         print("Compiling UCLA ROMS' NHMG library...")
         make_nhmg_result = subprocess.run(
-            f"make nhmg COMPILER={_CSTAR_COMPILER}",
+            f"make nhmg COMPILER={cstar_system.environment.compiler}",
             cwd=str(target) + "/Work",
             capture_output=True,
             text=True,
@@ -113,7 +102,7 @@ class ROMSBaseModel(BaseModel):
             )
         print("Compiling Tools-Roms package for UCLA ROMS...")
         make_tools_roms_result = subprocess.run(
-            f"make COMPILER={_CSTAR_COMPILER}",
+            f"make COMPILER={cstar_system.environment.compiler}",
             cwd=str(target) + "/Tools-Roms",
             shell=True,
             capture_output=True,

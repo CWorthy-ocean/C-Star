@@ -1,13 +1,9 @@
 import os
 import subprocess
-
 from pathlib import Path
 from cstar.base import BaseModel
-from cstar.base.utils import (
-    _clone_and_checkout,
-    _write_to_config_file,
-)
-from cstar.base.environment import _CSTAR_COMPILER
+from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
+from cstar.base.system import cstar_system
 
 
 class MARBLBaseModel(BaseModel):
@@ -34,9 +30,6 @@ class MARBLBaseModel(BaseModel):
     def expected_env_var(self) -> str:
         return "MARBL_ROOT"
 
-    def _base_model_adjustments(self) -> None:
-        pass
-
     def get(self, target: str | Path) -> None:
         """Clone MARBL code to local machine, set environment, compile libraries.
 
@@ -56,21 +49,18 @@ class MARBLBaseModel(BaseModel):
             local_path=target,
             checkout_target=self.checkout_target,
         )
-
         # Set environment variables for this session:
         os.environ["MARBL_ROOT"] = str(target)
-
-        # Set the configuration file to be read by __init__.py for future sessions:
-        # QUESTION: how better to handle this?
-        config_file_str = (
-            f'\n    _CSTAR_ENVIRONMENT_VARIABLES["MARBL_ROOT"]="{target}"\n'
-        )
-        _write_to_config_file(config_file_str)
+        cstar_system.environment.environment_variables["MARBL_ROOT"] = os.environ[
+            "MARBL_ROOT"
+        ]
+        env_file_str = f'MARBL_ROOT="{target}"\n'
+        _update_user_dotenv(env_file_str)
 
         # Make things
         print("Compiling MARBL...")
         make_marbl_result = subprocess.run(
-            f"make {_CSTAR_COMPILER} USEMPI=TRUE",
+            f"make {cstar_system.environment.compiler} USEMPI=TRUE",
             cwd=f"{target}/src",
             shell=True,
             text=True,
