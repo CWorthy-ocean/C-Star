@@ -1,5 +1,6 @@
 from cstar.roms.base_model import ROMSBaseModel
-from cstar.roms.component import ROMSComponent, ROMSDiscretization
+from cstar.roms.component import ROMSComponent
+from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.input_dataset import (
     ROMSInputDataset,
     ROMSModelGrid,
