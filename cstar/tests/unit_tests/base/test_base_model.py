@@ -2,7 +2,7 @@ import os
 import pytest
 from pathlib import Path
 from unittest import mock
-from cstar.base.environment import _CSTAR_ROOT
+from cstar.base.system import cstar_system
 from cstar.base.base_model import BaseModel
 
 ################################################################################
@@ -389,7 +389,9 @@ class TestBaseModelConfigHandling:
 
         generic_base_model.handle_config_status()
 
-        expected_install_dir = Path(_CSTAR_ROOT) / "externals/repo"
+        expected_install_dir = (
+            Path(cstar_system.environment.package_root) / "externals/repo"
+        )
 
         # Verify that 'get' (defined above)  is called when user inputs 'y':
         captured = capsys.readouterr()

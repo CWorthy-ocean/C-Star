@@ -7,10 +7,9 @@ from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
 
 from cstar.base.component import Component
-from cstar.base.environment import (
-    _CSTAR_SYSTEM_MAX_WALLTIME,
-    _CSTAR_SYSTEM_DEFAULT_PARTITION,
-)
+
+# from cstar.base.environment import environment
+from cstar.base.system import cstar_system
 from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
@@ -46,7 +45,7 @@ class Case:
     -------
     from_blueprint(blueprint,caseroot,start_date,end_date)
         Instantiate a Case from a "blueprint" yaml file
-    persist(filename)
+    to_blueprint(filename)
         Create a "blueprint" yaml file for this Case object
     setup()
         Fetch all code and files necessary to run this case in the local caseroot folder
@@ -449,7 +448,7 @@ class Case:
 
         return caseinstance
 
-    def persist(self, filename: str) -> None:
+    def to_blueprint(self, filename: str) -> None:
         """Write this case to a yaml 'blueprint' file.
 
         This effectively performs the actions of Case.from_blueprint(), but in reverse,
@@ -534,8 +533,8 @@ class Case:
     def run(
         self,
         account_key=None,
-        walltime=_CSTAR_SYSTEM_MAX_WALLTIME,
-        queue=_CSTAR_SYSTEM_DEFAULT_PARTITION,
+        walltime=cstar_system.environment.max_walltime,
+        queue=cstar_system.environment.primary_queue,
         job_name="my_case_run",
     ) -> None:
         """Run the case by calling `component.run(caseroot)` on the primary component

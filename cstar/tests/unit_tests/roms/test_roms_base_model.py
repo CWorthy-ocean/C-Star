@@ -2,7 +2,7 @@ import os
 import pytest
 from unittest import mock
 from cstar.roms.base_model import ROMSBaseModel
-from cstar.base.environment import _CSTAR_COMPILER
+from cstar.base.system import cstar_system
 
 
 @pytest.fixture
@@ -91,8 +91,8 @@ class TestROMSBaseModelGet:
         self.mock_clone_and_checkout = mock.patch(
             "cstar.roms.base_model._clone_and_checkout"
         ).start()
-        self.mock_write_to_config_file = mock.patch(
-            "cstar.roms.base_model._write_to_config_file"
+        self.mock_update_user_dotenv = mock.patch(
+            "cstar.roms.base_model._update_user_dotenv"
         ).start()
 
         self.mock_copytree = mock.patch("shutil.copytree").start()
@@ -120,6 +120,7 @@ class TestROMSBaseModelGet:
 
         # Assertions:
         ## Check environment variables
+
         assert os.environ["ROMS_ROOT"] == str(roms_dir)
         assert f":{roms_dir}/Tools-Roms/" in os.environ["PATH"]
 
@@ -130,21 +131,19 @@ class TestROMSBaseModelGet:
             checkout_target=roms_base_model.checkout_target,
         )
 
-        ## Check that _write_to_config_file was (mock) called correctly
-        config_file_str = (
-            f'    _CSTAR_ENVIRONMENT_VARIABLES["ROMS_ROOT"]="{roms_dir}"'
-            + '\n    _CSTAR_ENVIRONMENT_VARIABLES.setdefault("PATH",os.environ.get("PATH",default=""))'
-            + '\n    _CSTAR_ENVIRONMENT_VARIABLES["PATH"]+=":'
-            + f'{roms_dir}/Tools-Roms"\n'
+        ## Check that _update_user_dotenv was (mock) called correctly
+        env_file_str = (
+            f"ROMS_ROOT={roms_dir}" + "\nPATH=${PATH}:" + f"{roms_dir}/Tools-Roms\n"
         )
-        self.mock_write_to_config_file.assert_called_once_with(config_file_str)
+
+        self.mock_update_user_dotenv.assert_called_once_with(env_file_str)
 
         ## Check that subprocess.run was (mock) called twice for `make nhmg` and `make Tools-Roms`
         print(self.mock_subprocess_run.call_args_list)
         assert self.mock_subprocess_run.call_count == 2
 
         self.mock_subprocess_run.assert_any_call(
-            f"make nhmg COMPILER={_CSTAR_COMPILER}",
+            f"make nhmg COMPILER={cstar_system.environment.compiler}",
             cwd=f"{roms_dir}/Work",
             capture_output=True,
             text=True,
@@ -152,7 +151,7 @@ class TestROMSBaseModelGet:
         )
 
         self.mock_subprocess_run.assert_any_call(
-            f"make COMPILER={_CSTAR_COMPILER}",
+            f"make COMPILER={cstar_system.environment.compiler}",
             cwd=f"{roms_dir}/Tools-Roms",
             capture_output=True,
             text=True,

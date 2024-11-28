@@ -2,7 +2,7 @@ import os
 import pytest
 from unittest import mock
 from cstar.marbl.base_model import MARBLBaseModel
-from cstar.base.environment import _CSTAR_COMPILER
+from cstar.base.system import cstar_system
 
 
 @pytest.fixture
@@ -66,21 +66,21 @@ class TestMARBLBaseModelGet:
         Mocks `subprocess.run` to simulate `make` commands and other shell operations.
     mock_clone_and_checkout : MagicMock
         Mocks `_clone_and_checkout` to simulate repository cloning and checkout.
-    mock_write_to_config_file : MagicMock
-        Mocks `_write_to_config_file` to simulate writing environment variables to a config file.
+    mock_update_user_dotenv : MagicMock
+        Mocks `_update_user_dotenv` to simulate writing environment variables to a config file.
     env_patch : MagicMock
         Mocks `os.environ` to control environment variables during tests.
     """
 
     def setup_method(self):
         """Common setup before each test method."""
-        # Mock subprocess, _clone_and_checkout, and _write_to_config_file
+        # Mock subprocess, _clone_and_checkout, and _update_user_dotenv
         self.mock_subprocess_run = mock.patch("subprocess.run").start()
         self.mock_clone_and_checkout = mock.patch(
             "cstar.marbl.base_model._clone_and_checkout"
         ).start()
-        self.mock_write_to_config_file = mock.patch(
-            "cstar.marbl.base_model._write_to_config_file"
+        self.mock_update_user_dotenv = mock.patch(
+            "cstar.marbl.base_model._update_user_dotenv"
         ).start()
 
         # Clear environment variables
@@ -115,14 +115,12 @@ class TestMARBLBaseModelGet:
             checkout_target=marbl_base_model.checkout_target,
         )
 
-        ## Check that _write_to_config_file was (mock) called correctly
-        config_file_str = (
-            f'\n    _CSTAR_ENVIRONMENT_VARIABLES["MARBL_ROOT"]="{marbl_dir}"\n'
-        )
-        self.mock_write_to_config_file.assert_called_once_with(config_file_str)
+        ## Check that _update_user_dotenv was (mock) called correctly
+        env_file_str = f'MARBL_ROOT="{marbl_dir}"\n'
+        self.mock_update_user_dotenv.assert_called_once_with(env_file_str)
 
         self.mock_subprocess_run.assert_called_once_with(
-            f"make {_CSTAR_COMPILER} USEMPI=TRUE",
+            f"make {cstar_system.environment.compiler} USEMPI=TRUE",
             cwd=f"{marbl_dir}/src",
             capture_output=True,
             text=True,
