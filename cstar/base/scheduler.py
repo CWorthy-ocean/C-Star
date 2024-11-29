@@ -56,12 +56,13 @@ class SlurmScheduler(Scheduler):
         self,
         queue_flag: str,
         queues: List["SlurmQueue"],
-        primary_queue: str,
+        primary_queue_name: str,
         other_scheduler_directives: Optional[Dict[str, str]],
     ):
         self.queue_flag = queue_flag
         self.queues = queues
-        self.primary_queue = primary_queue
+        self.queue_names = [q.name for q in queues]
+        self.primary_queue_name = primary_queue_name
         self.other_scheduler_directives = (
             other_scheduler_directives if other_scheduler_directives is not None else {}
         )
@@ -87,3 +88,18 @@ class SlurmScheduler(Scheduler):
         )
         so = result.stdout.strip()
         return float(so) / (1024**3) if so else None
+
+    def get_queue(self, name):
+        queue = next((queue for queue in self.queues if queue.name == name), None)
+        if queue is None:
+            raise ValueError(f"{name} not found in list of queues: {self.queue_names}")
+        else:
+            return queue
+
+    def create_job(self):
+        """TODO."""
+        # Return SlurmJob with self as scheduler and all other args supplied as in init.
+        pass
+
+
+################################################################################

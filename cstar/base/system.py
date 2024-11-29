@@ -24,7 +24,7 @@ class CStarSystem:
 
                 self._scheduler = SlurmScheduler(
                     queues=[regular_q, shared_q, debug_q],
-                    primary_queue="regular",
+                    primary_queue_name="regular",
                     queue_flag="qos",
                     other_scheduler_directives={"-C": "cpu"},
                 )
