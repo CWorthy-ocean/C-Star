@@ -1,5 +1,4 @@
 import os
-import platform
 import warnings
 import subprocess
 import shutil
@@ -8,7 +7,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
 
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
-from cstar.base.component import Component, Discretization
+from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
 from cstar.roms.input_dataset import (
     ROMSInputDataset,
@@ -18,18 +17,10 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSTidalForcing,
 )
+from cstar.roms.discretization import ROMSDiscretization
 from cstar.base.additional_code import AdditionalCode
 
-from cstar.base.environment import (
-    _CSTAR_COMPILER,
-    _CSTAR_SCHEDULER,
-    _CSTAR_SYSTEM,
-    _CSTAR_ROOT,
-    _CSTAR_SYSTEM_MAX_WALLTIME,
-    _CSTAR_SYSTEM_DEFAULT_PARTITION,
-    _CSTAR_SYSTEM_CORES_PER_NODE,
-    _CSTAR_ENVIRONMENT_VARIABLES,
-)
+from cstar.base.system import cstar_system
 
 if TYPE_CHECKING:
     from cstar.roms import ROMSBaseModel
@@ -158,6 +149,52 @@ class ROMSComponent(Component):
         # roms-specific
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
+
+    @property
+    def in_file(self) -> Path:
+        """Find the .in file associated with this ROMSComponent in
+        ROMSComponent.namelists.
+
+        ROMS requires a text file containing runtime options to run. This file is typically
+        called `roms.in`, but variations occur and C-Star only enforces that
+        the file has a `.in` extension.
+
+        This property finds any ".in" or ".in_TEMPLATE" files in ROMSComponent.namelists.files
+        and assigns the result (less any _TEMPLATE suffix) to ROMSComponent.in_file.
+
+        If there are multiple `.in` files, or none, errors are raised.
+        This property is used by ROMSComponent.run()
+        """
+        in_files = []
+        if self.namelists is None:
+            raise ValueError(
+                "ROMSComponent.namelists not set."
+                + " ROMS reuires a runtime options file "
+                + "(typically roms.in)"
+            )
+
+        in_files = [
+            fname.replace(".in_TEMPLATE", ".in")
+            for fname in self.namelists.files
+            if (fname.endswith(".in") or fname.endswith(".in_TEMPLATE"))
+        ]
+        if len(in_files) > 1:
+            raise ValueError(
+                "Multiple '.in' files found:"
+                + "\n{in_files}"
+                + "\nROMS runtime file choice ambiguous"
+            )
+        elif len(in_files) == 0:
+            raise ValueError(
+                "No '.in' file found in ROMSComponent.namelists."
+                + "ROMS expects a runtime options file with the '.in'"
+                + "extension, e.g. roms.in"
+            )
+        else:
+            if self.namelists.working_path is not None:
+                return self.namelists.working_path / in_files[0]
+            else:
+                return Path(in_files[0])
 
     def __str__(self) -> str:
         base_str = super().__str__()
@@ -515,10 +552,13 @@ class ROMSComponent(Component):
                     _replace_text_in_file(mod_nl_path, placeholder, str(replacement))
                 self.namelists.modified_files[nl_idx] = mod_nl_path
         if no_template_found:
-            raise FileNotFoundError(
-                "No editable namelist found to set ROMS runtime parameters. "
+            warnings.warn(
+                "WARNING: No editable namelist found to set ROMS runtime parameters. "
                 + "Expected to find a file in ROMSComponent.namelists"
                 + " with the suffix '_TEMPLATE' on which to base the ROMS namelist."
+                + "\n********************************************************"
+                + "\nANY MODEL PARAMETERS SET IN C-STAR WILL NOT BE APPLIED."
+                + "\n********************************************************"
             )
 
     @property
@@ -695,7 +735,7 @@ class ROMSComponent(Component):
 
         print("Compiling UCLA-ROMS configuration...")
         make_roms_result = subprocess.run(
-            f"make COMPILER={_CSTAR_COMPILER}",
+            f"make COMPILER={cstar_system.environment.compiler}",
             cwd=build_dir,
             shell=True,
             capture_output=True,
@@ -809,8 +849,8 @@ class ROMSComponent(Component):
         n_time_steps: Optional[int] = None,
         account_key: Optional[str] = None,
         output_dir: Optional[str | Path] = None,
-        walltime: Optional[str] = _CSTAR_SYSTEM_MAX_WALLTIME,
-        queue: Optional[str] = _CSTAR_SYSTEM_DEFAULT_PARTITION,
+        walltime: Optional[str] = cstar_system.environment.max_walltime,
+        queue: Optional[str] = cstar_system.environment.primary_queue,
         job_name: str = "my_roms_run",
     ) -> None:
         """Runs the executable created by `build()`
@@ -827,7 +867,7 @@ class ROMSComponent(Component):
         output_dir: str or Path:
             The path to the directory in which model output will be saved. This is by default
             the directory from which the ROMS executable will be called.
-        walltime: str, default _CSTAR_SYSTEM_MAX_WALLTIME
+        walltime: str, default cstar.base.system.environment.environment.max_walltime
             The requested length of the job, HH:MM:SS
         job_name: str, default 'my_roms_run'
             The name of the job submitted to the scheduler, which also sets the output file name
@@ -867,48 +907,32 @@ class ROMSComponent(Component):
             )
         assert isinstance(n_time_steps, int)
 
-        if (self.namelists is not None) and (
-            "roms.in_TEMPLATE" in self.namelists.files
-        ):
-            nl_idx = self.namelists.files.index("roms.in_TEMPLATE")
-            mod_namelist = (
-                self.namelists.working_path / self.namelists.modified_files[nl_idx]
-            )
-            _replace_text_in_file(
-                mod_namelist,
-                "__NTIMES_PLACEHOLDER__",
-                str(n_time_steps),
-            )
+        # run_infile = self.namelists.working_path / self.in_file
+        _replace_text_in_file(
+            # run_infile,
+            self.in_file,
+            "__NTIMES_PLACEHOLDER__",
+            str(n_time_steps),
+        )
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
         ## 2: RUN ON THIS MACHINE
 
-        match _CSTAR_SYSTEM:
-            case "expanse":
-                exec_pfx = "srun --mpi=pmi2"
-            case "perlmutter":
-                exec_pfx = "srun"
-            case "derecho":
-                exec_pfx = "mpirun"
-            case "osx_arm64":
-                exec_pfx = "mpirun"
-            case "linux_x86_64":
-                exec_pfx = "mpirun"
-
         roms_exec_cmd = (
-            f"{exec_pfx} -n {self.discretization.n_procs_tot} {self.exe_path} "
-            + f"{mod_namelist}"
+            f"{cstar_system.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
+            + f"{self.in_file}"
         )
 
         if self.discretization.n_procs_tot is not None:
-            if _CSTAR_SYSTEM_CORES_PER_NODE is not None:
+            if cstar_system.environment.cores_per_node is not None:
                 nnodes, ncores = _calculate_node_distribution(
-                    self.discretization.n_procs_tot, _CSTAR_SYSTEM_CORES_PER_NODE
+                    self.discretization.n_procs_tot,
+                    cstar_system.environment.cores_per_node,
                 )
             else:
                 raise ValueError(
-                    f"Unable to calculate node distribution for system: {_CSTAR_SYSTEM}."
+                    f"Unable to calculate node distribution for system: {cstar_system.name}."
                     + "\nC-Star is unaware of your system's node configuration (cores per node)."
                     + "\nYour system may be unsupported. Please raise an issue at: "
                     + "\n https://github.com/CWorthy-ocean/C-Star/issues/new"
@@ -919,7 +943,7 @@ class ROMSComponent(Component):
                 "Unable to calculate node distribution for this Component. "
                 + "Component.n_procs_tot is not set"
             )
-        match _CSTAR_SCHEDULER:
+        match cstar_system.environment.scheduler:
             case "pbs":
                 if account_key is None:
                     raise ValueError(
@@ -936,7 +960,12 @@ class ROMSComponent(Component):
                 scheduler_script += "\n#PBS -j oe"
                 scheduler_script += "\n#PBS -k eod"
                 scheduler_script += "\n#PBS -V"
-                if _CSTAR_SYSTEM == "derecho":
+                for (
+                    key,
+                    value,
+                ) in cstar_system.environment.other_scheduler_directives.items():
+                    scheduler_script += f"\n#PBS {key} {value}"
+                if cstar_system.name == "derecho":
                     scheduler_script += "\ncd ${PBS_O_WORKDIR}"
                 scheduler_script += f"\n\n{roms_exec_cmd}"
 
@@ -956,26 +985,25 @@ class ROMSComponent(Component):
                 scheduler_script = "#!/bin/bash"
                 scheduler_script += f"\n#SBATCH --job-name={job_name}"
                 scheduler_script += f"\n#SBATCH --output={job_name}.out"
-                if _CSTAR_SYSTEM == "perlmutter":
-                    scheduler_script += f"\n#SBATCH --qos={queue}"
-                    scheduler_script += "\n#SBATCH -C cpu"
-                else:
-                    scheduler_script += (
-                        f"\n#SBATCH --partition={_CSTAR_SYSTEM_DEFAULT_PARTITION}"
-                    )
-                    # FIXME: This ^^^ is a pretty ugly patch...
+                scheduler_script += (
+                    f"\n#SBATCH --{cstar_system.environment.queue_flag}={queue}"
+                )
                 scheduler_script += f"\n#SBATCH --nodes={nnodes}"
                 scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
                 scheduler_script += f"\n#SBATCH --account={account_key}"
                 scheduler_script += "\n#SBATCH --export=NONE"
                 scheduler_script += "\n#SBATCH --mail-type=ALL"
                 scheduler_script += f"\n#SBATCH --time={walltime}"
-
+                for (
+                    key,
+                    value,
+                ) in cstar_system.environment.other_scheduler_directives.items():
+                    scheduler_script += f"\n#SBATCH {key} {value}"
                 # Add linux environment modules to scheduler script
-                if (platform.system() == "Linux") and ("LMOD_DIR" in list(os.environ)):
+                if cstar_system.environment.uses_lmod:
                     scheduler_script += "\nmodule reset"
                     with open(
-                        f"{_CSTAR_ROOT}/additional_files/lmod_lists/{_CSTAR_SYSTEM}.lmod"
+                        f"{cstar_system.environment.package_root}/additional_files/lmod_lists/{cstar_system.name}.lmod"
                     ) as F:
                         modules = F.readlines()
                 for m in modules:
@@ -984,7 +1012,10 @@ class ROMSComponent(Component):
                 scheduler_script += "\nprintenv"
 
                 # Add environment variables to scheduler script:
-                for var, value in _CSTAR_ENVIRONMENT_VARIABLES.items():
+                for (
+                    var,
+                    value,
+                ) in cstar_system.environment.environment_variables.items():
                     scheduler_script += f'\nexport {var}="{value}"'
 
                 # Add roms command to scheduler script
@@ -1079,7 +1110,7 @@ class ROMSComponent(Component):
                         f"ROMS terminated with errors. See {errlog} for further information."
                     )
 
-    def post_run(self, output_dir=None) -> None:
+    def post_run(self, output_dir: Optional[str | Path] = None) -> None:
         """Performs post-processing steps associated with this ROMSComponent object.
 
         This method goes through any netcdf files produced by the model in
@@ -1090,6 +1121,13 @@ class ROMSComponent(Component):
         output_dir: str | Path
             The directory in which output was produced by the run
         """
+        if output_dir is None:
+            # This should not be necessary, it allows output_dir to appear
+            # optional for signature compatibility in linting, see
+            # https://github.com/CWorthy-ocean/C-Star/issues/115
+            # https://github.com/CWorthy-ocean/C-Star/issues/116
+            raise ValueError("ROMSComponent.post_run() expects an output_dir parameter")
+
         output_dir = Path(output_dir)
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
@@ -1168,82 +1206,3 @@ class ROMSComponent(Component):
         new_component.initial_conditions = new_ic
 
         return new_component
-
-
-class ROMSDiscretization(Discretization):
-    """An implementation of the Discretization class for ROMS.
-
-    Additional attributes:
-    ----------------------
-    n_procs_x: int
-        The number of parallel processors over which to subdivide the x axis of the domain.
-    n_procs_y: int
-        The number of parallel processors over which to subdivide the y axis of the domain.
-
-    Properties:
-    -----------
-    n_procs_tot: int
-        The value of n_procs_x * n_procs_y
-    """
-
-    def __init__(
-        self,
-        time_step: int,
-        n_procs_x: int = 1,
-        n_procs_y: int = 1,
-    ):
-        """Initialize a ROMSDiscretization object from basic discretization parameters.
-
-        Parameters:
-        -----------
-        time_step: int
-            The time step with which to run the Component
-        n_procs_x: int
-           The number of parallel processors over which to subdivide the x axis of the domain.
-        n_procs_y: int
-           The number of parallel processors over which to subdivide the y axis of the domain.
-
-
-        Returns:
-        --------
-        ROMSDiscretization:
-            An initialized ROMSDiscretization object
-        """
-
-        super().__init__(time_step)
-        self.n_procs_x = n_procs_x
-        self.n_procs_y = n_procs_y
-
-    @property
-    def n_procs_tot(self) -> int:
-        """Total number of processors required by this ROMS configuration."""
-        return self.n_procs_x * self.n_procs_y
-
-    def __str__(self) -> str:
-        disc_str = super().__str__()
-
-        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            disc_str += (
-                "\nn_procs_x: "
-                + str(self.n_procs_x)
-                + " (Number of x-direction processors)"
-            )
-        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
-            disc_str += (
-                "\nn_procs_y: "
-                + str(self.n_procs_y)
-                + " (Number of y-direction processors)"
-            )
-        return disc_str
-
-    def __repr__(self) -> str:
-        repr_str = super().__repr__().rstrip(")")
-        if hasattr(self, "n_procs_x") and self.n_procs_x is not None:
-            repr_str += f"n_procs_x = {self.n_procs_x}, "
-        if hasattr(self, "n_procs_y") and self.n_procs_y is not None:
-            repr_str += f"n_procs_y = {self.n_procs_y}, "
-
-        repr_str = repr_str.strip(", ")
-        repr_str += ")"
-
-        return repr_str

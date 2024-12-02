@@ -1,6 +1,6 @@
 import pytest
 from cstar import Case
-from cstar.tests.config import TEST_CONFIG
+from cstar.tests.integration_tests.config import TEST_CONFIG
 
 
 class TestCStar:
@@ -75,7 +75,7 @@ class TestCStar:
         with mock_user_input("y"):
             cstar_test_case.setup()
 
-        cstar_test_case.persist(tmpdir / "test_blueprint_persistence.yaml")
+        cstar_test_case.to_blueprint(tmpdir / "test_blueprint_persistence.yaml")
         cstar_test_case.build()
         cstar_test_case.pre_run()
         cstar_test_case.run()
