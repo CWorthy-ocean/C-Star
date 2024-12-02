@@ -1,9 +1,6 @@
 ## STIL TODO:
 #
-# Fill out `status` property def (unsubmitted, queued, complete, cancelled)
-# Add `create_job` on SlurmScheduler that passes args to create SlurmJob
 # Integrate this new framework into Component.run() etc.
-# Add `updates` function to tail the output file
 
 # Add PBSJob class
 # Write unit test module
@@ -11,6 +8,7 @@
 
 import os
 import re
+import time
 import subprocess
 from abc import ABC
 from pathlib import Path
@@ -98,8 +96,26 @@ class SlurmJob:
         if self.id is None:
             return "unsubmitted"
         else:
-            return "undetermined"
-        # TODO
+            sacct_cmd = f"sacct -j {self.id} --format=State%20 --noheader"
+            result = subprocess.run(
+                sacct_cmd, capture_output=True, text=True, shell=True
+            )
+
+            if "PENDING" in result.stdout:
+                return "pending"
+            elif "RUNNING" in result.stdout:
+                return "running"
+            elif "COMPLETED" in result.stdout:
+                return "completed"
+            elif "CANCELLED" in result.stdout:
+                return "cancelled"
+            elif "FAILED" in result.stdout:
+                return "failed"
+            else:
+                raise RuntimeError(
+                    f"Failed to retrieve job status using {sacct_cmd}."
+                    f"STDOUT: {result.stdout}, STDERR: {result.stderr}"
+                )
 
     @property
     def script(self):
@@ -190,3 +206,46 @@ class SlurmJob:
             )
         else:
             print(f"Job {self.id} cancelled")
+
+    def updates(self, seconds=5):
+        """Provides updates from the job's output file as a live stream for `seconds`
+        seconds.
+
+        If `seconds` is 0, updates are provided indefinitely until the user interrupts the stream.
+        """
+
+        if self.status != "running":
+            print(
+                f"This job is currently not running ({self.status}). Live updates cannot be provided."
+            )
+        if (self.status in ["failed", "completed"]) or (
+            self.status == "cancelled" and self.output_file.exists()
+        ):
+            print(f"See {self.output_file.resolve()} for job output")
+
+        if seconds == 0:
+            # Confirm indefinite tailing
+            confirmation = (
+                input(
+                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
+                    "Do you want to continue? (y/n): "
+                )
+                .strip()
+                .lower()
+            )
+            if confirmation not in {"y", "yes"}:
+                return
+
+        try:
+            with open(self.output_file, "r") as f:
+                f.seek(0, 2)  # Move to the end of the file
+                start_time = time.time()
+
+                while seconds == 0 or (time.time() - start_time < seconds):
+                    line = f.readline()
+                    if line:
+                        print(line, end="")
+                    else:
+                        time.sleep(0.1)  # 100ms delay between updates
+        except KeyboardInterrupt:
+            print("\nTailing stopped by user.")

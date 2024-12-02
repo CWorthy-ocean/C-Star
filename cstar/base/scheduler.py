@@ -1,6 +1,10 @@
 from abc import ABC
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
+from cstar.base.scheduler_job import SlurmJob
 import subprocess
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 ################################################################################
 
@@ -96,10 +100,32 @@ class SlurmScheduler(Scheduler):
         else:
             return queue
 
-    def create_job(self):
-        """TODO."""
-        # Return SlurmJob with self as scheduler and all other args supplied as in init.
-        pass
+    def create_job(
+        self,
+        commands: str,
+        cpus: int,
+        account_key: str,
+        script_path: Optional[str | "Path"] = None,
+        run_path: Optional[str | "Path"] = None,
+        job_name: Optional[str] = None,
+        output_file: Optional[str | "Path"] = None,
+        queue_name: Optional[str] = None,
+        send_email: Optional[bool] = True,
+        walltime: Optional[str] = None,
+    ) -> "SlurmJob":
+        return SlurmJob(
+            scheduler=self,
+            commands=commands,
+            cpus=cpus,
+            account_key=account_key,
+            script_path=script_path,
+            run_path=run_path,
+            job_name=job_name,
+            output_file=output_file,
+            queue_name=queue_name,
+            send_email=send_email,
+            walltime=walltime,
+        )
 
 
 ################################################################################
