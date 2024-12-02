@@ -15,7 +15,7 @@ from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
 
 if TYPE_CHECKING:
-    pass
+    from cstar.base.scheduler_job import SchedulerJob
 
 
 class Case:
@@ -535,8 +535,8 @@ class Case:
         account_key=None,
         walltime=cstar_system.environment.max_walltime,
         queue=cstar_system.environment.primary_queue,
-        job_name="my_case_run",
-    ) -> None:
+        job_name=None,
+    ) -> Optional["SchedulerJob"]:
         """Run the case by calling `component.run(caseroot)` on the primary component
         (to which others are coupled)."""
 
@@ -558,7 +558,7 @@ class Case:
 
                 # After that you need to run some verification stuff on the downloaded files
                 print("\nRunning ROMS: " + "\n------------")
-                component.run(
+                job_instance = component.run(
                     output_dir=self.caseroot / "output",
                     n_time_steps=ntimesteps,
                     account_key=account_key,
@@ -566,6 +566,8 @@ class Case:
                     queue=queue,
                     job_name=job_name,
                 )
+                return job_instance
+        return None
 
     def post_run(self) -> None:
         """For each Component associated with this case, execute post-processing actions

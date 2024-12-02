@@ -1,4 +1,3 @@
-import os
 import warnings
 import subprocess
 import shutil
@@ -6,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
 
+from cstar.base.scheduler_job import create_scheduler_job
 from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
 from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
@@ -24,6 +24,7 @@ from cstar.base.system import cstar_system
 
 if TYPE_CHECKING:
     from cstar.roms import ROMSBaseModel
+    from cstar.base.scheduler_job import SchedulerJob
 
 
 class ROMSComponent(Component):
@@ -849,10 +850,10 @@ class ROMSComponent(Component):
         n_time_steps: Optional[int] = None,
         account_key: Optional[str] = None,
         output_dir: Optional[str | Path] = None,
-        walltime: Optional[str] = cstar_system.environment.max_walltime,
-        queue: Optional[str] = cstar_system.environment.primary_queue,
-        job_name: str = "my_roms_run",
-    ) -> None:
+        walltime: Optional[str] = None,
+        queue: Optional[str] = None,
+        job_name: Optional[str] = None,
+    ) -> Optional["SchedulerJob"]:
         """Runs the executable created by `build()`
 
         This method creates a temporary file to be submitted to the job scheduler (if any)
@@ -880,6 +881,11 @@ class ROMSComponent(Component):
                 + "\n If you have already run Component.build(), either run it again or "
                 + " add the executable path manually using Component.exe_path='YOUR/PATH'."
             )
+        if queue is None:
+            queue = cstar_system.scheduler.primary_queue_name
+        if walltime is None:
+            walltime = cstar_system.scheduler.get_queue(queue).max_walltime
+
         if output_dir is None:
             output_dir = self.exe_path.parent
         output_dir = Path(output_dir)
@@ -973,65 +979,25 @@ class ROMSComponent(Component):
                 with open(run_path / script_fname, "w") as f:
                     f.write(scheduler_script)
                 subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
-
+                return None
             case "slurm":
-                # TODO: export ALL copies env vars, but will need to handle module load
-
                 if account_key is None:
                     raise ValueError(
                         "please call Component.run() with a value for account_key"
                     )
 
-                scheduler_script = "#!/bin/bash"
-                scheduler_script += f"\n#SBATCH --job-name={job_name}"
-                scheduler_script += f"\n#SBATCH --output={job_name}.out"
-                scheduler_script += (
-                    f"\n#SBATCH --{cstar_system.environment.queue_flag}={queue}"
+                job_instance = create_scheduler_job(
+                    commands=roms_exec_cmd,
+                    job_name=job_name,
+                    cpus=self.discretization.n_procs_tot,
+                    account_key=account_key,
+                    run_path=run_path,
+                    queue_name=queue,
+                    walltime=walltime,
                 )
-                scheduler_script += f"\n#SBATCH --nodes={nnodes}"
-                scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
-                scheduler_script += f"\n#SBATCH --account={account_key}"
-                scheduler_script += "\n#SBATCH --export=NONE"
-                scheduler_script += "\n#SBATCH --mail-type=ALL"
-                scheduler_script += f"\n#SBATCH --time={walltime}"
-                for (
-                    key,
-                    value,
-                ) in cstar_system.environment.other_scheduler_directives.items():
-                    scheduler_script += f"\n#SBATCH {key} {value}"
-                # Add linux environment modules to scheduler script
-                if cstar_system.environment.uses_lmod:
-                    scheduler_script += "\nmodule reset"
-                    with open(
-                        f"{cstar_system.environment.package_root}/additional_files/lmod_lists/{cstar_system.name}.lmod"
-                    ) as F:
-                        modules = F.readlines()
-                for m in modules:
-                    scheduler_script += f"\nmodule load {m}"
 
-                scheduler_script += "\nprintenv"
-
-                # Add environment variables to scheduler script:
-                for (
-                    var,
-                    value,
-                ) in cstar_system.environment.environment_variables.items():
-                    scheduler_script += f'\nexport {var}="{value}"'
-
-                # Add roms command to scheduler script
-                scheduler_script += f"\n\n{roms_exec_cmd}"
-
-                script_fname = "cstar_run_script.sh"
-                with open(run_path / script_fname, "w") as f:
-                    f.write(scheduler_script)
-
-                # remove any slurm variables in case submitting from inside another slurm job
-                slurm_env = {
-                    k: v for k, v in os.environ.items() if not k.startswith("SLURM_")
-                }
-                subprocess.run(
-                    f"sbatch {script_fname}", shell=True, cwd=run_path, env=slurm_env
-                )
+                job_instance.submit()
+                return job_instance
 
             case None:
                 import time
@@ -1109,6 +1075,9 @@ class ROMSComponent(Component):
                     raise RuntimeError(
                         f"ROMS terminated with errors. See {errlog} for further information."
                     )
+                return None
+
+        return None
 
     def post_run(self, output_dir: Optional[str | Path] = None) -> None:
         """Performs post-processing steps associated with this ROMSComponent object.

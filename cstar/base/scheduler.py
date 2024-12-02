@@ -10,7 +10,8 @@ if TYPE_CHECKING:
 
 
 class Queue:
-    pass
+    def __init__(self, name: str):
+        self.name = name
 
 
 class SlurmQueue(Queue):
@@ -52,14 +53,10 @@ class SlurmQueue(Queue):
 
 
 class Scheduler(ABC):
-    pass
-
-
-class SlurmScheduler(Scheduler):
     def __init__(
         self,
         queue_flag: str,
-        queues: List["SlurmQueue"],
+        queues: List["Queue"],
         primary_queue_name: str,
         other_scheduler_directives: Optional[Dict[str, str]],
     ):
@@ -71,6 +68,15 @@ class SlurmScheduler(Scheduler):
             other_scheduler_directives if other_scheduler_directives is not None else {}
         )
 
+    def get_queue(self, name):
+        queue = next((queue for queue in self.queues if queue.name == name), None)
+        if queue is None:
+            raise ValueError(f"{name} not found in list of queues: {self.queue_names}")
+        else:
+            return queue
+
+
+class SlurmScheduler(Scheduler):
     @property
     def global_max_cpus_per_node(self):
         result = subprocess.run(
@@ -92,13 +98,6 @@ class SlurmScheduler(Scheduler):
         )
         so = result.stdout.strip()
         return float(so) / (1024**3) if so else None
-
-    def get_queue(self, name):
-        queue = next((queue for queue in self.queues if queue.name == name), None)
-        if queue is None:
-            raise ValueError(f"{name} not found in list of queues: {self.queue_names}")
-        else:
-            return queue
 
 
 ################################################################################

@@ -1,7 +1,5 @@
 ## STIL TODO:
 #
-# Integrate this new framework into Component.run() etc.
-
 # Add PBSJob class
 # Write unit test module
 # Write docstrings and rtd pages
@@ -10,7 +8,7 @@ import os
 import re
 import time
 import subprocess
-from abc import ABC
+from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -19,15 +17,14 @@ from cstar.base.system import cstar_system
 from cstar.base.scheduler import SlurmScheduler
 
 
-def create(
-    self,
+def create_scheduler_job(
     commands: str,
     cpus: int,
     account_key: str,
-    script_path: Optional[str | "Path"] = None,
-    run_path: Optional[str | "Path"] = None,
+    script_path: Optional[str | Path] = None,
+    run_path: Optional[str | Path] = None,
     job_name: Optional[str] = None,
-    output_file: Optional[str | "Path"] = None,
+    output_file: Optional[str | Path] = None,
     queue_name: Optional[str] = None,
     send_email: Optional[bool] = True,
     walltime: Optional[str] = None,
@@ -55,7 +52,9 @@ def create(
 
 
 class SchedulerJob(ABC):
-    pass
+    @abstractmethod
+    def submit(self):
+        pass
 
 
 class SlurmJob(SchedulerJob):
@@ -89,7 +88,9 @@ class SlurmJob(SchedulerJob):
         self.run_path = self.script_path.parent if run_path is None else Path(run_path)
         self.job_name = default_name if job_name is None else job_name
         self.output_file = (
-            Path.cwd() / f"{default_name}.out" if output_file is None else output_file
+            self.run_path / f"{default_name}.out"
+            if output_file is None
+            else output_file
         )
         self.queue_name = (
             scheduler.primary_queue_name if queue_name is None else queue_name
@@ -241,9 +242,9 @@ class SlurmJob(SchedulerJob):
         else:
             print(f"Job {self.id} cancelled")
 
-    def updates(self, seconds=5):
+    def updates(self, seconds=10):
         """Provides updates from the job's output file as a live stream for `seconds`
-        seconds.
+        seconds (default 10).
 
         If `seconds` is 0, updates are provided indefinitely until the user interrupts the stream.
         """
@@ -252,10 +253,11 @@ class SlurmJob(SchedulerJob):
             print(
                 f"This job is currently not running ({self.status}). Live updates cannot be provided."
             )
-        if (self.status in ["failed", "completed"]) or (
-            self.status == "cancelled" and self.output_file.exists()
-        ):
-            print(f"See {self.output_file.resolve()} for job output")
+            if (self.status in ["failed", "completed"]) or (
+                self.status == "cancelled" and self.output_file.exists()
+            ):
+                print(f"See {self.output_file.resolve()} for job output")
+            return
 
         if seconds == 0:
             # Confirm indefinite tailing
@@ -282,4 +284,4 @@ class SlurmJob(SchedulerJob):
                     else:
                         time.sleep(0.1)  # 100ms delay between updates
         except KeyboardInterrupt:
-            print("\nTailing stopped by user.")
+            print("\nLive status updates stopped by user.")
