@@ -13,18 +13,52 @@ import subprocess
 from abc import ABC
 from pathlib import Path
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 from cstar.base.system import cstar_system
 
-if TYPE_CHECKING:
-    from cstar.base.scheduler import SlurmScheduler
+from cstar.base.scheduler import SlurmScheduler
+
+
+def create(
+    self,
+    commands: str,
+    cpus: int,
+    account_key: str,
+    script_path: Optional[str | "Path"] = None,
+    run_path: Optional[str | "Path"] = None,
+    job_name: Optional[str] = None,
+    output_file: Optional[str | "Path"] = None,
+    queue_name: Optional[str] = None,
+    send_email: Optional[bool] = True,
+    walltime: Optional[str] = None,
+) -> "SchedulerJob":
+    if isinstance(cstar_system.scheduler, SlurmScheduler):
+        job_type = SlurmJob
+    else:
+        raise TypeError(
+            f"Unsupported scheduler type: {type(cstar_system.scheduler).__name__}"
+        )
+
+    return job_type(
+        scheduler=cstar_system.scheduler,
+        commands=commands,
+        cpus=cpus,
+        account_key=account_key,
+        script_path=script_path,
+        run_path=run_path,
+        job_name=job_name,
+        output_file=output_file,
+        queue_name=queue_name,
+        send_email=send_email,
+        walltime=walltime,
+    )
 
 
 class SchedulerJob(ABC):
     pass
 
 
-class SlurmJob:
+class SlurmJob(SchedulerJob):
     def __init__(
         self,
         scheduler: "SlurmScheduler",
