@@ -5,8 +5,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
 
+from cstar.base.scheduler import SlurmScheduler, PBSScheduler
 from cstar.base.scheduler_job import create_scheduler_job
-from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
+from cstar.base.utils import _replace_text_in_file
 from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
 from cstar.roms.input_dataset import (
@@ -930,152 +931,135 @@ class ROMSComponent(Component):
             + f"{self.in_file}"
         )
 
-        if self.discretization.n_procs_tot is not None:
-            if cstar_system.environment.cores_per_node is not None:
-                nnodes, ncores = _calculate_node_distribution(
-                    self.discretization.n_procs_tot,
-                    cstar_system.environment.cores_per_node,
-                )
-            else:
-                raise ValueError(
-                    f"Unable to calculate node distribution for system: {cstar_system.name}."
-                    + "\nC-Star is unaware of your system's node configuration (cores per node)."
-                    + "\nYour system may be unsupported. Please raise an issue at: "
-                    + "\n https://github.com/CWorthy-ocean/C-Star/issues/new"
-                    + "\n Thank you in advance for your contribution!"
-                )
-        else:
+        if self.discretization.n_procs_tot is None:
             raise ValueError(
                 "Unable to calculate node distribution for this Component. "
                 + "Component.n_procs_tot is not set"
             )
-        match cstar_system.environment.scheduler:
-            case "pbs":
-                if account_key is None:
-                    raise ValueError(
-                        "please call Component.run() with a value for account_key"
-                    )
-                scheduler_script = "#PBS -S /bin/bash"
-                scheduler_script += f"\n#PBS -N {job_name}"
-                scheduler_script += f"\n#PBS -o {job_name}.out"
-                scheduler_script += f"\n#PBS -A {account_key}"
-                scheduler_script += (
-                    f"\n#PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}"
+        if isinstance(cstar_system.scheduler, PBSScheduler):
+            if account_key is None:
+                raise ValueError(
+                    "please call Component.run() with a value for account_key"
                 )
-                scheduler_script += f"\n#PBS -q {queue}"
-                scheduler_script += "\n#PBS -j oe"
-                scheduler_script += "\n#PBS -k eod"
-                scheduler_script += "\n#PBS -V"
-                for (
-                    key,
-                    value,
-                ) in cstar_system.environment.other_scheduler_directives.items():
-                    scheduler_script += f"\n#PBS {key} {value}"
-                if cstar_system.name == "derecho":
-                    scheduler_script += "\ncd ${PBS_O_WORKDIR}"
-                scheduler_script += f"\n\n{roms_exec_cmd}"
+            scheduler_script = "#PBS -S /bin/bash"
+            scheduler_script += f"\n#PBS -N {job_name}"
+            scheduler_script += f"\n#PBS -o {job_name}.out"
+            scheduler_script += f"\n#PBS -A {account_key}"
+            scheduler_script += (
+                f"\n#PBS -l ncpus={self.discretization.n_procs_tot},walltime={walltime}"
+            )
+            scheduler_script += f"\n#PBS -q {queue}"
+            scheduler_script += "\n#PBS -j oe"
+            scheduler_script += "\n#PBS -k eod"
+            scheduler_script += "\n#PBS -V"
+            for (
+                key,
+                value,
+            ) in cstar_system.scheduler.other_scheduler_directives.items():
+                scheduler_script += f"\n#PBS {key} {value}"
+            if cstar_system.name == "derecho":
+                scheduler_script += "\ncd ${PBS_O_WORKDIR}"
+            scheduler_script += f"\n\n{roms_exec_cmd}"
 
-                script_fname = "cstar_run_script.pbs"
-                with open(run_path / script_fname, "w") as f:
-                    f.write(scheduler_script)
-                subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
-                return None
-            case "slurm":
-                if account_key is None:
-                    raise ValueError(
-                        "please call Component.run() with a value for account_key"
-                    )
-
-                job_instance = create_scheduler_job(
-                    commands=roms_exec_cmd,
-                    job_name=job_name,
-                    cpus=self.discretization.n_procs_tot,
-                    account_key=account_key,
-                    run_path=run_path,
-                    queue_name=queue,
-                    walltime=walltime,
+            script_fname = "cstar_run_script.pbs"
+            with open(run_path / script_fname, "w") as f:
+                f.write(scheduler_script)
+            subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
+            return None
+        elif isinstance(cstar_system.scheduler, SlurmScheduler):
+            if account_key is None:
+                raise ValueError(
+                    "please call Component.run() with a value for account_key"
                 )
 
-                job_instance.submit()
-                return job_instance
+            job_instance = create_scheduler_job(
+                commands=roms_exec_cmd,
+                job_name=job_name,
+                cpus=self.discretization.n_procs_tot,
+                account_key=account_key,
+                run_path=run_path,
+                queue_name=queue,
+                walltime=walltime,
+            )
 
-            case None:
-                import time
+            job_instance.submit()
+            return job_instance
 
-                romsprocess = subprocess.Popen(
-                    roms_exec_cmd,
-                    shell=True,
-                    cwd=run_path,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
+        elif cstar_system.scheduler is None:
+            import time
 
-                # Process stdout line-by-line
-                tstep0 = 0
-                roms_init_string = ""
-                if romsprocess.stdout is None:
-                    raise RuntimeError("ROMS is not producing stdout")
+            romsprocess = subprocess.Popen(
+                roms_exec_cmd,
+                shell=True,
+                cwd=run_path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
 
-                # 2024-09-21 : the following is included as in some instances ROMS
-                # will exit with code 0 even if a fatal error occurs, see:
-                # https://github.com/CESR-lab/ucla-roms/issues/42
+            # Process stdout line-by-line
+            tstep0 = 0
+            roms_init_string = ""
+            if romsprocess.stdout is None:
+                raise RuntimeError("ROMS is not producing stdout")
 
-                debugging = False  # Print raw output if true
-                if debugging:
-                    while True:
-                        output = romsprocess.stdout.readline()
-                        if output == "" and romsprocess.poll() is not None:
-                            break
-                        if output:
-                            print(output.strip())
-                else:
-                    for line in romsprocess.stdout:
-                        # Split the line by whitespace
-                        parts = line.split()
+            # 2024-09-21 : the following is included as in some instances ROMS
+            # will exit with code 0 even if a fatal error occurs, see:
+            # https://github.com/CESR-lab/ucla-roms/issues/42
 
-                        # Check if there are exactly 9 parts and the first one is an integer
-                        if len(parts) == 9:
-                            try:
-                                # Try to convert the first part to an integer
-                                tstep = int(parts[0])
-                                if tstep0 == 0:
-                                    tstep0 = tstep
-                                    T0 = time.time()
-                                    # Capture the first integer and print it
-                                else:
-                                    ETA = (n_time_steps - (tstep - tstep0)) * (
-                                        (time.time() - T0) / (tstep - tstep0)
+            debugging = False  # Print raw output if true
+            if debugging:
+                while True:
+                    output = romsprocess.stdout.readline()
+                    if output == "" and romsprocess.poll() is not None:
+                        break
+                    if output:
+                        print(output.strip())
+            else:
+                for line in romsprocess.stdout:
+                    # Split the line by whitespace
+                    parts = line.split()
+
+                    # Check if there are exactly 9 parts and the first one is an integer
+                    if len(parts) == 9:
+                        try:
+                            # Try to convert the first part to an integer
+                            tstep = int(parts[0])
+                            if tstep0 == 0:
+                                tstep0 = tstep
+                                T0 = time.time()
+                                # Capture the first integer and print it
+                            else:
+                                ETA = (n_time_steps - (tstep - tstep0)) * (
+                                    (time.time() - T0) / (tstep - tstep0)
+                                )
+                                total_print_statements = 50
+                                print_frq = n_time_steps // total_print_statements + 1
+                                if ((tstep - tstep0) % print_frq) == 0:
+                                    print(
+                                        f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
                                     )
-                                    total_print_statements = 50
-                                    print_frq = (
-                                        n_time_steps // total_print_statements + 1
-                                    )
-                                    if ((tstep - tstep0) % print_frq) == 0:
-                                        print(
-                                            f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
-                                        )
-                            except ValueError:
-                                pass
-                        elif tstep0 == 0 and len(roms_init_string) == 0:
-                            roms_init_string = "Running ROMS: Initializing run..."
-                            print(roms_init_string)
+                        except ValueError:
+                            pass
+                    elif tstep0 == 0 and len(roms_init_string) == 0:
+                        roms_init_string = "Running ROMS: Initializing run..."
+                        print(roms_init_string)
 
-                romsprocess.wait()
-                if romsprocess.returncode != 0:
-                    import datetime as dt
+            romsprocess.wait()
+            if romsprocess.returncode != 0:
+                import datetime as dt
 
-                    errlog = (
-                        output_dir
-                        / f"ROMS_STDERR_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-                    )
-                    if romsprocess.stderr is not None:
-                        with open(errlog, "w") as F:
-                            F.write(romsprocess.stderr.read())
-                    raise RuntimeError(
-                        f"ROMS terminated with errors. See {errlog} for further information."
-                    )
-                return None
+                errlog = (
+                    output_dir
+                    / f"ROMS_STDERR_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                )
+                if romsprocess.stderr is not None:
+                    with open(errlog, "w") as F:
+                        F.write(romsprocess.stderr.read())
+                raise RuntimeError(
+                    f"ROMS terminated with errors. See {errlog} for further information."
+                )
+            return None
 
         return None
 

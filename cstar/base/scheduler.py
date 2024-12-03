@@ -100,4 +100,8 @@ class SlurmScheduler(Scheduler):
         return float(so) / (1024**3) if so else None
 
 
+class PBSScheduler(Scheduler):
+    pass
+
+
 ################################################################################

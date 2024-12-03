@@ -533,8 +533,8 @@ class Case:
     def run(
         self,
         account_key=None,
-        walltime=cstar_system.environment.max_walltime,
-        queue=cstar_system.environment.primary_queue,
+        walltime=None,
+        queue=None,
         job_name=None,
     ) -> Optional["SchedulerJob"]:
         """Run the case by calling `component.run(caseroot)` on the primary component
@@ -543,6 +543,12 @@ class Case:
         # Assuming for now that ROMS presence implies it is the master program
         # TODO add more advanced logic for this
         # 20240807 - TN - set first component as main?
+
+        if queue is None:
+            queue = cstar_system.scheduler.primary_queue_name
+        if walltime is None:
+            walltime = cstar_system.scheduler.get_queue(queue).max_walltime
+
         for component in self.components:
             if isinstance(component, ROMSComponent):
                 # Calculate number of time steps:
