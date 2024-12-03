@@ -544,9 +544,9 @@ class Case:
         # TODO add more advanced logic for this
         # 20240807 - TN - set first component as main?
 
-        if queue is None:
+        if (queue is None) and (cstar_system.scheduler is not None):
             queue = cstar_system.scheduler.primary_queue_name
-        if walltime is None:
+        if (walltime is None) and (cstar_system.scheduler is not None):
             walltime = cstar_system.scheduler.get_queue(queue).max_walltime
 
         for component in self.components:

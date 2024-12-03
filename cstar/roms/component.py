@@ -882,9 +882,9 @@ class ROMSComponent(Component):
                 + "\n If you have already run Component.build(), either run it again or "
                 + " add the executable path manually using Component.exe_path='YOUR/PATH'."
             )
-        if queue is None:
+        if (queue is None) and (cstar_system.scheduler is not None):
             queue = cstar_system.scheduler.primary_queue_name
-        if walltime is None:
+        if (walltime is None) and (cstar_system.scheduler is not None):
             walltime = cstar_system.scheduler.get_queue(queue).max_walltime
 
         if output_dir is None:

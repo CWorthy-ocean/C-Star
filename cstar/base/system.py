@@ -10,7 +10,7 @@ class CStarSystem:
     _scheduler: Optional[Scheduler] = None
 
     @property
-    def scheduler(self) -> Scheduler:
+    def scheduler(self) -> Optional[Scheduler]:
         """todo."""
         if self._scheduler is not None:
             return self._scheduler
@@ -28,10 +28,10 @@ class CStarSystem:
                     queue_flag="qos",
                     other_scheduler_directives={"-C": "cpu"},
                 )
-        if self._scheduler is not None:
-            return self._scheduler
-        else:
-            raise ValueError("unable to determine scheduler")
+            case _:
+                self._scheduler = None
+
+        return self._scheduler
 
     @property
     def name(self) -> str:
