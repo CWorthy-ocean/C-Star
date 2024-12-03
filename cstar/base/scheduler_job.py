@@ -76,9 +76,7 @@ class SlurmJob(SchedulerJob):
         self.commands = commands
         self.cpus = cpus
 
-        default_name = (
-            f"slurm_job_{datetime.strftime(datetime.now(),format='%Y%m%d_%H%M%S')}"
-        )
+        default_name = f"slurm_job_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
 
         self.script_path = (
             Path.cwd() / f"{default_name}.sh"
