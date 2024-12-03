@@ -72,12 +72,6 @@ def test_system_name_raise(mock_machine, mock_system, mock_environment_vars):
             {
                 "mpi_exec_prefix": "srun --mpi=pmi2",
                 "compiler": "intel",
-                "queue_flag": "partition",
-                "primary_queue": "compute",
-                "mem_per_node_gb": 256,
-                "cores_per_node": 128,
-                "max_walltime": "48:00:00",
-                "other_scheduler_directives": {},
             },
         ),
         (
@@ -85,12 +79,6 @@ def test_system_name_raise(mock_machine, mock_system, mock_environment_vars):
             {
                 "mpi_exec_prefix": "srun",
                 "compiler": "gnu",
-                "queue_flag": "qos",
-                "primary_queue": "regular",
-                "mem_per_node_gb": 512,
-                "cores_per_node": 128,
-                "max_walltime": "24:00:00",
-                "other_scheduler_directives": {"-C": "cpu"},
             },
         ),
         (
@@ -98,12 +86,6 @@ def test_system_name_raise(mock_machine, mock_system, mock_environment_vars):
             {
                 "mpi_exec_prefix": "mpirun",
                 "compiler": "intel",
-                "queue_flag": "q",
-                "primary_queue": "main",
-                "mem_per_node_gb": 256,
-                "cores_per_node": 128,
-                "max_walltime": "12:00:00",
-                "other_scheduler_directives": {},
             },
         ),
     ],

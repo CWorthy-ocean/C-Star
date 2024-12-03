@@ -10,26 +10,11 @@ class MockEnvironment(cstar.base.environment.CStarEnvironment):
         system_name="mock_system",
         mpi_exec_prefix="mock_mpi_prefix",
         compiler="mock_compiler",
-        queue_flag="mock_queue_flag",
-        primary_queue="mock_primary_queue",
-        mem_per_node_gb=0,
-        cores_per_node=0,
-        max_walltime="00:00:00",
-        other_scheduler_directives=None,
     ):
-        if other_scheduler_directives is None:
-            other_scheduler_directives = {"--mock": "directive"}
-
         super().__init__(
             system_name=system_name,
             mpi_exec_prefix=mpi_exec_prefix,
             compiler=compiler,
-            queue_flag=queue_flag,
-            primary_queue=primary_queue,
-            mem_per_node_gb=mem_per_node_gb,
-            cores_per_node=cores_per_node,
-            max_walltime=max_walltime,
-            other_scheduler_directives=other_scheduler_directives,
         )
 
 
@@ -237,13 +222,8 @@ class TestStrAndReprMethods:
             expected_str = (
                 "MockEnvironment\n"
                 "---------------\n"  # Length of dashes matches "MockEnvironment"
-                "Scheduler: None\n"
                 "Compiler: mock_compiler\n"
-                "Primary Queue: mock_primary_queue\n"
                 "MPI Exec Prefix: mock_mpi_prefix\n"
-                "Cores per Node: 0\n"
-                "Memory per Node (GB): 0\n"
-                "Max Walltime: 00:00:00\n"
                 "Uses Lmod: False\n"
                 "Environment Variables:\n"
                 "    VAR1: value1\n"
@@ -269,90 +249,11 @@ class TestStrAndReprMethods:
 
         # Manually construct the expected repr output
         expected_repr = (
-            "MockEnvironment(system_name='mock_system', compiler='mock_compiler', scheduler=None, "
-            "primary_queue='mock_primary_queue', cores_per_node=0, mem_per_node_gb=0, "
-            "max_walltime='00:00:00')"
+            "MockEnvironment(system_name='mock_system', compiler='mock_compiler')"
             "\nState: <uses_lmod=False>"
         )
 
         assert repr(env) == expected_repr
-
-
-class TestSchedulerProperty:
-    """Tests for the scheduler property in CStarEnvironment.
-
-    Tests
-    -----
-    - test_scheduler_detects_slurm: Confirms Slurm detection when sinfo is present.
-    - test_scheduler_detects_pbs: Confirms PBS detection when qstat is present.
-    - test_scheduler_detects_no_scheduler: Confirms None is returned when no scheduler is detected.
-    """
-
-    def setup_method(self):
-        """Patches shutil.which to simulate different scheduler installations.
-
-        Mocks
-        -----
-        - shutil.which: Returns None by default to simulate the absence of schedulers,
-          and is modified in each test case to simulate specific scheduler binaries.
-        """
-        # Patch `shutil.which` for each test, starting with a default return of None
-        self.which_patcher = patch(
-            "cstar.base.environment.shutil.which", return_value=None
-        )
-        self.mock_which = self.which_patcher.start()
-
-    def teardown_method(self):
-        """Stops shutil.which patch after each test."""
-        self.which_patcher.stop()
-
-    def test_scheduler_detects_slurm(self):
-        """Tests that scheduler property detects Slurm when sinfo is present.
-
-        Mocks
-        -----
-        - shutil.which: Returns a path for "sinfo" to simulate the presence of Slurm.
-
-        Asserts
-        -------
-        - The scheduler property returns "slurm" when Slurm binaries are found.
-        """
-        # Set up `shutil.which` to simulate finding "sinfo" for Slurm
-        self.mock_which.side_effect = {"sinfo": "/usr/bin/sinfo"}.get
-        env = MockEnvironment()
-        assert env.scheduler == "slurm"
-
-    def test_scheduler_detects_pbs(self):
-        """Tests that scheduler property detects PBS when qstat is present.
-
-        Mocks
-        -----
-        - shutil.which: Returns a path for "qstat" to simulate the presence of PBS.
-
-        Asserts
-        -------
-        - The scheduler property returns "pbs" when PBS binaries are found.
-        """
-        # Set up `shutil.which` to simulate finding "qstat" for PBS
-        self.mock_which.side_effect = {"qstat": "/usr/bin/qstat"}.get
-        env = MockEnvironment()
-        assert env.scheduler == "pbs"
-
-    def test_scheduler_detects_no_scheduler(self):
-        """Tests that scheduler property returns None when no scheduler binaries are
-        detected.
-
-        Mocks
-        -----
-        - shutil.which: Returns None for all scheduler binaries, simulating no detected scheduler.
-
-        Asserts
-        -------
-        - The scheduler property is None when no recognized scheduler binaries are present.
-        """
-        # With `shutil.which` returning None, no scheduler should be detected
-        env = MockEnvironment()
-        assert env.scheduler is None
 
 
 class TestExceptions:

@@ -89,6 +89,7 @@ class CStarEnvironment:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nCompiler: {self.compiler}"
+        base_str += f"\nMPI Exec Prefix: {self.mpi_exec_prefix}"
         base_str += f"\nUses Lmod: {True if self.uses_lmod else False}"
         base_str += "\nEnvironment Variables:"
         for key, value in self.environment_variables.items():
@@ -107,7 +108,7 @@ class CStarEnvironment:
         return (
             f"{self.__class__.__name__}("
             f"system_name={self._system_name!r}, "
-            f"compiler={self.compiler!r}, "
+            f"compiler={self.compiler!r}"
             ")\nState: <"
             f"uses_lmod={self.uses_lmod!r}"
             ">"
