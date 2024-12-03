@@ -126,7 +126,7 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
         test_case_repo_url = (
             "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/"
         )
-        checkout_target = "d7996aea8d4fd4ca4148b34d2d898f019c90a8ff"
+        checkout_target = "935b5d4f6012b2863c2db103596f8f173a024d1c"
 
         # Construct the URL of this commit as a zip archive:
         archive_url = f"{test_case_repo_url.rstrip('/')}/archive/{checkout_target}.zip"
@@ -134,7 +134,7 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
         # Download the zip with pooch
         zip_path = pooch.retrieve(
             url=archive_url,
-            known_hash="e291bc79dd5f0ab88f486974075f3defe2076ff3706787131dae7fd0f01358b5",
+            known_hash="c9847301c308044f98731fc70864018a65c82df0981bea7c4e47d5b8e3b41b03",
             fname=f"{checkout_target}.zip",  # Name of the cached file
             path=CSTAR_TEST_DATA_DIRECTORY,  # Set the cache directory (customize as needed)
         )

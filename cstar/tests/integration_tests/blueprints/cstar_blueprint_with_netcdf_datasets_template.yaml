@@ -44,24 +44,20 @@ components:
           - "Makefile"
       model_grid:
         location: '<input_datasets_location>/roms_grd.nc'
-        file_hash: '893aff53b3c1d08c9bb381244f4fecbf9782403ba7cde82200ccb9d0f328745d'
+        file_hash: '4fe2beba68c16a7c4bccaad5d424c66255314543bc128faa527229e6e04f9e5d'
       initial_conditions:
         location: '<input_datasets_location>/roms_ini.nc'
-        file_hash: '20c2e62fcffe614e36f5948a16b2d941d85995a31cebbeecc5a3d6b8bf750907'
+        file_hash: '55168d62d9206e03433f44c3fcd06830fbd322c9b543cc9813b747dbe24dd403'
       tidal_forcing:
         location: '<input_datasets_location>/roms_tides.nc'
-        file_hash: '63e47c25604d9acf45439c7a555941c5a4b2ea84dd957f6ec23f68a6f429d47c'
+        file_hash: '4fe2beba68c16a7c4bccaad5d424c66255314543bc128faa527229e6e04f9e5d'
       boundary_forcing:
-        - location: '<input_datasets_location>/roms_bry_2012.nc'
-          file_hash: 'c501802a892320e5c915f6718da69ed6d1fbfa88106ce08a78a8661e0b2069a5'
-        - location: '<input_datasets_location>/roms_bry_bgc_2012.nc'
-          file_hash: '0fa5707547283cad4c0b0dd5cea4d4ec5be4b8451683430c4c89806ae9c4a0c8'
+        - location: '<input_datasets_location>/roms_bry.nc'
+          file_hash: '694fd224f93bfbae5022bf38d6e81c5663112151d7a9875d9ea6d917adb09e85'
+        - location: '<input_datasets_location>/roms_bry_bgc.nc'
+          file_hash: 'b286fe317a8b4a64f25971ccd0ad03abcfde9aa0ab27a439013a99126453960d'
       surface_forcing:
-        - location: '<input_datasets_location>/roms_frc_2012.nc'
-          file_hash: '02c817af1221657ad5a4a512e8c8151b110ea5b370599fc8a574017cfcd31bee'
-        - location: '<input_datasets_location>/roms_frc_2013.nc'
-          file_hash: '8fad7df6093643019e618f060056bbd97c1707ca08386a2494c9b098492d5efb'
-        - location: '<input_datasets_location>/roms_frc_bgc_2012.nc'
-          file_hash: '9f94cac6d689150bfeae6365af30a162eca9001fe649bc9562514dc99bb2ef3b'
-        - location: '<input_datasets_location>/roms_frc_bgc_2013.nc'
-          file_hash: 'd912f5700876e9126eabf4f5ebb2ddefcc34be143cb6d0f98e9a05f951947b4b'
+        - location: '<input_datasets_location>/roms_frc.nc'
+          file_hash: '43c1e15e5a4ae0718f87eb10367b1f54262a251f8bc7f9b791880efb7843f41c'
+        - location: '<input_datasets_location>/roms_frc_bgc.nc'
+          file_hash: '754421b2d99a51d3bab6086f96f78b59d3a2b5cfcf0bd582449e1f310da1378d'
