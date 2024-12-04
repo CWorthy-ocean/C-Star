@@ -119,13 +119,13 @@ class Scheduler(ABC):
         else:
             return queue
 
-    @abstractmethod
     @property
+    @abstractmethod
     def global_max_cpus_per_node(self):
         pass
 
-    @abstractmethod
     @property
+    @abstractmethod
     def global_max_mem_per_node_gb(self):
         pass
 
