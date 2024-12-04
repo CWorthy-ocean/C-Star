@@ -392,21 +392,24 @@ class PBSJob(SchedulerJob):
                 raise RuntimeError(f"Job ID {self.id} not found in qstat output.")
             # Extract the job state
             job_state = job_info["job_state"]
-            if job_state == "Q":
-                return "pending"
-            elif job_state == "R":
-                return "running"
-            elif job_state == "C":
-                return "completed"
-            elif job_state == "H":
-                return "held"
-            elif job_state == "F":
-                if job_info["Exit_status"] == 0:
+            match job_state:
+                case "Q":
+                    return "pending"
+                case "R":
+                    return "running"
+                case "C":
                     return "completed"
-                else:
-                    return "failed"
-            else:
-                return f"unknown ({job_state})"
+                case "H":
+                    return "held"
+                case "F":
+                    if job_info["Exit_status"] == 0:
+                        return "completed"
+                    else:
+                        return "failed"
+                case "E":
+                    return "ending"
+                case _:
+                    return f"unknown ({job_state})"
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse JSON from qstat output: {e}")
 

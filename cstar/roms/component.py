@@ -5,7 +5,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
 
-from cstar.base.scheduler import SlurmScheduler, PBSScheduler
 from cstar.base.scheduler_job import create_scheduler_job
 from cstar.base.utils import _replace_text_in_file
 from cstar.base.component import Component
@@ -936,7 +935,7 @@ class ROMSComponent(Component):
                 "Unable to calculate node distribution for this Component. "
                 + "Component.n_procs_tot is not set"
             )
-        if isinstance(cstar_system.scheduler, PBSScheduler):
+        if cstar_system.scheduler is not None:
             if account_key is None:
                 raise ValueError(
                     "please call Component.run() with a value for account_key"
@@ -955,26 +954,7 @@ class ROMSComponent(Component):
             job_instance.submit()
             return job_instance
 
-        elif isinstance(cstar_system.scheduler, SlurmScheduler):
-            if account_key is None:
-                raise ValueError(
-                    "please call Component.run() with a value for account_key"
-                )
-
-            job_instance = create_scheduler_job(
-                commands=roms_exec_cmd,
-                job_name=job_name,
-                cpus=self.discretization.n_procs_tot,
-                account_key=account_key,
-                run_path=run_path,
-                queue_name=queue,
-                walltime=walltime,
-            )
-
-            job_instance.submit()
-            return job_instance
-
-        elif cstar_system.scheduler is None:
+        else:  # cstar_system.scheduler is None
             import time
 
             romsprocess = subprocess.Popen(
