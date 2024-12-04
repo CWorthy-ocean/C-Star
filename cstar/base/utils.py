@@ -1,7 +1,5 @@
 import re
 import subprocess
-from math import ceil
-from typing import Tuple
 from pathlib import Path
 
 
@@ -122,38 +120,6 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
         )
     else:
         return ls_remote.split()[0]
-
-
-def _calculate_node_distribution(
-    n_cores_required: int, tot_cores_per_node: int
-) -> Tuple[int, int]:
-    """Determine how many nodes and cores per node to request from a job scheduler.
-
-    For example, if requiring 192 cores for a job on a system with 128 cores per node,
-    this method advises requesting 2 nodes with 96 cores each.
-
-    Parameters:
-    -----------
-    n_cores_required: int
-        The number of cores required for the job
-    tot_cores_per_node: int
-        The number of cores per node on the target system
-
-    Returns:
-    --------
-    n_nodes_to_request: int
-        The number of nodes to request from the scheduler
-    cores_to_request_per_node: int
-        The number of cores per node to request from the scheduler
-    """
-    n_nodes_to_request = ceil(n_cores_required / tot_cores_per_node)
-    cores_to_request_per_node = ceil(
-        tot_cores_per_node
-        - ((n_nodes_to_request * tot_cores_per_node) - n_cores_required)
-        / n_nodes_to_request
-    )
-
-    return n_nodes_to_request, cores_to_request_per_node
 
 
 def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -> bool:

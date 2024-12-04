@@ -2,7 +2,13 @@ import os
 import platform
 from typing import Optional
 from cstar.base.environment import CStarEnvironment
-from cstar.base.scheduler import Scheduler, SlurmScheduler, SlurmQueue
+from cstar.base.scheduler import (
+    Scheduler,
+    SlurmScheduler,
+    SlurmQueue,
+    PBSQueue,
+    PBSScheduler,
+)
 
 
 class CStarSystem:
@@ -27,6 +33,17 @@ class CStarSystem:
                     primary_queue_name="regular",
                     queue_flag="qos",
                     other_scheduler_directives={"-C": "cpu"},
+                )
+            case "derecho":
+                # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
+                main_q = PBSQueue(name="main", max_walltime="12:00:00")
+                preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
+                develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
+
+                self._scheduler = PBSScheduler(
+                    queues=[main_q, preempt_q, develop_q],
+                    primary_queue_name="main",
+                    queue_flag="q",
                 )
             case _:
                 self._scheduler = None
