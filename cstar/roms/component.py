@@ -941,31 +941,20 @@ class ROMSComponent(Component):
                 raise ValueError(
                     "please call Component.run() with a value for account_key"
                 )
-            scheduler_script = "#PBS -S /bin/bash"
-            scheduler_script += f"\n#PBS -N {job_name}"
-            scheduler_script += f"\n#PBS -o {job_name}.out"
-            scheduler_script += f"\n#PBS -A {account_key}"
-            scheduler_script += (
-                f"\n#PBS -l ncpus={self.discretization.n_procs_tot},walltime={walltime}"
-            )
-            scheduler_script += f"\n#PBS -q {queue}"
-            scheduler_script += "\n#PBS -j oe"
-            scheduler_script += "\n#PBS -k eod"
-            scheduler_script += "\n#PBS -V"
-            for (
-                key,
-                value,
-            ) in cstar_system.scheduler.other_scheduler_directives.items():
-                scheduler_script += f"\n#PBS {key} {value}"
-            if cstar_system.name == "derecho":
-                scheduler_script += "\ncd ${PBS_O_WORKDIR}"
-            scheduler_script += f"\n\n{roms_exec_cmd}"
 
-            script_fname = "cstar_run_script.pbs"
-            with open(run_path / script_fname, "w") as f:
-                f.write(scheduler_script)
-            subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
-            return None
+            job_instance = create_scheduler_job(
+                commands=roms_exec_cmd,
+                job_name=job_name,
+                cpus=self.discretization.n_procs_tot,
+                account_key=account_key,
+                run_path=run_path,
+                queue_name=queue,
+                walltime=walltime,
+            )
+
+            job_instance.submit()
+            return job_instance
+
         elif isinstance(cstar_system.scheduler, SlurmScheduler):
             if account_key is None:
                 raise ValueError(

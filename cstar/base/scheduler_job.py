@@ -16,7 +16,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple
 from cstar.base.system import cstar_system
-
 from cstar.base.scheduler import SlurmScheduler, PBSScheduler, Scheduler
 
 
@@ -32,8 +31,13 @@ def create_scheduler_job(
     send_email: Optional[bool] = True,
     walltime: Optional[str] = None,
 ) -> "SchedulerJob":
+    # mypy assigns type based on first condition, assigning explicitly:
+    job_type: type[SlurmJob] | type[PBSJob]
+
     if isinstance(cstar_system.scheduler, SlurmScheduler):
         job_type = SlurmJob
+    elif isinstance(cstar_system.scheduler, PBSScheduler):
+        job_type = PBSJob
     else:
         raise TypeError(
             f"Unsupported scheduler type: {type(cstar_system.scheduler).__name__}"
