@@ -1,4 +1,5 @@
-[](disclaimer.md)
+```{include} disclaimer.md
+```
 
 # Terminology
 
