@@ -60,10 +60,7 @@ fix = true
 config = ".pre-commit-config.yaml"
 
 [tool.setuptools.packages.find]
-# Automatically find the packages
-where = ["."]
-include = ["cstar"]
-exclude = ["tests*", "docs*", "examples*"]
+exclude = ["tests*", "docs*", "examples*", "additional_files*", "externals*"]
 
 [tool.setuptools]
 include-package-data = true
