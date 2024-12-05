@@ -8,7 +8,7 @@
 > Therefore whilst you are welcome to try out using the package, we cannot yet guarantee backwards compatibility. 
 We expect to reach a more stable version in Q1 2025.
 >
-> To see which systems C-Star has been tested on so far, see [Supported Systems]().
+> To see which systems C-Star has been tested on so far, see [Supported Systems](https://c-star.readthedocs.io/en/latest/machines.html).
 
 # Installation
 
