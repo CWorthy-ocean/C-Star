@@ -18,7 +18,10 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Oceanography"
 ]
 requires-python = ">=3.10"
@@ -39,8 +42,6 @@ test = [
      "roms_tools[dask]==2.0.0"
      ]
 dev =[]
-
-
 
 [build-system]
 requires = ["setuptools>=42", "wheel"]
@@ -64,7 +65,6 @@ exclude = ["tests*", "docs*", "examples*", "additional_files*", "externals*"]
 
 [tool.setuptools]
 include-package-data = true
-
 
 [tool.pytest.ini_options]
 norecursedirs = [".tox", ".git", "__pycache__", ".#*", "*~"]
