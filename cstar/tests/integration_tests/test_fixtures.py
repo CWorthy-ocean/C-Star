@@ -130,8 +130,8 @@ class TestFetchData:
         expected_files = [
             "additional_code/ROMS/namelists/roms.in",
             "additional_code/ROMS/source_mods/Makefile",
-            "input_datasets/ROMS/roms_bry_2012.nc",
-            "input_datasets/ROMS/roms_frc_2012.nc",
+            "input_datasets/ROMS/roms_bry.nc",
+            "input_datasets/ROMS/roms_frc.nc",
             "roms_tools_yaml_files/roms_bry.yaml",
             "roms_tools_yaml_files/roms_ini.yaml",
         ]
