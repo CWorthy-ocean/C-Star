@@ -1,10 +1,12 @@
 [![codecov](https://codecov.io/gh/CWorthy-ocean/C-Star/graph/badge.svg?token=HAPZGL2LWF)](https://codecov.io/gh/CWorthy-ocean/C-Star)
 [![Documentation Status](https://readthedocs.org/projects/c-star/badge/?version=latest)](https://c-star.readthedocs.io/en/latest/?badge=latest)
 
-<mark>**DISCLAIMER**: 
-* This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout 2024. We do not recommend to use this software before this ALPHA development and test phase is completed.
-* Examples in the [documentation](https://c-star.readthedocs.io/en/latest/index.html) currently only work on the Perlmutter machine.
-</mark>
+> [!Warning] 
+> This project is still in an early phase of development. The [python API](https://c-star.readthedocs.io/en/latest/api.html) is not yet stable, and the schema for the [blueprint](https://c-star.readthedocs.io/en/latest/terminology.html#term-blueprint) will likely evolve. 
+Therefore whilst you are welcome to try out using the package, we cannot yet guarantee backwards compatibility. 
+We expect to reach a more stable version in Q1 2025.
+>
+> To see which systems C-Star has been tested on so far, see [Supported Systems]().
 
 # Installation
 
