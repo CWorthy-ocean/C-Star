@@ -40,14 +40,24 @@ class MockScheduler(Scheduler):
 
 
 class TestSchedulerJobBase:
+    def setup_method(self, method):
+        # Define common job parameters
+        self.common_job_params = {
+            "scheduler": MockScheduler(),
+            "commands": "echo Hello, World",
+            "account_key": "test_account",
+            "cpus": 4,
+            "walltime": "01:00:00",
+        }
+
     @pytest.mark.filterwarnings("ignore:Walltime parameter unspecified")
     def test_initialization_defaults(self):
-        job = MockSchedulerJob(
-            scheduler=MockScheduler(),
-            commands="echo Hello, World",
-            account_key="test_account",
-            cpus=4,
-        )
+        params = {
+            key: value
+            for key, value in self.common_job_params.items()
+            if key != "walltime"
+        }
+        job = MockSchedulerJob(**params)
 
         assert job.job_name.startswith("cstar_job_")
         assert job.script_path.name.endswith(".sh")
@@ -59,22 +69,15 @@ class TestSchedulerJobBase:
         with pytest.raises(
             ValueError, match="Selected walltime 04:00:00 exceeds maximum"
         ):
-            MockSchedulerJob(
-                scheduler=MockScheduler(),
-                commands="echo Hello, World",
-                account_key="test_account",
-                cpus=4,
-                walltime="04:00:00",  # Requesting 2 hours
-            )
+            params = {
+                key: value
+                for key, value in self.common_job_params.items()
+                if key != "walltime"
+            }
+            MockSchedulerJob(**params, walltime="04:00:00")
 
     def test_updates_non_running_job(self):
-        job = MockSchedulerJob(
-            scheduler=MockScheduler(),
-            commands="echo Hello, World",
-            account_key="test_account",
-            walltime="00:20:00",
-            cpus=4,
-        )
+        job = MockSchedulerJob(**self.common_job_params)
 
         with patch.object(
             MockSchedulerJob, "status", new_callable=PropertyMock
@@ -101,14 +104,25 @@ class TestSchedulerJobBase:
             f.writelines(initial_content)
 
         # Create a MockSchedulerJob instance and assign the output file
-        job = MockSchedulerJob(
-            scheduler=MockScheduler(),
-            commands="echo Hello, World",
-            account_key="test_account",
-            walltime="00:20:00",
-            output_file=output_file,
-            cpus=4,
-        )
+
+        # -        job = MockSchedulerJob(
+        # -            scheduler=MockScheduler(),
+        # -            commands="echo Hello, World",
+        # -            account_key="test_account",
+        # -            walltime="00:20:00",
+        # -            output_file=output_file,
+        # -            cpus=4,
+        # -        )
+
+        # self.common_job_params = {
+        #     "scheduler": MockScheduler(),
+        #     "commands": "echo Hello, World",
+        #     "account_key": "test_account",
+        #     "cpus": 4,
+        #     "walltime": "01:00:00",
+        # }
+
+        job = MockSchedulerJob(**self.common_job_params, output_file=output_file)
 
         # Mock the `status` property to return "running"
         with patch.object(
@@ -138,9 +152,6 @@ class TestSchedulerJobBase:
 
             # Ensure the thread finishes before the test ends
             updater_thread.join()
-
-
-##
 
 
 class TestCalculateNodeDistribution:
@@ -378,6 +389,30 @@ class TestSlurmJob:
             text=True,
         )
 
+    def test_save_script(self, tmp_path):
+        # Define paths for the script file
+        script_path = tmp_path / "test_job.sh"
+
+        # Initialize the job
+        job = SlurmJob(
+            **self.common_job_params,
+            script_path=script_path,
+        )
+
+        # Call save_script
+        job.save_script()
+
+        # Check that the file was created
+        assert script_path.exists(), "The script file was not created."
+
+        # Verify the file content matches job.script
+        with script_path.open() as f:
+            file_content = f.read()
+
+        assert (
+            file_content.strip() == job.script.strip()
+        ), f"Script content mismatch!\nExpected:\n{job.script}\nGot:\n{file_content}"
+
     @patch("subprocess.run")
     @pytest.mark.parametrize(
         "job_id, sacct_output, return_code, expected_status, should_raise",
@@ -424,30 +459,6 @@ class TestSlurmJob:
             assert (
                 job.status == expected_status
             ), f"Expected status '{expected_status}' but got '{job.status}'"
-
-    def test_save_script(self, tmp_path):
-        # Define paths for the script file
-        script_path = tmp_path / "test_job.sh"
-
-        # Initialize the job
-        job = SlurmJob(
-            **self.common_job_params,
-            script_path=script_path,
-        )
-
-        # Call save_script
-        job.save_script()
-
-        # Check that the file was created
-        assert script_path.exists(), "The script file was not created."
-
-        # Verify the file content matches job.script
-        with script_path.open() as f:
-            file_content = f.read()
-
-        assert (
-            file_content.strip() == job.script.strip()
-        ), f"Script content mismatch!\nExpected:\n{job.script}\nGot:\n{file_content}"
 
 
 class TestPBSJob:
