@@ -43,6 +43,12 @@ A key strength of C-Star lies in its ability to run regional simulations using a
 
 .. toctree::
    :maxdepth: 1
+   :caption: Deployment
+
+   machines
+
+.. toctree::
+   :maxdepth: 1
    :caption: How To Contribute
 
    contributing
