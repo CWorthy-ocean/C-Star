@@ -1,23 +1,30 @@
-import subprocess
 import json
+import subprocess
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
+from typing import List, Dict, Optional
 
 ################################################################################
 
 
-class Queue:
-    def __init__(self, name: str):
-        self.name = name
-
-
-class SlurmQueue(Queue):
+class Queue(ABC):
     def __init__(self, name: str, query_name: Optional[str] = None):
         self.name = name
         self.query_name = query_name if query_name is not None else name
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(name={self.name!r}, query_name={self.query_name!r})"
+
+
+class SlurmQueue(Queue):
+    def __str__(self):
+        return (
+            f"{self.__class__.__name__}:\n"
+            f"{'-' * len(self.__class__.__name__)}\n"
+            f"name: {self.name}\n"
+            f"max_walltime: {self.max_walltime}\n"
+            f"max_nodes: {self.max_nodes}\n"
+            f"priority: {self.priority}\n"
+        )
 
     def query_queue_property(self, queue_name, property_name):
         result = subprocess.run(
@@ -52,8 +59,20 @@ class SlurmQueue(Queue):
 class PBSQueue(Queue):
     def __init__(self, name: str, max_walltime: str, query_name: Optional[str] = None):
         super().__init__(name)
-        self.query_name = query_name if query_name is not None else name
         self.max_walltime = max_walltime
+
+    def __str__(self):
+        return (
+            f"{self.__class__.__name__}:\n"
+            + f"{'-' * len(self.__class__.__name__)}\n"
+            + f"name: {self.name}\n"
+            + f"max_walltime: {self.max_walltime}\n"
+        )
+
+    def __repr__(self):
+        base_repr = super().__repr__()
+        # Strip the closing ')' and append the additional attribute
+        return f"{base_repr.rstrip(')')}, max_walltime={self.max_walltime!r})"
 
     def query_queue_property(
         self, queue_name: str, property_name: str
@@ -68,8 +87,6 @@ class PBSQueue(Queue):
         # Parse the JSON output
         data = json.loads(result.stdout)
         # Access the requested property
-        breakpoint()
-
         return data["Queue"][queue_name].get(property_name)
 
     @property
@@ -77,20 +94,9 @@ class PBSQueue(Queue):
         mc = self.query_queue_property(self.query_name, "resources_max.ncpus")
         return int(mc) if mc else None
 
-    # @property
-    # def max_walltime(self) -> Optional[str]:
-    #     return None
-    # mw = self.query_queue_property(self.query_name, "resources_max.walltime")
-    # return int(mw) if mw else None
-
     @property
     def max_mem(self) -> Optional[str]:
         return self.query_queue_property(self.query_name, "resources_max.mem")
-
-    @property
-    def priority(self) -> Optional[int]:
-        pr = self.query_queue_property(self.query_name, "Priority")
-        return int(pr) if pr else None
 
 
 ################################################################################
@@ -119,6 +125,26 @@ class Scheduler(ABC):
         else:
             return queue
 
+    def __str__(self):
+        queues_str = "\n".join([str(queue.name) for queue in self.queues])
+        return (
+            f"{self.__class__.__name__}\n"
+            f"{'-' * len(self.__class__.__name__)}\n"
+            f"primary_queue: {self.primary_queue_name}\n"
+            f"queues:\n{queues_str}\n"
+            f"other_scheduler_directives: {self.other_scheduler_directives}\n"
+            f"global max cpus per node: {self.global_max_cpus_per_node}\n"
+            f"global max mem per node: {self.global_max_mem_per_node_gb}GB"
+        )
+
+    def __repr__(self):
+        base_repr = (
+            f"{self.__class__.__name__}(queue_flag={self.queue_flag!r}, "
+            f"queues={self.queues!r}, primary_queue_name={self.primary_queue_name!r}, "
+            f"other_scheduler_directives={self.other_scheduler_directives!r})"
+        )
+        return base_repr
+
     @property
     @abstractmethod
     def global_max_cpus_per_node(self):
@@ -139,6 +165,8 @@ class SlurmScheduler(Scheduler):
             text=True,
             capture_output=True,
         )
+        if result.returncode != 0:
+            print(f"Error querying node property. STDERR: {result.stderr}")
         so = result.stdout.strip()
         return int(so) if so else None
 
@@ -150,8 +178,10 @@ class SlurmScheduler(Scheduler):
             text=True,
             capture_output=True,
         )
+        if result.returncode != 0:
+            print(f"Error querying node property. STDERR: {result.stderr}")
         so = result.stdout.strip()
-        return float(so) / (1024**3) if so else None
+        return float(so) / (1024) if so else None
 
 
 class PBSScheduler(Scheduler):
@@ -163,6 +193,8 @@ class PBSScheduler(Scheduler):
             text=True,
             capture_output=True,
         )
+        if result.returncode != 0:
+            print(f"Error querying node property. STDERR: {result.stderr}")
         so = result.stdout.strip()
         return int(so) if so else None
 
@@ -174,6 +206,8 @@ class PBSScheduler(Scheduler):
             text=True,
             capture_output=True,
         )
+        if result.returncode != 0:
+            print(f"Error querying node property. STDERR: {result.stderr}")
         so = result.stdout.strip()
         if so.endswith("kb"):
             return float(so[:-2]) / (1024**2)  # Convert kilobytes to gigabytes
