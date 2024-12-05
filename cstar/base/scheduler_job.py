@@ -13,7 +13,7 @@ import subprocess
 from math import ceil
 from abc import ABC, abstractmethod
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from cstar.base.system import cstar_system
 from cstar.base.scheduler import SlurmScheduler, PBSScheduler, Scheduler
@@ -98,14 +98,39 @@ class SchedulerJob(ABC):
         )
         self.queue = scheduler.get_queue(queue_name)
 
-        if walltime > self.queue.max_walltime:
+        self.walltime = walltime
+        if (walltime is None) and (self.queue.max_walltime is None):
             raise ValueError(
-                f"Selected walltime {walltime} exceeds maximum "
-                + f"walltime for selected queue {queue_name}: "
-                + f"{self.queue.max_walltime}"
+                "Cannot create scheduler job: walltime parameter not provided "
+                + f"and C-Star cannot default to the max walltime for the queue {queue_name} "
+                + " as it cannot be determined"
             )
+        elif self.queue.max_walltime is None:
+            warnings.warn(
+                f"WARNING: Unable to determine the maximum allowed walltime for chosen queue {queue_name}. "
+                + f"If your chosen walltime {walltime} exceeds the (unknown) limit, this job may be "
+                + "rejected by your system's job scheduler.",
+                UserWarning,
+            )
+        elif walltime is None:
+            warnings.warn(
+                "Walltime parameter unspecified. Creating scheduler job with maximum walltime "
+                + f"for queue {queue_name}, {self.queue.max_walltime}"
+            )
+            self.walltime = self.queue.max_walltime
         else:
-            self.walltime = walltime
+            # Check walltimes
+            wt_h, wt_m, wt_s = map(int, walltime.split(":"))
+            mw_h, mw_m, mw_s = map(int, self.queue.max_walltime.split(":"))
+            walltime_delta = timedelta(hours=wt_h, minutes=wt_m, seconds=wt_s)
+            max_walltime_delta = timedelta(hours=mw_h, minutes=mw_m, seconds=mw_s)
+
+            if walltime_delta > max_walltime_delta:
+                raise ValueError(
+                    f"Selected walltime {walltime} exceeds maximum "
+                    + f"walltime for selected queue {queue_name}: "
+                    + f"{self.queue.max_walltime}"
+                )
 
         self.cpus = cpus
         if isinstance(scheduler, PBSScheduler):
