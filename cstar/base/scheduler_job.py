@@ -1,6 +1,4 @@
 ## STIL TODO:
-#
-# Add PBSJob class
 # Write unit test module
 # Write docstrings and rtd pages
 
@@ -133,29 +131,46 @@ class SchedulerJob(ABC):
                 )
 
         self.cpus = cpus
-        if isinstance(scheduler, PBSScheduler):
-            if (nodes is None) and (cpus_per_node is not None):
-                self.nodes = ceil(cpus / cpus_per_node)  # ceiling division
-            elif (nodes is not None) and (cpus_per_node is None):
-                self.cpus_per_node = cpus / nodes
-            elif (nodes is None) or (cpus_per_node is None):
-                nnodes, ncpus = self._calculate_node_distribution(
-                    cpus, scheduler.global_max_cpus_per_node
-                )
-                warnings.warn(
-                    (
-                        "WARNING: Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
-                        + "parameters, but your system uses PBS."
-                        + "\n PBS requires explicit specification of task distribution. C-Star will attempt "
-                        + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
-                        + "\nbased on your system maximum of "
-                        + f"{scheduler.global_max_cpus_per_node} CPUS per node "
-                        + f"\nand your job requirement of {cpus} CPUS."
-                    ),
-                    UserWarning,
-                )
-                self.cpus_per_node = ncpus
-                self.nodes = nnodes
+
+        # Explicitly typing to avoid mypy confusion in conditional pathways below
+        self.cpus_per_node: Optional[int]
+        self.nodes: Optional[int]
+
+        if (
+            isinstance(scheduler, PBSScheduler)
+            and (nodes is None)
+            and (cpus_per_node is not None)
+        ):
+            self.nodes = ceil(cpus / cpus_per_node)  # ceiling division
+        elif (
+            isinstance(scheduler, PBSScheduler)
+            and (nodes is not None)
+            and (cpus_per_node is None)
+        ):
+            self.cpus_per_node = int(cpus / nodes)
+        elif isinstance(scheduler, PBSScheduler) and (
+            (nodes is None) or (cpus_per_node is None)
+        ):
+            nnodes, ncpus = self._calculate_node_distribution(
+                cpus, scheduler.global_max_cpus_per_node
+            )
+            warnings.warn(
+                (
+                    "WARNING: Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
+                    + "parameters, but your system uses PBS."
+                    + "\n PBS requires explicit specification of task distribution. C-Star will attempt "
+                    + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
+                    + "\nbased on your system maximum of "
+                    + f"{scheduler.global_max_cpus_per_node} CPUS per node "
+                    + f"\nand your job requirement of {cpus} CPUS."
+                ),
+                UserWarning,
+            )
+            self.cpus_per_node = ncpus
+            self.nodes = nnodes
+        else:
+            self.cpus_per_node = cpus_per_node
+            self.nodes = nodes
 
         self.account_key = account_key
         self._id = None
@@ -305,8 +320,8 @@ class SlurmJob(SchedulerJob):
                 f"{cstar_system.environment.package_root}/additional_files/lmod_lists/{cstar_system.name}.lmod"
             ) as F:
                 modules = F.readlines()
-        for m in modules:
-            scheduler_script += f"\nmodule load {m}"
+            for m in modules:
+                scheduler_script += f"\nmodule load {m}"
 
         scheduler_script += "\nprintenv"
 
