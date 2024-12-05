@@ -15,20 +15,34 @@ class MockSchedulerJob(SchedulerJob):
         return "mock_submit"
 
 
-@pytest.fixture
-def mock_scheduler():
-    # Fixture to provide a mocked Scheduler instance
-    scheduler = MagicMock(spec=Scheduler)
-    scheduler.primary_queue_name = "default_queue"
-    scheduler.get_queue.return_value = MagicMock(max_walltime="02:00:00")
-    return scheduler
+class MockScheduler(Scheduler):
+    def __init__(self):
+        # Initialize with mock values
+        super().__init__(
+            queue_flag="mock_flag",
+            queues=[MagicMock(name="default_queue", max_walltime="02:00:00")],
+            primary_queue_name="default_queue",
+            other_scheduler_directives={"mock_directive": "mock_value"},
+        )
+
+    def get_queue(self, name):
+        # Return a mocked queue with default properties
+        return MagicMock(name=name, max_walltime="02:00:00")
+
+    @property
+    def global_max_cpus_per_node(self):
+        return 64  # Mocked maximum CPUs per node
+
+    @property
+    def global_max_mem_per_node_gb(self):
+        return 128  # Mocked maximum memory in GB
 
 
 class TestSchedulerJobBase:
     @pytest.mark.filterwarnings("ignore:Walltime parameter unspecified")
-    def test_initialization_defaults(self, mock_scheduler):
+    def test_initialization_defaults(self):
         job = MockSchedulerJob(
-            scheduler=mock_scheduler,
+            scheduler=MockScheduler(),
             commands="echo Hello, World",
             account_key="test_account",
             cpus=4,
@@ -40,23 +54,21 @@ class TestSchedulerJobBase:
         assert job.walltime == "02:00:00"
         assert job.cpus == 4
 
-    def test_walltime_exceeds_max_walltime(self, mock_scheduler):
-        mock_scheduler.get_queue.return_value.max_walltime = "01:00:00"  # Max 1 hour
-
+    def test_walltime_exceeds_max_walltime(self):
         with pytest.raises(
-            ValueError, match="Selected walltime 02:00:00 exceeds maximum"
+            ValueError, match="Selected walltime 04:00:00 exceeds maximum"
         ):
             MockSchedulerJob(
-                scheduler=mock_scheduler,
+                scheduler=MockScheduler(),
                 commands="echo Hello, World",
                 account_key="test_account",
                 cpus=4,
-                walltime="02:00:00",  # Requesting 2 hours
+                walltime="04:00:00",  # Requesting 2 hours
             )
 
-    def test_updates_non_running_job(self, mock_scheduler):
+    def test_updates_non_running_job(self):
         job = MockSchedulerJob(
-            scheduler=mock_scheduler,
+            scheduler=MockScheduler(),
             commands="echo Hello, World",
             account_key="test_account",
             walltime="00:20:00",
@@ -77,7 +89,7 @@ class TestSchedulerJobBase:
                     f"See {job.output_file.resolve()} for job output"
                 )
 
-    def test_updates_running_job_with_tmp_file(self, mock_scheduler, tmp_path):
+    def test_updates_running_job_with_tmp_file(self, tmp_path):
         # Create a temporary output file
         output_file = tmp_path / "output.log"
         initial_content = ["First line\n"]
@@ -89,7 +101,7 @@ class TestSchedulerJobBase:
 
         # Create a MockSchedulerJob instance and assign the output file
         job = MockSchedulerJob(
-            scheduler=mock_scheduler,
+            scheduler=MockScheduler(),
             commands="echo Hello, World",
             account_key="test_account",
             walltime="00:20:00",
