@@ -482,6 +482,7 @@ class PBSJob(SchedulerJob):
     def cancel(self):
         if self.status not in ["running", "pending", "held"]:
             print(f"Cannot cancel job with status {self.status}")
+            return
 
         result = subprocess.run(
             f"qdel {self.id}",

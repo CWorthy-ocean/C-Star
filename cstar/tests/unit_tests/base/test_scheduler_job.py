@@ -1,3 +1,4 @@
+import json
 import time
 import pytest
 import threading
@@ -498,3 +499,183 @@ class TestPBSJob:
         assert (
             job.script.strip() == expected_script.strip()
         ), f"Script mismatch!\nExpected:\n{expected_script}\n\nGot:\n{job.script}"
+
+    @patch("subprocess.run")
+    @patch("cstar.base.system.CStarSystem.scheduler", new_callable=PropertyMock)
+    def test_submit(self, mock_scheduler, mock_subprocess, tmp_path):
+        # Mock scheduler attributes
+        mock_scheduler.return_value = MagicMock()
+        mock_scheduler.return_value.queue_flag = "q"
+        mock_scheduler.return_value.other_scheduler_directives = {}
+
+        # Mock subprocess.run for qsub
+        mock_subprocess.return_value = MagicMock(
+            returncode=0, stdout="12345.mockserver\n", stderr=""
+        )
+
+        # Create temporary paths
+        script_path = tmp_path / "test_pbs_job.sh"
+        run_path = tmp_path
+
+        # Initialize a PBSJob
+        job = PBSJob(
+            **self.common_job_params,
+            script_path=script_path,
+            run_path=run_path,
+        )
+
+        # Submit the job
+        job.submit()
+
+        # Verify the script file was saved
+        assert script_path.exists(), "The job script was not saved."
+        with script_path.open() as f:
+            file_content = f.read()
+        assert (
+            file_content.strip() == job.script.strip()
+        ), f"Script content mismatch!\nExpected:\n{job.script}\nGot:\n{file_content}"
+
+        # Verify subprocess.run was called with qsub
+        mock_subprocess.assert_called_once_with(
+            f"qsub {script_path}",
+            shell=True,
+            cwd=run_path,
+            capture_output=True,
+            text=True,
+        )
+
+        # Check that the job ID was correctly set
+        assert job.id == 12345, f"Expected job ID to be 12345 but got {job.id}"
+
+        # Reset the mock for the next scenario
+        mock_subprocess.reset_mock()
+
+        # Mock qsub failure
+        mock_subprocess.return_value = MagicMock(
+            returncode=1, stdout="", stderr="Error submitting job"
+        )
+
+        # Expect an error when qsub fails
+        with pytest.raises(
+            RuntimeError, match="Non-zero exit code when submitting job"
+        ):
+            job.submit()
+
+    @patch("subprocess.run")
+    @patch("cstar.base.scheduler_job.PBSJob.status", new_callable=PropertyMock)
+    def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
+        # Mock the status to "running"
+        mock_status.return_value = "running"
+
+        # Mock subprocess.run for successful cancellation
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Create a PBSJob with a set job ID
+        job = PBSJob(
+            **self.common_job_params,
+            run_path=tmp_path,
+        )
+        job._id = 12345  # Manually set the job ID
+
+        # Cancel the job
+        job.cancel()
+
+        # Verify qdel was called correctly
+        mock_subprocess.assert_called_once_with(
+            "qdel 12345",
+            shell=True,
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+
+    @patch("subprocess.run")
+    @patch("cstar.base.scheduler_job.PBSJob.status", new_callable=PropertyMock)
+    @patch("builtins.print")
+    def test_cancel_completed_job(
+        self, mock_print, mock_status, mock_subprocess, tmp_path
+    ):
+        # Mock the status to "completed"
+        mock_status.return_value = "completed"
+
+        # Create a PBSJob with a set job ID
+        job = PBSJob(
+            **self.common_job_params,
+            run_path=tmp_path,
+        )
+        job._id = 12345  # Manually set the job ID
+
+        # Attempt to cancel the job
+        job.cancel()
+
+        # Verify the message was printed
+        mock_print.assert_called_with("Cannot cancel job with status completed")
+
+        # Verify qdel was not called
+        mock_subprocess.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "qstat_output, exit_status, expected_status, should_raise",
+        [
+            (
+                {"Jobs": {"12345": {"job_state": "Q"}}},
+                None,
+                "pending",
+                False,
+            ),  # Pending job
+            (
+                {"Jobs": {"12345": {"job_state": "R"}}},
+                None,
+                "running",
+                False,
+            ),  # Running job
+            (
+                {"Jobs": {"12345": {"job_state": "C"}}},
+                None,
+                "completed",
+                False,
+            ),  # Completed job
+            ({"Jobs": {"12345": {"job_state": "H"}}}, None, "held", False),  # Held job
+            (
+                {"Jobs": {"12345": {"job_state": "F", "Exit_status": 1}}},
+                None,
+                "failed",
+                False,
+            ),  # Failed job
+            (
+                {"Jobs": {"12345": {"job_state": "F", "Exit_status": 0}}},
+                None,
+                "completed",
+                False,
+            ),  # Completed with Exit_status 0
+            (None, 1, None, True),  # qstat command failure
+        ],
+    )
+    @patch("subprocess.run")
+    def test_status(
+        self, mock_subprocess, qstat_output, exit_status, expected_status, should_raise
+    ):
+        # Mock qstat command output
+        if qstat_output is not None:
+            mock_subprocess.return_value = MagicMock(
+                returncode=0, stdout=json.dumps(qstat_output), stderr=""
+            )
+        else:
+            mock_subprocess.return_value = MagicMock(
+                returncode=1, stdout="", stderr="Error: qstat command failed"
+            )
+
+        # Create a PBSJob with a set job ID
+        job = PBSJob(**self.common_job_params)
+        job._id = 12345  # Manually set the job ID
+
+        # Check the expected outcome
+        if should_raise:
+            with pytest.raises(
+                RuntimeError, match="Failed to retrieve job status using qstat"
+            ):
+                job.status
+        else:
+            assert (
+                job.status == expected_status
+            ), f"Expected status '{expected_status}' but got '{job.status}'"
