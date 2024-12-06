@@ -1,5 +1,6 @@
 import os
 import platform
+from enum import Enum
 from typing import Optional
 from cstar.system.environment import CStarEnvironment
 from cstar.system.scheduler import (
@@ -11,44 +12,36 @@ from cstar.system.scheduler import (
 )
 
 
+class SystemName(Enum):
+    """Enum for representing the names of supported systems.
+
+    Each member corresponds to a specific system name used in the
+    application, derived from environment variables or platform information.
+
+    Members:
+    --------
+        PERLMUTTER: Represents the "perlmutter" system.
+        EXPANSE: Represents the "expanse" system.
+        DERECHO: Represents the "derecho" system.
+        DARWIN_ARM64: Represents a Darwin-based ARM64 system.
+        LINUX_X86_64: Represents a Linux-based x86_64 system.
+
+    Usage:
+    ------
+        SystemName.PERLMUTTER          # Accessing a member
+        SystemName("expanse")          # Converting from a string
+    """
+
+    PERLMUTTER = "perlmutter"
+    EXPANSE = "expanse"
+    DERECHO = "derecho"
+    DARWIN_ARM64 = "darwin_arm64"
+    LINUX_X86_64 = "linux_x86_64"
+
+
 class CStarSystemManager:
     _environment: Optional[CStarEnvironment] = None
     _scheduler: Optional[Scheduler] = None
-
-    @property
-    def scheduler(self) -> Optional[Scheduler]:
-        """todo."""
-        if self._scheduler is not None:
-            return self._scheduler
-
-        match self.name:
-            case "perlmutter":
-                # regular -> regular_1 for < 124 nodes, regular_0 for >124 nodes
-                regular_q = SlurmQueue(name="regular", query_name="regular_1")
-                shared_q = SlurmQueue(name="shared")
-                debug_q = SlurmQueue(name="debug")
-
-                self._scheduler = SlurmScheduler(
-                    queues=[regular_q, shared_q, debug_q],
-                    primary_queue_name="regular",
-                    queue_flag="qos",
-                    other_scheduler_directives={"-C": "cpu"},
-                )
-            case "derecho":
-                # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
-                main_q = PBSQueue(name="main", max_walltime="12:00:00")
-                preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
-                develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
-
-                self._scheduler = PBSScheduler(
-                    queues=[main_q, preempt_q, develop_q],
-                    primary_queue_name="main",
-                    queue_flag="q",
-                )
-            case _:
-                self._scheduler = None
-
-        return self._scheduler
 
     @property
     def name(self) -> str:
@@ -89,6 +82,45 @@ class CStarSystemManager:
 
         return sysname.casefold()
 
+    def _system_name_enum(self) -> SystemName:
+        """Converts the system name string to a validated SystemName enum."""
+        return SystemName(self.name)
+
+    @property
+    def scheduler(self) -> Optional[Scheduler]:
+        """todo."""
+        if self._scheduler is not None:
+            return self._scheduler
+
+        match self._system_name_enum():
+            case SystemName.PERLMUTTER:
+                # regular -> regular_1 for < 124 nodes, regular_0 for >124 nodes
+                regular_q = SlurmQueue(name="regular", query_name="regular_1")
+                shared_q = SlurmQueue(name="shared")
+                debug_q = SlurmQueue(name="debug")
+
+                self._scheduler = SlurmScheduler(
+                    queues=[regular_q, shared_q, debug_q],
+                    primary_queue_name="regular",
+                    queue_flag="qos",
+                    other_scheduler_directives={"-C": "cpu"},
+                )
+            case SystemName.DERECHO:
+                # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
+                main_q = PBSQueue(name="main", max_walltime="12:00:00")
+                preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
+                develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
+
+                self._scheduler = PBSScheduler(
+                    queues=[main_q, preempt_q, develop_q],
+                    primary_queue_name="main",
+                    queue_flag="q",
+                )
+            case _:
+                self._scheduler = None
+
+        return self._scheduler
+
     @property
     def environment(self) -> CStarEnvironment:
         """Returns a CStarEnvironment class instance corresponding to this machine.
@@ -99,8 +131,8 @@ class CStarSystemManager:
         if self._environment is not None:
             return self._environment
 
-        match self.name:
-            case "expanse":
+        match self._system_name_enum():
+            case SystemName.EXPANSE:
                 mpi_exec_prefix = "srun --mpi=pmi2"
                 compiler = "intel"
                 # queue_flag = "partition"
@@ -110,7 +142,7 @@ class CStarSystemManager:
                 # max_walltime = "48:00:00"
                 # other_scheduler_directives = {}
 
-            case "perlmutter":
+            case SystemName.PERLMUTTER:
                 mpi_exec_prefix = "srun"
                 compiler = "gnu"
                 # queue_flag = "qos"
@@ -120,7 +152,7 @@ class CStarSystemManager:
                 # max_walltime = "24:00:00"
                 # other_scheduler_directives = {"-C": "cpu"}
 
-            case "derecho":
+            case SystemName.DERECHO:
                 mpi_exec_prefix = "mpirun"
                 compiler = "intel"
                 # queue_flag = "q"
@@ -129,8 +161,7 @@ class CStarSystemManager:
                 # mem_per_node_gb = 256
                 # max_walltime = "12:00:00"
                 # other_scheduler_directives = {}
-
-            case "darwin_arm64" | "linux_x86_64":
+            case SystemName.DARWIN_ARM64 | SystemName.LINUX_X86_64:
                 mpi_exec_prefix = "mpirun"
                 compiler = "gnu"
                 # queue_flag = None
@@ -141,8 +172,6 @@ class CStarSystemManager:
                 #     os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / (1024**3)
                 # )
                 # other_scheduler_directives = {}
-            case _:
-                raise EnvironmentError("Unsupported environment")
 
         self._environment = CStarEnvironment(
             system_name=self.name, mpi_exec_prefix=mpi_exec_prefix, compiler=compiler

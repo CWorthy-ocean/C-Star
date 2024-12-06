@@ -57,8 +57,22 @@ class TestSystemName:
             system = CStarSystemManager()
             _ = system.name
 
+    def test_unsupported_name(self, mock_environment_vars):
+        """Test that an unsupported system name raises an error."""
+        with patch.object(
+            CStarSystemManager,
+            "name",
+            new_callable=PropertyMock,
+            return_value="unsupported_name",
+        ):
+            with pytest.raises(
+                ValueError, match="'unsupported_name' is not a valid SystemName"
+            ):
+                system = CStarSystemManager()
+                _ = system.environment
 
-class TestEnvironment:
+
+class TestEnvironmentProperty:
     """Tests for the `environment` property of the CStarSystemManager class."""
 
     @pytest.mark.parametrize(
@@ -105,23 +119,11 @@ class TestEnvironment:
             for attr, value in expected_attributes.items():
                 assert getattr(environment, attr) == value
 
-    def test_environment_unsupported_name(self, mock_environment_vars):
-        """Test that an unsupported system name raises an error."""
-        with patch.object(
-            CStarSystemManager,
-            "name",
-            new_callable=PropertyMock,
-            return_value="unsupported_name",
-        ):
-            with pytest.raises(EnvironmentError, match="Unsupported environment"):
-                system = CStarSystemManager()
-                _ = system.environment
-
 
 ##
 
 
-class TestScheduler:
+class TestSchedulerProperty:
     """Tests for the `scheduler` property of the CStarSystemManager class."""
 
     @pytest.mark.parametrize(
@@ -163,13 +165,13 @@ class TestScheduler:
             # Verify that the queue names match
             assert set(q.name for q in scheduler.queues) == set(expected_queue_names)
 
-    def test_scheduler_unsupported_name(self, mock_environment_vars):
-        """Test that an unsupported system name results in no scheduler."""
+    def test_no_scheduler(self, mock_environment_vars):
+        """Test that a supported system without a scheduler returns 'None'."""
         with patch.object(
             CStarSystemManager,
             "name",
             new_callable=PropertyMock,
-            return_value="unsupported_name",
+            return_value="darwin_arm64",
         ):
             system = CStarSystemManager()
             assert system.scheduler is None
