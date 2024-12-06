@@ -19,8 +19,10 @@ from cstar.base.scheduler import SlurmScheduler, PBSScheduler, Scheduler
 
 def create_scheduler_job(
     commands: str,
-    cpus: int,
     account_key: str,
+    cpus: int,
+    nodes: Optional[int] = None,
+    cpus_per_node: Optional[int] = None,
     script_path: Optional[str | Path] = None,
     run_path: Optional[str | Path] = None,
     job_name: Optional[str] = None,
@@ -45,6 +47,8 @@ def create_scheduler_job(
         scheduler=cstar_system.scheduler,
         commands=commands,
         cpus=cpus,
+        nodes=nodes,
+        cpus_per_node=cpus_per_node,
         account_key=account_key,
         script_path=script_path,
         run_path=run_path,
