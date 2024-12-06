@@ -1,7 +1,6 @@
 ## STIL TODO:
 # Write unit test module
 # Write docstrings and rtd pages
-
 import os
 import re
 import time
@@ -99,8 +98,8 @@ class SchedulerJob(ABC):
             scheduler.primary_queue_name if queue_name is None else queue_name
         )
         self.queue = scheduler.get_queue(queue_name)
-
         self.walltime = walltime
+
         if (walltime is None) and (self.queue.max_walltime is None):
             raise ValueError(
                 "Cannot create scheduler job: walltime parameter not provided "
@@ -146,14 +145,16 @@ class SchedulerJob(ABC):
             and (cpus_per_node is not None)
         ):
             self.nodes = ceil(cpus / cpus_per_node)  # ceiling division
+            self.cpus_per_node = cpus_per_node
         elif (
             isinstance(scheduler, PBSScheduler)
             and (nodes is not None)
             and (cpus_per_node is None)
         ):
+            self.nodes = nodes
             self.cpus_per_node = int(cpus / nodes)
         elif isinstance(scheduler, PBSScheduler) and (
-            (nodes is None) or (cpus_per_node is None)
+            (nodes is None) and (cpus_per_node is None)
         ):
             nnodes, ncpus = self._calculate_node_distribution(
                 cpus, scheduler.global_max_cpus_per_node
@@ -419,8 +420,6 @@ class PBSJob(SchedulerJob):
         result = subprocess.run(qstat_cmd, capture_output=True, text=True, shell=True)
 
         if result.returncode != 0:
-            if "Unknown Job Id" in result.stderr:
-                return "completed"  # The job is no longer tracked
             raise RuntimeError(
                 f"Failed to retrieve job status using {qstat_cmd}."
                 f"STDOUT: {result.stdout}, STDERR: {result.stderr}"
@@ -429,11 +428,11 @@ class PBSJob(SchedulerJob):
         # Parse the JSON output
         try:
             job_data = json.loads(result.stdout)
-            # job_info = job_data["Jobs"].get(f"{self.id}")
-            job_info = next(iter(job_data["Jobs"].values()))
-            # breakpoint()
-            if not job_info:
+            try:
+                job_info = next(iter(job_data["Jobs"].values()))
+            except StopIteration:
                 raise RuntimeError(f"Job ID {self.id} not found in qstat output.")
+
             # Extract the job state
             job_state = job_info["job_state"]
             match job_state:
