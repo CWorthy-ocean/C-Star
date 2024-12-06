@@ -1,3 +1,6 @@
+```{include} disclaimer.md
+```
+
 # Contributor Guide
 
 ## Conda environment
