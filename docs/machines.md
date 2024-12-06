@@ -6,5 +6,4 @@ C-Star aims to be deployable on a wide range of HPC systems, but so far it has b
 | --------------------------- | -------------- | ----- |
 | MacOS ARM64 (Apple Silicon) | Tested         |       |
 | [NERSC Perlmutter](https://docs.nersc.gov/systems/perlmutter/architecture/)            | Tested         |       |
-| [SDSC Expanse](https://www.sdsc.edu/support/user_guides/expanse.html)                | Tested         |       |
 | [NCAR Derecho](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/)                | Tested         |       |
