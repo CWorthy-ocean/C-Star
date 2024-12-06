@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
 
-from cstar.base.scheduler_job import create_scheduler_job
+from cstar.system.scheduler_job import create_scheduler_job
 from cstar.base.utils import _replace_text_in_file
 from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
@@ -20,11 +20,11 @@ from cstar.roms.input_dataset import (
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.base.additional_code import AdditionalCode
 
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 
 if TYPE_CHECKING:
     from cstar.roms import ROMSBaseModel
-    from cstar.base.scheduler_job import SchedulerJob
+    from cstar.system.scheduler_job import SchedulerJob
 
 
 class ROMSComponent(Component):
@@ -736,7 +736,7 @@ class ROMSComponent(Component):
 
         print("Compiling UCLA-ROMS configuration...")
         make_roms_result = subprocess.run(
-            f"make COMPILER={cstar_system.environment.compiler}",
+            f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
             shell=True,
             capture_output=True,
@@ -868,7 +868,7 @@ class ROMSComponent(Component):
         output_dir: str or Path:
             The path to the directory in which model output will be saved. This is by default
             the directory from which the ROMS executable will be called.
-        walltime: str, default cstar.base.system.environment.environment.max_walltime
+        walltime: str, default cstar.system.manager.environment.environment.max_walltime
             The requested length of the job, HH:MM:SS
         job_name: str, default 'my_roms_run'
             The name of the job submitted to the scheduler, which also sets the output file name
@@ -881,10 +881,10 @@ class ROMSComponent(Component):
                 + "\n If you have already run Component.build(), either run it again or "
                 + " add the executable path manually using Component.exe_path='YOUR/PATH'."
             )
-        if (queue is None) and (cstar_system.scheduler is not None):
-            queue = cstar_system.scheduler.primary_queue_name
-        if (walltime is None) and (cstar_system.scheduler is not None):
-            walltime = cstar_system.scheduler.get_queue(queue).max_walltime
+        if (queue is None) and (cstar_sysmgr.scheduler is not None):
+            queue = cstar_sysmgr.scheduler.primary_queue_name
+        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
+            walltime = cstar_sysmgr.scheduler.get_queue(queue).max_walltime
 
         if output_dir is None:
             output_dir = self.exe_path.parent
@@ -926,7 +926,7 @@ class ROMSComponent(Component):
         ## 2: RUN ON THIS MACHINE
 
         roms_exec_cmd = (
-            f"{cstar_system.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
+            f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
             + f"{self.in_file}"
         )
 
@@ -935,7 +935,7 @@ class ROMSComponent(Component):
                 "Unable to calculate node distribution for this Component. "
                 + "Component.n_procs_tot is not set"
             )
-        if cstar_system.scheduler is not None:
+        if cstar_sysmgr.scheduler is not None:
             if account_key is None:
                 raise ValueError(
                     "please call Component.run() with a value for account_key"
@@ -954,7 +954,7 @@ class ROMSComponent(Component):
             job_instance.submit()
             return job_instance
 
-        else:  # cstar_system.scheduler is None
+        else:  # cstar_sysmgr.scheduler is None
             import time
 
             romsprocess = subprocess.Popen(

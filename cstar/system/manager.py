@@ -1,8 +1,8 @@
 import os
 import platform
 from typing import Optional
-from cstar.base.environment import CStarEnvironment
-from cstar.base.scheduler import (
+from cstar.system.environment import CStarEnvironment
+from cstar.system.scheduler import (
     Scheduler,
     SlurmScheduler,
     SlurmQueue,
@@ -11,7 +11,7 @@ from cstar.base.scheduler import (
 )
 
 
-class CStarSystem:
+class CStarSystemManager:
     _environment: Optional[CStarEnvironment] = None
     _scheduler: Optional[Scheduler] = None
 
@@ -150,4 +150,4 @@ class CStarSystem:
         return self._environment
 
 
-cstar_system = CStarSystem()
+cstar_sysmgr = CStarSystemManager()

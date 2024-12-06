@@ -9,7 +9,7 @@ from cstar.base.utils import (
     _get_repo_remote,
     _get_repo_head_hash,
 )
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 
 
 class BaseModel(ABC):
@@ -253,13 +253,13 @@ class BaseModel(ABC):
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
                 ext_dir = (
-                    cstar_system.environment.package_root
+                    cstar_sysmgr.environment.package_root
                     / f"externals/{self.repo_basename}"
                 )
                 print(
                     "#######################################################\n"
                     + f"C-STAR: {self.expected_env_var}"
-                    + " not found in current cstar_system.environment. \n"
+                    + " not found in current cstar_sysmgr.environment. \n"
                     + "if this is your first time running C-Star with "
                     + f"an instance of {self.__class__.__name__}, "
                     + "you will need to set it up.\n"

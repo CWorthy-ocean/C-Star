@@ -8,14 +8,14 @@ from datetime import datetime
 
 from cstar.base.component import Component
 
-# from cstar.base.environment import environment
-from cstar.base.system import cstar_system
+# from cstar.system.environment import environment
+from cstar.system.manager import cstar_sysmgr
 from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
 
 if TYPE_CHECKING:
-    from cstar.base.scheduler_job import SchedulerJob
+    from cstar.system.scheduler_job import SchedulerJob
 
 
 class Case:
@@ -544,10 +544,10 @@ class Case:
         # TODO add more advanced logic for this
         # 20240807 - TN - set first component as main?
 
-        if (queue is None) and (cstar_system.scheduler is not None):
-            queue = cstar_system.scheduler.primary_queue_name
-        if (walltime is None) and (cstar_system.scheduler is not None):
-            walltime = cstar_system.scheduler.get_queue(queue).max_walltime
+        if (queue is None) and (cstar_sysmgr.scheduler is not None):
+            queue = cstar_sysmgr.scheduler.primary_queue_name
+        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
+            walltime = cstar_sysmgr.scheduler.get_queue(queue).max_walltime
 
         for component in self.components:
             if isinstance(component, ROMSComponent):

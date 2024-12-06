@@ -12,8 +12,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
-from cstar.base.system import cstar_system
-from cstar.base.scheduler import SlurmScheduler, PBSScheduler, Scheduler
+from cstar.system.manager import cstar_sysmgr
+from cstar.system.scheduler import SlurmScheduler, PBSScheduler, Scheduler
 
 
 def create_scheduler_job(
@@ -33,17 +33,17 @@ def create_scheduler_job(
     # mypy assigns type based on first condition, assigning explicitly:
     job_type: type[SlurmJob] | type[PBSJob]
 
-    if isinstance(cstar_system.scheduler, SlurmScheduler):
+    if isinstance(cstar_sysmgr.scheduler, SlurmScheduler):
         job_type = SlurmJob
-    elif isinstance(cstar_system.scheduler, PBSScheduler):
+    elif isinstance(cstar_sysmgr.scheduler, PBSScheduler):
         job_type = PBSJob
     else:
         raise TypeError(
-            f"Unsupported scheduler type: {type(cstar_system.scheduler).__name__}"
+            f"Unsupported scheduler type: {type(cstar_sysmgr.scheduler).__name__}"
         )
 
     return job_type(
-        scheduler=cstar_system.scheduler,
+        scheduler=cstar_sysmgr.scheduler,
         commands=commands,
         cpus=cpus,
         nodes=nodes,
@@ -319,10 +319,10 @@ class SlurmJob(SchedulerJob):
         ) in self.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#SBATCH {key} {value}"
             # Add linux environment modules to scheduler script
-        if cstar_system.environment.uses_lmod:
+        if cstar_sysmgr.environment.uses_lmod:
             scheduler_script += "\nmodule reset"
             with open(
-                f"{cstar_system.environment.package_root}/additional_files/lmod_lists/{cstar_system.name}.lmod"
+                f"{cstar_sysmgr.environment.package_root}/additional_files/lmod_lists/{cstar_sysmgr.name}.lmod"
             ) as F:
                 modules = F.readlines()
             for m in modules:
@@ -334,7 +334,7 @@ class SlurmJob(SchedulerJob):
         for (
             var,
             value,
-        ) in cstar_system.environment.environment_variables.items():
+        ) in cstar_sysmgr.environment.environment_variables.items():
             scheduler_script += f'\nexport {var}="{value}"'
 
         # Add roms command to scheduler script
@@ -404,7 +404,7 @@ class PBSJob(SchedulerJob):
         for (
             key,
             value,
-        ) in cstar_system.scheduler.other_scheduler_directives.items():
+        ) in cstar_sysmgr.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#PBS {key} {value}"
         scheduler_script += "\ncd ${PBS_O_WORKDIR}"
 
