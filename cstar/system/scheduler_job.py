@@ -137,7 +137,15 @@ class SchedulerJob(ABC):
         else:
             # Check walltimes
             wt_h, wt_m, wt_s = map(int, walltime.split(":"))
-            mw_h, mw_m, mw_s = map(int, self.queue.max_walltime.split(":"))
+            # Handle D-HH:MM:SS format for max_walltime
+
+            if "-" in self.queue.max_walltime:
+                days, time_part = self.queue.max_walltime.split("-")
+                mw_h, mw_m, mw_s = map(int, time_part.split(":"))
+                mw_h += int(days) * 24  # Convert days to hours
+            else:
+                mw_h, mw_m, mw_s = map(int, self.queue.max_walltime.split(":"))
+
             walltime_delta = timedelta(hours=wt_h, minutes=wt_m, seconds=wt_s)
             max_walltime_delta = timedelta(hours=mw_h, minutes=mw_m, seconds=mw_s)
 
@@ -154,23 +162,13 @@ class SchedulerJob(ABC):
         self.cpus_per_node: Optional[int]
         self.nodes: Optional[int]
 
-        if (
-            isinstance(scheduler, PBSScheduler)
-            and (nodes is None)
-            and (cpus_per_node is not None)
-        ):
+        if (nodes is None) and (cpus_per_node is not None):
             self.nodes = ceil(cpus / cpus_per_node)  # ceiling division
             self.cpus_per_node = cpus_per_node
-        elif (
-            isinstance(scheduler, PBSScheduler)
-            and (nodes is not None)
-            and (cpus_per_node is None)
-        ):
+        elif (nodes is not None) and (cpus_per_node is None):
             self.nodes = nodes
             self.cpus_per_node = int(cpus / nodes)
-        elif isinstance(scheduler, PBSScheduler) and (
-            (nodes is None) and (cpus_per_node is None)
-        ):
+        elif (nodes is None) and (cpus_per_node is None):
             nnodes, ncpus = self._calculate_node_distribution(
                 cpus, scheduler.global_max_cpus_per_node
             )
@@ -220,12 +218,12 @@ class SchedulerJob(ABC):
         If `seconds` is 0, updates are provided indefinitely until the user interrupts the stream.
         """
 
-        if self.status != "running":
+        if self.status != JobStatus.RUNNING:
             print(
                 f"This job is currently not running ({self.status}). Live updates cannot be provided."
             )
-            if (self.status in ["failed", "completed"]) or (
-                self.status == "cancelled" and self.output_file.exists()
+            if (self.status in {JobStatus.FAILED, JobStatus.COMPLETED}) or (
+                self.status == JobStatus.CANCELLED and self.output_file.exists()
             ):
                 print(f"See {self.output_file.resolve()} for job output")
             return
@@ -327,7 +325,8 @@ class SlurmJob(SchedulerJob):
         scheduler_script += f"\n#SBATCH --job-name={self.job_name}"
         scheduler_script += f"\n#SBATCH --output={self.output_file}"
         scheduler_script += f"\n#SBATCH --{self.scheduler.queue_flag}={self.queue_name}"
-        scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
+        scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
+        scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
         scheduler_script += f"\n#SBATCH --account={self.account_key}"
         scheduler_script += "\n#SBATCH --export=NONE"
         scheduler_script += "\n#SBATCH --mail-type=ALL"
@@ -363,8 +362,16 @@ class SlurmJob(SchedulerJob):
     def submit(self):
         self.save_script()
         # remove any slurm variables in case submitting from inside another slurm job
-        slurm_env = {k: v for k, v in os.environ.items() if not k.startswith("SLURM_")}
+        env_vars_to_exclude = []
+        for k in os.environ.keys():
+            if k.startswith("SLURM_"):
+                if k not in {"SLURM_MPI_TYPE", "SLURM_CONF"}:
+                    env_vars_to_exclude.append(k)
 
+        slurm_env = {
+            k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
+        }
+        breakpoint()
         result = subprocess.run(
             f"sbatch {self.script_path}",
             shell=True,
@@ -500,7 +507,7 @@ class PBSJob(SchedulerJob):
         return self._id
 
     def cancel(self):
-        if self.status not in ["running", "pending", "held"]:
+        if self.status not in {JobStatus.RUNNING, JobStatus.PENDING, JobStatus.HELD}:
             print(f"Cannot cancel job with status {self.status}")
             return
 

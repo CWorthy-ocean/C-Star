@@ -116,6 +116,14 @@ class CStarSystemManager:
                     primary_queue_name="main",
                     queue_flag="q",
                 )
+            case SystemName.EXPANSE:
+                compute_q = SlurmQueue(name="compute")
+                debug_q = SlurmQueue(name="debug")
+                self._scheduler = SlurmScheduler(
+                    queues=[compute_q, debug_q],
+                    primary_queue_name="compute",
+                    queue_flag="partition",
+                )
             case _:
                 self._scheduler = None
 
@@ -135,43 +143,16 @@ class CStarSystemManager:
             case SystemName.EXPANSE:
                 mpi_exec_prefix = "srun --mpi=pmi2"
                 compiler = "intel"
-                # queue_flag = "partition"
-                # primary_queue = "compute"
-                # mem_per_node_gb = 256
-                # cores_per_node = 128
-                # max_walltime = "48:00:00"
-                # other_scheduler_directives = {}
 
             case SystemName.PERLMUTTER:
                 mpi_exec_prefix = "srun"
                 compiler = "gnu"
-                # queue_flag = "qos"
-                # primary_queue = "regular"
-                # mem_per_node_gb = 512
-                # cores_per_node = 128  # for CPU nodes
-                # max_walltime = "24:00:00"
-                # other_scheduler_directives = {"-C": "cpu"}
-
             case SystemName.DERECHO:
                 mpi_exec_prefix = "mpirun"
                 compiler = "intel"
-                # queue_flag = "q"
-                # primary_queue = "main"
-                # cores_per_node = 128
-                # mem_per_node_gb = 256
-                # max_walltime = "12:00:00"
-                # other_scheduler_directives = {}
             case SystemName.DARWIN_ARM64 | SystemName.LINUX_X86_64:
                 mpi_exec_prefix = "mpirun"
                 compiler = "gnu"
-                # queue_flag = None
-                # primary_queue = None
-                # max_walltime = None
-                # cores_per_node = os.cpu_count()
-                # mem_per_node_gb = (
-                #     os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / (1024**3)
-                # )
-                # other_scheduler_directives = {}
 
         self._environment = CStarEnvironment(
             system_name=self.name, mpi_exec_prefix=mpi_exec_prefix, compiler=compiler
