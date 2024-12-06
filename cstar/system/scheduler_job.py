@@ -1,5 +1,4 @@
 ## STIL TODO:
-# Write unit test module
 # Write docstrings and rtd pages
 import os
 import re
@@ -8,6 +7,7 @@ import json
 import warnings
 import subprocess
 from math import ceil
+from enum import Enum, auto
 from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -57,6 +57,21 @@ def create_scheduler_job(
         send_email=send_email,
         walltime=walltime,
     )
+
+
+class JobStatus(Enum):
+    UNSUBMITTED = auto()
+    PENDING = auto()
+    RUNNING = auto()
+    COMPLETED = auto()
+    CANCELLED = auto()
+    FAILED = auto()
+    HELD = auto()
+    ENDING = auto()
+    UNKNOWN = auto()
+
+    def __str__(self):
+        return self.name.lower()  # Convert enum name to lowercase for display
 
 
 class SchedulerJob(ABC):
@@ -279,28 +294,32 @@ class SlurmJob(SchedulerJob):
     @property
     def status(self):
         if self.id is None:
-            return "unsubmitted"
+            return JobStatus.UNSUBMITTED
         else:
             sacct_cmd = f"sacct -j {self.id} --format=State%20 --noheader"
             result = subprocess.run(
                 sacct_cmd, capture_output=True, text=True, shell=True
             )
-
-            if "PENDING" in result.stdout:
-                return "pending"
-            elif "RUNNING" in result.stdout:
-                return "running"
-            elif "COMPLETED" in result.stdout:
-                return "completed"
-            elif "CANCELLED" in result.stdout:
-                return "cancelled"
-            elif "FAILED" in result.stdout:
-                return "failed"
-            else:
+            if result.returncode != 0:
                 raise RuntimeError(
                     f"Failed to retrieve job status using {sacct_cmd}."
                     f"STDOUT: {result.stdout}, STDERR: {result.stderr}"
                 )
+
+        # Map sacct states to JobStatus enum
+        sacct_status_map = {
+            "PENDING": JobStatus.PENDING,
+            "RUNNING": JobStatus.RUNNING,
+            "COMPLETED": JobStatus.COMPLETED,
+            "CANCELLED": JobStatus.CANCELLED,
+            "FAILED": JobStatus.FAILED,
+        }
+        for state, status in sacct_status_map.items():
+            if state in result.stdout:
+                return status
+
+        # Fallback if no known state is found
+        return JobStatus.UNKNOWN
 
     @property
     def script(self):
@@ -435,24 +454,22 @@ class PBSJob(SchedulerJob):
 
             # Extract the job state
             job_state = job_info["job_state"]
-            match job_state:
-                case "Q":
-                    return "pending"
-                case "R":
-                    return "running"
-                case "C":
-                    return "completed"
-                case "H":
-                    return "held"
-                case "F":
-                    if job_info["Exit_status"] == 0:
-                        return "completed"
-                    else:
-                        return "failed"
-                case "E":
-                    return "ending"
-                case _:
-                    return f"unknown ({job_state})"
+            pbs_status_map = {
+                "Q": JobStatus.PENDING,
+                "R": JobStatus.RUNNING,
+                "C": JobStatus.COMPLETED,
+                "H": JobStatus.HELD,
+                "E": JobStatus.ENDING,
+            }
+
+            # Handle specific cases for "F" (Finished)
+            if job_state == "F":
+                exit_status = job_info.get("Exit_status", 1)
+                return JobStatus.COMPLETED if exit_status == 0 else JobStatus.FAILED
+            else:
+                # Default to UNKNOWN for unmapped states
+                return pbs_status_map.get(job_state, JobStatus.UNKNOWN)
+
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse JSON from qstat output: {e}")
 

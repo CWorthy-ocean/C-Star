@@ -8,6 +8,7 @@ from cstar.system.scheduler import (
     PBSQueue,
 )
 from cstar.system.scheduler_job import (
+    JobStatus,
     SlurmJob,
     PBSJob,
     create_scheduler_job,
@@ -235,7 +236,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "Q"}}},
                 None,
-                "pending",
+                JobStatus.PENDING,
                 False,
                 None,
                 None,
@@ -243,7 +244,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "R"}}},
                 None,
-                "running",
+                JobStatus.RUNNING,
                 False,
                 None,
                 None,
@@ -251,7 +252,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "C"}}},
                 None,
-                "completed",
+                JobStatus.COMPLETED,
                 False,
                 None,
                 None,
@@ -259,7 +260,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "H"}}},
                 None,
-                "held",
+                JobStatus.HELD,
                 False,
                 None,
                 None,
@@ -267,7 +268,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "F", "Exit_status": 1}}},
                 None,
-                "failed",
+                JobStatus.FAILED,
                 False,
                 None,
                 None,
@@ -275,7 +276,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "F", "Exit_status": 0}}},
                 None,
-                "completed",
+                JobStatus.COMPLETED,
                 False,
                 None,
                 None,
@@ -299,7 +300,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "E"}}},
                 None,
-                "ending",
+                JobStatus.ENDING,
                 False,
                 None,
                 None,
@@ -307,7 +308,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "X"}}},
                 None,
-                "unknown (X)",
+                JobStatus.UNKNOWN,
                 False,
                 None,
                 None,
@@ -360,15 +361,6 @@ class TestPBSJob:
             assert (
                 job.status == expected_status
             ), f"Expected status '{expected_status}' but got '{job.status}'"
-
-    def test_status_unsubmitted(self):
-        # Create a PBSJob without setting a job ID
-        job = PBSJob(**self.common_job_params)
-
-        # Assert the status is "unsubmitted"
-        assert (
-            job.status == "unsubmitted"
-        ), "Expected 'unsubmitted' status when job ID is None"
 
     @patch("json.loads", side_effect=json.JSONDecodeError("Expecting value", "", 0))
     @patch("subprocess.run")

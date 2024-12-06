@@ -4,9 +4,7 @@ from cstar.system.scheduler import (
     SlurmScheduler,
     SlurmQueue,
 )
-from cstar.system.scheduler_job import (
-    SlurmJob,
-)
+from cstar.system.scheduler_job import SlurmJob, JobStatus
 
 
 class TestSlurmJob:
@@ -280,12 +278,12 @@ class TestSlurmJob:
     @pytest.mark.parametrize(
         "job_id, sacct_output, return_code, expected_status, should_raise",
         [
-            (None, "", 0, "unsubmitted", False),  # Unsubmitted job
-            (12345, "PENDING\n", 0, "pending", False),  # Pending job
-            (12345, "RUNNING\n", 0, "running", False),  # Running job
-            (12345, "COMPLETED\n", 0, "completed", False),  # Completed job
-            (12345, "CANCELLED\n", 0, "cancelled", False),  # Cancelled job
-            (12345, "FAILED\n", 0, "failed", False),  # Failed job
+            (None, "", 0, JobStatus.UNSUBMITTED, False),  # Unsubmitted job
+            (12345, "PENDING\n", 0, JobStatus.PENDING, False),  # Pending job
+            (12345, "RUNNING\n", 0, JobStatus.RUNNING, False),  # Running job
+            (12345, "COMPLETED\n", 0, JobStatus.COMPLETED, False),  # Completed job
+            (12345, "CANCELLED\n", 0, JobStatus.CANCELLED, False),  # Cancelled job
+            (12345, "FAILED\n", 0, JobStatus.FAILED, False),  # Failed job
             (12345, "", 1, None, True),  # sacct command failure
         ],
     )
