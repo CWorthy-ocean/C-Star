@@ -248,8 +248,8 @@ class TestBaseModelConfigHandling:
         Mocks `BaseModel.local_config_status` to simulate different configuration states.
     patch_subprocess_run : MagicMock
         Mocks `subprocess.run` to simulate command-line actions for `git checkout`.
-    patch_os_environ : MagicMock
-        Mocks `os.environ` to control environment variable presence and paths.
+    patch_environment : MagicMock
+        Mocks `cstar_system.environment.environment_variables` to control the environment variables.
     """
 
     def setup_method(self):
@@ -271,11 +271,6 @@ class TestBaseModelConfigHandling:
         self.patch_subprocess_run = mock.patch("subprocess.run")
         self.mock_subprocess_run = self.patch_subprocess_run.start()
 
-        # self.patch_os_environ = mock.patch.dict(
-        #     os.environ, {"TEST_ROOT": "/path/to/repo"}, clear=True
-        # )
-        # self.patch_os_environ.start()  # Apply the patch
-
         self.patch_environment = mock.patch(
             "cstar.base.system.CStarSystem.environment",
             new_callable=mock.PropertyMock,
@@ -292,7 +287,6 @@ class TestBaseModelConfigHandling:
         self.patch_local_config_status.stop()
         self.patch_get_repo_head_hash.stop()
         self.patch_get_repo_remote.stop()
-        # self.patch_os_environ.stop()
         self.patch_environment.stop()
 
     def test_handle_config_status_valid(self, generic_base_model, capsys):
