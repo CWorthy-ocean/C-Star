@@ -328,32 +328,32 @@ class SlurmJob(SchedulerJob):
         scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
         scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
         scheduler_script += f"\n#SBATCH --account={self.account_key}"
-        scheduler_script += "\n#SBATCH --export=NONE"
+        scheduler_script += "\n#SBATCH --export=ALL"
         scheduler_script += "\n#SBATCH --mail-type=ALL"
         scheduler_script += f"\n#SBATCH --time={self.walltime}"
-        for (
-            key,
-            value,
-        ) in self.scheduler.other_scheduler_directives.items():
-            scheduler_script += f"\n#SBATCH {key} {value}"
-            # Add linux environment modules to scheduler script
-        if cstar_sysmgr.environment.uses_lmod:
-            scheduler_script += "\nmodule reset"
-            with open(
-                f"{cstar_sysmgr.environment.package_root}/additional_files/lmod_lists/{cstar_sysmgr.name}.lmod"
-            ) as F:
-                modules = F.readlines()
-            for m in modules:
-                scheduler_script += f"\nmodule load {m}"
+        # for (
+        #     key,
+        #     value,
+        # ) in self.scheduler.other_scheduler_directives.items():
+        #     scheduler_script += f"\n#SBATCH {key} {value}"
+        #     # Add linux environment modules to scheduler script
+        # if cstar_sysmgr.environment.uses_lmod:
+        #     scheduler_script += "\nmodule reset"
+        #     with open(
+        #         f"{cstar_sysmgr.environment.package_root}/additional_files/lmod_lists/{cstar_sysmgr.name}.lmod"
+        #     ) as F:
+        #         modules = F.readlines()
+        #     for m in modules:
+        #         scheduler_script += f"\nmodule load {m}"
 
-        scheduler_script += "\nprintenv"
+        # scheduler_script += "\nprintenv"
 
-        # Add environment variables to scheduler script:
-        for (
-            var,
-            value,
-        ) in cstar_sysmgr.environment.environment_variables.items():
-            scheduler_script += f'\nexport {var}="{value}"'
+        # # Add environment variables to scheduler script:
+        # for (
+        #     var,
+        #     value,
+        # ) in cstar_sysmgr.environment.environment_variables.items():
+        #     scheduler_script += f'\nexport {var}="{value}"'
 
         # Add roms command to scheduler script
         scheduler_script += f"\n\n{self.commands}"
