@@ -1,10 +1,8 @@
 [project]
 name = "cstar"
-version = "0.0.0"
 description = "Computational systems for tracking ocean carbon"
 readme = "README.md"
 urls = { repository = "https://github.com/CWorthy-ocean/C-Star", homepage = "https://www.cworthy.org" }
-
 authors = [
     { name = "Dafydd Stephenson", email = "dafydd@cworthy.org" },
     { name = "Thomas Nicholas", email = "tom@cworthy.org" },
@@ -12,40 +10,42 @@ authors = [
     { name = "Matt Long", email = "matt@cworthy.org" }
 ]
 license = { text = "Apache-2.0" }
-
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Oceanography"
 ]
 requires-python = ">=3.10"
-
+dynamic = ["version"]
 dependencies = [
     "python-dateutil>=2.8.2",
     "python-dotenv",
     "PyYAML==6.0.2",
     "pooch>=1.8.1",
-    "roms_tools[dask]>=1.4.2"
+    "roms_tools[dask]>=2.0.0"
 ]
-
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
 [project.optional-dependencies]
 test = [
      "pytest>=7.0",
-     "roms_tools[dask]==1.4.2"
+     "roms_tools[dask]==2.0.0"
      ]
 dev =[]
 
-
-
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
-
+requires = [
+    "setuptools>=61.0.0",
+    "wheel",
+    "setuptools_scm[toml]>=7.0",
+    "check-manifest"
+]
 
 # Configuration for mypy type checker
 [tool.mypy]
@@ -60,14 +60,10 @@ fix = true
 config = ".pre-commit-config.yaml"
 
 [tool.setuptools.packages.find]
-# Automatically find the packages
-where = ["."]
-include = ["cstar"]
-exclude = ["tests*", "docs*", "examples*"]
+exclude = ["tests*", "docs*", "examples*", "additional_files*", "externals*"]
 
 [tool.setuptools]
 include-package-data = true
-
 
 [tool.pytest.ini_options]
 norecursedirs = [".tox", ".git", "__pycache__", ".#*", "*~"]
