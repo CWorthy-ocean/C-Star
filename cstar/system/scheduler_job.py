@@ -331,29 +331,11 @@ class SlurmJob(SchedulerJob):
         scheduler_script += "\n#SBATCH --export=ALL"
         scheduler_script += "\n#SBATCH --mail-type=ALL"
         scheduler_script += f"\n#SBATCH --time={self.walltime}"
-        # for (
-        #     key,
-        #     value,
-        # ) in self.scheduler.other_scheduler_directives.items():
-        #     scheduler_script += f"\n#SBATCH {key} {value}"
-        #     # Add linux environment modules to scheduler script
-        # if cstar_sysmgr.environment.uses_lmod:
-        #     scheduler_script += "\nmodule reset"
-        #     with open(
-        #         f"{cstar_sysmgr.environment.package_root}/additional_files/lmod_lists/{cstar_sysmgr.name}.lmod"
-        #     ) as F:
-        #         modules = F.readlines()
-        #     for m in modules:
-        #         scheduler_script += f"\nmodule load {m}"
-
-        # scheduler_script += "\nprintenv"
-
-        # # Add environment variables to scheduler script:
-        # for (
-        #     var,
-        #     value,
-        # ) in cstar_sysmgr.environment.environment_variables.items():
-        #     scheduler_script += f'\nexport {var}="{value}"'
+        for (
+            key,
+            value,
+        ) in self.scheduler.other_scheduler_directives.items():
+            scheduler_script += f"\n#SBATCH {key} {value}"
 
         # Add roms command to scheduler script
         scheduler_script += f"\n\n{self.commands}"
@@ -365,13 +347,13 @@ class SlurmJob(SchedulerJob):
         env_vars_to_exclude = []
         for k in os.environ.keys():
             if k.startswith("SLURM_"):
-                if k not in {"SLURM_MPI_TYPE", "SLURM_CONF"}:
+                if k not in {"SLURM_CONF", "SLURM_VERSION"}:
                     env_vars_to_exclude.append(k)
 
         slurm_env = {
             k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
         }
-        breakpoint()
+
         result = subprocess.run(
             f"sbatch {self.script_path}",
             shell=True,
