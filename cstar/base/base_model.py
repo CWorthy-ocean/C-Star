@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Optional
 from abc import ABC, abstractmethod
@@ -9,7 +8,7 @@ from cstar.base.utils import (
     _get_repo_remote,
     _get_repo_head_hash,
 )
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 
 
 class BaseModel(ABC):
@@ -165,11 +164,16 @@ class BaseModel(ABC):
         """
 
         # check 1: X_ROOT variable is in user's env
-        env_var_exists = self.expected_env_var in os.environ
+        env_var_exists = (
+            self.expected_env_var
+            in cstar_sysmgr.environment.environment_variables.keys()
+        )
 
         # check 2: X_ROOT points to the correct repository
         if env_var_exists:
-            local_root = Path(os.environ[self.expected_env_var])
+            local_root = Path(
+                cstar_sysmgr.environment.environment_variables[self.expected_env_var]
+            )
             env_var_repo_remote = _get_repo_remote(local_root)
             env_var_matches_repo = self.source_repo == env_var_repo_remote
             if not env_var_matches_repo:
@@ -207,8 +211,11 @@ class BaseModel(ABC):
            3: The expected environment variable is not present and it is assumed the base model is not installed locally
               -> prompt installation of the base model
         """
-
-        local_root = Path(os.environ.get(self.expected_env_var, ""))
+        local_root = Path(
+            cstar_sysmgr.environment.environment_variables.get(
+                self.expected_env_var, ""
+            )
+        )
 
         match self.local_config_status:
             case 0:
@@ -253,13 +260,13 @@ class BaseModel(ABC):
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
                 ext_dir = (
-                    cstar_system.environment.package_root
+                    cstar_sysmgr.environment.package_root
                     / f"externals/{self.repo_basename}"
                 )
                 print(
                     "#######################################################\n"
                     + f"C-STAR: {self.expected_env_var}"
-                    + " not found in current cstar_system.environment. \n"
+                    + " not found in current cstar_sysmgr.environment. \n"
                     + "if this is your first time running C-Star with "
                     + f"an instance of {self.__class__.__name__}, "
                     + "you will need to set it up.\n"

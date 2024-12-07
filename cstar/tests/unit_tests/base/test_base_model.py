@@ -2,7 +2,7 @@ import os
 import pytest
 from pathlib import Path
 from unittest import mock
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 from cstar.base.base_model import BaseModel
 
 ################################################################################
@@ -390,7 +390,7 @@ class TestBaseModelConfigHandling:
         generic_base_model.handle_config_status()
 
         expected_install_dir = (
-            Path(cstar_system.environment.package_root) / "externals/repo"
+            Path(cstar_sysmgr.environment.package_root) / "externals/repo"
         )
 
         # Verify that 'get' (defined above)  is called when user inputs 'y':
