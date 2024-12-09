@@ -1,6 +1,19 @@
 Release notes
 =============
 
+.. _v0.0.3-alpha:
+
+v0.0.3-alpha (9th Dec 2024)
+---------------------------
+
+New features:
+~~~~~~~~~~~~~
+- Add support for SDSC Expanse HPC
+
+Bugfixes:
+~~~~~~~~~
+- Fix bug where in certain circumstances environment variables were checked for before being set, prompting user to install already installed externals
+
 .. _v0.0.1-alpha:
 
 v0.0.1-alpha (6th Dec 2024)

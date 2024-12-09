@@ -991,7 +991,7 @@ class ROMSComponent(Component):
                 scheduler_script += f"\n#SBATCH --nodes={nnodes}"
                 scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
                 scheduler_script += f"\n#SBATCH --account={account_key}"
-                scheduler_script += "\n#SBATCH --export=NONE"
+                scheduler_script += "\n#SBATCH --export=ALL"
                 scheduler_script += "\n#SBATCH --mail-type=ALL"
                 scheduler_script += f"\n#SBATCH --time={walltime}"
                 for (
@@ -1026,9 +1026,16 @@ class ROMSComponent(Component):
                     f.write(scheduler_script)
 
                 # remove any slurm variables in case submitting from inside another slurm job
+                env_vars_to_exclude = []
+                for k in os.environ.keys():
+                    if k.startswith("SLURM_"):
+                        if k not in {"SLURM_CONF", "SLURM_VERSION"}:
+                            env_vars_to_exclude.append(k)
+
                 slurm_env = {
-                    k: v for k, v in os.environ.items() if not k.startswith("SLURM_")
+                    k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
                 }
+
                 subprocess.run(
                     f"sbatch {script_fname}", shell=True, cwd=run_path, env=slurm_env
                 )

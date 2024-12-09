@@ -1,4 +1,3 @@
-import os
 import pytest
 from pathlib import Path
 from unittest import mock
@@ -150,11 +149,20 @@ class TestBaseModelConfig:
         Mocks `cstar.utils._get_repo_remote` function to simulate different repository remotes.
     patch_get_repo_head_hash : MagicMock
         Mocks `cstar.utils._get_repo_head_hash` function to simulate different repository head hashes.
-    patch_os_environ : MagicMock
-        Mocks `os.environ` to control the environment variable `TEST_ROOT`.
+    patch_environment_variables : MagicMock
+        Mocks `cstar_system.environment.environment_variables` to control the environment variables.
     """
 
     def setup_method(self):
+        self.patch_environment = mock.patch(
+            "cstar.base.system.CStarSystem.environment",
+            new_callable=mock.PropertyMock,
+            return_value=mock.Mock(
+                environment_variables={"TEST_ROOT": "/path/to/repo"}
+            ),
+        )
+        self.mock_environment = self.patch_environment.start()
+
         self.patch_get_repo_remote = mock.patch(
             "cstar.base.base_model._get_repo_remote"
         )
@@ -165,20 +173,17 @@ class TestBaseModelConfig:
         )
         self.mock_get_repo_head_hash = self.patch_get_repo_head_hash.start()
 
-        self.patch_os_environ = mock.patch.dict(
-            os.environ, {"TEST_ROOT": "/path/to/repo"}, clear=True
-        )
-        self.patch_os_environ.start()
-
     def teardown_method(self):
+        self.patch_environment.stop()
         self.patch_get_repo_remote.stop()
         self.patch_get_repo_head_hash.stop()
-        self.patch_os_environ.stop()
 
     def test_local_config_status_valid(self, generic_base_model):
+        # Set return values for other mocks
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "test123"
 
+        # Assert local_config_status logic
         assert generic_base_model.local_config_status == 0
         assert generic_base_model.is_setup
 
@@ -195,8 +200,8 @@ class TestBaseModelConfig:
 
         assert generic_base_model.local_config_status == 2
 
-    @mock.patch.dict(os.environ, {}, clear=True)
     def test_local_config_status_no_env_var(self, generic_base_model):
+        self.mock_environment.return_value.environment_variables = {}
         assert generic_base_model.local_config_status == 3
 
 
@@ -243,8 +248,8 @@ class TestBaseModelConfigHandling:
         Mocks `BaseModel.local_config_status` to simulate different configuration states.
     patch_subprocess_run : MagicMock
         Mocks `subprocess.run` to simulate command-line actions for `git checkout`.
-    patch_os_environ : MagicMock
-        Mocks `os.environ` to control environment variable presence and paths.
+    patch_environment : MagicMock
+        Mocks `cstar_system.environment.environment_variables` to control the environment variables.
     """
 
     def setup_method(self):
@@ -266,10 +271,15 @@ class TestBaseModelConfigHandling:
         self.patch_subprocess_run = mock.patch("subprocess.run")
         self.mock_subprocess_run = self.patch_subprocess_run.start()
 
-        self.patch_os_environ = mock.patch.dict(
-            os.environ, {"TEST_ROOT": "/path/to/repo"}, clear=True
+        self.patch_environment = mock.patch(
+            "cstar.base.system.CStarSystem.environment",
+            new_callable=mock.PropertyMock,
+            return_value=mock.Mock(
+                environment_variables={"TEST_ROOT": "/path/to/repo"},
+                package_root=Path("/mock/package/root"),
+            ),
         )
-        self.patch_os_environ.start()  # Apply the patch
+        self.mock_environment = self.patch_environment.start()
 
     def teardown_method(self):
         self.patch_local_config_status.stop()
@@ -277,7 +287,7 @@ class TestBaseModelConfigHandling:
         self.patch_local_config_status.stop()
         self.patch_get_repo_head_hash.stop()
         self.patch_get_repo_remote.stop()
-        self.patch_os_environ.stop()
+        self.patch_environment.stop()
 
     def test_handle_config_status_valid(self, generic_base_model, capsys):
         """Test when local_config_status == 0 (correct configuration)"""
