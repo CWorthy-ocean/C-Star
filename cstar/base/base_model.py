@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Optional
 from abc import ABC, abstractmethod
@@ -165,11 +164,17 @@ class BaseModel(ABC):
         """
 
         # check 1: X_ROOT variable is in user's env
-        env_var_exists = self.expected_env_var in os.environ
+
+        env_var_exists = (
+            self.expected_env_var
+            in cstar_system.environment.environment_variables.keys()
+        )
 
         # check 2: X_ROOT points to the correct repository
         if env_var_exists:
-            local_root = Path(os.environ[self.expected_env_var])
+            local_root = Path(
+                cstar_system.environment.environment_variables[self.expected_env_var]
+            )
             env_var_repo_remote = _get_repo_remote(local_root)
             env_var_matches_repo = self.source_repo == env_var_repo_remote
             if not env_var_matches_repo:
@@ -208,7 +213,11 @@ class BaseModel(ABC):
               -> prompt installation of the base model
         """
 
-        local_root = Path(os.environ.get(self.expected_env_var, ""))
+        local_root = Path(
+            cstar_system.environment.environment_variables.get(
+                self.expected_env_var, ""
+            )
+        )
 
         match self.local_config_status:
             case 0:
