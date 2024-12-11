@@ -27,6 +27,7 @@ class TestSlurmJob:
             primary_queue_name="test_queue",
             queue_flag="mock_flag",
             other_scheduler_directives={"-mock_directive": "mock_value"},
+            requires_task_distribution=False,
         )
 
         # Define common job parameters
@@ -50,26 +51,7 @@ class TestSlurmJob:
     def teardown_method(self, method):
         self.patch_queue_properties.stop()  # Stop the patch_queue_properties to restore the original behavior
 
-    @patch("cstar.system.manager.CStarSystemManager.name", new_callable=PropertyMock)
-    @patch(
-        "cstar.system.manager.CStarSystemManager.environment", new_callable=PropertyMock
-    )
-    def test_script(self, mock_environment, mock_sysname, tmp_path):
-        # Mock environment
-        mock_environment.return_value.environment_variables = self.mock_env_vars
-        mock_environment.return_value.uses_lmod = True
-        mock_sysname.return_value = "mock_system"
-
-        # Mock package_root to point to tmp_path
-        mock_environment.return_value.package_root = tmp_path
-
-        # Create the necessary mock .lmod file in the mocked package_root
-        lmod_dir = tmp_path / "additional_files/lmod_lists"
-        lmod_dir.mkdir(parents=True, exist_ok=True)
-        lmod_file = lmod_dir / "mock_system.lmod"
-        lmod_modules = ["moduleA", "moduleB"]
-        lmod_file.write_text("\n".join(lmod_modules))
-
+    def test_script_task_distribution_not_required(self):
         # Initialize the job
         job = SlurmJob(
             **self.common_job_params,
@@ -82,17 +64,50 @@ class TestSlurmJob:
             "#SBATCH --mock_flag=test_queue\n"
             "#SBATCH --ntasks=4\n"
             "#SBATCH --account=test_account\n"
-            "#SBATCH --export=NONE\n"
+            "#SBATCH --export=ALL\n"
             "#SBATCH --mail-type=ALL\n"
             "#SBATCH --time=01:00:00\n"
-            "#SBATCH -mock_directive mock_value"
-            "\nmodule reset\n"
-            "module load moduleA\n\n"
-            "module load moduleB"
-            "\nprintenv\n"
-            'export MPIHOME="/mock/mpi"\n'
-            'export NETCDFHOME="/mock/netcdf"\n'
-            'export LD_LIBRARY_PATH="/mock/lib"\n'
+            "#SBATCH -mock_directive mock_value\n"
+            "\necho Hello, World"
+        )
+
+        assert (
+            job.script.strip() == expected_script.strip()
+        ), f"Expected:\n{expected_script}\n\nGot:\n{job.script}"
+
+    @pytest.mark.filterwarnings(
+        r"ignore:.* Attempting to create scheduler job.*:UserWarning"
+    )
+    @patch(
+        "cstar.system.scheduler.SlurmScheduler.global_max_cpus_per_node",
+        new_callable=PropertyMock,
+    )
+    def test_script_task_distribution_required(self, mock_global_max_cpus):
+        mock_global_max_cpus.return_value = 64
+
+        new_scheduler = self.scheduler
+        new_scheduler.requires_task_distribution = True
+
+        params = self.common_job_params
+        params.update({"scheduler": new_scheduler})
+
+        # Initialize the job
+        job = SlurmJob(
+            **self.common_job_params,
+        )
+
+        expected_script = (
+            "#!/bin/bash\n"
+            "#SBATCH --job-name=test_job\n"
+            "#SBATCH --output=/test/output.log\n"
+            "#SBATCH --mock_flag=test_queue\n"
+            "#SBATCH --nodes=1\n"
+            "#SBATCH --ntasks-per-node=4\n"
+            "#SBATCH --account=test_account\n"
+            "#SBATCH --export=ALL\n"
+            "#SBATCH --mail-type=ALL\n"
+            "#SBATCH --time=01:00:00\n"
+            "#SBATCH -mock_directive mock_value\n"
             "\necho Hello, World"
         )
 

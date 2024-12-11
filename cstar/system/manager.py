@@ -104,6 +104,7 @@ class CStarSystemManager:
                     primary_queue_name="regular",
                     queue_flag="qos",
                     other_scheduler_directives={"-C": "cpu"},
+                    requires_task_distribution=False,
                 )
             case SystemName.DERECHO:
                 # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
@@ -115,6 +116,7 @@ class CStarSystemManager:
                     queues=[main_q, preempt_q, develop_q],
                     primary_queue_name="main",
                     queue_flag="q",
+                    requires_task_distribution=True,
                 )
             case SystemName.EXPANSE:
                 compute_q = SlurmQueue(name="compute")
@@ -123,6 +125,7 @@ class CStarSystemManager:
                     queues=[compute_q, debug_q],
                     primary_queue_name="compute",
                     queue_flag="partition",
+                    requires_task_distribution=True,
                 )
             case _:
                 self._scheduler = None

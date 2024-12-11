@@ -6,10 +6,15 @@ from cstar.system.scheduler import (
     Scheduler,
     PBSScheduler,
     PBSQueue,
+    SlurmScheduler,
+    SlurmQueue,
 )
 from cstar.system.scheduler_job import (
+    JobStatus,
     SchedulerJob,
     PBSJob,
+    SlurmJob,
+    create_scheduler_job,
 )
 
 
@@ -53,6 +58,7 @@ class TestSchedulerJobBase:
             "commands": "echo Hello, World",
             "account_key": "test_account",
             "cpus": 4,
+            "nodes": 1,
             "walltime": "01:00:00",
         }
 
@@ -121,19 +127,13 @@ class TestSchedulerJobBase:
             }
             MockSchedulerJob(**params, walltime="04:00:00")
 
-    def test_init_pbs_without_nodes_but_with_cpus_per_node(self):
-        mock_queue = PBSQueue(name="main", max_walltime="02:00:00")
-        scheduler = PBSScheduler(
-            queue_flag="q", queues=[mock_queue], primary_queue_name="main"
-        )
-
+    ## Cpu distribution tests
+    def test_init_without_nodes_but_with_cpus_per_node(self):
         params = self.common_job_params.copy()
         params.update(
             {
-                "scheduler": scheduler,
                 "nodes": None,
                 "cpus_per_node": 16,  # Explicit cpus_per_node
-                "queue_name": "main",
             }
         )
 
@@ -143,53 +143,38 @@ class TestSchedulerJobBase:
         assert job.nodes == 1  # cpus=4, cpus_per_node=16
         assert job.cpus_per_node == 16
 
-    def test_init_pbs__with_nodes_but_without_cpus_per_node(self):
-        mock_queue = PBSQueue(name="main", max_walltime="02:00:00")
-        scheduler = PBSScheduler(
-            queue_flag="q", queues=[mock_queue], primary_queue_name="main"
-        )
-
+    def test_init_with_nodes_but_without_cpus_per_node(self):
         params = self.common_job_params.copy()
         params.update(
             {
-                "scheduler": scheduler,
                 "nodes": 2,  # Explicit nodes
                 "cpus_per_node": None,  # cpus_per_node not specified
-                "queue_name": "main",
             }
         )
 
-        job = PBSJob(**params)
+        job = MockSchedulerJob(**params)
 
         # cpus_per_node should be calculated as cpus / nodes
         assert job.nodes == 2
         assert job.cpus_per_node == 2  # cpus=4, nodes=2
 
-    @patch.object(PBSScheduler, "global_max_cpus_per_node", new_callable=PropertyMock)
-    def test_init_pbs_without_nodes_or_cpus_per_node(self, mock_max_cpus_per_node):
-        mock_queue = PBSQueue(name="main", max_walltime="02:00:00")
-        scheduler = PBSScheduler(
-            queue_flag="q", queues=[mock_queue], primary_queue_name="main"
-        )
-        mock_max_cpus_per_node.return_value = 128  # Mock the maximum CPUs per node
-
+    def test_init_without_nodes_or_cpus_per_node(self):
         params = self.common_job_params.copy()
         params.update(
             {
-                "scheduler": scheduler,
                 "nodes": None,
                 "cpus_per_node": None,  # Both nodes and cpus_per_node are missing
-                "queue_name": "main",
+                "cpus": 128,
             }
         )
         with pytest.warns(
             UserWarning,
             match="Attempting to create scheduler job without 'nodes' and 'cpus_per_node'",
         ):
-            job = PBSJob(**params)
+            job = MockSchedulerJob(**params)
             # Check the calculated values from _calculate_node_distribution
-            assert job.nodes == 1
-            assert job.cpus_per_node == 4  # cpus=4, max_cpus_per_node=128
+            assert job.nodes == 2
+            assert job.cpus_per_node == 64  # cpus=128, max_cpus_per_node=64
 
     @pytest.mark.parametrize(
         "nodes, cpus_per_node, expected_nodes, expected_cpus_per_node",
@@ -200,13 +185,15 @@ class TestSchedulerJobBase:
             (None, None, None, None),  # Neither provided
         ],
     )
-    def test_init_cpus_without_pbs(
+    def test_init_cpus_without_distribution_requirement(
         self, nodes, cpus_per_node, expected_nodes, expected_cpus_per_node
     ):
         params = self.common_job_params.copy()
+        scheduler = MockScheduler()
+        scheduler.requires_task_distribution = False
         params.update(
             {
-                "scheduler": MockScheduler(),
+                "scheduler": scheduler,
                 "nodes": nodes,
                 "cpus_per_node": cpus_per_node,
             }
@@ -224,7 +211,7 @@ class TestSchedulerJobBase:
         with patch.object(
             MockSchedulerJob, "status", new_callable=PropertyMock
         ) as mock_status:
-            mock_status.return_value = "completed"
+            mock_status.return_value = JobStatus.COMPLETED
             with patch("builtins.print") as mock_print:
                 job.updates(seconds=10)
                 mock_print.assert_any_call(
@@ -250,7 +237,7 @@ class TestSchedulerJobBase:
         with patch.object(
             MockSchedulerJob, "status", new_callable=PropertyMock
         ) as mock_status:
-            mock_status.return_value = "running"
+            mock_status.return_value = JobStatus.RUNNING
 
             # Function to simulate appending live updates to the file
             def append_live_updates():
@@ -292,7 +279,7 @@ class TestSchedulerJobBase:
         with patch.object(
             MockSchedulerJob, "status", new_callable=PropertyMock
         ) as mock_status:
-            mock_status.return_value = "running"
+            mock_status.return_value = JobStatus.RUNNING
 
             # Patch input to simulate the confirmation prompt
             with patch("builtins.input", side_effect=["y"]) as mock_input:
@@ -319,6 +306,9 @@ class TestSchedulerJobBase:
 
 
 ##
+@pytest.mark.filterwarnings(
+    r"ignore:WARNING.*Attempting to create scheduler job.*:UserWarning"
+)
 class TestCalculateNodeDistribution:
     """Tests for `_calculate_node_distribution`, ensuring correct calculation of nodes
     and cores per node for various input scenarios."""
@@ -377,3 +367,99 @@ class TestCalculateNodeDistribution:
 
 
 ##
+class TestCreateSchedulerJob:
+    @patch(
+        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
+    )
+    @patch("cstar.system.scheduler.SlurmQueue.max_walltime", new_callable=PropertyMock)
+    def test_create_slurm_job(self, mock_max_walltime, mock_scheduler):
+        # Mock max_walltime for the queue
+        mock_max_walltime.return_value = "02:00:00"
+
+        # Mock the scheduler to be a SlurmScheduler with a valid queue
+        mock_queue = SlurmQueue(name="test_queue", query_name="test_queue")
+        mock_scheduler.return_value = SlurmScheduler(
+            queues=[mock_queue],
+            primary_queue_name="test_queue",
+            queue_flag="mock_flag",
+        )
+
+        # Explicitly provide `queue_name`
+        job = create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=4,
+            nodes=1,
+            account_key="test_account",
+            walltime="01:00:00",
+            queue_name="test_queue",  # Explicitly specify queue_name
+        )
+
+        # Ensure the returned job is a SlurmJob instance
+        assert isinstance(job, SlurmJob), f"Expected SlurmJob, got {type(job).__name__}"
+        assert job.commands == "echo Hello, World"
+        assert job.cpus == 4
+        assert job.nodes == 1
+        assert job.cpus_per_node == 4
+        assert job.account_key == "test_account"
+        assert job.walltime == "01:00:00"  # Ensure the provided walltime is used
+
+    @patch(
+        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
+    )
+    @patch(
+        "cstar.system.scheduler.PBSScheduler.global_max_cpus_per_node",
+        new_callable=PropertyMock,
+    )
+    def test_create_pbs_job(self, mock_global_max_cpus, mock_scheduler):
+        # Mock global_max_cpus_per_node for the scheduler
+        mock_global_max_cpus.return_value = 128
+
+        # Mock the scheduler to be a PBSScheduler with a valid queue
+        mock_queue = PBSQueue(name="test_queue", max_walltime="02:00:00")
+        mock_scheduler.return_value = PBSScheduler(
+            queues=[mock_queue],
+            primary_queue_name="test_queue",
+            queue_flag="mock_flag",
+        )
+
+        # Explicitly provide `queue_name`
+        job = create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=8,
+            account_key="pbs_account",
+            walltime="02:00:00",
+            nodes=1,
+            cpus_per_node=8,
+            queue_name="test_queue",  # Explicitly specify queue_name
+        )
+
+        # Ensure the returned job is a PBSJob instance
+        assert isinstance(job, PBSJob), f"Expected PBSJob, got {type(job).__name__}"
+        assert job.commands == "echo Hello, World"
+        assert job.cpus == 8
+        assert job.account_key == "pbs_account"
+        assert job.walltime == "02:00:00"  # Ensure the provided walltime is used
+
+    @patch(
+        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
+    )
+    def test_unsupported_scheduler(self, mock_scheduler):
+        # Mock an unsupported scheduler type
+        mock_scheduler.return_value = None  # No scheduler set
+
+        with pytest.raises(TypeError, match="Unsupported scheduler type: NoneType"):
+            create_scheduler_job(
+                commands="echo Hello, World",
+                cpus=4,
+                account_key="test_account",
+                walltime="01:00:00",
+            )
+
+    def test_missing_arguments(self):
+        # No need to mock scheduler here as the error is in the function arguments
+        with pytest.raises(TypeError, match="missing .* required positional argument"):
+            create_scheduler_job(
+                cpus=4,
+                account_key="test_account",
+                walltime="01:00:00",
+            )

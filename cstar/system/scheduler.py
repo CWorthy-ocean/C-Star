@@ -109,6 +109,7 @@ class Scheduler(ABC):
         queues: List["Queue"],
         primary_queue_name: str,
         other_scheduler_directives: Optional[Dict[str, str]] = None,
+        requires_task_distribution: Optional[bool] = True,
     ):
         self.queue_flag = queue_flag
         self.queues = queues
@@ -117,6 +118,7 @@ class Scheduler(ABC):
         self.other_scheduler_directives = (
             other_scheduler_directives if other_scheduler_directives is not None else {}
         )
+        self.requires_task_distribution = requires_task_distribution
 
     def get_queue(self, name):
         queue = next((queue for queue in self.queues if queue.name == name), None)
@@ -185,6 +187,8 @@ class SlurmScheduler(Scheduler):
 
 
 class PBSScheduler(Scheduler):
+    requires_task_distribution = True
+
     @property
     def global_max_cpus_per_node(self):
         result = subprocess.run(

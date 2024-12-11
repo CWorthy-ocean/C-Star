@@ -2,16 +2,12 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import (
-    SlurmScheduler,
     PBSScheduler,
-    SlurmQueue,
     PBSQueue,
 )
 from cstar.system.scheduler_job import (
     JobStatus,
-    SlurmJob,
     PBSJob,
-    create_scheduler_job,
 )
 
 
@@ -155,7 +151,7 @@ class TestPBSJob:
     @patch("cstar.system.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
         # Mock the status to "running"
-        mock_status.return_value = "running"
+        mock_status.return_value = JobStatus.RUNNING
 
         # Mock subprocess.run for successful cancellation
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -209,7 +205,7 @@ class TestPBSJob:
     @patch("cstar.system.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_failure(self, mock_status, mock_subprocess, tmp_path):
         # Mock the status to "running"
-        mock_status.return_value = "running"
+        mock_status.return_value = JobStatus.RUNNING
 
         # Mock subprocess.run for qdel failure
         mock_subprocess.return_value = MagicMock(
@@ -379,98 +375,3 @@ class TestPBSJob:
             RuntimeError, match="Failed to parse JSON from qstat output"
         ):
             job.status
-
-
-class TestCreateSchedulerJob:
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
-    @patch("cstar.system.scheduler.SlurmQueue.max_walltime", new_callable=PropertyMock)
-    def test_create_slurm_job(self, mock_max_walltime, mock_scheduler):
-        # Mock max_walltime for the queue
-        mock_max_walltime.return_value = "02:00:00"
-
-        # Mock the scheduler to be a SlurmScheduler with a valid queue
-        mock_queue = SlurmQueue(name="test_queue", query_name="test_queue")
-        mock_scheduler.return_value = SlurmScheduler(
-            queues=[mock_queue],
-            primary_queue_name="test_queue",
-            queue_flag="mock_flag",
-        )
-
-        # Explicitly provide `queue_name`
-        job = create_scheduler_job(
-            commands="echo Hello, World",
-            cpus=4,
-            account_key="test_account",
-            walltime="01:00:00",
-            queue_name="test_queue",  # Explicitly specify queue_name
-        )
-
-        # Ensure the returned job is a SlurmJob instance
-        assert isinstance(job, SlurmJob), f"Expected SlurmJob, got {type(job).__name__}"
-        assert job.commands == "echo Hello, World"
-        assert job.cpus == 4
-        assert job.account_key == "test_account"
-        assert job.walltime == "01:00:00"  # Ensure the provided walltime is used
-
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
-    @patch(
-        "cstar.system.scheduler.PBSScheduler.global_max_cpus_per_node",
-        new_callable=PropertyMock,
-    )
-    def test_create_pbs_job(self, mock_global_max_cpus, mock_scheduler):
-        # Mock global_max_cpus_per_node for the scheduler
-        mock_global_max_cpus.return_value = 128
-
-        # Mock the scheduler to be a PBSScheduler with a valid queue
-        mock_queue = PBSQueue(name="test_queue", max_walltime="02:00:00")
-        mock_scheduler.return_value = PBSScheduler(
-            queues=[mock_queue],
-            primary_queue_name="test_queue",
-            queue_flag="mock_flag",
-        )
-
-        # Explicitly provide `queue_name`
-        job = create_scheduler_job(
-            commands="echo Hello, World",
-            cpus=8,
-            account_key="pbs_account",
-            walltime="02:00:00",
-            nodes=1,
-            cpus_per_node=8,
-            queue_name="test_queue",  # Explicitly specify queue_name
-        )
-
-        # Ensure the returned job is a PBSJob instance
-        assert isinstance(job, PBSJob), f"Expected PBSJob, got {type(job).__name__}"
-        assert job.commands == "echo Hello, World"
-        assert job.cpus == 8
-        assert job.account_key == "pbs_account"
-        assert job.walltime == "02:00:00"  # Ensure the provided walltime is used
-
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
-    def test_unsupported_scheduler(self, mock_scheduler):
-        # Mock an unsupported scheduler type
-        mock_scheduler.return_value = None  # No scheduler set
-
-        with pytest.raises(TypeError, match="Unsupported scheduler type: NoneType"):
-            create_scheduler_job(
-                commands="echo Hello, World",
-                cpus=4,
-                account_key="test_account",
-                walltime="01:00:00",
-            )
-
-    def test_missing_arguments(self):
-        # No need to mock scheduler here as the error is in the function arguments
-        with pytest.raises(TypeError, match="missing .* required positional argument"):
-            create_scheduler_job(
-                cpus=4,
-                account_key="test_account",
-                walltime="01:00:00",
-            )

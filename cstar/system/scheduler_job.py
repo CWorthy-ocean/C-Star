@@ -162,21 +162,41 @@ class SchedulerJob(ABC):
         self.cpus_per_node: Optional[int]
         self.nodes: Optional[int]
 
-        if (nodes is None) and (cpus_per_node is not None):
-            self.nodes = ceil(cpus / cpus_per_node)  # ceiling division
+        if (
+            (nodes is None)
+            and (cpus_per_node is not None)
+            and (scheduler.requires_task_distribution)
+        ):
+            self.nodes = ceil(cpus / cpus_per_node)
             self.cpus_per_node = cpus_per_node
-        elif (nodes is not None) and (cpus_per_node is None):
+        elif (
+            (nodes is not None)
+            and (cpus_per_node is None)
+            and (scheduler.requires_task_distribution)
+        ):
             self.nodes = nodes
             self.cpus_per_node = int(cpus / nodes)
-        elif (nodes is None) and (cpus_per_node is None):
+        elif (
+            (nodes is None)
+            and (cpus_per_node is None)
+            and (scheduler.requires_task_distribution)
+        ):
+            if scheduler.global_max_cpus_per_node is None:
+                raise EnvironmentError(
+                    "You attempted to create a scheduler job without 'nodes', and "
+                    + "'cpus_per_node' parameters, but your scheduler explicitly "
+                    + "requires a task distribution. C-Star is unable to determine "
+                    + "your system's CPUs per node automatically and cannot continue"
+                )
+
             nnodes, ncpus = self._calculate_node_distribution(
                 cpus, scheduler.global_max_cpus_per_node
             )
             warnings.warn(
                 (
                     "WARNING: Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
-                    + "parameters, but your system uses PBS."
-                    + "\n PBS requires explicit specification of task distribution. C-Star will attempt "
+                    + "parameters, but your system requires an explicitly specified task distribution."
+                    + "\n C-Star will attempt "
                     + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
                     + "\nbased on your system maximum of "
                     + f"{scheduler.global_max_cpus_per_node} CPUS per node "
@@ -325,8 +345,11 @@ class SlurmJob(SchedulerJob):
         scheduler_script += f"\n#SBATCH --job-name={self.job_name}"
         scheduler_script += f"\n#SBATCH --output={self.output_file}"
         scheduler_script += f"\n#SBATCH --{self.scheduler.queue_flag}={self.queue_name}"
-        scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
-        scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
+        if self.scheduler.requires_task_distribution:
+            scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
+            scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
+        else:
+            scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
         scheduler_script += f"\n#SBATCH --account={self.account_key}"
         scheduler_script += "\n#SBATCH --export=ALL"
         scheduler_script += "\n#SBATCH --mail-type=ALL"
