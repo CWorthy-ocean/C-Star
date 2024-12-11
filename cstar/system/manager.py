@@ -6,7 +6,6 @@ from cstar.system.environment import CStarEnvironment
 from cstar.system.scheduler import (
     Scheduler,
     SlurmScheduler,
-    QueueFlag,
     SlurmQOS,
     SlurmPartition,
     PBSQueue,
@@ -104,7 +103,6 @@ class CStarSystemManager:
                 self._scheduler = SlurmScheduler(
                     queues=[per_regular_q, per_shared_q, per_debug_q],
                     primary_queue_name="regular",
-                    queue_flag=QueueFlag.QOS,
                     other_scheduler_directives={"-C": "cpu"},
                     requires_task_distribution=False,
                 )
@@ -117,7 +115,6 @@ class CStarSystemManager:
                 self._scheduler = PBSScheduler(
                     queues=[der_main_q, der_preempt_q, der_develop_q],
                     primary_queue_name="main",
-                    queue_flag=QueueFlag.Q,
                     requires_task_distribution=True,
                 )
             case SystemName.EXPANSE:
@@ -126,7 +123,6 @@ class CStarSystemManager:
                 self._scheduler = SlurmScheduler(
                     queues=[exp_compute_q, exp_debug_q],
                     primary_queue_name="compute",
-                    queue_flag=QueueFlag.PARTITION,
                     requires_task_distribution=True,
                 )
             case _:

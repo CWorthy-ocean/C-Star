@@ -13,7 +13,13 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from cstar.system.manager import cstar_sysmgr
-from cstar.system.scheduler import SlurmScheduler, PBSScheduler, Scheduler
+from cstar.system.scheduler import (
+    SlurmScheduler,
+    PBSScheduler,
+    Scheduler,
+    SlurmQOS,
+    SlurmPartition,
+)
 
 
 def create_scheduler_job(
@@ -337,7 +343,10 @@ class SlurmJob(SchedulerJob):
         scheduler_script = "#!/bin/bash"
         scheduler_script += f"\n#SBATCH --job-name={self.job_name}"
         scheduler_script += f"\n#SBATCH --output={self.output_file}"
-        scheduler_script += f"\n#SBATCH {self.scheduler.queue_flag}={self.queue_name}"
+        if isinstance(self.queue, SlurmQOS):
+            scheduler_script += f"\n#SBATCH --qos={self.queue_name}"
+        elif isinstance(self.queue, SlurmPartition):
+            scheduler_script += f"\n#SBATCH --partition={self.queue_name}"
         if self.scheduler.requires_task_distribution:
             scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
@@ -421,7 +430,7 @@ class PBSJob(SchedulerJob):
         scheduler_script += f"\n#PBS -o {self.output_file}"
         scheduler_script += f"\n#PBS -A {self.account_key}"
         scheduler_script += f"\n#PBS -l select={self.nodes}:ncpus={self.cpus_per_node},walltime={self.walltime}"
-        scheduler_script += f"\n#PBS {self.scheduler.queue_flag} {self.queue_name}"
+        scheduler_script += f"\n#PBS -q {self.queue_name}"
         scheduler_script += "\n#PBS -j oe"
         scheduler_script += "\n#PBS -k eod"
         scheduler_script += "\n#PBS -V"

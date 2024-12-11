@@ -103,13 +103,11 @@ class PBSQueue(Queue):
 class Scheduler(ABC):
     def __init__(
         self,
-        queue_flag: QueueFlag,
         queues: List["Queue"],
         primary_queue_name: str,
         other_scheduler_directives: Optional[Dict[str, str]] = None,
         requires_task_distribution: Optional[bool] = True,
     ):
-        self.queue_flag = queue_flag
         self.queues = queues
         self.queue_names = [q.name for q in queues]
         self.primary_queue_name = primary_queue_name
@@ -139,7 +137,7 @@ class Scheduler(ABC):
 
     def __repr__(self):
         base_repr = (
-            f"{self.__class__.__name__}(queue_flag={self.queue_flag!r}, "
+            f"{self.__class__.__name__}("
             f"queues={self.queues!r}, primary_queue_name={self.primary_queue_name!r}, "
             f"other_scheduler_directives={self.other_scheduler_directives!r})"
         )

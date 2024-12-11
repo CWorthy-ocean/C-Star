@@ -182,10 +182,9 @@ class TestScheduler:
         queue1 = Queue(name="general")
         queue2 = Queue(name="batch")
         scheduler = SlurmScheduler(
-            queue_flag="q", queues=[queue1, queue2], primary_queue_name="general"
+            queues=[queue1, queue2], primary_queue_name="general"
         )
 
-        assert scheduler.queue_flag == "q"
         assert scheduler.queues == [queue1, queue2]
         assert scheduler.primary_queue_name == "general"
         assert scheduler.queue_names == ["general", "batch"]
@@ -197,7 +196,7 @@ class TestScheduler:
         queue1 = Queue(name="general")
         queue2 = Queue(name="batch")
         scheduler = SlurmScheduler(
-            queue_flag="q", queues=[queue1, queue2], primary_queue_name="general"
+            queues=[queue1, queue2], primary_queue_name="general"
         )
 
         result = scheduler.get_queue("batch")
@@ -214,9 +213,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=0, stdout="128", stderr=""
         )
-        scheduler = SlurmScheduler(
-            queue_flag="q", queues=[], primary_queue_name="general"
-        )
+        scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
 
         result = scheduler.global_max_cpus_per_node
         assert result == 128
@@ -238,9 +235,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying CPUs"
         )
-        scheduler = SlurmScheduler(
-            queue_flag="q", queues=[], primary_queue_name="general"
-        )
+        scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
 
         result = scheduler.global_max_cpus_per_node
         assert result is None
@@ -260,9 +255,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=0, stdout="131072", stderr=""
         )
-        scheduler = SlurmScheduler(
-            queue_flag="q", queues=[], primary_queue_name="general"
-        )
+        scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
 
         result = scheduler.global_max_mem_per_node_gb
         assert result == 128.0  # 131072 MB -> 128 GB
@@ -284,9 +277,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying memory"
         )
-        scheduler = SlurmScheduler(
-            queue_flag="q", queues=[], primary_queue_name="general"
-        )
+        scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
 
         result = scheduler.global_max_mem_per_node_gb
         assert result is None
@@ -305,7 +296,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=0, stdout="128", stderr=""
         )
-        scheduler = PBSScheduler(queue_flag="q", queues=[], primary_queue_name="batch")
+        scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
 
         result = scheduler.global_max_cpus_per_node
         assert result == 128
@@ -327,7 +318,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying CPUs"
         )
-        scheduler = PBSScheduler(queue_flag="q", queues=[], primary_queue_name="batch")
+        scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
 
         result = scheduler.global_max_cpus_per_node
         assert result is None
@@ -347,7 +338,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying memory"
         )
-        scheduler = PBSScheduler(queue_flag="q", queues=[], primary_queue_name="batch")
+        scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
 
         result = scheduler.global_max_mem_per_node_gb
         assert result is None
@@ -378,9 +369,7 @@ class TestScheduler:
             mock_subprocess_run.return_value = MagicMock(
                 returncode=0, stdout=stdout, stderr=""
             )
-            scheduler = PBSScheduler(
-                queue_flag="q", queues=[], primary_queue_name="batch"
-            )
+            scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
 
             result = scheduler.global_max_mem_per_node_gb
             assert result == expected
@@ -460,7 +449,6 @@ class TestStrAndRepr:
         """Test __str__ for SlurmScheduler."""
         queues = [SlurmQOS(name="main"), SlurmQOS(name="backup")]
         scheduler = SlurmScheduler(
-            queue_flag="q",
             queues=queues,
             primary_queue_name="main",
             other_scheduler_directives={"constraint": "high-memory"},
@@ -495,13 +483,12 @@ class TestStrAndRepr:
         """Test __repr__ for SlurmScheduler."""
         queues = [SlurmQOS(name="main"), SlurmQOS(name="backup")]
         scheduler = SlurmScheduler(
-            queue_flag="q",
             queues=queues,
             primary_queue_name="main",
             other_scheduler_directives={"constraint": "high-memory"},
         )
         expected = (
-            "SlurmScheduler(queue_flag='q', queues=[SlurmQOS(name='main', query_name='main'), "
+            "SlurmScheduler(queues=[SlurmQOS(name='main', query_name='main'), "
             "SlurmQOS(name='backup', query_name='backup')], primary_queue_name='main', "
             "other_scheduler_directives={'constraint': 'high-memory'})"
         )
@@ -511,7 +498,6 @@ class TestStrAndRepr:
         """Test __str__ for PBSScheduler."""
         queues = [PBSQueue(name="batch", max_walltime="72:00:00")]
         scheduler = PBSScheduler(
-            queue_flag="q",
             queues=queues,
             primary_queue_name="batch",
             other_scheduler_directives={"feature": "gpu"},
@@ -546,13 +532,12 @@ class TestStrAndRepr:
         """Test __repr__ for PBSScheduler."""
         queues = [PBSQueue(name="batch", max_walltime="72:00:00")]
         scheduler = PBSScheduler(
-            queue_flag="q",
             queues=queues,
             primary_queue_name="batch",
             other_scheduler_directives={"feature": "gpu"},
         )
         expected = (
-            "PBSScheduler(queue_flag='q', queues=[PBSQueue(name='batch', query_name='batch', "
+            "PBSScheduler(queues=[PBSQueue(name='batch', query_name='batch', "
             "max_walltime='72:00:00')], primary_queue_name='batch', "
             "other_scheduler_directives={'feature': 'gpu'})"
         )

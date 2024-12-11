@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
-from cstar.system.scheduler import SlurmScheduler, SlurmQOS, QueueFlag
+from cstar.system.scheduler import SlurmScheduler, SlurmQOS, SlurmPartition
 from cstar.system.scheduler_job import SlurmJob, JobStatus
 
 
@@ -9,20 +9,28 @@ class TestSlurmJob:
 
     def setup_method(self, method):
         # Create a SlurmQOS and patch its max_walltime property
-        self.mock_queue = SlurmQOS(name="test_queue", query_name="test_queue")
-        self.patch_queue_properties = patch.object(
-            type(self.mock_queue),
+        self.mock_qos = SlurmQOS(name="test_queue", query_name="test_queue")
+        self.mock_partition = SlurmPartition(name="test_queue")
+        self.patch_qos_properties = patch.object(
+            type(self.mock_qos),
             "max_walltime",
             new_callable=PropertyMock,
             return_value="02:00:00",
         )
-        self.mock_max_walltime = self.patch_queue_properties.start()
+        self.mock_max_qos_walltime = self.patch_qos_properties.start()
+
+        self.patch_partition_properties = patch.object(
+            type(self.mock_partition),
+            "max_walltime",
+            new_callable=PropertyMock,
+            return_value="02:00:00",
+        )
+        self.mock_max_partition_walltime = self.patch_partition_properties.start()
 
         # Create the SlurmScheduler with the patched queue
         self.scheduler = SlurmScheduler(
-            queues=[self.mock_queue],
+            queues=[self.mock_qos],
             primary_queue_name="test_queue",
-            queue_flag=QueueFlag.PARTITION,
             other_scheduler_directives={"-mock_directive": "mock_value"},
             requires_task_distribution=False,
         )
@@ -46,7 +54,8 @@ class TestSlurmJob:
         }
 
     def teardown_method(self, method):
-        self.patch_queue_properties.stop()  # Stop the patch_queue_properties to restore the original behavior
+        self.patch_qos_properties.stop()  # Stop the patch_queue_properties to restore the original behavior
+        self.patch_partition_properties.stop()
 
     def test_script_task_distribution_not_required(self):
         # Initialize the job
@@ -58,7 +67,7 @@ class TestSlurmJob:
             "#!/bin/bash\n"
             "#SBATCH --job-name=test_job\n"
             "#SBATCH --output=/test/output.log\n"
-            "#SBATCH --partition=test_queue\n"
+            "#SBATCH --qos=test_queue\n"
             "#SBATCH --ntasks=4\n"
             "#SBATCH --account=test_account\n"
             "#SBATCH --export=ALL\n"
@@ -79,19 +88,18 @@ class TestSlurmJob:
         "cstar.system.scheduler.SlurmScheduler.global_max_cpus_per_node",
         new_callable=PropertyMock,
     )
-    @pytest.mark.parametrize(
-        "queue_flag, queue_flag_str",
-        [(QueueFlag.PARTITION, "--partition"), (QueueFlag.QOS, "--qos")],
-    )
     def test_script_task_distribution_required(
-        self, mock_global_max_cpus, queue_flag, queue_flag_str
+        self,
+        mock_global_max_cpus,
     ):
         mock_global_max_cpus.return_value = 64
 
         params = self.common_job_params
         new_scheduler = self.scheduler
+        new_scheduler.queues = [
+            self.mock_partition,
+        ]
         new_scheduler.requires_task_distribution = True
-        new_scheduler.queue_flag = queue_flag
         params.update({"scheduler": new_scheduler})
 
         # Initialize the job
@@ -103,7 +111,7 @@ class TestSlurmJob:
             "#!/bin/bash\n"
             "#SBATCH --job-name=test_job\n"
             "#SBATCH --output=/test/output.log\n"
-            f"#SBATCH {queue_flag_str}=test_queue\n"
+            "#SBATCH --partition=test_queue\n"
             "#SBATCH --nodes=1\n"
             "#SBATCH --ntasks-per-node=4\n"
             "#SBATCH --account=test_account\n"
@@ -118,7 +126,6 @@ class TestSlurmJob:
             job.script.strip() == expected_script.strip()
         ), f"Expected:\n{expected_script}\n\nGot:\n{job.script}"
 
-    @patch("subprocess.run")
     @patch(
         "cstar.system.manager.CStarSystemManager.environment", new_callable=PropertyMock
     )
@@ -127,7 +134,8 @@ class TestSlurmJob:
         {"SLURM_JOB_ID": "123", "SLURM_NODELIST": "mock_node", "SOME_ENV_VAR": "value"},
         clear=True,
     )
-    def test_submit(self, mock_environment, mock_subprocess, tmp_path):
+    @patch("subprocess.run")
+    def test_submit(self, mock_subprocess, mock_environment, tmp_path):
         # Mock environment
         mock_environment.return_value.environment_variables = self.mock_env_vars
         mock_environment.return_value.uses_lmod = False

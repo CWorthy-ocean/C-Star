@@ -31,7 +31,6 @@ class MockScheduler(Scheduler):
     def __init__(self):
         # Initialize with mock values
         super().__init__(
-            queue_flag="mock_flag",
             queues=[MagicMock(name="default_queue", max_walltime="02:00:00")],
             primary_queue_name="default_queue",
             other_scheduler_directives={"-mock_directive": "mock_value"},
@@ -381,7 +380,6 @@ class TestCreateSchedulerJob:
         mock_scheduler.return_value = SlurmScheduler(
             queues=[mock_queue],
             primary_queue_name="test_queue",
-            queue_flag="mock_flag",
         )
 
         # Explicitly provide `queue_name`
@@ -419,7 +417,6 @@ class TestCreateSchedulerJob:
         mock_scheduler.return_value = PBSScheduler(
             queues=[mock_queue],
             primary_queue_name="test_queue",
-            queue_flag="mock_flag",
         )
 
         # Explicitly provide `queue_name`

@@ -1,7 +1,7 @@
 import json
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
-from cstar.system.scheduler import PBSScheduler, PBSQueue, QueueFlag
+from cstar.system.scheduler import PBSScheduler, PBSQueue
 from cstar.system.scheduler_job import (
     JobStatus,
     PBSJob,
@@ -19,7 +19,6 @@ class TestPBSJob:
         self.scheduler = PBSScheduler(
             queues=[self.mock_queue],
             primary_queue_name="test_queue",
-            queue_flag=QueueFlag.Q,
         )
 
         # Define common job parameters
@@ -41,7 +40,6 @@ class TestPBSJob:
     def test_script(self, mock_scheduler):
         # Mock the scheduler and its attributes
         mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.queue_flag = "q"
         mock_scheduler.return_value.other_scheduler_directives = {
             "mock_directive": "mock_value"
         }
@@ -76,7 +74,6 @@ class TestPBSJob:
     def test_submit(self, mock_scheduler, mock_subprocess, tmp_path):
         # Mock scheduler attributes
         mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.queue_flag = "q"
         mock_scheduler.return_value.other_scheduler_directives = {}
 
         # Mock subprocess.run for qsub
@@ -121,7 +118,6 @@ class TestPBSJob:
     ):
         # Mock scheduler attributes
         mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.queue_flag = "q"
         mock_scheduler.return_value.other_scheduler_directives = {}
 
         # Mock subprocess.run for qsub
