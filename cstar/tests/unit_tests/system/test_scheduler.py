@@ -1,9 +1,9 @@
-import json
 import pytest
 from unittest.mock import patch, MagicMock, PropertyMock
 from cstar.system.scheduler import (
     Queue,
-    SlurmQueue,
+    SlurmQOS,
+    SlurmPartition,
     PBSQueue,
     SlurmScheduler,
     PBSScheduler,
@@ -81,43 +81,7 @@ class TestQueue:
         assert queue.name == "general"
         assert queue.query_name == "specific"
 
-    def test_slurmqueue_inherits_queue(self):
-        """Confirm SlurmQueue inherits initialization logic from Queue."""
-        slurm_queue = SlurmQueue(name="general")
-        assert slurm_queue.name == "general"
-        assert slurm_queue.query_name == "general"  # Default to name
-
-    def test_slurmqueue_query_queue_property(self, mock_subprocess_run):
-        """Test querying a property from a SlurmQueue using subprocess.
-
-        Uses mock_subprocess_run to simulate the output of the system command.
-        """
-        mock_subprocess_run.return_value = MagicMock(
-            returncode=0, stdout="60:00", stderr=""
-        )
-        slurm_queue = SlurmQueue(name="general")
-        result = slurm_queue.query_queue_property("general", "MaxWall")
-        assert result == "60:00"
-
-        mock_subprocess_run.assert_called_once_with(
-            "sacctmgr show qos general format=MaxWall --noheader",
-            shell=True,
-            text=True,
-            capture_output=True,
-        )
-
-    def test_slurmqueue_query_queue_property_error(self, mock_subprocess_run):
-        """Verify RuntimeError is raised when SlurmQueue command fails.
-
-        Simulates a failing command by returning a non-zero exit code.
-        """
-        mock_subprocess_run.return_value = MagicMock(returncode=1, stderr="Error")
-        slurm_queue = SlurmQueue(name="general")
-
-        with pytest.raises(RuntimeError, match="Command failed: Error"):
-            slurm_queue.query_queue_property("general", "MaxWall")
-
-    def test_slurmqueue_max_walltime(self, mock_subprocess_run):
+    def test_slurmqos_max_walltime(self, mock_subprocess_run):
         """Test the max_walltime property of SlurmQueue.
 
         Simulates a successful system command to retrieve the maximum walltime.
@@ -125,8 +89,8 @@ class TestQueue:
         mock_subprocess_run.return_value = MagicMock(
             returncode=0, stdout="02:00:00", stderr=""
         )
-        slurm_queue = SlurmQueue(name="general")
-        assert slurm_queue.max_walltime == "02:00:00"
+        slurm_qos = SlurmQOS(name="general")
+        assert slurm_qos.max_walltime == "02:00:00"
 
         mock_subprocess_run.assert_called_once_with(
             "sacctmgr show qos general format=MaxWall --noheader",
@@ -135,37 +99,19 @@ class TestQueue:
             capture_output=True,
         )
 
-    def test_slurmqueue_max_nodes(self, mock_subprocess_run):
-        """Test the max_nodes property of SlurmQueue.
+    def test_slurmpartition_max_walltime(self, mock_subprocess_run):
+        """Test the max_walltime property of SlurmQueue.
 
-        Simulates a successful system command to retrieve the maximum nodes.
+        Simulates a successful system command to retrieve the maximum walltime.
         """
         mock_subprocess_run.return_value = MagicMock(
-            returncode=0, stdout="100", stderr=""
+            returncode=0, stdout="2-01:00:00", stderr=""
         )
-        slurm_queue = SlurmQueue(name="general")
-        assert slurm_queue.max_nodes == 100
+        slurm_ptn = SlurmPartition(name="general")
+        assert slurm_ptn.max_walltime == "49:00:00"
 
         mock_subprocess_run.assert_called_once_with(
-            "sacctmgr show qos general format=MaxNodes --noheader",
-            shell=True,
-            text=True,
-            capture_output=True,
-        )
-
-    def test_slurmqueue_priority(self, mock_subprocess_run):
-        """Test the priority property of SlurmQueue.
-
-        Simulates a successful system command to retrieve the queue priority.
-        """
-        mock_subprocess_run.return_value = MagicMock(
-            returncode=0, stdout="1000", stderr=""
-        )
-        slurm_queue = SlurmQueue(name="general")
-        assert slurm_queue.priority == "1000"
-
-        mock_subprocess_run.assert_called_once_with(
-            "sacctmgr show qos general format=Priority --noheader",
+            "sinfo -h -o '%l' -p general",
             shell=True,
             text=True,
             capture_output=True,
@@ -177,65 +123,6 @@ class TestQueue:
         assert pbs_queue.name == "batch"
         assert pbs_queue.query_name == "batch"  # Default to name
         assert pbs_queue.max_walltime == "72:00:00"
-
-    def test_pbsqueue_query_queue_property(self, mock_subprocess_run):
-        """Verify PBSQueue can parse JSON output from qstat.
-
-        Uses mock_subprocess_run to simulate qstat JSON output and validates that the
-        desired property is correctly extracted.
-        """
-        mock_subprocess_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"Queue": {"batch": {"resources_max.ncpus": "128"}}}),
-        )
-        pbs_queue = PBSQueue(name="batch", max_walltime="72:00:00")
-        result = pbs_queue.query_queue_property("batch", "resources_max.ncpus")
-        assert result == "128"
-
-        mock_subprocess_run.assert_called_once_with(
-            ["qstat", "-Qf", "-Fjson", "batch"],
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-
-    def test_pbsqueue_max_cpus(self, mock_subprocess_run):
-        """Test the max_cpus property of PBSQueue.
-
-        Simulates a successful qstat JSON output for the maximum CPUs property.
-        """
-        mock_subprocess_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"Queue": {"batch": {"resources_max.ncpus": "128"}}}),
-        )
-        pbs_queue = PBSQueue(name="batch", max_walltime="72:00:00")
-        assert pbs_queue.max_cpus == 128
-
-        mock_subprocess_run.assert_called_once_with(
-            ["qstat", "-Qf", "-Fjson", "batch"],
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-
-    def test_pbsqueue_max_mem(self, mock_subprocess_run):
-        """Test the max_mem property of PBSQueue.
-
-        Simulates a successful qstat JSON output for the maximum memory property.
-        """
-        mock_subprocess_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"Queue": {"batch": {"resources_max.mem": "512mb"}}}),
-        )
-        pbs_queue = PBSQueue(name="batch", max_walltime="72:00:00")
-        assert pbs_queue.max_mem == "512mb"
-
-        mock_subprocess_run.assert_called_once_with(
-            ["qstat", "-Qf", "-Fjson", "batch"],
-            text=True,
-            capture_output=True,
-            check=True,
-        )
 
 
 ################################################################################
@@ -510,9 +397,9 @@ class TestStrAndRepr:
     """Unit tests for the __str__ and __repr__ methods of Queue, Scheduler, and their
     respective subclasses."""
 
-    def test_slurmqueue_str(self):
+    def test_slurmqos_str(self):
         """Test __str__ for SlurmQueue."""
-        queue = SlurmQueue(name="main")
+        queue = SlurmQOS(name="main")
         with (
             patch.object(
                 type(queue),
@@ -520,44 +407,48 @@ class TestStrAndRepr:
                 new_callable=PropertyMock,
                 return_value="09:00:00",
             ),
-            patch.object(
-                type(queue), "max_nodes", new_callable=PropertyMock, return_value=10
-            ),
-            patch.object(
-                type(queue), "priority", new_callable=PropertyMock, return_value=298248
-            ),
         ):
             expected = (
-                "SlurmQueue:\n"
-                "----------\n"
-                "name: main\n"
-                "max_walltime: 09:00:00\n"
-                "max_nodes: 10\n"
-                "priority: 298248\n"
+                "SlurmQOS:\n" "--------\n" "name: main\n" "max_walltime: 09:00:00\n"
             )
             assert str(queue) == expected
 
-    def test_slurmqueue_repr(self):
-        """Test __repr__ for SlurmQueue."""
-        queue = SlurmQueue(name="main")
-        expected = "SlurmQueue(name='main', query_name='main')"
+    def test_slurmqos_repr(self):
+        """Test __repr__ for SlurmQOS."""
+        queue = SlurmQOS(name="main")
+        expected = "SlurmQOS(name='main', query_name='main')"
+        assert repr(queue) == expected
+
+    def test_slurmpartition_str(self):
+        """Test __str__ for SlurmPartition."""
+        queue = SlurmPartition(name="main")
+        with (
+            patch.object(
+                type(queue),
+                "max_walltime",
+                new_callable=PropertyMock,
+                return_value="09:00:00",
+            ),
+        ):
+            expected = (
+                "SlurmPartition:\n"
+                "--------------\n"
+                "name: main\n"
+                "max_walltime: 09:00:00\n"
+            )
+            assert str(queue) == expected
+
+    def test_slurmpartition_repr(self):
+        """Test __repr__ for SlurmPartition."""
+        queue = SlurmPartition(name="main")
+        expected = "SlurmPartition(name='main', query_name='main')"
         assert repr(queue) == expected
 
     def test_pbsqueue_str(self):
         """Test __str__ for PBSQueue."""
         queue = PBSQueue(name="batch", max_walltime="72:00:00")
-        with (
-            patch.object(
-                type(queue), "max_cpus", new_callable=PropertyMock, return_value=128
-            ),
-            patch.object(
-                type(queue), "max_mem", new_callable=PropertyMock, return_value="512mb"
-            ),
-        ):
-            expected = (
-                "PBSQueue:\n" "--------\n" "name: batch\n" "max_walltime: 72:00:00\n"
-            )
-            assert str(queue) == expected
+        expected = "PBSQueue:\n" "--------\n" "name: batch\n" "max_walltime: 72:00:00\n"
+        assert str(queue) == expected
 
     def test_pbsqueue_repr(self):
         """Test __repr__ for PBSQueue."""
@@ -567,7 +458,7 @@ class TestStrAndRepr:
 
     def test_slurmscheduler_str(self):
         """Test __str__ for SlurmScheduler."""
-        queues = [SlurmQueue(name="main"), SlurmQueue(name="backup")]
+        queues = [SlurmQOS(name="main"), SlurmQOS(name="backup")]
         scheduler = SlurmScheduler(
             queue_flag="q",
             queues=queues,
@@ -602,7 +493,7 @@ class TestStrAndRepr:
 
     def test_slurmscheduler_repr(self):
         """Test __repr__ for SlurmScheduler."""
-        queues = [SlurmQueue(name="main"), SlurmQueue(name="backup")]
+        queues = [SlurmQOS(name="main"), SlurmQOS(name="backup")]
         scheduler = SlurmScheduler(
             queue_flag="q",
             queues=queues,
@@ -610,8 +501,8 @@ class TestStrAndRepr:
             other_scheduler_directives={"constraint": "high-memory"},
         )
         expected = (
-            "SlurmScheduler(queue_flag='q', queues=[SlurmQueue(name='main', query_name='main'), "
-            "SlurmQueue(name='backup', query_name='backup')], primary_queue_name='main', "
+            "SlurmScheduler(queue_flag='q', queues=[SlurmQOS(name='main', query_name='main'), "
+            "SlurmQOS(name='backup', query_name='backup')], primary_queue_name='main', "
             "other_scheduler_directives={'constraint': 'high-memory'})"
         )
         assert repr(scheduler) == expected

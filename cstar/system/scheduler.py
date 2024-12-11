@@ -1,5 +1,5 @@
-import json
 import subprocess
+from enum import Enum
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
 
@@ -15,45 +15,67 @@ class Queue(ABC):
         return f"{self.__class__.__name__}(name={self.name!r}, query_name={self.query_name!r})"
 
 
-class SlurmQueue(Queue):
+class QueueFlag(Enum):
+    PARTITION = "--partition"
+    QOS = "--qos"
+    Q = "-q"
+
+    def __str__(self):
+        return self.value
+
+
+class SlurmQueue(Queue, ABC):
     def __str__(self):
         return (
             f"{self.__class__.__name__}:\n"
             f"{'-' * len(self.__class__.__name__)}\n"
             f"name: {self.name}\n"
             f"max_walltime: {self.max_walltime}\n"
-            f"max_nodes: {self.max_nodes}\n"
-            f"priority: {self.priority}\n"
         )
 
-    def query_queue_property(self, queue_name, property_name):
-        result = subprocess.run(
-            f"sacctmgr show qos {queue_name} format={property_name} --noheader",
-            shell=True,
-            text=True,
-            capture_output=True,
-        )
+    @property
+    @abstractmethod
+    def max_walltime(self):
+        pass
 
-        if result.returncode != 0:
-            raise RuntimeError(f"Command failed: {result.stderr.strip()}")
+    def _parse_walltime(self, walltime_str):
+        # The output of the above might be inconsistent (e.g. 02:00:00, 1-12:00:00, 30:00)
+        # We should parse the output and return a consistent "HH:MM:SS":
 
-        stdout = result.stdout.strip()
-        return stdout
+        if walltime_str.count("-") == 1:  # D-HH:MM:SS
+            mw_d = int(walltime_str.split("-")[0])
+            mw_hms = walltime_str.split("-")[1]
+        else:
+            mw_d = 0
+            mw_hms = walltime_str
+        if mw_hms.count(":") == 1:  # MM:SS
+            mw_h = 0
+            mw_m, mw_s = map(int, mw_hms.split(":"))
+        elif mw_hms.count(":") == 2:  # HH:MM:SS
+            mw_h, mw_m, mw_s = map(int, mw_hms.split(":"))
+        return f"{mw_d*24 + mw_h:02}:{mw_m:02}:{mw_s:02}"
 
+
+class SlurmQOS(SlurmQueue):
     @property
     def max_walltime(self) -> Optional[str]:
-        mw = self.query_queue_property(self.query_name, "MaxWall")
-        return mw if mw else None
+        sp_cmd = f"sacctmgr show qos {self.name} format=MaxWall --noheader"
+        sp_run = subprocess.run(sp_cmd, shell=True, text=True, capture_output=True)
+        if sp_run.returncode != 0:
+            raise RuntimeError(f"Command {sp_cmd} failed: {sp_run.stderr.strip()}")
+        mw = sp_run.stdout.strip()
+        return self._parse_walltime(mw) if mw else None
 
-    @property
-    def max_nodes(self) -> Optional[int]:
-        mn = self.query_queue_property(self.query_name, "MaxNodes")
-        return int(mn) if mn else None
 
+class SlurmPartition(SlurmQueue):
     @property
-    def priority(self) -> Optional[str]:
-        pr = self.query_queue_property(self.query_name, "Priority")
-        return pr if pr else None
+    def max_walltime(self) -> Optional[str]:
+        sp_cmd = f"sinfo -h -o '%l' -p {self.name}"
+        sp_run = subprocess.run(sp_cmd, shell=True, text=True, capture_output=True)
+        if sp_run.returncode != 0:
+            raise RuntimeError(f"Command {sp_cmd} failed: {sp_run.stderr.strip()}")
+        mw = sp_run.stdout.strip()
+        return self._parse_walltime(mw) if mw else None
 
 
 class PBSQueue(Queue):
@@ -74,30 +96,6 @@ class PBSQueue(Queue):
         # Strip the closing ')' and append the additional attribute
         return f"{base_repr.rstrip(')')}, max_walltime={self.max_walltime!r})"
 
-    def query_queue_property(
-        self, queue_name: str, property_name: str
-    ) -> Optional[str]:
-        # Run qstat with JSON output
-        result = subprocess.run(
-            ["qstat", "-Qf", "-Fjson", queue_name],
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        # Parse the JSON output
-        data = json.loads(result.stdout)
-        # Access the requested property
-        return data["Queue"][queue_name].get(property_name)
-
-    @property
-    def max_cpus(self) -> Optional[int]:
-        mc = self.query_queue_property(self.query_name, "resources_max.ncpus")
-        return int(mc) if mc else None
-
-    @property
-    def max_mem(self) -> Optional[str]:
-        return self.query_queue_property(self.query_name, "resources_max.mem")
-
 
 ################################################################################
 
@@ -105,7 +103,7 @@ class PBSQueue(Queue):
 class Scheduler(ABC):
     def __init__(
         self,
-        queue_flag: str,
+        queue_flag: QueueFlag,
         queues: List["Queue"],
         primary_queue_name: str,
         other_scheduler_directives: Optional[Dict[str, str]] = None,

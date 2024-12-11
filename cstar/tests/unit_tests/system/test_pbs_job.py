@@ -1,10 +1,7 @@
 import json
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
-from cstar.system.scheduler import (
-    PBSScheduler,
-    PBSQueue,
-)
+from cstar.system.scheduler import PBSScheduler, PBSQueue, QueueFlag
 from cstar.system.scheduler_job import (
     JobStatus,
     PBSJob,
@@ -22,7 +19,7 @@ class TestPBSJob:
         self.scheduler = PBSScheduler(
             queues=[self.mock_queue],
             primary_queue_name="test_queue",
-            queue_flag="mock_flag",
+            queue_flag=QueueFlag.Q,
         )
 
         # Define common job parameters
@@ -58,7 +55,7 @@ class TestPBSJob:
             "#PBS -o /test/pbs_output.log\n"
             "#PBS -A test_account\n"
             "#PBS -l select=2:ncpus=2,walltime=02:00:00\n"
-            "#PBS -mock_flag test_queue\n"
+            "#PBS -q test_queue\n"
             "#PBS -j oe\n"
             "#PBS -k eod\n"
             "#PBS -V\n"

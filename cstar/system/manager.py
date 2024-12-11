@@ -6,7 +6,9 @@ from cstar.system.environment import CStarEnvironment
 from cstar.system.scheduler import (
     Scheduler,
     SlurmScheduler,
-    SlurmQueue,
+    QueueFlag,
+    SlurmQOS,
+    SlurmPartition,
     PBSQueue,
     PBSScheduler,
 )
@@ -95,36 +97,36 @@ class CStarSystemManager:
         match self._system_name_enum():
             case SystemName.PERLMUTTER:
                 # regular -> regular_1 for < 124 nodes, regular_0 for >124 nodes
-                regular_q = SlurmQueue(name="regular", query_name="regular_1")
-                shared_q = SlurmQueue(name="shared")
-                debug_q = SlurmQueue(name="debug")
+                per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
+                per_shared_q = SlurmQOS(name="shared")
+                per_debug_q = SlurmQOS(name="debug")
 
                 self._scheduler = SlurmScheduler(
-                    queues=[regular_q, shared_q, debug_q],
+                    queues=[per_regular_q, per_shared_q, per_debug_q],
                     primary_queue_name="regular",
-                    queue_flag="qos",
+                    queue_flag=QueueFlag.QOS,
                     other_scheduler_directives={"-C": "cpu"},
                     requires_task_distribution=False,
                 )
             case SystemName.DERECHO:
                 # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
-                main_q = PBSQueue(name="main", max_walltime="12:00:00")
-                preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
-                develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
+                der_main_q = PBSQueue(name="main", max_walltime="12:00:00")
+                der_preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
+                der_develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
 
                 self._scheduler = PBSScheduler(
-                    queues=[main_q, preempt_q, develop_q],
+                    queues=[der_main_q, der_preempt_q, der_develop_q],
                     primary_queue_name="main",
-                    queue_flag="q",
+                    queue_flag=QueueFlag.Q,
                     requires_task_distribution=True,
                 )
             case SystemName.EXPANSE:
-                compute_q = SlurmQueue(name="compute")
-                debug_q = SlurmQueue(name="debug")
+                exp_compute_q = SlurmPartition(name="compute")
+                exp_debug_q = SlurmPartition(name="debug")
                 self._scheduler = SlurmScheduler(
-                    queues=[compute_q, debug_q],
+                    queues=[exp_compute_q, exp_debug_q],
                     primary_queue_name="compute",
-                    queue_flag="partition",
+                    queue_flag=QueueFlag.PARTITION,
                     requires_task_distribution=True,
                 )
             case _:

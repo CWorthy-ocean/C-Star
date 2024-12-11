@@ -7,7 +7,7 @@ from cstar.system.scheduler import (
     PBSScheduler,
     PBSQueue,
     SlurmScheduler,
-    SlurmQueue,
+    SlurmQOS,
 )
 from cstar.system.scheduler_job import (
     JobStatus,
@@ -371,13 +371,13 @@ class TestCreateSchedulerJob:
     @patch(
         "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
     )
-    @patch("cstar.system.scheduler.SlurmQueue.max_walltime", new_callable=PropertyMock)
+    @patch("cstar.system.scheduler.SlurmQOS.max_walltime", new_callable=PropertyMock)
     def test_create_slurm_job(self, mock_max_walltime, mock_scheduler):
         # Mock max_walltime for the queue
         mock_max_walltime.return_value = "02:00:00"
 
         # Mock the scheduler to be a SlurmScheduler with a valid queue
-        mock_queue = SlurmQueue(name="test_queue", query_name="test_queue")
+        mock_queue = SlurmQOS(name="test_queue", query_name="test_queue")
         mock_scheduler.return_value = SlurmScheduler(
             queues=[mock_queue],
             primary_queue_name="test_queue",

@@ -137,14 +137,7 @@ class SchedulerJob(ABC):
         else:
             # Check walltimes
             wt_h, wt_m, wt_s = map(int, walltime.split(":"))
-            # Handle D-HH:MM:SS format for max_walltime
-
-            if "-" in self.queue.max_walltime:
-                days, time_part = self.queue.max_walltime.split("-")
-                mw_h, mw_m, mw_s = map(int, time_part.split(":"))
-                mw_h += int(days) * 24  # Convert days to hours
-            else:
-                mw_h, mw_m, mw_s = map(int, self.queue.max_walltime.split(":"))
+            mw_h, mw_m, mw_s = map(int, self.queue.max_walltime.split(":"))
 
             walltime_delta = timedelta(hours=wt_h, minutes=wt_m, seconds=wt_s)
             max_walltime_delta = timedelta(hours=mw_h, minutes=mw_m, seconds=mw_s)
@@ -344,7 +337,7 @@ class SlurmJob(SchedulerJob):
         scheduler_script = "#!/bin/bash"
         scheduler_script += f"\n#SBATCH --job-name={self.job_name}"
         scheduler_script += f"\n#SBATCH --output={self.output_file}"
-        scheduler_script += f"\n#SBATCH --{self.scheduler.queue_flag}={self.queue_name}"
+        scheduler_script += f"\n#SBATCH {self.scheduler.queue_flag}={self.queue_name}"
         if self.scheduler.requires_task_distribution:
             scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
@@ -428,7 +421,7 @@ class PBSJob(SchedulerJob):
         scheduler_script += f"\n#PBS -o {self.output_file}"
         scheduler_script += f"\n#PBS -A {self.account_key}"
         scheduler_script += f"\n#PBS -l select={self.nodes}:ncpus={self.cpus_per_node},walltime={self.walltime}"
-        scheduler_script += f"\n#PBS -{self.scheduler.queue_flag} {self.queue_name}"
+        scheduler_script += f"\n#PBS {self.scheduler.queue_flag} {self.queue_name}"
         scheduler_script += "\n#PBS -j oe"
         scheduler_script += "\n#PBS -k eod"
         scheduler_script += "\n#PBS -V"

@@ -1,9 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
-from cstar.system.scheduler import (
-    SlurmScheduler,
-    SlurmQueue,
-)
+from cstar.system.scheduler import SlurmScheduler, SlurmQOS, QueueFlag
 from cstar.system.scheduler_job import SlurmJob, JobStatus
 
 
@@ -11,8 +8,8 @@ class TestSlurmJob:
     """Tests for the SlurmJob class."""
 
     def setup_method(self, method):
-        # Create a SlurmQueue and patch its max_walltime property
-        self.mock_queue = SlurmQueue(name="test_queue", query_name="test_queue")
+        # Create a SlurmQOS and patch its max_walltime property
+        self.mock_queue = SlurmQOS(name="test_queue", query_name="test_queue")
         self.patch_queue_properties = patch.object(
             type(self.mock_queue),
             "max_walltime",
@@ -25,7 +22,7 @@ class TestSlurmJob:
         self.scheduler = SlurmScheduler(
             queues=[self.mock_queue],
             primary_queue_name="test_queue",
-            queue_flag="mock_flag",
+            queue_flag=QueueFlag.PARTITION,
             other_scheduler_directives={"-mock_directive": "mock_value"},
             requires_task_distribution=False,
         )
@@ -61,7 +58,7 @@ class TestSlurmJob:
             "#!/bin/bash\n"
             "#SBATCH --job-name=test_job\n"
             "#SBATCH --output=/test/output.log\n"
-            "#SBATCH --mock_flag=test_queue\n"
+            "#SBATCH --partition=test_queue\n"
             "#SBATCH --ntasks=4\n"
             "#SBATCH --account=test_account\n"
             "#SBATCH --export=ALL\n"
@@ -82,25 +79,31 @@ class TestSlurmJob:
         "cstar.system.scheduler.SlurmScheduler.global_max_cpus_per_node",
         new_callable=PropertyMock,
     )
-    def test_script_task_distribution_required(self, mock_global_max_cpus):
+    @pytest.mark.parametrize(
+        "queue_flag, queue_flag_str",
+        [(QueueFlag.PARTITION, "--partition"), (QueueFlag.QOS, "--qos")],
+    )
+    def test_script_task_distribution_required(
+        self, mock_global_max_cpus, queue_flag, queue_flag_str
+    ):
         mock_global_max_cpus.return_value = 64
 
+        params = self.common_job_params
         new_scheduler = self.scheduler
         new_scheduler.requires_task_distribution = True
-
-        params = self.common_job_params
+        new_scheduler.queue_flag = queue_flag
         params.update({"scheduler": new_scheduler})
 
         # Initialize the job
         job = SlurmJob(
-            **self.common_job_params,
+            **params,
         )
 
         expected_script = (
             "#!/bin/bash\n"
             "#SBATCH --job-name=test_job\n"
             "#SBATCH --output=/test/output.log\n"
-            "#SBATCH --mock_flag=test_queue\n"
+            f"#SBATCH {queue_flag_str}=test_queue\n"
             "#SBATCH --nodes=1\n"
             "#SBATCH --ntasks-per-node=4\n"
             "#SBATCH --account=test_account\n"
