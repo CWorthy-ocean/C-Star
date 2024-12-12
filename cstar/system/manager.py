@@ -89,7 +89,18 @@ class CStarSystemManager:
 
     @property
     def scheduler(self) -> Optional[Scheduler]:
-        """todo."""
+        """Returns the Scheduler instance corresponding to the system.
+
+        The scheduler instance is created based on the detected system name
+        and cached for future access.
+
+        Returns
+        -------
+        Optional[Scheduler]
+            A `Scheduler` instance configured for the detected system, or `None` if the
+            system is not supported or does not use a job scheduler.
+        """
+
         if self._scheduler is not None:
             return self._scheduler
 
@@ -132,10 +143,10 @@ class CStarSystemManager:
 
     @property
     def environment(self) -> CStarEnvironment:
-        """Returns a CStarEnvironment class instance corresponding to this machine.
+        """Returns a CStarEnvironment class instance corresponding to this system.
 
         The instance is created when the property is first accessed and cached for
-        future queries
+        future queries.
         """
         if self._environment is not None:
             return self._environment
