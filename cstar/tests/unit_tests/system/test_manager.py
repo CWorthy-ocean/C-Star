@@ -14,7 +14,20 @@ def mock_environment_vars():
 
 
 class TestSystemName:
-    """Tests for the `name` property of the CStarSystemManager class."""
+    """Tests for the `name` property of the `CStarSystemManager` class.
+
+    Tests
+    -----
+    test_system_name
+        Validates that the system name is correctly determined based on environment
+        variables and platform properties.
+    test_system_name_raise
+        Ensures that an `EnvironmentError` is raised if the system name cannot be
+        determined.
+    test_unsupported_name
+        Confirms that a `ValueError` is raised when an unsupported system name
+        is encountered.
+    """
 
     @pytest.mark.parametrize(
         "env_vars, platform_values, expected_sysname",
@@ -35,7 +48,26 @@ class TestSystemName:
         expected_sysname,
         mock_environment_vars,
     ):
-        """Test the system name determination logic."""
+        """Validates that the system name is correctly determined based on environment
+        variables and platform properties.
+
+        This test uses parameterization to evaluate multiple combinations of environment
+        variables and platform values.
+
+        Mocks
+        -----
+        platform.system
+            Returns a mocked system name when platform detection is used.
+        platform.machine
+            Returns a mocked machine architecture when platform detection is used.
+        os.environ
+            Environment variables are patched to simulate specific configurations.
+
+        Asserts
+        -------
+        - That the system name matches the expected value for various input scenarios.
+        """
+
         # Override platform mocks if values are provided
         if platform_values:
             mock_system.return_value = platform_values[0]
@@ -58,7 +90,7 @@ class TestSystemName:
             _ = system.name
 
     def test_unsupported_name(self, mock_environment_vars):
-        """Test that an unsupported system name raises an error."""
+        """Test that an unsupported system name raises a ValueError."""
         with patch.object(
             CStarSystemManager,
             "name",
@@ -73,7 +105,14 @@ class TestSystemName:
 
 
 class TestEnvironmentProperty:
-    """Tests for the `environment` property of the CStarSystemManager class."""
+    """Tests for the `environment` property of the `CStarSystemManager` class.
+
+    Tests
+    -----
+    test_environment_initialization
+        Validates that the `CStarEnvironment` object is correctly initialized with
+        the expected attributes based on the system name.
+    """
 
     @pytest.mark.parametrize(
         "system_name, expected_attributes",
@@ -124,7 +163,18 @@ class TestEnvironmentProperty:
 
 
 class TestSchedulerProperty:
-    """Tests for the `scheduler` property of the CStarSystemManager class."""
+    """Tests for the `scheduler` property of the `CStarSystemManager` class.
+
+    Tests
+    -----
+    test_scheduler_initialization
+        Validates that the scheduler is initialized with the correct type and queue names
+        based on the system name.
+    test_no_scheduler
+        Ensures that the scheduler property is `None` for supported systems without a scheduler.
+    test_scheduler_caching
+        Confirms that the scheduler property is cached after the first access.
+    """
 
     @pytest.mark.parametrize(
         "system_name, expected_scheduler_type, expected_queue_names",
@@ -148,8 +198,25 @@ class TestSchedulerProperty:
         expected_queue_names,
         mock_environment_vars,
     ):
-        """Test that the scheduler is initialized with the correct type and queue
-        names."""
+        """Validates that the scheduler is initialized with the correct type and queue
+        names based on the system name.
+
+        This test uses parameterization to evaluate multiple system names and their
+        corresponding scheduler types and queue names.
+
+        Mocks
+        -----
+        CStarSystemManager.name
+            Returns a mocked system name to simulate different environments.
+        os.environ
+            Environment variables are patched to simulate a clean environment.
+
+        Asserts
+        -------
+        - That the scheduler is an instance of the expected type.
+        - That the queue names of the scheduler match the expected names.
+        """
+
         with patch.object(
             CStarSystemManager,
             "name",
@@ -166,7 +233,7 @@ class TestSchedulerProperty:
             assert set(q.name for q in scheduler.queues) == set(expected_queue_names)
 
     def test_no_scheduler(self, mock_environment_vars):
-        """Test that a supported system without a scheduler returns 'None'."""
+        """Asserts that a supported system without a scheduler returns 'None'."""
         with patch.object(
             CStarSystemManager,
             "name",
@@ -177,7 +244,7 @@ class TestSchedulerProperty:
             assert system.scheduler is None
 
     def test_scheduler_caching(self, mock_environment_vars):
-        """Test that the scheduler property is cached after first access."""
+        """Asserts that the scheduler property is cached after first access."""
         with patch.object(
             CStarSystemManager,
             "name",
