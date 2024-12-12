@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import SlurmScheduler, SlurmQOS, SlurmPartition
-from cstar.system.scheduler_job import SlurmJob, JobStatus
+from cstar.scheduler.job import SlurmJob, JobStatus
 
 
 class TestSlurmJob:

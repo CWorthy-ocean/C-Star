@@ -2,7 +2,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import PBSScheduler, PBSQueue
-from cstar.system.scheduler_job import (
+from cstar.scheduler.job import (
     JobStatus,
     PBSJob,
 )
@@ -141,7 +141,7 @@ class TestPBSJob:
             job.submit()
 
     @patch("subprocess.run")
-    @patch("cstar.system.scheduler_job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
         # Mock the status to "running"
         mock_status.return_value = JobStatus.RUNNING
@@ -169,7 +169,7 @@ class TestPBSJob:
         )
 
     @patch("subprocess.run")
-    @patch("cstar.system.scheduler_job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
     @patch("builtins.print")
     def test_cancel_completed_job(
         self, mock_print, mock_status, mock_subprocess, tmp_path
@@ -195,7 +195,7 @@ class TestPBSJob:
 
     ##
     @patch("subprocess.run")
-    @patch("cstar.system.scheduler_job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_failure(self, mock_status, mock_subprocess, tmp_path):
         # Mock the status to "running"
         mock_status.return_value = JobStatus.RUNNING
