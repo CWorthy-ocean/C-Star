@@ -1,5 +1,3 @@
-## STIL TODO:
-# Write docstrings and rtd pages
 import os
 import re
 import time
@@ -36,6 +34,52 @@ def create_scheduler_job(
     send_email: Optional[bool] = True,
     walltime: Optional[str] = None,
 ) -> "SchedulerJob":
+    """Create a scheduler job for either SLURM or PBS based on the system's active
+    scheduler.
+
+    Parameters
+    ----------
+    commands : str
+        The commands to execute within the job script.
+    account_key : str
+        The account key to associate with the job for resource tracking.
+    cpus : int
+        The total number of CPUs required for the job.
+    nodes : int, optional
+        The number of nodes to request. Defaults to None.
+        If not provided and a specific nodes x cpus distribution is required,
+        C-Star will attempt to calculate an appropriate number of nodes.
+    cpus_per_node : int, optional
+        The number of CPUs per node to request. Defaults to None.
+        If not provided and a specific nodes x cpus distribution is required,
+        C-Star will attempt to calculate an appropriate number of nodes.
+    script_path : str or Path, optional
+        The file path to save the job script. Defaults to the current directory with
+        an auto-generated name.
+    run_path : str or Path, optional
+        The directory to execute the job. Defaults to the directory containing the job script.
+    job_name : str, optional
+        The name of the job. Defaults to an auto-generated name.
+    output_file : str or Path, optional
+        The file path for job output. Defaults to an auto-generated filename in the run path.
+    queue_name : str, optional
+        The name of the queue to submit the job to. Defaults to the scheduler's primary queue.
+    send_email : bool, optional
+        Whether to send email notifications about job status. Defaults to True.
+    walltime : str, optional
+        The maximum walltime for the job, in the format "HH:MM:SS". Defaults to the queue's maximum.
+
+    Returns
+    -------
+    job: SchedulerJob
+        An instance of `SlurmJob` or `PBSJob`, depending on the active scheduler.
+
+    Raises
+    ------
+    TypeError
+        If the active scheduler is not SLURM or PBS.
+    """
+
     # mypy assigns type based on first condition, assigning explicitly:
     job_type: type[SlurmJob] | type[PBSJob]
 
@@ -66,6 +110,33 @@ def create_scheduler_job(
 
 
 class JobStatus(Enum):
+    """Enum representing possible states of a job in the scheduler.
+
+    Each state corresponds to a stage in the lifecycle of a job, from submission
+    to completion or failure.
+
+    Attributes
+    ----------
+    UNSUBMITTED : JobStatus
+        The job has not been submitted to the scheduler yet.
+    PENDING : JobStatus
+        The job has been submitted but is waiting to start.
+    RUNNING : JobStatus
+        The job is currently executing.
+    COMPLETED : JobStatus
+        The job finished successfully.
+    CANCELLED : JobStatus
+        The job was cancelled before completion.
+    FAILED : JobStatus
+        The job finished unsuccessfully.
+    HELD : JobStatus
+        The job is on hold and will not run until released.
+    ENDING : JobStatus
+        The job is in the process of ending but not fully completed.
+    UNKNOWN : JobStatus
+        The job state is unknown or not recognized.
+    """
+
     UNSUBMITTED = auto()
     PENDING = auto()
     RUNNING = auto()
@@ -76,11 +147,66 @@ class JobStatus(Enum):
     ENDING = auto()
     UNKNOWN = auto()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name.lower()  # Convert enum name to lowercase for display
 
 
 class SchedulerJob(ABC):
+    """Abstract base class for representing a job submitted to a scheduler.
+
+    This class defines the structure and common behavior for jobs managed by
+    schedulers such as SLURM and PBS. Subclasses must implement methods for
+    submitting jobs and retrieving job status.
+
+    Attributes
+    ----------
+    scheduler : Scheduler
+        The scheduler managing this job (e.g., a SlurmScheduler or PBSScheduler instance)
+    commands : str
+        The commands to execute within the job script.
+    account_key : str
+        The account key associated with the job for resource tracking.
+    cpus : int
+        The total number of CPUs required for the job.
+    nodes : int or None
+        The number of nodes to request.
+        If not provided and a specific nodes x cpus distribution is required,
+        C-Star will attempt to calculate an appropriate number of nodes.
+    cpus_per_node : int or None
+        The number of CPUs per node to request.
+        If not provided and a specific nodes x cpus distribution is required,
+        C-Star will attempt to calculate an appropriate number of nodes.
+    script_path : Path
+        The file path where the job script will be saved.
+    run_path : Path
+        The directory where the job will be executed.
+    job_name : str
+        The name of the job.
+    output_file : Path
+        The file path for job output.
+    queue_name : str
+        The name of the queue to which the job will be submitted.
+    queue : Queue
+        The queue object corresponding to `queue_name`.
+    walltime : str
+        The maximum walltime for the job, in the format "HH:MM:SS".
+    id : int or None
+        The unique job ID assigned by the scheduler. None if the job has not been submitted.
+    status: JobStatus
+        A representation of the current status of the job, e.g. RUNNING or CANCELLED
+    script: str
+        The job script to be submitted to the scheduler.
+
+    Methods
+    -------
+    save_script()
+        Save the job script to the specified file path.
+    submit()
+        Abstract method for submitting the job to the scheduler.
+    updates(seconds=10)
+        Stream live updates from the job's output file for the specified duration.
+    """
+
     def __init__(
         self,
         scheduler: "Scheduler",
@@ -97,6 +223,55 @@ class SchedulerJob(ABC):
         send_email: Optional[bool] = True,
         walltime: Optional[str] = None,
     ):
+        """Initialize a SchedulerJob instance.
+
+        Parameters
+        ----------
+        scheduler : Scheduler
+            The scheduler managing this job (e.g., a SlurmScheduler or PBSScheduler instance).
+        commands : str
+            The commands to execute within the job script.
+        account_key : str
+            The account key associated with the job for resource tracking.
+        cpus : int
+            The total number of CPUs required for the job.
+        nodes : int, optional
+            The number of nodes to request. If not provided and a specific nodes x CPUs
+            distribution is required, C-Star will attempt to calculate an appropriate
+            number of nodes.
+        cpus_per_node : int, optional
+            The number of CPUs per node to request. If not provided and a specific nodes x CPUs
+            distribution is required, C-Star will attempt to calculate an appropriate
+            number of CPUs per node.
+        script_path : str or Path, optional
+            The file path to save the job script. Defaults to the current directory with
+            an auto-generated name.
+        run_path : str or Path, optional
+            The directory where the job will be executed. Defaults to the directory containing
+            the job script.
+        job_name : str, optional
+            The name of the job. Defaults to an auto-generated name.
+        output_file : str or Path, optional
+            The file path for job output. Defaults to an auto-generated file in the run path.
+        queue_name : str, optional
+            The name of the queue to which the job will be submitted. Defaults to the scheduler's
+            primary queue.
+        send_email : bool, optional
+            Whether to send email notifications about job status. Defaults to True.
+        walltime : str, optional
+            The maximum walltime for the job, in the format "HH:MM:SS". If not provided,
+            it defaults to the queue's maximum walltime.
+
+        Raises
+        ------
+        ValueError
+            If no walltime is provided and the queue's maximum walltime is unavailable, or
+            if the provided walltime exceeds the queue's maximum allowed walltime.
+        EnvironmentError
+            If neither `nodes` nor `cpus_per_node` are provided and the scheduler cannot
+            determine the system's CPUs per node automatically.
+        """
+
         self.scheduler = scheduler
         self.commands = commands
         self.cpus = cpus
@@ -210,24 +385,83 @@ class SchedulerJob(ABC):
             self.nodes = nodes
 
         self.account_key = account_key
-        self._id = None
+        self._id: Optional[int] = None
 
     @property
-    def id(self):
+    def id(self) -> Optional[int]:
+        """Retrieve the unique job ID assigned by the scheduler.
+
+        The job ID is assigned when the job is successfully submitted to the scheduler.
+        If the job has not been submitted, a message will be displayed indicating that
+        the ID is not yet available.
+
+        Returns
+        -------
+        id: int or None
+            The unique job ID assigned by the scheduler, or `None` if the job has not
+            been submitted.
+        """
+
         if self._id is None:
             print("No Job ID found. Submit this job with SchedulerJob.submit()")
         return self._id
 
+    @property
+    @abstractmethod
+    def script(self) -> str:
+        """Generate the job script to be submitted to the scheduler.
+
+        This property constructs the job script as a string, incorporating scheduler-specific
+        directives (e.g., SLURM or PBS) and the commands provided during initialization. The
+        script includes information such as job name, output file, walltime, and resource
+        requirements.
+
+        Returns
+        -------
+        script: str
+            The complete job script as a string, ready for submission.
+        """
+        pass
+
     def save_script(self):
+        """Save the job script to a file.
+
+        Writes the generated job script to the file specified by the `script_path` attribute.
+        The file can then be used to submit the job to the scheduler.
+        """
         with open(self.script_path, "w") as f:
             f.write(self.script)
 
     @abstractmethod
     def submit(self):
+        """Submit the job to the scheduler.
+
+        This method is responsible for submitting the generated job script to the
+        underlying scheduler (e.g., SLURM or PBS). Subclasses must implement this method
+        to handle the specifics of the submission process.
+
+        This method updates the 'id' attribute
+        """
         pass
 
+    @property
     @abstractmethod
-    def status(self):
+    def status(self) -> JobStatus:
+        """Retrieve the current status of the job.
+
+        This method queries the underlying scheduler to determine the current status of
+        the job (e.g., PENDING, RUNNING, COMPLETED). Subclasses must implement this method
+        to interact with the specific scheduler and map its state to a `JobStatus` enum.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        status: JobStatus
+            An enumeration value representing the current status of the job.
+        """
         pass
 
     def updates(self, seconds=10):
@@ -308,8 +542,80 @@ class SchedulerJob(ABC):
 
 
 class SlurmJob(SchedulerJob):
+    """Represents a job submitted to the SLURM scheduler.
+
+    This class extends `SchedulerJob` to handle SLURM-specific functionality for
+    job submission, status retrieval, and script generation.
+
+    Attributes
+    ----------
+    scheduler : SlurmScheduler
+        The SLURM scheduler managing this job.
+    commands : str
+        The commands to execute within the job script.
+    account_key : str
+        The account key associated with the job for resource tracking.
+    cpus : int
+        The total number of CPUs required for the job.
+    nodes : int or None
+        The number of nodes to request.
+        If not provided and a specific nodes x CPUs distribution is required,
+        C-Star will attempt to calculate an appropriate number of nodes.
+    cpus_per_node : int or None
+        The number of CPUs per node to request.
+        If not provided and a specific nodes x CPUs distribution is required,
+        C-Star will attempt to calculate an appropriate number of CPUs per node.
+    script_path : Path
+        The file path where the job script will be saved.
+    run_path : Path
+        The directory where the job will be executed.
+    job_name : str
+        The name of the job.
+    output_file : Path
+        The file path for job output.
+    queue_name : str
+        The name of the SLURM queue (partition or QOS) to which the job will be submitted.
+    walltime : str
+        The maximum walltime for the job, in the format "HH:MM:SS".
+    id : int or None
+        The unique job ID assigned by the SLURM scheduler. None if the job has not been submitted.
+    status : JobStatus
+        The current status of the job, retrieved from SLURM.
+    script : str
+        The SLURM-specific job script, including directives and commands.
+
+    Methods
+    -------
+    submit()
+        Submit the job to the SLURM scheduler.
+    cancel()
+        Cancel the job using the SLURM `scancel` command.
+    """
+
     @property
-    def status(self):
+    def status(self) -> JobStatus:
+        """Retrieve the current status of the job from the SLURM scheduler.
+
+        This property queries SLURM using the `sacct` command to determine the job's
+        state and maps it to a corresponding `JobStatus` enumeration.
+
+        Returns
+        -------
+        status: JobStatus
+            The current status of the job. Possible values include:
+            - `JobStatus.PENDING`: The job has been submitted but is waiting to start.
+            - `JobStatus.RUNNING`: The job is currently executing.
+            - `JobStatus.COMPLETED`: The job finished successfully.
+            - `JobStatus.CANCELLED`: The job was cancelled before completion.
+            - `JobStatus.FAILED`: The job finished unsuccessfully.
+            - `JobStatus.UNKNOWN`: The job state could not be determined.
+
+        Raises
+        ------
+        RuntimeError
+            If the command to retrieve the job status fails or returns an unexpected result.
+        """
+
         if self.id is None:
             return JobStatus.UNSUBMITTED
         else:
@@ -339,7 +645,17 @@ class SlurmJob(SchedulerJob):
         return JobStatus.UNKNOWN
 
     @property
-    def script(self):
+    def script(self) -> str:
+        """Generate the SLURM-specific job script to be submitted to the scheduler.
+        Includes standard Slurm scheduler directives as well as scheduler-specific
+        directives specified by the scheduler.other_scheduler_directives attribute.
+
+        Returns
+        -------
+        scheduler_script: str
+            The complete SLURM job script as a string, ready for submission.
+        """
+
         scheduler_script = "#!/bin/bash"
         scheduler_script += f"\n#SBATCH --job-name={self.job_name}"
         scheduler_script += f"\n#SBATCH --output={self.output_file}"
@@ -366,7 +682,24 @@ class SlurmJob(SchedulerJob):
         scheduler_script += f"\n\n{self.commands}"
         return scheduler_script
 
-    def submit(self):
+    def submit(self) -> Optional[int]:
+        """Submit the job to the SLURM scheduler.
+
+        This method saves the job script to the specified `script_path` and submits it
+        to the SLURM scheduler using the `sbatch` command. It extracts and stores the
+        job ID assigned by SLURM to the 'id' attribute.
+
+        Returns
+        -------
+        job_id : int
+            The unique job ID assigned by the SLURM scheduler.
+
+        Raises
+        ------
+        RuntimeError
+            If the `sbatch` command fails or if the job ID cannot be extracted from the
+            submission output.
+        """
         self.save_script()
         # remove any slurm variables in case submitting from inside another slurm job
         env_vars_to_exclude = []
@@ -405,6 +738,23 @@ class SlurmJob(SchedulerJob):
             )
 
     def cancel(self):
+        """Cancel the job in the SLURM scheduler.
+
+        This method cancels the job using the SLURM `scancel` command and provides
+        feedback about the cancellation process.
+
+        It can only be used on jobs with RUNNING or PENDING status.
+
+        Raises
+        ------
+        RuntimeError
+            If the `scancel` command fails or returns a non-zero exit code.
+        """
+
+        if self.status not in {JobStatus.RUNNING, JobStatus.PENDING}:
+            print(f"Cannot cancel job with status {self.status}")
+            return
+
         result = subprocess.run(
             f"scancel {self.id}",
             shell=True,
@@ -423,8 +773,70 @@ class SlurmJob(SchedulerJob):
 
 
 class PBSJob(SchedulerJob):
+    """Represents a job submitted to the PBS (Portable Batch System) scheduler.
+
+    This class extends `SchedulerJob` to handle PBS-specific functionality for
+    job submission, status retrieval, and script generation.
+
+    Attributes
+    ----------
+    scheduler : PBSScheduler
+        The PBS scheduler managing this job.
+    commands : str
+        The commands to execute within the job script.
+    account_key : str
+        The account key associated with the job for resource tracking.
+    cpus : int
+        The total number of CPUs required for the job.
+    nodes : int or None
+        The number of nodes to request.
+        If not provided and a specific nodes x CPUs distribution is required,
+        C-Star will attempt to calculate an appropriate number of nodes.
+    cpus_per_node : int or None
+        The number of CPUs per node to request.
+        If not provided and a specific nodes x CPUs distribution is required,
+        C-Star will attempt to calculate an appropriate number of CPUs per node.
+    script_path : Path
+        The file path where the job script will be saved.
+    run_path : Path
+        The directory where the job will be executed.
+    job_name : str
+        The name of the job.
+    output_file : Path
+        The file path for job output.
+    queue_name : str
+        The name of the PBS queue to which the job will be submitted.
+    walltime : str
+        The maximum walltime for the job, in the format "HH:MM:SS".
+    id : int or None
+        The unique job ID assigned by the PBS scheduler. None if the job has not been submitted.
+    status : JobStatus
+        The current status of the job, retrieved from PBS.
+    script : str
+        The PBS-specific job script, including directives and commands.
+
+    Methods
+    -------
+    submit()
+        Submit the job to the PBS scheduler.
+    cancel()
+        Cancel the job using the PBS `qdel` command.
+    """
+
     @property
     def script(self):
+        """Generate the PBS-specific job script to be submitted to the scheduler.
+        Includes standard Slurm scheduler directives as well as scheduler-specific
+        directives specified by the scheduler.other_scheduler_directives attribute.
+
+        Generate the PBS-specific job script to be submitted to the scheduler.
+
+        Returns
+        -------
+        scheduler_script : str
+            The complete PBS job script as a string, ready for submission.
+        """
+
         scheduler_script = "#PBS -S /bin/bash"
         scheduler_script += f"\n#PBS -N {self.job_name}"
         scheduler_script += f"\n#PBS -o {self.output_file}"
@@ -445,9 +857,33 @@ class PBSJob(SchedulerJob):
         return scheduler_script
 
     @property
-    def status(self):
+    def status(self) -> JobStatus:
+        """Retrieve the current status of the job from the PBS scheduler.
+
+        This property queries PBS using the `qstat` command to determine the job's
+        state and maps it to a corresponding `JobStatus` enumeration.
+
+        Returns
+        -------
+        status : JobStatus
+            The current status of the job. Possible values include:
+            - `JobStatus.PENDING`: The job has been submitted but is waiting to start.
+            - `JobStatus.RUNNING`: The job is currently executing.
+            - `JobStatus.COMPLETED`: The job finished successfully.
+            - `JobStatus.CANCELLED`: The job was cancelled before completion.
+            - `JobStatus.FAILED`: The job finished unsuccessfully.
+            - `JobStatus.HELD`: The job is on hold.
+            - `JobStatus.ENDING`: The job is in the process of ending.
+            - `JobStatus.UNKNOWN`: The job state could not be determined.
+
+        Raises
+        ------
+        RuntimeError
+            If the `qstat` command fails or the job cannot be found in the scheduler's records.
+        """
+
         if self.id is None:
-            return "unsubmitted"
+            return JobStatus.UNSUBMITTED
 
         qstat_cmd = f"qstat -x -f -F json {self.id}"
         result = subprocess.run(qstat_cmd, capture_output=True, text=True, shell=True)
@@ -487,7 +923,25 @@ class PBSJob(SchedulerJob):
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse JSON from qstat output: {e}")
 
-    def submit(self):
+    def submit(self) -> Optional[int]:
+        """Submit the job to the PBS scheduler.
+
+        This method saves the job script to the specified `script_path` and submits it
+        to the PBS scheduler using the `qsub` command. It extracts and stores the job ID
+        assigned by PBS.
+
+        Returns
+        -------
+        job_id : int
+            The unique job ID assigned by the PBS scheduler.
+
+        Raises
+        ------
+        RuntimeError
+            If the `qsub` command fails or if the job ID cannot be parsed from the
+            submission output.
+        """
+
         self.save_script()
 
         result = subprocess.run(
@@ -514,6 +968,18 @@ class PBSJob(SchedulerJob):
         return self._id
 
     def cancel(self):
+        """Cancel the job in the PBS scheduler.
+
+        This method cancels the job using the PBS `qdel` command and provides feedback
+        about the cancellation process. The job must be in a state that allows cancellation
+        (i.e., PENDING or RUNNING).
+
+        Raises
+        ------
+        RuntimeError
+            If the `qdel` command fails or returns a non-zero exit code.
+        """
+
         if self.status not in {JobStatus.RUNNING, JobStatus.PENDING, JobStatus.HELD}:
             print(f"Cannot cancel job with status {self.status}")
             return
