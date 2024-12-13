@@ -36,8 +36,8 @@ class Queue(ABC):
         """Return a string represention of this queue instance."""
         return f"{self.__class__.__name__}(name={self.name!r}, query_name={self.query_name!r})"
 
-    @abstractmethod
     @property
+    @abstractmethod
     def max_walltime(self):
         pass
 
