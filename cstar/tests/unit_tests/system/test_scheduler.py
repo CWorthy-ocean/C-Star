@@ -24,28 +24,14 @@ class TestQueue:
         Verify initialization of a basic Queue object.
     test_queue_initialization_with_query_name
         Ensure query_name is correctly set when explicitly provided.
-    test_slurmqueue_inherits_queue
-        Confirm SlurmQueue inherits initialization logic from Queue.
-    test_slurmqueue_query_queue_property
-        Test querying a property from a SlurmQueue using subprocess.
-    test_slurmqueue_query_queue_property_error
-        Verify RuntimeError is raised when SlurmQueue command fails.
-    test_slurmqueue_max_walltime
-        Test the max_walltime property of SlurmQueue, ensuring correct system call.
+    test_slurmqos_max_walltime
+        Test the max_walltime property of SlurmQOS, ensuring correct system call.
+    test_slurmpartition_max_walltime
+        Test the max_walltime property of SlurmQOS, ensuring correct system call.
     test_slurmqueue_max_nodes
         Test the max_nodes property of SlurmQueue, ensuring correct system call.
-    test_slurmqueue_priority
-        Test the priority property of SlurmQueue, verifying correct output.
     test_pbsqueue_initialization
         Test initialization of a PBSQueue with max_walltime.
-    test_pbsqueue_query_queue_property
-        Verify PBSQueue can parse JSON output from qstat for arbitrary properties.
-    test_pbsqueue_max_cpus
-        Test the max_cpus property of PBSQueue for retrieving CPU limits.
-    test_pbsqueue_max_mem
-        Test the max_mem property of PBSQueue for retrieving memory limits.
-    test_pbsqueue_priority
-        Test the priority property of PBSQueue for retrieving queue priority.
 
     Fixtures
     --------
@@ -82,7 +68,7 @@ class TestQueue:
         assert queue.query_name == "specific"
 
     def test_slurmqos_max_walltime(self, mock_subprocess_run):
-        """Test the max_walltime property of SlurmQueue.
+        """Test the max_walltime property of SlurmQOS.
 
         Simulates a successful system command to retrieve the maximum walltime.
         """
@@ -100,7 +86,7 @@ class TestQueue:
         )
 
     def test_slurmpartition_max_walltime(self, mock_subprocess_run):
-        """Test the max_walltime property of SlurmQueue.
+        """Test the max_walltime property of SlurmPartition.
 
         Simulates a successful system command to retrieve the maximum walltime.
         """
@@ -134,19 +120,19 @@ class TestScheduler:
     Tests
     -----
     test_scheduler_initialization
-        Verify initialization of the Scheduler with queues and directives.
+        Verify initialization of a Scheduler instance from a list of queues
     test_scheduler_get_queue
         Ensure that queues can be retrieved by name, and missing queues raise a ValueError.
     test_slurmscheduler_global_max_cpus_per_node_success
-        Confirm SlurmScheduler retrieves the maximum CPUs per node successfully.
+        Confirm SlurmScheduler queries and sets the maximum CPUs per node successfully.
     test_slurmscheduler_global_max_cpus_per_node_failure
         Validate SlurmScheduler handles subprocess failures when querying CPUs.
     test_slurmscheduler_global_max_mem_per_node_gb_success
-        Confirm SlurmScheduler retrieves maximum memory per node in GB successfully.
+        Confirm SlurmScheduler queries and sets maximum memory per node in GB successfully.
     test_slurmscheduler_global_max_mem_per_node_gb_failure
         Validate SlurmScheduler handles subprocess failures when querying memory.
     test_pbsscheduler_global_max_cpus_per_node_success
-        Confirm PBSScheduler retrieves the maximum CPUs per node successfully.
+        Confirm PBSScheduler rqueries and sets the maximum CPUs per node successfully.
     test_pbsscheduler_global_max_cpus_per_node_failure
         Validate PBSScheduler handles subprocess failures when querying CPUs.
     test_pbsscheduler_global_max_mem_per_node_gb
@@ -178,7 +164,7 @@ class TestScheduler:
             yield mock_run
 
     def test_scheduler_initialization(self):
-        """Verify initialization of the Scheduler with queues and directives."""
+        """Verify initialization of a Scheduler instance from a list of queues."""
         queue1 = Queue(name="general")
         queue2 = Queue(name="batch")
         scheduler = SlurmScheduler(
@@ -206,7 +192,8 @@ class TestScheduler:
             scheduler.get_queue("nonexistent")
 
     def test_slurmscheduler_global_max_cpus_per_node_success(self, mock_subprocess_run):
-        """Confirm SlurmScheduler retrieves the maximum CPUs per node successfully.
+        """Confirm SlurmScheduler queries and sets the maximum CPUs per node
+        successfully.
 
         Uses mock_subprocess_run to simulate a successful system command output.
         """
@@ -248,7 +235,8 @@ class TestScheduler:
     def test_slurmscheduler_global_max_mem_per_node_gb_success(
         self, mock_subprocess_run
     ):
-        """Confirm SlurmScheduler retrieves maximum memory per node in GB successfully.
+        """Confirm SlurmScheduler queries and sets maximum memory per node in GB
+        successfully.
 
         Uses mock_subprocess_run to simulate a successful system command output.
         """
@@ -289,7 +277,7 @@ class TestScheduler:
         )
 
     def test_pbsscheduler_global_max_cpus_per_node_success(self, mock_subprocess_run):
-        """Confirm PBSScheduler retrieves the maximum CPUs per node successfully.
+        """Confirm PBSScheduler queries and sets the maximum CPUs per node successfully.
 
         Uses mock_subprocess_run to simulate a successful system command output.
         """
