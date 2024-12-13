@@ -9,9 +9,52 @@ from cstar.scheduler.job import (
 
 
 class TestPBSJob:
-    """Tests for the PBSJob class."""
+    """Tests for the `PBSJob` class.
+
+    These tests cover the behavior and functionality of the `PBSJob` class,
+    including job script generation, job submission, status retrieval, and cancellation.
+
+    Tests
+    -----
+    test_script
+        Verifies that the PBS job script is correctly generated with all directives.
+    test_submit
+        Ensures that the `submit` method properly submits a PBS job and extracts the job ID.
+    test_submit_raises
+        Confirms that `submit` raises a `RuntimeError` for invalid `qsub` responses or errors.
+    test_cancel_running_job
+        Tests that the `cancel` method successfully cancels a running job.
+    test_cancel_completed_job
+        Verifies that `cancel` does not proceed if the job is already completed.
+    test_cancel_failure
+        Ensures that a `RuntimeError` is raised if the `qdel` command fails.
+    test_status
+        Validates the status retrieval logic for various job states and qstat outputs.
+    test_status_json_decode_error
+        Confirms that a `RuntimeError` is raised when the `qstat` output cannot be parsed as JSON.
+    """
 
     def setup_method(self, method):
+        """Sets up the common parameters and objects needed for tests in `TestPBSJob`.
+
+        This method initializes a mocked PBS queue and scheduler, along with a set of
+        common job parameters to be used across multiple test cases.
+
+        Parameters
+        ----------
+        method : Callable
+            The test method being executed. This parameter is part of the pytest
+            `setup_method` signature but is not used in this setup.
+
+        Attributes
+        ----------
+        - mock_queu`: A `PBSQueue` object with a maximum walltime of "02:00:00".
+        - scheduler: A `PBSScheduler` object initialized with the mocked queue.
+        - common_job_params: A dictionary containing standard job parameters,
+          including `scheduler`, `commands`, `account_key`, `cpus`, `nodes`, `walltime`,
+          `job_name`, `output_file`, and `queue_name`.
+        """
+
         # Create PBSQueue with specified max_walltime
         self.mock_queue = PBSQueue(name="test_queue", max_walltime="02:00:00")
 
@@ -38,6 +81,24 @@ class TestPBSJob:
         "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
     )
     def test_script(self, mock_scheduler):
+        """Verifies that the PBS job script is correctly generated with all directives.
+
+        This test checks that the `script` property of `PBSJob` produces the expected
+        job script, including user-provided parameters and any scheduler directives.
+
+        Mocks
+        -----
+        CStarSystemManager.scheduler
+            Mocked to simulate a scheduler with specific directives (`mock_directive`).
+
+        Asserts
+        -------
+        - That the generated job script matches the expected content, including:
+          - PBS directives (`#PBS ...`) such as queue, walltime, and nodes.
+          - Custom scheduler directives provided in `other_scheduler_directives`.
+          - Commands to execute in the job script (`echo Hello, World`).
+        """
+
         # Mock the scheduler and its attributes
         mock_scheduler.return_value = MagicMock()
         mock_scheduler.return_value.other_scheduler_directives = {
@@ -72,6 +133,28 @@ class TestPBSJob:
         "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
     )
     def test_submit(self, mock_scheduler, mock_subprocess, tmp_path):
+        """Ensures that the `submit` method properly submits a PBS job and extracts the
+        job ID.
+
+        This test validates that the `PBSJob.submit` method:
+        - Saves the job script to the specified path.
+        - Executes the `qsub` command to submit the job.
+        - Extracts the job ID from the `qsub` output.
+
+        Mocks
+        -----
+        subprocess.run
+            Mocked to simulate the execution of the `qsub` command and its output.
+        CStarSystemManager.scheduler
+            Mocked to simulate a scheduler with no additional directives.
+
+        Asserts
+        -------
+        - That the `submit` method successfully parses and assigns the job ID.
+        - That the script file is created in the specified path.
+        - That the `qsub` command is executed with the correct arguments.
+        """
+
         # Mock scheduler attributes
         mock_scheduler.return_value = MagicMock()
         mock_scheduler.return_value.other_scheduler_directives = {}
@@ -116,6 +199,29 @@ class TestPBSJob:
         match_message,
         tmp_path,
     ):
+        """Confirms that `submit` raises a `RuntimeError` for invalid `qsub` responses
+        or errors.
+
+        This test validates that the `PBSJob.submit` method handles submission errors gracefully
+        by raising appropriate exceptions when:
+        - The `qsub` command exits with a non-zero return code.
+        - The job ID extracted from `qsub` output is invalid.
+
+        The test uses parameterization to check multiple failure scenarios, including
+        different combinations of return codes, standard output, and standard error.
+
+        Mocks
+        -----
+        subprocess.run
+            Mocked to simulate the execution of the `qsub` command.
+        CStarSystemManager.scheduler
+            Mocked to simulate a scheduler with no additional directives.
+
+        Asserts
+        -------
+        - That a `RuntimeError` is raised with the expected error message when submission fails.
+        """
+
         # Mock scheduler attributes
         mock_scheduler.return_value = MagicMock()
         mock_scheduler.return_value.other_scheduler_directives = {}
@@ -143,6 +249,24 @@ class TestPBSJob:
     @patch("subprocess.run")
     @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
+        """Tests that the `cancel` method successfully cancels a running PBS job.
+
+        This test ensures that when the job status is `RUNNING`, the `cancel` method
+        executes the `qdel` command and cancels the job without errors.
+
+        Mocks
+        -----
+        PBSJob.status
+            Mocked to return `JobStatus.RUNNING`, simulating a running job.
+        subprocess.run
+            Mocked to simulate successful execution of the `qdel` command.
+
+        Asserts
+        -------
+        - That the `qdel` command is called with the correct job ID and parameters.
+        - That no exceptions are raised during the cancellation process.
+        """
+
         # Mock the status to "running"
         mock_status.return_value = JobStatus.RUNNING
 
@@ -174,6 +298,26 @@ class TestPBSJob:
     def test_cancel_completed_job(
         self, mock_print, mock_status, mock_subprocess, tmp_path
     ):
+        """Verifies that the `cancel` method does not proceed if the job is already
+        completed.
+
+        This test ensures that calling `cancel` on a job with a `COMPLETED` status does not
+        invoke the `qdel` command and instead informs the user.
+
+        Mocks
+        -----
+        PBSJob.status
+            Mocked to return "completed", simulating a completed job.
+        subprocess.run
+            Mocked to ensure that the `qdel` command is not executed.
+        builtins.print
+            Mocked to capture printed messages for validation.
+
+        Asserts
+        -------
+        - That the user is informed that the job cannot be canceled due to its completed status.
+        - That the `qdel` command is not called for a completed job.
+        """
         # Mock the status to "completed"
         mock_status.return_value = "completed"
 
@@ -197,6 +341,25 @@ class TestPBSJob:
     @patch("subprocess.run")
     @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_failure(self, mock_status, mock_subprocess, tmp_path):
+        """Ensures that a `RuntimeError` is raised if the `qdel` command fails to cancel
+        a job.
+
+        This test verifies that the `cancel` method handles errors from the `qdel` command
+        gracefully by raising an appropriate exception when the command returns a non-zero
+        exit code.
+
+        Mocks
+        -----
+        PBSJob.status
+            Mocked to return `JobStatus.RUNNING`, simulating a running job.
+        subprocess.run
+            Mocked to simulate a failed execution of the `qdel` command, returning a non-zero exit code.
+
+        Asserts
+        -------
+        - That a `RuntimeError` is raised with an appropriate error message when `qdel` fails.
+        - That the `qdel` command is called with the correct job ID and parameters.
+        """
         # Mock the status to "running"
         mock_status.return_value = JobStatus.RUNNING
 
@@ -323,6 +486,30 @@ class TestPBSJob:
         expected_exception,
         expected_message,
     ):
+        """Validates the job status retrieval logic for various job states and `qstat`
+        outputs.
+
+        This test verifies that the `status` property of `PBSJob` correctly parses the
+        output of the `qstat` command to determine the current job state. It also checks
+        that appropriate exceptions are raised in error scenarios, such as invalid `qstat`
+        outputs or missing job information.
+
+        This test uses parameterization to evaluate:
+        - Standard job states such as `PENDING`, `RUNNING`, `COMPLETED`, and `FAILED`.
+        - Edge cases like unknown states, empty job data, and invalid JSON output from qstat.
+        - Error conditions such as command failures or JSON decoding errors.
+
+        Mocks
+        -----
+        subprocess.run
+            Mocked to simulate the execution of the `qstat` command and its output.
+
+        Asserts
+        -------
+        - That the job status is correctly determined for valid `qstat` outputs.
+        - That appropriate exceptions are raised for invalid or error scenarios.
+        """
+
         # Mock qstat command output
         if qstat_output is not None:
             if qstat_output == "invalid_json":
@@ -354,6 +541,25 @@ class TestPBSJob:
     @patch("json.loads", side_effect=json.JSONDecodeError("Expecting value", "", 0))
     @patch("subprocess.run")
     def test_status_json_decode_error(self, mock_subprocess, mock_json_loads):
+        """Confirms that a `RuntimeError` is raised when the `qstat` output cannot be
+        parsed as JSON.
+
+        This test ensures that the `status` property of `PBSJob` handles JSON decoding
+        errors gracefully by raising a `RuntimeError` when the output from the `qstat`
+        command is invalid.
+
+        Mocks
+        -----
+        subprocess.run
+            Mocked to simulate a successful `qstat` command execution with invalid JSON output.
+        json.loads
+            Mocked to raise a `JSONDecodeError` when attempting to parse the `qstat` output.
+
+        Asserts
+        -------
+        - That a `RuntimeError` is raised with an appropriate error message indicating the JSON
+          parsing failure.
+        """
         # Mock qstat command output
         mock_subprocess.return_value = MagicMock(
             returncode=0, stdout="Invalid JSON", stderr=""

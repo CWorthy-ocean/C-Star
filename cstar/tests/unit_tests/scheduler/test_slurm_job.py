@@ -5,9 +5,54 @@ from cstar.scheduler.job import SlurmJob, JobStatus
 
 
 class TestSlurmJob:
-    """Tests for the SlurmJob class."""
+    """Tests for the `SlurmJob` class.
+
+    These tests cover the functionality of the `SlurmJob` class, including job script
+    generation, submission, cancellation, status retrieval, and script saving.
+
+    Tests
+    -----
+    test_script_task_distribution_not_required
+        Verifies the job script is correctly generated when the system does not explicitly require
+        the user to specify requested nodes and cpus
+    test_script_task_distribution_required
+        Verifies the job script is correctly generated when the system explicitly requires
+        the user to specify requested nodes and cpus
+    test_submit
+        Ensures that the job is properly submitted and the job ID is extracted.
+    test_submit_raises
+        Confirms that a `RuntimeError` is raised for invalid submission scenarios.
+    test_cancel
+        Tests that the `cancel` method works correctly, raising an exception if cancellation fails.
+    test_save_script
+        Ensures that the job script is saved to the specified path and matches the expected content.
+    test_status
+        Verifies the status retrieval logic for various job states and scenarios.
+    """
 
     def setup_method(self, method):
+        """Sets up the common parameters and objects needed for tests in `TestSlurmJob`.
+
+        This method initializes a mocked SLURM queue and scheduler, along with a set of
+        common job parameters and mock environment variables, to be used across multiple tests.
+
+        Parameters
+        ----------
+        method : Callable
+            The test method being executed. This parameter is part of the pytest
+            `setup_method` signature but is not used in this setup.
+
+        Attributes
+        ----------
+        - mock_qos: A mocked `SlurmQOS` object with a maximum walltime of "02:00:00".
+        - mock_partition: A mocked `SlurmPartition` object with a maximum walltime of "02:00:00".
+        - scheduler: A `SlurmScheduler` object initialized with the mocked queue and
+          task distribution set to `False`.
+        - common_job_params: A dictionary containing common job parameters, such as
+          `scheduler`, `commands`, `account_key`, `cpus`, `walltime`, and more.
+        - mock_env_vars: A dictionary simulating environment variables.
+        """
+
         # Create a SlurmQOS and patch its max_walltime property
         self.mock_qos = SlurmQOS(name="test_queue", query_name="test_queue")
         self.mock_partition = SlurmPartition(name="test_queue")
@@ -58,6 +103,8 @@ class TestSlurmJob:
         self.patch_partition_properties.stop()
 
     def test_script_task_distribution_not_required(self):
+        """Verifies that the correct script is generated when the node x cpu breakdown
+        is not required."""
         # Initialize the job
         job = SlurmJob(
             **self.common_job_params,
@@ -92,6 +139,23 @@ class TestSlurmJob:
         self,
         mock_global_max_cpus,
     ):
+        """Verifies the job script is correctly generated when the nodes x cpu
+        distribution is required by the system.
+
+        This test ensures that the `SlurmJob.script` property includes the appropriate SLURM
+        directives for a job where task distribution is required by the scheduler. It validates
+        that nodes and tasks-per-node directives are correctly calculated and included.
+
+        Mocks
+        -----
+        SlurmScheduler.global_max_cpus_per_node
+            Mocked to return the system's maximum CPUs per node (64).
+
+        Asserts
+        -------
+        - That the generated job script matches a pre-specified expected script
+        """
+
         mock_global_max_cpus.return_value = 64
 
         params = self.common_job_params
@@ -136,6 +200,30 @@ class TestSlurmJob:
     )
     @patch("subprocess.run")
     def test_submit(self, mock_subprocess, mock_environment, tmp_path):
+        """Ensures that the `submit` method properly submits a SLURM job and sets the
+        job ID.
+
+        This test validates that the `SlurmJob.submit` method:
+        - Saves the job script to the specified path.
+        - Executes the `sbatch` command to submit the job.
+        - Extracts and sets the job ID from the `sbatch` output.
+
+        Mocks
+        -----
+        subprocess.run
+            Mocked to simulate the `sbatch` command's execution and output.
+        CStarSystemManager.environment
+            Mocked to provide environment variables and Lmod settings.
+        os.environ
+            Mocked to include specific SLURM-related environment variables.
+
+        Asserts
+        -------
+        - That the job script file is created and its content matches the expected script.
+        - That the `sbatch` command is executed with the correct arguments.
+        - That the job ID is correctly extracted and assigned.
+        """
+
         # Mock environment
         mock_environment.return_value.environment_variables = self.mock_env_vars
         mock_environment.return_value.uses_lmod = False
@@ -204,6 +292,27 @@ class TestSlurmJob:
         subprocess_returncode,
         expected_exception_message,
     ):
+        """Ensures that `submit` raises a `RuntimeError` for invalid `sbatch` responses
+        or errors.
+
+        This test validates that the `SlurmJob.submit` method handles errors correctly
+        by raising a `RuntimeError` in the following scenarios:
+        - The `sbatch` command exits with a non-zero return code.
+        - The job ID is missing or malformed in the `sbatch` output.
+
+        The test uses parameterization to evaluate multiple failure scenarios.
+
+        Mocks
+        -----
+        subprocess.run
+            Mocked to simulate various `sbatch` command responses, including failures
+            and invalid output.
+
+        Asserts
+        -------
+        - That a `RuntimeError` is raised with the expected message for each failure scenario.
+        """
+
         # Mock the subprocess.run behavior
         mock_subprocess.return_value = MagicMock(
             returncode=subprocess_returncode,
@@ -228,6 +337,27 @@ class TestSlurmJob:
 
     @patch("subprocess.run")
     def test_cancel(self, mock_subprocess, tmp_path):
+        """Verifies that the `cancel` method cancels a SLURM job and raises an exception
+        if it fails.
+
+        This test ensures that the `SlurmJob.cancel` method:
+        - Executes the `scancel` command with the correct job ID and parameters.
+        - Successfully cancels the job when `scancel` returns a zero exit code.
+        - Raises a `RuntimeError` when `scancel` fails (non-zero exit code).
+
+        Mocks
+        -----
+        subprocess.run
+            Mocked to simulate the `scancel` command, including both successful and
+            failed executions.
+
+        Asserts
+        -------
+        - That `scancel` is called with the correct job ID and working directory.
+        - That the job is successfully canceled when `scancel` succeeds.
+        - That a `RuntimeError` is raised with an appropriate error message when `scancel` fails.
+        """
+
         # Create a temporary directory for the job run path
         run_path = tmp_path
 
@@ -277,6 +407,19 @@ class TestSlurmJob:
         )
 
     def test_save_script(self, tmp_path):
+        """Tests the `save_script` method, creating a temporary job script file and
+        checking its content.
+
+        This test validates that the `SlurmJob.save_script` method:
+        - Saves the job script to the specified file path.
+        - Writes the content of the `script` property to the file.
+
+        Asserts
+        -------
+        - That the job script file is created at the specified path.
+        - That the content of the created file matches the expected script.
+        """
+
         # Define paths for the script file
         script_path = tmp_path / "test_job.sh"
 
@@ -322,6 +465,28 @@ class TestSlurmJob:
         expected_status,
         should_raise,
     ):
+        """Verifies the status retrieval logic for a SLURM job using the `sacct`
+        command.
+
+        This test ensures that the `SlurmJob.status` property:
+        - Retrieves the correct job status from `sacct` output for various job states.
+        - Raises an exception when `sacct` fails or produces invalid output.
+
+        The test uses parameterization to evaluate:
+        - Valid job states like `PENDING`, `RUNNING`, `COMPLETED`, etc.
+        - Error scenarios such as `sacct` command failures.
+
+        Mocks
+        -----
+        subprocess.run
+            Mocked to simulate the `sacct` command, returning various outputs and return codes.
+
+        Asserts
+        -------
+        - That the job status matches the expected state for valid `sacct` outputs.
+        - That a `RuntimeError` is raised when `sacct` fails or returns invalid data.
+        """
+
         # Initialize the job
         job = SlurmJob(**self.common_job_params)
 
