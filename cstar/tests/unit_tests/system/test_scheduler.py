@@ -12,6 +12,14 @@ from cstar.system.scheduler import (
 ################################################################################
 
 
+class MockQueue(Queue):
+    """Mock subclass of the Queue ABC used for testing."""
+
+    def max_walltime(self):
+        """Mock implementation of the max_walltime abstractmethod for Queue."""
+        pass
+
+
 class TestQueue:
     """Unit tests for the Queue and its subclasses (SlurmQueue, PBSQueue).
 
@@ -57,13 +65,13 @@ class TestQueue:
 
     def test_queue_initialization(self):
         """Verify initialization of a basic Queue object."""
-        queue = Queue(name="general")
+        queue = MockQueue(name="general")
         assert queue.name == "general"
         assert queue.query_name == "general"  # Default to the same name
 
     def test_queue_initialization_with_query_name(self):
         """Ensure query_name is correctly set when explicitly provided."""
-        queue = Queue(name="general", query_name="specific")
+        queue = MockQueue(name="general", query_name="specific")
         assert queue.name == "general"
         assert queue.query_name == "specific"
 
@@ -165,8 +173,8 @@ class TestScheduler:
 
     def test_scheduler_initialization(self):
         """Verify initialization of a Scheduler instance from a list of queues."""
-        queue1 = Queue(name="general")
-        queue2 = Queue(name="batch")
+        queue1 = MockQueue(name="general")
+        queue2 = MockQueue(name="batch")
         scheduler = SlurmScheduler(
             queues=[queue1, queue2], primary_queue_name="general"
         )
@@ -179,8 +187,8 @@ class TestScheduler:
     def test_scheduler_get_queue(self):
         """Ensure that queues can be retrieved by name, and missing queues raise a
         ValueError."""
-        queue1 = Queue(name="general")
-        queue2 = Queue(name="batch")
+        queue1 = MockQueue(name="general")
+        queue2 = MockQueue(name="batch")
         scheduler = SlurmScheduler(
             queues=[queue1, queue2], primary_queue_name="general"
         )

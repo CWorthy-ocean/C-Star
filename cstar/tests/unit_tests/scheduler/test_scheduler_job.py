@@ -39,6 +39,9 @@ class MockSchedulerJob(SchedulerJob):
     def submit(self):
         return "mock_submit"
 
+    def script(self):
+        pass
+
 
 class MockScheduler(Scheduler):
     """Mock implementation of the `Scheduler` ABC for testing purposes.

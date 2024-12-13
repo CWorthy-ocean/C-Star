@@ -336,7 +336,8 @@ class TestSlurmJob:
             job.submit()
 
     @patch("subprocess.run")
-    def test_cancel(self, mock_subprocess, tmp_path):
+    @patch("cstar.scheduler.job.SlurmJob.status", new_callable=PropertyMock)
+    def test_cancel(self, mock_status, mock_subprocess, tmp_path):
         """Verifies that the `cancel` method cancels a SLURM job and raises an exception
         if it fails.
 
@@ -350,6 +351,8 @@ class TestSlurmJob:
         subprocess.run
             Mocked to simulate the `scancel` command, including both successful and
             failed executions.
+        SlurmJob.status
+            Mocked to simulate the job status as RUNNING
 
         Asserts
         -------
@@ -360,6 +363,9 @@ class TestSlurmJob:
 
         # Create a temporary directory for the job run path
         run_path = tmp_path
+
+        # Mock the status to simulate a running job
+        mock_status.return_value = JobStatus.RUNNING
 
         # Mock the subprocess.run behavior for successful cancellation
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -373,6 +379,9 @@ class TestSlurmJob:
 
         # Call cancel
         job.cancel()
+
+        # Log mock call arguments
+        print(f"Mock call args after success: {mock_subprocess.call_args_list}")
 
         # Check that scancel was called correctly
         mock_subprocess.assert_called_once_with(
@@ -396,6 +405,9 @@ class TestSlurmJob:
             RuntimeError, match="Non-zero exit code when cancelling job."
         ):
             job.cancel()
+
+        # Log mock call arguments
+        print(f"Mock call args after failure: {mock_subprocess.call_args_list}")
 
         # Verify that scancel was still called
         mock_subprocess.assert_called_once_with(
