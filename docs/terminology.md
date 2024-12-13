@@ -1,3 +1,6 @@
+```{include} disclaimer.md
+```
+
 # Terminology
 
 *Below is a glossary of key terms.*

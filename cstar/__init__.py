@@ -12,7 +12,7 @@ __all__ = [
 
 
 try:
-    __version__ = _version("cstar")
+    __version__ = _version("cstar-ocean")
 except Exception:
     # Local copy or not installed with setuptools.
     # Disable minimum version checks on downstream libraries.
