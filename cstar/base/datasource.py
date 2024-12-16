@@ -53,11 +53,12 @@ class DataSource:
     def source_type(self) -> str:
         """Get the source type (e.g. "netcdf") from the "location" attribute."""
         loc = Path(self.location)
-        if loc.is_dir():
-            return "directory"
-        elif (loc.suffix.lower() == ".git") or ((loc / ".git").is_dir()):
+
+        if (loc.suffix.lower() == ".git") or ((loc / ".git").is_dir()):
             # TODO: a remote repository might not have a .git suffix, more advanced handling needed
             return "repository"
+        elif loc.is_dir():
+            return "directory"
         elif loc.suffix.lower() in {".yaml", ".yml"}:
             return "yaml"
         elif loc.suffix.lower() == ".nc":
@@ -80,3 +81,7 @@ class DataSource:
         base_str += f"\n location type: {self.location_type}"
         base_str += f"\n source type: {self.source_type}"
         return base_str
+
+    def __repr__(self) -> str:
+        repr_str = f"{self.__class__.__name__}(location={self.location!r})"
+        return repr_str
