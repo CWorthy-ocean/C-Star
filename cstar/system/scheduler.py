@@ -368,8 +368,8 @@ class Scheduler(ABC):
         base_repr = (
             f"{self.__class__.__name__}("
             f"queues={self.queues!r}, primary_queue_name={self.primary_queue_name!r}, "
-            f"other_scheduler_directives={self.other_scheduler_directives!r}), "
-            f"documentation={self.documentation!r}"
+            f"other_scheduler_directives={self.other_scheduler_directives!r}, "
+            f"documentation={self.documentation!r})"
         )
         return base_repr
 

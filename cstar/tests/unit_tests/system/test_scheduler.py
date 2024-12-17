@@ -448,6 +448,7 @@ class TestStrAndRepr:
             queues=queues,
             primary_queue_name="main",
             other_scheduler_directives={"constraint": "high-memory"},
+            documentation="https://mockscheduler.readthemocks.io",
         )
 
         with (
@@ -468,10 +469,11 @@ class TestStrAndRepr:
                 "SlurmScheduler\n"
                 "--------------\n"
                 "primary_queue: main\n"
-                "queues:\nmain\nbackup\n"
+                "queues:\n- main\n- backup\n"
                 "other_scheduler_directives: {'constraint': 'high-memory'}\n"
                 "global max cpus per node: 128\n"
-                "global max mem per node: 256GB"
+                "global max mem per node: 256GB\n"
+                "documentation: https://mockscheduler.readthemocks.io"
             )
             assert str(scheduler) == expected
 
@@ -482,11 +484,13 @@ class TestStrAndRepr:
             queues=queues,
             primary_queue_name="main",
             other_scheduler_directives={"constraint": "high-memory"},
+            documentation="https://mockscheduler.readthemocks.io",
         )
         expected = (
             "SlurmScheduler(queues=[SlurmQOS(name='main', query_name='main'), "
             "SlurmQOS(name='backup', query_name='backup')], primary_queue_name='main', "
-            "other_scheduler_directives={'constraint': 'high-memory'})"
+            "other_scheduler_directives={'constraint': 'high-memory'}, "
+            "documentation='https://mockscheduler.readthemocks.io')"
         )
         assert repr(scheduler) == expected
 
@@ -497,6 +501,7 @@ class TestStrAndRepr:
             queues=queues,
             primary_queue_name="batch",
             other_scheduler_directives={"feature": "gpu"},
+            documentation="https://mockscheduler.readthemocks.io",
         )
 
         with (
@@ -517,10 +522,11 @@ class TestStrAndRepr:
                 "PBSScheduler\n"
                 "------------\n"
                 "primary_queue: batch\n"
-                "queues:\nbatch\n"
+                "queues:\n- batch\n"
                 "other_scheduler_directives: {'feature': 'gpu'}\n"
                 "global max cpus per node: 64\n"
-                "global max mem per node: 128GB"
+                "global max mem per node: 128GB\n"
+                "documentation: https://mockscheduler.readthemocks.io"
             )
             assert str(scheduler) == expected
 
@@ -531,10 +537,12 @@ class TestStrAndRepr:
             queues=queues,
             primary_queue_name="batch",
             other_scheduler_directives={"feature": "gpu"},
+            documentation="https://mockscheduler.readthemocks.io",
         )
         expected = (
             "PBSScheduler(queues=[PBSQueue(name='batch', query_name='batch', "
             "max_walltime='72:00:00')], primary_queue_name='batch', "
-            "other_scheduler_directives={'feature': 'gpu'})"
+            "other_scheduler_directives={'feature': 'gpu'}, "
+            "documentation='https://mockscheduler.readthemocks.io')"
         )
         assert repr(scheduler) == expected
