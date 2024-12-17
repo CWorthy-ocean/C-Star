@@ -563,7 +563,7 @@ class Case:
                     ntimesteps = None
 
                 # After that you need to run some verification stuff on the downloaded files
-                print("\nRunning ROMS: " + "\n------------")
+                print("\nRunning ROMS... ")
                 job_instance = component.run(
                     output_dir=self.caseroot / "output",
                     n_time_steps=ntimesteps,

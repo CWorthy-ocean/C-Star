@@ -288,6 +288,7 @@ class Scheduler(ABC):
         primary_queue_name: str,
         other_scheduler_directives: Optional[Dict[str, str]] = None,
         requires_task_distribution: Optional[bool] = True,
+        documentation: Optional[str] = None,
     ):
         """Initialize a Scheduler instance.
 
@@ -303,6 +304,8 @@ class Scheduler(ABC):
             Whether the scheduler requires explicit specification of
             required nodes and cpus for a job, or will calculate it
             based on the number of CPUs alone. Defaults to True.
+        documentation : str, optional
+            Where to find additional documentation for this system's scheduler
 
         Raises
         ------
@@ -317,6 +320,7 @@ class Scheduler(ABC):
             other_scheduler_directives if other_scheduler_directives is not None else {}
         )
         self.requires_task_distribution = requires_task_distribution
+        self.documentation = documentation
 
     def get_queue(self, name) -> Queue:
         """Retrieve a queue by name.
@@ -347,7 +351,7 @@ class Scheduler(ABC):
 
     def __str__(self) -> str:
         """Return a readable string representation of the PBSQueue instance."""
-        queues_str = "\n".join([str(queue.name) for queue in self.queues])
+        queues_str = "\n".join([f"- {queue.name}" for queue in self.queues])
         return (
             f"{self.__class__.__name__}\n"
             f"{'-' * len(self.__class__.__name__)}\n"
@@ -355,7 +359,8 @@ class Scheduler(ABC):
             f"queues:\n{queues_str}\n"
             f"other_scheduler_directives: {self.other_scheduler_directives}\n"
             f"global max cpus per node: {self.global_max_cpus_per_node}\n"
-            f"global max mem per node: {self.global_max_mem_per_node_gb}GB"
+            f"global max mem per node: {self.global_max_mem_per_node_gb}GB\n"
+            f"documentation: {self.documentation}"
         )
 
     def __repr__(self) -> str:
@@ -363,7 +368,8 @@ class Scheduler(ABC):
         base_repr = (
             f"{self.__class__.__name__}("
             f"queues={self.queues!r}, primary_queue_name={self.primary_queue_name!r}, "
-            f"other_scheduler_directives={self.other_scheduler_directives!r})"
+            f"other_scheduler_directives={self.other_scheduler_directives!r}), "
+            f"documentation={self.documentation!r}"
         )
         return base_repr
 

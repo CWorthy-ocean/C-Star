@@ -116,6 +116,7 @@ class CStarSystemManager:
                     primary_queue_name="regular",
                     other_scheduler_directives={"-C": "cpu"},
                     requires_task_distribution=False,
+                    documentation="https://docs.nersc.gov/systems/perlmutter/architecture/",
                 )
             case SystemName.DERECHO:
                 # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
@@ -127,6 +128,7 @@ class CStarSystemManager:
                     queues=[der_main_q, der_preempt_q, der_develop_q],
                     primary_queue_name="main",
                     requires_task_distribution=True,
+                    documentation="https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/",
                 )
             case SystemName.EXPANSE:
                 exp_compute_q = SlurmPartition(name="compute")
@@ -135,6 +137,7 @@ class CStarSystemManager:
                     queues=[exp_compute_q, exp_debug_q],
                     primary_queue_name="compute",
                     requires_task_distribution=True,
+                    documentation="https://www.sdsc.edu/support/user_guides/expanse.html",
                 )
             case _:
                 self._scheduler = None
