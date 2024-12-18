@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 from unittest import mock
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 from cstar.base.base_model import BaseModel
 
 ################################################################################
@@ -150,12 +150,12 @@ class TestBaseModelConfig:
     patch_get_repo_head_hash : MagicMock
         Mocks `cstar.utils._get_repo_head_hash` function to simulate different repository head hashes.
     patch_environment_variables : MagicMock
-        Mocks `cstar_system.environment.environment_variables` to control the environment variables.
+        Mocks `cstar_sysmgr.environment.environment_variables` to control the environment variables.
     """
 
     def setup_method(self):
         self.patch_environment = mock.patch(
-            "cstar.base.system.CStarSystem.environment",
+            "cstar.system.manager.CStarSystemManager.environment",
             new_callable=mock.PropertyMock,
             return_value=mock.Mock(
                 environment_variables={"TEST_ROOT": "/path/to/repo"}
@@ -249,7 +249,7 @@ class TestBaseModelConfigHandling:
     patch_subprocess_run : MagicMock
         Mocks `subprocess.run` to simulate command-line actions for `git checkout`.
     patch_environment : MagicMock
-        Mocks `cstar_system.environment.environment_variables` to control the environment variables.
+        Mocks `cstar_sysmgr.environment.environment_variables` to control the environment variables.
     """
 
     def setup_method(self):
@@ -272,7 +272,7 @@ class TestBaseModelConfigHandling:
         self.mock_subprocess_run = self.patch_subprocess_run.start()
 
         self.patch_environment = mock.patch(
-            "cstar.base.system.CStarSystem.environment",
+            "cstar.system.manager.CStarSystemManager.environment",
             new_callable=mock.PropertyMock,
             return_value=mock.Mock(
                 environment_variables={"TEST_ROOT": "/path/to/repo"},
@@ -400,7 +400,7 @@ class TestBaseModelConfigHandling:
         generic_base_model.handle_config_status()
 
         expected_install_dir = (
-            Path(cstar_system.environment.package_root) / "externals/repo"
+            Path(cstar_sysmgr.environment.package_root) / "externals/repo"
         )
 
         # Verify that 'get' (defined above)  is called when user inputs 'y':
