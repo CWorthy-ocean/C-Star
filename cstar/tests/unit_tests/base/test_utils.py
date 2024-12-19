@@ -6,7 +6,6 @@ from cstar.base.utils import (
     _get_repo_head_hash,
     _get_repo_remote,
     _get_hash_from_checkout_target,
-    _calculate_node_distribution,
     _replace_text_in_file,
     _list_to_concise_str,
     _dict_to_tree,
@@ -314,65 +313,6 @@ def test_get_hash_from_checkout_target_invalid():
         )
         # Assert the correct hash is returned
         assert str(exception_info.value) == expected_message
-
-
-class TestCalculateNodeDistribution:
-    """Tests for `_calculate_node_distribution`, ensuring correct calculation of nodes
-    and cores per node for various input scenarios."""
-
-    def test_exact_division(self):
-        """Test when `n_cores_required` is an exact multiple of `tot_cores_per_node`.
-
-        Asserts
-        -------
-        - Ensures the correct number of nodes and cores per node are calculated.
-        """
-        n_cores_required = 256
-        tot_cores_per_node = 64
-
-        result = _calculate_node_distribution(n_cores_required, tot_cores_per_node)
-        assert result == (4, 64), f"Expected (4, 64), got {result}"
-
-    def test_partial_division(self):
-        """Test when `n_cores_required` is not an exact multiple of
-        `tot_cores_per_node`, requiring an extra node.
-
-        Asserts
-        -------
-        - Ensures the correct number of nodes and cores per node are calculated.
-        """
-        n_cores_required = 300
-        tot_cores_per_node = 64
-
-        result = _calculate_node_distribution(n_cores_required, tot_cores_per_node)
-        assert result == (5, 60), f"Expected (5, 60), got {result}"
-
-    def test_single_node(self):
-        """Test when `n_cores_required` is less than or equal to `tot_cores_per_node`,
-        so only one node is required.
-
-        Asserts
-        -------
-        - Ensures that a single node is requested with `n_cores_required` cores.
-        """
-        n_cores_required = 50
-        tot_cores_per_node = 64
-
-        result = _calculate_node_distribution(n_cores_required, tot_cores_per_node)
-        assert result == (1, 50), f"Expected (1, 50), got {result}"
-
-    def test_minimum_cores(self):
-        """Test the edge case where `n_cores_required` is very low, such as 1.
-
-        Asserts
-        -------
-        - Ensures that only one node is requested with the specified core count.
-        """
-        n_cores_required = 1
-        tot_cores_per_node = 64
-
-        result = _calculate_node_distribution(n_cores_required, tot_cores_per_node)
-        assert result == (1, 1), f"Expected (1, 1), got {result}"
 
 
 class TestReplaceTextInFile:

@@ -8,14 +8,14 @@ from datetime import datetime
 
 from cstar.base.component import Component
 
-# from cstar.base.environment import environment
-from cstar.base.system import cstar_system
+# from cstar.system.environment import environment
+from cstar.system.manager import cstar_sysmgr
 from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
 
 if TYPE_CHECKING:
-    pass
+    from cstar.scheduler.job import SchedulerJob
 
 
 class Case:
@@ -533,16 +533,22 @@ class Case:
     def run(
         self,
         account_key=None,
-        walltime=cstar_system.environment.max_walltime,
-        queue=cstar_system.environment.primary_queue,
-        job_name="my_case_run",
-    ) -> None:
+        walltime=None,
+        queue=None,
+        job_name=None,
+    ) -> Optional["SchedulerJob"]:
         """Run the case by calling `component.run(caseroot)` on the primary component
         (to which others are coupled)."""
 
         # Assuming for now that ROMS presence implies it is the master program
         # TODO add more advanced logic for this
         # 20240807 - TN - set first component as main?
+
+        if (queue is None) and (cstar_sysmgr.scheduler is not None):
+            queue = cstar_sysmgr.scheduler.primary_queue_name
+        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
+            walltime = cstar_sysmgr.scheduler.get_queue(queue).max_walltime
+
         for component in self.components:
             if isinstance(component, ROMSComponent):
                 # Calculate number of time steps:
@@ -557,8 +563,8 @@ class Case:
                     ntimesteps = None
 
                 # After that you need to run some verification stuff on the downloaded files
-                print("\nRunning ROMS: " + "\n------------")
-                component.run(
+                print("\nRunning ROMS... ")
+                job_instance = component.run(
                     output_dir=self.caseroot / "output",
                     n_time_steps=ntimesteps,
                     account_key=account_key,
@@ -566,6 +572,8 @@ class Case:
                     queue=queue,
                     job_name=job_name,
                 )
+                return job_instance
+        return None
 
     def post_run(self) -> None:
         """For each Component associated with this case, execute post-processing actions

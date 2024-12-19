@@ -16,6 +16,6 @@ roms_marbl_case = cstar.Case.from_blueprint(
 ## In a python session, execute:
 roms_marbl_case.setup()
 roms_marbl_case.build()
-#roms_marbl_case.pre_run()
+roms_marbl_case.pre_run()
 #roms_marbl_case.run(account_key=os.environ.get('ACCOUNT_KEY')) #substituting your account key on any HPC system
 #roms_marbl_case.post_run()
