@@ -573,7 +573,9 @@ class Case:
                     job_name=job_name,
                 )
                 return job_instance
-        return None
+        raise RuntimeError(
+            "unable to run Case, could not find a suitable Component to run"
+        )
 
     def post_run(self) -> None:
         """For each Component associated with this case, execute post-processing actions
