@@ -851,7 +851,7 @@ class ROMSComponent(Component):
         account_key: Optional[str] = None,
         output_dir: Optional[str | Path] = None,
         walltime: Optional[str] = None,
-        queue: Optional[str] = None,
+        queue_name: Optional[str] = None,
         job_name: Optional[str] = None,
     ) -> Optional["SchedulerJob"]:
         """Runs the executable created by `build()`
@@ -881,10 +881,10 @@ class ROMSComponent(Component):
                 + "\n If you have already run Component.build(), either run it again or "
                 + " add the executable path manually using Component.exe_path='YOUR/PATH'."
             )
-        if (queue is None) and (cstar_sysmgr.scheduler is not None):
-            queue = cstar_sysmgr.scheduler.primary_queue_name
+        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
+            queue_name = cstar_sysmgr.scheduler.primary_queue_name
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
-            walltime = cstar_sysmgr.scheduler.get_queue(queue).max_walltime
+            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
         if output_dir is None:
             output_dir = self.exe_path.parent
@@ -947,7 +947,7 @@ class ROMSComponent(Component):
                 cpus=self.discretization.n_procs_tot,
                 account_key=account_key,
                 run_path=run_path,
-                queue_name=queue,
+                queue_name=queue_name,
                 walltime=walltime,
             )
 

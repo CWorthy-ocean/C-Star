@@ -8,7 +8,6 @@ from datetime import datetime
 
 from cstar.base.component import Component
 
-# from cstar.system.environment import environment
 from cstar.system.manager import cstar_sysmgr
 from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
@@ -532,10 +531,10 @@ class Case:
 
     def run(
         self,
-        account_key=None,
-        walltime=None,
-        queue=None,
-        job_name=None,
+        account_key: Optional[str] = None,
+        walltime: Optional[str] = None,
+        queue_name: Optional[str] = None,
+        job_name: Optional[str] = None,
     ) -> Optional["SchedulerJob"]:
         """Run the case by calling `component.run(caseroot)` on the primary component
         (to which others are coupled)."""
@@ -544,10 +543,10 @@ class Case:
         # TODO add more advanced logic for this
         # 20240807 - TN - set first component as main?
 
-        if (queue is None) and (cstar_sysmgr.scheduler is not None):
-            queue = cstar_sysmgr.scheduler.primary_queue_name
+        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
+            queue_name = cstar_sysmgr.scheduler.primary_queue_name
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
-            walltime = cstar_sysmgr.scheduler.get_queue(queue).max_walltime
+            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
         for component in self.components:
             if isinstance(component, ROMSComponent):
@@ -569,7 +568,7 @@ class Case:
                     n_time_steps=ntimesteps,
                     account_key=account_key,
                     walltime=walltime,
-                    queue=queue,
+                    queue_name=queue_name,
                     job_name=job_name,
                 )
                 return job_instance
