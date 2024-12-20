@@ -1,6 +1,7 @@
 import pooch
 from abc import ABC
 import datetime as dt
+import hashlib
 import dateutil.parser
 from pathlib import Path
 from urllib.parse import urljoin
@@ -135,6 +136,34 @@ class InputDataset(ABC):
 
         return input_dataset_dict
 
+    def _get_hash(self, file_path: Path) -> str:
+        """Calculate the 256-bit SHA checksum of a file.
+
+        Parameters
+        ----------
+        file_path: Path
+           Path to the file whose checksum is to be calculated
+
+        Returns
+        -------
+        file_hash: str
+           The SHA-256 checksum of the file at file_path
+        """
+
+        file_path = Path(file_path)
+        if not file_path.is_file():
+            raise FileNotFoundError(
+                f"Error when calculating file hash: {file_path} is not a valid file"
+            )
+
+        sha256_hash = hashlib.sha256()
+        with file_path.open("rb") as file:
+            for chunk in iter(lambda: file.read(4096), b""):
+                sha256_hash.update(chunk)
+
+        file_hash = sha256_hash.hexdigest()
+        return file_hash
+
     def get(self, local_dir: str | Path) -> None:
         """Make the file containing this input dataset available in `local_dir`
 
@@ -162,7 +191,20 @@ class InputDataset(ABC):
                 self.working_path = target_path
         else:
             if self.source.location_type == "path":
-                target_path.symlink_to(Path(self.source.location).resolve())
+                source_location = Path(self.source.location).resolve()
+                if hasattr(self, "file_hash") and self.file_hash is not None:
+                    source_hash = self._get_hash(source_location)
+                    if self.file_hash != source_hash:
+                        raise ValueError(
+                            f"The provided file hash ({self.file_hash}) does not match "
+                            f"that of the file at {source_location} ({source_hash}). "
+                            "Note that as this input dataset exists on the local filesystem, "
+                            "C-Star does not require a file hash to use it. Please either "
+                            "update the file_hash entry or remove it."
+                        )
+
+                target_path.symlink_to(source_location)
+
             elif self.source.location_type == "url":
                 if hasattr(self, "file_hash") and self.file_hash is not None:
                     downloader = pooch.HTTPDownloader(timeout=120)
@@ -179,5 +221,4 @@ class InputDataset(ABC):
                         + "but no InputDataset.file_hash is not defined. "
                         + "Cannot proceed."
                     )
-
             self.working_path = target_path

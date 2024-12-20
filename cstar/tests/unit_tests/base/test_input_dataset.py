@@ -1,4 +1,5 @@
 import pytest
+import hashlib
 from unittest import mock
 from pathlib import Path
 from cstar.base import InputDataset
@@ -371,6 +372,24 @@ def test_to_dict(remote_input_dataset):
     }
 
 
+def test_get_hash(local_input_dataset, tmp_path):
+    """Test the _get_hash method for correctness."""
+    file_path = tmp_path / "test_file.txt"
+    file_path.write_text("Test data for hash")
+
+    # Compute the expected hash manually
+    expected_hash = hashlib.sha256("Test data for hash".encode()).hexdigest()
+
+    # Call _get_hash and verify
+    calculated_hash = local_input_dataset._get_hash(file_path)
+    assert calculated_hash == expected_hash, "Hash mismatch"
+
+    # Test FileNotFoundError
+    non_existent_path = tmp_path / "non_existent_file.txt"
+    with pytest.raises(FileNotFoundError):
+        local_input_dataset._get_hash(non_existent_path)
+
+
 class TestInputDatasetGet:
     """Test class for the InputDataset.get method.
 
@@ -493,6 +512,27 @@ class TestInputDatasetGet:
         assert (
             local_input_dataset.working_path == self.target_filepath_local
         ), f"Expected working_filepath to be {self.target_filepath_local}, but got {local_input_dataset.working_path}"
+
+    def test_get_local_wrong_hash(self, local_input_dataset):
+        """Test the `get` method with a bogus file_hash for local sources."""
+        # Assign a bogus file hash
+        local_input_dataset.file_hash = "bogus_hash"
+
+        source_filepath_local = Path(
+            local_input_dataset.source.location
+        )  # Source file in the local system
+
+        self.mock_exists.return_value = False
+        self.mock_resolve.side_effect = [self.target_dir, source_filepath_local]
+
+        # Patch `_get_hash` to return a different, valid hash
+        with mock.patch.object(
+            local_input_dataset, "_get_hash", return_value="valid_hash"
+        ):
+            with pytest.raises(
+                ValueError, match="The provided file hash.*does not match.*"
+            ):
+                local_input_dataset.get(self.target_dir)
 
     def test_get_with_remote_source(self, remote_input_dataset):
         """Test the InputDataset.get method with a remote source file.
