@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from cstar.system.manager import cstar_sysmgr
 from cstar.system.scheduler import (
+    Queue,
     SlurmScheduler,
     PBSScheduler,
     Scheduler,
@@ -272,9 +273,9 @@ class SchedulerJob(ABC):
             determine the system's CPUs per node automatically.
         """
 
-        self.scheduler = scheduler
-        self.commands = commands
-        self.cpus = cpus
+        self._scheduler = scheduler
+        self._commands = commands
+        self._cpus = cpus
 
         default_name = f"cstar_job_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
 
@@ -284,17 +285,16 @@ class SchedulerJob(ABC):
             else Path(script_path)
         )
         self.run_path = self.script_path.parent if run_path is None else Path(run_path)
-        self.job_name = default_name if job_name is None else job_name
+        self._job_name = default_name if job_name is None else job_name
         self.output_file = (
             self.run_path / f"{default_name}.out"
             if output_file is None
             else output_file
         )
-        self.queue_name = (
+        self._queue_name = (
             scheduler.primary_queue_name if queue_name is None else queue_name
         )
-        self.queue = scheduler.get_queue(queue_name)
-        self.walltime = walltime
+        self._walltime = walltime
 
         if (walltime is None) and (self.queue.max_walltime is None):
             raise ValueError(
@@ -314,7 +314,7 @@ class SchedulerJob(ABC):
                 "Walltime parameter unspecified. Creating scheduler job with maximum walltime "
                 + f"for queue {queue_name}, {self.queue.max_walltime}"
             )
-            self.walltime = self.queue.max_walltime
+            self._walltime = self.queue.max_walltime
         else:
             # Check walltimes
             wt_h, wt_m, wt_s = map(int, walltime.split(":"))
@@ -330,26 +330,24 @@ class SchedulerJob(ABC):
                     + f"{self.queue.max_walltime}"
                 )
 
-        self.cpus = cpus
-
         # Explicitly typing to avoid mypy confusion in conditional pathways below
-        self.cpus_per_node: Optional[int]
-        self.nodes: Optional[int]
+        self._cpus_per_node: Optional[int]
+        self._nodes: Optional[int]
 
         if (
             (nodes is None)
             and (cpus_per_node is not None)
             and (scheduler.requires_task_distribution)
         ):
-            self.nodes = ceil(cpus / cpus_per_node)
-            self.cpus_per_node = cpus_per_node
+            self._nodes = ceil(cpus / cpus_per_node)
+            self._cpus_per_node = cpus_per_node
         elif (
             (nodes is not None)
             and (cpus_per_node is None)
             and (scheduler.requires_task_distribution)
         ):
-            self.nodes = nodes
-            self.cpus_per_node = int(cpus / nodes)
+            self._nodes = nodes
+            self._cpus_per_node = int(cpus / nodes)
         elif (
             (nodes is None)
             and (cpus_per_node is None)
@@ -378,14 +376,68 @@ class SchedulerJob(ABC):
                 ),
                 UserWarning,
             )
-            self.cpus_per_node = ncpus
-            self.nodes = nnodes
+            self._cpus_per_node = ncpus
+            self._nodes = nnodes
         else:
-            self.cpus_per_node = cpus_per_node
-            self.nodes = nodes
+            self._cpus_per_node = cpus_per_node
+            self._nodes = nodes
 
-        self.account_key = account_key
+        self._account_key = account_key
         self._id: Optional[int] = None
+
+    @property
+    def account_key(self) -> str:
+        """The account key associated with the job for resource tracking."""
+        return self._account_key
+
+    @property
+    def nodes(self) -> Optional[int]:
+        """The number of nodes to request."""
+        return self._nodes
+
+    @property
+    def cpus_per_node(self) -> Optional[int]:
+        """The number of CPUs per node to request."""
+        return self._cpus_per_node
+
+    @property
+    def cpus(self) -> int:
+        """The total number of CPUs required for the job."""
+        return self._cpus
+
+    @property
+    def job_name(self) -> str:
+        """The name of the job.
+
+        Defaults to an auto-generated name.
+        """
+        return self._job_name
+
+    @property
+    def walltime(self) -> Optional[str]:
+        """The maximum walltime for the job, in the format "HH:MM:SS"."""
+        return self._walltime
+
+    @property
+    def queue_name(self) -> str:
+        """The name of the queue to which the job will be submitted."""
+        return self._queue_name
+
+    @property
+    def queue(self) -> Queue:
+        """The queue to which the job will be submitted."""
+        return self.scheduler.get_queue(self.queue_name)
+
+    @property
+    def scheduler(self) -> Scheduler:
+        """The scheduler managing this job (e.g., a SlurmScheduler or PBSScheduler
+        instance)"""
+        return self._scheduler
+
+    @property
+    def commands(self) -> str:
+        """The commands to execute within the job script."""
+        return self._commands
 
     @property
     def id(self) -> Optional[int]:
