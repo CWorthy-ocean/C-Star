@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import SlurmScheduler, SlurmQOS, SlurmPartition
-from cstar.execution.scheduler_job import SlurmJob, JobStatus
+from cstar.execution.scheduler_job import SlurmJob, ExecutionStatus
 
 
 class TestSlurmJob:
@@ -365,7 +365,7 @@ class TestSlurmJob:
         run_path = tmp_path
 
         # Mock the status to simulate a running job
-        mock_status.return_value = JobStatus.RUNNING
+        mock_status.return_value = ExecutionStatus.RUNNING
 
         # Mock the subprocess.run behavior for successful cancellation
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -459,12 +459,24 @@ class TestSlurmJob:
     @pytest.mark.parametrize(
         "job_id, sacct_output, return_code, expected_status, should_raise",
         [
-            (None, "", 0, JobStatus.UNSUBMITTED, False),  # Unsubmitted job
-            (12345, "PENDING\n", 0, JobStatus.PENDING, False),  # Pending job
-            (12345, "RUNNING\n", 0, JobStatus.RUNNING, False),  # Running job
-            (12345, "COMPLETED\n", 0, JobStatus.COMPLETED, False),  # Completed job
-            (12345, "CANCELLED\n", 0, JobStatus.CANCELLED, False),  # Cancelled job
-            (12345, "FAILED\n", 0, JobStatus.FAILED, False),  # Failed job
+            (None, "", 0, ExecutionStatus.UNSUBMITTED, False),  # Unsubmitted job
+            (12345, "PENDING\n", 0, ExecutionStatus.PENDING, False),  # Pending job
+            (12345, "RUNNING\n", 0, ExecutionStatus.RUNNING, False),  # Running job
+            (
+                12345,
+                "COMPLETED\n",
+                0,
+                ExecutionStatus.COMPLETED,
+                False,
+            ),  # Completed job
+            (
+                12345,
+                "CANCELLED\n",
+                0,
+                ExecutionStatus.CANCELLED,
+                False,
+            ),  # Cancelled job
+            (12345, "FAILED\n", 0, ExecutionStatus.FAILED, False),  # Failed job
             (12345, "", 1, None, True),  # sacct command failure
         ],
     )

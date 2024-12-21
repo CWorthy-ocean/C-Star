@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import PBSScheduler, PBSQueue
 from cstar.execution.scheduler_job import (
-    JobStatus,
+    ExecutionStatus,
     PBSJob,
 )
 
@@ -257,7 +257,7 @@ class TestPBSJob:
         Mocks
         -----
         PBSJob.status
-            Mocked to return `JobStatus.RUNNING`, simulating a running job.
+            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
         subprocess.run
             Mocked to simulate successful execution of the `qdel` command.
 
@@ -268,7 +268,7 @@ class TestPBSJob:
         """
 
         # Mock the status to "running"
-        mock_status.return_value = JobStatus.RUNNING
+        mock_status.return_value = ExecutionStatus.RUNNING
 
         # Mock subprocess.run for successful cancellation
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -351,7 +351,7 @@ class TestPBSJob:
         Mocks
         -----
         PBSJob.status
-            Mocked to return `JobStatus.RUNNING`, simulating a running job.
+            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
         subprocess.run
             Mocked to simulate a failed execution of the `qdel` command, returning a non-zero exit code.
 
@@ -361,7 +361,7 @@ class TestPBSJob:
         - That the `qdel` command is called with the correct job ID and parameters.
         """
         # Mock the status to "running"
-        mock_status.return_value = JobStatus.RUNNING
+        mock_status.return_value = ExecutionStatus.RUNNING
 
         # Mock subprocess.run for qdel failure
         mock_subprocess.return_value = MagicMock(
@@ -388,7 +388,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "Q"}}},
                 None,
-                JobStatus.PENDING,
+                ExecutionStatus.PENDING,
                 False,
                 None,
                 None,
@@ -396,7 +396,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "R"}}},
                 None,
-                JobStatus.RUNNING,
+                ExecutionStatus.RUNNING,
                 False,
                 None,
                 None,
@@ -404,7 +404,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "C"}}},
                 None,
-                JobStatus.COMPLETED,
+                ExecutionStatus.COMPLETED,
                 False,
                 None,
                 None,
@@ -412,7 +412,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "H"}}},
                 None,
-                JobStatus.HELD,
+                ExecutionStatus.HELD,
                 False,
                 None,
                 None,
@@ -420,7 +420,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "F", "Exit_status": 1}}},
                 None,
-                JobStatus.FAILED,
+                ExecutionStatus.FAILED,
                 False,
                 None,
                 None,
@@ -428,7 +428,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "F", "Exit_status": 0}}},
                 None,
-                JobStatus.COMPLETED,
+                ExecutionStatus.COMPLETED,
                 False,
                 None,
                 None,
@@ -452,7 +452,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "E"}}},
                 None,
-                JobStatus.ENDING,
+                ExecutionStatus.ENDING,
                 False,
                 None,
                 None,
@@ -460,7 +460,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "X"}}},
                 None,
-                JobStatus.UNKNOWN,
+                ExecutionStatus.UNKNOWN,
                 False,
                 None,
                 None,

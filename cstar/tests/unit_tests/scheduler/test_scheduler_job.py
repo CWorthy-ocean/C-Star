@@ -10,7 +10,7 @@ from cstar.system.scheduler import (
     SlurmQOS,
 )
 from cstar.execution.scheduler_job import (
-    JobStatus,
+    ExecutionStatus,
     SchedulerJob,
     PBSJob,
     SlurmJob,
@@ -427,7 +427,7 @@ class TestSchedulerJobBase:
         Mocks
         -----
         MockSchedulerJob.status
-            Mocked to return `JobStatus.COMPLETED`, simulating a non-running job.
+            Mocked to return `ExecutionStatus.COMPLETED`, simulating a non-running job.
         builtins.print
             Mocked to capture printed messages for validation.
 
@@ -443,7 +443,7 @@ class TestSchedulerJobBase:
         with patch.object(
             MockSchedulerJob, "status", new_callable=PropertyMock
         ) as mock_status:
-            mock_status.return_value = JobStatus.COMPLETED
+            mock_status.return_value = ExecutionStatus.COMPLETED
             with patch("builtins.print") as mock_print:
                 job.updates(seconds=10)
                 mock_print.assert_any_call(
@@ -465,7 +465,7 @@ class TestSchedulerJobBase:
         Mocks
         -----
         MockSchedulerJob.status
-            Mocked to return `JobStatus.RUNNING`, simulating a running job.
+            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
         builtins.print
             Mocked to capture printed messages for validation.
 
@@ -491,7 +491,7 @@ class TestSchedulerJobBase:
         with patch.object(
             MockSchedulerJob, "status", new_callable=PropertyMock
         ) as mock_status:
-            mock_status.return_value = JobStatus.RUNNING
+            mock_status.return_value = ExecutionStatus.RUNNING
 
             # Function to simulate appending live updates to the file
             def append_live_updates():
@@ -531,7 +531,7 @@ class TestSchedulerJobBase:
         Mocks
         -----
         MockSchedulerJob.status
-            Mocked to return `JobStatus.RUNNING`, simulating a running job.
+            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
         builtins.input
             Mocked to simulate user responses to the confirmation prompt.
         builtins.print
@@ -559,7 +559,7 @@ class TestSchedulerJobBase:
         with patch.object(
             MockSchedulerJob, "status", new_callable=PropertyMock
         ) as mock_status:
-            mock_status.return_value = JobStatus.RUNNING
+            mock_status.return_value = ExecutionStatus.RUNNING
 
             # Patch input to simulate the confirmation prompt
             with patch("builtins.input", side_effect=["y"]) as mock_input:
