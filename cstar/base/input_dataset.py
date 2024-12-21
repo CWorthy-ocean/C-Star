@@ -1,11 +1,11 @@
 import pooch
 from abc import ABC
 import datetime as dt
-import hashlib
 import dateutil.parser
 from pathlib import Path
 from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
+from cstar.base.utils import _get_sha256_hash
 from typing import Optional, List
 
 
@@ -136,34 +136,6 @@ class InputDataset(ABC):
 
         return input_dataset_dict
 
-    def _get_hash(self, file_path: Path) -> str:
-        """Calculate the 256-bit SHA checksum of a file.
-
-        Parameters
-        ----------
-        file_path: Path
-           Path to the file whose checksum is to be calculated
-
-        Returns
-        -------
-        file_hash: str
-           The SHA-256 checksum of the file at file_path
-        """
-
-        file_path = Path(file_path)
-        if not file_path.is_file():
-            raise FileNotFoundError(
-                f"Error when calculating file hash: {file_path} is not a valid file"
-            )
-
-        sha256_hash = hashlib.sha256()
-        with file_path.open("rb") as file:
-            for chunk in iter(lambda: file.read(4096), b""):
-                sha256_hash.update(chunk)
-
-        file_hash = sha256_hash.hexdigest()
-        return file_hash
-
     def get(self, local_dir: str | Path) -> None:
         """Make the file containing this input dataset available in `local_dir`
 
@@ -193,7 +165,7 @@ class InputDataset(ABC):
             if self.source.location_type == "path":
                 source_location = Path(self.source.location).resolve()
                 if hasattr(self, "file_hash") and self.file_hash is not None:
-                    source_hash = self._get_hash(source_location)
+                    source_hash = _get_sha256_hash(source_location)
                     if self.file_hash != source_hash:
                         raise ValueError(
                             f"The provided file hash ({self.file_hash}) does not match "

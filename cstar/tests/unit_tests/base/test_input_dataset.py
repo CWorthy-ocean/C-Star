@@ -1,5 +1,4 @@
 import pytest
-import hashlib
 from unittest import mock
 from pathlib import Path
 from cstar.base import InputDataset
@@ -372,24 +371,6 @@ def test_to_dict(remote_input_dataset):
     }
 
 
-def test_get_hash(local_input_dataset, tmp_path):
-    """Test the _get_hash method for correctness."""
-    file_path = tmp_path / "test_file.txt"
-    file_path.write_text("Test data for hash")
-
-    # Compute the expected hash manually
-    expected_hash = hashlib.sha256("Test data for hash".encode()).hexdigest()
-
-    # Call _get_hash and verify
-    calculated_hash = local_input_dataset._get_hash(file_path)
-    assert calculated_hash == expected_hash, "Hash mismatch"
-
-    # Test FileNotFoundError
-    non_existent_path = tmp_path / "non_existent_file.txt"
-    with pytest.raises(FileNotFoundError):
-        local_input_dataset._get_hash(non_existent_path)
-
-
 class TestInputDatasetGet:
     """Test class for the InputDataset.get method.
 
@@ -526,8 +507,8 @@ class TestInputDatasetGet:
         self.mock_resolve.side_effect = [self.target_dir, source_filepath_local]
 
         # Patch `_get_hash` to return a different, valid hash
-        with mock.patch.object(
-            local_input_dataset, "_get_hash", return_value="valid_hash"
+        with mock.patch(
+            "cstar.base.input_dataset._get_sha256_hash", return_value="valid_hash"
         ):
             with pytest.raises(
                 ValueError, match="The provided file hash.*does not match.*"
