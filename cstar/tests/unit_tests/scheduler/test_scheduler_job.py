@@ -9,7 +9,7 @@ from cstar.system.scheduler import (
     SlurmScheduler,
     SlurmQOS,
 )
-from cstar.scheduler.job import (
+from cstar.execution.scheduler_job import (
     JobStatus,
     SchedulerJob,
     PBSJob,

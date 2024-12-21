@@ -2,7 +2,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import PBSScheduler, PBSQueue
-from cstar.scheduler.job import (
+from cstar.execution.scheduler_job import (
     JobStatus,
     PBSJob,
 )
@@ -247,7 +247,7 @@ class TestPBSJob:
             job.submit()
 
     @patch("subprocess.run")
-    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
         """Tests that the `cancel` method successfully cancels a running PBS job.
 
@@ -293,7 +293,7 @@ class TestPBSJob:
         )
 
     @patch("subprocess.run")
-    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     @patch("builtins.print")
     def test_cancel_completed_job(
         self, mock_print, mock_status, mock_subprocess, tmp_path
@@ -339,7 +339,7 @@ class TestPBSJob:
 
     ##
     @patch("subprocess.run")
-    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_failure(self, mock_status, mock_subprocess, tmp_path):
         """Ensures that a `RuntimeError` is raised if the `qdel` command fails to cancel
         a job.

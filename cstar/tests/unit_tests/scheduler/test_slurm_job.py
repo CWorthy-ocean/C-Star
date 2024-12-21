@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import SlurmScheduler, SlurmQOS, SlurmPartition
-from cstar.scheduler.job import SlurmJob, JobStatus
+from cstar.execution.scheduler_job import SlurmJob, JobStatus
 
 
 class TestSlurmJob:
@@ -336,7 +336,7 @@ class TestSlurmJob:
             job.submit()
 
     @patch("subprocess.run")
-    @patch("cstar.scheduler.job.SlurmJob.status", new_callable=PropertyMock)
+    @patch("cstar.execution.scheduler_job.SlurmJob.status", new_callable=PropertyMock)
     def test_cancel(self, mock_status, mock_subprocess, tmp_path):
         """Verifies that the `cancel` method cancels a SLURM job and raises an exception
         if it fails.

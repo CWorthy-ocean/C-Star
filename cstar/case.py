@@ -14,7 +14,7 @@ from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
 
 if TYPE_CHECKING:
-    from cstar.scheduler.job import SchedulerJob
+    from cstar.execution.scheduler_job import SchedulerJob
 
 
 class Case:

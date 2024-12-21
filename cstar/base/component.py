@@ -6,7 +6,7 @@ from cstar.base.base_model import BaseModel
 if TYPE_CHECKING:
     from cstar.base.additional_code import AdditionalCode
     from cstar.base.discretization import Discretization
-    from cstar.scheduler.job import SchedulerJob
+    from cstar.execution.scheduler_job import SchedulerJob
 
 
 class Component(ABC):

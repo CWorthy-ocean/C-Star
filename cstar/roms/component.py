@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
 
-from cstar.scheduler.job import create_scheduler_job
+from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.base.utils import _replace_text_in_file
 from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
@@ -24,7 +24,7 @@ from cstar.system.manager import cstar_sysmgr
 
 if TYPE_CHECKING:
     from cstar.roms import ROMSBaseModel
-    from cstar.scheduler.job import SchedulerJob
+    from cstar.execution.scheduler_job import SchedulerJob
 
 
 class ROMSComponent(Component):
