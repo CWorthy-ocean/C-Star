@@ -924,7 +924,7 @@ class ROMSComponent(Component):
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        ## 2: RUN ON THIS MACHINE
+        ## 2: RUN ROMS
 
         roms_exec_cmd = (
             f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
@@ -960,82 +960,6 @@ class ROMSComponent(Component):
 
             romsprocess.start()
             return romsprocess
-            # romsprocess = subprocess.Popen(
-            #     roms_exec_cmd,
-            #     shell=True,
-            #     cwd=run_path,
-            #     stdout=subprocess.PIPE,
-            #     stderr=subprocess.PIPE,
-            #     text=True,
-            # )
-
-            ## UNCOMMENT FROM HERE
-            # # Process stdout line-by-line
-            # tstep0 = 0
-            # roms_init_string = ""
-            # if romsprocess.stdout is None:
-            #     raise RuntimeError("ROMS is not producing stdout")
-
-            # # 2024-09-21 : the following is included as in some instances ROMS
-            # # will exit with code 0 even if a fatal error occurs, see:
-            # # https://github.com/CESR-lab/ucla-roms/issues/42
-
-            # debugging = False  # Print raw output if true
-            # if debugging:
-            #     while True:
-            #         output = romsprocess.stdout.readline()
-            #         if output == "" and romsprocess.poll() is not None:
-            #             break
-            #         if output:
-            #             print(output.strip())
-            # else:
-            #     for line in romsprocess.stdout:
-            #         # Split the line by whitespace
-            #         parts = line.split()
-
-            #         # Check if there are exactly 9 parts and the first one is an integer
-            #         if len(parts) == 9:
-            #             try:
-            #                 # Try to convert the first part to an integer
-            #                 tstep = int(parts[0])
-            #                 if tstep0 == 0:
-            #                     tstep0 = tstep
-            #                     T0 = time.time()
-            #                     # Capture the first integer and print it
-            #                 else:
-            #                     ETA = (n_time_steps - (tstep - tstep0)) * (
-            #                         (time.time() - T0) / (tstep - tstep0)
-            #                     )
-            #                     total_print_statements = 50
-            #                     print_frq = n_time_steps // total_print_statements + 1
-            #                     if ((tstep - tstep0) % print_frq) == 0:
-            #                         print(
-            #                             f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
-            #                         )
-            #             except ValueError:
-            #                 pass
-            #         elif tstep0 == 0 and len(roms_init_string) == 0:
-            #             roms_init_string = "Running ROMS: Initializing run..."
-            #             print(roms_init_string)
-
-            # romsprocess.wait()
-            # if romsprocess.returncode != 0:
-            #     import datetime as dt
-
-            #     errlog = (
-            #         output_dir
-            #         / f"ROMS_STDERR_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-            #     )
-            #     if romsprocess.stderr is not None:
-            #         with open(errlog, "w") as F:
-            #             F.write(romsprocess.stderr.read())
-            #     raise RuntimeError(
-            #         f"ROMS terminated with errors. See {errlog} for further information."
-            #     )
-            # return None
-            ## UNCOMMENT TO HERE
-
-        return None
 
     def post_run(self, output_dir: Optional[str | Path] = None) -> None:
         """Performs post-processing steps associated with this ROMSComponent object.
