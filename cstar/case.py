@@ -14,7 +14,7 @@ from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
 
 if TYPE_CHECKING:
-    from cstar.execution.scheduler_job import SchedulerJob
+    from cstar.execution.handler import ExecutionHandler
 
 
 class Case:
@@ -535,7 +535,7 @@ class Case:
         walltime: Optional[str] = None,
         queue_name: Optional[str] = None,
         job_name: Optional[str] = None,
-    ) -> Optional["SchedulerJob"]:
+    ) -> "ExecutionHandler":
         """Run the case by calling `component.run(caseroot)` on the primary component
         (to which others are coupled)."""
 

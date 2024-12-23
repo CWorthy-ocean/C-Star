@@ -1,6 +1,5 @@
 import os
 import re
-import time
 import json
 import warnings
 import subprocess
@@ -9,7 +8,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
-from cstar.execution.handler import ExecutionStatus
+from cstar.execution.handler import ExecutionStatus, ExecutionHandler
 from cstar.system.manager import cstar_sysmgr
 from cstar.system.scheduler import (
     Queue,
@@ -110,7 +109,7 @@ def create_scheduler_job(
     )
 
 
-class SchedulerJob(ABC):
+class SchedulerJob(ExecutionHandler, ABC):
     """Abstract base class for representing a job submitted to a scheduler.
 
     This class defines the structure and common behavior for jobs managed by
@@ -473,50 +472,6 @@ class SchedulerJob(ABC):
             An enumeration value representing the current status of the job.
         """
         pass
-
-    def updates(self, seconds=10):
-        """Provides updates from the job's output file as a live stream for `seconds`
-        seconds (default 10).
-
-        If `seconds` is 0, updates are provided indefinitely until the user interrupts the stream.
-        """
-
-        if self.status != ExecutionStatus.RUNNING:
-            print(
-                f"This job is currently not running ({self.status}). Live updates cannot be provided."
-            )
-            if (self.status in {ExecutionStatus.FAILED, ExecutionStatus.COMPLETED}) or (
-                self.status == ExecutionStatus.CANCELLED and self.output_file.exists()
-            ):
-                print(f"See {self.output_file.resolve()} for job output")
-            return
-
-        if seconds == 0:
-            # Confirm indefinite tailing
-            confirmation = (
-                input(
-                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
-                    "Do you want to continue? (y/n): "
-                )
-                .strip()
-                .lower()
-            )
-            if confirmation not in {"y", "yes"}:
-                return
-
-        try:
-            with open(self.output_file, "r") as f:
-                f.seek(0, 2)  # Move to the end of the file
-                start_time = time.time()
-
-                while seconds == 0 or (time.time() - start_time < seconds):
-                    line = f.readline()
-                    if line:
-                        print(line, end="")
-                    else:
-                        time.sleep(0.1)  # 100ms delay between updates
-        except KeyboardInterrupt:
-            print("\nLive status updates stopped by user.")
 
     def _calculate_node_distribution(
         self, n_cores_required: int, tot_cores_per_node: int

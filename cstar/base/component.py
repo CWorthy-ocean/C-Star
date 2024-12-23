@@ -6,7 +6,7 @@ from cstar.base.base_model import BaseModel
 if TYPE_CHECKING:
     from cstar.base.additional_code import AdditionalCode
     from cstar.base.discretization import Discretization
-    from cstar.execution.scheduler_job import SchedulerJob
+    from cstar.execution.handler import ExecutionHandler
 
 
 class Component(ABC):
@@ -179,7 +179,7 @@ class Component(ABC):
         """
 
     @abstractmethod
-    def run(self) -> Optional["SchedulerJob"]:
+    def run(self) -> "ExecutionHandler":
         """Run this component.
 
         This abstract method will be implemented differently by different Component

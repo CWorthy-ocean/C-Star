@@ -31,11 +31,11 @@ class LocalProcess(ExecutionHandler):
     def start(self):
         # Open the output file to write to
         self._output_file_handle = open(self.output_file, "w")
-
         local_process = subprocess.Popen(
-            self.commands,
-            shell=True,
+            self.commands.split(),
+            # shell=True,
             cwd=self.run_path,
+            stdin=subprocess.PIPE,
             stdout=self._output_file_handle,
             stderr=subprocess.STDOUT,
         )
@@ -75,6 +75,3 @@ class LocalProcess(ExecutionHandler):
                     self._output_file_handle.close()
                     self._output_file_handle = None
                 self._cancelled = True
-
-    def updates(self):
-        raise NotImplementedError("don't get ahead of yourself son")
