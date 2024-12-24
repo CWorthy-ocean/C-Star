@@ -33,7 +33,8 @@ A key strength of C-Star lies in its ability to run regional simulations using a
    Importing and running a Case from a blueprint <2_importing_and_running_a_case_from_a_blueprint>
    Restarting and continuing a Case <3_restarting_and_continuing_a_case>
    Preparing input datasets for a Case with ROMS using roms-tools <4_preparing_roms_input_datasets>
-   Handling jobs on HPC systems <5_handling_jobs_on_hpc_systems>
+   Handling runs executed as jobs on HPC systems <5_handling_jobs_on_hpc_systems>
+   Tracking runs executed locally <6_tracking_runs_executed_locally>
 
 .. toctree::
    :maxdepth: 1
