@@ -67,9 +67,10 @@ Scheduler Job
 .. autosummary::
    :toctree: generated/
 
-   cstar.scheduler.job.SchedulerJob
-   cstar.scheduler.job.SlurmJob
-   cstar.scheduler.job.PBSJob
+   cstar.execution..scheduler_job.SchedulerJob
+   cstar.execution.scheduler_job.SlurmJob
+   cstar.execution.scheduler_job.PBSJob
+   cstar.execution.local_process.LocalProcess
    
 System
 ------

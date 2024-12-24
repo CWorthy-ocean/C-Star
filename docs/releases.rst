@@ -1,5 +1,15 @@
 Release notes
 =============
+.. _v0.0.6-alpha:
+
+v0.0.6-alpha ()
+---------------------------
+
+New features:
+~~~~~~~~~~~~~
+- Add ExecutionHandler class to track tasks run locally (LocalProcess subclass) or submitted to a job scheduler (SchedulerJob subclass)
+
+
 
 .. _v0.0.3-alpha:
 
