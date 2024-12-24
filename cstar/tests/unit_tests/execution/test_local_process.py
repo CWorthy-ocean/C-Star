@@ -328,7 +328,7 @@ class TestLocalProcess:
         # Test cancel on a completed process
         process.cancel()
         mock_print.assert_called_once_with(
-            f"Cannot cancel job with status {process.status}"
+            f"Cannot cancel job with status '{process.status}'"
         )
         mock_process.terminate.assert_not_called()
         mock_process.kill.assert_not_called()
