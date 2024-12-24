@@ -10,11 +10,15 @@ class MockExecutionHandler(ExecutionHandler):
 
     def __init__(self, status, output_file):
         self._status = status
-        self.output_file = Path(output_file)
+        self._output_file = Path(output_file)
 
     @property
     def status(self):
         return self._status
+
+    @property
+    def output_file(self):
+        return self._output_file
 
 
 class TestExecutionHandlerUpdates:

@@ -234,19 +234,19 @@ class SchedulerJob(ExecutionHandler, ABC):
         self._commands = commands
         self._cpus = cpus
 
-        default_name = f"cstar_job_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
+        self._default_name = (
+            f"cstar_job_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
+        )
 
         self.script_path = (
-            Path.cwd() / f"{default_name}.sh"
+            Path.cwd() / f"{self._default_name}.sh"
             if script_path is None
             else Path(script_path)
         )
         self.run_path = self.script_path.parent if run_path is None else Path(run_path)
-        self._job_name = default_name if job_name is None else job_name
-        self.output_file = (
-            self.run_path / f"{default_name}.out"
-            if output_file is None
-            else output_file
+        self._job_name = self._default_name if job_name is None else job_name
+        self._output_file = (
+            Path(output_file) if output_file is not None else output_file
         )
         self._queue_name = (
             scheduler.primary_queue_name if queue_name is None else queue_name
@@ -341,6 +341,15 @@ class SchedulerJob(ExecutionHandler, ABC):
 
         self._account_key = account_key
         self._id: Optional[int] = None
+
+    @property
+    def output_file(self) -> Path:
+        """The file in which to write this job's STDOUT and STDERR."""
+        return (
+            self.run_path / f"{self._default_name}.out"
+            if self._output_file is None
+            else self._output_file
+        )
 
     @property
     def account_key(self) -> str:
@@ -789,7 +798,7 @@ class PBSJob(SchedulerJob):
     """
 
     @property
-    def script(self):
+    def script(self) -> str:
         """Generate the PBS-specific job script to be submitted to the scheduler.
         Includes standard Slurm scheduler directives as well as scheduler-specific
         directives specified by the scheduler.other_scheduler_directives attribute.
@@ -814,7 +823,7 @@ class PBSJob(SchedulerJob):
         for (
             key,
             value,
-        ) in cstar_sysmgr.scheduler.other_scheduler_directives.items():
+        ) in self.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#PBS {key} {value}"
         scheduler_script += "\ncd ${PBS_O_WORKDIR}"
 

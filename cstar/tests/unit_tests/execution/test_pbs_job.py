@@ -62,6 +62,7 @@ class TestPBSJob:
         self.scheduler = PBSScheduler(
             queues=[self.mock_queue],
             primary_queue_name="test_queue",
+            other_scheduler_directives={"mock_directive": "mock_value"},
         )
 
         # Define common job parameters
@@ -77,19 +78,11 @@ class TestPBSJob:
             "queue_name": "test_queue",
         }
 
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
-    def test_script(self, mock_scheduler):
+    def test_script(self):  # , mock_scheduler):
         """Verifies that the PBS job script is correctly generated with all directives.
 
         This test checks that the `script` property of `PBSJob` produces the expected
         job script, including user-provided parameters and any scheduler directives.
-
-        Mocks
-        -----
-        CStarSystemManager.scheduler
-            Mocked to simulate a scheduler with specific directives (`mock_directive`).
 
         Asserts
         -------
@@ -98,12 +91,6 @@ class TestPBSJob:
           - Custom scheduler directives provided in `other_scheduler_directives`.
           - Commands to execute in the job script (`echo Hello, World`).
         """
-
-        # Mock the scheduler and its attributes
-        mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.other_scheduler_directives = {
-            "mock_directive": "mock_value"
-        }
 
         # Initialize a PBSJob
         job = PBSJob(**self.common_job_params)
@@ -129,10 +116,7 @@ class TestPBSJob:
         ), f"Script mismatch!\nExpected:\n{expected_script}\n\nGot:\n{job.script}"
 
     @patch("subprocess.run")
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
-    def test_submit(self, mock_scheduler, mock_subprocess, tmp_path):
+    def test_submit(self, mock_subprocess, tmp_path):
         """Ensures that the `submit` method properly submits a PBS job and extracts the
         job ID.
 
@@ -145,8 +129,6 @@ class TestPBSJob:
         -----
         subprocess.run
             Mocked to simulate the execution of the `qsub` command and its output.
-        CStarSystemManager.scheduler
-            Mocked to simulate a scheduler with no additional directives.
 
         Asserts
         -------
@@ -154,10 +136,6 @@ class TestPBSJob:
         - That the script file is created in the specified path.
         - That the `qsub` command is executed with the correct arguments.
         """
-
-        # Mock scheduler attributes
-        mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.other_scheduler_directives = {}
 
         # Mock subprocess.run for qsub
         mock_subprocess.return_value = MagicMock(
@@ -186,12 +164,8 @@ class TestPBSJob:
         ],
     )
     @patch("subprocess.run")
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
     def test_submit_raises(
         self,
-        mock_scheduler,
         mock_subprocess,
         returncode,
         stdout,
@@ -214,17 +188,11 @@ class TestPBSJob:
         -----
         subprocess.run
             Mocked to simulate the execution of the `qsub` command.
-        CStarSystemManager.scheduler
-            Mocked to simulate a scheduler with no additional directives.
 
         Asserts
         -------
         - That a `RuntimeError` is raised with the expected error message when submission fails.
         """
-
-        # Mock scheduler attributes
-        mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.other_scheduler_directives = {}
 
         # Mock subprocess.run for qsub
         mock_subprocess.return_value = MagicMock(

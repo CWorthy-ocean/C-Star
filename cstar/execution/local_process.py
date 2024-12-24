@@ -58,19 +58,16 @@ class LocalProcess(ExecutionHandler):
         """
 
         self.commands = commands
-
-        default_name = (
+        self.run_path = Path(run_path) if run_path is not None else Path.cwd()
+        self._default_name = (
             f"cstar_process_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
         )
-        self.run_path = Path(run_path) if run_path is not None else Path.cwd()
-        self.output_file = (
-            self.run_path / f"{default_name}.out"
-            if output_file is None
-            else output_file
+        self._output_file = (
+            Path(output_file) if output_file is not None else output_file
         )
 
-        self._process = None
         self._output_file_handle = None
+        self._process = None
         self._cancelled = False
 
     def start(self):
@@ -104,7 +101,16 @@ class LocalProcess(ExecutionHandler):
         self._process = local_process
 
     @property
-    def status(self):
+    def output_file(self) -> Path:
+        """The file in which to write this task's STDOUT and STDERR."""
+        return (
+            self.run_path / f"{self._default_name}.out"
+            if self._output_file is None
+            else self._output_file
+        )
+
+    @property
+    def status(self) -> ExecutionStatus:
         """Retrieve the current status of the local process.
 
         This property determines the status of the process based on its

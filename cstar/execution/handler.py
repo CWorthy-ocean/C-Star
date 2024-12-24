@@ -1,6 +1,7 @@
 import time
 from abc import ABC, abstractmethod
 from enum import Enum, auto
+from pathlib import Path
 
 
 class ExecutionStatus(Enum):
@@ -63,7 +64,7 @@ class ExecutionHandler(ABC):
 
     @property
     @abstractmethod
-    def status(self):
+    def status(self) -> ExecutionStatus:
         """Abstract property representing the current status of the task.
 
         Subclasses must implement this property to query the underlying
@@ -84,7 +85,20 @@ class ExecutionHandler(ABC):
 
         pass
 
-    def updates(self, seconds=10):
+    @property
+    @abstractmethod
+    def output_file(self) -> Path:
+        """Abstract property representing the output file.
+
+        Returns
+        -------
+        output_file (Path):
+            Path to the file in which stdout and stderr will be written.
+        """
+
+        pass
+
+    def updates(self, seconds: int = 10):
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
