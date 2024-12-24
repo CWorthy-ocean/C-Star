@@ -113,7 +113,10 @@ class ExecutionHandler(ABC):
             The duration (in seconds) for which updates should be streamed.
             If set to 0, updates will be streamed indefinitely until
             interrupted by the user.
-
+        confirm_indefinite: bool, optional, default = True
+            If 'seconds' is set to 0, the user will be prompted to confirm
+            whether they want to continue with an indefinite update stream
+            if confirm_indefinite is set to True
         Notes
         -----
         - This method moves to the end of the output file and streams only
