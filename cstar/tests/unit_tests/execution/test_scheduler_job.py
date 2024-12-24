@@ -1,6 +1,4 @@
-import time
 import pytest
-import threading
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import (
     Scheduler,
@@ -10,7 +8,6 @@ from cstar.system.scheduler import (
     SlurmQOS,
 )
 from cstar.execution.scheduler_job import (
-    ExecutionStatus,
     SchedulerJob,
     PBSJob,
     SlurmJob,
@@ -111,12 +108,6 @@ class TestSchedulerJobBase:
         system defaults.
     test_init_cpus_without_distribution_requirement
         Confirms that task distribution is skipped if the scheduler does not require it.
-    test_updates_non_running_job
-        Validates that `updates()` provides appropriate feedback when the job is not running.
-    test_updates_running_job_with_tmp_file
-        Verifies that `updates()` streams live updates from the output file when the job is running.
-    test_updates_indefinite_with_seconds_param_0
-        Confirms that `updates()` runs indefinitely when `seconds=0` and allows termination via user interruption.
     """
 
     def setup_method(self, method):
@@ -416,173 +407,6 @@ class TestSchedulerJobBase:
         # Ensure nodes and cpus_per_node are correctly assigned
         assert job.nodes == expected_nodes
         assert job.cpus_per_node == expected_cpus_per_node
-
-    def test_updates_non_running_job(self):
-        """Validates that `updates()` provides appropriate feedback when the job is not
-        running.
-
-        This test ensures that if the job status is not `RUNNING`, the method informs
-        the user and provides instructions for viewing the job output if applicable.
-
-        Mocks
-        -----
-        MockSchedulerJob.status
-            Mocked to return `ExecutionStatus.COMPLETED`, simulating a non-running job.
-        builtins.print
-            Mocked to capture printed messages for validation.
-
-        Asserts
-        -------
-        - That the user is informed the job is not running.
-        - That instructions for viewing the job output are provided if the job status
-          is `COMPLETED` or similar.
-        """
-
-        job = MockSchedulerJob(**self.common_job_params)
-
-        with patch.object(
-            MockSchedulerJob, "status", new_callable=PropertyMock
-        ) as mock_status:
-            mock_status.return_value = ExecutionStatus.COMPLETED
-            with patch("builtins.print") as mock_print:
-                job.updates(seconds=10)
-                mock_print.assert_any_call(
-                    "This job is currently not running (completed). Live updates cannot be provided."
-                )
-                mock_print.assert_any_call(
-                    f"See {job.output_file.resolve()} for job output"
-                )
-
-    def test_updates_running_job_with_tmp_file(self, tmp_path):
-        """Verifies that `updates()` streams live updates from the job's output file
-        when the job is running.
-
-        This test creates a temporary output file and pre-populates it with initial
-        content. Live updates are then appended to the file in real-time using a
-        background thread, simulating a running job. The `updates()` method is tested
-        to ensure it reads and prints both the pre-existing content and new updates.
-
-        Mocks
-        -----
-        MockSchedulerJob.status
-            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
-        builtins.print
-            Mocked to capture printed messages for validation.
-
-        Asserts
-        -------
-        - That all live updates appended to the output file are printed correctly.
-        - That previously existing content in the file is also printed.
-        - That the method properly interacts with the output file in real-time.
-        """
-
-        # Create a temporary output file
-        output_file = tmp_path / "output.log"
-        initial_content = ["First line\n"]
-        live_updates = ["Second line\n", "Third line\n", "Fourth line\n"]
-        print(output_file)
-        # Write initial content to the file
-        with output_file.open("w") as f:
-            f.writelines(initial_content)
-
-        job = MockSchedulerJob(**self.common_job_params, output_file=output_file)
-
-        # Mock the `status` property to return "running"
-        with patch.object(
-            MockSchedulerJob, "status", new_callable=PropertyMock
-        ) as mock_status:
-            mock_status.return_value = ExecutionStatus.RUNNING
-
-            # Function to simulate appending live updates to the file
-            def append_live_updates():
-                with output_file.open("a") as f:
-                    for line in live_updates:
-                        time.sleep(0.01)  # Ensure `updates()` is actively reading
-                        f.write(line)
-                        f.flush()  # Immediately write to disk
-
-            # Start the live update simulation in a background thread
-            updater_thread = threading.Thread(target=append_live_updates, daemon=True)
-            updater_thread.start()
-
-            # Run the `updates` method
-            with patch("builtins.print") as mock_print:
-                job.updates(seconds=0.25)
-
-                # Ensure both initial and live update lines are printed
-                for line in live_updates:
-                    mock_print.assert_any_call(line, end="")
-
-            # Ensure the thread finishes before the test ends
-            updater_thread.join()
-
-    ##
-
-    def test_updates_indefinite_with_seconds_param_0(self, tmp_path):
-        """Confirms that `updates()` runs indefinitely when `seconds=0` and allows
-        termination via user interruption.
-
-        This test creates a temporary output file and pre-populates it with content.
-        Unlike `test_updates_running_job_with_tmp_file`, this test does not continue
-        to update the temporary file, so no updates are actually provided. The
-        stream is then killed via a simulated `KeyboardInterrupt` and the test
-        ensures a graceful exit
-
-        Mocks
-        -----
-        MockSchedulerJob.status
-            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
-        builtins.input
-            Mocked to simulate user responses to the confirmation prompt.
-        builtins.print
-            Mocked to capture printed messages for validation.
-        time.sleep
-            Mocked to simulate a `KeyboardInterrupt` during indefinite updates.
-
-        Asserts
-        -------
-        - That the user is prompted to confirm running the updates indefinitely.
-        - That the method handles user interruptions and prints the appropriate message.
-        - That no additional file operations occur if the user denies the confirmation.
-        """
-        # Create a temporary output file
-        output_file = tmp_path / "output.log"
-        content = ["Line 1\n", "Line 2\n", "Line 3\n"]
-
-        # Write initial content to the file
-        with output_file.open("w") as f:
-            f.writelines(content)
-
-        job = MockSchedulerJob(**self.common_job_params, output_file=output_file)
-
-        # Mock the `status` property to return "running"
-        with patch.object(
-            MockSchedulerJob, "status", new_callable=PropertyMock
-        ) as mock_status:
-            mock_status.return_value = ExecutionStatus.RUNNING
-
-            # Patch input to simulate the confirmation prompt
-            with patch("builtins.input", side_effect=["y"]) as mock_input:
-                # Replace `time.sleep` with a side effect that raises KeyboardInterrupt
-                with patch("builtins.print") as mock_print:
-                    # Simulate a KeyboardInterrupt during the updates call
-                    with patch("time.sleep", side_effect=KeyboardInterrupt):
-                        job.updates(seconds=0)  # Run updates indefinitely
-
-                        # Assert that the "stopped by user" message was printed
-                        mock_print.assert_any_call(
-                            "\nLive status updates stopped by user."
-                        )
-                # Verify that the prompt was displayed to the user
-                mock_input.assert_called_once_with(
-                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
-                    "Do you want to continue? (y/n): "
-                )
-            # Patch input to simulate the confirmation prompt
-            with patch("builtins.input", side_effect=["n"]) as mock_input:
-                with patch("builtins.open", create=True) as mock_open:
-                    job.updates(seconds=0)
-                    mock_open.assert_not_called()
 
 
 ##

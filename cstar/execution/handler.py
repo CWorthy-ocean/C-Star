@@ -43,16 +43,69 @@ class ExecutionStatus(Enum):
 
 
 class ExecutionHandler(ABC):
+    """Abstract base class for managing the execution of a task or process.
+
+    This class defines the interface and common behavior for handling task
+    execution, such as monitoring the status and providing live updates
+    from an output file.
+
+    Attributes
+    ----------
+    status : ExecutionStatus
+        Represents the current status of the task (e.g., RUNNING, COMPLETED).
+        This is an abstract property that must be implemented by subclasses.
+
+    Methods
+    -------
+    updates(seconds=10)
+        Stream live updates from the task's output file for a specified duration.
+    """
+
     @property
     @abstractmethod
     def status(self):
+        """Abstract property representing the current status of the task.
+
+        Subclasses must implement this property to query the underlying
+        process and return the appropriate `ExecutionStatus` enum value.
+
+        Returns
+        -------
+        ExecutionStatus
+            The current status of the task, such as `ExecutionStatus.RUNNING`,
+            `ExecutionStatus.COMPLETED`, or other valid states defined in
+            the `ExecutionStatus` enum.
+
+        Notes
+        -----
+        The specific implementation should query the underlying process or
+        system to determine the task's status.
+        """
+
         pass
 
     def updates(self, seconds=10):
-        """Provides updates from the job's output file as a live stream for `seconds`
-        seconds (default 10).
+        """Stream live updates from the task's output file.
 
-        If `seconds` is 0, updates are provided indefinitely until the user interrupts the stream.
+        This method streams updates from the task's output file for the
+        specified duration. If the task is not running, a message will
+        indicate the inability to provide updates. If the output file
+        exists and the task has already finished, the method provides a
+        reference to the output file for review.
+
+        Parameters
+        ----------
+        seconds : int, optional, default = 10
+            The duration (in seconds) for which updates should be streamed.
+            If set to 0, updates will be streamed indefinitely until
+            interrupted by the user.
+
+        Notes
+        -----
+        - This method moves to the end of the output file and streams only
+          new lines appended during the specified duration.
+        - When streaming indefinitely (`seconds=0`), user confirmation is
+          required before proceeding.
         """
 
         if self.status != ExecutionStatus.RUNNING:
