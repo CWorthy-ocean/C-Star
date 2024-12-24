@@ -7,6 +7,7 @@ from typing import Optional, TYPE_CHECKING, List
 
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.execution.local_process import LocalProcess
+from cstar.execution.handler import ExecutionStatus
 from cstar.base.utils import _replace_text_in_file
 from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
@@ -151,6 +152,8 @@ class ROMSComponent(Component):
         # roms-specific
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
+
+        self._execution_handler: Optional["ExecutionHandler"] = None
 
     @property
     def in_file(self) -> Path:
@@ -953,11 +956,12 @@ class ROMSComponent(Component):
             )
 
             job_instance.submit()
+            self._execution_handler = job_instance
             return job_instance
 
         else:  # cstar_sysmgr.scheduler is None
             romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
-
+            self._execution_handler = romsprocess
             romsprocess.start()
             return romsprocess
 
@@ -972,6 +976,17 @@ class ROMSComponent(Component):
         output_dir: str | Path
             The directory in which output was produced by the run
         """
+
+        if self._execution_handler is None:
+            raise RuntimeError(
+                "Cannot call 'ROMSComponent.post_run()' before calling 'ROMSComponent.run()'"
+            )
+        elif self._execution_handler.status != ExecutionStatus.COMPLETED:
+            raise RuntimeError(
+                "Cannot call 'ROMSComponent.post_run()' until the ROMS run is completed, "
+                + f"but current execution status is '{self._execution_handler.status}'"
+            )
+
         if output_dir is None:
             # This should not be necessary, it allows output_dir to appear
             # optional for signature compatibility in linting, see

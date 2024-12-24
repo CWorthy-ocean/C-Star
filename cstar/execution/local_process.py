@@ -179,5 +179,5 @@ class LocalProcess(ExecutionHandler):
                     self._output_file_handle = None
                 self._cancelled = True
         else:
-            print(f"Cannot cancel job with status {self.status}")
+            print(f"Cannot cancel job with status '{self.status}'")
             return

@@ -726,7 +726,7 @@ class SlurmJob(SchedulerJob):
         """
 
         if self.status not in {ExecutionStatus.RUNNING, ExecutionStatus.PENDING}:
-            print(f"Cannot cancel job with status {self.status}")
+            print(f"Cannot cancel job with status '{self.status}'")
             return
 
         result = subprocess.run(
