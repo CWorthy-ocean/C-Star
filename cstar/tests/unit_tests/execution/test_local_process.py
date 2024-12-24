@@ -332,3 +332,61 @@ class TestLocalProcess:
         )
         mock_process.terminate.assert_not_called()
         mock_process.kill.assert_not_called()
+
+    @patch("subprocess.Popen")
+    @patch("builtins.print")
+    def test_wait_running_process(self, mock_print, mock_popen, tmp_path):
+        """Ensures that `wait` correctly waits for a running process to complete.
+
+        This test verifies:
+        - `wait()` is called on the process when it is running.
+        - `print` is not called for valid process states.
+        - The process's final status is updated correctly.
+        """
+        # Mock subprocess behavior
+        mock_process = MagicMock()
+        mock_popen.return_value = mock_process
+
+        # Simulate a running process
+        mock_process.poll.return_value = None  # Process is active
+        process = LocalProcess(
+            commands="sleep 1",
+            run_path=tmp_path,
+            output_file=tmp_path / "output.log",
+        )
+        process._process = mock_process  # Assign mock process
+        process._cancelled = False
+
+        # Test wait on a running process
+        process.wait()
+        mock_process.wait.assert_called_once()  # Ensure `wait` was called on the process
+        assert not mock_print.called  # Confirm `print` was not called
+
+    @patch("subprocess.Popen")
+    @patch("builtins.print")
+    def test_wait_non_running_process(self, mock_print, mock_popen, tmp_path):
+        """Ensures that `wait` does not perform actions for non-running processes.
+
+        This test verifies:
+        - `wait()` prints an appropriate message for non-running processes.
+        - `wait()` does not attempt to wait on processes that are not running.
+        """
+        # Mock subprocess behavior
+        mock_process = MagicMock()
+        mock_popen.return_value = mock_process
+
+        # Test wait on a cancelled process
+        mock_process.poll.return_value = None  # Process is active
+        process = LocalProcess(
+            commands="sleep 1",
+            run_path=tmp_path,
+            output_file=tmp_path / "output.log",
+        )
+        process._process = mock_process  # Assign mock process
+        process._cancelled = True
+
+        process.wait()
+        mock_print.assert_called_once_with(
+            f"cannot wait for process with execution status '{ExecutionStatus.CANCELLED}'"
+        )
+        mock_process.wait.assert_not_called()

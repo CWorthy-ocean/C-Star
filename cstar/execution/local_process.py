@@ -164,7 +164,7 @@ class LocalProcess(ExecutionHandler):
 
         See Also
         --------
-        status : Retrieve the current status of the subprocess.
+        wait : Wait for the local process to finish
         """
 
         if self._process and self.status == ExecutionStatus.RUNNING:
@@ -181,3 +181,16 @@ class LocalProcess(ExecutionHandler):
         else:
             print(f"Cannot cancel job with status '{self.status}'")
             return
+
+    def wait(self):
+        """Wait for the local process to finish.
+
+        See Also
+        --------
+        cancel : end the current process
+        """
+
+        if self._process and self.status == ExecutionStatus.RUNNING:
+            self._process.wait()
+        else:
+            print(f"cannot wait for process with execution status '{self.status}'")

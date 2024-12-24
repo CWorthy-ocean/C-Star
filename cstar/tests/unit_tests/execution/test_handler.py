@@ -189,3 +189,63 @@ class TestExecutionHandlerUpdates:
                 with patch("builtins.open", create=True) as mock_open:
                     handler.updates(seconds=0)
                     mock_open.assert_not_called()
+
+    def test_updates_stops_when_status_changes(self, tmp_path):
+        """Verifies that `updates()` stops execution when `status` changes to non-
+        RUNNING.
+
+        This test ensures:
+        - The conditional block exits `updates` when `status` is not `RUNNING`.
+        - Only lines added while the job is `RUNNING` are streamed.
+        """
+        # Create a temporary output file
+        output_file = tmp_path / "output.log"
+        initial_content = ["First line\n"]
+        running_updates = ["Second line\n", "Third line\n"]
+        completed_updates = ["Fourth line\n", "Fifth line\n"]
+        # Write initial content to the file
+        with output_file.open("w") as f:
+            f.writelines(initial_content)
+
+        # Initialize the handler with status `RUNNING`
+        handler = MockExecutionHandler(ExecutionStatus.RUNNING, output_file)
+
+        # Function to simulate appending live updates and changing status
+        def append_updates_and_change_status():
+            with output_file.open("a") as f:
+                for line in running_updates:
+                    time.sleep(0.1)  # Ensure updates() is actively reading
+                    f.write(line)
+                    f.flush()
+
+                # Change the status to `COMPLETED` after writing running updates
+                time.sleep(0.2)
+                handler._status = ExecutionStatus.COMPLETED
+                for line in completed_updates:
+                    time.sleep(0.1)
+                    f.write(line)
+                    f.flush()
+
+        # Start the background thread to append updates and change status
+        updater_thread = threading.Thread(
+            target=append_updates_and_change_status, daemon=True
+        )
+        updater_thread.start()
+
+        # Run the `updates` method
+        with patch("builtins.print") as mock_print:
+            handler.updates(seconds=0, confirm_indefinite=False)
+
+            # Verify that only lines from `running_updates` were printed
+            printed_calls = [call[0][0] for call in mock_print.call_args_list]
+            # print(printed_calls)
+
+            for line in running_updates:
+                assert line in printed_calls
+
+            # Verify that lines from `completed_updates` were not printed
+            for line in completed_updates:
+                assert line not in printed_calls
+
+        # Ensure the thread finishes before the test ends
+        updater_thread.join()

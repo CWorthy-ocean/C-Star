@@ -98,7 +98,7 @@ class ExecutionHandler(ABC):
 
         pass
 
-    def updates(self, seconds: int = 10):
+    def updates(self, seconds: int = 10, confirm_indefinite: bool = True):
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
@@ -132,7 +132,7 @@ class ExecutionHandler(ABC):
                 print(f"See {self.output_file.resolve()} for job output")
             return
 
-        if seconds == 0:
+        if (seconds == 0) and (confirm_indefinite):
             # Confirm indefinite tailing
             confirmation = (
                 input(
@@ -149,10 +149,11 @@ class ExecutionHandler(ABC):
             with open(self.output_file, "r") as f:
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
-
                 while seconds == 0 or (time.time() - start_time < seconds):
                     line = f.readline()
-                    if line:
+                    if self.status != ExecutionStatus.RUNNING:
+                        return
+                    elif line:
                         print(line, end="")
                     else:
                         time.sleep(0.1)  # 100ms delay between updates
