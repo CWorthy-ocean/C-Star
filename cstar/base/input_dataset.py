@@ -47,15 +47,14 @@ class InputDataset(ABC):
             The 256 bit SHA sum associated with the file for verification if remote
         """
 
-        self.source: DataSource = DataSource(location)
-        self.file_hash: Optional[str] = file_hash  # remote hash used for downloads
+        self.source: DataSource = DataSource(location=location, file_hash=file_hash)
         self.working_path: Optional[Path | List[Path]] = None
         self._local_hash_cache: Optional[Dict] = None  # 27
 
-        if (self.source.location_type == "url") and (self.file_hash is None):
+        if (self.source.location_type == "url") and (self.source.file_hash is None):
             raise ValueError(
                 f"Cannot create InputDataset for \n {self.source.location}:\n "
-                + "InputDataset.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
+                + "InputDataset.source.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
                 + "A file hash is required to verify files downloaded from remote sources."
             )
         if isinstance(start_date, str):
@@ -100,8 +99,8 @@ class InputDataset(ABC):
         base_str += "\n" + "-" * len(name)
 
         base_str += f"\nSource location: {self.source.location}"
-        if self.file_hash is not None:
-            base_str += f"\nfile_hash: {self.file_hash}"
+        if self.source.file_hash is not None:
+            base_str += f"\nSource file hash: {self.source.file_hash}"
         if self.start_date is not None:
             base_str += f"\nstart_date: {self.start_date}"
         if self.end_date is not None:
@@ -120,7 +119,7 @@ class InputDataset(ABC):
         # Constructor-style section:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nlocation = {self.source.location!r},"
-        repr_str += f"\nfile_hash = {self.file_hash}"
+        repr_str += f"\nfile_hash = {self.source.file_hash}"
         if self.start_date is not None:
             repr_str += f"\nstart_date = {self.start_date!r}"
         if self.end_date is not None:
@@ -149,8 +148,8 @@ class InputDataset(ABC):
         """
         input_dataset_dict = {}
         input_dataset_dict["location"] = self.source.location
-        if self.file_hash is not None:
-            input_dataset_dict["file_hash"] = self.file_hash
+        if self.source.file_hash is not None:
+            input_dataset_dict["file_hash"] = self.source.file_hash
         if self.start_date is not None:
             input_dataset_dict["start_date"] = self.start_date.__str__()
         if self.end_date is not None:
@@ -202,12 +201,12 @@ class InputDataset(ABC):
 
         if self.source.location_type == "path":
             source_location = Path(self.source.location).resolve()
-            if hasattr(self, "file_hash") and self.file_hash is not None:
-                source_hash = _get_sha256_hash(source_location)
-                if self.file_hash != source_hash:
+            if self.source.file_hash is not None:
+                computed_source_hash = _get_sha256_hash(source_location)
+                if self.source.file_hash != computed_source_hash:
                     raise ValueError(
-                        f"The provided file hash ({self.file_hash}) does not match "
-                        f"that of the file at {source_location} ({source_hash}). "
+                        f"The provided file hash ({self.source.file_hash}) does not match "
+                        f"that of the file at {source_location} ({computed_source_hash}). "
                         "Note that as this input dataset exists on the local filesystem, "
                         "C-Star does not require a file hash to use it. Please either "
                         "update the file_hash entry or remove it."
@@ -216,22 +215,22 @@ class InputDataset(ABC):
             target_path.symlink_to(source_location)
 
         elif self.source.location_type == "url":
-            if hasattr(self, "file_hash") and self.file_hash is not None:
+            if self.source.file_hash is not None:
                 downloader = pooch.HTTPDownloader(timeout=120)
                 to_fetch = pooch.create(
                     path=local_dir,
                     # urllib equivalent to Path.parent:
                     base_url=urljoin(self.source.location, "."),
-                    registry={self.source.basename: self.file_hash},
+                    registry={self.source.basename: self.source.file_hash},
                 )
                 to_fetch.fetch(self.source.basename, downloader=downloader)
                 source_hash = (
-                    self.file_hash
+                    self.source.file_hash
                 )  # 27, no need to recompute as Pooch checks for us
             else:
                 raise ValueError(
                     "InputDataset.source.source_type is 'url' "
-                    + "but no InputDataset.file_hash is not defined. "
+                    + "but no InputDataset.source.file_hash is not defined. "
                     + "Cannot proceed."
                 )
         self.working_path = target_path

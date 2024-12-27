@@ -1,3 +1,4 @@
+from typing import Optional
 from urllib.parse import urlparse
 from pathlib import Path
 
@@ -20,7 +21,7 @@ class DataSource:
        The basename of self.location, typically the file name
     """
 
-    def __init__(self, location: str | Path):
+    def __init__(self, location: str | Path, file_hash: Optional[str] = None):
         """Initialize a DataSource from a location string.
 
         Parameters:
@@ -34,6 +35,7 @@ class DataSource:
             An initialized DataSource
         """
         self.location = str(location)
+        self.file_hash = file_hash
 
     @property
     def location_type(self) -> str:
@@ -77,11 +79,17 @@ class DataSource:
         base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
         base_str += f"\n location: {self.location}"
+        if self.file_hash is not None:
+            base_str += f"\n file hash: {self.file_hash}"
         base_str += f"\n basename: {self.basename}"
         base_str += f"\n location type: {self.location_type}"
         base_str += f"\n source type: {self.source_type}"
         return base_str
 
     def __repr__(self) -> str:
-        repr_str = f"{self.__class__.__name__}(location={self.location!r})"
+        repr_str = f"{self.__class__.__name__}(location={self.location!r}"
+        if self.file_hash is not None:
+            repr_str += f", {self.file_hash!r}"
+        repr_str += ")"
+
         return repr_str
