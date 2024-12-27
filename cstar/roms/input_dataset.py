@@ -8,7 +8,7 @@ from abc import ABC
 from pathlib import Path
 from typing import Optional, List
 from cstar.base.input_dataset import InputDataset
-from cstar.base.utils import _list_to_concise_str
+from cstar.base.utils import _list_to_concise_str, _get_sha256_hash
 
 
 class ROMSInputDataset(InputDataset, ABC):
@@ -168,8 +168,10 @@ class ROMSInputDataset(InputDataset, ABC):
             savepath = roms_tools_class_instance.save(
                 Path(f"{local_dir/yaml_file.stem}.nc")
             )
-
             self.working_path = savepath[0] if len(savepath) == 1 else savepath
+            self._local_hash_cache = {
+                path: _get_sha256_hash(path.resolve()) for path in savepath
+            }  # 27
 
 
 class ROMSModelGrid(ROMSInputDataset):

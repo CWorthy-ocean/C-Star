@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
 from cstar.base.utils import _get_sha256_hash
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 class InputDataset(ABC):
@@ -48,8 +48,9 @@ class InputDataset(ABC):
         """
 
         self.source: DataSource = DataSource(location)
-        self.file_hash: Optional[str] = file_hash
+        self.file_hash: Optional[str] = file_hash  # remote hash used for downloads
         self.working_path: Optional[Path | List[Path]] = None
+        self._local_hash_cache: Optional[Dict] = None  # 27
 
         if (self.source.location_type == "url") and (self.file_hash is None):
             raise ValueError(
@@ -75,6 +76,23 @@ class InputDataset(ABC):
         elif isinstance(self.working_path, Path):
             return self.working_path.exists()
 
+    @property  # 27
+    def local_hash(self) -> Optional[Dict]:
+        if self._local_hash_cache is not None:
+            return self._local_hash_cache
+
+        if (not self.exists_locally) or (self.working_path is None):
+            local_hash = None
+        elif isinstance(self.working_path, list):
+            local_hash = {
+                path: _get_sha256_hash(path.resolve()) for path in self.working_path
+            }
+        elif isinstance(self.working_path, Path):
+            local_hash = {self.working_path: _get_sha256_hash(self.working_path)}
+
+        self._local_hash_cache = local_hash
+        return local_hash
+
     def __str__(self) -> str:
         name = self.__class__.__name__
         base_str = f"{name}"
@@ -94,6 +112,8 @@ class InputDataset(ABC):
         else:
             base_str += " ( does not yet exist. Call InputDataset.get() )"
 
+        if self.local_hash is not None:
+            base_str += f"\nLocal hash: {self.local_hash}"
         return base_str
 
     def __repr__(self) -> str:
@@ -111,6 +131,8 @@ class InputDataset(ABC):
             info_str += f"working_path = {self.working_path}"
             if not self.exists_locally:
                 info_str += " (does not exist)"
+        if self.local_hash is not None:
+            info_str += f", local_hash = {self.local_hash}"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         # Additional info
@@ -155,6 +177,7 @@ class InputDataset(ABC):
 
         # If the file is somewhere else on the system, make a symbolic link where we want it
         if target_path.exists():
+            # 27 add an additional check for the file hash here
             print(
                 f"A file by the name of {self.source.basename} "
                 + f"already exists at {local_dir}"
@@ -187,6 +210,9 @@ class InputDataset(ABC):
                         registry={self.source.basename: self.file_hash},
                     )
                     to_fetch.fetch(self.source.basename, downloader=downloader)
+                    source_hash = (
+                        self.file_hash
+                    )  # 27, no need to recompute as Pooch checks for us
                 else:
                     raise ValueError(
                         "InputDataset.source.source_type is 'url' "
@@ -194,3 +220,4 @@ class InputDataset(ABC):
                         + "Cannot proceed."
                     )
             self.working_path = target_path
+            self._local_hash_cache = {target_path: source_hash}  # 27
