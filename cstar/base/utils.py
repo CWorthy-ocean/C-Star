@@ -1,6 +1,36 @@
 import re
+import hashlib
 import subprocess
 from pathlib import Path
+
+
+def _get_sha256_hash(file_path: str | Path) -> str:
+    """Calculate the 256-bit SHA checksum of a file.
+
+    Parameters
+    ----------
+    file_path: Path
+       Path to the file whose checksum is to be calculated
+
+    Returns
+    -------
+    file_hash: str
+       The SHA-256 checksum of the file at file_path
+    """
+
+    file_path = Path(file_path)
+    if not file_path.is_file():
+        raise FileNotFoundError(
+            f"Error when calculating file hash: {file_path} is not a valid file"
+        )
+
+    sha256_hash = hashlib.sha256()
+    with file_path.open("rb") as file:
+        for chunk in iter(lambda: file.read(4096), b""):
+            sha256_hash.update(chunk)
+
+    file_hash = sha256_hash.hexdigest()
+    return file_hash
 
 
 def _update_user_dotenv(env_file_str) -> None:

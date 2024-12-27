@@ -1,6 +1,8 @@
 import pytest
+import hashlib
 from unittest import mock
 from cstar.base.utils import (
+    _get_sha256_hash,
     _update_user_dotenv,
     _clone_and_checkout,
     _get_repo_head_hash,
@@ -10,6 +12,36 @@ from cstar.base.utils import (
     _list_to_concise_str,
     _dict_to_tree,
 )
+
+
+def test_get_sha256_hash(tmp_path):
+    """Test the get_sha256_hash method using the known hash of a temporary file.
+
+    Fixtures
+    ----------
+    tmp_path : Path
+        Pytest fixture providing a temporary directory for isolated filesystem operations.
+
+    Asserts
+    -------
+    - The calculated hash matches the expected hash
+    - A FileNotFoundError is raised if the file does not exist
+    """
+
+    file_path = tmp_path / "test_file.txt"
+    file_path.write_text("Test data for hash")
+
+    # Compute the expected hash manually
+    expected_hash = hashlib.sha256("Test data for hash".encode()).hexdigest()
+
+    # Call _get_sha256_hash and verify
+    calculated_hash = _get_sha256_hash(file_path)
+    assert calculated_hash == expected_hash, "Hash mismatch"
+
+    # Test FileNotFoundError
+    non_existent_path = tmp_path / "non_existent_file.txt"
+    with pytest.raises(FileNotFoundError):
+        _get_sha256_hash(non_existent_path)
 
 
 def test_update_user_dotenv(tmp_path):
