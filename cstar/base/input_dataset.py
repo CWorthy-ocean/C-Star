@@ -177,47 +177,62 @@ class InputDataset(ABC):
 
         # If the file is somewhere else on the system, make a symbolic link where we want it
         if target_path.exists():
-            # 27 add an additional check for the file hash here
-            print(
-                f"A file by the name of {self.source.basename} "
-                + f"already exists at {local_dir}"
-            )
-            if self.working_path is None:
-                self.working_path = target_path
-        else:
-            if self.source.location_type == "path":
-                source_location = Path(self.source.location).resolve()
-                if hasattr(self, "file_hash") and self.file_hash is not None:
-                    source_hash = _get_sha256_hash(source_location)
-                    if self.file_hash != source_hash:
-                        raise ValueError(
-                            f"The provided file hash ({self.file_hash}) does not match "
-                            f"that of the file at {source_location} ({source_hash}). "
-                            "Note that as this input dataset exists on the local filesystem, "
-                            "C-Star does not require a file hash to use it. Please either "
-                            "update the file_hash entry or remove it."
-                        )
-
-                target_path.symlink_to(source_location)
-
-            elif self.source.location_type == "url":
-                if hasattr(self, "file_hash") and self.file_hash is not None:
-                    downloader = pooch.HTTPDownloader(timeout=120)
-                    to_fetch = pooch.create(
-                        path=local_dir,
-                        # urllib equivalent to Path.parent:
-                        base_url=urljoin(self.source.location, "."),
-                        registry={self.source.basename: self.file_hash},
+            # 27
+            if (
+                self.local_hash is not None
+            ):  # Also implies self.working_path is not None
+                target_hash = _get_sha256_hash(target_path)
+                if target_hash == self.local_hash:
+                    print(
+                        f"File {self.source.basename} already exists at {local_dir}, skipping."
                     )
-                    to_fetch.fetch(self.source.basename, downloader=downloader)
-                    source_hash = (
-                        self.file_hash
-                    )  # 27, no need to recompute as Pooch checks for us
+                    return
                 else:
-                    raise ValueError(
-                        "InputDataset.source.source_type is 'url' "
-                        + "but no InputDataset.file_hash is not defined. "
-                        + "Cannot proceed."
+                    raise FileExistsError(
+                        f"File {self.source.basename} already exists at {local_dir} "
+                        + f"but its checksum {target_hash} does not match that expected "
+                        + f"by C-Star: {self.local_hash}"
                     )
-            self.working_path = target_path
-            self._local_hash_cache = {target_path: source_hash}  # 27
+            else:  # local_hash is None
+                raise FileExistsError(
+                    f"File {self.source.basename} already exists at {local_dir} "
+                    + "but C-Star cannot verify it is the same as the expected file "
+                    + "without a file hash."
+                )
+
+        if self.source.location_type == "path":
+            source_location = Path(self.source.location).resolve()
+            if hasattr(self, "file_hash") and self.file_hash is not None:
+                source_hash = _get_sha256_hash(source_location)
+                if self.file_hash != source_hash:
+                    raise ValueError(
+                        f"The provided file hash ({self.file_hash}) does not match "
+                        f"that of the file at {source_location} ({source_hash}). "
+                        "Note that as this input dataset exists on the local filesystem, "
+                        "C-Star does not require a file hash to use it. Please either "
+                        "update the file_hash entry or remove it."
+                    )
+
+            target_path.symlink_to(source_location)
+
+        elif self.source.location_type == "url":
+            if hasattr(self, "file_hash") and self.file_hash is not None:
+                downloader = pooch.HTTPDownloader(timeout=120)
+                to_fetch = pooch.create(
+                    path=local_dir,
+                    # urllib equivalent to Path.parent:
+                    base_url=urljoin(self.source.location, "."),
+                    registry={self.source.basename: self.file_hash},
+                )
+                to_fetch.fetch(self.source.basename, downloader=downloader)
+                source_hash = (
+                    self.file_hash
+                )  # 27, no need to recompute as Pooch checks for us
+            else:
+                raise ValueError(
+                    "InputDataset.source.source_type is 'url' "
+                    + "but no InputDataset.file_hash is not defined. "
+                    + "Cannot proceed."
+                )
+        self.working_path = target_path
+        self._local_hash_cache = {target_path: source_hash}  # 27
