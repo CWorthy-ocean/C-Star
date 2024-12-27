@@ -5,6 +5,7 @@ import dateutil.parser
 from pathlib import Path
 from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
+from cstar.base.utils import _get_sha256_hash
 from typing import Optional, List
 
 
@@ -162,7 +163,20 @@ class InputDataset(ABC):
                 self.working_path = target_path
         else:
             if self.source.location_type == "path":
-                target_path.symlink_to(Path(self.source.location).resolve())
+                source_location = Path(self.source.location).resolve()
+                if hasattr(self, "file_hash") and self.file_hash is not None:
+                    source_hash = _get_sha256_hash(source_location)
+                    if self.file_hash != source_hash:
+                        raise ValueError(
+                            f"The provided file hash ({self.file_hash}) does not match "
+                            f"that of the file at {source_location} ({source_hash}). "
+                            "Note that as this input dataset exists on the local filesystem, "
+                            "C-Star does not require a file hash to use it. Please either "
+                            "update the file_hash entry or remove it."
+                        )
+
+                target_path.symlink_to(source_location)
+
             elif self.source.location_type == "url":
                 if hasattr(self, "file_hash") and self.file_hash is not None:
                     downloader = pooch.HTTPDownloader(timeout=120)
@@ -179,5 +193,4 @@ class InputDataset(ABC):
                         + "but no InputDataset.file_hash is not defined. "
                         + "Cannot proceed."
                     )
-
             self.working_path = target_path

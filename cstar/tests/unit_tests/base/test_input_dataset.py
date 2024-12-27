@@ -494,6 +494,27 @@ class TestInputDatasetGet:
             local_input_dataset.working_path == self.target_filepath_local
         ), f"Expected working_filepath to be {self.target_filepath_local}, but got {local_input_dataset.working_path}"
 
+    def test_get_local_wrong_hash(self, local_input_dataset):
+        """Test the `get` method with a bogus file_hash for local sources."""
+        # Assign a bogus file hash
+        local_input_dataset.file_hash = "bogus_hash"
+
+        source_filepath_local = Path(
+            local_input_dataset.source.location
+        )  # Source file in the local system
+
+        self.mock_exists.return_value = False
+        self.mock_resolve.side_effect = [self.target_dir, source_filepath_local]
+
+        # Patch `_get_hash` to return a different, valid hash
+        with mock.patch(
+            "cstar.base.input_dataset._get_sha256_hash", return_value="valid_hash"
+        ):
+            with pytest.raises(
+                ValueError, match="The provided file hash.*does not match.*"
+            ):
+                local_input_dataset.get(self.target_dir)
+
     def test_get_with_remote_source(self, remote_input_dataset):
         """Test the InputDataset.get method with a remote source file.
 
