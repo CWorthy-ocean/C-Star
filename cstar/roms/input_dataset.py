@@ -50,7 +50,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
         return repr_str
 
-    def get_from_yaml(
+    def get(
         self,
         local_dir: str | Path,
         start_date: Optional[dt.datetime] | str = None,
@@ -83,19 +83,14 @@ class ROMSInputDataset(InputDataset, ABC):
            np_eta is the number of y-direction processors
         """
 
-        # If it's not a yaml, we're done
-        if self.source.source_type != "yaml":
-            raise ValueError(
-                "Attempted to call `ROMSInputDataset.get_from_yaml() "
-                + "but ROMSInputDataset.source.source_type is "
-                + f"{self.source.source_type}, not 'yaml'"
-            )
-
         # Ensure we're working with a Path object
         local_dir = Path(local_dir)
 
-        # First, get the file as usual
-        self.get(local_dir)
+        super().get(local_dir=local_dir)
+
+        # If it's not a yaml, we're done
+        if self.source.source_type != "yaml":
+            return
 
         # Make sure that the local copy is not a symlink
         # (as InputDataset.get() symlinks files that didn't need to be downloaded)

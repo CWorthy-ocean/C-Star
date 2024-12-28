@@ -89,7 +89,7 @@ class DataSource:
     def __repr__(self) -> str:
         repr_str = f"{self.__class__.__name__}(location={self.location!r}"
         if self.file_hash is not None:
-            repr_str += f", {self.file_hash!r}"
+            repr_str += f", file_hash={self.file_hash!r}"
         repr_str += ")"
 
         return repr_str

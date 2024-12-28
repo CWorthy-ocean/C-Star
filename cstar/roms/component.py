@@ -684,19 +684,14 @@ class ROMSComponent(Component):
                         "ROMSComponent.input_datasets has entries "
                         + f" in the specified date range {start_date},{end_date}, "
                         + "but ROMSComponent.setup() did not receive "
-                        + "a input_datasets_target_dir argument"
+                        + "an input_datasets_target_dir argument"
                     )
 
-                if (isinstance(inp, ROMSInputDataset)) and (
-                    inp.source.source_type == "yaml"
-                ):
-                    inp.get_from_yaml(
-                        input_datasets_target_dir,
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                else:
-                    inp.get(input_datasets_target_dir)
+                inp.get(
+                    local_dir=input_datasets_target_dir,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
 
     def build(self) -> None:
         """Compiles any code associated with this configuration of ROMS.

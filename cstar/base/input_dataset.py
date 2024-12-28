@@ -224,7 +224,7 @@ class InputDataset(ABC):
                     registry={self.source.basename: self.source.file_hash},
                 )
                 to_fetch.fetch(self.source.basename, downloader=downloader)
-                source_hash = (
+                computed_source_hash = (
                     self.source.file_hash
                 )  # 27, no need to recompute as Pooch checks for us
             else:
@@ -234,4 +234,4 @@ class InputDataset(ABC):
                     + "Cannot proceed."
                 )
         self.working_path = target_path
-        self._local_hash_cache = {target_path: source_hash}  # 27
+        self._local_hash_cache = {target_path: computed_source_hash}  # 27
