@@ -82,9 +82,20 @@ class ROMSInputDataset(InputDataset, ABC):
            running ROMS in parallel. np_xi is the number of x-direction processors,
            np_eta is the number of y-direction processors
         """
-
         # Ensure we're working with a Path object
-        local_dir = Path(local_dir)
+        local_dir = Path(local_dir).resolve()
+
+        # If `working_path` is set, determine we're not fetching to the same parent dir:
+        if self.working_path is None:
+            working_path_parent = None
+        elif isinstance(self.working_path, list):
+            working_path_parent = self.working_path[0].parent
+        else:
+            working_path_parent = self.working_path.parent
+
+        if (self.exists_locally) and (working_path_parent == local_dir):
+            print(f"Input dataset already exists in {working_path_parent}, skipping.")
+            return
 
         super().get(local_dir=local_dir)
 
@@ -163,10 +174,11 @@ class ROMSInputDataset(InputDataset, ABC):
             savepath = roms_tools_class_instance.save(
                 Path(f"{local_dir/yaml_file.stem}.nc")
             )
-            self.working_path = savepath[0] if len(savepath) == 1 else savepath
-            self._local_hash_cache = {
-                path: _get_sha256_hash(path.resolve()) for path in savepath
-            }  # 27
+        self.working_path = savepath[0] if len(savepath) == 1 else savepath
+        self._local_hash_cache = {
+            path: _get_sha256_hash(path.resolve()) for path in savepath
+        }  # 27
+        self._local_file_stats = {path: path.stat() for path in savepath}
 
 
 class ROMSModelGrid(ROMSInputDataset):

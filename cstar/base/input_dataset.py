@@ -6,7 +6,10 @@ from pathlib import Path
 from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
 from cstar.base.utils import _get_sha256_hash
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
 
 
 class InputDataset(ABC):
@@ -48,9 +51,6 @@ class InputDataset(ABC):
         """
 
         self.source: DataSource = DataSource(location=location, file_hash=file_hash)
-        self.working_path: Optional[Path | List[Path]] = None
-        self._local_hash_cache: Optional[Dict] = None  # 27
-
         if (self.source.location_type == "url") and (self.source.file_hash is None):
             raise ValueError(
                 f"Cannot create InputDataset for \n {self.source.location}:\n "
@@ -66,14 +66,74 @@ class InputDataset(ABC):
         assert self.start_date is None or isinstance(self.start_date, dt.datetime)
         assert self.end_date is None or isinstance(self.end_date, dt.datetime)
 
+        # Initialize object state:
+        self.working_path: Optional[Path | List[Path]] = None
+        self._local_hash_cache: Optional[Dict] = None  # 27
+        self._local_file_stats: Optional[Dict] = None
+
+    # @property
+    # def exists_locally(self) -> bool:
+    #     if self.working_path is None:
+    #         return False
+    #     elif isinstance(self.working_path, list):
+    #         return True if all([f.exists() for f in self.working_path]) else False
+    #     elif isinstance(self.working_path, Path):
+    #         return self.working_path.exists()
+
     @property
     def exists_locally(self) -> bool:
-        if self.working_path is None:
+        """Check if this InputDataset exists on the local filesystem.
+
+        This method verifies the following for each file in `InputDataset.working_path`:
+        1. The file exists at the specified path.
+        2. The file's current size and modification date match values cached by `InputDataset.get()`
+        3. If the size matches but the modification time does not, the file's SHA-256 hash
+           is computed and compared against a value cached by `InputDataset.get()`
+
+        Returns:
+        --------
+        exists_locally (bool): True if all files pass the existence, size, modification
+            time, and (if necessary) hash checks. Returns False otherwise.
+
+        Notes:
+        ------
+            If C-Star cannot access cached file statistics, it is impossible to verify
+            whether the InputDataset is correct, and so `False` is returned.
+        """
+        if (self.working_path is None) or (self._local_file_stats is None):
             return False
-        elif isinstance(self.working_path, list):
-            return True if all([f.exists() for f in self.working_path]) else False
-        elif isinstance(self.working_path, Path):
-            return self.working_path.exists()
+
+        # Ensure working_path is a list for unified iteration
+        paths = (
+            self.working_path
+            if isinstance(self.working_path, list)
+            else [self.working_path]
+        )
+
+        for path in paths:
+            # Check if the file exists
+            if not path.exists():
+                return False
+
+            # Retrieve the cached stats
+            cached_stats = self._local_file_stats.get(path)
+            if cached_stats is None:
+                return False  # No stats cached for this file
+
+            # Compare size first
+            current_stats = path.stat()
+            if current_stats.st_size != cached_stats.st_size:
+                return False  # Size mismatch, no need to check further
+
+            # Compare modification time, fallback to hash check if mismatched
+            if current_stats.st_mtime != cached_stats.st_mtime:
+                current_hash = _get_sha256_hash(path.resolve())
+                if (self._local_hash_cache is None) or (
+                    self._local_hash_cache.get(path) != current_hash
+                ):
+                    return False
+
+        return True
 
     @property  # 27
     def local_hash(self) -> Optional[Dict]:
@@ -137,8 +197,14 @@ class InputDataset(ABC):
         # Additional info
         return repr_str
 
-    def to_dict(self):
+    def to_dict(self, include_state=False):
         """Represent this InputDataset object as a dictionary of kwargs.
+
+        Parameters:
+        -----------
+        include_state (bool, default False):
+           Includes additional entries concerning the current state of
+           this InputDataset which are not necessary to initialize it.
 
         Returns:
         --------
@@ -155,7 +221,42 @@ class InputDataset(ABC):
         if self.end_date is not None:
             input_dataset_dict["end_date"] = self.end_date.__str__()
 
+        if include_state:
+            input_dataset_dict["state"] = {}
+            input_dataset_dict["state"]["working_path"] = self.working_path
+            input_dataset_dict["state"]["_local_file_stats"] = self._local_file_stats
+            input_dataset_dict["state"]["_local_hash_cache"] = self._local_hash_cache
+
         return input_dataset_dict
+
+    @classmethod
+    def from_dict(cls, input_dataset_dict):
+        """Create an InputDataset object from a dictionary.
+
+        Parameters:
+        -----------
+        input_dataset_dict (dict):
+            A dictionary representation of the InputDataset object, potentially
+            including both initialization parameters and state information.
+
+        Returns:
+        --------
+        InputDataset:
+            A new instance of the InputDataset class with the specified parameters
+            and, if provided, state information.
+        """
+        # Extract the state information and remove it from the dictionary
+        state = input_dataset_dict.pop("state", None)
+
+        # Use the remaining dictionary to initialize the object
+        instance = cls(**input_dataset_dict)
+
+        # Restore state attributes if the state dictionary exists
+        if state:
+            for key, value in state.items():
+                setattr(instance, key, value)
+
+        return instance
 
     def get(self, local_dir: str | Path) -> None:
         """Make the file containing this input dataset available in `local_dir`
@@ -175,29 +276,33 @@ class InputDataset(ABC):
         target_path = Path(local_dir).resolve() / self.source.basename
 
         # If the file is somewhere else on the system, make a symbolic link where we want it
-        if target_path.exists():
-            # 27
-            if (
-                self.local_hash is not None
-            ):  # Also implies self.working_path is not None
-                target_hash = _get_sha256_hash(target_path)
-                if target_hash == self.local_hash:
-                    print(
-                        f"File {self.source.basename} already exists at {local_dir}, skipping."
-                    )
-                    return
-                else:
-                    raise FileExistsError(
-                        f"File {self.source.basename} already exists at {local_dir} "
-                        + f"but its checksum {target_hash} does not match that expected "
-                        + f"by C-Star: {self.local_hash}"
-                    )
-            else:  # local_hash is None
-                raise FileExistsError(
-                    f"File {self.source.basename} already exists at {local_dir} "
-                    + "but C-Star cannot verify it is the same as the expected file "
-                    + "without a file hash."
-                )
+        # if target_path.exists():
+        #     # 27
+        #     if (
+        #         self.local_hash is not None
+        #     ):  # Also implies self.working_path is not None
+        #         target_hash = _get_sha256_hash(target_path)
+        #         if target_hash == self.local_hash:
+        #             print(
+        #                 f"File {self.source.basename} already exists at {local_dir}, skipping."
+        #             )
+        #             return
+        #         else:
+        #             raise FileExistsError(
+        #                 f"File {self.source.basename} already exists at {local_dir} "
+        #                 + f"but its checksum {target_hash} does not match that expected "
+        #                 + f"by C-Star: {self.local_hash}"
+        #             )
+        #     else:  # local_hash is None
+        #         raise FileExistsError(
+        #             f"File {self.source.basename} already exists at {local_dir} "
+        #             + "but C-Star cannot verify it is the same as the expected file "
+        #             + "without a file hash."
+        #         )
+
+        if (self.exists_locally) and (self.working_path == target_path):
+            print(f"Input dataset already exists at {self.working_path}, skipping.")
+            return
 
         if self.source.location_type == "path":
             source_location = Path(self.source.location).resolve()
@@ -235,3 +340,4 @@ class InputDataset(ABC):
                 )
         self.working_path = target_path
         self._local_hash_cache = {target_path: computed_source_hash}  # 27
+        self._local_file_stats = {target_path: target_path.stat()}
