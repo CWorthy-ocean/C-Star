@@ -156,8 +156,8 @@ def test_repr_with_partitioned_files_and_working_path(local_roms_netcdf_dataset)
                              'local_file.002.nc']""" in repr(local_roms_netcdf_dataset)
 
 
-class TestROMSInputDatasetGetFromYAML:
-    """Test class for ROMSInputDataset.get_from_yaml method."""
+class TestROMSInputDatasetGet:
+    """Test class for ROMSInputDataset.get() method."""
 
     def setup_method(self):
         """Set up common patches and mocks for each test.
@@ -251,146 +251,147 @@ class TestROMSInputDatasetGetFromYAML:
         """Stop all patches."""
         mock.patch.stopall()
 
-    def test_get_from_yaml_raises_when_not_yaml(self, local_roms_netcdf_dataset):
-        """Test the get_from_yaml method raises a ValueError if source is not YAML."""
-        with pytest.raises(ValueError) as exception_info:
-            local_roms_netcdf_dataset.get_from_yaml(local_dir="some/local/dir")
-
-        expected_message = (
-            "Attempted to call `ROMSInputDataset.get_from_yaml() "
-            + "but ROMSInputDataset.source.source_type is "
-            + "netcdf, not 'yaml'"
-        )
-        assert str(exception_info.value) == expected_message
-
-    def test_get_grid_from_local_yaml_partitioned(self, local_roms_yaml_dataset):
+    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
+    @mock.patch("pathlib.Path.stat", autospec=True)
+    def test_get_grid_from_local_yaml_partitioned(
+        self, mock_stat, mock_get_hash, local_roms_yaml_dataset
+    ):
         """Test get_from_yaml for roms_tools.Grid with the saved file partitioned.
 
-        This test simulates the process of creating a ROMS grid file
-        from a local roms_tools yaml file.
+        This test ensures that the `get` method correctly handles creating partitioned ROMS grid files
+        from a local `roms-tools` YAML file.
+
         The method being tested involves:
-        - calling 'get' on the file, which creates a local symlink to its path on the filesystem
-        - replacing this symlink with a copy of the file
-        - loading the YAML file and determining the roms-tools class it describes
-        - creating the roms_tools.Grid object and saving it as a series of netCDF files
-          corresponding to ROMS' domain partitioning for MPI runs
+        - Calling the parent class `get` method to retrieve or symlink the source YAML file.
+        - Replacing the symlink with a local copy of the YAML file.
+        - Parsing the YAML file to determine the roms-tools class it describes.
+        - Modifying the YAML to include correct start and end times for time-varying datasets.
+        - Creating the roms-tools.Grid object from the modified YAML.
+        - Saving the Grid object as partitioned netCDF files corresponding to ROMS' domain decomposition.
 
         Fixtures:
         ---------
-        - local_roms_yaml_dataset: Provides a ROMSInputDataset with a local YAML source.
-        - mock_is_symlink: Mocks Path.is_symlink to simulate a symlinked file.
-        - mock_resolve: Mocks Path.resolve to simulate resolving a symlink to the actual file path.
+        - local_roms_yaml_dataset: Provides a ROMSInputDataset instance with a local YAML source.
+        - mock_is_symlink: Mocks Path.is_symlink to simulate checking for a symlinked file.
+        - mock_resolve: Mocks Path.resolve to simulate resolving symlink targets and other paths.
         - mock_unlink: Mocks Path.unlink to simulate unlinking the symlink.
         - mock_copy2: Mocks shutil.copy2 to simulate copying the resolved file to the specified directory.
-        - mock_yaml_load: Mocks yaml.safe_load to return a test dictionary for the Grid.
-        - mock_rt_grid: Mocks the roms_tools.Grid class.
+        - mock_yaml_load: Mocks yaml.safe_load to return a test dictionary for the YAML data.
+        - mock_rt_grid: Mocks the roms_tools.Grid class and its from_yaml method.
         - mock_rt_grid_instance: Mocks the instance of the roms_tools.Grid class and its save method.
 
         Asserts:
         --------
-        - `mock_get` is called on the YAML file itself with the correct arguments.
-        - `mock_is_symlink` is called once to check for a symlink.
-        - `mock_resolve` is called once to resolve the symlink to its actual path.
+        - `mock_get` is called on the YAML file with the correct arguments.
+        - `mock_is_symlink` is called once to check if the source YAML file is a symlink.
         - `mock_unlink` is called once to unlink the symlink.
-        - `mock_copy2` is called once to copy the resolved file to the symlink's former location
-        - `mock_yaml_load` is called to parse the local copy of the YAML file.
-        - `mock_rt_grid.from_yaml` is called with the resolved file path.
+        - `mock_copy2` is called once to copy the resolved YAML file to the target location.
+        - `mock_resolve` is called for the local directory, the source YAML file, and all partitioned files.
+        - `mock_yaml_load` is called to parse the contents of the copied YAML file.
+        - `mock_rt_grid.from_yaml` is called with the resolved path to the modified YAML file.
         - `mock_rt_grid_instance.save` is called with the correct partitioning parameters (np_xi, np_eta).
-        - `ROMSInputDataset.partitioned_files` is updated to reflect the partitioned netCDF file
+        - `local_roms_yaml_dataset.partitioned_files` is updated to reflect the list of partitioned netCDF files.
+        - `Path.stat` and `_get_sha256_hash` are called once for each partitioned file to cache metadata and checksums.
         """
+
+        # Mock the stat result
+        mock_stat_result = mock.Mock(
+            st_size=12345, st_mtime=1678901234, st_mode=0o100644
+        )
+        mock_stat.return_value = mock_stat_result
 
         # Mock the is_symlink method to return True
         self.mock_is_symlink.return_value = True
 
         # Mock resolve to return a resolved path
         resolved_path = Path("/resolved/path/to/local_file.yaml")
-        self.mock_resolve.return_value = resolved_path
+        self.mock_resolve.side_effect = [
+            Path("some/local/dir"),  # First resolve: local_dir
+            resolved_path,  # Second resolve: symlink target
+            *(
+                Path(f"some/local/dir/PARTITIONED/local_file.{i:02d}.nc")
+                for i in range(1, 13)
+            ),  # Resolves for partitioned files
+        ]
 
         # Mock yaml loading
         self.mock_yaml_load.return_value = {
             "Grid": {"source": "ETOPO5", "fake": "entry"}
         }
 
-        # Configure the save method to return a list of file paths
-        self.mock_rt_grid_instance.save.return_value = ["some/local/dir/local_file.nc"]
+        # Configure the save method to return a list of partitioned file paths
+        partitioned_paths = [
+            Path(f"some/local/dir/PARTITIONED/local_file.{i:02d}.nc")
+            for i in range(1, 13)
+        ]
+        self.mock_rt_grid_instance.save.return_value = partitioned_paths
 
         # Call the method under test
-        local_roms_yaml_dataset.get_from_yaml(
-            local_dir="some/local/dir", np_xi=3, np_eta=4
-        )
+        local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"), np_xi=3, np_eta=4)
+
         # Assert "get" was called on the yaml file itself
         self.mock_get.assert_called_once_with(
-            local_roms_yaml_dataset, Path("some/local/dir")
+            local_roms_yaml_dataset, local_dir=Path("some/local/dir")
         )
 
         # Assert that symlink handling code was triggered
         self.mock_is_symlink.assert_called_once()
-        self.mock_resolve.assert_called_once()
         self.mock_unlink.assert_called_once()
         self.mock_copy2.assert_called_once_with(
             resolved_path, Path("some/local/dir/local_file.yaml")
         )
 
+        # Assert resolve calls
+        expected_resolve_calls = [
+            mock.call(Path("some/local/dir")),
+            mock.call(Path("some/local/dir/local_file.yaml")),
+            *(
+                mock.call(Path(f"some/local/dir/PARTITIONED/local_file.{i:02d}.nc"))
+                for i in range(1, 13)
+            ),
+        ]
+        assert self.mock_resolve.call_args_list == expected_resolve_calls, (
+            f"Expected resolve calls:\n{expected_resolve_calls}\n"
+            f"But got:\n{self.mock_resolve.call_args_list}"
+        )
+
         # Check that the yaml.safe_load was called properly
         self.mock_yaml_load.assert_called_once()
 
-        # Assert that roms_tools.Grid.from_yaml or roms_tools.OtherClass.from_yaml was called
+        # Assert that roms_tools.Grid.from_yaml was called
         self.mock_rt_grid.from_yaml.assert_called_once_with(resolved_path)
 
         # Finally, ensure the save method is called
         self.mock_rt_grid_instance.save.assert_called_once_with(
             Path("some/local/dir/PARTITIONED/local_file"), np_xi=3, np_eta=4
         )
-        assert local_roms_yaml_dataset.partitioned_files == [
-            "some/local/dir/local_file.nc"
-        ]
 
+        # Assert partitioned files are updated correctly
+        assert local_roms_yaml_dataset.partitioned_files == partitioned_paths
+
+        # Ensure stat was called for each partitioned file
+        assert mock_stat.call_count == len(partitioned_paths), (
+            f"Expected stat to be called {len(partitioned_paths)} times, "
+            f"but got {mock_stat.call_count} calls."
+        )
+
+    @mock.patch("pathlib.Path.stat", autospec=True)
+    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
     def test_get_surface_forcing_from_local_yaml_unpartitioned(
-        self, local_roms_yaml_dataset
+        self, mock_get_hash, mock_stat, local_roms_yaml_dataset
     ):
-        """Test get_from_yaml for roms_tools.SurfaceForcing with the saved file
-        partitioned.
-
-        This test simulates the process of creating a ROMS surface forcing (or other) file
-        from a local roms_tools yaml file.
-        The method being tested involves:
-        - calling 'get' on the file, which creates a local symlink to its path on the filesystem
-        - replacing this symlink with a copy of the file
-        - loading the modified YAML file and determining the roms-tools class it describes
-        - modifying the YAML dictionary to set desired start and end dates
-        - writing the modified YAML file, replacing the local copy
-        - creating the roms_tools.SurfaceForcing object and saving as an unpartitioned netCDF file
-
-        Fixtures:
-        ---------
-        - local_roms_yaml_dataset: Provides a ROMSInputDataset with a local YAML source.
-        - mock_is_symlink: Mocks Path.is_symlink to simulate a symlinked file.
-        - mock_resolve: Mocks Path.resolve to simulate resolving a symlink to the actual file path.
-        - mock_unlink: Mocks Path.unlink to simulate unlinking the symlink.
-        - mock_copy2: Mocks shutil.copy2 to simulate copying the resolved file to the specified directory.
-        - mock_yaml_load: Mocks yaml.safe_load to return a test dictionary for Grid and SurfaceForcing.
-        - mock_rt_surface_forcing: Mocks the roms_tools.SurfaceForcing class.
-        - mock_rt_surface_forcing_instance: Mocks the instance of roms_tools.SurfaceForcing and its save method.
-
-        Asserts:
-        --------
-        - `start_time` and `end_time` in the YAML dictionary are updated with the correct values.
-        - `mock_get` is called on the YAML file itself with the correct arguments.
-        - `mock_is_symlink` is called once to check for a symlink.
-        - `mock_resolve` is called once to resolve the symlink to its actual path.
-        - `mock_unlink` is called once to unlink the symlink.
-        - `mock_copy2` is called once to copy the resolved file to the symlink's former location
-        - `mock_yaml_load` is called to parse the local copy of the YAML file.
-        - `mock_rt_surface_forcing.from_yaml` is called with the resolved file path and use_dask=True.
-        - `mock_rt_surface_forcing_instance.save` is called to save the SurfaceForcing data.
-        """
+        """Test get for roms_tools.SurfaceForcing with the saved file unpartitioned."""
 
         # Mock the is_symlink method to return True
         self.mock_is_symlink.return_value = True
 
         # Mock resolve to return a resolved path
         resolved_path = Path("/resolved/path/to/local_file.yaml")
-        self.mock_resolve.return_value = resolved_path
+        self.mock_resolve.side_effect = [
+            Path("some/local/dir"),  # First resolve: local_dir
+            resolved_path,  # Second resolve: symlink target
+            Path("some/local/dir/local_file.nc"),  # Third resolve: during caching
+        ]
 
         # Mock yaml loading for a more complex YAML with both Grid and SurfaceForcing
         yaml_dict = {
@@ -412,14 +413,21 @@ class TestROMSInputDatasetGetFromYAML:
         )
         # Configure mock save method for SurfaceForcing to return a valid list
         self.mock_rt_surface_forcing_instance.save.return_value = [
-            "some/local/dir/surface_forcing_file.nc"
+            Path("some/local/dir/surface_forcing_file.nc")
         ]
 
+        # Mock stat result for saved files
+        mock_stat_result = mock.Mock(
+            st_size=12345, st_mtime=1678901234, st_mode=0o100644
+        )
+        mock_stat.return_value = mock_stat_result
+
         # Call the method under test
-        local_roms_yaml_dataset.get_from_yaml(
+        local_roms_yaml_dataset.get(
             local_dir="some/local/dir", start_date="2022-01-01", end_date="2022-01-31"
         )
 
+        # Assert that start_time and end_time are updated in the YAML dictionary
         assert (
             yaml_dict["SurfaceForcing"]["start_time"]
             == dt.datetime(2022, 1, 1).isoformat()
@@ -436,7 +444,6 @@ class TestROMSInputDatasetGetFromYAML:
 
         # Assert that symlink handling code was triggered
         self.mock_is_symlink.assert_called_once()
-        self.mock_resolve.assert_called_once()
         self.mock_unlink.assert_called_once()
         self.mock_copy2.assert_called_once_with(
             resolved_path, Path("some/local/dir/local_file.yaml")
@@ -445,21 +452,27 @@ class TestROMSInputDatasetGetFromYAML:
         # Check that the yaml.safe_load was called properly
         self.mock_yaml_load.assert_called_once()
 
-        # Assert that both roms_tools.SurfaceForcing was instantiated
+        # Assert that roms_tools.SurfaceForcing was instantiated
         self.mock_rt_surface_forcing.from_yaml.assert_called_once_with(
             resolved_path, use_dask=True
         )
 
-        # Ensure the save methods were called for both instances
+        # Ensure the save method was called for the SurfaceForcing instance
         self.mock_rt_surface_forcing_instance.save.assert_called_once_with(
             Path("some/local/dir/local_file.nc")
         )
 
-    def test_get_from_yaml_raises_with_wrong_number_of_keys(
-        self, local_roms_yaml_dataset
+        # Ensure stat was called for the saved file
+        assert (
+            mock_stat.call_count == 1
+        ), f"Expected stat to be called 1 time, but got {mock_stat.call_count} calls."
+
+    @mock.patch("pathlib.Path.stat", autospec=True)
+    def test_get_raises_with_wrong_number_of_keys(
+        self, mock_stat, local_roms_yaml_dataset
     ):
-        """Test that the get_from_yaml method raises a ValueError when the yaml file
-        contains more than two sections.
+        """Test that the get method raises a ValueError when the yaml file contains more
+        than two sections.
 
         Fixtures:
         ---------
@@ -469,16 +482,19 @@ class TestROMSInputDatasetGetFromYAML:
 
         Asserts:
         --------
-        - Ensures `mock_resolve` is called once to resolve the symlink to the actual path.
+        - Ensures `mock_resolve` is called to resolve the symlink to the actual path.
         - Ensures `mock_yaml_load` is called to parse the YAML file.
         - Asserts that a ValueError is raised when the YAML file contains more than two sections (Grid and one other).
         """
 
         # Mock resolve to return a resolved path
         resolved_path = Path("/resolved/path/to/local_file.yaml")
-        self.mock_resolve.return_value = resolved_path
+        self.mock_resolve.side_effect = [
+            Path("some/local/dir"),  # First resolve: local_dir
+            resolved_path,  # Second resolve: symlink target
+        ]
 
-        # Mock yaml loading for a more complex YAML with both Grid and SurfaceForcing
+        # Mock yaml loading for a YAML with too many sections
         self.mock_yaml_load.return_value = {
             "Grid": {"fake": "entry", "topography_source": "ETOPO5"},
             "SurfaceForcing": {
@@ -488,11 +504,25 @@ class TestROMSInputDatasetGetFromYAML:
             "AnotherSection": {"should": "fail", "with": 3, "sections": "in yaml"},
         }
 
+        # Mock stat to prevent unintended file operations
+        mock_stat_result = mock.Mock(
+            st_size=12345, st_mtime=1678901234, st_mode=0o100644
+        )
+        mock_stat.return_value = mock_stat_result
+
+        # Call the method under test and expect a ValueError
         with pytest.raises(ValueError) as exception_info:
-            local_roms_yaml_dataset.get_from_yaml(local_dir="some/local/dir")
+            local_roms_yaml_dataset.get(local_dir="some/local/dir")
+
+        # Define the expected error message
         expected_message = (
             "roms tools yaml file has 3 sections. "
             + "Expected 'Grid' and one other class"
         )
 
+        # Assert the error message matches
         assert str(exception_info.value) == expected_message
+
+        # Assertions to ensure everything worked as expected
+        self.mock_resolve.assert_called()
+        self.mock_yaml_load.assert_called_once()
