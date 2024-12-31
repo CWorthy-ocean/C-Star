@@ -815,3 +815,99 @@ class TestInputDatasetGet:
         with pytest.raises(ValueError) as exception_info:
             remote_input_dataset.get(self.target_dir)
         assert str(exception_info.value) == expected_message
+
+
+class TestLocalHash:
+    def setup_method(self):
+        """Set up common mocks for `local_hash` tests."""
+        # Patch resolve
+        self.patcher_resolve = mock.patch("pathlib.Path.resolve")
+        self.mock_resolve = self.patcher_resolve.start()
+        self.mock_resolve.return_value = Path("/resolved/local/path")
+
+        # Patch _get_sha256_hash
+        self.patcher_get_hash = mock.patch("cstar.base.input_dataset._get_sha256_hash")
+        self.mock_get_hash = self.patcher_get_hash.start()
+        self.mock_get_hash.return_value = "mocked_hash"
+
+        # Patch exists_locally
+        self.patcher_exists_locally = mock.patch(
+            "cstar.base.input_dataset.InputDataset.exists_locally",
+            new_callable=mock.PropertyMock,
+        )
+        self.mock_exists_locally = self.patcher_exists_locally.start()
+        self.mock_exists_locally.return_value = True
+
+    def teardown_method(self):
+        """Stop all patches."""
+        mock.patch.stopall()
+
+    def test_local_hash_single_file(self, local_input_dataset):
+        """Test `local_hash` calculation for a single file."""
+        local_input_dataset._local_file_hash_cache = None
+        local_input_dataset.working_path = Path("/some/local/path")
+
+        # Ensure the resolve method is invoked
+        self.mock_resolve.return_value = Path("/resolved/local/path")
+
+        result = local_input_dataset.local_hash
+
+        # Debug: Confirm resolve was invoked
+        print(f"Resolved path: {local_input_dataset.working_path.resolve()}")
+
+        # Check that the result uses the resolved path
+        assert result == {
+            Path("/some/local/path"): "mocked_hash"
+        }, f"Expected calculated local_hash, but got {result}"
+
+        # Verify _get_sha256_hash was called with the resolved path
+        self.mock_get_hash.assert_called_once_with(Path("/some/local/path"))
+
+    def test_local_hash_cached(self, local_input_dataset):
+        """Test `local_hash` when the hash is cached."""
+        cached_hash = {Path("/resolved/local/path"): "cached_hash"}
+        local_input_dataset._local_file_hash_cache = cached_hash
+
+        result = local_input_dataset.local_hash
+
+        assert result == cached_hash, "Expected the cached hash to be returned."
+        self.mock_get_hash.assert_not_called()
+
+    def test_local_hash_no_working_path(self, local_input_dataset):
+        """Test `local_hash` when no working path is set."""
+        local_input_dataset.working_path = None
+
+        result = local_input_dataset.local_hash
+
+        assert (
+            result is None
+        ), "Expected local_hash to be None when working_path is not set."
+        self.mock_get_hash.assert_not_called()
+
+    def test_local_hash_multiple_files(self, local_input_dataset):
+        """Test `local_hash` calculation for multiple files."""
+        local_input_dataset._local_file_hash_cache = None
+        local_input_dataset.working_path = [
+            Path("/some/local/path1"),
+            Path("/some/local/path2"),
+        ]
+
+        self.mock_resolve.side_effect = [
+            Path("/resolved/local/path1"),
+            Path("/resolved/local/path2"),
+        ]
+
+        result = local_input_dataset.local_hash
+
+        assert result == {
+            Path("/some/local/path1"): "mocked_hash",
+            Path("/some/local/path2"): "mocked_hash",
+        }, f"Expected calculated local_hash for multiple files, but got {result}"
+
+        self.mock_get_hash.assert_has_calls(
+            [
+                mock.call(Path("/resolved/local/path1")),
+                mock.call(Path("/resolved/local/path2")),
+            ],
+            any_order=True,
+        )

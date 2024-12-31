@@ -526,3 +526,135 @@ class TestROMSInputDatasetGet:
         # Assertions to ensure everything worked as expected
         self.mock_resolve.assert_called()
         self.mock_yaml_load.assert_called_once()
+
+    @mock.patch(
+        "cstar.base.input_dataset.InputDataset.exists_locally",
+        new_callable=mock.PropertyMock,
+    )
+    def test_get_skips_if_working_path_in_same_parent_dir(
+        self, mock_exists_locally, local_roms_yaml_dataset
+    ):
+        """Test that the `get` method skips execution when `working_path` is set and
+        points to the same parent directory as `local_dir`."""
+        # Mock `working_path` to point to a file in `some/local/dir`
+        local_roms_yaml_dataset.working_path = Path("some/local/dir/local_file.yaml")
+
+        # Mock the `exists_locally` property to return True
+        mock_exists_locally.return_value = True
+
+        # Set the `mock_resolve` side effect to resolve `local_dir` correctly
+        self.mock_resolve.return_value = Path("some/local/dir")
+
+        # Capture print output
+        with mock.patch("builtins.print") as mock_print:
+            local_roms_yaml_dataset.get(local_dir="some/local/dir")
+
+        # Assert the skip message was printed
+        mock_print.assert_called_once_with(
+            "Input dataset already exists in some/local/dir, skipping."
+        )
+
+        # Ensure no further operations were performed
+        self.mock_get.assert_not_called()
+        self.mock_is_symlink.assert_not_called()
+        self.mock_unlink.assert_not_called()
+        self.mock_copy2.assert_not_called()
+        self.mock_yaml_load.assert_not_called()
+
+    @mock.patch(
+        "cstar.base.input_dataset.InputDataset.exists_locally",
+        new_callable=mock.PropertyMock,
+    )
+    def test_get_skips_if_working_path_list_in_same_parent_dir(
+        self, mock_exists_locally, local_roms_yaml_dataset
+    ):
+        """Test that the `get` method skips execution when `working_path` is a list and
+        its first element points to the same parent directory as `local_dir`."""
+        # Mock `working_path` to be a list pointing to files in `some/local/dir`
+        local_roms_yaml_dataset.working_path = [
+            Path("some/local/dir/local_file_1.yaml"),
+            Path("some/local/dir/local_file_2.yaml"),
+        ]
+
+        # Mock the `exists_locally` property to return True
+        mock_exists_locally.return_value = True
+
+        # Set the `mock_resolve` side effect to resolve `local_dir` correctly
+        self.mock_resolve.return_value = Path("some/local/dir")
+
+        # Capture print output
+        with mock.patch("builtins.print") as mock_print:
+            local_roms_yaml_dataset.get(local_dir="some/local/dir")
+
+        # Assert the skip message was printed
+        mock_print.assert_called_once_with(
+            "Input dataset already exists in some/local/dir, skipping."
+        )
+
+        # Ensure no further operations were performed
+        self.mock_get.assert_not_called()
+        self.mock_is_symlink.assert_not_called()
+        self.mock_unlink.assert_not_called()
+        self.mock_copy2.assert_not_called()
+        self.mock_yaml_load.assert_not_called()
+
+    @mock.patch(
+        "cstar.base.input_dataset.InputDataset.exists_locally",
+        new_callable=mock.PropertyMock,
+    )
+    def test_get_exits_if_not_yaml(self, mock_exists_locally, local_roms_yaml_dataset):
+        """Test that the `get` method exits early if `self.source.source_type` is not
+        'yaml'.
+
+        This test ensures that the `get` method performs no further operations if the input dataset's
+        source type is not 'yaml', ensuring that early returns function correctly.
+
+        Fixtures:
+        ---------
+        - local_roms_yaml_dataset: Provides a ROMSInputDataset with a mocked `source` attribute.
+        - mock_exists_locally: Mocks the `exists_locally` property to simulate the file's existence.
+
+        Asserts:
+        --------
+        - Ensures the parent class `get` method (`self.mock_get`) is called with the correct arguments.
+        - Ensures no further actions (e.g., resolving symlinks, modifying YAML, or saving files) occur.
+        - Ensures no messages are printed during the method's execution.
+        """
+        # Mock the `source` attribute and its `source_type` property
+        mock_source = mock.Mock()
+        type(mock_source).source_type = mock.PropertyMock(
+            return_value="netcdf"
+        )  # Non-yaml type
+
+        # Assign the mocked `source` to the dataset
+        with mock.patch.object(local_roms_yaml_dataset, "source", mock_source):
+            mock_exists_locally.return_value = (
+                False  # Ensure the file does not exist locally
+            )
+
+            # Mock `resolve` to return the expected path
+            self.mock_resolve.return_value = Path("some/local/dir")
+
+            # Call the method under test
+            with mock.patch("builtins.print") as mock_print:
+                local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
+
+            # Assert the parent `get` method was called with the correct arguments
+            self.mock_get.assert_called_once_with(
+                local_roms_yaml_dataset, local_dir=Path("some/local/dir")
+            )
+
+            # Ensure no further processing happened
+            mock_print.assert_not_called()
+            assert (
+                not self.mock_is_symlink.called
+            ), "Expected no calls to is_symlink, but some occurred."
+            assert (
+                not self.mock_unlink.called
+            ), "Expected no calls to unlink, but some occurred."
+            assert (
+                not self.mock_copy2.called
+            ), "Expected no calls to copy2, but some occurred."
+            assert (
+                not self.mock_yaml_load.called
+            ), "Expected no calls to yaml.safe_load, but some occurred."
