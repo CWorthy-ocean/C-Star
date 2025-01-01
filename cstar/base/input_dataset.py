@@ -170,9 +170,9 @@ class InputDataset(ABC):
         # Constructor-style section:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nlocation = {self.source.location!r},"
-        repr_str += f"\nfile_hash = {self.source.file_hash}"
+        repr_str += f"\nfile_hash = {self.source.file_hash!r},"
         if self.start_date is not None:
-            repr_str += f"\nstart_date = {self.start_date!r}"
+            repr_str += f"\nstart_date = {self.start_date!r},"
         if self.end_date is not None:
             repr_str += f"\nend_date = {self.end_date!r}"
         repr_str += "\n)"

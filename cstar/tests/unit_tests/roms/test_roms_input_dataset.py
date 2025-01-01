@@ -2,6 +2,7 @@ import pytest
 import datetime as dt
 from unittest import mock
 from pathlib import Path
+from textwrap import dedent
 from cstar.roms import ROMSInputDataset
 from cstar.base.datasource import DataSource
 
@@ -91,103 +92,174 @@ def local_roms_yaml_dataset():
 ################################################################################
 
 
-def test_str_with_partitioned_files(local_roms_netcdf_dataset):
-    """Test the ROMSInputDataset string representation hass correct substring for
-    partitioned_files.
+class TestStrAndRepr:
+    """Test class for verifying the string and repr outputs of ROMSInputDataset.
 
-    Fixtures:
-    ---------
-    - local_roms_netcdf_dataset: Provides a ROMSInputDataset with a local NetCDF source.
+    This class contains tests to validate the correct representation of the
+    `ROMSInputDataset` object in its string and repr outputs, including support
+    for additional attributes like `partitioned_files` and `working_path`.
 
-    Asserts:
-    --------
-    - String representation of the dataset includes the list of
-      partitioned files in the correct format.
+    Tests:
+    ------
+    - `test_str_with_partitioned_files`: Validates the string output includes
+      the `partitioned_files` attribute in the correct format.
+    - `test_repr_with_partitioned_files`: Validates the repr output includes
+      the `partitioned_files` attribute in the correct format.
+    - `test_repr_with_partitioned_files_and_working_path`: Ensures the repr
+      output includes both `working_path` and `partitioned_files` in the
+      correct format.
     """
 
-    local_roms_netcdf_dataset.partitioned_files = [
-        "local_file.001.nc",
-        "local_file.002.nc",
-    ]
-    assert """Partitioned files: ['local_file.001.nc',
-                    'local_file.002.nc']""" in str(local_roms_netcdf_dataset)
+    def test_str_with_partitioned_files(self, local_roms_netcdf_dataset):
+        """Test the ROMSInputDataset string representation has correct substring for
+        partitioned_files.
 
+        Fixtures:
+        ---------
+        - local_roms_netcdf_dataset: Provides a ROMSInputDataset with a local NetCDF source.
 
-def test_repr_with_partitioned_files(local_roms_netcdf_dataset):
-    """Test the ROMSInputDataset repr has correct substring for partitioned_files.
+        Asserts:
+        --------
+        - String representation of the dataset includes the list of
+          partitioned files in the correct format.
+        """
+        local_roms_netcdf_dataset.partitioned_files = [
+            "local_file.001.nc",
+            "local_file.002.nc",
+        ]
+        expected_str = dedent("""\
+            Partitioned files: ['local_file.001.nc',
+                                'local_file.002.nc']
+        """).strip()
+        actual_str = str(local_roms_netcdf_dataset).strip()
+        assert (
+            expected_str in actual_str
+        ), f"Expected:\n{expected_str}\nBut got:\n{actual_str}"
 
-    Fixtures:
-    ---------
-    - local_roms_netcdf_dataset: Provides a ROMSInputDataset with a local NetCDF source.
+    def test_repr_with_partitioned_files(self, local_roms_netcdf_dataset):
+        """Test the ROMSInputDataset repr includes `partitioned_files`.
 
-    Asserts:
-    --------
-    - ROMSInputDataset repr includes the list of partitioned files in the correct format.
-    """
-    local_roms_netcdf_dataset.partitioned_files = [
-        "local_file.001.nc",
-        "local_file.002.nc",
-    ]
-    assert """State: <partitioned_files = ['local_file.001.nc',
-                             'local_file.002.nc']>""" in repr(local_roms_netcdf_dataset)
+        This test ensures that the `repr` output of a `ROMSInputDataset` object
+        contains the `partitioned_files` attribute formatted as expected.
 
+        Fixtures:
+        ---------
+        - `local_roms_netcdf_dataset`: Provides a mock ROMSInputDataset object
+          with a local NetCDF source.
 
-def test_repr_with_partitioned_files_and_working_path(local_roms_netcdf_dataset):
-    """Test the ROMSInputDataset repr has correct substring for partitioned_files and
-    working_path.
+        Asserts:
+        --------
+        - The `partitioned_files` attribute is included in the repr output.
+        - The format of the `partitioned_files` list matches the expected string output.
+        """
 
-    Fixtures:
-    ---------
-    - local_roms_netcdf_dataset: Provides a ROMSInputDataset with a local NetCDF source.
+        local_roms_netcdf_dataset.partitioned_files = [
+            "local_file.001.nc",
+            "local_file.002.nc",
+        ]
+        expected_repr = dedent("""\
+            State: <partitioned_files = ['local_file.001.nc',
+                                         'local_file.002.nc']>
+        """).strip()
+        actual_repr = repr(local_roms_netcdf_dataset)
 
-    Asserts:
-    --------
-    - ROMSInputDataset repr includes both the working_path and the list of partitioned files in the correct format.
-    """
+        # Normalize whitespace for comparison
+        expected_repr_normalized = " ".join(expected_repr.split())
+        actual_repr_normalized = " ".join(actual_repr.split())
 
-    local_roms_netcdf_dataset.partitioned_files = [
-        "local_file.001.nc",
-        "local_file.002.nc",
-    ]
-    local_roms_netcdf_dataset.working_path = "/some/path/local_file.nc"
+        assert (
+            expected_repr_normalized in actual_repr_normalized
+        ), f"Expected:\n{expected_repr}\nBut got:\n{actual_repr}"
 
-    assert """State: <working_path = /some/path/local_file.nc (does not exist),
-        partitioned_files = ['local_file.001.nc',
-                             'local_file.002.nc']""" in repr(local_roms_netcdf_dataset)
+    def test_repr_with_partitioned_files_and_working_path(
+        self, local_roms_netcdf_dataset
+    ):
+        """Test the ROMSInputDataset repr includes `partitioned_files` and
+        `working_path`.
+
+        This test ensures that the `repr` output of a `ROMSInputDataset` object
+        contains both the `partitioned_files` and `working_path` attributes formatted
+        as expected.
+
+        Fixtures:
+        ---------
+        - `local_roms_netcdf_dataset`: Provides a mock ROMSInputDataset object
+          with a local NetCDF source.
+
+        Asserts:
+        --------
+        - The `working_path` and `partitioned_files` attributes are included in the repr output.
+        - The format of both attributes matches the expected string output.
+        """
+
+        local_roms_netcdf_dataset.partitioned_files = [
+            "local_file.001.nc",
+            "local_file.002.nc",
+        ]
+        local_roms_netcdf_dataset.working_path = "/some/path/local_file.nc"
+
+        expected_repr = dedent("""\
+            State: <working_path = /some/path/local_file.nc (does not exist),
+                    partitioned_files = ['local_file.001.nc',
+                                         'local_file.002.nc'] >
+        """).strip()
+        actual_repr = repr(local_roms_netcdf_dataset)
+
+        # Normalize whitespace for comparison
+        expected_repr_normalized = " ".join(expected_repr.split())
+        actual_repr_normalized = " ".join(actual_repr.split())
+
+        assert (
+            expected_repr_normalized in actual_repr_normalized
+        ), f"Expected:\n{expected_repr_normalized}\n to be in \n{actual_repr_normalized}"
 
 
 class TestROMSInputDatasetGet:
-    """Test class for ROMSInputDataset.get() method."""
+    """Test class for ROMSInputDataset.get() method.
+
+    This class includes tests for the `get` method, ensuring correct handling
+    of local and YAML-based ROMS input datasets. The tests cover cases for
+    partitioned files, unpartitioned files, early exits, and error conditions.
+
+    Tests:
+    ------
+    - `test_get_grid_from_local_yaml_partitioned`:
+      Verifies the creation of partitioned ROMS grid files from a local YAML file.
+    - `test_get_surface_forcing_from_local_yaml_unpartitioned`:
+      Checks the handling of unpartitioned ROMS surface forcing files from a YAML file.
+    - `test_get_raises_with_wrong_number_of_keys`:
+      Asserts that a ValueError is raised for invalid YAML file structures.
+    - `test_get_skips_if_working_path_in_same_parent_dir`:
+      Ensures the method skips processing if the dataset already exists locally.
+    - `test_get_skips_if_working_path_list_in_same_parent_dir`:
+      Verifies skipping execution for a list of working paths in the same directory.
+    - `test_get_exits_if_not_yaml`:
+      Confirms that the method exits early for non-YAML input datasets.
+    """
 
     def setup_method(self):
-        """Set up common patches and mocks for each test.
+        """Set up common patches and mocks for each test in TestROMSInputDatasetGet.
 
-        This method patches several methods and properties that are commonly used across the tests
-        to avoid external dependencies and isolate the behavior of the `get_from_yaml` method.
+        This method initializes patches and mocks for methods and classes commonly
+        used across the tests to ensure consistent behavior and avoid dependencies
+        on external systems or file operations.
 
         Mocks:
         ------
-        - InputDataset.get: Mocks the parent class' get method to simulate dataset retrieval.
-        - Path.is_symlink: Mocks the is_symlink method to control symlink behavior.
-        - Path.resolve: Mocks the resolve method to simulate resolving symlinks.
-        - Path.unlink: Mocks the unlink method to simulate file unlinking.
-        - shutil.copy2: Mocks file copying to avoid file system modifications.
-        - open (for reading): Mocks the open function to simulate reading YAML files.
-        - yaml.safe_load: Mocks YAML loading to return a test-specific dictionary.
-        - yaml.dump: Mocks YAML dumping to simulate saving modified YAML.
-        - roms_tools.Grid: Mocks the Grid class from roms_tools:
-            - mocks the class itself (to simulate Grid.from_yaml)
-            - mocks a specific instance (to simulate grid_instance.save)
-        - roms_tools.SurfaceForcing: represents all other classes in roms_tools except Grid
-            - mocks the class itself (to simulate ROMSToolsClass.from_yaml)
-            - mocks a specific instance (to simulate roms_tools_instance.save)
-
-        Tests:
-        ------
-        - test_get_from_yaml_raises_when_not_yaml
-        - test_get_grid_from_local_yaml_partitioned
-        - test_get_surface_forcing_from_local_yaml_unpartitioned
-        - test_get_from_yaml_raises_with_wrong_number_of_keys
+        - `InputDataset.get`: Mocks the parent class' `get` method to simulate dataset retrieval.
+        - `Path.is_symlink`: Mocks `is_symlink` to control symlink behavior.
+        - `Path.resolve`: Mocks `resolve` to simulate resolving symlinks.
+        - `Path.unlink`: Mocks `unlink` to simulate file unlinking.
+        - `shutil.copy2`: Mocks file copying to avoid modifying the file system.
+        - `builtins.open`: Mocks the `open` function to simulate reading YAML files.
+        - `yaml.safe_load`: Mocks YAML parsing to return a test-specific dictionary.
+        - `yaml.dump`: Mocks YAML dumping to simulate saving modified YAML files.
+        - `roms_tools.Grid`: Mocks the `Grid` class from `roms_tools`:
+            - Mocks the `from_yaml` method for creating Grid instances.
+            - Mocks a specific Grid instance, including its `save` method.
+        - `roms_tools.SurfaceForcing`: Represents all other `roms_tools` classes except Grid:
+            - Mocks the `from_yaml` method for creating instances.
+            - Mocks specific SurfaceForcing instances, including their `save` method.
         """
 
         # Mocking InputDataset.get()
@@ -256,42 +328,39 @@ class TestROMSInputDatasetGet:
     def test_get_grid_from_local_yaml_partitioned(
         self, mock_stat, mock_get_hash, local_roms_yaml_dataset
     ):
-        """Test get_from_yaml for roms_tools.Grid with the saved file partitioned.
+        """Test the `get` method for partitioned ROMS grid files from a local YAML
+        source.
 
-        This test ensures that the `get` method correctly handles creating partitioned ROMS grid files
-        from a local `roms-tools` YAML file.
-
-        The method being tested involves:
-        - Calling the parent class `get` method to retrieve or symlink the source YAML file.
-        - Replacing the symlink with a local copy of the YAML file.
-        - Parsing the YAML file to determine the roms-tools class it describes.
-        - Modifying the YAML to include correct start and end times for time-varying datasets.
-        - Creating the roms-tools.Grid object from the modified YAML.
-        - Saving the Grid object as partitioned netCDF files corresponding to ROMS' domain decomposition.
+        This test ensures the `get` method correctly processes a `roms-tools` YAML file to
+        create partitioned ROMS grid files. It covers steps including resolving symlinks,
+        copying and modifying YAML files, and saving the Grid object with proper partitioning.
 
         Fixtures:
         ---------
-        - local_roms_yaml_dataset: Provides a ROMSInputDataset instance with a local YAML source.
-        - mock_is_symlink: Mocks Path.is_symlink to simulate checking for a symlinked file.
-        - mock_resolve: Mocks Path.resolve to simulate resolving symlink targets and other paths.
-        - mock_unlink: Mocks Path.unlink to simulate unlinking the symlink.
-        - mock_copy2: Mocks shutil.copy2 to simulate copying the resolved file to the specified directory.
-        - mock_yaml_load: Mocks yaml.safe_load to return a test dictionary for the YAML data.
-        - mock_rt_grid: Mocks the roms_tools.Grid class and its from_yaml method.
-        - mock_rt_grid_instance: Mocks the instance of the roms_tools.Grid class and its save method.
+        - `local_roms_yaml_dataset`: Provides a ROMSInputDataset instance with a local YAML source.
+
+        Mocks:
+        ------
+        - `Path.stat`: Simulates retrieving file metadata for partitioned files.
+        - `_get_sha256_hash`: Simulates computing the hash of each partitioned file.
+        - `Path.is_symlink`: Simulates symlink detection for the source YAML file.
+        - `Path.resolve`: Simulates resolving paths for symlinks and partitioned files.
+        - `Path.unlink`: Simulates unlinking symlinks.
+        - `shutil.copy2`: Simulates copying the YAML file to the target directory.
+        - `yaml.safe_load`: Simulates loading YAML content from a file.
+        - `roms_tools.Grid.from_yaml`: Simulates creating a Grid object from the YAML file.
+        - `roms_tools.Grid.save`: Simulates saving Grid data as partitioned NetCDF files.
 
         Asserts:
         --------
-        - `mock_get` is called on the YAML file with the correct arguments.
-        - `mock_is_symlink` is called once to check if the source YAML file is a symlink.
-        - `mock_unlink` is called once to unlink the symlink.
-        - `mock_copy2` is called once to copy the resolved YAML file to the target location.
-        - `mock_resolve` is called for the local directory, the source YAML file, and all partitioned files.
-        - `mock_yaml_load` is called to parse the contents of the copied YAML file.
-        - `mock_rt_grid.from_yaml` is called with the resolved path to the modified YAML file.
-        - `mock_rt_grid_instance.save` is called with the correct partitioning parameters (np_xi, np_eta).
-        - `local_roms_yaml_dataset.partitioned_files` is updated to reflect the list of partitioned netCDF files.
-        - `Path.stat` and `_get_sha256_hash` are called once for each partitioned file to cache metadata and checksums.
+        - Ensures `get` is called on the YAML file with correct arguments.
+        - Verifies symlink handling operations such as `is_symlink`, `unlink`, and `copy2`.
+        - Confirms `resolve` is called for the directory, YAML file, and partitioned files.
+        - Ensures `yaml.safe_load` processes the YAML content as expected.
+        - Validates `roms_tools.Grid.from_yaml` creates the Grid object from the YAML file.
+        - Verifies `roms_tools.Grid.save` saves files with correct partitioning parameters.
+        - Confirms the list of partitioned files is updated correctly in the dataset.
+        - Ensures metadata and checksums for partitioned files are cached via `stat` and `_get_sha256_hash`.
         """
 
         # Mock the stat result
@@ -380,7 +449,39 @@ class TestROMSInputDatasetGet:
     def test_get_surface_forcing_from_local_yaml_unpartitioned(
         self, mock_get_hash, mock_stat, local_roms_yaml_dataset
     ):
-        """Test get for roms_tools.SurfaceForcing with the saved file unpartitioned."""
+        """Test the `get` method for creating unpartitioned SurfaceForcing from a local
+        YAML source.
+
+        This test verifies that the `get` method processes a `roms-tools` YAML file correctly to
+        create a SurfaceForcing dataset without partitioning. It ensures proper handling of YAML
+        content and the creation of unpartitioned NetCDF files.
+
+        Fixtures:
+        ---------
+        - `local_roms_yaml_dataset`: Provides a ROMSInputDataset instance with a local YAML source.
+
+        Mocks:
+        ------
+        - `Path.stat`: Simulates retrieving file metadata for the generated file.
+        - `_get_sha256_hash`: Simulates computing the hash of the saved file.
+        - `Path.is_symlink`: Simulates symlink detection for the source YAML file.
+        - `Path.resolve`: Simulates resolving paths for symlinks and the saved file.
+        - `Path.unlink`: Simulates unlinking symlinks.
+        - `shutil.copy2`: Simulates copying the YAML file to the target directory.
+        - `yaml.safe_load`: Simulates loading YAML content from a file.
+        - `roms_tools.SurfaceForcing.from_yaml`: Simulates creating a SurfaceForcing object from the YAML file.
+        - `roms_tools.SurfaceForcing.save`: Simulates saving SurfaceForcing data as an unpartitioned NetCDF file.
+
+        Asserts:
+        --------
+        - Ensures the start and end times in the YAML dictionary are updated correctly.
+        - Validates that `get` is called on the YAML file with the correct arguments.
+        - Confirms symlink handling operations such as `is_symlink`, `unlink`, and `copy2`.
+        - Verifies `yaml.safe_load` processes the YAML content correctly.
+        - Confirms `roms_tools.SurfaceForcing.from_yaml` creates the SurfaceForcing object from the YAML file.
+        - Ensures `roms_tools.SurfaceForcing.save` saves the file with the correct parameters.
+        - Verifies file metadata and checksum caching via `stat` and `_get_sha256_hash`.
+        """
 
         # Mock the is_symlink method to return True
         self.mock_is_symlink.return_value = True
@@ -471,20 +572,27 @@ class TestROMSInputDatasetGet:
     def test_get_raises_with_wrong_number_of_keys(
         self, mock_stat, local_roms_yaml_dataset
     ):
-        """Test that the get method raises a ValueError when the yaml file contains more
-        than two sections.
+        """Test that the `get` method raises a ValueError when the YAML file contains
+        more than two sections.
+
+        This test ensures that the `get` method validates the structure of the YAML file
+        and raises an error if the file contains more than two sections (e.g., `Grid` and one other).
 
         Fixtures:
         ---------
-        - local_roms_yaml_dataset: Provides a ROMSInputDataset with a local YAML source.
-        - mock_resolve: Mocks Path.resolve to simulate resolving a symlink to the actual file path.
-        - mock_yaml_load: Mocks yaml.safe_load to return a dictionary with too many sections.
+        - `local_roms_yaml_dataset`: Provides a ROMSInputDataset with a local YAML source.
+
+        Mocks:
+        ------
+        - `Path.resolve`: Simulates resolving a symlink to the actual file path.
+        - `yaml.safe_load`: Simulates loading YAML content from a file with too many sections.
 
         Asserts:
         --------
-        - Ensures `mock_resolve` is called to resolve the symlink to the actual path.
-        - Ensures `mock_yaml_load` is called to parse the YAML file.
-        - Asserts that a ValueError is raised when the YAML file contains more than two sections (Grid and one other).
+        - Ensures `resolve` is called to determine the actual path of the YAML file.
+        - Ensures `yaml.safe_load` is invoked to parse the YAML content.
+        - Confirms that a `ValueError` is raised when the YAML file contains more than two sections.
+        - Validates that the exception message matches the expected error message.
         """
 
         # Mock resolve to return a resolved path
@@ -535,7 +643,28 @@ class TestROMSInputDatasetGet:
         self, mock_exists_locally, local_roms_yaml_dataset
     ):
         """Test that the `get` method skips execution when `working_path` is set and
-        points to the same parent directory as `local_dir`."""
+        points to the same parent directory as `local_dir`.
+
+        This test verifies that if `working_path` exists and is in the same directory
+        as the specified `local_dir`, the `get` method does not proceed with further
+        file operations.
+
+        Fixtures:
+        ---------
+        - `local_roms_yaml_dataset`: Provides a ROMSInputDataset with a mocked `source` attribute.
+
+        Mocks:
+        ------
+        - `exists_locally`: Simulates the local existence check for `working_path`.
+        - `Path.resolve`: Simulates resolving paths to their actual locations.
+        - `print`: Captures output to ensure the correct skip message is displayed.
+
+        Asserts:
+        --------
+        - Ensures the skip message is printed when `working_path` exists in `local_dir`.
+        - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
+        """
+
         # Mock `working_path` to point to a file in `some/local/dir`
         local_roms_yaml_dataset.working_path = Path("some/local/dir/local_file.yaml")
 
@@ -569,7 +698,28 @@ class TestROMSInputDatasetGet:
         self, mock_exists_locally, local_roms_yaml_dataset
     ):
         """Test that the `get` method skips execution when `working_path` is a list and
-        its first element points to the same parent directory as `local_dir`."""
+        its first element points to the same parent directory as `local_dir`.
+
+        This test ensures that if `working_path` is a list of paths, and at least one of
+        its elements exists in the same parent directory as `local_dir`, the `get` method
+        does not proceed with further file operations.
+
+        Fixtures:
+        ---------
+        - `local_roms_yaml_dataset`: Provides a ROMSInputDataset with a mocked `source` attribute.
+
+        Mocks:
+        ------
+        - `exists_locally`: Simulates the local existence check for `working_path`.
+        - `Path.resolve`: Simulates resolving paths to their actual locations.
+        - `print`: Captures output to ensure the correct skip message is displayed.
+
+        Asserts:
+        --------
+        - Ensures the skip message is printed when a `working_path` in the list exists in `local_dir`.
+        - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
+        """
+
         # Mock `working_path` to be a list pointing to files in `some/local/dir`
         local_roms_yaml_dataset.working_path = [
             Path("some/local/dir/local_file_1.yaml"),
