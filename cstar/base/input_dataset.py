@@ -128,6 +128,24 @@ class InputDataset(ABC):
 
     @property
     def local_hash(self) -> Optional[Dict]:
+        """Compute or retrieve the cached SHA-256 hash of the local dataset.
+
+        This property calculates the SHA-256 hash for the dataset located at `working_path`.
+        If the hash has been previously computed and cached by InputDataset.get(),
+        it will return the cached value instead of recomputing it.
+
+        If `working_path` is a list of paths, the hash is computed for each file
+        individually. The hashes are stored as a dictionary mapping paths to their
+        respective hash values.
+
+        Returns
+        -------
+        local_hash (dict or None)
+            - A dictionary where the keys are `Path` objects representing file paths
+              and the values are their respective SHA-256 hashes.
+            - `None` if `working_path` is not set or no files exist locally.
+        """
+
         if self._local_file_hash_cache is not None:
             return self._local_file_hash_cache
 
@@ -188,7 +206,7 @@ class InputDataset(ABC):
         # Additional info
         return repr_str
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         """Represent this InputDataset object as a dictionary of kwargs.
 
         Returns:
