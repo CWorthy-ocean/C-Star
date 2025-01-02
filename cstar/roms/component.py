@@ -754,18 +754,8 @@ class ROMSComponent(Component):
     def pre_run(self) -> None:
         """Performs pre-processing steps associated with this ROMSComponent object.
 
-        This method:
-        1. goes through any netcdf files associated with InputDataset objects belonging
-           to this ROMSComponent instance and partitions them such that there is one file per processor.
-           The partitioned files are stored in a subdirectory `PARTITIONED` of
-           InputDataset.working_path
-
-        2. Replaces placeholder strings (if present) representing, e.g. input file paths
-           in a template roms namelist file (typically `roms.in_TEMPLATE`) used to run the model with
-           the respective paths to input datasets and any MARBL namelists (if this ROMS
-           component belongs to a case for which MARBL is also a component).
-           The namelist file is sought in
-           `ROMSComponent.namelists.working_path
+        At present the pre-run method exclusively calls ROMSInputDataset.partition() on
+        any locally present datasets.
         """
 
         # Partition input datasets and add their paths to namelist
