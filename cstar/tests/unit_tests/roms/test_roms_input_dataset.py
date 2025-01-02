@@ -496,3 +496,252 @@ class TestROMSInputDatasetGetFromYAML:
         )
 
         assert str(exception_info.value) == expected_message
+
+
+class TestROMSInputDatasetPartition:
+    """Test class for the `ROMSInputDataset.partition` method.
+
+    Tests:
+    ------
+    - test_partition_single_file:
+        Ensures that a single NetCDF file is partitioned and relocated correctly.
+    - test_partition_multiple_files:
+        Verifies partitioning behavior when multiple files are provided.
+    - test_partition_raises_when_not_local:
+        Confirms an error is raised when `working_path` does not exist locally.
+    - test_partition_raises_with_mismatched_directories:
+        Validates that an error is raised if files span multiple directories.
+    """
+
+    @mock.patch("cstar.roms.input_dataset.roms_tools.utils.partition_netcdf")
+    def test_partition_single_file(
+        self, mock_partition_netcdf, local_roms_netcdf_dataset
+    ):
+        """Ensures that a single NetCDF file is partitioned and relocated correctly.
+
+        Mocks:
+        ------
+        - partition_netcdf: Simulates the behavior of the partitioning utility.
+        - Path.rename: Mocks the moving of partitioned files to the PARTITIONED directory.
+
+        Fixtures:
+        ---------
+        - local_roms_netcdf_dataset: Provides a dataset with a single NetCDF file.
+
+        Asserts:
+        --------
+        - `partition_netcdf` is called with the correct arguments.
+        - Files are renamed correctly to the PARTITIONED directory.
+        - `partitioned_files` is updated with the expected file paths.
+        """
+
+        np_xi, np_eta = 2, 3
+        num_partitions = np_xi * np_eta
+
+        # Set up the working_path for the dataset
+        local_roms_netcdf_dataset.working_path = Path(
+            "some/local/source/path/local_file.nc"
+        )
+
+        # Mock the exists_locally property
+        with mock.patch.object(
+            type(local_roms_netcdf_dataset),
+            "exists_locally",
+            new_callable=mock.PropertyMock,
+        ) as mock_exists_locally:
+            mock_exists_locally.return_value = True
+
+            # Mock the partitioning function to produce files
+            mock_partition_netcdf.return_value = [
+                Path(f"local_file.{i}.nc") for i in range(1, num_partitions + 1)
+            ]
+
+            # Mock the rename method
+            with mock.patch.object(Path, "rename", autospec=True) as mock_rename:
+                # Call the method under test
+                local_roms_netcdf_dataset.partition(np_xi=np_xi, np_eta=np_eta)
+
+                # Assert partition_netcdf is called with the correct arguments
+                mock_partition_netcdf.assert_called_once_with(
+                    local_roms_netcdf_dataset.working_path, np_xi=np_xi, np_eta=np_eta
+                )
+
+                # Assert rename is called for each file
+                expected_calls = [
+                    mock.call(
+                        Path(f"local_file.{i}.nc"),
+                        Path(f"some/local/source/path/PARTITIONED/local_file.{i}.nc"),
+                    )
+                    for i in range(1, num_partitions + 1)
+                ]
+                mock_rename.assert_has_calls(expected_calls, any_order=False)
+
+                # Assert partitioned_files attribute is updated correctly
+                expected_partitioned_files = [
+                    Path(f"some/local/source/path/PARTITIONED/local_file.{i}.nc")
+                    for i in range(1, num_partitions + 1)
+                ]
+                assert (
+                    local_roms_netcdf_dataset.partitioned_files
+                    == expected_partitioned_files
+                )
+
+    @mock.patch("cstar.roms.input_dataset.roms_tools.utils.partition_netcdf")
+    def test_partition_multiple_files(
+        self, mock_partition_netcdf, local_roms_netcdf_dataset
+    ):
+        """Verifies partitioning behavior when multiple files are provided.
+
+        Mocks:
+        ------
+        - partition_netcdf: Simulates the behavior of the partitioning utility.
+        - Path.rename: Mocks the renaming of partitioned files to the PARTITIONED directory.
+
+        Fixtures:
+        ---------
+        - local_roms_netcdf_dataset: Provides a dataset with multiple files.
+
+        Asserts:
+        --------
+        - `partition_netcdf` is called the correct number of times.
+        - Files are moved correctly to the PARTITIONED directory.
+        - `partitioned_files` is updated with the expected file paths.
+        """
+
+        np_xi, np_eta = 2, 2
+        num_partitions = np_xi * np_eta
+
+        # Set up the working_path for multiple files
+        local_roms_netcdf_dataset.working_path = [
+            Path("some/local/source/path/file1.nc"),
+            Path("some/local/source/path/file2.nc"),
+        ]
+
+        # Mock the exists_locally property
+        with mock.patch.object(
+            type(local_roms_netcdf_dataset),
+            "exists_locally",
+            new_callable=mock.PropertyMock,
+        ) as mock_exists_locally:
+            mock_exists_locally.return_value = True
+
+            # Mock the partitioning function to produce files for each input
+            mock_partition_netcdf.side_effect = [
+                [Path(f"file1.{i}.nc") for i in range(1, num_partitions + 1)],
+                [Path(f"file2.{i}.nc") for i in range(1, num_partitions + 1)],
+            ]
+
+            # Mock the rename method
+            with mock.patch.object(Path, "rename", autospec=True) as mock_rename:
+                # Call the method under test
+                local_roms_netcdf_dataset.partition(np_xi=np_xi, np_eta=np_eta)
+
+                # Assert partition_netcdf is called for each file
+                assert mock_partition_netcdf.call_count == len(
+                    local_roms_netcdf_dataset.working_path
+                )
+
+                # Assert rename is called for each file
+                expected_calls = [
+                    mock.call(
+                        Path(f"file1.{i}.nc"),
+                        Path(f"some/local/source/path/PARTITIONED/file1.{i}.nc"),
+                    )
+                    for i in range(1, num_partitions + 1)
+                ] + [
+                    mock.call(
+                        Path(f"file2.{i}.nc"),
+                        Path(f"some/local/source/path/PARTITIONED/file2.{i}.nc"),
+                    )
+                    for i in range(1, num_partitions + 1)
+                ]
+                mock_rename.assert_has_calls(expected_calls, any_order=False)
+
+                # Assert partitioned_files attribute is updated correctly
+                expected_partitioned_files = [
+                    Path(f"some/local/source/path/PARTITIONED/file1.{i}.nc")
+                    for i in range(1, num_partitions + 1)
+                ] + [
+                    Path(f"some/local/source/path/PARTITIONED/file2.{i}.nc")
+                    for i in range(1, num_partitions + 1)
+                ]
+                assert (
+                    local_roms_netcdf_dataset.partitioned_files
+                    == expected_partitioned_files
+                )
+
+    def test_partition_raises_when_not_local(self, local_roms_netcdf_dataset):
+        """Confirms an error is raised when `working_path` does not exist locally.
+
+        Mocks:
+        ------
+        - exists_locally: Ensures the dataset is treated as non-existent.
+
+        Fixtures:
+        ---------
+        - local_roms_netcdf_dataset: Provides a dataset for testing.
+
+        Asserts:
+        --------
+        - A `ValueError` is raised with the correct message.
+        """
+
+        # Simulate a dataset that does not exist locally
+        with mock.patch.object(
+            type(local_roms_netcdf_dataset),
+            "exists_locally",
+            new_callable=mock.PropertyMock,
+        ) as mock_exists_locally:
+            mock_exists_locally.return_value = False
+
+            with pytest.raises(ValueError) as exception_info:
+                local_roms_netcdf_dataset.partition(np_xi=2, np_eta=3)
+
+        expected_message = (
+            f"working_path of InputDataset \n {local_roms_netcdf_dataset.working_path}, "
+            + "refers to a non-existent file"
+            + "\n call InputDataset.get() and try again."
+        )
+        assert str(exception_info.value) == expected_message
+
+    def test_partition_raises_with_mismatched_directories(
+        self, local_roms_netcdf_dataset
+    ):
+        """Validates that an error is raised if files span multiple directories.
+
+        Mocks:
+        ------
+        - exists_locally: Ensures the dataset is treated as existing.
+
+        Fixtures:
+        ---------
+        - local_roms_netcdf_dataset: Provides a dataset for testing.
+
+        Asserts:
+        --------
+        - A `ValueError` is raised with the correct message.
+        """
+
+        # Set up the dataset with files in different directories
+        local_roms_netcdf_dataset.working_path = [
+            Path("some/local/source/path/file1.nc"),
+            Path("some/other/source/path/file2.nc"),
+        ]
+
+        # Mock the exists_locally property to ensure it returns True
+        with mock.patch.object(
+            type(local_roms_netcdf_dataset),
+            "exists_locally",
+            new_callable=mock.PropertyMock,
+        ) as mock_exists_locally:
+            mock_exists_locally.return_value = True
+
+            # Expect a ValueError due to mismatched directories
+            with pytest.raises(ValueError) as exception_info:
+                local_roms_netcdf_dataset.partition(np_xi=2, np_eta=3)
+
+            expected_message = (
+                f"A single input dataset exists in multiple directories: "
+                f"{local_roms_netcdf_dataset.working_path}."
+            )
+            assert str(exception_info.value) == expected_message
