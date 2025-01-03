@@ -53,7 +53,7 @@ class MARBLComponent(Component):
         print(infostr + "\n" + "-" * len(infostr))
         self.base_model.handle_config_status()
 
-    def build(self) -> None:
+    def build(self, rebuild: bool = False) -> None:
         print("No build steps to be completed for MARBLComponent")
         pass
 

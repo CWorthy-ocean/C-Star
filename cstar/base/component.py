@@ -162,7 +162,7 @@ class Component(ABC):
         pass
 
     @abstractmethod
-    def build(self) -> None:
+    def build(self, rebuild: bool = False) -> None:
         """Compile any Component-specific code on this machine.
 
         This abstract method will be implemented differently by different Component
