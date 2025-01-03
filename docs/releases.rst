@@ -1,5 +1,14 @@
 Release notes
 =============
+.. _v0.0.6-alpha:
+
+v0.0.6-alpha ()
+---------------------------
+
+New features:
+~~~~~~~~~~~~
+- Add Case.persist() and Case.restore() methods to allow continuation of work in a new session
+
 
 .. _v0.0.3-alpha:
 
