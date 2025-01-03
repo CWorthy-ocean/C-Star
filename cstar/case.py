@@ -88,6 +88,17 @@ class Case:
         """
 
         self.components: List["Component"] = components
+        resolved_caseroot = Path(caseroot).resolve()
+        if resolved_caseroot.exists() and (
+            (not resolved_caseroot.is_dir()) or (any(resolved_caseroot.iterdir()))
+        ):
+            raise FileExistsError(
+                f"Your chosen caseroot {caseroot} exists and is not an empty directory."
+                "\nIf you have previously created this case, use "
+                f"\nmy_case = Case.restore(caseroot={caseroot!r})"
+                "\n to restore it"
+            )
+
         self.caseroot: Path = Path(caseroot).resolve()
         self.name: str = name
         self.is_from_blueprint: bool = False
