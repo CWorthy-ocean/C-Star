@@ -1,6 +1,9 @@
 import pytest
-from unittest import mock
+
 from pathlib import Path
+from unittest import mock
+from textwrap import dedent
+
 from cstar.base import AdditionalCode
 from cstar.base.datasource import DataSource
 
@@ -60,167 +63,203 @@ def local_additional_code():
     )
 
 
-def test_init(remote_additional_code):
-    """Test that an AdditionalCode object is initialized with the correct attributes."""
-    assert remote_additional_code.source.location == "https://github.com/test/repo.git"
-    assert remote_additional_code.checkout_target == "test123"
-    assert remote_additional_code.subdir == "test/subdir"
-    assert remote_additional_code.files == [
-        "test_file_1.F",
-        "test_file_2.py",
-        "test_file_3.opt",
-    ]
+class TestInit:
+    """Test class for the initialization of the AdditionalCode class.
 
+    The `__init__` method of the AdditionalCode class sets up attributes like
+    location, subdirectory, checkout target, and associated files. This class tests
+    that instances are correctly initialized with the provided parameters and default values.
 
-def test_defaults():
-    """Test that a minimal AdditionalCode object is initialized with correct default
-    values."""
-    additional_code = AdditionalCode(location="test/location")
-
-    assert additional_code.source.location == "test/location"
-    assert additional_code.subdir == ""
-    assert additional_code.checkout_target is None
-    assert len(additional_code.files) == 0
-
-
-def test_repr_remote(remote_additional_code):
-    """Test that the __repr__ method returns the correct string for the example remote
-    AdditionalCode instance defined in the above fixture."""
-    expected_repr = """AdditionalCode(
-location = 'https://github.com/test/repo.git',
-subdir = 'test/subdir'
-checkout_target = 'test123',
-files = ['test_file_1.F',
-         'test_file_2.py',
-         'test_file_3.opt']
-)"""
-    assert repr(remote_additional_code) == expected_repr
-
-
-def test_repr_local(local_additional_code):
-    """Test that the __repr__ method returns the correct string for the example local
-    AdditionalCode instance defined in the above fixture."""
-
-    expected_repr = """AdditionalCode(
-location = '/some/local/directory',
-subdir = 'some/subdirectory'
-checkout_target = None,
-files = ['test_file_1.F',
-         'test_file_2.py',
-         'test_file_3.opt']
-)"""
-    assert repr(local_additional_code) == expected_repr
-
-
-@mock.patch(
-    "cstar.base.additional_code.AdditionalCode.exists_locally",
-    new_callable=mock.PropertyMock,
-    return_value=True,
-)
-def test_repr_with_working_path(mock_exists_locally, local_additional_code):
-    """Test that the __repr__ method contains the correct substring when working_path
-    attr is defined.
-
-    Fixtures:
-    ------
-    - mock_exists: Patches Path.exists() to ensure exists_locally property used in __repr__ returns True.
-    - local_additional_code: An example AdditionalCode instance representing local code
+    Tests
+    -----
+    test_init
+        Verifies that an AdditionalCode object is correctly initialized with provided attributes.
+    test_defaults
+        Verifies that an AdditionalCode object is correctly initialized with default values
+        when optional attributes are not provided.
     """
 
-    local_additional_code.working_path = Path("/mock/local/dir")
-    assert "State: <working_path = /mock/local/dir,exists_locally = True>" in repr(
-        local_additional_code
+    def test_init(self, remote_additional_code):
+        """Test that an AdditionalCode object is initialized with the correct
+        attributes."""
+        assert (
+            remote_additional_code.source.location == "https://github.com/test/repo.git"
+        )
+        assert remote_additional_code.checkout_target == "test123"
+        assert remote_additional_code.subdir == "test/subdir"
+        assert remote_additional_code.files == [
+            "test_file_1.F",
+            "test_file_2.py",
+            "test_file_3.opt",
+        ]
+
+    def test_defaults(self):
+        """Test that a minimal AdditionalCode object is initialized with correct default
+        values."""
+        additional_code = AdditionalCode(location="test/location")
+
+        assert additional_code.source.location == "test/location"
+        assert additional_code.subdir == ""
+        assert additional_code.checkout_target is None
+        assert len(additional_code.files) == 0
+
+
+class TestStrAndRepr:
+    """Test class for the `__str__` and `__repr__` methods of the AdditionalCode class.
+
+    The `__str__` and `__repr__` methods provide string representations of AdditionalCode
+    instances, which include key attributes such as location, subdirectory, and associated files.
+
+    Tests
+    -----
+    test_repr_remote
+        Verifies that the `__repr__` method returns the correct string for a remote AdditionalCode instance.
+    test_repr_local
+        Verifies that the `__repr__` method returns the correct string for a local AdditionalCode instance.
+    test_repr_with_working_path
+        Verifies that the `__repr__` method includes additional state information when `working_path` is set.
+    test_str_remote
+        Verifies that the `__str__` method returns the correct string for a remote AdditionalCode instance.
+    test_str_with_template_file
+        Verifies that the `__str__` method correctly processes filenames with the `_TEMPLATE` suffix.
+    test_str_local
+        Verifies that the `__str__` method returns the correct string for a local AdditionalCode instance.
+
+    Mocks
+    -----
+    exists_locally
+        Patches the `exists_locally` property to simulate the existence or non-existence of files.
+    """
+
+    def test_repr_remote(self, remote_additional_code):
+        """Test that the __repr__ method returns the correct string for the example
+        remote AdditionalCode instance defined in the above fixture."""
+        expected_repr = dedent("""\
+        AdditionalCode(
+        location = 'https://github.com/test/repo.git',
+        subdir = 'test/subdir'
+        checkout_target = 'test123',
+        files = ['test_file_1.F',
+                 'test_file_2.py',
+                 'test_file_3.opt']
+        )""")
+        assert (
+            repr(remote_additional_code) == expected_repr
+        ), f"expected \n{repr(remote_additional_code)}\n, got \n{expected_repr}"
+
+    def test_repr_local(self, local_additional_code):
+        """Test that the __repr__ method returns the correct string for the example
+        local AdditionalCode instance defined in the above fixture."""
+
+        expected_repr = dedent("""\
+        AdditionalCode(
+        location = '/some/local/directory',
+        subdir = 'some/subdirectory'
+        checkout_target = None,
+        files = ['test_file_1.F',
+                 'test_file_2.py',
+                 'test_file_3.opt']
+        )""")
+        assert repr(local_additional_code) == expected_repr
+
+    @mock.patch(
+        "cstar.base.additional_code.AdditionalCode.exists_locally",
+        new_callable=mock.PropertyMock,
+        return_value=True,
     )
+    def test_repr_with_working_path(self, mock_exists_locally, local_additional_code):
+        """Test that the __repr__ method contains the correct substring when
+        working_path attr is defined.
 
+        Fixtures:
+        ------
+        - mock_exists: Patches Path.exists() to ensure exists_locally property used in __repr__ returns True.
+        - local_additional_code: An example AdditionalCode instance representing local code
+        """
 
-def test_str_remote(remote_additional_code):
-    """Test that the __str__ method returns the correct string for the example remote
-    AdditionalCode instance defined in the above fixture."""
+        local_additional_code.working_path = Path("/mock/local/dir")
+        assert "State: <working_path = /mock/local/dir,exists_locally = True>" in repr(
+            local_additional_code
+        )
 
-    expected_str = """AdditionalCode
---------------
-Location: https://github.com/test/repo.git
-subdirectory: test/subdir
-Working path: None
-Exists locally: False (get with AdditionalCode.get())
-Files:
-    test_file_1.F
-    test_file_2.py
-    test_file_3.opt"""
+    def test_str_remote(self, remote_additional_code):
+        """Test that the __str__ method returns the correct string for the example
+        remote AdditionalCode instance defined in the above fixture."""
 
-    assert str(remote_additional_code) == expected_str
+        expected_str = dedent("""\
+        AdditionalCode
+        --------------
+        Location: https://github.com/test/repo.git
+        subdirectory: test/subdir
+        Working path: None
+        Exists locally: False (get with AdditionalCode.get())
+        Files:
+            test_file_1.F
+            test_file_2.py
+            test_file_3.opt""")
 
+        assert (
+            str(remote_additional_code) == expected_str
+        ), f"expected \n{str(remote_additional_code)}\n, got \n{expected_str}"
 
-def test_str_with_template_file(local_additional_code):
-    """Test that the __str__ method contains the correct substring when an additional
-    code filename has the '_TEMPLATE' suffix."""
-    # Simulate template files with "_TEMPLATE"
-    local_additional_code.files = ["file1_TEMPLATE", "file2"]
-    local_additional_code.working_path = Path("/mock/local/dir")
+    def test_str_with_template_file(self, local_additional_code):
+        """Test that the __str__ method contains the correct substring when an
+        additional code filename has the '_TEMPLATE' suffix."""
+        # Simulate template files with "_TEMPLATE"
+        local_additional_code.files = ["file1_TEMPLATE", "file2"]
+        local_additional_code.working_path = Path("/mock/local/dir")
 
-    assert "      (file1 will be used by C-Star based on this template)" in str(
-        local_additional_code
-    )
+        assert "      (file1 will be used by C-Star based on this template)" in str(
+            local_additional_code
+        )
 
+    def test_str_local(self, local_additional_code):
+        """Test that the __str__ method returns the correct string for the example local
+        AdditionalCode instance defined in the above fixture."""
 
-def test_str_local(local_additional_code):
-    """Test that the __str__ method returns the correct string for the example local
-    AdditionalCode instance defined in the above fixture."""
+        expected_str = dedent("""\
+        AdditionalCode
+        --------------
+        Location: /some/local/directory
+        subdirectory: some/subdirectory
+        Working path: None
+        Exists locally: False (get with AdditionalCode.get())
+        Files:
+            test_file_1.F
+            test_file_2.py
+            test_file_3.opt""")
 
-    expected_str = """AdditionalCode
---------------
-Location: /some/local/directory
-subdirectory: some/subdirectory
-Working path: None
-Exists locally: False (get with AdditionalCode.get())
-Files:
-    test_file_1.F
-    test_file_2.py
-    test_file_3.opt"""
-
-    assert str(local_additional_code) == expected_str
-
-
-# @mock.patch("pathlib.Path.exists", side_effect=[True, True, True])
-# def test_exists_locally_all_files_exist(mock_exists, remote_additional_code):
-#     """Test that the AdditionalCode.exists_locally() property works correctly when all
-#     files exist locally.
-
-#     Fixtures:
-#     ------
-#     - mock_exists: Patches Path.exists() to ensure exists_locally property used in __repr__ returns True.
-#     - remote_additional_code: An example AdditionalCode instance representing code in a remote repo
-#     """
-#     remote_additional_code.working_path = Path("/mock/local/dir")
-#     assert remote_additional_code.exists_locally is True
-#     assert mock_exists.call_count == len(remote_additional_code.files)
-
-
-# @mock.patch("pathlib.Path.exists", side_effect=[True, True, False])
-# def test_exists_locally_some_files_missing(mock_exists, remote_additional_code):
-#     """Test that the AdditionalCode.exists_locally() property works correctly when a
-#     file is missing.
-
-#     Fixtures:
-#     ------
-#     - mock_exists: Patches Path.exists() to ensure exists_locally property used in __repr__ returns True.
-#     - remote_additional_code: An example AdditionalCode instance representing code in a remote repo
-#     """
-
-#     remote_additional_code.working_path = Path("/mock/local/dir")
-#     assert remote_additional_code.exists_locally is False
-#     assert mock_exists.call_count == len(remote_additional_code.files)
-
-
-# def test_exists_locally_no_working_path(remote_additional_code):
-#     """Test that the AdditionalCode.exists_locally() property correctly returns False
-#     when the working_path attribute is not set."""
-#     remote_additional_code.working_path = None
-#     assert remote_additional_code.exists_locally is False
+        assert (
+            str(local_additional_code) == expected_str
+        ), f"expected \n{str(local_additional_code)}\n, got \n{expected_str}"
 
 
 class TestExistsLocally:
-    """Test class for the `exists_locally` property of the AdditionalCode class."""
+    """Test class for the `exists_locally` property of the AdditionalCode class.
+
+    The `exists_locally` property verifies whether the required additional code
+    files exist at the specified local working path and have matching hash values.
+
+    Tests
+    -----
+    test_all_files_exist_and_hashes_match
+        Verifies that `exists_locally` returns True when all files exist and their hashes match the cache.
+    test_some_files_missing
+        Verifies that `exists_locally` returns False when some files are missing.
+    test_hash_mismatch
+        Verifies that `exists_locally` returns False when a file's hash does not match the cached value.
+    test_no_working_path
+        Verifies that `exists_locally` returns False when the `working_path` attribute is None.
+    test_no_cached_hashes
+        Verifies that `exists_locally` returns False when the hash cache is None.
+
+    Mocks
+    -----
+    _get_sha256_hash
+        Patches the `_get_sha256_hash` function to simulate file hash calculation without requiring real files.
+    Path.exists
+        Patches the `Path.exists` property to handle a variety of situations regarding file existings
+    """
 
     def setup_method(self):
         """Set up common mocks before each test."""
@@ -229,14 +268,35 @@ class TestExistsLocally:
         )
         self.mock_get_sha256_hash = self.patch_get_sha256_hash.start()
 
+        self.patch_exists = mock.patch("pathlib.Path.exists")
+        self.mock_exists = self.patch_exists.start()
+
     def teardown_method(self):
         """Stop all mocks after each test."""
         mock.patch.stopall()
 
-    @mock.patch("pathlib.Path.exists", side_effect=[True, True, True])
-    def test_all_files_exist_and_hashes_match(self, mock_exists):
-        """Test that `exists_locally` returns True when all files exist and hashes
-        match."""
+    def test_all_files_exist_and_hashes_match(self):
+        """Verifies that `exists_locally` returns True when all files exist and their
+        hashes match the cache.
+
+        This test ensures that the `exists_locally` property correctly identifies when all files
+        associated with an `AdditionalCode` instance:
+        - Exist in the specified `working_path`.
+        - Have hash values that match the cached values in `_local_file_hash_cache`.
+
+        Mocks
+        -----
+        mock_exists : unittest.mock.MagicMock
+            Mock for the `Path.exists` method, simulating file existence checks for all files.
+
+        Assertions
+        ----------
+        - `exists_locally` is True when all files exist and their hashes match the cache.
+        - The number of calls to `Path.exists` matches the number of files.
+        - The number of calls to `_get_sha256_hash` matches the number of files.
+        """
+        self.mock_exists.side_effect = [True, True, True]
+
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
@@ -254,12 +314,30 @@ class TestExistsLocally:
         self.mock_get_sha256_hash.side_effect = lambda path: f"mock_hash_{path.name}"
 
         assert additional_code.exists_locally is True
-        assert mock_exists.call_count == len(additional_code.files)
+        assert self.mock_exists.call_count == len(additional_code.files)
         assert self.mock_get_sha256_hash.call_count == len(additional_code.files)
 
-    @mock.patch("pathlib.Path.exists", side_effect=[True, True, False])
-    def test_some_files_missing(self, mock_exists):
-        """Test that `exists_locally` returns False when some files are missing."""
+    def test_some_files_missing(self):
+        """Verifies that `exists_locally` returns False when some files are missing.
+
+        This test ensures that the `exists_locally` property correctly identifies when
+        one or more files associated with an `AdditionalCode` instance:
+        - Do not exist in the specified `working_path`.
+
+        Mocks
+        -----
+        mock_exists : unittest.mock.MagicMock
+            Mock for the `Path.exists` method, simulating file existence checks
+            where one or more files are missing.
+
+        Assertions
+        ----------
+        - `exists_locally` is False when some files are missing.
+        - `Path.exists` is called for all files before returning False.
+        - `_get_sha256_hash` is only called for existing files.
+        """
+        self.mock_exists.side_effect = [True, True, False]
+
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
@@ -275,15 +353,32 @@ class TestExistsLocally:
         self.mock_get_sha256_hash.side_effect = lambda path: f"mock_hash_{path.name}"
 
         assert additional_code.exists_locally is False
-        assert mock_exists.call_count == 3
+        assert self.mock_exists.call_count == 3
         assert (
             self.mock_get_sha256_hash.call_count == 2
         )  # Stops checking when a file is missing.
 
-    @mock.patch("pathlib.Path.exists", return_value=True)
-    def test_hash_mismatch(self, mock_exists):
-        """Test that `exists_locally` returns False when a file hash does not match the
-        cached value."""
+    def test_hash_mismatch(self):
+        """Verifies that `exists_locally` returns False when a file's hash does not
+        match the cached value.
+
+        This test ensures that the `exists_locally` property correctly identifies when:
+        - All files exist in the specified `working_path`.
+        - At least one file's hash value does not match the cached value in `_local_file_hash_cache`.
+
+        Mocks
+        -----
+        mock_exists : unittest.mock.MagicMock
+            Mock for the `Path.exists` method, simulating successful file existence checks for all files.
+
+        Assertions
+        ----------
+        - `exists_locally` is False when a hash mismatch occurs for any file.
+        - `Path.exists` and `_get_sha256_hash` are only called up to the first mismatch.
+        """
+
+        self.mock_exists.return_value = True
+
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
@@ -308,11 +403,22 @@ class TestExistsLocally:
         assert additional_code.exists_locally is False
 
         # Assert that Path.exists and _get_sha256_hash are only called for the first file
-        assert mock_exists.call_count == 1
+        assert self.mock_exists.call_count == 1
         assert self.mock_get_sha256_hash.call_count == 1
 
     def test_no_working_path(self):
-        """Test that `exists_locally` returns False when the working_path is None."""
+        """Verifies that `exists_locally` returns False when the `working_path`
+        attribute is None.
+
+        This test ensures that the `exists_locally` property correctly identifies that
+        no local file checks can be performed when `working_path` is not set.
+
+        Assertions
+        ----------
+        - `exists_locally` is False when `working_path` is None.
+        - `_get_sha256_hash` is not called, as no files are checked.
+        """
+
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
@@ -324,7 +430,18 @@ class TestExistsLocally:
         self.mock_get_sha256_hash.assert_not_called()
 
     def test_no_cached_hashes(self):
-        """Test that `exists_locally` returns False when the hash cache is None."""
+        """Verifies that `exists_locally` returns False when the hash cache
+        (`_local_file_hash_cache`) is None.
+
+        This test ensures that the `exists_locally` property correctly identifies that
+        file existence and hash validation cannot be performed when the hash cache is unset.
+
+        Assertions
+        ----------
+        - `exists_locally` is False when `_local_file_hash_cache` is None.
+        - `_get_sha256_hash` is not called, as no hashes are available for comparison.
+        """
+
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
