@@ -1,15 +1,14 @@
 import os
 import re
-import time
 import json
 import warnings
 import subprocess
 from math import ceil
-from enum import Enum, auto
 from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
+from cstar.execution.handler import ExecutionStatus, ExecutionHandler
 from cstar.system.manager import cstar_sysmgr
 from cstar.system.scheduler import (
     Queue,
@@ -110,49 +109,7 @@ def create_scheduler_job(
     )
 
 
-class JobStatus(Enum):
-    """Enum representing possible states of a job in the scheduler.
-
-    Each state corresponds to a stage in the lifecycle of a job, from submission
-    to completion or failure.
-
-    Attributes
-    ----------
-    UNSUBMITTED : JobStatus
-        The job has not been submitted to the scheduler yet.
-    PENDING : JobStatus
-        The job has been submitted but is waiting to start.
-    RUNNING : JobStatus
-        The job is currently executing.
-    COMPLETED : JobStatus
-        The job finished successfully.
-    CANCELLED : JobStatus
-        The job was cancelled before completion.
-    FAILED : JobStatus
-        The job finished unsuccessfully.
-    HELD : JobStatus
-        The job is on hold and will not run until released.
-    ENDING : JobStatus
-        The job is in the process of ending but not fully completed.
-    UNKNOWN : JobStatus
-        The job state is unknown or not recognized.
-    """
-
-    UNSUBMITTED = auto()
-    PENDING = auto()
-    RUNNING = auto()
-    COMPLETED = auto()
-    CANCELLED = auto()
-    FAILED = auto()
-    HELD = auto()
-    ENDING = auto()
-    UNKNOWN = auto()
-
-    def __str__(self) -> str:
-        return self.name.lower()  # Convert enum name to lowercase for display
-
-
-class SchedulerJob(ABC):
+class SchedulerJob(ExecutionHandler, ABC):
     """Abstract base class for representing a job submitted to a scheduler.
 
     This class defines the structure and common behavior for jobs managed by
@@ -193,7 +150,7 @@ class SchedulerJob(ABC):
         The maximum walltime for the job, in the format "HH:MM:SS".
     id : int or None
         The unique job ID assigned by the scheduler. None if the job has not been submitted.
-    status: JobStatus
+    status: ExecutionStatus
         A representation of the current status of the job, e.g. RUNNING or CANCELLED
     script: str
         The job script to be submitted to the scheduler.
@@ -277,19 +234,19 @@ class SchedulerJob(ABC):
         self._commands = commands
         self._cpus = cpus
 
-        default_name = f"cstar_job_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
+        self._default_name = (
+            f"cstar_job_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
+        )
 
         self.script_path = (
-            Path.cwd() / f"{default_name}.sh"
+            Path.cwd() / f"{self._default_name}.sh"
             if script_path is None
             else Path(script_path)
         )
         self.run_path = self.script_path.parent if run_path is None else Path(run_path)
-        self._job_name = default_name if job_name is None else job_name
-        self.output_file = (
-            self.run_path / f"{default_name}.out"
-            if output_file is None
-            else output_file
+        self._job_name = self._default_name if job_name is None else job_name
+        self._output_file = (
+            Path(output_file) if output_file is not None else output_file
         )
         self._queue_name = (
             scheduler.primary_queue_name if queue_name is None else queue_name
@@ -384,6 +341,15 @@ class SchedulerJob(ABC):
 
         self._account_key = account_key
         self._id: Optional[int] = None
+
+    @property
+    def output_file(self) -> Path:
+        """The file in which to write this job's STDOUT and STDERR."""
+        return (
+            self.run_path / f"{self._default_name}.out"
+            if self._output_file is None
+            else self._output_file
+        )
 
     @property
     def account_key(self) -> str:
@@ -498,12 +464,12 @@ class SchedulerJob(ABC):
 
     @property
     @abstractmethod
-    def status(self) -> JobStatus:
+    def status(self) -> ExecutionStatus:
         """Retrieve the current status of the job.
 
         This method queries the underlying scheduler to determine the current status of
         the job (e.g., PENDING, RUNNING, COMPLETED). Subclasses must implement this method
-        to interact with the specific scheduler and map its state to a `JobStatus` enum.
+        to interact with the specific scheduler and map its state to a `ExecutionStatus` enum.
 
         Parameters
         ----------
@@ -511,54 +477,10 @@ class SchedulerJob(ABC):
 
         Returns
         -------
-        status: JobStatus
+        status: ExecutionStatus
             An enumeration value representing the current status of the job.
         """
         pass
-
-    def updates(self, seconds=10):
-        """Provides updates from the job's output file as a live stream for `seconds`
-        seconds (default 10).
-
-        If `seconds` is 0, updates are provided indefinitely until the user interrupts the stream.
-        """
-
-        if self.status != JobStatus.RUNNING:
-            print(
-                f"This job is currently not running ({self.status}). Live updates cannot be provided."
-            )
-            if (self.status in {JobStatus.FAILED, JobStatus.COMPLETED}) or (
-                self.status == JobStatus.CANCELLED and self.output_file.exists()
-            ):
-                print(f"See {self.output_file.resolve()} for job output")
-            return
-
-        if seconds == 0:
-            # Confirm indefinite tailing
-            confirmation = (
-                input(
-                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
-                    "Do you want to continue? (y/n): "
-                )
-                .strip()
-                .lower()
-            )
-            if confirmation not in {"y", "yes"}:
-                return
-
-        try:
-            with open(self.output_file, "r") as f:
-                f.seek(0, 2)  # Move to the end of the file
-                start_time = time.time()
-
-                while seconds == 0 or (time.time() - start_time < seconds):
-                    line = f.readline()
-                    if line:
-                        print(line, end="")
-                    else:
-                        time.sleep(0.1)  # 100ms delay between updates
-        except KeyboardInterrupt:
-            print("\nLive status updates stopped by user.")
 
     def _calculate_node_distribution(
         self, n_cores_required: int, tot_cores_per_node: int
@@ -631,7 +553,7 @@ class SlurmJob(SchedulerJob):
         The maximum walltime for the job, in the format "HH:MM:SS".
     id : int or None
         The unique job ID assigned by the SLURM scheduler. None if the job has not been submitted.
-    status : JobStatus
+    status : ExecutionStatus
         The current status of the job, retrieved from SLURM.
     script : str
         The SLURM-specific job script, including directives and commands.
@@ -645,22 +567,22 @@ class SlurmJob(SchedulerJob):
     """
 
     @property
-    def status(self) -> JobStatus:
+    def status(self) -> ExecutionStatus:
         """Retrieve the current status of the job from the SLURM scheduler.
 
         This property queries SLURM using the `sacct` command to determine the job's
-        state and maps it to a corresponding `JobStatus` enumeration.
+        state and maps it to a corresponding `ExecutionStatus` enumeration.
 
         Returns
         -------
-        status: JobStatus
+        status: ExecutionStatus
             The current status of the job. Possible values include:
-            - `JobStatus.PENDING`: The job has been submitted but is waiting to start.
-            - `JobStatus.RUNNING`: The job is currently executing.
-            - `JobStatus.COMPLETED`: The job finished successfully.
-            - `JobStatus.CANCELLED`: The job was cancelled before completion.
-            - `JobStatus.FAILED`: The job finished unsuccessfully.
-            - `JobStatus.UNKNOWN`: The job state could not be determined.
+            - `ExecutionStatus.PENDING`: The job has been submitted but is waiting to start.
+            - `ExecutionStatus.RUNNING`: The job is currently executing.
+            - `ExecutionStatus.COMPLETED`: The job finished successfully.
+            - `ExecutionStatus.CANCELLED`: The job was cancelled before completion.
+            - `ExecutionStatus.FAILED`: The job finished unsuccessfully.
+            - `ExecutionStatus.UNKNOWN`: The job state could not be determined.
 
         Raises
         ------
@@ -669,7 +591,7 @@ class SlurmJob(SchedulerJob):
         """
 
         if self.id is None:
-            return JobStatus.UNSUBMITTED
+            return ExecutionStatus.UNSUBMITTED
         else:
             sacct_cmd = f"sacct -j {self.id} --format=State%20 --noheader"
             result = subprocess.run(
@@ -681,20 +603,20 @@ class SlurmJob(SchedulerJob):
                     f"STDOUT: {result.stdout}, STDERR: {result.stderr}"
                 )
 
-        # Map sacct states to JobStatus enum
+        # Map sacct states to ExecutionStatus enum
         sacct_status_map = {
-            "PENDING": JobStatus.PENDING,
-            "RUNNING": JobStatus.RUNNING,
-            "COMPLETED": JobStatus.COMPLETED,
-            "CANCELLED": JobStatus.CANCELLED,
-            "FAILED": JobStatus.FAILED,
+            "PENDING": ExecutionStatus.PENDING,
+            "RUNNING": ExecutionStatus.RUNNING,
+            "COMPLETED": ExecutionStatus.COMPLETED,
+            "CANCELLED": ExecutionStatus.CANCELLED,
+            "FAILED": ExecutionStatus.FAILED,
         }
         for state, status in sacct_status_map.items():
             if state in result.stdout:
                 return status
 
         # Fallback if no known state is found
-        return JobStatus.UNKNOWN
+        return ExecutionStatus.UNKNOWN
 
     @property
     def script(self) -> str:
@@ -803,8 +725,8 @@ class SlurmJob(SchedulerJob):
             If the `scancel` command fails or returns a non-zero exit code.
         """
 
-        if self.status not in {JobStatus.RUNNING, JobStatus.PENDING}:
-            print(f"Cannot cancel job with status {self.status}")
+        if self.status not in {ExecutionStatus.RUNNING, ExecutionStatus.PENDING}:
+            print(f"Cannot cancel job with status '{self.status}'")
             return
 
         result = subprocess.run(
@@ -862,7 +784,7 @@ class PBSJob(SchedulerJob):
         The maximum walltime for the job, in the format "HH:MM:SS".
     id : int or None
         The unique job ID assigned by the PBS scheduler. None if the job has not been submitted.
-    status : JobStatus
+    status : ExecutionStatus
         The current status of the job, retrieved from PBS.
     script : str
         The PBS-specific job script, including directives and commands.
@@ -876,7 +798,7 @@ class PBSJob(SchedulerJob):
     """
 
     @property
-    def script(self):
+    def script(self) -> str:
         """Generate the PBS-specific job script to be submitted to the scheduler.
         Includes standard Slurm scheduler directives as well as scheduler-specific
         directives specified by the scheduler.other_scheduler_directives attribute.
@@ -901,7 +823,7 @@ class PBSJob(SchedulerJob):
         for (
             key,
             value,
-        ) in cstar_sysmgr.scheduler.other_scheduler_directives.items():
+        ) in self.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#PBS {key} {value}"
         scheduler_script += "\ncd ${PBS_O_WORKDIR}"
 
@@ -909,24 +831,24 @@ class PBSJob(SchedulerJob):
         return scheduler_script
 
     @property
-    def status(self) -> JobStatus:
+    def status(self) -> ExecutionStatus:
         """Retrieve the current status of the job from the PBS scheduler.
 
         This property queries PBS using the `qstat` command to determine the job's
-        state and maps it to a corresponding `JobStatus` enumeration.
+        state and maps it to a corresponding `ExecutionStatus` enumeration.
 
         Returns
         -------
-        status : JobStatus
+        status : ExecutionStatus
             The current status of the job. Possible values include:
-            - `JobStatus.PENDING`: The job has been submitted but is waiting to start.
-            - `JobStatus.RUNNING`: The job is currently executing.
-            - `JobStatus.COMPLETED`: The job finished successfully.
-            - `JobStatus.CANCELLED`: The job was cancelled before completion.
-            - `JobStatus.FAILED`: The job finished unsuccessfully.
-            - `JobStatus.HELD`: The job is on hold.
-            - `JobStatus.ENDING`: The job is in the process of ending.
-            - `JobStatus.UNKNOWN`: The job state could not be determined.
+            - `ExecutionStatus.PENDING`: The job has been submitted but is waiting to start.
+            - `ExecutionStatus.RUNNING`: The job is currently executing.
+            - `ExecutionStatus.COMPLETED`: The job finished successfully.
+            - `ExecutionStatus.CANCELLED`: The job was cancelled before completion.
+            - `ExecutionStatus.FAILED`: The job finished unsuccessfully.
+            - `ExecutionStatus.HELD`: The job is on hold.
+            - `ExecutionStatus.ENDING`: The job is in the process of ending.
+            - `ExecutionStatus.UNKNOWN`: The job state could not be determined.
 
         Raises
         ------
@@ -935,7 +857,7 @@ class PBSJob(SchedulerJob):
         """
 
         if self.id is None:
-            return JobStatus.UNSUBMITTED
+            return ExecutionStatus.UNSUBMITTED
 
         qstat_cmd = f"qstat -x -f -F json {self.id}"
         result = subprocess.run(qstat_cmd, capture_output=True, text=True, shell=True)
@@ -957,20 +879,24 @@ class PBSJob(SchedulerJob):
             # Extract the job state
             job_state = job_info["job_state"]
             pbs_status_map = {
-                "Q": JobStatus.PENDING,
-                "R": JobStatus.RUNNING,
-                "C": JobStatus.COMPLETED,
-                "H": JobStatus.HELD,
-                "E": JobStatus.ENDING,
+                "Q": ExecutionStatus.PENDING,
+                "R": ExecutionStatus.RUNNING,
+                "C": ExecutionStatus.COMPLETED,
+                "H": ExecutionStatus.HELD,
+                "E": ExecutionStatus.ENDING,
             }
 
             # Handle specific cases for "F" (Finished)
             if job_state == "F":
                 exit_status = job_info.get("Exit_status", 1)
-                return JobStatus.COMPLETED if exit_status == 0 else JobStatus.FAILED
+                return (
+                    ExecutionStatus.COMPLETED
+                    if exit_status == 0
+                    else ExecutionStatus.FAILED
+                )
             else:
                 # Default to UNKNOWN for unmapped states
-                return pbs_status_map.get(job_state, JobStatus.UNKNOWN)
+                return pbs_status_map.get(job_state, ExecutionStatus.UNKNOWN)
 
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse JSON from qstat output: {e}")
@@ -1032,7 +958,11 @@ class PBSJob(SchedulerJob):
             If the `qdel` command fails or returns a non-zero exit code.
         """
 
-        if self.status not in {JobStatus.RUNNING, JobStatus.PENDING, JobStatus.HELD}:
+        if self.status not in {
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.PENDING,
+            ExecutionStatus.HELD,
+        }:
             print(f"Cannot cancel job with status {self.status}")
             return
 

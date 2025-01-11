@@ -2,8 +2,8 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import PBSScheduler, PBSQueue
-from cstar.scheduler.job import (
-    JobStatus,
+from cstar.execution.scheduler_job import (
+    ExecutionStatus,
     PBSJob,
 )
 
@@ -62,6 +62,7 @@ class TestPBSJob:
         self.scheduler = PBSScheduler(
             queues=[self.mock_queue],
             primary_queue_name="test_queue",
+            other_scheduler_directives={"mock_directive": "mock_value"},
         )
 
         # Define common job parameters
@@ -77,19 +78,11 @@ class TestPBSJob:
             "queue_name": "test_queue",
         }
 
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
-    def test_script(self, mock_scheduler):
+    def test_script(self):  # , mock_scheduler):
         """Verifies that the PBS job script is correctly generated with all directives.
 
         This test checks that the `script` property of `PBSJob` produces the expected
         job script, including user-provided parameters and any scheduler directives.
-
-        Mocks
-        -----
-        CStarSystemManager.scheduler
-            Mocked to simulate a scheduler with specific directives (`mock_directive`).
 
         Asserts
         -------
@@ -98,12 +91,6 @@ class TestPBSJob:
           - Custom scheduler directives provided in `other_scheduler_directives`.
           - Commands to execute in the job script (`echo Hello, World`).
         """
-
-        # Mock the scheduler and its attributes
-        mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.other_scheduler_directives = {
-            "mock_directive": "mock_value"
-        }
 
         # Initialize a PBSJob
         job = PBSJob(**self.common_job_params)
@@ -129,10 +116,7 @@ class TestPBSJob:
         ), f"Script mismatch!\nExpected:\n{expected_script}\n\nGot:\n{job.script}"
 
     @patch("subprocess.run")
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
-    def test_submit(self, mock_scheduler, mock_subprocess, tmp_path):
+    def test_submit(self, mock_subprocess, tmp_path):
         """Ensures that the `submit` method properly submits a PBS job and extracts the
         job ID.
 
@@ -145,8 +129,6 @@ class TestPBSJob:
         -----
         subprocess.run
             Mocked to simulate the execution of the `qsub` command and its output.
-        CStarSystemManager.scheduler
-            Mocked to simulate a scheduler with no additional directives.
 
         Asserts
         -------
@@ -154,10 +136,6 @@ class TestPBSJob:
         - That the script file is created in the specified path.
         - That the `qsub` command is executed with the correct arguments.
         """
-
-        # Mock scheduler attributes
-        mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.other_scheduler_directives = {}
 
         # Mock subprocess.run for qsub
         mock_subprocess.return_value = MagicMock(
@@ -186,12 +164,8 @@ class TestPBSJob:
         ],
     )
     @patch("subprocess.run")
-    @patch(
-        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
-    )
     def test_submit_raises(
         self,
-        mock_scheduler,
         mock_subprocess,
         returncode,
         stdout,
@@ -214,17 +188,11 @@ class TestPBSJob:
         -----
         subprocess.run
             Mocked to simulate the execution of the `qsub` command.
-        CStarSystemManager.scheduler
-            Mocked to simulate a scheduler with no additional directives.
 
         Asserts
         -------
         - That a `RuntimeError` is raised with the expected error message when submission fails.
         """
-
-        # Mock scheduler attributes
-        mock_scheduler.return_value = MagicMock()
-        mock_scheduler.return_value.other_scheduler_directives = {}
 
         # Mock subprocess.run for qsub
         mock_subprocess.return_value = MagicMock(
@@ -247,7 +215,7 @@ class TestPBSJob:
             job.submit()
 
     @patch("subprocess.run")
-    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
         """Tests that the `cancel` method successfully cancels a running PBS job.
 
@@ -257,7 +225,7 @@ class TestPBSJob:
         Mocks
         -----
         PBSJob.status
-            Mocked to return `JobStatus.RUNNING`, simulating a running job.
+            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
         subprocess.run
             Mocked to simulate successful execution of the `qdel` command.
 
@@ -268,7 +236,7 @@ class TestPBSJob:
         """
 
         # Mock the status to "running"
-        mock_status.return_value = JobStatus.RUNNING
+        mock_status.return_value = ExecutionStatus.RUNNING
 
         # Mock subprocess.run for successful cancellation
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -293,7 +261,7 @@ class TestPBSJob:
         )
 
     @patch("subprocess.run")
-    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     @patch("builtins.print")
     def test_cancel_completed_job(
         self, mock_print, mock_status, mock_subprocess, tmp_path
@@ -339,7 +307,7 @@ class TestPBSJob:
 
     ##
     @patch("subprocess.run")
-    @patch("cstar.scheduler.job.PBSJob.status", new_callable=PropertyMock)
+    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_failure(self, mock_status, mock_subprocess, tmp_path):
         """Ensures that a `RuntimeError` is raised if the `qdel` command fails to cancel
         a job.
@@ -351,7 +319,7 @@ class TestPBSJob:
         Mocks
         -----
         PBSJob.status
-            Mocked to return `JobStatus.RUNNING`, simulating a running job.
+            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
         subprocess.run
             Mocked to simulate a failed execution of the `qdel` command, returning a non-zero exit code.
 
@@ -361,7 +329,7 @@ class TestPBSJob:
         - That the `qdel` command is called with the correct job ID and parameters.
         """
         # Mock the status to "running"
-        mock_status.return_value = JobStatus.RUNNING
+        mock_status.return_value = ExecutionStatus.RUNNING
 
         # Mock subprocess.run for qdel failure
         mock_subprocess.return_value = MagicMock(
@@ -388,7 +356,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "Q"}}},
                 None,
-                JobStatus.PENDING,
+                ExecutionStatus.PENDING,
                 False,
                 None,
                 None,
@@ -396,7 +364,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "R"}}},
                 None,
-                JobStatus.RUNNING,
+                ExecutionStatus.RUNNING,
                 False,
                 None,
                 None,
@@ -404,7 +372,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "C"}}},
                 None,
-                JobStatus.COMPLETED,
+                ExecutionStatus.COMPLETED,
                 False,
                 None,
                 None,
@@ -412,7 +380,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "H"}}},
                 None,
-                JobStatus.HELD,
+                ExecutionStatus.HELD,
                 False,
                 None,
                 None,
@@ -420,7 +388,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "F", "Exit_status": 1}}},
                 None,
-                JobStatus.FAILED,
+                ExecutionStatus.FAILED,
                 False,
                 None,
                 None,
@@ -428,7 +396,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "F", "Exit_status": 0}}},
                 None,
-                JobStatus.COMPLETED,
+                ExecutionStatus.COMPLETED,
                 False,
                 None,
                 None,
@@ -452,7 +420,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "E"}}},
                 None,
-                JobStatus.ENDING,
+                ExecutionStatus.ENDING,
                 False,
                 None,
                 None,
@@ -460,7 +428,7 @@ class TestPBSJob:
             (
                 {"Jobs": {"12345": {"job_state": "X"}}},
                 None,
-                JobStatus.UNKNOWN,
+                ExecutionStatus.UNKNOWN,
                 False,
                 None,
                 None,

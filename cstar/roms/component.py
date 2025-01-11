@@ -5,7 +5,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
 
-from cstar.scheduler.job import create_scheduler_job
+from cstar.execution.scheduler_job import create_scheduler_job
+from cstar.execution.local_process import LocalProcess
+from cstar.execution.handler import ExecutionStatus
 from cstar.base.utils import _replace_text_in_file
 from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
@@ -24,7 +26,7 @@ from cstar.system.manager import cstar_sysmgr
 
 if TYPE_CHECKING:
     from cstar.roms import ROMSBaseModel
-    from cstar.scheduler.job import SchedulerJob
+    from cstar.execution.handler import ExecutionHandler
 
 
 class ROMSComponent(Component):
@@ -150,6 +152,8 @@ class ROMSComponent(Component):
         # roms-specific
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
+
+        self._execution_handler: Optional["ExecutionHandler"] = None
 
     @property
     def in_file(self) -> Path:
@@ -853,7 +857,7 @@ class ROMSComponent(Component):
         walltime: Optional[str] = None,
         queue_name: Optional[str] = None,
         job_name: Optional[str] = None,
-    ) -> Optional["SchedulerJob"]:
+    ) -> "ExecutionHandler":
         """Runs the executable created by `build()`
 
         This method creates a temporary file to be submitted to the job scheduler (if any)
@@ -923,7 +927,7 @@ class ROMSComponent(Component):
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        ## 2: RUN ON THIS MACHINE
+        ## 2: RUN ROMS
 
         roms_exec_cmd = (
             f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
@@ -952,85 +956,14 @@ class ROMSComponent(Component):
             )
 
             job_instance.submit()
+            self._execution_handler = job_instance
             return job_instance
 
         else:  # cstar_sysmgr.scheduler is None
-            import time
-
-            romsprocess = subprocess.Popen(
-                roms_exec_cmd,
-                shell=True,
-                cwd=run_path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            # Process stdout line-by-line
-            tstep0 = 0
-            roms_init_string = ""
-            if romsprocess.stdout is None:
-                raise RuntimeError("ROMS is not producing stdout")
-
-            # 2024-09-21 : the following is included as in some instances ROMS
-            # will exit with code 0 even if a fatal error occurs, see:
-            # https://github.com/CESR-lab/ucla-roms/issues/42
-
-            debugging = False  # Print raw output if true
-            if debugging:
-                while True:
-                    output = romsprocess.stdout.readline()
-                    if output == "" and romsprocess.poll() is not None:
-                        break
-                    if output:
-                        print(output.strip())
-            else:
-                for line in romsprocess.stdout:
-                    # Split the line by whitespace
-                    parts = line.split()
-
-                    # Check if there are exactly 9 parts and the first one is an integer
-                    if len(parts) == 9:
-                        try:
-                            # Try to convert the first part to an integer
-                            tstep = int(parts[0])
-                            if tstep0 == 0:
-                                tstep0 = tstep
-                                T0 = time.time()
-                                # Capture the first integer and print it
-                            else:
-                                ETA = (n_time_steps - (tstep - tstep0)) * (
-                                    (time.time() - T0) / (tstep - tstep0)
-                                )
-                                total_print_statements = 50
-                                print_frq = n_time_steps // total_print_statements + 1
-                                if ((tstep - tstep0) % print_frq) == 0:
-                                    print(
-                                        f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
-                                    )
-                        except ValueError:
-                            pass
-                    elif tstep0 == 0 and len(roms_init_string) == 0:
-                        roms_init_string = "Running ROMS: Initializing run..."
-                        print(roms_init_string)
-
-            romsprocess.wait()
-            if romsprocess.returncode != 0:
-                import datetime as dt
-
-                errlog = (
-                    output_dir
-                    / f"ROMS_STDERR_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-                )
-                if romsprocess.stderr is not None:
-                    with open(errlog, "w") as F:
-                        F.write(romsprocess.stderr.read())
-                raise RuntimeError(
-                    f"ROMS terminated with errors. See {errlog} for further information."
-                )
-            return None
-
-        return None
+            romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
+            self._execution_handler = romsprocess
+            romsprocess.start()
+            return romsprocess
 
     def post_run(self, output_dir: Optional[str | Path] = None) -> None:
         """Performs post-processing steps associated with this ROMSComponent object.
@@ -1043,6 +976,17 @@ class ROMSComponent(Component):
         output_dir: str | Path
             The directory in which output was produced by the run
         """
+
+        if self._execution_handler is None:
+            raise RuntimeError(
+                "Cannot call 'ROMSComponent.post_run()' before calling 'ROMSComponent.run()'"
+            )
+        elif self._execution_handler.status != ExecutionStatus.COMPLETED:
+            raise RuntimeError(
+                "Cannot call 'ROMSComponent.post_run()' until the ROMS run is completed, "
+                + f"but current execution status is '{self._execution_handler.status}'"
+            )
+
         if output_dir is None:
             # This should not be necessary, it allows output_dir to appear
             # optional for signature compatibility in linting, see
