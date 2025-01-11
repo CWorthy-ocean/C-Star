@@ -8,7 +8,7 @@ from abc import ABC
 from pathlib import Path
 from typing import Optional, List
 from cstar.base.input_dataset import InputDataset
-from cstar.base.utils import _list_to_concise_str
+from cstar.base.utils import _list_to_concise_str, _get_sha256_hash
 
 
 class ROMSInputDataset(InputDataset, ABC):
@@ -50,7 +50,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
         return repr_str
 
-    def get_from_yaml(
+    def get(
         self,
         local_dir: str | Path,
         start_date: Optional[dt.datetime] | str = None,
@@ -58,18 +58,20 @@ class ROMSInputDataset(InputDataset, ABC):
         np_xi: Optional[int] = None,
         np_eta: Optional[int] = None,
     ) -> None:
-        """Make this input dataset available as a netCDF file in `local_dir`
+        """Make this input dataset available as a netCDF file in `local_dir`.
 
-        This method uses the roms-tools python package to produce a UCLA-ROMS-compatible
-        netCDF file from a roms-tools compatible yaml file.
+        This method extends the `InputDataset.get()` method to accommodate
+        instances where the source is a `roms-tools`-compatible `yaml` file.
 
         Steps:
-        i. Obtain a working copy of the yaml file in `local_dir`
-        from InputDataset.source.location.
-        ii. Modify the working copy of the yaml file so any time-varying datasets
-        are given the correct start and end date.
+        i. Fetch the source file to `local_dir` using `InputDataset.get()`.
+            If the file is not in `yaml` format, we are done.
+        ii. If the file is in `yaml` format, modify the local copy so any
+            time-varying datasets are given the correct start and end date
         iii. Pass the modified yaml to roms-tools and save the resulting
-        object to netCDF.
+            object to netCDF.
+        iv. Update the working_path attribute and cache the metadata and
+            checksums of any produced netCDF files
 
         Parameters:
         -----------
@@ -82,32 +84,38 @@ class ROMSInputDataset(InputDataset, ABC):
            running ROMS in parallel. np_xi is the number of x-direction processors,
            np_eta is the number of y-direction processors
         """
+        # Ensure we're working with a Path object
+        local_dir = Path(local_dir).resolve()
+
+        # If `working_path` is set, determine we're not fetching to the same parent dir:
+        if self.working_path is None:
+            working_path_parent = None
+        elif isinstance(self.working_path, list):
+            working_path_parent = self.working_path[0].parent
+        else:
+            working_path_parent = self.working_path.parent
+
+        if (self.exists_locally) and (working_path_parent == local_dir):
+            print(f"Input dataset already exists in {working_path_parent}, skipping.")
+            return
+
+        super().get(local_dir=local_dir)
 
         # If it's not a yaml, we're done
         if self.source.source_type != "yaml":
-            raise ValueError(
-                "Attempted to call `ROMSInputDataset.get_from_yaml() "
-                + "but ROMSInputDataset.source.source_type is "
-                + f"{self.source.source_type}, not 'yaml'"
-            )
-
-        # Ensure we're working with a Path object
-        local_dir = Path(local_dir)
-
-        # First, get the file as usual
-        self.get(local_dir)
+            return
 
         # Make sure that the local copy is not a symlink
         # (as InputDataset.get() symlinks files that didn't need to be downloaded)
-        yaml_file = local_dir / Path(self.source.location).name
-        if yaml_file.is_symlink():
-            actual_path = yaml_file.resolve()
-            yaml_file.unlink()
-            shutil.copy2(actual_path, yaml_file)
-            yaml_file = actual_path
+        local_path = local_dir / Path(self.source.basename)
+        if local_path.is_symlink():
+            actual_path = local_path.resolve()
+            local_path.unlink()
+            shutil.copy2(actual_path, local_path)
+            local_path = actual_path
 
         # Now modify the local copy of the yaml file as needed:
-        with open(yaml_file, "r") as F:
+        with open(local_path, "r") as F:
             _, header, yaml_data = F.read().split("---", 2)
             yaml_dict = yaml.safe_load(yaml_data)
 
@@ -138,7 +146,7 @@ class ROMSInputDataset(InputDataset, ABC):
             if key in yaml_dict[roms_tools_class_name].keys():
                 yaml_dict[roms_tools_class_name][key] = value
 
-        with open(yaml_file, "w") as F:
+        with open(local_path, "w") as F:
             F.write(f"---{header}---\n" + yaml.dump(yaml_dict))
 
         # Finally, make a roms-tools object from the modified yaml
@@ -150,26 +158,30 @@ class ROMSInputDataset(InputDataset, ABC):
         # in order to use wildcards in filepaths (known xarray issue):
 
         if roms_tools_class_name == "Grid":
-            roms_tools_class_instance = roms_tools_class.from_yaml(yaml_file)
+            roms_tools_class_instance = roms_tools_class.from_yaml(local_path)
         else:
             roms_tools_class_instance = roms_tools_class.from_yaml(
-                yaml_file, use_dask=True
+                local_path, use_dask=True
             )
 
         # ... and save:
-        print(f"Saving roms-tools dataset created from {yaml_file}...")
+        print(f"Saving roms-tools dataset created from {local_path}...")
         if (np_eta is not None) and (np_xi is not None):
             savepath = roms_tools_class_instance.save(
-                local_dir / "PARTITIONED" / yaml_file.stem, np_xi=np_xi, np_eta=np_eta
+                local_dir / "PARTITIONED" / local_path.stem, np_xi=np_xi, np_eta=np_eta
             )
             self.partitioned_files = savepath
 
         else:
             savepath = roms_tools_class_instance.save(
-                Path(f"{local_dir/yaml_file.stem}.nc")
+                Path(f"{local_dir/local_path.stem}.nc")
             )
+        self.working_path = savepath[0] if len(savepath) == 1 else savepath
 
-            self.working_path = savepath[0] if len(savepath) == 1 else savepath
+        self._local_file_hash_cache = {
+            path: _get_sha256_hash(path.resolve()) for path in savepath
+        }  # 27
+        self._local_file_stat_cache = {path: path.stat() for path in savepath}
 
 
 class ROMSModelGrid(ROMSInputDataset):
