@@ -754,18 +754,8 @@ class ROMSComponent(Component):
     def pre_run(self) -> None:
         """Performs pre-processing steps associated with this ROMSComponent object.
 
-        This method:
-        1. goes through any netcdf files associated with InputDataset objects belonging
-           to this ROMSComponent instance and partitions them such that there is one file per processor.
-           The partitioned files are stored in a subdirectory `PARTITIONED` of
-           InputDataset.working_path
-
-        2. Replaces placeholder strings (if present) representing, e.g. input file paths
-           in a template roms namelist file (typically `roms.in_TEMPLATE`) used to run the model with
-           the respective paths to input datasets and any MARBL namelists (if this ROMS
-           component belongs to a case for which MARBL is also a component).
-           The namelist file is sought in
-           `ROMSComponent.namelists.working_path
+        At present the pre-run method exclusively calls ROMSInputDataset.partition() on
+        any locally present datasets.
         """
 
         # Partition input datasets and add their paths to namelist
@@ -773,76 +763,13 @@ class ROMSComponent(Component):
             [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
         ):
             datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
-            # Preliminary checks
-            if (self.additional_source_code is None) or (
-                self.additional_source_code.working_path is None
-            ):
-                raise ValueError(
-                    "Unable to prepare ROMSComponent for execution: "
-                    + "\nROMSComponent.additional_source_code.working_path is None."
-                    + "\n Call ROMSComponent.additional_source_code.get() and try again"
-                )
 
-            if self.namelists is None:
-                raise ValueError(
-                    "At least one namelist is required to run ROMS, but "
-                    + "ROMSComponent.namelists is None"
-                )
-            if self.namelists.working_path is None:
-                raise ValueError(
-                    "No working path found for ROMSComponent.namelists. "
-                    + "Call ROMSComponent.namelists.get() and try again"
-                )
-
-            if len(datasets_to_partition) > 0:
-                from roms_tools.utils import partition_netcdf
             for f in datasets_to_partition:
                 # fname = f.source.basename
-
-                if not f.exists_locally:
-                    raise ValueError(
-                        f"working_path of InputDataset \n{f}\n\n {f.working_path}, "
-                        + "refers to a non-existent file"
-                        + "\n call InputDataset.get() and try again."
-                    )
-                # Partitioning step
-                if f.working_path is None:
-                    # Raise if inputdataset has no local working path
-                    raise ValueError(f"InputDataset has no working path: {f}")
-                elif isinstance(f.working_path, list):
-                    # if single InputDataset corresponds to many files, check they're colocated
-                    if not all(
-                        [d.parent == f.working_path[0].parent for d in f.working_path]
-                    ):
-                        raise ValueError(
-                            f"A single input dataset exists in multiple directories: {f.working_path}."
-                        )
-                    else:
-                        # If they are, we want to partition them all in the same place
-                        partdir = f.working_path[0].parent / "PARTITIONED"
-                        id_files_to_partition = f.working_path[:]
-                else:
-                    id_files_to_partition = [
-                        f.working_path,
-                    ]
-                    partdir = f.working_path.parent / "PARTITIONED"
-
-                partdir.mkdir(parents=True, exist_ok=True)
-                parted_files = []
-                for idfile in id_files_to_partition:
-                    print(
-                        f"Partitioning {idfile} into ({self.discretization.n_procs_x},{self.discretization.n_procs_y})"
-                    )
-                    parted_files += partition_netcdf(
-                        idfile,
-                        np_xi=self.discretization.n_procs_x,
-                        np_eta=self.discretization.n_procs_y,
-                    )
-
-                    # [p.rename(partdir / p.name) for p in parted_files[-1]]
-                [p.rename(partdir / p.name) for p in parted_files]
-                parted_files = [partdir / p.name for p in parted_files]
-                f.partitioned_files = parted_files
+                f.partition(
+                    np_xi=self.discretization.n_procs_x,
+                    np_eta=self.discretization.n_procs_y,
+                )
 
     def run(
         self,

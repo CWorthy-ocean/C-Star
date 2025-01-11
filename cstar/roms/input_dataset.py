@@ -50,6 +50,69 @@ class ROMSInputDataset(InputDataset, ABC):
 
         return repr_str
 
+    def partition(self, np_xi: int, np_eta: int):
+        """Partition a netCDF dataset into tiles to run ROMS in parallel.
+
+        Takes a local InputDataset and parallelisation parameters and uses
+        roms-tools' partition_netcdf method to create multiple, smaller
+        netCDF files, each of which corresponds to a processor used by ROMS.
+
+        Parameters:
+        -----------
+        np_xi (int):
+           The number of tiles in the x direction
+        np_eta (int):
+           The number of tiles in the y direction
+
+        Notes:
+        ------
+        - This method will only work on ROMSInputDataset instances corresponding
+        to locally available files, i.e. ROMSInputDataset.get() has been called.
+        - This method sets the ROMSInputDataset.partitioned_files attribute
+        """
+
+        if not self.exists_locally:
+            raise ValueError(
+                f"working_path of InputDataset \n {self.working_path}, "
+                + "refers to a non-existent file"
+                + "\n call InputDataset.get() and try again."
+            )
+        else:
+            assert self.working_path is not None  # if exists_locally then can't be None
+
+        if isinstance(self.working_path, list):
+            # if single InputDataset corresponds to many files, check they're colocated
+            if not all(
+                [d.parent == self.working_path[0].parent for d in self.working_path]
+            ):
+                raise ValueError(
+                    f"A single input dataset exists in multiple directories: {self.working_path}."
+                )
+
+            # If they are, we want to partition them all in the same place
+            partdir = self.working_path[0].parent / "PARTITIONED"
+            id_files_to_partition = self.working_path[:]
+
+        else:
+            id_files_to_partition = [
+                self.working_path,
+            ]
+            partdir = self.working_path.parent / "PARTITIONED"
+
+        partdir.mkdir(parents=True, exist_ok=True)
+        parted_files = []
+
+        for idfile in id_files_to_partition:
+            print(f"Partitioning {idfile} into ({np_xi},{np_eta})")
+            parted_files += roms_tools.utils.partition_netcdf(
+                idfile, np_xi=np_xi, np_eta=np_eta
+            )
+
+            # [p.rename(partdir / p.name) for p in parted_files[-1]]
+        [p.rename(partdir / p.name) for p in parted_files]
+        parted_files = [partdir / p.name for p in parted_files]
+        self.partitioned_files = parted_files
+
     def get(
         self,
         local_dir: str | Path,
