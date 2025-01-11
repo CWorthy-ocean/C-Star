@@ -2,7 +2,7 @@ import os
 import pytest
 from unittest import mock
 from cstar.roms.base_model import ROMSBaseModel
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 
 
 @pytest.fixture
@@ -143,7 +143,7 @@ class TestROMSBaseModelGet:
         assert self.mock_subprocess_run.call_count == 2
 
         self.mock_subprocess_run.assert_any_call(
-            f"make nhmg COMPILER={cstar_system.environment.compiler}",
+            f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=f"{roms_dir}/Work",
             capture_output=True,
             text=True,
@@ -151,7 +151,7 @@ class TestROMSBaseModelGet:
         )
 
         self.mock_subprocess_run.assert_any_call(
-            f"make COMPILER={cstar_system.environment.compiler}",
+            f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=f"{roms_dir}/Tools-Roms",
             capture_output=True,
             text=True,

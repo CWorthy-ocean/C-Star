@@ -1,4 +1,3 @@
-import os
 import warnings
 import subprocess
 import shutil
@@ -6,7 +5,10 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, List
 
-from cstar.base.utils import _calculate_node_distribution, _replace_text_in_file
+from cstar.execution.scheduler_job import create_scheduler_job
+from cstar.execution.local_process import LocalProcess
+from cstar.execution.handler import ExecutionStatus
+from cstar.base.utils import _replace_text_in_file
 from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
 from cstar.roms.input_dataset import (
@@ -20,10 +22,11 @@ from cstar.roms.input_dataset import (
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.base.additional_code import AdditionalCode
 
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 
 if TYPE_CHECKING:
     from cstar.roms import ROMSBaseModel
+    from cstar.execution.handler import ExecutionHandler
 
 
 class ROMSComponent(Component):
@@ -149,6 +152,8 @@ class ROMSComponent(Component):
         # roms-specific
         self.exe_path: Optional[Path] = None
         self.partitioned_files: List[Path] | None = None
+
+        self._execution_handler: Optional["ExecutionHandler"] = None
 
     @property
     def in_file(self) -> Path:
@@ -684,19 +689,14 @@ class ROMSComponent(Component):
                         "ROMSComponent.input_datasets has entries "
                         + f" in the specified date range {start_date},{end_date}, "
                         + "but ROMSComponent.setup() did not receive "
-                        + "a input_datasets_target_dir argument"
+                        + "an input_datasets_target_dir argument"
                     )
 
-                if (isinstance(inp, ROMSInputDataset)) and (
-                    inp.source.source_type == "yaml"
-                ):
-                    inp.get_from_yaml(
-                        input_datasets_target_dir,
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                else:
-                    inp.get(input_datasets_target_dir)
+                inp.get(
+                    local_dir=input_datasets_target_dir,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
 
     def build(self) -> None:
         """Compiles any code associated with this configuration of ROMS.
@@ -735,7 +735,7 @@ class ROMSComponent(Component):
 
         print("Compiling UCLA-ROMS configuration...")
         make_roms_result = subprocess.run(
-            f"make COMPILER={cstar_system.environment.compiler}",
+            f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
             shell=True,
             capture_output=True,
@@ -776,10 +776,10 @@ class ROMSComponent(Component):
         n_time_steps: Optional[int] = None,
         account_key: Optional[str] = None,
         output_dir: Optional[str | Path] = None,
-        walltime: Optional[str] = cstar_system.environment.max_walltime,
-        queue: Optional[str] = cstar_system.environment.primary_queue,
-        job_name: str = "my_roms_run",
-    ) -> None:
+        walltime: Optional[str] = None,
+        queue_name: Optional[str] = None,
+        job_name: Optional[str] = None,
+    ) -> "ExecutionHandler":
         """Runs the executable created by `build()`
 
         This method creates a temporary file to be submitted to the job scheduler (if any)
@@ -794,7 +794,7 @@ class ROMSComponent(Component):
         output_dir: str or Path:
             The path to the directory in which model output will be saved. This is by default
             the directory from which the ROMS executable will be called.
-        walltime: str, default cstar.base.system.environment.environment.max_walltime
+        walltime: str, default cstar.system.manager.environment.environment.max_walltime
             The requested length of the job, HH:MM:SS
         job_name: str, default 'my_roms_run'
             The name of the job submitted to the scheduler, which also sets the output file name
@@ -807,6 +807,11 @@ class ROMSComponent(Component):
                 + "\n If you have already run Component.build(), either run it again or "
                 + " add the executable path manually using Component.exe_path='YOUR/PATH'."
             )
+        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
+            queue_name = cstar_sysmgr.scheduler.primary_queue_name
+        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
+            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
+
         if output_dir is None:
             output_dir = self.exe_path.parent
         output_dir = Path(output_dir)
@@ -844,205 +849,43 @@ class ROMSComponent(Component):
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        ## 2: RUN ON THIS MACHINE
+        ## 2: RUN ROMS
 
         roms_exec_cmd = (
-            f"{cstar_system.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
+            f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
             + f"{self.in_file}"
         )
 
-        if self.discretization.n_procs_tot is not None:
-            if cstar_system.environment.cores_per_node is not None:
-                nnodes, ncores = _calculate_node_distribution(
-                    self.discretization.n_procs_tot,
-                    cstar_system.environment.cores_per_node,
-                )
-            else:
-                raise ValueError(
-                    f"Unable to calculate node distribution for system: {cstar_system.name}."
-                    + "\nC-Star is unaware of your system's node configuration (cores per node)."
-                    + "\nYour system may be unsupported. Please raise an issue at: "
-                    + "\n https://github.com/CWorthy-ocean/C-Star/issues/new"
-                    + "\n Thank you in advance for your contribution!"
-                )
-        else:
+        if self.discretization.n_procs_tot is None:
             raise ValueError(
                 "Unable to calculate node distribution for this Component. "
                 + "Component.n_procs_tot is not set"
             )
-        match cstar_system.environment.scheduler:
-            case "pbs":
-                if account_key is None:
-                    raise ValueError(
-                        "please call Component.run() with a value for account_key"
-                    )
-                scheduler_script = "#PBS -S /bin/bash"
-                scheduler_script += f"\n#PBS -N {job_name}"
-                scheduler_script += f"\n#PBS -o {job_name}.out"
-                scheduler_script += f"\n#PBS -A {account_key}"
-                scheduler_script += (
-                    f"\n#PBS -l select={nnodes}:ncpus={ncores},walltime={walltime}"
-                )
-                scheduler_script += f"\n#PBS -q {queue}"
-                scheduler_script += "\n#PBS -j oe"
-                scheduler_script += "\n#PBS -k eod"
-                scheduler_script += "\n#PBS -V"
-                for (
-                    key,
-                    value,
-                ) in cstar_system.environment.other_scheduler_directives.items():
-                    scheduler_script += f"\n#PBS {key} {value}"
-                if cstar_system.name == "derecho":
-                    scheduler_script += "\ncd ${PBS_O_WORKDIR}"
-                scheduler_script += f"\n\n{roms_exec_cmd}"
-
-                script_fname = "cstar_run_script.pbs"
-                with open(run_path / script_fname, "w") as f:
-                    f.write(scheduler_script)
-                subprocess.run(f"qsub {script_fname}", shell=True, cwd=run_path)
-
-            case "slurm":
-                # TODO: export ALL copies env vars, but will need to handle module load
-
-                if account_key is None:
-                    raise ValueError(
-                        "please call Component.run() with a value for account_key"
-                    )
-
-                scheduler_script = "#!/bin/bash"
-                scheduler_script += f"\n#SBATCH --job-name={job_name}"
-                scheduler_script += f"\n#SBATCH --output={job_name}.out"
-                scheduler_script += (
-                    f"\n#SBATCH --{cstar_system.environment.queue_flag}={queue}"
-                )
-                scheduler_script += f"\n#SBATCH --nodes={nnodes}"
-                scheduler_script += f"\n#SBATCH --ntasks-per-node={ncores}"
-                scheduler_script += f"\n#SBATCH --account={account_key}"
-                scheduler_script += "\n#SBATCH --export=ALL"
-                scheduler_script += "\n#SBATCH --mail-type=ALL"
-                scheduler_script += f"\n#SBATCH --time={walltime}"
-                for (
-                    key,
-                    value,
-                ) in cstar_system.environment.other_scheduler_directives.items():
-                    scheduler_script += f"\n#SBATCH {key} {value}"
-                # Add linux environment modules to scheduler script
-                if cstar_system.environment.uses_lmod:
-                    scheduler_script += "\nmodule reset"
-                    with open(
-                        f"{cstar_system.environment.package_root}/additional_files/lmod_lists/{cstar_system.name}.lmod"
-                    ) as F:
-                        modules = F.readlines()
-                for m in modules:
-                    scheduler_script += f"\nmodule load {m}"
-
-                scheduler_script += "\nprintenv"
-
-                # Add environment variables to scheduler script:
-                for (
-                    var,
-                    value,
-                ) in cstar_system.environment.environment_variables.items():
-                    scheduler_script += f'\nexport {var}="{value}"'
-
-                # Add roms command to scheduler script
-                scheduler_script += f"\n\n{roms_exec_cmd}"
-
-                script_fname = "cstar_run_script.sh"
-                with open(run_path / script_fname, "w") as f:
-                    f.write(scheduler_script)
-
-                # remove any slurm variables in case submitting from inside another slurm job
-                env_vars_to_exclude = []
-                for k in os.environ.keys():
-                    if k.startswith("SLURM_"):
-                        if k not in {"SLURM_CONF", "SLURM_VERSION"}:
-                            env_vars_to_exclude.append(k)
-
-                slurm_env = {
-                    k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
-                }
-
-                subprocess.run(
-                    f"sbatch {script_fname}", shell=True, cwd=run_path, env=slurm_env
+        if cstar_sysmgr.scheduler is not None:
+            if account_key is None:
+                raise ValueError(
+                    "please call Component.run() with a value for account_key"
                 )
 
-            case None:
-                import time
+            job_instance = create_scheduler_job(
+                commands=roms_exec_cmd,
+                job_name=job_name,
+                cpus=self.discretization.n_procs_tot,
+                account_key=account_key,
+                run_path=run_path,
+                queue_name=queue_name,
+                walltime=walltime,
+            )
 
-                romsprocess = subprocess.Popen(
-                    roms_exec_cmd,
-                    shell=True,
-                    cwd=run_path,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
+            job_instance.submit()
+            self._execution_handler = job_instance
+            return job_instance
 
-                # Process stdout line-by-line
-                tstep0 = 0
-                roms_init_string = ""
-                if romsprocess.stdout is None:
-                    raise RuntimeError("ROMS is not producing stdout")
-
-                # 2024-09-21 : the following is included as in some instances ROMS
-                # will exit with code 0 even if a fatal error occurs, see:
-                # https://github.com/CESR-lab/ucla-roms/issues/42
-
-                debugging = False  # Print raw output if true
-                if debugging:
-                    while True:
-                        output = romsprocess.stdout.readline()
-                        if output == "" and romsprocess.poll() is not None:
-                            break
-                        if output:
-                            print(output.strip())
-                else:
-                    for line in romsprocess.stdout:
-                        # Split the line by whitespace
-                        parts = line.split()
-
-                        # Check if there are exactly 9 parts and the first one is an integer
-                        if len(parts) == 9:
-                            try:
-                                # Try to convert the first part to an integer
-                                tstep = int(parts[0])
-                                if tstep0 == 0:
-                                    tstep0 = tstep
-                                    T0 = time.time()
-                                    # Capture the first integer and print it
-                                else:
-                                    ETA = (n_time_steps - (tstep - tstep0)) * (
-                                        (time.time() - T0) / (tstep - tstep0)
-                                    )
-                                    total_print_statements = 50
-                                    print_frq = (
-                                        n_time_steps // total_print_statements + 1
-                                    )
-                                    if ((tstep - tstep0) % print_frq) == 0:
-                                        print(
-                                            f"Running ROMS: time-step {tstep-tstep0} of {n_time_steps} ({time.time()-T0:.1f}s elapsed; ETA {ETA:.1f}s)"
-                                        )
-                            except ValueError:
-                                pass
-                        elif tstep0 == 0 and len(roms_init_string) == 0:
-                            roms_init_string = "Running ROMS: Initializing run..."
-                            print(roms_init_string)
-
-                romsprocess.wait()
-                if romsprocess.returncode != 0:
-                    import datetime as dt
-
-                    errlog = (
-                        output_dir
-                        / f"ROMS_STDERR_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-                    )
-                    if romsprocess.stderr is not None:
-                        with open(errlog, "w") as F:
-                            F.write(romsprocess.stderr.read())
-                    raise RuntimeError(
-                        f"ROMS terminated with errors. See {errlog} for further information."
-                    )
+        else:  # cstar_sysmgr.scheduler is None
+            romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
+            self._execution_handler = romsprocess
+            romsprocess.start()
+            return romsprocess
 
     def post_run(self, output_dir: Optional[str | Path] = None) -> None:
         """Performs post-processing steps associated with this ROMSComponent object.
@@ -1055,6 +898,17 @@ class ROMSComponent(Component):
         output_dir: str | Path
             The directory in which output was produced by the run
         """
+
+        if self._execution_handler is None:
+            raise RuntimeError(
+                "Cannot call 'ROMSComponent.post_run()' before calling 'ROMSComponent.run()'"
+            )
+        elif self._execution_handler.status != ExecutionStatus.COMPLETED:
+            raise RuntimeError(
+                "Cannot call 'ROMSComponent.post_run()' until the ROMS run is completed, "
+                + f"but current execution status is '{self._execution_handler.status}'"
+            )
+
         if output_dir is None:
             # This should not be necessary, it allows output_dir to appear
             # optional for signature compatibility in linting, see

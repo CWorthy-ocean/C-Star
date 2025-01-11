@@ -61,8 +61,8 @@ class MARBLComponent(Component):
         print("No pre-processing steps to be completed for MARBLComponent")
         pass
 
-    def run(self) -> None:
-        print("MARBL must be run in the context of a parent model")
+    def run(self):
+        raise ValueError("MARBL must be run in the context of a parent model")
 
     def post_run(self) -> None:
         print("No post-processing steps to be completed for MARBLComponent")

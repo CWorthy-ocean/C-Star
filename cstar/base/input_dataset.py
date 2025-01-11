@@ -6,7 +6,10 @@ from pathlib import Path
 from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
 from cstar.base.utils import _get_sha256_hash
-from typing import Optional, List
+from typing import Optional, List, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
 
 
 class InputDataset(ABC):
@@ -47,14 +50,11 @@ class InputDataset(ABC):
             The 256 bit SHA sum associated with the file for verification if remote
         """
 
-        self.source: DataSource = DataSource(location)
-        self.file_hash: Optional[str] = file_hash
-        self.working_path: Optional[Path | List[Path]] = None
-
-        if (self.source.location_type == "url") and (self.file_hash is None):
+        self.source: DataSource = DataSource(location=location, file_hash=file_hash)
+        if (self.source.location_type == "url") and (self.source.file_hash is None):
             raise ValueError(
                 f"Cannot create InputDataset for \n {self.source.location}:\n "
-                + "InputDataset.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
+                + "InputDataset.source.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
                 + "A file hash is required to verify files downloaded from remote sources."
             )
         if isinstance(start_date, str):
@@ -66,14 +66,100 @@ class InputDataset(ABC):
         assert self.start_date is None or isinstance(self.start_date, dt.datetime)
         assert self.end_date is None or isinstance(self.end_date, dt.datetime)
 
+        # Initialize object state:
+        self.working_path: Optional[Path | List[Path]] = None
+        self._local_file_hash_cache: Optional[Dict] = None
+        self._local_file_stat_cache: Optional[Dict] = None
+
     @property
     def exists_locally(self) -> bool:
-        if self.working_path is None:
+        """Check if this InputDataset exists on the local filesystem.
+
+        This method verifies the following for each file in `InputDataset.working_path`:
+        1. The file exists at the specified path.
+        2. The file's current size and modification date match values cached by `InputDataset.get()`
+        3. If the size matches but the modification time does not, the file's SHA-256 hash
+           is computed and compared against a value cached by `InputDataset.get()`
+
+        Returns:
+        --------
+        exists_locally (bool): True if all files pass the existence, size, modification
+            time, and (if necessary) hash checks. Returns False otherwise.
+
+        Notes:
+        ------
+            If C-Star cannot access cached file statistics, it is impossible to verify
+            whether the InputDataset is correct, and so `False` is returned.
+        """
+        if (self.working_path is None) or (self._local_file_stat_cache is None):
             return False
+
+        # Ensure working_path is a list for unified iteration
+        paths = (
+            self.working_path
+            if isinstance(self.working_path, list)
+            else [self.working_path]
+        )
+
+        for path in paths:
+            # Check if the file exists
+            if not path.exists():
+                return False
+
+            # Retrieve the cached stats
+            cached_stats = self._local_file_stat_cache.get(path)
+            if cached_stats is None:
+                return False  # No stats cached for this file
+
+            # Compare size first
+            current_stats = path.stat()
+            if current_stats.st_size != cached_stats.st_size:
+                return False  # Size mismatch, no need to check further
+
+            # Compare modification time, fallback to hash check if mismatched
+            if current_stats.st_mtime != cached_stats.st_mtime:
+                current_hash = _get_sha256_hash(path.resolve())
+                if (self._local_file_hash_cache is None) or (
+                    self._local_file_hash_cache.get(path) != current_hash
+                ):
+                    return False
+
+        return True
+
+    @property
+    def local_hash(self) -> Optional[Dict]:
+        """Compute or retrieve the cached SHA-256 hash of the local dataset.
+
+        This property calculates the SHA-256 hash for the dataset located at `working_path`.
+        If the hash has been previously computed and cached by InputDataset.get(),
+        it will return the cached value instead of recomputing it.
+
+        If `working_path` is a list of paths, the hash is computed for each file
+        individually. The hashes are stored as a dictionary mapping paths to their
+        respective hash values.
+
+        Returns
+        -------
+        local_hash (dict or None)
+            - A dictionary where the keys are `Path` objects representing file paths
+              and the values are their respective SHA-256 hashes.
+            - `None` if `working_path` is not set or no files exist locally.
+        """
+
+        if self._local_file_hash_cache is not None:
+            return self._local_file_hash_cache
+
+        if (not self.exists_locally) or (self.working_path is None):
+            local_hash = None
         elif isinstance(self.working_path, list):
-            return True if all([f.exists() for f in self.working_path]) else False
+            local_hash = {
+                path: _get_sha256_hash(path.resolve()) for path in self.working_path
+            }
         elif isinstance(self.working_path, Path):
-            return self.working_path.exists()
+            local_hash = {self.working_path: _get_sha256_hash(self.working_path)}
+
+        self._local_file_hash_cache = local_hash
+        return local_hash
 
     def __str__(self) -> str:
         name = self.__class__.__name__
@@ -82,8 +168,8 @@ class InputDataset(ABC):
         base_str += "\n" + "-" * len(name)
 
         base_str += f"\nSource location: {self.source.location}"
-        if self.file_hash is not None:
-            base_str += f"\nfile_hash: {self.file_hash}"
+        if self.source.file_hash is not None:
+            base_str += f"\nSource file hash: {self.source.file_hash}"
         if self.start_date is not None:
             base_str += f"\nstart_date: {self.start_date}"
         if self.end_date is not None:
@@ -94,15 +180,17 @@ class InputDataset(ABC):
         else:
             base_str += " ( does not yet exist. Call InputDataset.get() )"
 
+        if self.local_hash is not None:
+            base_str += f"\nLocal hash: {self.local_hash}"
         return base_str
 
     def __repr__(self) -> str:
         # Constructor-style section:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nlocation = {self.source.location!r},"
-        repr_str += f"\nfile_hash = {self.file_hash}"
+        repr_str += f"\nfile_hash = {self.source.file_hash!r},"
         if self.start_date is not None:
-            repr_str += f"\nstart_date = {self.start_date!r}"
+            repr_str += f"\nstart_date = {self.start_date!r},"
         if self.end_date is not None:
             repr_str += f"\nend_date = {self.end_date!r}"
         repr_str += "\n)"
@@ -111,12 +199,14 @@ class InputDataset(ABC):
             info_str += f"working_path = {self.working_path}"
             if not self.exists_locally:
                 info_str += " (does not exist)"
+        if self.local_hash is not None:
+            info_str += f", local_hash = {self.local_hash}"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         # Additional info
         return repr_str
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         """Represent this InputDataset object as a dictionary of kwargs.
 
         Returns:
@@ -127,8 +217,8 @@ class InputDataset(ABC):
         """
         input_dataset_dict = {}
         input_dataset_dict["location"] = self.source.location
-        if self.file_hash is not None:
-            input_dataset_dict["file_hash"] = self.file_hash
+        if self.source.file_hash is not None:
+            input_dataset_dict["file_hash"] = self.source.file_hash
         if self.start_date is not None:
             input_dataset_dict["start_date"] = self.start_date.__str__()
         if self.end_date is not None:
@@ -143,7 +233,8 @@ class InputDataset(ABC):
            - ...a local path: create a symbolic link to the file in `local_dir`.
            - ...a URL: fetch the file to `local_dir` using Pooch
 
-        This method updates the `InputDataset.working_path` attribute with the new location.
+        This method updates the `InputDataset.working_path` attribute with the new location,
+        and caches file metadata and checksum values.
 
         Parameters:
         -----------
@@ -153,44 +244,43 @@ class InputDataset(ABC):
         Path(local_dir).mkdir(parents=True, exist_ok=True)
         target_path = Path(local_dir).resolve() / self.source.basename
 
-        # If the file is somewhere else on the system, make a symbolic link where we want it
-        if target_path.exists():
-            print(
-                f"A file by the name of {self.source.basename} "
-                + f"already exists at {local_dir}"
-            )
-            if self.working_path is None:
-                self.working_path = target_path
-        else:
-            if self.source.location_type == "path":
-                source_location = Path(self.source.location).resolve()
-                if hasattr(self, "file_hash") and self.file_hash is not None:
-                    source_hash = _get_sha256_hash(source_location)
-                    if self.file_hash != source_hash:
-                        raise ValueError(
-                            f"The provided file hash ({self.file_hash}) does not match "
-                            f"that of the file at {source_location} ({source_hash}). "
-                            "Note that as this input dataset exists on the local filesystem, "
-                            "C-Star does not require a file hash to use it. Please either "
-                            "update the file_hash entry or remove it."
-                        )
+        if (self.exists_locally) and (self.working_path == target_path):
+            print(f"Input dataset already exists at {self.working_path}, skipping.")
+            return
 
-                target_path.symlink_to(source_location)
+        if self.source.location_type == "path":
+            source_location = Path(self.source.location).resolve()
+            computed_source_hash = _get_sha256_hash(source_location)
+            if (self.source.file_hash is not None) and (
+                self.source.file_hash != computed_source_hash
+            ):
+                raise ValueError(
+                    f"The provided file hash ({self.source.file_hash}) does not match "
+                    f"that of the file at {source_location} ({computed_source_hash}). "
+                    "Note that as this input dataset exists on the local filesystem, "
+                    "C-Star does not require a file hash to use it. Please either "
+                    "update the file_hash entry or remove it."
+                )
 
-            elif self.source.location_type == "url":
-                if hasattr(self, "file_hash") and self.file_hash is not None:
-                    downloader = pooch.HTTPDownloader(timeout=120)
-                    to_fetch = pooch.create(
-                        path=local_dir,
-                        # urllib equivalent to Path.parent:
-                        base_url=urljoin(self.source.location, "."),
-                        registry={self.source.basename: self.file_hash},
-                    )
-                    to_fetch.fetch(self.source.basename, downloader=downloader)
-                else:
-                    raise ValueError(
-                        "InputDataset.source.source_type is 'url' "
-                        + "but no InputDataset.file_hash is not defined. "
-                        + "Cannot proceed."
-                    )
-            self.working_path = target_path
+            target_path.symlink_to(source_location)
+
+        elif self.source.location_type == "url":
+            if self.source.file_hash is not None:
+                downloader = pooch.HTTPDownloader(timeout=120)
+                to_fetch = pooch.create(
+                    path=local_dir,
+                    # urllib equivalent to Path.parent:
+                    base_url=urljoin(self.source.location, "."),
+                    registry={self.source.basename: self.source.file_hash},
+                )
+                to_fetch.fetch(self.source.basename, downloader=downloader)
+                computed_source_hash = self.source.file_hash
+            else:
+                raise ValueError(
+                    "InputDataset.source.source_type is 'url' "
+                    + "but no InputDataset.source.file_hash is not defined. "
+                    + "Cannot proceed."
+                )
+        self.working_path = target_path
+        self._local_file_hash_cache = {target_path: computed_source_hash}  # 27
+        self._local_file_stat_cache = {target_path: target_path.stat()}

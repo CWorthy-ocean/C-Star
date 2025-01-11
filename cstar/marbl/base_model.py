@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from cstar.base import BaseModel
 from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 
 
 class MARBLBaseModel(BaseModel):
@@ -51,7 +51,7 @@ class MARBLBaseModel(BaseModel):
         )
         # Set environment variables for this session:
         os.environ["MARBL_ROOT"] = str(target)
-        cstar_system.environment.environment_variables["MARBL_ROOT"] = os.environ[
+        cstar_sysmgr.environment.environment_variables["MARBL_ROOT"] = os.environ[
             "MARBL_ROOT"
         ]
         env_file_str = f'MARBL_ROOT="{target}"\n'
@@ -60,7 +60,7 @@ class MARBLBaseModel(BaseModel):
         # Make things
         print("Compiling MARBL...")
         make_marbl_result = subprocess.run(
-            f"make {cstar_system.environment.compiler} USEMPI=TRUE",
+            f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
             cwd=f"{target}/src",
             shell=True,
             text=True,

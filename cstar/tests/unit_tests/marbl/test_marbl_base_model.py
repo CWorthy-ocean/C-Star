@@ -2,7 +2,7 @@ import os
 import pytest
 from unittest import mock
 from cstar.marbl.base_model import MARBLBaseModel
-from cstar.base.system import cstar_system
+from cstar.system.manager import cstar_sysmgr
 
 
 @pytest.fixture
@@ -120,7 +120,7 @@ class TestMARBLBaseModelGet:
         self.mock_update_user_dotenv.assert_called_once_with(env_file_str)
 
         self.mock_subprocess_run.assert_called_once_with(
-            f"make {cstar_system.environment.compiler} USEMPI=TRUE",
+            f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
             cwd=f"{marbl_dir}/src",
             capture_output=True,
             text=True,
