@@ -78,5 +78,6 @@ class TestCStar:
         cstar_test_case.to_blueprint(tmpdir / "test_blueprint_persistence.yaml")
         cstar_test_case.build()
         cstar_test_case.pre_run()
-        cstar_test_case.run()
+        test_process = cstar_test_case.run()
+        test_process.updates(seconds=0, confirm_indefinite=False)
         cstar_test_case.post_run()

@@ -47,6 +47,9 @@ requires = [
     "check-manifest"
 ]
 
+[tool.setuptools_scm]
+fallback_version = "9999"
+
 # Configuration for mypy type checker
 [tool.mypy]
 ignore_missing_imports = true 
