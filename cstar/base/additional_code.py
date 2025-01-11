@@ -1,9 +1,9 @@
 import shutil
 import tempfile
-from typing import Optional
+from typing import Optional, Dict
 from pathlib import Path
 from cstar.base.datasource import DataSource
-from cstar.base.utils import _clone_and_checkout, _list_to_concise_str
+from cstar.base.utils import _clone_and_checkout, _list_to_concise_str, _get_sha256_hash
 
 
 class AdditionalCode:
@@ -73,7 +73,9 @@ class AdditionalCode:
         self.subdir: str = subdir
         self.checkout_target: Optional[str] = checkout_target
         self.files: Optional[list[str]] = [] if files is None else files
+        # Initialize object state
         self.working_path: Optional[Path] = None
+        self._local_file_hash_cache: Dict = {}
 
         # If there are namelists, make a parallel attribute to keep track of the ones we are editing
         # AdditionalCode.get() determines which namelists are editable templates and updates this list
@@ -120,11 +122,16 @@ class AdditionalCode:
     def exists_locally(self):
         """Determine whether a local working copy of the AdditionalCode exists at
         self.working_path (bool)"""
-        if self.working_path is None:
+        if (self.working_path is None) or (self._local_file_hash_cache is None):
             return False
 
         for f in self.files:
-            if not (self.working_path / f).exists():
+            path = self.working_path / f
+            if not path.exists():
+                return False
+
+            current_hash = _get_sha256_hash(path.resolve())
+            if self._local_file_hash_cache.get(path) != current_hash:
                 return False
 
         return True
@@ -195,6 +202,10 @@ class AdditionalCode:
                 )
                 if src_file_path.exists():
                     shutil.copy(src_file_path, tgt_file_path)
+                    self._local_file_hash_cache[tgt_file_path] = _get_sha256_hash(
+                        tgt_file_path
+                    )
+
                 else:
                     raise FileNotFoundError(f"Error: {src_file_path} does not exist.")
                 # Special case for template namelists:
