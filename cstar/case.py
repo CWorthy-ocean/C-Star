@@ -14,6 +14,9 @@ from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
 
+from cstar.execution.handler import ExecutionStatus
+from cstar.execution.local_process import LocalProcess
+
 if TYPE_CHECKING:
     from cstar.execution.handler import ExecutionHandler
 
@@ -534,6 +537,19 @@ class Case:
         Case.restore(caseroot):
            Restore the state of a previously created Case in `caseroot`
         """
+
+        for component in self.components:
+            if (
+                (hasattr(component, "_execution_handler"))
+                and (isinstance(component._execution_handler, LocalProcess))
+                and (component._execution_handler.status == ExecutionStatus.RUNNING)
+            ):
+                raise RuntimeError(
+                    "Case.persist() was called, but at least one "
+                    "component is currently running in a local process. Await "
+                    "completion or use LocalProcess.cancel(), then try again"
+                )
+
         with open(f"{self.caseroot}/case_state.pkl", "wb") as state_file:
             pickle.dump(self, state_file)
 

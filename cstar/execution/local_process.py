@@ -68,6 +68,7 @@ class LocalProcess(ExecutionHandler):
 
         self._output_file_handle = None
         self._process = None
+        self._returncode = None
         self._cancelled = False
 
     def start(self):
@@ -128,24 +129,39 @@ class LocalProcess(ExecutionHandler):
             - `ExecutionStatus.CANCELLED`: The task was cancelled using LocalProcess.cancel()
             - `ExecutionStatus.UNKNOWN`: The task status could not be determined.
         """
+        if self._process:
+            if self._process.poll() is None:
+                return ExecutionStatus.RUNNING
+            else:
+                self._drop_process()
 
         if self._cancelled:
             return ExecutionStatus.CANCELLED
-        if self._process is None:
-            return ExecutionStatus.UNSUBMITTED
-        if self._process.poll() is None:
-            return ExecutionStatus.RUNNING
-        if self._process.returncode == 0:
-            if self._output_file_handle:
-                self._output_file_handle.close()
-                self._output_file_handle = None
-            return ExecutionStatus.COMPLETED
-        elif self._process.returncode is not None:
-            if self._output_file_handle:
-                self._output_file_handle.close()
-                self._output_file_handle = None
-            return ExecutionStatus.FAILED
+
+        match self._returncode:
+            case None:
+                return ExecutionStatus.UNSUBMITTED
+            case 0:
+                return ExecutionStatus.COMPLETED
+            case _:
+                return ExecutionStatus.FAILED
+
         return ExecutionStatus.UNKNOWN
+
+    def _drop_process(self) -> None:
+        if self._process is None:
+            return
+        elif self._process.poll() is not None:
+            self._returncode = self._process.returncode
+            self._process = None
+        else:
+            raise RuntimeError(
+                "LocalProcess._drop_process() called on still-active process. Await completion or use LocalProcess.cancel()"
+            )
+
+        if self._output_file_handle:
+            self._output_file_handle.close()
+            self._output_file_handle = None
 
     def cancel(self):
         """Cancel the local process.
@@ -178,6 +194,7 @@ class LocalProcess(ExecutionHandler):
                     self._output_file_handle.close()
                     self._output_file_handle = None
                 self._cancelled = True
+                self._drop_process()
         else:
             print(f"Cannot cancel job with status '{self.status}'")
             return
