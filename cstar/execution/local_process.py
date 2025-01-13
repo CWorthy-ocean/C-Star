@@ -127,9 +127,8 @@ class LocalProcess(ExecutionHandler):
             - `ExecutionStatus.COMPLETED`: The task finished successfully.
             - `ExecutionStatus.FAILED`: The task finished unsuccessfully.
             - `ExecutionStatus.CANCELLED`: The task was cancelled using LocalProcess.cancel()
-            - `ExecutionStatus.UNKNOWN`: The task status could not be determined.
         """
-        if self._process:
+        if self._process is not None:
             if self._process.poll() is None:
                 return ExecutionStatus.RUNNING
             else:
@@ -145,8 +144,6 @@ class LocalProcess(ExecutionHandler):
                 return ExecutionStatus.COMPLETED
             case _:
                 return ExecutionStatus.FAILED
-
-        return ExecutionStatus.UNKNOWN
 
     def _drop_process(self) -> None:
         if self._process is None:
@@ -207,7 +204,7 @@ class LocalProcess(ExecutionHandler):
         cancel : end the current process
         """
 
-        if self._process and self.status == ExecutionStatus.RUNNING:
+        if self.status == ExecutionStatus.RUNNING:
             self._process.wait()
         else:
             print(f"cannot wait for process with execution status '{self.status}'")
