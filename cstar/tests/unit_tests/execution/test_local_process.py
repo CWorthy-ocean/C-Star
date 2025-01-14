@@ -1,7 +1,10 @@
-from unittest.mock import MagicMock, patch
-from pathlib import Path
-from cstar.execution.local_process import LocalProcess, ExecutionStatus
+import pytest
 import subprocess
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from cstar.execution.local_process import LocalProcess, ExecutionStatus
 
 
 class TestLocalProcess:
@@ -200,6 +203,57 @@ class TestLocalProcess:
         assert process.status == ExecutionStatus.FAILED
         mock_file_handle.close.assert_called_once()  # Ensure the file handle is closed
         assert process._output_file_handle is None  # Ensure the file handle is cleared
+
+    @patch("subprocess.Popen")
+    def test_drop_process(self, mock_popen, tmp_path):
+        """Tests the behavior of the private _drop_process method.
+
+        This test checks behavior in three situations:
+        - _process un-set
+        - _process set to a completed subprocess.Popen instance
+        - _process set to a running subprocess.Popen instance
+
+        Mocks
+        -----
+        subprocess.Popen
+            Mocked to simulate a failed subprocess.
+
+        Asserts
+        -------
+        - no action is taken if the _process attribute is not set
+        - _returncode is set if _process is set to a complete subprocess
+        - _process is un-set if _process is set to a complete subprocess
+        - RuntimeError raised if _process is set to a running subprocess
+        """
+        mock_subprocess = MagicMock()
+        mock_popen.return_value = mock_subprocess
+        local_process = LocalProcess(
+            commands=self.commands,
+            run_path=tmp_path,
+            output_file=tmp_path / "output.log",
+        )
+        # no process (return early):
+        local_process._process = None
+        local_process._drop_process()
+        assert local_process._returncode is None
+        mock_subprocess.poll.assert_not_called()
+
+        # valid process (set _returncode, clear _process):
+        mock_subprocess.returncode = 0
+        local_process._process = mock_subprocess
+        local_process._drop_process()
+        assert local_process._returncode == 0
+        assert local_process._process is None
+
+        # running process (raise)
+        mock_subprocess.poll.return_value = None
+        local_process._process = mock_subprocess
+        with pytest.raises(RuntimeError) as err_msg:
+            local_process._drop_process()
+            assert str(err_msg.value) == (
+                "LocalProcess._drop_process() called on still-active process. "
+                "Await completion or use LocalProcess.cancel()"
+            )
 
     @patch("subprocess.Popen")
     def test_cancel_graceful_termination(self, mock_popen, tmp_path):
