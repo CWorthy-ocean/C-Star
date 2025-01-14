@@ -1,7 +1,10 @@
-from unittest.mock import MagicMock, patch
-from pathlib import Path
-from cstar.execution.local_process import LocalProcess, ExecutionStatus
+import pytest
 import subprocess
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from cstar.execution.local_process import LocalProcess, ExecutionStatus
 
 
 class TestLocalProcess:
@@ -145,21 +148,20 @@ class TestLocalProcess:
         mock_process.poll.return_value = None  # Simulate running process
         process.start()
         assert process.status == ExecutionStatus.RUNNING
+        assert process._process is not None
 
         # After completion: COMPLETED
         mock_process.poll.return_value = 0  # Simulate successful termination
         mock_process.returncode = 0
+        process.start()
         assert process.status == ExecutionStatus.COMPLETED
+        assert process._process is None
 
         # After failure: FAILED
         mock_process.poll.return_value = 1  # Simulate unsuccessful termination
         mock_process.returncode = 1
+        process.start()
         assert process.status == ExecutionStatus.FAILED
-
-        # Indeterminate state: UNKNOWN
-        mock_process.returncode = None  # Indeterminate state
-        process._process = mock_process  # Ensure process is assigned
-        assert process.status == ExecutionStatus.UNKNOWN
 
     @patch("subprocess.Popen")
     def test_status_failed_closes_file_handle(self, mock_popen, tmp_path):
@@ -203,6 +205,57 @@ class TestLocalProcess:
         assert process._output_file_handle is None  # Ensure the file handle is cleared
 
     @patch("subprocess.Popen")
+    def test_drop_process(self, mock_popen, tmp_path):
+        """Tests the behavior of the private _drop_process method.
+
+        This test checks behavior in three situations:
+        - _process un-set
+        - _process set to a completed subprocess.Popen instance
+        - _process set to a running subprocess.Popen instance
+
+        Mocks
+        -----
+        subprocess.Popen
+            Mocked to simulate a failed subprocess.
+
+        Asserts
+        -------
+        - no action is taken if the _process attribute is not set
+        - _returncode is set if _process is set to a complete subprocess
+        - _process is un-set if _process is set to a complete subprocess
+        - RuntimeError raised if _process is set to a running subprocess
+        """
+        mock_subprocess = MagicMock()
+        mock_popen.return_value = mock_subprocess
+        local_process = LocalProcess(
+            commands=self.commands,
+            run_path=tmp_path,
+            output_file=tmp_path / "output.log",
+        )
+        # no process (return early):
+        local_process._process = None
+        local_process._drop_process()
+        assert local_process._returncode is None
+        mock_subprocess.poll.assert_not_called()
+
+        # valid process (set _returncode, clear _process):
+        mock_subprocess.returncode = 0
+        local_process._process = mock_subprocess
+        local_process._drop_process()
+        assert local_process._returncode == 0
+        assert local_process._process is None
+
+        # running process (raise)
+        mock_subprocess.poll.return_value = None
+        local_process._process = mock_subprocess
+        with pytest.raises(RuntimeError) as err_msg:
+            local_process._drop_process()
+            assert str(err_msg.value) == (
+                "LocalProcess._drop_process() called on still-active process. "
+                "Await completion or use LocalProcess.cancel()"
+            )
+
+    @patch("subprocess.Popen")
     def test_cancel_graceful_termination(self, mock_popen, tmp_path):
         """Ensures that the `cancel` method gracefully terminates a running process.
 
@@ -239,6 +292,9 @@ class TestLocalProcess:
         assert process.status == ExecutionStatus.RUNNING
         assert process._process is mock_process  # Ensure the process was assigned
 
+        # cancel() call will call process.poll() internally twice;
+        # once while still running [None], once in _drop_process() [termination code]:
+        mock_process.poll.side_effect = [None, -15]
         # Test graceful termination
         process.cancel()
         mock_process.terminate.assert_called_once()  # Ensure terminate() was called
@@ -284,6 +340,10 @@ class TestLocalProcess:
         # Verify the process has started
         assert process.status == ExecutionStatus.RUNNING
         assert process._process is mock_process  # Ensure the process was assigned
+
+        # cancel() call will call process.poll() internally twice;
+        # once while still running [None], once in _drop_process() [termination code]:
+        mock_process.poll.side_effect = [None, -15]
 
         # Test forceful termination
         process.cancel()
@@ -371,18 +431,15 @@ class TestLocalProcess:
         - `wait()` prints an appropriate message for non-running processes.
         - `wait()` does not attempt to wait on processes that are not running.
         """
-        # Mock subprocess behavior
+        # # Mock subprocess behavior
         mock_process = MagicMock()
-        mock_popen.return_value = mock_process
 
-        # Test wait on a cancelled process
-        mock_process.poll.return_value = None  # Process is active
         process = LocalProcess(
             commands="sleep 1",
             run_path=tmp_path,
             output_file=tmp_path / "output.log",
         )
-        process._process = mock_process  # Assign mock process
+        process._process = None  # Assign mock process
         process._cancelled = True
 
         process.wait()

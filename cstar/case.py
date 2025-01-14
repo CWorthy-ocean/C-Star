@@ -1,4 +1,5 @@
 import yaml
+import pickle
 import warnings
 
 import dateutil.parser
@@ -12,6 +13,9 @@ from cstar.system.manager import cstar_sysmgr
 from cstar.base.utils import _dict_to_tree
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
+
+from cstar.execution.handler import ExecutionStatus
+from cstar.execution.local_process import LocalProcess
 
 if TYPE_CHECKING:
     from cstar.execution.handler import ExecutionHandler
@@ -86,6 +90,17 @@ class Case:
         """
 
         self.components: List["Component"] = components
+        resolved_caseroot = Path(caseroot).resolve()
+        if resolved_caseroot.exists() and (
+            (not resolved_caseroot.is_dir()) or (any(resolved_caseroot.iterdir()))
+        ):
+            raise FileExistsError(
+                f"Your chosen caseroot {caseroot} exists and is not an empty directory."
+                "\nIf you have previously created this case, use "
+                f"\nmy_case = Case.restore(caseroot={caseroot!r})"
+                "\n to restore it"
+            )
+
         self.caseroot: Path = Path(caseroot).resolve()
         self.name: str = name
         self.is_from_blueprint: bool = False
@@ -511,6 +526,59 @@ class Case:
             elif isinstance(component, MARBLComponent):
                 component.setup()
 
+    def persist(self) -> None:
+        """Save the state of this Case.
+
+        This method creates a file `case_state.pkl` in the Case.caseroot directory,
+        containing the current state of the Case instance.
+
+        See Also
+        --------
+        Case.restore(caseroot):
+           Restore the state of a previously created Case in `caseroot`
+        """
+
+        for component in self.components:
+            if (
+                (hasattr(component, "_execution_handler"))
+                and (isinstance(component._execution_handler, LocalProcess))
+                and (component._execution_handler.status == ExecutionStatus.RUNNING)
+            ):
+                raise RuntimeError(
+                    "Case.persist() was called, but at least one "
+                    "component is currently running in a local process. Await "
+                    "completion or use LocalProcess.cancel(), then try again"
+                )
+
+        with open(f"{self.caseroot}/case_state.pkl", "wb") as state_file:
+            pickle.dump(self, state_file)
+
+    @classmethod
+    def restore(cls, caseroot: str | Path) -> "Case":
+        """Restore the state of a Case previously created in `caseroot`
+
+        Parameters
+        ----------
+        caseroot (str or Path):
+           The directory associated with the previously created Case
+
+        Returns
+        -------
+        case (Case):
+           The restored Case instance
+
+        See Also
+        --------
+        Case.persist():
+            Save the state of a Case instance
+        """
+
+        caseroot = Path(caseroot)
+        with open(f"{caseroot}/case_state.pkl", "rb") as state_file:
+            case_instance = pickle.load(state_file)
+
+        return case_instance
+
     def build(self) -> None:
         """Compile any necessary additional code associated with this case by calling
         component.build() on each Component object making up this case."""
@@ -518,6 +586,9 @@ class Case:
             infostr = f"\nCompiling {component.__class__.__name__}"
             print(infostr + "\n" + "-" * len(infostr))
             component.build()
+
+        # Update saved state:
+        self.persist()
 
     def pre_run(self) -> None:
         """For each Component associated with this case, execute pre-processing actions
@@ -528,6 +599,9 @@ class Case:
             )
             print(infostr + "\n" + "-" * len(infostr))
             component.pre_run()
+
+        # Update saved state:
+        self.persist()
 
     def run(
         self,
@@ -576,6 +650,9 @@ class Case:
             "unable to run Case, could not find a suitable Component to run"
         )
 
+        # Update saved state:
+        self.persist()
+
     def post_run(self) -> None:
         """For each Component associated with this case, execute post-processing actions
         by calling component.post_run()"""
@@ -584,6 +661,9 @@ class Case:
                 infostr = f"\nCompleting post-processing steps for {component.__class__.__name__}"
                 print(infostr + "\n" + "-" * len(infostr))
                 component.post_run(output_dir=self.caseroot / "output")
+
+        # Update saved state
+        self.persist()
 
     def restart(self, new_end_date: str | datetime) -> "Case":
         """Returns a new Case instance beginning at the end date of this Case.
@@ -631,9 +711,5 @@ class Case:
                 new_component = component
             new_components.append(new_component)
         new_case.components = new_components
-
-        # TODO: need handling of ROMSComponent.initial_conditions:
-        # - Somehow need to calculate what the restart file will be
-        #   and replace the IC with this
 
         return new_case
