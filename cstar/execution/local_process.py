@@ -71,6 +71,27 @@ class LocalProcess(ExecutionHandler):
         self._returncode = None
         self._cancelled = False
 
+    def __str__(self) -> str:
+        base_str = self.__class__.__name__ + "\n"
+        base_str += "-" * (len(base_str) - 1)
+        base_str += f"\nCommands: {self.commands}"
+        base_str += f"\nRun path: {self.run_path}"
+        base_str += f"\nOutput file: {self.output_file}"
+        base_str += f"\nStatus: {self.status}"
+
+        return base_str
+
+    def __repr__(self) -> str:
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\ncommands = {self.commands!r},"
+        repr_str += f"\noutput_file = {self.output_file!r},"
+        repr_str += f"\nrun_path = {self.run_path!r}"
+        repr_str += "\n)"
+
+        repr_str += f"\nState: <status = {self.status!r}>"
+
+        return repr_str
+
     def start(self):
         """Start the local process.
 
