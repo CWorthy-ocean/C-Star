@@ -146,6 +146,18 @@ class LocalProcess(ExecutionHandler):
                 return ExecutionStatus.FAILED
 
     def _drop_process(self) -> None:
+        """Un-sets private attributes associated with a completed subprocess.
+
+        This method:
+        - Sets LocalProcess._returncode to LocalProcess._process.returncode
+        - Sets LocalProcess._process to None
+        - Closes output_file
+        - Sets LocalProcess._output_file_handle to None
+
+        If the _process attribute is not set, no action is taken.
+        If it is set to a running process, a RuntimeError is raised.
+        """
+
         if self._process is None:
             return
         elif self._process.poll() is not None:
