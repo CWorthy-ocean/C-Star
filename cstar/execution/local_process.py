@@ -83,8 +83,8 @@ class LocalProcess(ExecutionHandler):
 
     def __repr__(self) -> str:
         repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\ncommands = {self.commands!r}, "
-        repr_str += f"\noutput_file = {self.output_file!r}, "
+        repr_str += f"\ncommands = {self.commands!r},"
+        repr_str += f"\noutput_file = {self.output_file!r},"
         repr_str += f"\nrun_path = {self.run_path!r}"
         repr_str += "\n)"
 

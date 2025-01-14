@@ -120,7 +120,9 @@ class TestLocalProcess:
         )
         State: <status = <ExecutionStatus.UNSUBMITTED: 1>>""")
 
-        assert mock_local_process.__repr__() == test_repr
+        assert (
+            mock_local_process.__repr__() == test_repr
+        ), f"expected \n{test_repr}\n, got \n{mock_local_process.__repr__()}\n"
 
     def test_start_success(self, tmp_path, mock_local_process):
         """Verifies that the subprocess starts successfully with valid commands.
