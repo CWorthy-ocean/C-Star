@@ -579,13 +579,19 @@ class Case:
 
         return case_instance
 
-    def build(self) -> None:
+    def build(self, rebuild=False) -> None:
         """Compile any necessary additional code associated with this case by calling
-        component.build() on each Component object making up this case."""
+        component.build() on each Component object making up this case.
+
+        Parameters
+        ----------
+        rebuild (bool, default False):
+            Forces recompilation of any already compiled code
+        """
         for component in self.components:
             infostr = f"\nCompiling {component.__class__.__name__}"
             print(infostr + "\n" + "-" * len(infostr))
-            component.build()
+            component.build(rebuild=rebuild)
 
         # Update saved state:
         self.persist()

@@ -8,7 +8,7 @@ from typing import Optional, TYPE_CHECKING, List
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.handler import ExecutionStatus
-from cstar.base.utils import _replace_text_in_file
+from cstar.base.utils import _replace_text_in_file, _get_sha256_hash
 from cstar.base.component import Component
 from cstar.roms.base_model import ROMSBaseModel
 from cstar.roms.input_dataset import (
@@ -151,6 +151,7 @@ class ROMSComponent(Component):
 
         # roms-specific
         self.exe_path: Optional[Path] = None
+        self._exe_hash: Optional[str] = None
         self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
@@ -698,13 +699,20 @@ class ROMSComponent(Component):
                     end_date=end_date,
                 )
 
-    def build(self) -> None:
+    def build(self, rebuild: bool = False) -> None:
         """Compiles any code associated with this configuration of ROMS.
 
         Compilation occurs in the directory
         `ROMSComponent.additional_source_code.working_path
         This method sets the ROMSComponent `exe_path` attribute.
+
+        Parameters
+        ----------
+        rebuild (bool, default False):
+            Will force the recompilation of ROMS even if the executable
+            already exists and there is no apparent reason to recompile.
         """
+
         if self.additional_source_code is None:
             raise ValueError(
                 "Unable to compile ROMSComponent: "
@@ -719,6 +727,23 @@ class ROMSComponent(Component):
                 + "\nROMSComponent.additional_source_code.working_path is None."
                 + "\n Call ROMSComponent.additional_source_code.get() and try again"
             )
+
+        exe_path = build_dir / "roms"
+        if (
+            (exe_path.exists())
+            and (self.additional_source_code.exists_locally)
+            and (self._exe_hash is not None)
+            and (_get_sha256_hash(exe_path) == self._exe_hash)
+            and not rebuild
+        ):
+            print(
+                f"ROMS has already been built at {exe_path}, and "
+                "the source code appears not to have changed. "
+                "If you would like to recompile, call "
+                "ROMSComponent.build(rebuild = True)"
+            )
+            return
+
         if (build_dir / "Compile").is_dir():
             make_clean_result = subprocess.run(
                 "make compile_clean",
@@ -749,7 +774,8 @@ class ROMSComponent(Component):
 
         print(f"UCLA-ROMS compiled at {build_dir}")
 
-        self.exe_path = build_dir / "roms"
+        self.exe_path = exe_path
+        self._exe_hash = _get_sha256_hash(exe_path)
 
     def pre_run(self) -> None:
         """Performs pre-processing steps associated with this ROMSComponent object.
