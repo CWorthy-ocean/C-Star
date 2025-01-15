@@ -377,8 +377,8 @@ class Case:
 
         Parameters:
         -----------
-        blueprint: str | Path
-            Path to a yaml file containing the blueprint for the case
+        blueprint: str
+            Location of a yaml file (either a path or URL) containing the blueprint for the case
         caseroot: str | Path
             Path to the local directory where the case will be curated and run
         start_date: str or datetime, Optional, default=valid_start_date
