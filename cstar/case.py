@@ -1,6 +1,7 @@
 import yaml
 import pickle
 import warnings
+import requests
 
 import dateutil.parser
 from pathlib import Path
@@ -11,6 +12,7 @@ from cstar.base.component import Component
 
 from cstar.system.manager import cstar_sysmgr
 from cstar.base.utils import _dict_to_tree
+from cstar.base.datasource import DataSource
 from cstar.roms.component import ROMSComponent
 from cstar.marbl.component import MARBLComponent
 
@@ -375,8 +377,8 @@ class Case:
 
         Parameters:
         -----------
-        blueprint: str | Path
-            Path to a yaml file containing the blueprint for the case
+        blueprint: str
+            Location of a yaml file (either a path or URL) containing the blueprint for the case
         caseroot: str | Path
             Path to the local directory where the case will be curated and run
         start_date: str or datetime, Optional, default=valid_start_date
@@ -390,8 +392,16 @@ class Case:
             An initalized Case object based on the provided blueprint
         """
 
-        with open(blueprint, "r") as file:
-            bp_dict = yaml.safe_load(file)
+        source = DataSource(location=blueprint)
+        if source.source_type != "yaml":
+            raise ValueError(
+                f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
+            )
+        if source.location_type == "path":
+            with open(blueprint, "r") as file:
+                bp_dict = yaml.safe_load(file)
+        elif source.location_type == "url":
+            bp_dict = yaml.safe_load(requests.get(source.location).text)
 
         # Top-level metadata
         registry_attrs = bp_dict.get("registry_attrs")
