@@ -1,6 +1,7 @@
 import yaml
-import shutil
+import tempfile
 import dateutil
+import requests
 import datetime as dt
 import roms_tools
 
@@ -149,7 +150,7 @@ class ROMSInputDataset(InputDataset, ABC):
         """
         # Ensure we're working with a Path object
         local_dir = Path(local_dir).resolve()
-
+        local_dir.mkdir(parents=True, exist_ok=True)
         # If `working_path` is set, determine we're not fetching to the same parent dir:
         if self.working_path is None:
             working_path_parent = None
@@ -162,25 +163,18 @@ class ROMSInputDataset(InputDataset, ABC):
             print(f"Input dataset already exists in {working_path_parent}, skipping.")
             return
 
-        super().get(local_dir=local_dir)
-
-        # If it's not a yaml, we're done
         if self.source.source_type != "yaml":
+            super().get(local_dir=local_dir)
             return
+        elif self.source.location_type == "path":
+            with open(self.source.location) as F:
+                raw_yaml_text = F.read()
+        elif self.source.location_type == "url":
+            raw_yaml_text = requests.get(self.source.location).text
 
-        # Make sure that the local copy is not a symlink
-        # (as InputDataset.get() symlinks files that didn't need to be downloaded)
-        local_path = local_dir / Path(self.source.basename)
-        if local_path.is_symlink():
-            actual_path = local_path.resolve()
-            local_path.unlink()
-            shutil.copy2(actual_path, local_path)
-            local_path = actual_path
+        _, header, yaml_data = raw_yaml_text.split("---", 2)
 
-        # Now modify the local copy of the yaml file as needed:
-        with open(local_path, "r") as F:
-            _, header, yaml_data = F.read().split("---", 2)
-            yaml_dict = yaml.safe_load(yaml_data)
+        yaml_dict = yaml.safe_load(yaml_data)
 
         yaml_keys = list(yaml_dict.keys())
         if len(yaml_keys) == 1:
@@ -209,35 +203,36 @@ class ROMSInputDataset(InputDataset, ABC):
             if key in yaml_dict[roms_tools_class_name].keys():
                 yaml_dict[roms_tools_class_name][key] = value
 
-        with open(local_path, "w") as F:
-            F.write(f"---{header}---\n" + yaml.dump(yaml_dict))
-
-        # Finally, make a roms-tools object from the modified yaml
-        # import roms_tools
-
         roms_tools_class = getattr(roms_tools, roms_tools_class_name)
 
-        # roms-tools currently requires dask for every class except Grid
-        # in order to use wildcards in filepaths (known xarray issue):
+        # Create a temporary file that deletes itself when closed
+        with tempfile.NamedTemporaryFile(mode="w", delete=True) as temp_file:
+            temp_file.write(f"---{header}---\n" + yaml.dump(yaml_dict))
+            temp_file.flush()  # Ensure data is written to disk
 
-        if roms_tools_class_name == "Grid":
-            roms_tools_class_instance = roms_tools_class.from_yaml(local_path)
-        else:
-            roms_tools_class_instance = roms_tools_class.from_yaml(
-                local_path, use_dask=True
-            )
+            # roms-tools currently requires dask for every class except Grid
+            # in order to use wildcards in filepaths (known xarray issue):
+            if roms_tools_class_name == "Grid":
+                roms_tools_class_instance = roms_tools_class.from_yaml(temp_file.name)
+            else:
+                roms_tools_class_instance = roms_tools_class.from_yaml(
+                    temp_file.name, use_dask=True
+                )
+        ##
 
         # ... and save:
-        print(f"Saving roms-tools dataset created from {local_path}...")
+        print(f"Saving roms-tools dataset created from {self.source.location}...")
         if (np_eta is not None) and (np_xi is not None):
             savepath = roms_tools_class_instance.save(
-                local_dir / "PARTITIONED" / local_path.stem, np_xi=np_xi, np_eta=np_eta
+                local_dir / "PARTITIONED" / Path(self.source.location).stem,
+                np_xi=np_xi,
+                np_eta=np_eta,
             )
             self.partitioned_files = savepath
 
         else:
             savepath = roms_tools_class_instance.save(
-                Path(f"{local_dir/local_path.stem}.nc")
+                Path(f"{local_dir/Path(self.source.location).stem}.nc")
             )
         self.working_path = savepath[0] if len(savepath) == 1 else savepath
 
