@@ -208,7 +208,7 @@ class TestInputDatasetInit:
         expected_message = (
             "Cannot create InputDataset for \n http://example.com/remote_file.nc:\n "
             + "InputDataset.source.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
-            + "A file hash is required to verify files downloaded from remote sources."
+            + "A file hash is required to verify non-plaintext files downloaded from remote sources."
         )
 
         assert str(exception_info.value) == expected_message

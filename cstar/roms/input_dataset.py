@@ -171,11 +171,9 @@ class ROMSInputDataset(InputDataset, ABC):
                 raw_yaml_text = F.read()
         elif self.source.location_type == "url":
             raw_yaml_text = requests.get(self.source.location).text
-
         _, header, yaml_data = raw_yaml_text.split("---", 2)
 
         yaml_dict = yaml.safe_load(yaml_data)
-
         yaml_keys = list(yaml_dict.keys())
         if len(yaml_keys) == 1:
             roms_tools_class_name = yaml_keys[0]
