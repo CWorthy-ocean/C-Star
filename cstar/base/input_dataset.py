@@ -51,11 +51,15 @@ class InputDataset(ABC):
         """
 
         self.source: DataSource = DataSource(location=location, file_hash=file_hash)
-        if (self.source.location_type == "url") and (self.source.file_hash is None):
+        if (
+            (self.source.location_type == "url")
+            and (self.source.file_hash is None)
+            and (self.source.source_type != "yaml")
+        ):
             raise ValueError(
                 f"Cannot create InputDataset for \n {self.source.location}:\n "
                 + "InputDataset.source.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
-                + "A file hash is required to verify files downloaded from remote sources."
+                + "A file hash is required to verify non-plaintext files downloaded from remote sources."
             )
         if isinstance(start_date, str):
             start_date = dateutil.parser.parse(start_date)
