@@ -1019,4 +1019,10 @@ class ROMSComponent(Component):
         new_component = copy.deepcopy(self)
         new_component.initial_conditions = new_ic
 
+        # Reset cached data for input datasets
+        for inp in new_component.input_datasets:
+            inp._local_file_hash_cache = None
+            inp._local_file_stat_cache = None
+            inp.working_path = None
+
         return new_component
