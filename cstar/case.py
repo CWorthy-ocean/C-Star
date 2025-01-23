@@ -704,6 +704,8 @@ class Case:
 
         new_case = copy.deepcopy(self)
         new_case.start_date = self.end_date
+        new_case.caseroot = new_case.caseroot / f"RESTART_{new_case.start_date.strftime(format='%Y%m%d_%H%M%S')}"
+        
         if isinstance(new_end_date, str):
             new_case.end_date = dateutil.parser.parse(new_end_date)
         elif isinstance(new_end_date, datetime):
@@ -727,5 +729,6 @@ class Case:
                 new_component = component
             new_components.append(new_component)
         new_case.components = new_components
-
+        print(f"Created new Case to restart case {self.name!r} in {new_case.caseroot}")
+        
         return new_case
