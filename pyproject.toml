@@ -28,14 +28,14 @@ dependencies = [
     "python-dotenv",
     "PyYAML==6.0.2",
     "pooch>=1.8.1",
-    "roms_tools[dask]>=2.2.0"
+    "roms_tools[dask]>=2.2.1"
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
 [project.optional-dependencies]
 test = [
      "pytest>=7.0",
-     "roms_tools[dask]==2.2.0"
+     "roms_tools[dask]==2.2.1"
      ]
 dev =[]
 
