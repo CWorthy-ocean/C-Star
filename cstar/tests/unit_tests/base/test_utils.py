@@ -1,5 +1,6 @@
 import pytest
 import hashlib
+import warnings
 from unittest import mock
 from cstar.base.utils import (
     _get_sha256_hash,
@@ -337,6 +338,59 @@ class TestGetHashFromCheckoutTarget:
         assert "main" in error_message
         assert "feature" in error_message
         assert "v1.0.0" in error_message
+
+    @pytest.mark.parametrize(
+        "checkout_target, should_warn, should_raise",
+        [
+            # 7-character hex string (valid short hash)
+            ("246c11f", True, False),
+            # 40-character hex string (valid full hash)
+            ("246c11fa537145ba5868f2256dfb4964aeb09a25", True, False),
+            # 8-character hex string (invalid length)
+            ("246c11fa", False, True),
+            # Non-hex string
+            ("not-a-hash", False, True),
+        ],
+    )
+    def test_warning_and_error_for_potential_hash(
+        self, checkout_target, should_warn, should_raise
+    ):
+        """Test `_get_hash_from_checkout_target` to ensure a warning or error is raised
+        appropriately when the checkout target appears to be a commit hash but is not in
+        the dictionary of references returned by git ls-remote.
+
+        Parameters
+        ----------
+        checkout_target : str
+            The checkout target to test.
+        should_warn : bool
+            Whether a warning should be raised for this target.
+        should_raise : bool
+            Whether a ValueError should be raised for this target.
+        """
+        # Use pytest's `warnings.catch_warnings` to capture the warning
+        with warnings.catch_warnings(record=True) as warning_list:
+            if should_raise:
+                # Call the function and expect a ValueError
+                with pytest.raises(ValueError):
+                    _get_hash_from_checkout_target(self.repo_url, checkout_target)
+
+            else:
+                # Call the function and assert the result
+                result = _get_hash_from_checkout_target(self.repo_url, checkout_target)
+                assert result == checkout_target
+
+            # Check if a warning was raised
+            if should_warn:
+                assert len(warning_list) == 1
+                warning = warning_list[0]
+                assert issubclass(warning.category, UserWarning)
+                assert (
+                    f"C-STAR: The checkout target {checkout_target} appears to be a commit hash, "
+                    f"but it is not possible to verify that this hash is a valid checkout target of {self.repo_url}"
+                ) in str(warning.message)
+            else:
+                assert len(warning_list) == 0
 
 
 class TestReplaceTextInFile:

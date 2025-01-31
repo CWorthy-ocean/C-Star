@@ -1,4 +1,6 @@
+import re
 import hashlib
+import warnings
 import subprocess
 from pathlib import Path
 
@@ -143,12 +145,25 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
         return checkout_target
 
     # Otherwise, see if it is listed as a branch or tag
-    for ref, hash in ref_dict.items():
+    for ref, has in ref_dict.items():
         if (
             ref == f"refs/heads/{checkout_target}"
             or ref == f"refs/tags/{checkout_target}"
         ):
-            return hash
+            return has
+
+    # Lastly, if NOTA worked, see if the checkout target is a 7 or 40 digit hexadecimal string
+    is_potential_hash = bool(re.fullmatch(r"^[0-9a-f]{7}$", checkout_target)) or bool(
+        re.fullmatch(r"^[0-9a-f]{40}$", checkout_target)
+    )
+    if is_potential_hash:
+        warnings.warn(
+            f"C-STAR: The checkout target {checkout_target} appears to be a commit hash, "
+            f"but it is not possible to verify that this hash is a valid checkout target of {repo_url}"
+        )
+
+        return checkout_target
+
     # If the target is still not found, raise an error listing branches and tags
     branches = [
         ref.replace("refs/heads/", "")
