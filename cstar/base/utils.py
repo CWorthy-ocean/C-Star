@@ -1,4 +1,3 @@
-import re
 import hashlib
 import subprocess
 from pathlib import Path
@@ -109,10 +108,9 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
     """Take a git checkout target (any `arg` accepted by `git checkout arg`) and return
     a commit hash.
 
-    If the target is a 7 or 40 digit hexadecimal string, it is assumed `checkout_target`
-    is already a git hash, so `checkout_target` is returned.
-
-    Otherwise, `git ls-remote` is used to obtain the hash associated with `checkout_target`.
+    This method parses the output of `git ls-remote {repo_url}` to create a dictionary
+    of refs and hashes, returning the hash corresponding to `checkout_target` or
+    raising an error listing available branches and tags if the target is not found.
 
     Parameters:
     -----------
@@ -127,29 +125,58 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
         A git commit hash associated with the checkout target
     """
 
-    # First check if the checkout target is a 7 or 40 digit hexadecimal string
-    is_potential_hash = bool(re.fullmatch(r"^[0-9a-f]{7}$", checkout_target)) or bool(
-        re.fullmatch(r"^[0-9a-f]{40}$", checkout_target)
-    )
-    if is_potential_hash:
-        return checkout_target
-
-    # Then try ls-remote to see if there is a match
-    # (no match if either invalid target or a valid hash):
+    # Get list of targets from git ls-remote
     ls_remote = subprocess.run(
-        "git ls-remote " + repo_url + " " + checkout_target,
+        f"git ls-remote {repo_url}",
         shell=True,
         capture_output=True,
         text=True,
     ).stdout
 
-    if len(ls_remote) == 0:
-        raise ValueError(
-            f"supplied checkout_target ({checkout_target}) does not appear "
-            + f"to be a valid reference for this repository ({repo_url})"
+    # Process the output into a `reference: hash` dictionary
+    ref_dict = {
+        ref: has for has, ref in (line.split() for line in ls_remote.splitlines())
+    }
+
+    # If the checkout target is a valid hash, return it
+    if checkout_target in ref_dict.values():
+        return checkout_target
+
+    # Otherwise, see if it is listed as a branch or tag
+    for ref, hash in ref_dict.items():
+        if (
+            ref == f"refs/heads/{checkout_target}"
+            or ref == f"refs/tags/{checkout_target}"
+        ):
+            return hash
+    # If the target is still not found, raise an error listing branches and tags
+    branches = [
+        ref.replace("refs/heads/", "")
+        for ref in ref_dict
+        if ref.startswith("refs/heads/")
+    ]
+    tags = [
+        ref.replace("refs/tags/", "")
+        for ref in ref_dict
+        if ref.startswith("refs/tags/")
+    ]
+
+    error_message = (
+        f"Supplied checkout_target ({checkout_target}) does not appear "
+        f"to be a valid reference for this repository ({repo_url}).\n"
+    )
+    if branches:
+        error_message += (
+            "Available branches:\n"
+            + "\n".join(f" - {branch}" for branch in sorted(branches))
+            + "\n"
         )
-    else:
-        return ls_remote.split()[0]
+    if tags:
+        error_message += (
+            "Available tags:\n" + "\n".join(f" - {tag}" for tag in sorted(tags)) + "\n"
+        )
+
+    raise ValueError(error_message.strip())
 
 
 def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -> bool:

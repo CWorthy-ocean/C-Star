@@ -248,103 +248,95 @@ def test_get_repo_head_hash():
         )
 
 
-def test_get_hash_from_checkout_target_direct_hash():
-    """Test `_get_hash_from_checkout_target` to confirm it returns the input directly
-    when `checkout_target` is already a valid 7-character or 40-character hash.
+class TestGetHashFromCheckoutTarget:
+    """Test class for `_get_hash_from_checkout_target`."""
 
-    Asserts
-    -------
-    - Ensures that `checkout_target` is returned directly if it matches a 7-character or
-      40-character hash pattern.
-    - Verifies `subprocess.run` is not called for direct hash inputs.
-    """
-    repo_url = "https://example.com/repo.git"
+    def setup_method(self):
+        """Setup method to define common variables and mock data."""
+        self.repo_url = "https://example.com/repo.git"
 
-    # Test with a 7-character hash
-    checkout_target_7 = "abcdef1"
-    with mock.patch("subprocess.run") as mock_run:
-        result_7 = _get_hash_from_checkout_target(repo_url, checkout_target_7)
-        assert (
-            result_7 == checkout_target_7
-        ), f"Expected '{checkout_target_7}', got '{result_7}'"
-        (
-            mock_run.assert_not_called(),
-            f"subprocess.run was called unexpectedly for 7-character hash '{checkout_target_7}'",
+        # Mock the output of `git ls-remote` with a variety of refs
+        self.ls_remote_output = (
+            "abcdef1234567890abcdef1234567890abcdef12\trefs/heads/main\n"  # Branch
+            "deadbeef1234567890deadbeef1234567890deadbeef\trefs/heads/feature\n"  # Branch
+            "c0ffee1234567890c0ffee1234567890c0ffee1234\trefs/tags/v1.0.0\n"  # Tag
+            "feedface1234567890feedface1234567890feedface\trefs/pull/123/head\n"  # Pull request
+            "1234567890abcdef1234567890abcdef12345678\trefs/heads/develop\n"  # Branch
         )
 
-    # Test with a 40-character hash
-    checkout_target_40 = "abcdef1234567890abcdef1234567890abcdef12"
-    with mock.patch("subprocess.run") as mock_run:
-        result_40 = _get_hash_from_checkout_target(repo_url, checkout_target_40)
-        assert (
-            result_40 == checkout_target_40
-        ), f"Expected '{checkout_target_40}', got '{result_40}'"
-        (
-            mock_run.assert_not_called(),
-            f"subprocess.run was called unexpectedly for 40-character hash '{checkout_target_40}'",
+        # Patch subprocess.run to simulate the `git ls-remote` command
+        self.mock_run = mock.patch("subprocess.run").start()
+        self.mock_run.return_value = mock.Mock(
+            returncode=0, stdout=self.ls_remote_output
         )
 
+    def teardown_method(self):
+        """Teardown method to stop all patches."""
+        mock.patch.stopall()
 
-def test_get_hash_from_checkout_target_branch():
-    """Test `_get_hash_from_checkout_target` to confirm it retrieves the correct hash
-    when `checkout_target` is a branch or tag.
+    @pytest.mark.parametrize(
+        "checkout_target, expected_hash",
+        [
+            pytest.param(target, hash, id=target)
+            for target, hash in [
+                # Branches
+                ("main", "abcdef1234567890abcdef1234567890abcdef12"),
+                ("develop", "1234567890abcdef1234567890abcdef12345678"),
+                # Tags
+                ("v1.0.0", "c0ffee1234567890c0ffee1234567890c0ffee1234"),
+                # Commit hashes
+                (
+                    "1234567890abcdef1234567890abcdef12345678",
+                    "1234567890abcdef1234567890abcdef12345678",
+                ),
+            ]
+        ],
+    )
+    def test_valid_targets(self, checkout_target, expected_hash):
+        """Test `_get_hash_from_checkout_target` with valid checkout targets.
 
-    Asserts
-    -------
-    - Ensures the correct hash is returned when `checkout_target` is not a direct hash.
-    - Verifies `subprocess.run` is called with the correct `git ls-remote` command.
-    """
-    repo_url = "https://example.com/repo.git"
-    checkout_target = "main"
-    expected_hash = "abcdef1234567890abcdef1234567890abcdef12"
-
-    # Patch subprocess.run to simulate successful `git ls-remote` command
-    with mock.patch("subprocess.run") as mock_run:
-        mock_run.return_value = mock.Mock(
-            returncode=0, stdout=f"{expected_hash}\trefs/heads/main\n"
-        )
-
-        # Call the function
-        result = _get_hash_from_checkout_target(repo_url, checkout_target)
-
-        # Assert the correct hash is returned
+        Parameters
+        ----------
+        checkout_target : str
+            The checkout target to test (branch, tag, pull request, or commit hash).
+        expected_hash : str
+            The expected commit hash for the given checkout target.
+        """
+        # Call the function and assert the result
+        result = _get_hash_from_checkout_target(self.repo_url, checkout_target)
         assert result == expected_hash
 
-        # Check the subprocess call arguments
-        mock_run.assert_called_once_with(
-            f"git ls-remote {repo_url} {checkout_target}",
-            shell=True,
+        # Verify the subprocess call
+        self.mock_run.assert_called_with(
+            f"git ls-remote {self.repo_url}",
             capture_output=True,
+            shell=True,
             text=True,
         )
 
+    def test_invalid_target(self):
+        """Test `_get_hash_from_checkout_target` with an invalid checkout target.
 
-def test_get_hash_from_checkout_target_invalid():
-    """Test `_get_hash_from_checkout_target` when git ls-remote does not return a hash
-    and `checkout_target` is not itself a valid hash.
+        Asserts
+        -------
+        - A ValueError is raised.
+        - The error message includes a list of available branches and tags.
+        """
+        checkout_target = "invalid-branch"
 
-    Asserts
-    -------
-    - a ValueError is raised
-    - the error message matches an expected error message
-    """
-    repo_url = "https://example.com/repo.git"
-    checkout_target = "pain"
-
-    # Patch subprocess.run to simulate successful `git ls-remote` command
-    with mock.patch("subprocess.run") as mock_run:
-        mock_run.return_value = mock.Mock(returncode=0, stdout="")
-
-        # Call the function
+        # Call the function and expect a ValueError
         with pytest.raises(ValueError) as exception_info:
-            _get_hash_from_checkout_target(repo_url, checkout_target)
+            _get_hash_from_checkout_target(self.repo_url, checkout_target)
 
-        expected_message = (
-            "supplied checkout_target (pain) does not appear "
-            + "to be a valid reference for this repository (https://example.com/repo.git)"
-        )
-        # Assert the correct hash is returned
-        assert str(exception_info.value) == expected_message
+        # Assert the error message includes the expected content
+        error_message = str(exception_info.value)
+        assert checkout_target in error_message
+        assert self.repo_url in error_message
+        assert "Available branches:" in error_message
+        assert "Available tags:" in error_message
+        assert "main" in error_message
+        assert "feature" in error_message
+        assert "v1.0.0" in error_message
 
 
 class TestReplaceTextInFile:
