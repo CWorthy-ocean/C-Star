@@ -655,7 +655,7 @@ class TestInputDatasetGet:
     def test_get_local_wrong_hash(self, mock_get_hash, local_input_dataset):
         """Test the `get` method with a bogus file_hash for local sources."""
         # Assign a bogus file hash
-        local_input_dataset.source.file_hash = "bogus_hash"
+        local_input_dataset.source._file_hash = "bogus_hash"
 
         # Define the resolved source and target paths
         source_filepath_local = Path("/resolved/source/local_file.nc")
@@ -745,7 +745,7 @@ class TestInputDatasetGet:
         - A ValueError is raised when no file_hash is provided for a remote file.
         - The error message matches the expected message regarding the missing file_hash.
         """
-        remote_input_dataset.source.file_hash = None
+        remote_input_dataset.source._file_hash = None
         self.mock_exists.return_value = False
         self.mock_resolve.return_value = self.target_dir
         expected_message = (
