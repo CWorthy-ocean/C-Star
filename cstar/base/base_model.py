@@ -75,14 +75,8 @@ class BaseModel(ABC):
         """
 
         # TODO: Type check here
-        self.source_repo = (
-            source_repo if source_repo is not None else self.default_source_repo
-        )
-        self.checkout_target = (
-            checkout_target
-            if checkout_target is not None
-            else self.default_checkout_target
-        )
+        self._source_repo = source_repo
+        self._checkout_target = checkout_target
 
     def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
@@ -118,6 +112,22 @@ class BaseModel(ABC):
         repr_str += "\nState: <"
         repr_str += f"local_config_status = {self.local_config_status}>"
         return repr_str
+
+    @property
+    def source_repo(self) -> str:
+        return (
+            self._source_repo
+            if self._source_repo is not None
+            else self.default_source_repo
+        )
+
+    @property
+    def checkout_target(self) -> str:
+        return (
+            self._checkout_target
+            if self._checkout_target is not None
+            else self.default_checkout_target
+        )
 
     @property
     def repo_basename(self) -> str:

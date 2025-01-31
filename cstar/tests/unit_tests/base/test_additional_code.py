@@ -665,7 +665,7 @@ class TestAdditionalCodeGet:
         """
 
         # Simulate a remote repository source but without checkout_target
-        remote_additional_code.checkout_target = None  # This should raise a ValueError
+        remote_additional_code._checkout_target = None  # This should raise a ValueError
         self.mock_location_type.return_value = "url"
         self.mock_source_type.return_value = "repository"
 
