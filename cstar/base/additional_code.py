@@ -71,7 +71,7 @@ class AdditionalCode:
         """
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
-        self.checkout_target: Optional[str] = checkout_target
+        self._checkout_target = checkout_target
         self.files: Optional[list[str]] = [] if files is None else files
         # Initialize object state
         self.working_path: Optional[Path] = None
@@ -117,6 +117,10 @@ class AdditionalCode:
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         return repr_str
+
+    @property
+    def checkout_target(self) -> Optional[str]:
+        return self._checkout_target
 
     @property
     def exists_locally(self):

@@ -34,8 +34,16 @@ class DataSource:
         DataSource
             An initialized DataSource
         """
-        self.location = str(location)
-        self.file_hash = file_hash
+        self._location = str(location)
+        self._file_hash = file_hash
+
+    @property
+    def location(self) -> str:
+        return self._location
+
+    @property
+    def file_hash(self) -> Optional[str]:
+        return self._file_hash
 
     @property
     def location_type(self) -> str:
