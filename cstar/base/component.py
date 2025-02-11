@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional, TYPE_CHECKING
 
-from cstar.base.base_model import BaseModel
+from cstar.base.external_codebase import ExternalCodeBase
 
 if TYPE_CHECKING:
     from cstar.base.additional_code import AdditionalCode
@@ -14,14 +14,14 @@ class Component(ABC):
 
     Attributes:
     ----------
-    base_model: BaseModel
+    codebase: ExternalCodeBase
         An object pointing to the unmodified source code of a model handling an individual
         aspect of the simulation such as biogeochemistry or ocean circulation
     additional_source_code: AdditionalCode (Optional, default None)
-        Additional source code contributing to a unique instance of a base model,
+        Additional source code contributing to a unique instance of the model,
         to be included at compile time
     namelists: AdditionalCode (Optional, default None)
-        Namelist files contributing to a unique instance of the base model,
+        Namelist files contributing to a unique instance of the model,
         to be used at runtime
     discretization: Discretization
         Any information related to the discretization of this Component
@@ -39,30 +39,31 @@ class Component(ABC):
         Execute any post-processing actions associated with this component
     """
 
-    base_model: BaseModel
+    codebase: ExternalCodeBase
     namelists: Optional["AdditionalCode"]
     additional_source_code: Optional["AdditionalCode"]
     discretization: Optional["Discretization"]
 
     def __init__(
         self,
-        base_model: BaseModel,
+        codebase: ExternalCodeBase,
         namelists: Optional["AdditionalCode"] = None,
         additional_source_code: Optional["AdditionalCode"] = None,
         discretization: Optional["Discretization"] = None,
     ):
-        """Initialize a Component object from a base model and any additional_code.
+        """Initialize a Component object from an external codebase and any additional
+        code.
 
         Parameters:
         -----------
-        base_model: BaseModel
+        codebase: ExternalCodeBase
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
         namelists: AdditionalCode (Optional, default None)
-            Namelist files contributing to a unique instance of the base model,
+            Namelist files contributing to a unique instance of the model,
             to be used at runtime
         additional_source_code: AdditionalCode (Optional, default None)
-            Additional source code contributing to a unique instance of a base model,
+            Additional source code contributing to a unique instance of a model,
             to be included at compile time
         discretization: Discretization (Optional, default None)
             Any information related to the discretization of this Component (e.g. time step)
@@ -72,11 +73,11 @@ class Component(ABC):
         Component:
             An intialized Component object
         """
-        if not isinstance(base_model, BaseModel):
+        if not isinstance(codebase, ExternalCodeBase):
             raise ValueError(
-                "base_model must be provided and must be an instance of BaseModel"
+                "codebase must be provided and must be an instance of ExternalCodeBase"
             )
-        self.base_model = base_model
+        self.codebase = codebase
         self.additional_source_code = additional_source_code or None
         self.discretization = discretization or None
 
@@ -102,10 +103,10 @@ class Component(ABC):
         component_dict["component_type"] = self.component_type
 
         # BaseModel:
-        base_model_info = {}
-        base_model_info["source_repo"] = self.base_model.source_repo
-        base_model_info["checkout_target"] = self.base_model.checkout_target
-        component_dict["base_model"] = base_model_info
+        codebase_info = {}
+        codebase_info["source_repo"] = self.codebase.source_repo
+        codebase_info["checkout_target"] = self.codebase.checkout_target
+        component_dict["codebase"] = codebase_info
 
         # additional source code
         additional_src = getattr(self, "additional_source_code")
@@ -131,7 +132,7 @@ class Component(ABC):
         base_str += "\n" + "-" * len(name)
 
         # Attrs
-        base_str += f"\nbase_model: {self.base_model.__class__.__name__} instance (query using Component.base_model)"
+        base_str += f"\ncodebase: {self.codebase.__class__.__name__} instance (query using Component.codebase)"
 
         if (
             hasattr(self, "additional_source_code")
@@ -147,7 +148,7 @@ class Component(ABC):
 
     def __repr__(self) -> str:
         repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\nbase_model = <{self.base_model.__class__.__name__} instance>, "
+        repr_str += f"\ncodebase = <{self.codebase.__class__.__name__} instance>, "
         if self.additional_source_code is not None:
             repr_str += (
                 "\nadditional_source_code = "

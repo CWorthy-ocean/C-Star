@@ -7,13 +7,13 @@ registry_attrs:
 components:
   - component:
       component_type: 'MARBL'
-      base_model:
+      codebase:
         source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
         checkout_target: 'marbl0.45.0'
 
   - component:
       component_type: 'ROMS'
-      base_model:
+      codebase:
         source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
         checkout_target: '246c11fa537145ba5868f2256dfb4964aeb09a25'
       discretization:

@@ -10,7 +10,7 @@ from cstar.execution.local_process import LocalProcess
 from cstar.execution.handler import ExecutionStatus
 from cstar.base.utils import _replace_text_in_file, _get_sha256_hash
 from cstar.base.component import Component
-from cstar.roms.base_model import ROMSBaseModel
+from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
     ROMSInputDataset,
     ROMSInitialConditions,
@@ -25,7 +25,7 @@ from cstar.base.additional_code import AdditionalCode
 from cstar.system.manager import cstar_sysmgr
 
 if TYPE_CHECKING:
-    from cstar.roms import ROMSBaseModel
+    from cstar.roms import ROMSExternalCodeBase
     from cstar.execution.handler import ExecutionHandler
 
 
@@ -37,13 +37,13 @@ class ROMSComponent(Component):
 
     Attributes:
     -----------
-    base_model: ROMSBaseModel
+    codebase: ROMSExternalCodeBase
         An object pointing to the unmodified source code of ROMS at a specific commit
     namelists: AdditionalCode (Optional, default None)
-        Namelist files contributing to a unique instance of the base model,
+        Namelist files contributing to a unique instance of the model,
         to be used at runtime
     additional_source_code: AdditionalCode (Optional, default None)
-        Additional source code contributing to a unique instance of a base model,
+        Additional source code contributing to a unique instance of a model,
         to be included at compile time
     discretization: ROMSDiscretization
         Any information related to discretization of this ROMSComponent
@@ -79,13 +79,13 @@ class ROMSComponent(Component):
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
     """
 
-    base_model: "ROMSBaseModel"
+    codebase: "ROMSExternalCodeBase"
     additional_code: "AdditionalCode"
     discretization: "ROMSDiscretization"
 
     def __init__(
         self,
-        base_model: "ROMSBaseModel",
+        codebase: "ROMSExternalCodeBase",
         discretization: "ROMSDiscretization",
         namelists: "AdditionalCode",
         additional_source_code: "AdditionalCode",
@@ -95,19 +95,19 @@ class ROMSComponent(Component):
         boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
         surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
     ):
-        """Initialize a ROMSComponent object from a ROMSBaseModel object, additional
-        code, input datasets, and discretization information.
+        """Initialize a ROMSComponent object from a ROMSExternalCodeBase object,
+        additional code, input datasets, and discretization information.
 
         Parameters:
         -----------
-        base_model: ROMSBaseModel
+        codebase: ROMSExternalCodeBase
             An object pointing to the unmodified source code of a model handling an individual
             aspect of the simulation such as biogeochemistry or ocean circulation
         namelists: AdditionalCode (Optional, default None)
-            Namelist files contributing to a unique instance of the base model,
+            Namelist files contributing to a unique instance of the model,
             to be used at runtime
         additional_source_code: AdditionalCode (Optional, default None)
-            Additional source code contributing to a unique instance of a base model,
+            Additional source code contributing to a unique instance of the model,
             to be included at compile time
         discretization: ROMSDiscretization
             Any information related to discretization of this ROMSComponent
@@ -129,7 +129,7 @@ class ROMSComponent(Component):
             An intialized ROMSComponent object
         """
 
-        self.base_model = base_model
+        self.codebase = codebase
         self.namelists = namelists
         self.additional_source_code = additional_source_code
         self.discretization = discretization
@@ -289,16 +289,16 @@ class ROMSComponent(Component):
         """
 
         component_kwargs = {}
-        # Construct the BaseModel instance
-        base_model_kwargs = component_dict.get("base_model")
-        if base_model_kwargs is None:
+        # Construct the ExternalCodeBase instance
+        codebase_kwargs = component_dict.get("codebase")
+        if codebase_kwargs is None:
             raise ValueError(
                 "Cannot construct a ROMSComponent instance without a "
-                + "ROMSBaseModel object, but could not find 'base_model' entry"
+                + "ROMSExternalCodeBase object, but could not find 'codebase' entry"
             )
-        base_model = ROMSBaseModel(**base_model_kwargs)
+        codebase = ROMSExternalCodeBase(**codebase_kwargs)
 
-        component_kwargs["base_model"] = base_model
+        component_kwargs["codebase"] = codebase
 
         # Construct the Discretization instance
         discretization_kwargs = component_dict.get("discretization")
@@ -633,7 +633,7 @@ class ROMSComponent(Component):
     ) -> None:
         """Set up this ROMSComponent instance locally.
 
-        This method ensures the ROMSBaseModel is correctly configured, and
+        This method ensures the ROMSExternalCodeBase is correctly configured, and
         that any additional code and input datasets corresponding to the
         chosen simulation period (defined by `start_date` and `end_date`)
         are made available in the chosen `additional_code_target_dir` and
@@ -657,10 +657,10 @@ class ROMSComponent(Component):
            The date until which the ROMSComponent is expected to be run. Used to
            determine which input datasets are needed as part of this setup call.
         """
-        # Setup BaseModel
+        # Setup ExternalCodeBase
         infostr = f"Configuring {self.__class__.__name__}"
         print(infostr + "\n" + "-" * len(infostr))
-        self.base_model.handle_config_status()
+        self.codebase.handle_config_status()
 
         # Additional source code
         print(

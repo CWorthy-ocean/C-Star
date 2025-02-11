@@ -1,4 +1,4 @@
-from cstar.roms.base_model import ROMSBaseModel
+from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.component import ROMSComponent
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.input_dataset import (
@@ -11,7 +11,7 @@ from cstar.roms.input_dataset import (
 )
 
 __all__ = [
-    "ROMSBaseModel",
+    "ROMSExternalCodeBase",
     "ROMSComponent",
     "ROMSDiscretization",
     "ROMSInputDataset",

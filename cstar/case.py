@@ -257,7 +257,7 @@ class Case:
         local `caseroot` folder.
 
         The method loops over each Component object makng up the case and
-        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
+        1. Checks for any issues withe the component's codebase (using ExternalCodeBase.local_config_status)
         2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
         3. Loops over InputDataset instances in the component checking if InputDataset.working_path exists
 
@@ -268,7 +268,7 @@ class Case:
         """
 
         for component in self.components:
-            if component.base_model.local_config_status != 0:
+            if component.codebase.local_config_status != 0:
                 return False
 
             # Check AdditionalCode
@@ -365,7 +365,7 @@ class Case:
 
         - registry_attrs: overall case metadata, including "name"
         - components: A list of components, containing, e.g.
-            - base_model: containing ["name","source_repo",and "checkout_target"]
+            - codebase: containing ["name","source_repo",and "checkout_target"]
             - namelists: optional, containing ["source_repo","checkout_target","source_mods","files"]
             - additional_source_code: optional, containing ["source_repo","checkout_target","source_mods","files"]
             - <input dataset>: taking values like "model_grid","initial_conditions","tidal_forcing","boundary_forcing","surface_forcing"
@@ -373,7 +373,7 @@ class Case:
             - discretization: containing e.g. time step "time_step"  and parallelization "n_procs_x","n_procs_y" information
 
 
-        The blueprint MUST contain a name and at least one component with a base_model
+        The blueprint MUST contain a name and at least one component with an external_codebase
 
         Parameters:
         -----------

@@ -1,7 +1,7 @@
-from cstar.marbl.base_model import MARBLBaseModel
+from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.marbl.component import MARBLComponent
 
 __all__ = [
-    "MARBLBaseModel",
+    "MARBLExternalCodeBase",
     "MARBLComponent",
 ]
