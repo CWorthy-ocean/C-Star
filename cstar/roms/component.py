@@ -11,6 +11,7 @@ from cstar.execution.handler import ExecutionStatus
 from cstar.base.utils import _replace_text_in_file, _get_sha256_hash
 from cstar.base.component import Component
 from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms.input_dataset import (
     ROMSInputDataset,
     ROMSInitialConditions,
@@ -25,7 +26,7 @@ from cstar.base.additional_code import AdditionalCode
 from cstar.system.manager import cstar_sysmgr
 
 if TYPE_CHECKING:
-    from cstar.roms import ROMSExternalCodeBase
+    # from cstar.roms import ROMSExternalCodeBase
     from cstar.execution.handler import ExecutionHandler
 
 
@@ -79,16 +80,17 @@ class ROMSComponent(Component):
         Performs post-processing steps, such as joining output netcdf files that are produced one-per-core
     """
 
-    codebase: "ROMSExternalCodeBase"
+    # codebase: "ROMSExternalCodeBase"
     additional_code: "AdditionalCode"
     discretization: "ROMSDiscretization"
 
     def __init__(
         self,
-        codebase: "ROMSExternalCodeBase",
         discretization: "ROMSDiscretization",
         namelists: "AdditionalCode",
         additional_source_code: "AdditionalCode",
+        codebase: Optional["ROMSExternalCodeBase"] = None,
+        marbl_codebase: Optional["MARBLExternalCodeBase"] = None,
         model_grid: Optional["ROMSModelGrid"] = None,
         initial_conditions: Optional["ROMSInitialConditions"] = None,
         tidal_forcing: Optional["ROMSTidalForcing"] = None,
@@ -129,7 +131,6 @@ class ROMSComponent(Component):
             An intialized ROMSComponent object
         """
 
-        self.codebase = codebase
         self.namelists = namelists
         self.additional_source_code = additional_source_code
         self.discretization = discretization
@@ -149,12 +150,26 @@ class ROMSComponent(Component):
                 "ROMSComponent.boundary_forcing must be a list of ROMSBoundaryForcing instances"
             )
 
+        # codebases
+        self.codebase = codebase if codebase is not None else self.default_codebase
+        self.marbl_codebase = (
+            marbl_codebase if marbl_codebase is not None else MARBLExternalCodeBase()
+        )
+
         # roms-specific
         self.exe_path: Optional[Path] = None
         self._exe_hash: Optional[str] = None
         self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
+
+    @property
+    def default_codebase(self) -> ROMSExternalCodeBase:
+        return ROMSExternalCodeBase()
+
+    @property
+    def codebases(self) -> list:
+        return [self.codebase, self.marbl_codebase]
 
     @property
     def in_file(self) -> Path:
@@ -291,14 +306,32 @@ class ROMSComponent(Component):
         component_kwargs = {}
         # Construct the ExternalCodeBase instance
         codebase_kwargs = component_dict.get("codebase")
-        if codebase_kwargs is None:
-            raise ValueError(
-                "Cannot construct a ROMSComponent instance without a "
-                + "ROMSExternalCodeBase object, but could not find 'codebase' entry"
+        if codebase_kwargs is not None:
+            codebase = ROMSExternalCodeBase(**codebase_kwargs)
+        else:
+            codebase = ROMSExternalCodeBase()
+            warnings.warn(
+                "Creating ROMSComponent instance without a specified "
+                + "ROMSExternalCodeBase, default codebase will be used:\n"
+                + f"Source location: {codebase.source_repo}\n"
+                + f"Checkout target: {codebase.checkout_target}\n"
             )
-        codebase = ROMSExternalCodeBase(**codebase_kwargs)
 
         component_kwargs["codebase"] = codebase
+
+        marbl_codebase_kwargs = component_dict.get("marbl_codebase")
+        if marbl_codebase_kwargs is not None:
+            marbl_codebase = MARBLExternalCodeBase(**marbl_codebase_kwargs)
+        else:
+            marbl_codebase = MARBLExternalCodeBase()
+            warnings.warn(
+                "Creating MARBLComponent instance without a specified "
+                + "MARBLExternalCodeBase, default codebase will be used:\n"
+                + f"Source location: {marbl_codebase.source_repo}\n"
+                + f"Checkout target: {marbl_codebase.checkout_target}\n"
+            )
+
+        component_kwargs["marbl_codebase"] = marbl_codebase
 
         # Construct the Discretization instance
         discretization_kwargs = component_dict.get("discretization")
@@ -588,6 +621,18 @@ class ROMSComponent(Component):
         # Docstring is inherited
 
         component_dict = super().to_dict()
+
+        # ExternalCodeBases:
+        codebase_info = {}
+        codebase_info["source_repo"] = self.codebase.source_repo
+        codebase_info["checkout_target"] = self.codebase.checkout_target
+        component_dict["codebase"] = codebase_info
+
+        marbl_codebase_info = {}
+        marbl_codebase_info["source_repo"] = self.marbl_codebase.source_repo
+        marbl_codebase_info["checkout_target"] = self.marbl_codebase.checkout_target
+        component_dict["marbl_codebase"] = marbl_codebase_info
+
         # additional source code
         namelists = getattr(self, "namelists")
         if namelists is not None:
@@ -660,7 +705,10 @@ class ROMSComponent(Component):
         # Setup ExternalCodeBase
         infostr = f"Configuring {self.__class__.__name__}"
         print(infostr + "\n" + "-" * len(infostr))
+        print(f"Setting up {self.codebase.__class__.__name__}...")
         self.codebase.handle_config_status()
+        print(f"Setting up {self.marbl_codebase.__class__.__name__}...")
+        self.marbl_codebase.handle_config_status()
 
         # Additional source code
         print(

@@ -14,7 +14,6 @@ from cstar.system.manager import cstar_sysmgr
 from cstar.base.utils import _dict_to_tree
 from cstar.base.datasource import DataSource
 from cstar.roms.component import ROMSComponent
-from cstar.marbl.component import MARBLComponent
 
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
@@ -268,8 +267,9 @@ class Case:
         """
 
         for component in self.components:
-            if component.codebase.local_config_status != 0:
-                return False
+            for codebase in component.codebases:
+                if codebase.local_config_status != 0:
+                    return False
 
             # Check AdditionalCode
             if (
@@ -448,8 +448,6 @@ class Case:
             match component_type.casefold():
                 case "roms":
                     components.append(ROMSComponent.from_dict(component_info))
-                case "marbl":
-                    components.append(MARBLComponent.from_dict(component_info))
                 case _:
                     raise ValueError(
                         f"component_type {component_type} in blueprint "
@@ -533,8 +531,6 @@ class Case:
                     start_date=self.start_date,
                     end_date=self.end_date,
                 )
-            elif isinstance(component, MARBLComponent):
-                component.setup()
 
     def persist(self) -> None:
         """Save the state of this Case.

@@ -77,9 +77,15 @@ class Component(ABC):
             raise ValueError(
                 "codebase must be provided and must be an instance of ExternalCodeBase"
             )
-        self.codebase = codebase
+        self.codebase = codebase if codebase is not None else self.default_codebase
         self.additional_source_code = additional_source_code or None
         self.discretization = discretization or None
+
+    @property
+    @abstractmethod
+    def default_codebase(self) -> ExternalCodeBase:
+        """Each subclass must provide a default CodeBase instance."""
+        pass
 
     @classmethod
     @abstractmethod
@@ -101,12 +107,6 @@ class Component(ABC):
         component_dict = {}
 
         component_dict["component_type"] = self.component_type
-
-        # BaseModel:
-        codebase_info = {}
-        codebase_info["source_repo"] = self.codebase.source_repo
-        codebase_info["checkout_target"] = self.codebase.checkout_target
-        component_dict["codebase"] = codebase_info
 
         # additional source code
         additional_src = getattr(self, "additional_source_code")
