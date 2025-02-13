@@ -25,7 +25,7 @@ from cstar.execution.handler import ExecutionStatus
 
 from cstar import Simulation
 from cstar.system.manager import cstar_sysmgr
-from typing import Optional, List
+from typing import Optional, List, cast
 
 
 class ROMSSimulation(Simulation):
@@ -588,3 +588,41 @@ class ROMSSimulation(Simulation):
                     )
                 for F in output_dir.glob(wildcard_pattern):
                     F.rename(output_dir / "PARTITIONED" / F.name)
+
+    def restart(self, new_end_date: str | datetime) -> "ROMSSimulation":
+        new_sim = cast(ROMSSimulation, super().restart(new_end_date=new_end_date))
+
+        restart_dir = self.directory / "output"
+
+        new_start_date = new_sim.start_date
+        restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")
+        restart_wildcard = f"*_rst.{restart_date_string}.nc"
+        restart_files = list(restart_dir.glob(restart_wildcard))
+        if len(restart_files) == 0:
+            raise FileNotFoundError(
+                f"No files in {restart_dir} match the pattern "
+                + f"'*_rst.{restart_date_string}.nc"
+            )
+
+        unique_restarts = {fname for fname in restart_files}
+
+        if len(unique_restarts) > 1:
+            raise ValueError(
+                "Found multiple distinct restart files corresponding to "
+                + f"{restart_date_string}: "
+                + "\n ".join([str(rst) for rst in list(unique_restarts)])
+            )
+
+        restart_file = restart_dir / list(unique_restarts)[0]
+        new_ic = ROMSInitialConditions(
+            location=str(restart_file.resolve()), start_date=new_start_date
+        )
+        new_sim.initial_conditions = new_ic
+
+        # Reset cached data for input datasets
+        for inp in new_sim.input_datasets:
+            inp._local_file_hash_cache = None
+            inp._local_file_stat_cache = None
+            inp.working_path = None
+
+        return new_sim
