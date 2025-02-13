@@ -47,8 +47,9 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
     with open(test_blueprint, "r") as bpfile:
         bpyaml = yaml.safe_load(bpfile)
 
+    # 20250212TODO: components shouldn't be a list anymore
     assert (
-        bpyaml["components"][1]["component"]["additional_source_code"]["location"]
+        bpyaml["components"][0]["component"]["additional_source_code"]["location"]
         == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
     )
 

@@ -14,7 +14,6 @@ from cstar.system.manager import cstar_sysmgr
 from cstar.base.utils import _dict_to_tree
 from cstar.base.datasource import DataSource
 from cstar.roms.component import ROMSComponent
-from cstar.marbl.component import MARBLComponent
 
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
@@ -92,9 +91,35 @@ class Case:
         """
 
         self.components: List["Component"] = components
+        self.caseroot: Path = self._validate_caseroot(caseroot)
+        self.name: str = name
+        self.is_from_blueprint: bool = False
+        self.blueprint: Optional[str] = None
+
+        # Process valid date ranges
+        self.valid_start_date = self._parse_date(
+            date=valid_start_date, field_name="Valid start date"
+        )
+        self.valid_end_date = self._parse_date(
+            date=valid_end_date, field_name="Valid end date"
+        )
+
+        # Set start and end dates, using defaults where needed
+        self.start_date = self._get_date_or_fallback(
+            date=start_date, fallback=self.valid_start_date, field_name="start_date"
+        )
+        self.end_date = self._get_date_or_fallback(
+            date=end_date, fallback=self.valid_end_date, field_name="end_date"
+        )
+
+        # Ensure start_date and end_date are within valid range
+        self._validate_date_range()
+
+    def _validate_caseroot(self, caseroot: str | Path) -> Path:
+        """Validates and resolves the caseroot directory."""
         resolved_caseroot = Path(caseroot).resolve()
         if resolved_caseroot.exists() and (
-            (not resolved_caseroot.is_dir()) or (any(resolved_caseroot.iterdir()))
+            not resolved_caseroot.is_dir() or any(resolved_caseroot.iterdir())
         ):
             raise FileExistsError(
                 f"Your chosen caseroot {caseroot} exists and is not an empty directory."
@@ -102,105 +127,44 @@ class Case:
                 f"\nmy_case = Case.restore(caseroot={caseroot!r})"
                 "\n to restore it"
             )
+        return resolved_caseroot
 
-        self.caseroot: Path = Path(caseroot).resolve()
-        self.name: str = name
-        self.is_from_blueprint: bool = False
-        self.blueprint: Optional[str] = None
-
-        # Make sure valid dates are datetime objects if present:
-        if valid_start_date is not None:
-            self.valid_start_date: Optional[datetime] = (
-                valid_start_date
-                if isinstance(valid_start_date, datetime)
-                else dateutil.parser.parse(valid_start_date)
-            )
-        else:
+    def _parse_date(
+        self, date: Optional[str | datetime], field_name: str
+    ) -> Optional[datetime]:
+        """Converts a date string to a datetime object if it's not None."""
+        if date is None:
             warnings.warn(
-                "Valid start date not provided."
-                + " Unable to check if simulation dates are out of range. "
-                + "Case objects should be initialized with valid_start_date "
-                + "and valid_end_date attributes.",
+                f"{field_name} not provided. Unable to check if simulation dates are out of range.",
                 RuntimeWarning,
             )
-            self.valid_start_date = None
+            return None
+        return date if isinstance(date, datetime) else dateutil.parser.parse(date)
 
-        if valid_end_date is not None:
-            self.valid_end_date: Optional[datetime] = (
-                valid_end_date
-                if isinstance(valid_end_date, datetime)
-                else dateutil.parser.parse(valid_end_date)
-            )
-        else:
-            warnings.warn(
-                "Valid end date not provided."
-                + " Unable to check if simulation dates are out of range. "
-                + "Case objects should be initialized with valid_start_date "
-                + "and valid_end_date attributes.",
-                RuntimeWarning,
-            )
-            self.valid_end_date = None
+    def _get_date_or_fallback(
+        self,
+        date: Optional[str | datetime],
+        fallback: Optional[datetime],
+        field_name: str,
+    ) -> datetime:
+        """Ensures a date is set, using a fallback if needed."""
+        parsed_date = self._parse_date(date=date, field_name=field_name)
 
-        # Make sure Case start_date is set and is a datetime object:
-        if start_date is not None:
-            # Set if provided
-            self.start_date: Optional[datetime] = (
-                start_date
-                if isinstance(start_date, datetime)
-                else dateutil.parser.parse(start_date)
-            )
-            # Set to earliest valid date if not provided and warn
-        elif valid_start_date is not None:
-            self.start_date = self.valid_start_date
-            warnings.warn(
-                "start_date not provided. "
-                + f"Defaulting to earliest valid start date: {valid_start_date}."
-            )
-        else:
-            # Raise error if no way to set
-            raise ValueError(
-                "Neither start_date nor valid_start_date provided."
-                + " Unable to establish a simulation date range"
-            )
-        assert isinstance(
-            self.start_date, datetime
-        ), "At this point either the code has failed or start_date is a datetime object"
+        if parsed_date is None:  # If no date is provided, use the fallback
+            if fallback is not None:
+                warnings.warn(f"{field_name} not provided. Defaulting to {fallback}.")
+                return fallback
+            raise ValueError(f"Neither {field_name} nor a valid fallback was provided.")
 
-        # Make sure Case end_date is set and is a datetime object:
-        if end_date is not None:
-            # Set if provided
-            self.end_date: Optional[datetime] = (
-                end_date
-                if isinstance(end_date, datetime)
-                else dateutil.parser.parse(end_date)
-            )
-        elif valid_end_date is not None:
-            # Set to latest valid date if not provided and warn
-            self.end_date = self.valid_end_date
-            warnings.warn(
-                "end_date not provided."
-                + f"Defaulting to latest valid end date: {valid_end_date}"
-            )
+        return parsed_date  # Always returns a valid datetime
 
-        else:
-            # Raise error if no way to set
-            raise ValueError(
-                "Neither end_date nor valid_end_date provided."
-                + " Unable to establish a simulation date range"
-            )
-
-        assert isinstance(
-            self.end_date, datetime
-        ), "At this point either the code has failed or end_date is a datetime object"
-
-        # Check provded dates are valid
-        if (self.valid_start_date is not None) and (
-            self.start_date < self.valid_start_date
-        ):
+    def _validate_date_range(self):
+        """Checks that start_date and end_date are within valid ranges."""
+        if self.valid_start_date and self.start_date < self.valid_start_date:
             raise ValueError(
                 f"start_date {self.start_date} is before the earliest valid start date {self.valid_start_date}."
             )
-        if (self.valid_end_date is not None) and (self.end_date > self.valid_end_date):
+        if self.valid_end_date and self.end_date > self.valid_end_date:
             raise ValueError(
                 f"end_date {self.end_date} is after the latest valid end date {self.valid_end_date}."
             )
@@ -257,7 +221,7 @@ class Case:
         local `caseroot` folder.
 
         The method loops over each Component object makng up the case and
-        1. Checks for any issues withe the component's base model (using BaseModel.local_config_status)
+        1. Checks for any issues withe the component's codebase (using ExternalCodeBase.local_config_status)
         2. Loops over AdditionalCode instances in the component calling AdditionalCode.check_exists_locally(caseroot) on each
         3. Loops over InputDataset instances in the component checking if InputDataset.working_path exists
 
@@ -268,8 +232,9 @@ class Case:
         """
 
         for component in self.components:
-            if component.base_model.local_config_status != 0:
-                return False
+            for codebase in component.codebases:
+                if codebase.local_config_status != 0:
+                    return False
 
             # Check AdditionalCode
             if (
@@ -365,7 +330,7 @@ class Case:
 
         - registry_attrs: overall case metadata, including "name"
         - components: A list of components, containing, e.g.
-            - base_model: containing ["name","source_repo",and "checkout_target"]
+            - codebase: containing ["name","source_repo",and "checkout_target"]
             - namelists: optional, containing ["source_repo","checkout_target","source_mods","files"]
             - additional_source_code: optional, containing ["source_repo","checkout_target","source_mods","files"]
             - <input dataset>: taking values like "model_grid","initial_conditions","tidal_forcing","boundary_forcing","surface_forcing"
@@ -373,7 +338,7 @@ class Case:
             - discretization: containing e.g. time step "time_step"  and parallelization "n_procs_x","n_procs_y" information
 
 
-        The blueprint MUST contain a name and at least one component with a base_model
+        The blueprint MUST contain a name and at least one component with an external_codebase
 
         Parameters:
         -----------
@@ -448,8 +413,6 @@ class Case:
             match component_type.casefold():
                 case "roms":
                     components.append(ROMSComponent.from_dict(component_info))
-                case "marbl":
-                    components.append(MARBLComponent.from_dict(component_info))
                 case _:
                     raise ValueError(
                         f"component_type {component_type} in blueprint "
@@ -533,8 +496,6 @@ class Case:
                     start_date=self.start_date,
                     end_date=self.end_date,
                 )
-            elif isinstance(component, MARBLComponent):
-                component.setup()
 
     def persist(self) -> None:
         """Save the state of this Case.
