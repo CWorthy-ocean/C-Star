@@ -16,9 +16,9 @@ class Simulation(ABC):
         self,
         name: str,
         directory: str | Path,
+        discretization: "Discretization",
         runtime_code: Optional["AdditionalCode"],
         compile_time_code: Optional["AdditionalCode"],
-        discretization: Optional["Discretization"],
         codebase: Optional["ExternalCodeBase"] = None,
         start_date: Optional[str | datetime] = None,
         end_date: Optional[str | datetime] = None,
@@ -50,7 +50,7 @@ class Simulation(ABC):
         self.codebase = codebase if codebase is not None else self.default_codebase
         self.runtime_code = runtime_code or None
         self.compile_time_code = compile_time_code or None
-        self.discretization = discretization or None
+        self.discretization = discretization
 
     def _validate_caseroot(self, caseroot: str | Path) -> Path:
         """Validates and resolves the caseroot directory."""
@@ -178,13 +178,7 @@ class Simulation(ABC):
         pass
 
     @abstractmethod
-    def run(
-        self,
-        account_key: Optional[str] = None,
-        walltime: Optional[str] = None,
-        queue_name: Optional[str] = None,
-        job_name: Optional[str] = None,
-    ) -> "ExecutionHandler":
+    def run(self) -> "ExecutionHandler":
         pass
 
     @abstractmethod

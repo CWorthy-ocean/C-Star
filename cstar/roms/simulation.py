@@ -1,5 +1,7 @@
-from pathlib import Path
+import shutil
+import warnings
 import subprocess
+from pathlib import Path
 from datetime import datetime
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
@@ -12,22 +14,30 @@ from cstar.roms.input_dataset import (
     ROMSInputDataset,
 )
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.utils import _get_sha256_hash, _replace_text_in_file
+
 from cstar.execution.handler import ExecutionHandler
-from cstar.base.utils import _get_sha256_hash
+from cstar.execution.scheduler_job import create_scheduler_job
+from cstar.execution.local_process import LocalProcess
+from cstar.execution.handler import ExecutionStatus
+
 from cstar import Simulation
 from cstar.system.manager import cstar_sysmgr
 from typing import Optional, List
 
 
 class ROMSSimulation(Simulation):
+    discretization: ROMSDiscretization
+
     def __init__(
         self,
         name: str,
         directory: str | Path,
+        discretization: "ROMSDiscretization",
         runtime_code: Optional["AdditionalCode"],
         compile_time_code: Optional["AdditionalCode"],
-        discretization: Optional["ROMSDiscretization"],
         codebase: Optional["ROMSExternalCodeBase"] = None,
         start_date: Optional[str | datetime] = None,
         end_date: Optional[str | datetime] = None,
@@ -43,10 +53,10 @@ class ROMSSimulation(Simulation):
         super().__init__(
             name=name,
             directory=directory,
+            discretization=discretization,
             codebase=codebase,
             runtime_code=runtime_code,
             compile_time_code=compile_time_code,
-            discretization=discretization,
             start_date=start_date,
             end_date=end_date,
             valid_start_date=valid_start_date,
@@ -150,7 +160,168 @@ class ROMSSimulation(Simulation):
         pass
 
     def to_blueprint(self) -> None:
-        return
+        pass
+
+    def update_runtime_code(self):
+        no_template_found = True
+        for nl_idx, nl_fname in enumerate(self.runtime_code.files):
+            nl_path = self.runtime_code.working_path / nl_fname
+            if str(nl_fname)[-9:] == "_TEMPLATE":
+                no_template_found = False
+                mod_nl_path = Path(str(nl_path)[:-9])
+                shutil.copy(nl_path, mod_nl_path)
+                for placeholder, replacement in self._runtime_code_modifications[
+                    nl_idx
+                ].items():
+                    _replace_text_in_file(mod_nl_path, placeholder, str(replacement))
+                self.runtime_code.modified_files[nl_idx] = mod_nl_path
+        if no_template_found:
+            warnings.warn(
+                "WARNING: No editable runtime code found to set ROMS runtime parameters. "
+                + "Expected to find a template in ROMSSimulation.runtime_code"
+                + " with the suffix '_TEMPLATE' on which to base the file."
+                + "\n********************************************************"
+                + "\nANY MODEL PARAMETERS SET IN C-STAR WILL NOT BE APPLIED."
+                + "\n********************************************************"
+            )
+
+    @property
+    def _runtime_code_modifications(self) -> list[dict]:
+        # Helper function for formatting:
+        def partitioned_files_to_runtime_code_string(input_dataset):
+            """Take a ROMSInputDataset that has been partitioned and return a ROMS
+            namelist-compatible string pointing to it e.g. path/to/roms_file.232.nc -> '
+            path/to/roms_file.nc'."""
+
+            unique_paths = {
+                str(Path(f).parent / (Path(Path(f).stem).stem + ".nc"))
+                for f in input_dataset.partitioned_files
+            }
+            return "\n     ".join(sorted(list(unique_paths)))
+
+        # Initialise the list of dictionaries:
+        if self.runtime_code is None:
+            raise ValueError(
+                "attempted to access "
+                + "ROMSComponent._runtime_code_modifications, but "
+                + "ROMSComponent.runtime_code is None"
+            )
+
+        runtime_code_modifications: list[dict] = [{} for f in self.runtime_code.files]
+
+        ################################################################################
+        # 'roms.in' file modifications (the only namelist to modify as of 2024-10-01):
+        ################################################################################
+        # First figure out which namelist is the one to modify
+        if "roms.in_TEMPLATE" in self.runtime_code.files:
+            nl_idx = self.runtime_code.files.index("roms.in_TEMPLATE")
+        else:
+            raise ValueError(
+                "could not find expected template namelist file "
+                + "roms.in_TEMPLATE to modify. "
+                + "ROMS requires a namelist file to run."
+            )
+
+        # Time step entry
+        runtime_code_modifications[nl_idx]["__TIMESTEP_PLACEHOLDER__"] = (
+            self.discretization.time_step
+        )
+
+        # Grid file entry
+        if self.model_grid is not None:
+            if len(self.model_grid.partitioned_files) == 0:
+                raise ValueError(
+                    "could not find a local path to a partitioned"
+                    + "ROMS grid file. Run ROMSComponent.pre_run() [or "
+                    + "Case.pre_run() if running a Case] to partition "
+                    + "ROMS input datasets and try again."
+                )
+
+            runtime_code_modifications[nl_idx]["__GRID_FILE_PLACEHOLDER__"] = (
+                partitioned_files_to_runtime_code_string(self.model_grid)
+            )
+
+        # Initial conditions entry
+        if self.initial_conditions is not None:
+            if len(self.initial_conditions.partitioned_files) == 0:
+                raise ValueError(
+                    "could not find a local path to a partitioned"
+                    + "ROMS initial file. Run ROMSComponent.pre_run() [or "
+                    + "Case.pre_run() if running a Case] to partition "
+                    + "ROMS input datasets and try again."
+                )
+
+            runtime_code_modifications[nl_idx][
+                "__INITIAL_CONDITION_FILE_PLACEHOLDER__"
+            ] = partitioned_files_to_runtime_code_string(self.initial_conditions)
+
+        # Forcing files entry
+        runtime_code_forcing_str = ""
+        for sf in self.surface_forcing:
+            if len(sf.partitioned_files) > 0:
+                runtime_code_forcing_str += (
+                    "\n     " + partitioned_files_to_runtime_code_string(sf)
+                )
+        for bf in self.boundary_forcing:
+            if len(bf.partitioned_files) > 0:
+                runtime_code_forcing_str += (
+                    "\n     " + partitioned_files_to_runtime_code_string(bf)
+                )
+        if self.tidal_forcing is not None:
+            if len(self.tidal_forcing.partitioned_files) == 0:
+                raise ValueError(
+                    "ROMSComponent has tidal_forcing attribute "
+                    + "but could not find a local path to a partitioned "
+                    + "tidal forcing file. Run ROMSComponent.pre_run() "
+                    + "[or Case.pre_run() if building a Case] "
+                    + " to partition ROMS input datasets and try again."
+                )
+            runtime_code_forcing_str += (
+                "\n     " + partitioned_files_to_runtime_code_string(self.tidal_forcing)
+            )
+
+        runtime_code_modifications[nl_idx]["__FORCING_FILES_PLACEHOLDER__"] = (
+            runtime_code_forcing_str.lstrip()
+        )
+
+        # MARBL settings filepaths entries
+        ## NOTE: WANT TO RAISE IF PLACEHOLDER IS IN NAMELIST BUT not Path(marbl_file.exists())
+        if "marbl_in" in self.runtime_code.files:
+            if self.runtime_code.working_path is None:
+                raise ValueError(
+                    "ROMSComponent.runtime_code does not have a "
+                    + "'working_path' attribute. "
+                    + "Run ROMSComponent.runtime_code.get() and try again"
+                )
+            runtime_code_modifications[nl_idx][
+                "__MARBL_SETTINGS_FILE_PLACEHOLDER__"
+            ] = str(self.runtime_code.working_path / "marbl_in")
+
+        if "marbl_tracer_output_list" in self.runtime_code.files:
+            if self.runtime_code.working_path is None:
+                raise ValueError(
+                    "ROMSComponent.runtime_code does not have a "
+                    + "'working_path' attribute. "
+                    + "Run ROMSComponent.runtime_code.get() and try again"
+                )
+
+            runtime_code_modifications[nl_idx][
+                "__MARBL_TRACER_LIST_FILE_PLACEHOLDER__"
+            ] = str(self.runtime_code.working_path / "marbl_tracer_output_list")
+
+        if "marbl_diagnostic_output_list" in self.runtime_code.files:
+            if self.runtime_code.working_path is None:
+                raise ValueError(
+                    "ROMSComponent.runtime_code does not have a "
+                    + "'working_path' attribute. "
+                    + "Run ROMSComponent.runtime_code.get() and try again"
+                )
+
+            runtime_code_modifications[nl_idx][
+                "__MARBL_DIAG_LIST_FILE_PLACEHOLDER__"
+            ] = str(self.runtime_code.working_path / "marbl_diagnostic_output_list")
+
+        return runtime_code_modifications
 
     def setup(
         self,
@@ -276,11 +447,144 @@ class ROMSSimulation(Simulation):
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
 
-    def pre_run(self):
-        pass
+    def pre_run(self) -> None:
+        # Partition input datasets and add their paths to namelist
+        if self.input_datasets is not None and all(
+            [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
+        ):
+            datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
 
-    def run(self):
-        pass
+            for f in datasets_to_partition:
+                f.partition(
+                    np_xi=self.discretization.n_procs_x,
+                    np_eta=self.discretization.n_procs_y,
+                )
 
-    def post_run(self):
-        pass
+    def run(
+        self,
+        account_key: Optional[str] = None,
+        walltime: Optional[str] = None,
+        queue_name: Optional[str] = None,
+        job_name: Optional[str] = None,
+    ) -> "ExecutionHandler":
+        if self.exe_path is None:
+            raise ValueError(
+                "C-STAR: ROMSComponent.exe_path is None; unable to find ROMS executable."
+                + "\nRun Component.build() first. "
+                + "\n If you have already run Component.build(), either run it again or "
+                + " add the executable path manually using Component.exe_path='YOUR/PATH'."
+            )
+
+        if (self.end_date is not None) and (self.start_date is not None):
+            run_length_seconds = int((self.end_date - self.start_date).total_seconds())
+            n_time_steps = run_length_seconds // self.discretization.time_step
+        else:
+            n_time_steps = 1
+            warnings.warn(
+                "n_time_steps not explicitly set, using default value of 1. "
+                "Please call ROMSComponent.run() with the n_time_steps argument "
+                "to specify the length of the run.",
+                UserWarning,
+            )
+
+        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
+            queue_name = cstar_sysmgr.scheduler.primary_queue_name
+        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
+            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
+
+        output_dir = self.directory / "output"
+
+        # Set run path to output dir for clarity: we are running in the output dir but
+        # these are conceptually different:
+        run_path = output_dir
+
+        # 1. MODIFY NAMELIST
+        # Copy template namelist and add all current known information
+        # from this Component instance:
+        self.update_runtime_code()
+
+        # Now need to manually update number of time steps as it is unknown
+        # outside of the context of this function:
+
+        _replace_text_in_file(
+            self.in_file,
+            "__NTIMES_PLACEHOLDER__",
+            str(n_time_steps),
+        )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        ## 2: RUN ROMS
+
+        roms_exec_cmd = (
+            f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
+            + f"{self.in_file}"
+        )
+
+        if self.discretization.n_procs_tot is None:
+            raise ValueError(
+                "Unable to calculate node distribution for this Component. "
+                + "Component.n_procs_tot is not set"
+            )
+        if cstar_sysmgr.scheduler is not None:
+            if account_key is None:
+                raise ValueError(
+                    "please call Component.run() with a value for account_key"
+                )
+
+            job_instance = create_scheduler_job(
+                commands=roms_exec_cmd,
+                job_name=job_name,
+                cpus=self.discretization.n_procs_tot,
+                account_key=account_key,
+                run_path=run_path,
+                queue_name=queue_name,
+                walltime=walltime,
+            )
+
+            job_instance.submit()
+            self._execution_handler = job_instance
+            return job_instance
+
+        else:  # cstar_sysmgr.scheduler is None
+            romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
+            self._execution_handler = romsprocess
+            romsprocess.start()
+            return romsprocess
+
+    def post_run(self) -> None:
+        if self._execution_handler is None:
+            raise RuntimeError(
+                "Cannot call 'ROMSComponent.post_run()' before calling 'ROMSComponent.run()'"
+            )
+        elif self._execution_handler.status != ExecutionStatus.COMPLETED:
+            raise RuntimeError(
+                "Cannot call 'ROMSComponent.post_run()' until the ROMS run is completed, "
+                + f"but current execution status is '{self._execution_handler.status}'"
+            )
+
+        output_dir = self.directory / "output"
+        files = list(output_dir.glob("*.??????????????.*.nc"))
+        unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
+        if not files:
+            print("no suitable output found")
+        else:
+            (output_dir / "PARTITIONED").mkdir(exist_ok=True)
+            for wildcard_pattern in unique_wildcards:
+                # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
+
+                print(f"Joining netCDF files {wildcard_pattern}...")
+                ncjoin_result = subprocess.run(
+                    f"ncjoin {wildcard_pattern}",
+                    cwd=output_dir,
+                    capture_output=True,
+                    text=True,
+                    shell=True,
+                )
+                if ncjoin_result.returncode != 0:
+                    raise RuntimeError(
+                        f"Error {ncjoin_result.returncode} while joining ROMS output. "
+                        + f"STDERR stream:\n {ncjoin_result.stderr}"
+                    )
+                for F in output_dir.glob(wildcard_pattern):
+                    F.rename(output_dir / "PARTITIONED" / F.name)
