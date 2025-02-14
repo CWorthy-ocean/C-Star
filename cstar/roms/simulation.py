@@ -280,7 +280,31 @@ class ROMSSimulation(Simulation):
         return cls(**simulation_kwargs)
 
     def to_dict(self) -> dict:
-        return {}
+        simulation_dict = super().to_dict()
+
+        # MARBLExternalCodeBase
+        marbl_codebase_info = {}
+        marbl_codebase_info["source_repo"] = self.marbl_codebase.source_repo
+        marbl_codebase_info["checkout_target"] = self.marbl_codebase.checkout_target
+        simulation_dict["marbl_codebase"] = marbl_codebase_info
+
+        # InputDatasets:
+        if self.model_grid is not None:
+            simulation_dict["model_grid"] = self.model_grid.to_dict()
+        if self.initial_conditions is not None:
+            simulation_dict["initial_conditions"] = self.initial_conditions.to_dict()
+        if self.tidal_forcing is not None:
+            simulation_dict["tidal_forcing"] = self.tidal_forcing.to_dict()
+        if len(self.surface_forcing) > 0:
+            simulation_dict["surface_forcing"] = [
+                sf.to_dict() for sf in self.surface_forcing
+            ]
+        if len(self.boundary_forcing) > 0:
+            simulation_dict["boundary_forcing"] = [
+                bf.to_dict() for bf in self.boundary_forcing
+            ]
+
+        return simulation_dict
 
     @classmethod
     def from_blueprint(
@@ -301,15 +325,15 @@ class ROMSSimulation(Simulation):
         elif source.location_type == "url":
             bp_dict = yaml.safe_load(requests.get(source.location).text)
 
-        bp_dict = bp_dict.get("simulation")
-        bp_dict.pop("type")
-
         return cls.from_dict(
             bp_dict, directory=directory, start_date=start_date, end_date=end_date
         )
 
-    def to_blueprint(self) -> None:
-        pass
+    def to_blueprint(self, filename: str) -> None:
+        with open(filename, "w") as yaml_file:
+            yaml.dump(
+                self.to_dict, yaml_file, default_flow_style=False, sort_keys=False
+            )
 
     def update_runtime_code(self):
         no_template_found = True

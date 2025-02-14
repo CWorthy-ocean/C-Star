@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from cstar.base import ExternalCodeBase, AdditionalCode, Discretization
 from datetime import datetime
 import copy
@@ -64,6 +64,7 @@ class Simulation(ABC):
                 f"\nmy_case = Case.restore(caseroot={caseroot!r})"
                 "\n to restore it"
             )
+
         return resolved_caseroot
 
     def _parse_date(
@@ -121,9 +122,54 @@ class Simulation(ABC):
     def from_dict(self, simulation_dict: dict, directory: str | Path):
         pass
 
-    @abstractmethod
     def to_dict(self) -> dict:
-        pass
+        simulation_dict: dict[Any, Any] = {}
+
+        # Top-level information
+        simulation_dict["name"] = self.name
+        simulation_dict["valid_start_date"] = self.valid_start_date
+        simulation_dict["valid_end_date"] = self.valid_end_date
+
+        # ExternalCodeBases:
+        codebase_info = {}
+        codebase_info["source_repo"] = self.codebase.source_repo
+        codebase_info["checkout_target"] = self.codebase.checkout_target
+        simulation_dict["codebase"] = codebase_info
+
+        # discretization
+        simulation_dict["discretization"] = self.discretization.__dict__
+
+        # runtime code
+        runtime_code = getattr(self, "runtime_code")
+        if runtime_code is not None:
+            runtime_code_info = {}
+            runtime_code_info["location"] = runtime_code.source.location
+            if runtime_code.subdir is not None:
+                runtime_code_info["subdir"] = runtime_code.subdir
+            if runtime_code.checkout_target is not None:
+                runtime_code_info["checkout_target"] = runtime_code.checkout_target
+            if runtime_code.files is not None:
+                runtime_code_info["files"] = runtime_code.files
+
+            simulation_dict["runtime_code"] = runtime_code_info
+
+        # compile-time code
+        compile_time_code = getattr(self, "compile_time_code")
+        if compile_time_code is not None:
+            compile_time_code_info = {}
+            compile_time_code_info["location"] = compile_time_code.source.location
+            if compile_time_code.subdir is not None:
+                compile_time_code_info["subdir"] = compile_time_code.subdir
+            if compile_time_code.checkout_target is not None:
+                compile_time_code_info["checkout_target"] = (
+                    compile_time_code.checkout_target
+                )
+            if compile_time_code.files is not None:
+                compile_time_code_info["files"] = compile_time_code.files
+
+            simulation_dict["compile_time_code"] = compile_time_code_info
+
+        return simulation_dict
 
     @classmethod
     @abstractmethod
@@ -135,7 +181,7 @@ class Simulation(ABC):
         pass
 
     @abstractmethod
-    def to_blueprint(self) -> None:
+    def to_blueprint(self, filename: str) -> None:
         pass
 
     @abstractmethod
