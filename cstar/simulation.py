@@ -118,7 +118,7 @@ class Simulation(ABC):
 
     @classmethod
     @abstractmethod
-    def from_dict(self, arg_dict):
+    def from_dict(self, simulation_dict: dict, directory: str | Path):
         pass
 
     @abstractmethod
@@ -127,20 +127,15 @@ class Simulation(ABC):
 
     @classmethod
     @abstractmethod
-    def from_blueprint(self):
-        """Construct this component instance from a dictionary of kwargs.
-
-        This method is implemented separately for different subclasses of Component.
-        """
-        # This should basically be `from_dict` +
+    def from_blueprint(
+        cls,
+        blueprint: str,
+        directory: str | Path,
+    ):
         pass
 
     @abstractmethod
     def to_blueprint(self) -> None:
-        # This should be `to_dict`+
-        # i.e. subclass calls to_dict which calls super.to_dict to get a basic
-        # dictionary to fill in more thoroughly
-        # then to_blueprint just dumps the dict
         pass
 
     @abstractmethod

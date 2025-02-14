@@ -1,5 +1,7 @@
+import yaml
 import shutil
 import warnings
+import requests
 import subprocess
 from pathlib import Path
 from datetime import datetime
@@ -15,6 +17,7 @@ from cstar.roms.input_dataset import (
 )
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 
+from cstar.base.datasource import DataSource
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.utils import _get_sha256_hash, _replace_text_in_file
 
@@ -25,7 +28,7 @@ from cstar.execution.handler import ExecutionStatus
 
 from cstar import Simulation
 from cstar.system.manager import cstar_sysmgr
-from typing import Optional, List, cast
+from typing import Optional, List, cast, Any
 
 
 class ROMSSimulation(Simulation):
@@ -149,15 +152,161 @@ class ROMSSimulation(Simulation):
         return input_datasets
 
     @classmethod
-    def from_dict(cls, arg_dict):
-        return cls(**arg_dict)
+    def from_dict(
+        cls,
+        simulation_dict: dict,
+        directory: str | Path,
+        start_date: Optional[str | datetime] = None,
+        end_date: Optional[str | datetime] = None,
+    ):
+        # Initialise keyword argument dictionary to create ROMSSimulation
+        simulation_kwargs: dict[Any, Any] = {}
+
+        # Pass method parameters in
+        simulation_kwargs["directory"] = directory
+        simulation_kwargs["start_date"] = start_date
+        simulation_kwargs["end_date"] = end_date
+
+        # Get other direct entries from dictionary
+        simulation_kwargs["name"] = simulation_dict.get("name")
+        simulation_kwargs["valid_start_date"] = simulation_dict.get("valid_start_date")
+        simulation_kwargs["valid_end_date"] = simulation_dict.get("valid_end_date")
+
+        # Construct the ExternalCodeBase instance
+        codebase_kwargs = simulation_dict.get("codebase")
+        if codebase_kwargs is not None:
+            codebase = ROMSExternalCodeBase(**codebase_kwargs)
+        else:
+            codebase = ROMSExternalCodeBase()
+            warnings.warn(
+                "Creating ROMSComponent instance without a specified "
+                + "ROMSExternalCodeBase, default codebase will be used:\n"
+                + f"Source location: {codebase.source_repo}\n"
+                + f"Checkout target: {codebase.checkout_target}\n"
+            )
+
+        simulation_kwargs["codebase"] = codebase
+
+        marbl_codebase_kwargs = simulation_dict.get("marbl_codebase")
+        if marbl_codebase_kwargs is not None:
+            marbl_codebase = MARBLExternalCodeBase(**marbl_codebase_kwargs)
+        else:
+            marbl_codebase = MARBLExternalCodeBase()
+            warnings.warn(
+                "Creating MARBLComponent instance without a specified "
+                + "MARBLExternalCodeBase, default codebase will be used:\n"
+                + f"Source location: {marbl_codebase.source_repo}\n"
+                + f"Checkout target: {marbl_codebase.checkout_target}\n"
+            )
+
+        simulation_kwargs["marbl_codebase"] = marbl_codebase
+
+        # Construct the Discretization instance
+        discretization_kwargs = simulation_dict.get("discretization")
+        if discretization_kwargs is None:
+            raise ValueError(
+                "Cannot construct a ROMSComponent instance without a "
+                + "ROMSDiscretization object, but could not find 'discretization' entry"
+            )
+        discretization = ROMSDiscretization(**discretization_kwargs)
+
+        simulation_kwargs["discretization"] = discretization
+
+        # Construct any AdditionalCode instance associated with namelists
+        runtime_code_kwargs = simulation_dict.get("runtime_code")
+        if runtime_code_kwargs is None:
+            raise ValueError(
+                "Cannot construct a ROMSComponent instance without runtime "
+                + "code, but could not find 'runtime_code' entry"
+            )
+        runtime_code = AdditionalCode(**runtime_code_kwargs)
+        simulation_kwargs["runtime_code"] = runtime_code
+
+        # Construct any AdditionalCode instance associated with source mods
+        compile_time_code_kwargs = simulation_dict.get("compile_time_code")
+        if compile_time_code_kwargs is None:
+            raise NotImplementedError(
+                "This version of C-Star does not support ROMSComponent instances "
+                + "without code to be included at compile time (.opt files, etc.), but "
+                + "could not find an 'compile_time_code' entry."
+            )
+
+        compile_time_code = AdditionalCode(**compile_time_code_kwargs)
+        simulation_kwargs["compile_time_code"] = compile_time_code
+
+        # Construct any ROMSModelGrid instance:
+        model_grid_kwargs = simulation_dict.get("model_grid")
+        if model_grid_kwargs is not None:
+            simulation_kwargs["model_grid"] = ROMSModelGrid(**model_grid_kwargs)
+
+        # Construct any ROMSInitialConditions instance:
+        initial_conditions_kwargs = simulation_dict.get("initial_conditions")
+        if initial_conditions_kwargs is not None:
+            simulation_kwargs["initial_conditions"] = ROMSInitialConditions(
+                **initial_conditions_kwargs
+            )
+
+        # Construct any ROMSTidalForcing instance:
+        tidal_forcing_kwargs = simulation_dict.get("tidal_forcing")
+        if tidal_forcing_kwargs is not None:
+            simulation_kwargs["tidal_forcing"] = ROMSTidalForcing(
+                **tidal_forcing_kwargs
+            )
+
+        # Construct any ROMSBoundaryForcing instances:
+        boundary_forcing_entries = simulation_dict.get("boundary_forcing", [])
+        if len(boundary_forcing_entries) > 0:
+            simulation_kwargs["boundary_forcing"] = []
+        if isinstance(boundary_forcing_entries, dict):
+            boundary_forcing_entries = [
+                boundary_forcing_entries,
+            ]
+        for bf_kwargs in boundary_forcing_entries:
+            simulation_kwargs["boundary_forcing"].append(
+                ROMSBoundaryForcing(**bf_kwargs)
+            )
+
+        # Construct any ROMSSurfaceForcing instances:
+        surface_forcing_entries = simulation_dict.get("surface_forcing", [])
+        if len(surface_forcing_entries) > 0:
+            simulation_kwargs["surface_forcing"] = []
+        if isinstance(surface_forcing_entries, dict):
+            surface_forcing_entries = [
+                surface_forcing_entries,
+            ]
+        for sf_kwargs in surface_forcing_entries:
+            simulation_kwargs["surface_forcing"].append(ROMSSurfaceForcing(**sf_kwargs))
+
+        return cls(**simulation_kwargs)
 
     def to_dict(self) -> dict:
         return {}
 
     @classmethod
-    def from_blueprint(self):
-        pass
+    def from_blueprint(
+        cls,
+        blueprint: str,
+        directory: str | Path,
+        start_date: Optional[str | datetime] = None,
+        end_date: Optional[str | datetime] = None,
+    ):
+        source = DataSource(location=blueprint)
+        if source.source_type != "yaml":
+            raise ValueError(
+                f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
+            )
+        if source.location_type == "path":
+            with open(blueprint, "r") as file:
+                bp_dict = yaml.safe_load(file)
+        elif source.location_type == "url":
+            bp_dict = yaml.safe_load(requests.get(source.location).text)
+
+        bp_dict = bp_dict.get("simulation")
+        bp_dict.pop("type")
+
+        return cls.from_dict(
+            bp_dict, directory=directory, start_date=start_date, end_date=end_date
+        )
 
     def to_blueprint(self) -> None:
         pass
