@@ -19,7 +19,7 @@ from cstar.marbl.external_codebase import MARBLExternalCodeBase
 
 from cstar.base.datasource import DataSource
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.utils import _get_sha256_hash, _replace_text_in_file
+from cstar.base.utils import _get_sha256_hash, _replace_text_in_file, _dict_to_tree
 
 from cstar.execution.handler import ExecutionHandler
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -92,6 +92,10 @@ class ROMSSimulation(Simulation):
         self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
+
+    @property
+    def simulation_type(self):
+        return "ROMS"
 
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
@@ -496,12 +500,43 @@ class ROMSSimulation(Simulation):
 
         return runtime_code_modifications
 
+    def tree(self):
+        """Represent this Case using a `tree`-style visualisation.
+
+        This function prints a representation of the Case to stdout. It represents the
+        directory structure that Case.caseroot takes after calling Case.setup(), but
+        does not require the user to have already called Case.setup().
+        """
+        # Build a dictionary of files connected to this case
+        simulation_tree_dict = {}
+
+        if hasattr(self, "input_datasets") and (len(self.input_datasets) > 0):
+            simulation_tree_dict.setdefault("input_datasets", {})
+            simulation_tree_dict["input_datasets"] = [
+                dataset.source.basename for dataset in self.input_datasets
+            ]
+        if hasattr(self, "runtime_code") and (self.runtime_code is not None):
+            simulation_tree_dict.setdefault("runtime_code", {})
+            simulation_tree_dict["runtime_code"] = [
+                runtime_code.split("/")[-1] for runtime_code in self.runtime_code.files
+            ]
+
+        if hasattr(self, "compile_time_code") and (self.compile_time_code is not None):
+            simulation_tree_dict.setdefault("compile_time_code", {})
+            simulation_tree_dict["compile_time_code"] = [
+                compile_time_code.split("/")[-1]
+                for compile_time_code in self.compile_time_code.files
+            ]
+        print_dict = {}
+        print_dict["ROMS"] = simulation_tree_dict
+        print(f"{self.directory}\n{_dict_to_tree(print_dict)}")
+
     def setup(
         self,
     ) -> None:
-        compile_time_code_dir = self.directory / "compile_time_code/ROMS"
-        runtime_code_dir = self.directory / "runtime_code/ROMS"
-        input_datasets_dir = self.directory / "input_datasets/ROMS"
+        compile_time_code_dir = self.directory / "ROMS/compile_time_code"
+        runtime_code_dir = self.directory / "ROMS/runtime_code"
+        input_datasets_dir = self.directory / "ROMS/input_datasets"
 
         # Setup ExternalCodeBase
         infostr = f"Configuring {self.__class__.__name__}"
