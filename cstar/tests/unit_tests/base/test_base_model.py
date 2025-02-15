@@ -2,13 +2,13 @@ import pytest
 from pathlib import Path
 from unittest import mock
 from cstar.system.manager import cstar_sysmgr
-from cstar.base.base_model import BaseModel
+from cstar.base.external_codebase import ExternalCodeBase
 
 ################################################################################
 
 
-class MockBaseModel(BaseModel):
-    """A mock subclass of the `BaseModel` abstract base class used for testing
+class MockExternalCodeBase(ExternalCodeBase):
+    """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
     purposes."""
 
     @property
@@ -24,32 +24,33 @@ class MockBaseModel(BaseModel):
         return "test_target"
 
     # Abstract methods that aren't properties:
-    def _base_model_adjustments(self):
+    def _codebase_adjustments(self):
         pass
 
     def get(self, target: str | Path):
-        print(f"mock installing BaseModel at {target}")
+        print(f"mock installing ExternalCodeBase at {target}")
         pass
 
 
 @pytest.fixture
-def generic_base_model():
-    """Yields a generic base model (instance of MockBaseModel defined above) for use in
-    testing."""
-    # Correctly patch the imported _get_hash_from_checkout_target in the BaseModel's module
+def generic_codebase():
+    """Yields a generic codebase (instance of MockExternalCodeBase defined above) for
+    use in testing."""
+    # Correctly patch the imported _get_hash_from_checkout_target in the ExternalCodeBase's module
     with mock.patch(
-        "cstar.base.base_model._get_hash_from_checkout_target", return_value="test123"
+        "cstar.base.external_codebase._get_hash_from_checkout_target",
+        return_value="test123",
     ):
-        yield MockBaseModel()
+        yield MockExternalCodeBase()
 
 
-def test_base_model_str(generic_base_model):
-    """Test the string representation of the `BaseModel` class.
+def test_codebase_str(generic_codebase):
+    """Test the string representation of the `ExternalCodeBase` class.
 
     Fixtures
     --------
-    generic_base_model : MockBaseModel
-        A mock instance of `BaseModel` with a predefined environment and repository configuration.
+    generic_codebase : MockExternalCodeBase
+        A mock instance of `ExternalCodeBase` with a predefined environment and repository configuration.
 
     Mocks
     -----
@@ -65,52 +66,52 @@ def test_base_model_str(generic_base_model):
     """
     # Define the expected output
     expected_str = (
-        "MockBaseModel\n"
-        "-------------\n"
+        "MockExternalCodeBase\n"
+        "--------------------\n"
         "source_repo : https://github.com/test/repo.git (default)\n"
         "checkout_target : test_target (corresponding to hash test123) (default)\n"
     )
 
     # Compare the actual result with the expected result
-    assert expected_str in str(generic_base_model)
+    assert expected_str in str(generic_codebase)
 
-    # Assuming generic_base_model is an instance of a class
+    # Assuming generic_codebase is an instance of a class
     with mock.patch.object(
-        type(generic_base_model), "local_config_status", new_callable=mock.PropertyMock
+        type(generic_codebase), "local_config_status", new_callable=mock.PropertyMock
     ) as mock_local_config_status:
         mock_local_config_status.return_value = 0
         assert (
             "(Environment variable TEST_ROOT is present, points to the correct repository remote, and is checked out at the correct hash)"
-            in str(generic_base_model)
+            in str(generic_codebase)
         )
 
         mock_local_config_status.return_value = 1
         assert (
             "(Environment variable TEST_ROOT is present but does not point to the correct repository remote [unresolvable])"
-            in str(generic_base_model)
+            in str(generic_codebase)
         )
 
         # Change the return value again
         mock_local_config_status.return_value = 2
         assert (
             "(Environment variable TEST_ROOT is present, points to the correct repository remote, but is checked out at the wrong hash)"
-            in str(generic_base_model)
+            in str(generic_codebase)
         )
 
         # Final test with return value 3
         mock_local_config_status.return_value = 3
         assert (
-            "(Environment variable TEST_ROOT is not present and it is assumed the base model is not installed locally)"
-            in str(generic_base_model)
+            "(Environment variable TEST_ROOT is not present and it is assumed the external codebase is not installed locally)"
+            in str(generic_codebase)
         )
 
 
-def test_base_model_repr(generic_base_model):
-    """Test the repr representation of the `BaseModel` class."""
+def test_codebase_repr(generic_codebase):
+    """Test the repr representation of the `ExternalCodeBase` class."""
 
-    result_repr = repr(generic_base_model)
+    result_repr = repr(generic_codebase)
     expected_repr = (
-        "MockBaseModel("
+        "MockExternalCodeBase("
         + "\nsource_repo = 'https://github.com/test/repo.git',"
         + "\ncheckout_target = 'test_target'"
         + "\n)"
@@ -121,11 +122,11 @@ def test_base_model_repr(generic_base_model):
     pass
 
 
-class TestBaseModelConfig:
-    """Unit tests for calculating the configuration status of BaseModel.
+class TestExternalCodeBaseConfig:
+    """Unit tests for calculating the configuration status of ExternalCodeBase.
 
-    This test suite evaluates the `local_config_status` property of `BaseModel` (mocked by
-    `MockBaseModel`) to confirm correct repository and environment variable configurations.
+    This test suite evaluates the `local_config_status` property of `ExternalCodeBase` (mocked by
+    `MockExternalCodeBase`) to confirm correct repository and environment variable configurations.
 
     Tests
     -----
@@ -140,8 +141,8 @@ class TestBaseModelConfig:
 
     Fixtures
     --------
-    generic_base_model : MockBaseModel
-        Provides a mock instance of `BaseModel` for use in the tests.
+    generic_codebase : MockExternalCodeBase
+        Provides a mock instance of `ExternalCodeBase` for use in the tests.
 
     Mocks
     -----
@@ -164,12 +165,12 @@ class TestBaseModelConfig:
         self.mock_environment = self.patch_environment.start()
 
         self.patch_get_repo_remote = mock.patch(
-            "cstar.base.base_model._get_repo_remote"
+            "cstar.base.external_codebase._get_repo_remote"
         )
         self.mock_get_repo_remote = self.patch_get_repo_remote.start()
 
         self.patch_get_repo_head_hash = mock.patch(
-            "cstar.base.base_model._get_repo_head_hash"
+            "cstar.base.external_codebase._get_repo_head_hash"
         )
         self.mock_get_repo_head_hash = self.patch_get_repo_head_hash.start()
 
@@ -178,37 +179,37 @@ class TestBaseModelConfig:
         self.patch_get_repo_remote.stop()
         self.patch_get_repo_head_hash.stop()
 
-    def test_local_config_status_valid(self, generic_base_model):
+    def test_local_config_status_valid(self, generic_codebase):
         # Set return values for other mocks
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "test123"
 
         # Assert local_config_status logic
-        assert generic_base_model.local_config_status == 0
-        assert generic_base_model.is_setup
+        assert generic_codebase.local_config_status == 0
+        assert generic_codebase.is_setup
 
-    def test_local_config_status_wrong_remote(self, generic_base_model):
+    def test_local_config_status_wrong_remote(self, generic_codebase):
         self.mock_get_repo_remote.return_value = (
             "https://github.com/test/wrong_repo.git"
         )
 
-        assert generic_base_model.local_config_status == 1
+        assert generic_codebase.local_config_status == 1
 
-    def test_local_config_status_wrong_checkout(self, generic_base_model):
+    def test_local_config_status_wrong_checkout(self, generic_codebase):
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
-        assert generic_base_model.local_config_status == 2
+        assert generic_codebase.local_config_status == 2
 
-    def test_local_config_status_no_env_var(self, generic_base_model):
+    def test_local_config_status_no_env_var(self, generic_codebase):
         self.mock_environment.return_value.environment_variables = {}
-        assert generic_base_model.local_config_status == 3
+        assert generic_codebase.local_config_status == 3
 
 
-class TestBaseModelConfigHandling:
-    """Unit tests for handling various configuration statuses in `BaseModel`.
+class TestExternalCodeBaseConfigHandling:
+    """Unit tests for handling various configuration statuses in `ExternalCodeBase`.
 
-    This suite evaluates `BaseModel`'s `handle_config_status` method by simulating different
+    This suite evaluates `ExternalCodeBase`'s `handle_config_status` method by simulating different
     environment and repository states. Each test checks the behavior of `handle_config_status`
     under varying `local_config_status` values, user input responses, and repository setups.
 
@@ -225,18 +226,18 @@ class TestBaseModelConfigHandling:
     test_handle_config_status_wrong_checkout_user_y
         Verifies that the system attempts to correct the checkout when the user agrees (local_config_status == 2).
     test_handle_config_status_no_env_var_user_y
-        Checks that `get` method is called to install `BaseModel` when the associated environment variable is missing (local_config_status == 3) and user opts to proceed.
+        Checks that `get` method is called to install `ExternalCodeBase` when the associated environment variable is missing (local_config_status == 3) and user opts to proceed.
     test_handle_config_status_no_env_var_user_n
-        Ensures that an `EnvironmentError` is raised when user declines to set up a missing BaseModel (local_config_status == 3).
+        Ensures that an `EnvironmentError` is raised when user declines to set up a missing ExternalCodeBase (local_config_status == 3).
     test_handle_config_status_no_env_var_user_invalid
-        Simulates an invalid user response when prompted to set up the BaseModel (local_config_status == 3).
+        Simulates an invalid user response when prompted to set up the ExternalCodeBase (local_config_status == 3).
     test_handle_config_status_no_env_var_user_custom
-        Confirms that `BaseModel` installs to a custom path when user specifies a custom directory (local_config_status == 3).
+        Confirms that `ExternalCodeBase` installs to a custom path when user specifies a custom directory (local_config_status == 3).
 
     Fixtures
     --------
-    generic_base_model : MockBaseModel
-        Provides a mock instance of `BaseModel` for testing configuration handling.
+    generic_codebase : MockExternalCodeBase
+        Provides a mock instance of `ExternalCodeBase` for testing configuration handling.
 
     Mocks
     -----
@@ -245,7 +246,7 @@ class TestBaseModelConfigHandling:
     patch_get_repo_head_hash : MagicMock
         Mocks `cstar.utils._get_repo_head_hash` to control the repository head hash.
     patch_local_config_status : MagicMock
-        Mocks `BaseModel.local_config_status` to simulate different configuration states.
+        Mocks `ExternalCodeBase.local_config_status` to simulate different configuration states.
     patch_subprocess_run : MagicMock
         Mocks `subprocess.run` to simulate command-line actions for `git checkout`.
     patch_environment : MagicMock
@@ -254,17 +255,17 @@ class TestBaseModelConfigHandling:
 
     def setup_method(self):
         self.patch_get_repo_remote = mock.patch(
-            "cstar.base.base_model._get_repo_remote"
+            "cstar.base.external_codebase._get_repo_remote"
         )
         self.mock_get_repo_remote = self.patch_get_repo_remote.start()
 
         self.patch_get_repo_head_hash = mock.patch(
-            "cstar.base.base_model._get_repo_head_hash"
+            "cstar.base.external_codebase._get_repo_head_hash"
         )
         self.mock_get_repo_head_hash = self.patch_get_repo_head_hash.start()
 
         self.patch_local_config_status = mock.patch.object(
-            BaseModel, "local_config_status", new_callable=mock.PropertyMock
+            ExternalCodeBase, "local_config_status", new_callable=mock.PropertyMock
         )
         self.mock_local_config_status = self.patch_local_config_status.start()
 
@@ -289,19 +290,19 @@ class TestBaseModelConfigHandling:
         self.patch_get_repo_remote.stop()
         self.patch_environment.stop()
 
-    def test_handle_config_status_valid(self, generic_base_model, capsys):
+    def test_handle_config_status_valid(self, generic_codebase, capsys):
         """Test when local_config_status == 0 (correct configuration)"""
         # Mock the config status to be 0 (everything is correct)
         self.mock_local_config_status.return_value = 0
 
         # Call the method
-        generic_base_model.handle_config_status()
+        generic_codebase.handle_config_status()
 
         # Capture printed output and check that nothing happens
         captured = capsys.readouterr()
         assert "correctly configured. Nothing to be done" in captured.out
 
-    def test_handle_config_status_wrong_repo(self, generic_base_model):
+    def test_handle_config_status_wrong_repo(self, generic_codebase):
         """Test when local_config_status == 1 (wrong repository remote)"""
         # Mock the config status to be 1 (wrong repo)
         self.mock_local_config_status.return_value = 1
@@ -311,7 +312,7 @@ class TestBaseModelConfigHandling:
 
         # Assert that it raises an EnvironmentError
         with pytest.raises(EnvironmentError) as exception_info:
-            generic_base_model.handle_config_status()
+            generic_codebase.handle_config_status()
 
         # Check error message:
         expected_message = (
@@ -326,7 +327,7 @@ class TestBaseModelConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_invalid(
-        self, mock_input, generic_base_model, capsys
+        self, mock_input, generic_codebase, capsys
     ):
         # Assert that it raises an EnvironmentError
         self.mock_local_config_status.return_value = 2
@@ -335,7 +336,7 @@ class TestBaseModelConfigHandling:
 
         # Expect StopIteration after the invalid input due to no further inputs
         with pytest.raises(StopIteration):
-            generic_base_model.handle_config_status()
+            generic_codebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y' or 'n'"
         captured = capsys.readouterr()
@@ -343,21 +344,21 @@ class TestBaseModelConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["n"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_n(
-        self, mock_input, generic_base_model, capsys
+        self, mock_input, generic_codebase, capsys
     ):
         # Assert that it raises an EnvironmentError
         self.mock_local_config_status.return_value = 2
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
         with pytest.raises(EnvironmentError):
-            generic_base_model.handle_config_status()
+            generic_codebase.handle_config_status()
 
         # Capture print statements
         capsys.readouterr()
 
     @mock.patch("builtins.input", side_effect=["y"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_y(
-        self, mock_input, generic_base_model, capsys
+        self, mock_input, generic_codebase, capsys
     ):
         """Test handling when local_config_status == 2 (right remote, wrong hash) and
         user agrees to checkout."""
@@ -368,7 +369,7 @@ class TestBaseModelConfigHandling:
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
         # Call the method to trigger the flow
-        generic_base_model.handle_config_status()
+        generic_codebase.handle_config_status()
 
         ## Assert that subprocess.run was called with the correct git checkout command
         self.mock_subprocess_run.assert_called_with(
@@ -393,11 +394,11 @@ class TestBaseModelConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["y"])  # mock_input
     def test_handle_config_status_no_env_var_user_y(
-        self, mock_input, generic_base_model, capsys
+        self, mock_input, generic_codebase, capsys
     ):
         self.mock_local_config_status.return_value = 3
 
-        generic_base_model.handle_config_status()
+        generic_codebase.handle_config_status()
 
         expected_install_dir = (
             Path(cstar_sysmgr.environment.package_root) / "externals/repo"
@@ -405,28 +406,28 @@ class TestBaseModelConfigHandling:
 
         # Verify that 'get' (defined above)  is called when user inputs 'y':
         captured = capsys.readouterr()
-        assert (f"mock installing BaseModel at {expected_install_dir}") in str(
+        assert (f"mock installing ExternalCodeBase at {expected_install_dir}") in str(
             captured.out
         )
 
     @mock.patch("builtins.input", side_effect=["n"])  # mock_input
     def test_handle_config_status_no_env_var_user_n(
-        self, mock_input, generic_base_model, capsys
+        self, mock_input, generic_codebase, capsys
     ):
         self.mock_local_config_status.return_value = 3
 
         with pytest.raises(EnvironmentError):
-            generic_base_model.handle_config_status()
+            generic_codebase.handle_config_status()
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_no_env_var_user_invalid(
-        self, mock_input, generic_base_model, capsys
+        self, mock_input, generic_codebase, capsys
     ):
         self.mock_local_config_status.return_value = 3
 
         # Expect StopIteration after the invalid input due to no further inputs
         with pytest.raises(StopIteration):
-            generic_base_model.handle_config_status()
+            generic_codebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y','n',or 'custom'"
         captured = capsys.readouterr()
@@ -436,13 +437,13 @@ class TestBaseModelConfigHandling:
         "builtins.input", side_effect=["custom", "some/install/path"]
     )  # mock_input
     def test_handle_config_status_no_env_var_user_custom(
-        self, mock_input, generic_base_model, capsys
+        self, mock_input, generic_codebase, capsys
     ):
         self.mock_local_config_status.return_value = 3
-        generic_base_model.handle_config_status()
+        generic_codebase.handle_config_status()
         expected_install_dir = Path("some/install/path").resolve()
 
         captured = capsys.readouterr()
-        assert (f"mock installing BaseModel at {expected_install_dir}") in str(
+        assert (f"mock installing ExternalCodeBase at {expected_install_dir}") in str(
             captured.out
         )
