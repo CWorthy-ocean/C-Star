@@ -577,20 +577,39 @@ class ROMSSimulation(Simulation):
                     end_date=self.end_date,
                 )
 
+    @property
+    def is_setup(self) -> bool:
+        if self.codebase.local_config_status != 0:
+            return False
+        if self.marbl_codebase.local_config_status != 0:
+            return False
+        if (self.runtime_code is not None) and (not self.runtime_code.exists_locally):
+            return False
+        if (self.compile_time_code is not None) and (
+            not self.compile_time_code.exists_locally
+        ):
+            return False
+        for inp in self.input_datasets:
+            if (inp.working_path is None) or (not inp.working_path.exists()):
+                # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
+                # If no start or end date, it should be found locally:
+                if (not isinstance(inp.start_date, datetime)) or (
+                    not isinstance(inp.end_date, datetime)
+                ):
+                    return False
+                # If no start or end date for case, all files should be found locally:
+                elif (not isinstance(self.start_date, datetime)) or (
+                    not isinstance(self.end_date, datetime)
+                ):
+                    return False
+                # If inp and case start and end dates overlap, should be found locally:
+                elif (inp.start_date <= self.end_date) and (
+                    inp.end_date >= self.start_date
+                ):
+                    return False
+        return True
+
     def build(self, rebuild: bool = False) -> None:
-        """Compiles any code associated with this configuration of ROMS.
-
-        Compilation occurs in the directory
-        `ROMSComponent.additional_source_code.working_path
-        This method sets the ROMSComponent `exe_path` attribute.
-
-        Parameters
-        ----------
-        rebuild (bool, default False):
-            Will force the recompilation of ROMS even if the executable
-            already exists and there is no apparent reason to recompile.
-        """
-
         if self.compile_time_code is None:
             raise ValueError(
                 "Unable to compile ROMSComponent: "
