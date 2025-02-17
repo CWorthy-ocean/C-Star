@@ -93,9 +93,65 @@ class ROMSSimulation(Simulation):
 
         self._execution_handler: Optional["ExecutionHandler"] = None
 
-    @property
-    def simulation_type(self):
-        return "ROMS"
+    def __str__(self) -> str:
+        class_name = self.__class__.__name__
+        base_str = super().__str__()
+
+        # MARBL Codebase
+        if self.marbl_codebase is not None:
+            base_str += f"\nMARBL Codebase: {self.marbl_codebase.__class__.__name__} instance (query using {class_name}.marbl_codebase)\n"
+
+        # Input Datasets:
+        base_str += "\nInput Datasets:\n"
+        if self.model_grid is not None:
+            base_str += f"Model grid: <{self.model_grid.__class__.__name__} instance>"
+        if self.initial_conditions is not None:
+            base_str += f"\nInitial conditions: <{self.initial_conditions.__class__.__name__} instance>"
+        if self.tidal_forcing is not None:
+            base_str += (
+                f"\nTidal forcing: <{self.tidal_forcing.__class__.__name__} instance>"
+            )
+        if len(self.surface_forcing) > 0:
+            base_str += (
+                f"\nSurface forcing: <list of {len(self.surface_forcing)} "
+                + f"{self.surface_forcing[0].__class__.__name__} instances>"
+            )
+        if len(self.boundary_forcing) > 0:
+            base_str += (
+                f"\nBoundary forcing: <list of {len(self.boundary_forcing)} "
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>\n"
+            )
+
+        base_str += f"\nIs setup: {self.is_setup}"
+
+        return base_str
+
+    def __repr__(self) -> str:
+        repr_str = super().__repr__().rstrip(")")
+
+        if hasattr(self, "model_grid") and self.model_grid is not None:
+            repr_str += (
+                f"\nmodel_grid = <{self.model_grid.__class__.__name__} instance>,"
+            )
+        if hasattr(self, "initial_conditions") and self.initial_conditions is not None:
+            repr_str += f"\ninitial_conditions = <{self.initial_conditions.__class__.__name__} instance>,"
+        if hasattr(self, "tidal_forcing") and self.tidal_forcing is not None:
+            repr_str += (
+                f"\ntidal_forcing = <{self.tidal_forcing.__class__.__name__} instance>,"
+            )
+        if hasattr(self, "surface_forcing") and len(self.surface_forcing) > 0:
+            repr_str += (
+                f"\nsurface_forcing = <list of {len(self.surface_forcing)} "
+                + f"{self.surface_forcing[0].__class__.__name__} instances>,"
+            )
+        if hasattr(self, "boundary_forcing") and len(self.boundary_forcing) > 0:
+            repr_str += (
+                f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
+            )
+        repr_str += "\n)"
+
+        return repr_str
 
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
@@ -590,7 +646,7 @@ class ROMSSimulation(Simulation):
         ):
             return False
         for inp in self.input_datasets:
-            if (inp.working_path is None) or (not inp.working_path.exists()):
+            if not (inp.exists_locally):
                 # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
                 # If no start or end date, it should be found locally:
                 if (not isinstance(inp.start_date, datetime)) or (

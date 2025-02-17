@@ -111,6 +111,74 @@ class Simulation(ABC):
                 f"start_date {self.start_date} is after end_date {self.end_date}."
             )
 
+    def __str__(self) -> str:
+        class_name = self.__class__.__name__
+        base_str = f"{class_name}\n" + ("-" * len(class_name)) + "\n"
+
+        base_str += f"Name: {self.name}\n"
+        base_str += f"Directory: {self.directory}\n"
+
+        # Dates
+        base_str += f"Start date: {self.start_date}\n"
+        base_str += f"End date: {self.end_date}\n"
+        base_str += f"Valid start date: {self.valid_start_date}\n"
+        base_str += f"Valid end date: {self.valid_end_date}\n"
+
+        if self.discretization is not None:
+            base_str += "\nDiscretization: "
+            base_str += self.discretization.__repr__() + "\n"
+
+        # Codebase
+        base_str += "\nCode: "
+        base_str += f"\nCodebase: {self.codebase.__class__.__name__} instance (query using {class_name}.codebase)\n"
+
+        # Runtime code:
+        if self.runtime_code is not None:
+            NN = len(self.runtime_code.files)
+        else:
+            NN = 0
+        base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
+
+        # Compile-time code:
+        if self.compile_time_code is not None:
+            NN = len(self.compile_time_code.files)
+        else:
+            NN = 0
+        base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
+
+        if hasattr(self, "exe_path") and self.exe_path is not None:
+            base_str += "\n Is compiled: True"
+            base_str += "\n Executable path: " + str(self.exe_path)
+
+        return base_str
+
+    def __repr__(self) -> str:
+        repr_str = f"{self.__class__.__name__}("
+        repr_str += f"\nname = {self.name}, "
+        repr_str += f"\ndirectory = {self.directory}, "
+        repr_str += f"\nstart_date = {self.start_date}, "
+        repr_str += f"\nend_date = {self.end_date}, "
+        repr_str += f"\nvalid_start_date = {self.valid_start_date}, "
+        repr_str += f"\nvalid_end_date = {self.valid_end_date}, "
+        if self.discretization is not None:
+            repr_str += f"\ndiscretization = {self.discretization.__repr__()},"
+
+        repr_str += f"\ncodebase = <{self.codebase.__class__.__name__} instance>, "
+        if self.runtime_code is not None:
+            repr_str += (
+                "\nruntime_code = "
+                + f"<{self.runtime_code.__class__.__name__} instance>, "
+            )
+        if self.compile_time_code is not None:
+            repr_str += (
+                "\ncompile_time_code = "
+                + f"<{self.compile_time_code.__class__.__name__} instance>, "
+            )
+
+        repr_str += ")"
+
+        return repr_str
+
     @property
     @abstractmethod
     def default_codebase(self) -> ExternalCodeBase:
