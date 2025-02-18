@@ -105,7 +105,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
         for idfile in id_files_to_partition:
             print(f"Partitioning {idfile} into ({np_xi},{np_eta})")
-            parted_files += roms_tools.utils.partition_netcdf(
+            parted_files += roms_tools.partition_netcdf(
                 idfile, np_xi=np_xi, np_eta=np_eta
             )
 

@@ -890,7 +890,7 @@ class TestROMSInputDatasetPartition:
         """Stop all patches."""
         mock.patch.stopall()
 
-    @mock.patch("cstar.roms.input_dataset.roms_tools.utils.partition_netcdf")
+    @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_single_file(
         self, mock_partition_netcdf, local_roms_netcdf_dataset
     ):
@@ -963,7 +963,7 @@ class TestROMSInputDatasetPartition:
                     == expected_partitioned_files
                 )
 
-    @mock.patch("cstar.roms.input_dataset.roms_tools.utils.partition_netcdf")
+    @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_multiple_files(
         self, mock_partition_netcdf, local_roms_netcdf_dataset
     ):

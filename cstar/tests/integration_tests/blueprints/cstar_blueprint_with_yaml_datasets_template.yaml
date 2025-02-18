@@ -35,20 +35,13 @@ discretization:
   time_step: 60
 model_grid:
   location: '<input_datasets_location>/roms_grd.yaml'
-  file_hash: 'c71a0fb19b1694bab3f465e849d3c897aa4be177414f4821d446aa312d02b463'
 initial_conditions:
   location: '<input_datasets_location>/roms_ini.yaml'
-  file_hash: '22a666a5402748de77e36c66bc16da073eb04aec4e7c7384ef314b5a275c7db8'
 tidal_forcing:
   location: '<input_datasets_location>/roms_tides.yaml'
-  file_hash: 'c71a0fb19b1694bab3f465e849d3c897aa4be177414f4821d446aa312d02b463'
 boundary_forcing:
   - location: '<input_datasets_location>/roms_bry.yaml'
-    file_hash: '9446dfb3e9304723dae92e35a51172c11e2412e086a29eed573b3f6c1c1e0d16'
   - location: '<input_datasets_location>/roms_bry_bgc.yaml'
-    file_hash: '6d600be6794fd197d72e30cb4aca96b96a4d80912b9581a763041a99a48784cf'
 surface_forcing:
   - location: '<input_datasets_location>/roms_frc.yaml'
-    file_hash: '3183bf45d6d827dbdde3133c680a77a3f8e6e2d9f5577716ced9ff06de6c4a4c'
   - location: '<input_datasets_location>/roms_frc_bgc.yaml'
-    file_hash: '528a112e18d30f41ec7154a84316772ffcaae92d4931bae3c36eee147e0a236e'
