@@ -1,17 +1,72 @@
-from pathlib import Path
-from typing import Optional, Any
-from cstar.base import ExternalCodeBase, AdditionalCode, Discretization
-from datetime import datetime
 import copy
+import pickle
 import warnings
 import dateutil
+
 from abc import ABC, abstractmethod
-from cstar.execution.local_process import LocalProcess
+from typing import Optional, Any
+from pathlib import Path
+from datetime import datetime
+
+from cstar.base import ExternalCodeBase, AdditionalCode, Discretization
 from cstar.execution.handler import ExecutionStatus, ExecutionHandler
-import pickle
+from cstar.execution.local_process import LocalProcess
 
 
 class Simulation(ABC):
+    """An abstract base class representing a C-Star simulation.
+
+    Attributes
+    ----------
+    name : str
+        The name of this simulation.
+    directory : Path
+        The local directory in which this simulation will be prepared and executed.
+    start_date : str or datetime, optional
+        The starting date of the simulation.
+    end_date : str or datetime, optional
+        The ending date of the simulation.
+    valid_start_date : str or datetime, optional
+        The earliest allowed start date, based on, e.g. the availability of input data.
+    valid_end_date : str or datetime, optional
+        The latest allowed end date, based on, e.g., the availability of input data.
+    codebase : ExternalCodeBase, optional
+        The repository containing the base source code for this simulation.
+    runtime_code : AdditionalCode, optional
+        Runtime configuration files.
+    compile_time_code : AdditionalCode, optional
+        Additional source code modifications and compile-time configuration files.
+    discretization : Discretization
+        Numerical discretization parameters for this simulation.
+
+    Methods
+    -------
+    from_dict(simulation_dict, directory)
+        Construct a Simulation instance from a dictionary.
+    to_dict()
+        Convert this Simulation instance into a dictionary.
+    from_blueprint(blueprint, directory)
+        Initialize a Simulation from a YAML blueprint.
+    to_blueprint(filename)
+        Save this simulation's configuration as a YAML blueprint.
+    setup()
+        Prepare all necessary files and configurations for the simulation locally.
+    build(rebuild=False)
+        Compile any necessary additional code associated with this simulation.
+    pre_run()
+        Execute any pre-processing actions required before running the simulation.
+    run()
+        Execute the simulation.
+    post_run()
+        Execute any post-processing actions required after running the simulation.
+    persist()
+        Save the state of this Simulation instance to disk.
+    restore(directory)
+        Restore a previously saved Simulation instance from disk.
+    restart(new_end_date)
+        Create a new Simulation instance starting from the end of this one.
+    """
+
     def __init__(
         self,
         name: str,
@@ -25,6 +80,33 @@ class Simulation(ABC):
         valid_start_date: Optional[str | datetime] = None,
         valid_end_date: Optional[str | datetime] = None,
     ):
+        """Initialize a Simulation object with a given name, directory, codebase, and
+        configuration parameters.
+
+        Parameters
+        ----------
+        name : str
+            The name of this simulation.
+        directory : str or Path
+            The directory where the simulation will be prepared and executed.
+        discretization : Discretization
+            The numerical discretization settings for this simulation.
+        runtime_code : AdditionalCode, optional
+            Runtime configuration files.
+        compile_time_code : AdditionalCode, optional
+            Additional source code modifications and compile-time configuration files.
+        codebase : ExternalCodeBase, optional
+            The repository containing the base source code for this simulation.
+        start_date : str or datetime, optional
+            The starting date of the simulation.
+        end_date : str or datetime, optional
+            The ending date of the simulation.
+        valid_start_date : str or datetime, optional
+            The earliest allowed start date, based on, e.g. the availability of input data.
+        valid_end_date : str or datetime, optional
+            The latest allowed end date, based on, e.g., the availability of input data.
+        """
+
         self.directory: Path = self._validate_simulation_directory(directory)
         self.name = name
 
@@ -53,7 +135,26 @@ class Simulation(ABC):
         self.discretization = discretization
 
     def _validate_simulation_directory(self, directory: str | Path) -> Path:
-        """Validates and resolves the simulation directory."""
+        """Validates and resolves the simulation directory.
+
+        This method ensures that the provided directory is valid and resolves its absolute path.
+        If the directory already exists and is not empty, an error is raised.
+
+        Parameters
+        ----------
+        directory : str or Path
+            The path to the simulation directory.
+
+        Returns
+        -------
+        Path
+            The resolved absolute path of the simulation directory.
+
+        Raises
+        ------
+        FileExistsError
+            If the specified directory already exists and is not empty.
+        """
         resolved_directory = Path(directory).resolve()
         if resolved_directory.exists() and (
             not resolved_directory.is_dir() or any(resolved_directory.iterdir())
@@ -70,7 +171,31 @@ class Simulation(ABC):
     def _parse_date(
         self, date: Optional[str | datetime], field_name: str
     ) -> Optional[datetime]:
-        """Converts a date string to a datetime object if it's not None."""
+        """Converts a date string to a datetime object if it's not None.
+
+        If the input is a string, it attempts to parse it into a `datetime` object.
+        If the input is already a `datetime` object, it is returned as is.
+        If the input is `None`, a warning is issued, and `None` is returned.
+
+        Parameters
+        ----------
+        date : str, datetime, or None
+            The date to be parsed. Can be a string representation of a date,
+            a `datetime` object, or `None`.
+        field_name : str
+            The name of the field being parsed, used for warning messages.
+
+        Returns
+        -------
+        datetime or None
+            The parsed `datetime` object if the input is valid, otherwise `None`.
+
+        Warns
+        -----
+        RuntimeWarning
+            If the date is `None`, a warning is issued indicating that
+            validation of simulation dates may be incomplete.
+        """
         if date is None:
             warnings.warn(
                 f"{field_name} not provided. Unable to check if simulation dates are out of range.",
@@ -85,7 +210,37 @@ class Simulation(ABC):
         fallback: Optional[datetime],
         field_name: str,
     ) -> datetime:
-        """Ensures a date is set, using a fallback if needed."""
+        """Ensures a date is set, using a fallback if needed.
+
+        If a valid date is provided, it is parsed and returned. If `date` is `None`,
+        the fallback is used instead. If both `date` and `fallback` are `None`,
+        an error is raised.
+
+        Parameters
+        ----------
+        date : str, datetime, or None
+            The date to be parsed. Can be a string representation of a date,
+            a `datetime` object, or `None`.
+        fallback : datetime or None
+            The fallback value to use if `date` is not provided.
+        field_name : str
+            The name of the field being processed, used for warning messages.
+
+        Returns
+        -------
+        datetime
+            The parsed `datetime` object.
+
+        Raises
+        ------
+        ValueError
+            If both `date` and `fallback` are `None`, indicating that no valid date is available.
+
+        Warns
+        -----
+        UserWarning
+            If `date` is `None`, a warning is issued indicating that the fallback value is being used.
+        """
         parsed_date = self._parse_date(date=date, field_name=field_name)
 
         if parsed_date is None:  # If no date is provided, use the fallback
@@ -97,7 +252,22 @@ class Simulation(ABC):
         return parsed_date  # Always returns a valid datetime
 
     def _validate_date_range(self):
-        """Checks that start_date and end_date are within valid ranges."""
+        """Checks that `start_date` and `end_date` fall within the valid date range.
+
+        Ensures that the simulation's `start_date` is not earlier than `valid_start_date`,
+        and that `end_date` is not later than `valid_end_date`. Also checks that `start_date`
+        is not after `end_date`.
+
+        Raises
+        ------
+        ValueError
+            If `start_date` is earlier than `valid_start_date`.
+        ValueError
+            If `end_date` is later than `valid_end_date`.
+        ValueError
+            If `start_date` is later than `end_date`.
+        """
+
         if self.valid_start_date and self.start_date < self.valid_start_date:
             raise ValueError(
                 f"start_date {self.start_date} is before the earliest valid start date {self.valid_start_date}."
@@ -112,6 +282,18 @@ class Simulation(ABC):
             )
 
     def __str__(self) -> str:
+        """Returns a string representation of the simulation.
+
+        The representation includes the simulation's name, directory,
+        start and end dates, valid date range, discretization settings,
+        and code-related information.
+
+        Returns
+        -------
+        str
+            A formatted string summarizing the simulation's attributes.
+        """
+
         class_name = self.__class__.__name__
         base_str = f"{class_name}\n" + ("-" * len(class_name)) + "\n"
 
@@ -153,6 +335,18 @@ class Simulation(ABC):
         return base_str
 
     def __repr__(self) -> str:
+        """Returns a detailed string representation of the simulation.
+
+        The representation includes all relevant attributes, such as
+        name, directory, start and end dates, valid date range,
+        discretization settings, and code-related components.
+
+        Returns
+        -------
+        str
+            A string representation of the simulation suitable for debugging.
+        """
+
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nname = {self.name}, "
         repr_str += f"\ndirectory = {self.directory}, "
@@ -182,15 +376,65 @@ class Simulation(ABC):
     @property
     @abstractmethod
     def default_codebase(self) -> ExternalCodeBase:
-        """Each subclass must provide a default CodeBase instance."""
+        """Abstract property that must be implemented by subclasses to provide a default
+        codebase.
+
+        This property ensures that each subclass of `Simulation` defines a default
+        `ExternalCodeBase` instance to be used when no specific codebase is provided.
+
+        Returns
+        -------
+        ExternalCodeBase
+            The default codebase instance for the simulation.
+        """
         pass
 
     @classmethod
     @abstractmethod
     def from_dict(self, simulation_dict: dict, directory: str | Path):
+        """Abstract method to create a Simulation instance from a dictionary.
+
+        This method must be implemented by subclasses to construct a simulation
+        object using a dictionary representation, typically generated by `to_dict()`.
+
+        Parameters
+        ----------
+        simulation_dict : dict
+            A dictionary containing the attributes required to initialize a Simulation instance.
+        directory : str or Path
+            The directory where the simulation will be set up.
+
+        Returns
+        -------
+        Simulation
+            An initialized simulation instance.
+
+        See Also
+        --------
+        to_dict : Converts an existing Simulation instance into a dictionary representation.
+        from_blueprint: Reads an equivalent representation from a yaml file.
+        """
+
         pass
 
     def to_dict(self) -> dict:
+        """Convert the Simulation instance into a dictionary representation.
+
+        This method serializes the attributes of the Simulation instance into a
+        dictionary format, including metadata, codebase details, discretization
+        settings, runtime and compile-time code information.
+
+        Returns
+        -------
+        dict
+            A dictionary containing all the attributes of the Simulation instance.
+
+        See Also
+        --------
+        from_dict : Constructs a Simulation instance from a dictionary.
+        to_blueprint: Writes an equivalent representation to a yaml file.
+        """
+
         simulation_dict: dict[Any, Any] = {}
 
         # Top-level information
@@ -246,17 +490,83 @@ class Simulation(ABC):
         blueprint: str,
         directory: str | Path,
     ):
+        """Abstract method to create a Simulation instance from a blueprint file.
+
+        This method should be implemented in subclasses to read a YAML file containing
+        a structured blueprint for a simulation and initialize a Simulation instance
+        accordingly.
+
+        Parameters
+        ----------
+        blueprint : str
+            The path or URL of a YAML file containing the blueprint for the simulation.
+        directory : str or Path
+            The local directory where the simulation will be set up.
+
+        Returns
+        -------
+        Simulation
+            An initialized Simulation instance based on the provided blueprint.
+
+        See Also
+        --------
+        to_blueprint : Saves the Simulation instance to a YAML blueprint file.
+        from_dict : Creates a Simulation instance from a dictionary.
+        """
+
         pass
 
     @abstractmethod
     def to_blueprint(self, filename: str) -> None:
+        """Abstract method to save the Simulation instance as a YAML blueprint file.
+
+        This method should be implemented in subclasses to serialize the Simulation
+        instance into a structured YAML file, making it possible to recreate the
+        instance later using `from_blueprint`.
+
+        Parameters
+        ----------
+        filename : str
+            The path to the YAML file that will be created.
+
+        See Also
+        --------
+        from_blueprint : Loads a Simulation instance from a YAML blueprint file.
+        to_dict : Converts the Simulation instance into a dictionary.
+        """
         pass
 
     @abstractmethod
     def setup(self) -> None:
+        """Abstract method to set up the Simulation.
+
+        This method should be implemented in subclasses to handle tasks such as
+        configuring the simulation directory, retrieving necessary files, and preparing
+        the simulation for execution.
+
+        See Also
+        --------
+        run : Executes the simulation.
+        """
         pass
 
     def persist(self) -> None:
+        """Save the current state of the simulation to a file.
+
+        This method serializes the simulation object and writes it to a file named
+        `simulation_state.pkl` within the simulation directory, allowing the exact state
+        to be restored later.
+
+        Raises
+        ------
+        RuntimeError
+            If the simulation is currently running in a local process, as a running
+            LocalProcess instance cannot be serialized.
+
+        See Also
+        --------
+        restore : Restores a previously saved simulation state.
+        """
         if (
             (hasattr(self, "_execution_handler"))
             and (isinstance(self._execution_handler, LocalProcess))
@@ -273,6 +583,32 @@ class Simulation(ABC):
 
     @classmethod
     def restore(cls, directory: str | Path) -> "Simulation":
+        """Restore a previously saved simulation state.
+
+        This method loads a serialized simulation object from the `simulation_state.pkl`
+        file located in the specified directory and returns the restored instance.
+
+        Parameters
+        ----------
+        directory : str or Path
+            The directory containing the saved simulation state.
+
+        Returns
+        -------
+        Simulation
+            The restored simulation instance.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the `simulation_state.pkl` file is not found in the specified directory.
+        pickle.UnpicklingError
+            If the file cannot be deserialized, indicating possible corruption.
+
+        See Also
+        --------
+        persist : Saves the current simulation state.
+        """
         directory = Path(directory)
         with open(f"{directory}/simulation_state.pkl", "rb") as state_file:
             simulation_instance = pickle.load(state_file)
@@ -280,23 +616,116 @@ class Simulation(ABC):
 
     @abstractmethod
     def build(self, rebuild=False) -> None:
+        """Abstract method to compile any necessary code for this simulation.
+
+        This method should be implemented by subclasses to handle steps
+        specific to that Simulation type.
+
+        Parameters
+        ----------
+        rebuild : bool, optional, default=False
+            If True, forces recompilation or reconfiguration even if an existing
+            build is detected.
+
+        See Also
+        --------
+        setup : Prepares the Simulation locally.
+        run : Executes the Simulation.
+        """
         pass
 
     @abstractmethod
     def pre_run(self) -> None:
+        """Abstract method to perform any necessary pre-processing steps before running
+        the simulation.
+
+        This method should be implemented by subclasses to handle setup tasks such as
+        preparing input datasets or configuration files.
+
+        Raises
+        ------
+        NotImplementedError
+            If the subclass does not implement this method.
+
+        See Also
+        --------
+        build : Compiles or prepares necessary components.
+        run : Executes the simulation.
+        post_run : Handles post-processing steps after execution.
+        """
         pass
 
     @abstractmethod
     def run(self) -> "ExecutionHandler":
+        """Abstract method to begin execution of the simulation.
+
+        This method should be implemented by subclasses to handle the execution
+        of the simulation, whether locally or through a job scheduler. The
+        method should return an `ExecutionHandler` instance that tracks the
+        execution status.
+
+        Returns
+        -------
+        ExecutionHandler
+            An object that manages and tracks the execution of the simulation.
+
+        Raises
+        ------
+        NotImplementedError
+            If the subclass does not implement this method.
+
+        See Also
+        --------
+        pre_run : Prepares the simulation before execution.
+        post_run : Handles post-processing steps after execution.
+        """
         pass
 
     @abstractmethod
     def post_run(self) -> None:
+        """Abstract method to perform post-processing actions after the simulation run.
+
+        This method should be implemented by subclasses to handle any necessary
+        post-processing steps after the simulation has completed, such as
+        processing output files.
+
+        See Also
+        --------
+        run : Executes the simulation.
+        pre_run : Performs preprocessing before execution.
+        """
         pass
 
     def restart(self, new_end_date: str | datetime) -> "Simulation":
-        # This just sets dates, restart files etc. should be set in
-        # subclasses
+        """Create a new Simulation instance starting from the end date of the current
+        simulation.
+
+        This method generates a deep copy of the current simulation and updates its
+        start date to match the current simulation's end date. The new simulation
+        may require additional modifications, such as setting restart files, which
+        should be implemented in subclasses.
+
+        Parameters
+        ----------
+        new_end_date : str or datetime
+            The end date for the restarted simulation.
+
+        Returns
+        -------
+        Simulation
+            A new simulation instance with updated parameters for continuing the
+            previous simulation.
+
+        Raises
+        ------
+        ValueError
+            If `new_end_date` is not of type str or datetime.
+
+        See Also
+        --------
+        persist : Saves the state of the current simulation.
+        restore : Restores a saved simulation instance.
+        """
         new_sim = copy.deepcopy(self)
         new_sim.start_date = self.end_date
         new_sim.directory = (
