@@ -25,7 +25,7 @@ class Simulation(ABC):
         valid_start_date: Optional[str | datetime] = None,
         valid_end_date: Optional[str | datetime] = None,
     ):
-        self.directory: Path = Path(directory).resolve()
+        self.directory: Path = self._validate_simulation_directory(directory)
         self.name = name
 
         # Process valid date ranges
@@ -52,20 +52,20 @@ class Simulation(ABC):
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization
 
-    def _validate_caseroot(self, caseroot: str | Path) -> Path:
-        """Validates and resolves the caseroot directory."""
-        resolved_caseroot = Path(caseroot).resolve()
-        if resolved_caseroot.exists() and (
-            not resolved_caseroot.is_dir() or any(resolved_caseroot.iterdir())
+    def _validate_simulation_directory(self, directory: str | Path) -> Path:
+        """Validates and resolves the simulation directory."""
+        resolved_directory = Path(directory).resolve()
+        if resolved_directory.exists() and (
+            not resolved_directory.is_dir() or any(resolved_directory.iterdir())
         ):
             raise FileExistsError(
-                f"Your chosen caseroot {caseroot} exists and is not an empty directory."
+                f"Your chosen directory {directory} exists and is not an empty directory."
                 "\nIf you have previously created this case, use "
-                f"\nmy_case = Case.restore(caseroot={caseroot!r})"
+                f"\nmy_sim = {self.__class__.__name__}.restore(directory={directory!r})"
                 "\n to restore it"
             )
 
-        return resolved_caseroot
+        return resolved_directory
 
     def _parse_date(
         self, date: Optional[str | datetime], field_name: str
