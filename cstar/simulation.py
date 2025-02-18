@@ -22,19 +22,19 @@ class Simulation(ABC):
         The name of this simulation.
     directory : Path
         The local directory in which this simulation will be prepared and executed.
-    start_date : str or datetime, optional
+    start_date : str or datetime
         The starting date of the simulation.
-    end_date : str or datetime, optional
+    end_date : str or datetime
         The ending date of the simulation.
-    valid_start_date : str or datetime, optional
+    valid_start_date : str or datetime
         The earliest allowed start date, based on, e.g. the availability of input data.
-    valid_end_date : str or datetime, optional
+    valid_end_date : str or datetime
         The latest allowed end date, based on, e.g., the availability of input data.
-    codebase : ExternalCodeBase, optional
+    codebase : ExternalCodeBase
         The repository containing the base source code for this simulation.
-    runtime_code : AdditionalCode, optional
+    runtime_code : AdditionalCode
         Runtime configuration files.
-    compile_time_code : AdditionalCode, optional
+    compile_time_code : AdditionalCode
         Additional source code modifications and compile-time configuration files.
     discretization : Discretization
         Numerical discretization parameters for this simulation.

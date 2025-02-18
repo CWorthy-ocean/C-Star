@@ -10,7 +10,7 @@ def marbl_codebase():
     """Fixture providing a configured instance of `MARBLExternalCodeBase` for
     testing."""
     source_repo = "https://github.com/marbl-ecosys/MARBL.git"
-    checkout_target = "v0.45.0"
+    checkout_target = "marbl0.45.0"
     return MARBLExternalCodeBase(
         source_repo=source_repo, checkout_target=checkout_target
     )
@@ -26,7 +26,7 @@ def test_default_source_repo(marbl_codebase):
 
 def test_default_checkout_target(marbl_codebase):
     """Test if the default checkout target is set correctly."""
-    assert marbl_codebase.default_checkout_target == "v0.45.0"
+    assert marbl_codebase.default_checkout_target == "marbl0.45.0"
 
 
 def test_expected_env_var(marbl_codebase):
@@ -40,7 +40,7 @@ def test_defaults_are_set():
 
     marbl_codebase = MARBLExternalCodeBase()
     assert marbl_codebase.source_repo == "https://github.com/marbl-ecosys/MARBL.git"
-    assert marbl_codebase.checkout_target == "v0.45.0"
+    assert marbl_codebase.checkout_target == "marbl0.45.0"
 
 
 class TestMARBLExternalCodeBaseGet:
