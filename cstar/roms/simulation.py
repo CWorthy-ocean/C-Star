@@ -105,8 +105,8 @@ class ROMSSimulation(Simulation):
         name: str,
         directory: str | Path,
         discretization: "ROMSDiscretization",
-        runtime_code: Optional["AdditionalCode"],
-        compile_time_code: Optional["AdditionalCode"],
+        runtime_code: Optional["AdditionalCode"] = None,
+        compile_time_code: Optional["AdditionalCode"] = None,
         codebase: Optional["ROMSExternalCodeBase"] = None,
         start_date: Optional[str | datetime] = None,
         end_date: Optional[str | datetime] = None,
@@ -168,6 +168,23 @@ class ROMSSimulation(Simulation):
             If `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
             If `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
         """
+        if discretization is None:
+            raise ValueError(
+                "Cannot construct a ROMSComponent instance without a "
+                + "ROMSDiscretization object, but could not find 'discretization' entry"
+            )
+        if runtime_code is None:
+            raise ValueError(
+                "Cannot construct a ROMSComponent instance without runtime "
+                + "code, but could not find 'runtime_code' entry"
+            )
+        if compile_time_code is None:
+            raise NotImplementedError(
+                "This version of C-Star does not support ROMSComponent instances "
+                + "without code to be included at compile time (.opt files, etc.), but "
+                + "could not find a 'compile_time_code' entry."
+            )
+
         super().__init__(
             name=name,
             directory=directory,
@@ -340,7 +357,7 @@ class ROMSSimulation(Simulation):
         if self.runtime_code is None:
             raise ValueError(
                 "ROMSComponent.runtime_code not set."
-                + " ROMS reuires a runtime options file "
+                + " ROMS requires a runtime options file "
                 + "(typically roms.in)"
             )
 
@@ -477,36 +494,22 @@ class ROMSSimulation(Simulation):
 
         # Construct the Discretization instance
         discretization_kwargs = simulation_dict.get("discretization")
-        if discretization_kwargs is None:
-            raise ValueError(
-                "Cannot construct a ROMSComponent instance without a "
-                + "ROMSDiscretization object, but could not find 'discretization' entry"
-            )
-        discretization = ROMSDiscretization(**discretization_kwargs)
+        if discretization_kwargs is not None:
+            discretization = ROMSDiscretization(**discretization_kwargs)
 
-        simulation_kwargs["discretization"] = discretization
+            simulation_kwargs["discretization"] = discretization
 
         # Construct any AdditionalCode instance associated with namelists
         runtime_code_kwargs = simulation_dict.get("runtime_code")
-        if runtime_code_kwargs is None:
-            raise ValueError(
-                "Cannot construct a ROMSComponent instance without runtime "
-                + "code, but could not find 'runtime_code' entry"
-            )
-        runtime_code = AdditionalCode(**runtime_code_kwargs)
-        simulation_kwargs["runtime_code"] = runtime_code
+        if runtime_code_kwargs is not None:
+            runtime_code = AdditionalCode(**runtime_code_kwargs)
+            simulation_kwargs["runtime_code"] = runtime_code
 
         # Construct any AdditionalCode instance associated with source mods
         compile_time_code_kwargs = simulation_dict.get("compile_time_code")
-        if compile_time_code_kwargs is None:
-            raise NotImplementedError(
-                "This version of C-Star does not support ROMSComponent instances "
-                + "without code to be included at compile time (.opt files, etc.), but "
-                + "could not find an 'compile_time_code' entry."
-            )
-
-        compile_time_code = AdditionalCode(**compile_time_code_kwargs)
-        simulation_kwargs["compile_time_code"] = compile_time_code
+        if compile_time_code_kwargs is not None:
+            compile_time_code = AdditionalCode(**compile_time_code_kwargs)
+            simulation_kwargs["compile_time_code"] = compile_time_code
 
         # Construct any ROMSModelGrid instance:
         model_grid_kwargs = simulation_dict.get("model_grid")
