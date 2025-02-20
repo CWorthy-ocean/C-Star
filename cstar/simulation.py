@@ -312,7 +312,7 @@ class Simulation(ABC):
             base_str += self.discretization.__repr__() + "\n"
 
         # Codebase
-        base_str += "\nCode: "
+        base_str += "\nCode:"
         base_str += f"\nCodebase: {self.codebase.__class__.__name__} instance (query using {class_name}.codebase)\n"
 
         # Runtime code:
@@ -345,27 +345,27 @@ class Simulation(ABC):
         """
 
         repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\nname = {self.name}, "
-        repr_str += f"\ndirectory = {self.directory}, "
-        repr_str += f"\nstart_date = {self.start_date}, "
-        repr_str += f"\nend_date = {self.end_date}, "
-        repr_str += f"\nvalid_start_date = {self.valid_start_date}, "
-        repr_str += f"\nvalid_end_date = {self.valid_end_date}, "
+        repr_str += f"\nname = {self.name},"
+        repr_str += f"\ndirectory = {self.directory},"
+        repr_str += f"\nstart_date = {self.start_date},"
+        repr_str += f"\nend_date = {self.end_date},"
+        repr_str += f"\nvalid_start_date = {self.valid_start_date},"
+        repr_str += f"\nvalid_end_date = {self.valid_end_date},"
         if self.discretization is not None:
             repr_str += f"\ndiscretization = {self.discretization.__repr__()},"
 
-        repr_str += f"\ncodebase = <{self.codebase.__class__.__name__} instance>, "
+        repr_str += f"\ncodebase = <{self.codebase.__class__.__name__} instance>,"
         if self.runtime_code is not None:
             repr_str += (
                 "\nruntime_code = "
-                + f"<{self.runtime_code.__class__.__name__} instance>, "
+                + f"<{self.runtime_code.__class__.__name__} instance>,"
             )
         if self.compile_time_code is not None:
             repr_str += (
                 "\ncompile_time_code = "
-                + f"<{self.compile_time_code.__class__.__name__} instance>, "
+                + f"<{self.compile_time_code.__class__.__name__} instance>,"
             )
-        repr_str = repr_str.rstrip(", ")
+        repr_str = repr_str.rstrip(",")
         repr_str += ")"
 
         return repr_str
