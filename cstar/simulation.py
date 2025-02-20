@@ -72,8 +72,8 @@ class Simulation(ABC):
         name: str,
         directory: str | Path,
         discretization: "Discretization",
-        runtime_code: Optional["AdditionalCode"],
-        compile_time_code: Optional["AdditionalCode"],
+        runtime_code: Optional["AdditionalCode"] = None,
+        compile_time_code: Optional["AdditionalCode"] = None,
         codebase: Optional["ExternalCodeBase"] = None,
         start_date: Optional[str | datetime] = None,
         end_date: Optional[str | datetime] = None,
@@ -117,6 +117,11 @@ class Simulation(ABC):
         self.valid_end_date = self._parse_date(
             date=valid_end_date, field_name="Valid end date"
         )
+        if self.valid_start_date is None or self.valid_end_date is None:
+            warnings.warn(
+                "Cannot enforce date range validation: Missing `valid_start_date` or `valid_end_date`.",
+                RuntimeWarning,
+            )
 
         # Set start and end dates, using defaults where needed
         self.start_date = self._get_date_or_fallback(
@@ -197,10 +202,6 @@ class Simulation(ABC):
             validation of simulation dates may be incomplete.
         """
         if date is None:
-            warnings.warn(
-                f"{field_name} not provided. Unable to check if simulation dates are out of range.",
-                RuntimeWarning,
-            )
             return None
         return date if isinstance(date, datetime) else dateutil.parser.parse(date)
 
@@ -317,20 +318,16 @@ class Simulation(ABC):
         # Runtime code:
         if self.runtime_code is not None:
             NN = len(self.runtime_code.files)
-        else:
-            NN = 0
-        base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
+            base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
 
         # Compile-time code:
         if self.compile_time_code is not None:
             NN = len(self.compile_time_code.files)
-        else:
-            NN = 0
-        base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
+            base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
 
         if hasattr(self, "exe_path") and self.exe_path is not None:
-            base_str += "\n Is compiled: True"
-            base_str += "\n Executable path: " + str(self.exe_path)
+            base_str += "\nIs compiled: True"
+            base_str += "\nExecutable path: " + str(self.exe_path)
 
         return base_str
 
@@ -368,7 +365,7 @@ class Simulation(ABC):
                 "\ncompile_time_code = "
                 + f"<{self.compile_time_code.__class__.__name__} instance>, "
             )
-
+        repr_str = repr_str.rstrip(", ")
         repr_str += ")"
 
         return repr_str
@@ -574,7 +571,7 @@ class Simulation(ABC):
         ):
             raise RuntimeError(
                 "Simulation.persist() was called, but at least one "
-                "component is currently running in a local process. Await "
+                "local process is currently running in. Await "
                 "completion or use LocalProcess.cancel(), then try again"
             )
 
