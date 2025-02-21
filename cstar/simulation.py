@@ -134,7 +134,17 @@ class Simulation(ABC):
         # Ensure start_date and end_date are within valid range
         self._validate_date_range()
 
-        self.codebase = codebase if codebase is not None else self.default_codebase
+        if codebase is None:
+            self.codebase = self.default_codebase
+            warnings.warn(
+                f"Creating {self.__class__.__name__} instance without a specified "
+                + "ExternalCodeBase, default codebase will be used:\n"
+                + f"Source location: {self.codebase.source_repo}\n"
+                + f"Checkout target: {self.codebase.checkout_target}\n"
+            )
+        else:
+            self.codebase = codebase
+
         self.runtime_code = runtime_code or None
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization

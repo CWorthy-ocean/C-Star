@@ -214,9 +214,16 @@ class ROMSSimulation(Simulation):
                 "ROMSComponent.boundary_forcing must be a list of ROMSBoundaryForcing instances"
             )
 
-        self.marbl_codebase = (
-            marbl_codebase if marbl_codebase is not None else MARBLExternalCodeBase()
-        )
+        if marbl_codebase is None:
+            self.marbl_codebase = MARBLExternalCodeBase()
+            warnings.warn(
+                "Creating MARBLSimulation instance without a specified "
+                + "MARBLExternalCodeBase, default codebase will be used:\n"
+                + f"Source location: {self.marbl_codebase.source_repo}\n"
+                + f"Checkout target: {self.marbl_codebase.checkout_target}\n"
+            )
+        else:
+            self.marbl_codebase = marbl_codebase
 
         # roms-specific
         self.exe_path: Optional[Path] = None
@@ -464,31 +471,13 @@ class ROMSSimulation(Simulation):
         simulation_kwargs["valid_end_date"] = simulation_dict.get("valid_end_date")
 
         # Construct the ExternalCodeBase instance
-        codebase_kwargs = simulation_dict.get("codebase")
-        if codebase_kwargs is not None:
-            codebase = ROMSExternalCodeBase(**codebase_kwargs)
-        else:
-            codebase = ROMSExternalCodeBase()
-            warnings.warn(
-                "Creating ROMSComponent instance without a specified "
-                + "ROMSExternalCodeBase, default codebase will be used:\n"
-                + f"Source location: {codebase.source_repo}\n"
-                + f"Checkout target: {codebase.checkout_target}\n"
-            )
+        codebase_kwargs = simulation_dict.get("codebase", {})
+        codebase = ROMSExternalCodeBase(**codebase_kwargs)
 
         simulation_kwargs["codebase"] = codebase
 
-        marbl_codebase_kwargs = simulation_dict.get("marbl_codebase")
-        if marbl_codebase_kwargs is not None:
-            marbl_codebase = MARBLExternalCodeBase(**marbl_codebase_kwargs)
-        else:
-            marbl_codebase = MARBLExternalCodeBase()
-            warnings.warn(
-                "Creating MARBLComponent instance without a specified "
-                + "MARBLExternalCodeBase, default codebase will be used:\n"
-                + f"Source location: {marbl_codebase.source_repo}\n"
-                + f"Checkout target: {marbl_codebase.checkout_target}\n"
-            )
+        marbl_codebase_kwargs = simulation_dict.get("marbl_codebase", {})
+        marbl_codebase = MARBLExternalCodeBase(**marbl_codebase_kwargs)
 
         simulation_kwargs["marbl_codebase"] = marbl_codebase
 
@@ -690,7 +679,7 @@ class ROMSSimulation(Simulation):
 
         with open(filename, "w") as yaml_file:
             yaml.dump(
-                self.to_dict, yaml_file, default_flow_style=False, sort_keys=False
+                self.to_dict(), yaml_file, default_flow_style=False, sort_keys=False
             )
 
     def update_runtime_code(self):

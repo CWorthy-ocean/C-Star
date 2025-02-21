@@ -64,6 +64,7 @@ class TestSimulationInitialization:
         self.simulation = MockSimulation(
             name="TestSim",
             directory="some/dir",
+            codebase=MockExternalCodeBase(),
             discretization=Discretization(time_step=60),
             start_date="2025-01-01",
             end_date="2025-12-31",
@@ -126,6 +127,7 @@ class TestSimulationInitialization:
             MockSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
+                codebase=MockExternalCodeBase(),
                 discretization=Discretization(time_step=60),
                 start_date="2023-12-31",  # Too early
                 end_date="2025-12-31",
@@ -142,6 +144,7 @@ class TestSimulationInitialization:
             MockSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
+                codebase=MockExternalCodeBase(),
                 discretization=Discretization(time_step=60),
                 start_date="2025-01-01",
                 end_date="2026-02-01",  # Too late
@@ -155,6 +158,7 @@ class TestSimulationInitialization:
             MockSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
+                codebase=MockExternalCodeBase(),
                 discretization=Discretization(time_step=60),
                 start_date="2025-12-31",
                 end_date="2025-01-01",
@@ -198,6 +202,7 @@ class TestSimulationInitialization:
             sim = MockSimulation(
                 name="TestSim",
                 directory="some/dir",
+                codebase=MockExternalCodeBase(),
                 discretization=Discretization(time_step=60),
                 start_date="2025-01-01",
                 end_date="2025-12-31",
@@ -221,6 +226,7 @@ class TestSimulationInitialization:
             sim = MockSimulation(
                 name="FallbackSim",
                 directory=tmp_path,
+                codebase=MockExternalCodeBase(),
                 discretization=Discretization(time_step=60),
                 valid_start_date="2025-01-01",
                 valid_end_date="2025-12-31",
@@ -233,6 +239,7 @@ class TestSimulationInitialization:
         with pytest.warns(RuntimeWarning, match="Cannot enforce date range validation"):
             MockSimulation(
                 name="FallbackSim",
+                codebase=MockExternalCodeBase(),
                 directory=tmp_path,
                 discretization=Discretization(time_step=60),
                 start_date="2025-01-01",
@@ -247,6 +254,7 @@ class TestStrAndRepr:
             name="TestSim",
             directory=sim_dir,
             discretization=Discretization(time_step=60),
+            codebase=MockExternalCodeBase(),
             runtime_code=AdditionalCode(location=sim_dir, files=["file1", "file2"]),
             compile_time_code=AdditionalCode(
                 location=sim_dir, files=["file1", "file2"]
@@ -285,6 +293,7 @@ Executable path: {sim_dir}"""
             name="TestSim",
             directory=sim_dir,
             discretization=Discretization(time_step=60),
+            codebase=MockExternalCodeBase(),
             runtime_code=AdditionalCode(location=sim_dir, files=["file1", "file2"]),
             compile_time_code=AdditionalCode(
                 location=sim_dir, files=["file1", "file2"]
@@ -316,6 +325,7 @@ class TestSimulationPersistence:
         self.simulation = MockSimulation(
             name="TestSim",
             directory="some/dir",
+            codebase=MockExternalCodeBase(),
             discretization=Discretization(time_step=60),
             start_date="2025-01-01",
             end_date="2025-12-31",
@@ -372,6 +382,7 @@ class TestSimulationRestart:
         self.simulation = MockSimulation(
             name="TestSim",
             directory="some/dir",
+            codebase=MockExternalCodeBase(),
             discretization=Discretization(time_step=60),
             start_date="2025-01-01",
             end_date="2025-12-31",

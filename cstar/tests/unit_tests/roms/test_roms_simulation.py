@@ -1,7 +1,9 @@
 import pytest
+import yaml
 import pickle
 from pathlib import Path
 from datetime import datetime
+from unittest.mock import patch, mock_open, MagicMock
 from cstar.roms.simulation import ROMSSimulation
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
@@ -176,17 +178,18 @@ class TestROMSSimulationInitialization:
 
     def test_default_codebase_assignment(self, tmp_path):
         """Ensure ROMSSimulation assigns default codebase when not provided."""
-        sim = ROMSSimulation(
-            name="test",
-            directory=tmp_path,
-            discretization=ROMSDiscretization(time_step=60),
-            runtime_code=AdditionalCode(location="some/dir"),
-            compile_time_code=AdditionalCode(location="some/dir"),
-            start_date="2012-01-01",
-            end_date="2012-01-02",
-            valid_start_date="2012-01-01",
-            valid_end_date="2012-01-02",
-        )
+        with pytest.warns(UserWarning, match="default codebase will be used"):
+            sim = ROMSSimulation(
+                name="test",
+                directory=tmp_path,
+                discretization=ROMSDiscretization(time_step=60),
+                runtime_code=AdditionalCode(location="some/dir"),
+                compile_time_code=AdditionalCode(location="some/dir"),
+                start_date="2012-01-01",
+                end_date="2012-01-02",
+                valid_start_date="2012-01-01",
+                valid_end_date="2012-01-02",
+            )
 
         assert isinstance(sim.codebase, ROMSExternalCodeBase)
         assert sim.codebase.source_repo == "https://github.com/CESR-lab/ucla-roms.git"
@@ -209,6 +212,7 @@ class TestROMSSimulationInitialization:
                 name="test",
                 directory=tmp_path,
                 discretization=ROMSDiscretization(time_step=60),
+                codebase=ROMSExternalCodeBase(),
                 runtime_code=AdditionalCode(location="some/dir"),
                 compile_time_code=AdditionalCode(location="some/dir"),
                 start_date="2012-01-01",
@@ -236,6 +240,7 @@ class TestROMSSimulationInitialization:
                 name="test",
                 directory=tmp_path,
                 discretization=ROMSDiscretization(time_step=60),
+                codebase=ROMSExternalCodeBase(),
                 runtime_code=AdditionalCode("some/dir"),
                 compile_time_code=AdditionalCode("some/dir"),
                 start_date="2012-01-01",
@@ -383,41 +388,8 @@ boundary_forcing = <list of 1 ROMSBoundaryForcing instances>
 
 
 class TestToAndFromDictAndBlueprint:
-    def test_to_dict(self, example_roms_simulation):
-        """Test key/value pairs unique ROMSSimulation.to_dict (Simulation.to_dict tested
-        elsewhere)"""
-        sim, directory = example_roms_simulation
-        test_dict = sim.to_dict()
-        assert (
-            test_dict["marbl_codebase"]["source_repo"] == sim.marbl_codebase.source_repo
-        )
-        assert (
-            test_dict["marbl_codebase"]["checkout_target"]
-            == sim.marbl_codebase.checkout_target
-        )
-        assert test_dict["model_grid"] == {
-            "location": "http://my.files/grid.nc",
-            "file_hash": "123",
-        }
-        assert test_dict["initial_conditions"] == {
-            "location": "http://my.files/initial.nc",
-            "file_hash": "234",
-        }
-        assert test_dict["tidal_forcing"] == {
-            "location": "http://my.files/tidal.nc",
-            "file_hash": "345",
-        }
-        assert test_dict["boundary_forcing"] == [
-            {"location": "http://my.files/boundary.nc", "file_hash": "456"},
-        ]
-        assert test_dict["surface_forcing"] == [
-            {"location": "http://my.files/surface.nc", "file_hash": "567"},
-        ]
-
-    def test_from_dict(self, example_roms_simulation):
-        sim, directory = example_roms_simulation
-
-        sim_dict = {
+    def setup_method(self):
+        self.example_simulation_dict = {
             "name": "ROMSTest",
             "valid_start_date": datetime(2024, 1, 1, 0, 0),
             "valid_end_date": datetime(2026, 1, 1, 0, 0),
@@ -427,13 +399,13 @@ class TestToAndFromDictAndBlueprint:
             },
             "discretization": {"time_step": 60, "n_procs_x": 1, "n_procs_y": 1},
             "runtime_code": {
-                "location": directory.parent,
+                "location": "some/dir",
                 "subdir": "subdir/",
                 "checkout_target": "main",
                 "files": ["file1", "file2.in_TEMPLATE"],
             },
             "compile_time_code": {
-                "location": directory.parent,
+                "location": "some/dir",
                 "subdir": "subdir/",
                 "checkout_target": "main",
                 "files": ["file1.h", "file2.opt"],
@@ -459,6 +431,38 @@ class TestToAndFromDictAndBlueprint:
             ],
         }
 
+    def test_to_dict(self, example_roms_simulation):
+        """Test key/value pairs unique ROMSSimulation.to_dict (Simulation.to_dict tested
+        elsewhere)"""
+        sim, directory = example_roms_simulation
+        test_dict = sim.to_dict()
+
+        assert (
+            test_dict["marbl_codebase"]
+            == self.example_simulation_dict["marbl_codebase"]
+        )
+        assert test_dict["model_grid"] == self.example_simulation_dict["model_grid"]
+        assert (
+            test_dict["initial_conditions"]
+            == self.example_simulation_dict["initial_conditions"]
+        )
+        assert (
+            test_dict["tidal_forcing"] == self.example_simulation_dict["tidal_forcing"]
+        )
+        assert (
+            test_dict["boundary_forcing"]
+            == self.example_simulation_dict["boundary_forcing"]
+        )
+        assert (
+            test_dict["surface_forcing"]
+            == self.example_simulation_dict["surface_forcing"]
+        )
+
+    def test_from_dict(self, example_roms_simulation):
+        sim, directory = example_roms_simulation
+        sim_dict = self.example_simulation_dict
+        sim_dict["runtime_code"]["location"] = directory.parent
+        sim_dict["compile_time_code"]["location"] = directory.parent
         sim2 = ROMSSimulation.from_dict(
             sim_dict,
             directory=directory,
@@ -468,45 +472,15 @@ class TestToAndFromDictAndBlueprint:
 
         assert pickle.dumps(sim2) == pickle.dumps(sim), "Instances are not identical"
 
-    def test_from_dict_warns_if_default_codebase(self, tmp_path):
-        sim_dict = {
-            "name": "ROMSTest",
-            "valid_start_date": datetime(2024, 1, 1, 0, 0),
-            "valid_end_date": datetime(2026, 1, 1, 0, 0),
-            "discretization": {"time_step": 60, "n_procs_x": 1, "n_procs_y": 1},
-            "runtime_code": {"location": "some/dir"},
-            "compile_time_code": {"location": "some/dir"},
-        }
-
-        with pytest.warns(UserWarning, match="default codebase will be used"):
-            ROMSSimulation.from_dict(
-                sim_dict,
-                directory=tmp_path,
-                start_date="2024-01-01",
-                end_date="2025-01-01",
-            )
-
     def test_from_dict_with_single_forcing_entries(self, tmp_path):
-        sim_dict = {
-            "name": "ROMSTest",
-            "valid_start_date": datetime(2024, 1, 1, 0, 0),
-            "valid_end_date": datetime(2026, 1, 1, 0, 0),
-            "codebase": {
-                "source_repo": "http://my.code/repo.git",
-                "checkout_target": "dev",
-            },
-            "discretization": {"time_step": 60, "n_procs_x": 1, "n_procs_y": 1},
-            "runtime_code": {"location": "some/dir"},
-            "compile_time_code": {"location": "some/dir"},
-            "marbl_codebase": {"source_repo": "http://marbl.com/repo.git"},
-            "surface_forcing": {
-                "location": "http://my.files/surface.nc",
-                "file_hash": "567",
-            },
-            "boundary_forcing": {
-                "location": "http://my.files/boundary.nc",
-                "file_hash": "456",
-            },
+        sim_dict = self.example_simulation_dict.copy()
+        sim_dict["surface_forcing"] = {
+            "location": "http://my.files/surface.nc",
+            "file_hash": "567",
+        }
+        sim_dict["boundary_forcing"] = {
+            "location": "http://my.files/boundary.nc",
+            "file_hash": "456",
         }
 
         sim = ROMSSimulation.from_dict(
@@ -535,52 +509,84 @@ class TestToAndFromDictAndBlueprint:
 
         assert sim_from_dict.to_dict() == sim_to_dict
 
-    """Tests for loading ROMSSimulation from a YAML blueprint."""
+    @patch("pathlib.Path.exists", return_value=True)
+    @patch(
+        "builtins.open",
+        new_callable=mock_open,
+        read_data="name: TestROMS\ndiscretization:\n  time_step: 60",
+    )
+    def test_from_blueprint_valid_file(
+        self, mock_open_file, mock_path_exists, tmp_path
+    ):
+        """Ensure that from_blueprint correctly loads a ROMSSimulation from a valid YAML
+        file."""
+        blueprint_path = tmp_path / "roms_blueprint.yaml"
 
-    # @patch("pathlib.Path.exists", return_value=True)
-    # @patch("builtins.open", new_callable=mock_open, read_data="name: TestROMS\ndiscretization:\n  time_step: 60")
-    # @patch("yaml.safe_load", return_value={"name": "TestROMS", "discretization": {"time_step": 60}})
-    # def test_from_blueprint_valid_file(self, mock_yaml_load, mock_open_file, mock_path_exists, tmp_path):
-    #     """Ensure that from_blueprint correctly loads a ROMSSimulation from a valid YAML file."""
-    #     blueprint_path = tmp_path / "roms_blueprint.yaml"
+        with patch("yaml.safe_load", return_value=self.example_simulation_dict):
+            sim = ROMSSimulation.from_blueprint(
+                blueprint=str(blueprint_path),
+                directory=tmp_path,
+                start_date="2024-01-01",
+                end_date="2025-01-01",
+            )
 
-    #     with patch("cstar.base.datasource.DataSource.source_type", new="yaml"):
-    #         sim = ROMSSimulation.from_blueprint(blueprint=str(blueprint_path), directory=tmp_path)
+        # Assertions
+        assert isinstance(sim, ROMSSimulation)
+        mock_open_file.assert_called_once_with(str(blueprint_path), "r")
 
-    #     # Assertions
-    #     assert sim.name == "TestROMS"
-    #     assert sim.discretization.time_step == 60
-    #     mock_path_exists.assert_called_once()
-    #     mock_open_file.assert_called_once_with(str(blueprint_path), "r")
-    #     mock_yaml_load.assert_called_once()
+    @patch("pathlib.Path.exists", return_value=True)
+    @patch(
+        "builtins.open",
+        new_callable=mock_open,
+        read_data="name: TestROMS\ndiscretization:\n  time_step: 60",
+    )
+    def test_from_blueprint_invalid_filetype(
+        self, mock_open_file, mock_path_exists, tmp_path
+    ):
+        """Ensure that from_blueprint correctly loads a ROMSSimulation from a valid YAML
+        file."""
+        blueprint_path = tmp_path / "roms_blueprint.nc"
 
-    # @patch("builtins.open", new_callable=mock_open, read_data="invalid_yaml")
-    # @patch("yaml.safe_load", side_effect=yaml.YAMLError)
-    # def test_from_blueprint_invalid_yaml_format(self, mock_yaml_load, mock_open_file, tmp_path):
-    #     """Ensure an error is raised when trying to load an incorrectly formatted YAML file."""
-    #     blueprint_path = tmp_path / "invalid_blueprint.yaml"
+        with patch("yaml.safe_load", return_value=self.example_simulation_dict):
+            with pytest.raises(
+                ValueError, match="C-Star expects blueprint in '.yaml' format"
+            ):
+                ROMSSimulation.from_blueprint(
+                    blueprint=str(blueprint_path),
+                    directory=tmp_path,
+                    start_date="2024-01-01",
+                    end_date="2025-01-01",
+                )
 
-    #     with pytest.raises(yaml.YAMLError):
-    #         ROMSSimulation.from_blueprint(blueprint=str(blueprint_path), directory=tmp_path)
+    @patch("requests.get")
+    @patch("pathlib.Path.exists", return_value=True)
+    def test_from_blueprint_url(self, mock_path_exists, mock_requests_get, tmp_path):
+        """Ensure that from_blueprint correctly loads a ROMSSimulation from a valid YAML
+        file."""
+        mock_response = MagicMock()
+        mock_response.text = yaml.dump(self.example_simulation_dict)
+        mock_requests_get.return_value = mock_response
+        blueprint_path = "http://sketchyamlfiles4u.ru/roms_blueprint.yaml"
 
-    #     mock_open_file.assert_called_once_with(str(blueprint_path), "r")
-    #     mock_yaml_load.assert_called_once()
+        sim = ROMSSimulation.from_blueprint(
+            blueprint=blueprint_path,
+            directory=tmp_path,
+            start_date="2024-01-01",
+            end_date="2025-01-01",
+        )
 
-    # @patch("requests.get")
-    # @patch("yaml.safe_load", return_value={"name": "TestROMS", "discretization": {"time_step": 60}})
-    # def test_from_blueprint_from_url(self, mock_yaml_load, mock_requests_get, tmp_path):
-    #     """Ensure that from_blueprint correctly loads a blueprint from a URL."""
-    #     mock_response = MagicMock()
-    #     mock_response.text = "name: TestROMS\ndiscretization:\n  time_step: 60"
-    #     mock_requests_get.return_value = mock_response
+        assert isinstance(sim, ROMSSimulation)
+        mock_requests_get.assert_called_once()
 
-    #     url = "https://example.com/roms_blueprint.yaml"
-
-    #     with patch("cstar.base.datasource.DataSource.source_type", new="yaml"):
-    #         sim = ROMSSimulation.from_blueprint(blueprint=url, directory=tmp_path)
-
-    #     # Assertions
-    #     assert sim.name == "TestROMS"
-    #     assert sim.discretization.time_step == 60
-    #     mock_requests_get.assert_called_once_with(url)
-    #     mock_yaml_load.assert_called_once()
+    def test_blueprint_roundtrip(self, example_roms_simulation, tmp_path):
+        sim, _ = example_roms_simulation
+        sim.directory = tmp_path / "simdir"
+        output_file = tmp_path / "test.yaml"
+        sim.to_blueprint(filename=output_file)
+        sim2 = ROMSSimulation.from_blueprint(
+            blueprint=output_file,
+            directory=sim.directory,
+            start_date=sim.start_date,
+            end_date=sim.end_date,
+        )
+        assert pickle.dumps(sim2) == pickle.dumps(sim), "Instances are not identical"
