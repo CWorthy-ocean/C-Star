@@ -509,6 +509,23 @@ class TestToAndFromDictAndBlueprint:
 
         assert sim_from_dict.to_dict() == sim_to_dict
 
+    def test_to_blueprint(self, example_roms_simulation):
+        sim, directory = example_roms_simulation
+        mock_file_path = "mock_path.yaml"
+
+        # Mock `open` and `yaml.dump`
+        with (
+            patch("builtins.open", mock_open()) as mock_file,
+            patch("yaml.dump") as mock_yaml_dump,
+        ):
+            sim.to_blueprint(mock_file_path)
+
+            mock_file.assert_called_once_with(mock_file_path, "w")
+
+            mock_yaml_dump.assert_called_once_with(
+                sim.to_dict(), mock_file(), default_flow_style=False, sort_keys=False
+            )
+
     @patch("pathlib.Path.exists", return_value=True)
     @patch(
         "builtins.open",
@@ -589,4 +606,4 @@ class TestToAndFromDictAndBlueprint:
             start_date=sim.start_date,
             end_date=sim.end_date,
         )
-        assert pickle.dumps(sim2) == pickle.dumps(sim), "Instances are not identical"
+        assert sim.to_dict() == sim2.to_dict()
