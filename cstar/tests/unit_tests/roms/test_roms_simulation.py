@@ -19,6 +19,8 @@ from cstar.roms.input_dataset import (
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.base.additional_code import AdditionalCode
 
+from cstar.system.manager import cstar_sysmgr
+
 
 @pytest.fixture
 def example_roms_simulation(tmp_path):
@@ -968,7 +970,148 @@ class TestProcessingAndExecution:
             ):
                 sim.start_date = sim_start
                 sim.end_date = sim_end
-                print(
-                    f"Dataset exists: {dataset_exists}, Dataset range: ({dataset_start} - {dataset_end}), Sim range: ({sim_start} - {sim_end}), Expected: {expected}"
-                )
                 assert sim.is_setup == expected
+
+    @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @patch("subprocess.run")
+    def test_build(self, mock_subprocess, mock_get_hash, example_roms_simulation):
+        sim, directory = example_roms_simulation
+        build_dir = directory / "ROMS/compile_time_code"
+        (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+        sim.compile_time_code.working_path = build_dir
+
+        mock_subprocess.return_value = MagicMock(returncode=0, stderr="")
+        mock_get_hash.return_value = "mockhash123"
+
+        sim.build()
+        assert mock_subprocess.call_count == 2
+        mock_subprocess.assert_any_call(
+            "make compile_clean",
+            cwd=build_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+        mock_subprocess.assert_any_call(
+            f"make COMPILER={cstar_sysmgr.environment.compiler}",
+            cwd=build_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+
+        assert sim.exe_path == build_dir / "roms"
+        assert sim._exe_hash == "mockhash123"
+
+    @patch("builtins.print")  # Mock print to check if the early exit message is printed
+    @patch(
+        "cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash"
+    )  # Mock hash function
+    @patch("subprocess.run")  # Mock subprocess (should not be called)
+    def test_build_no_rebuild(
+        self, mock_subprocess, mock_get_hash, mock_print, example_roms_simulation
+    ):
+        sim, directory = example_roms_simulation
+        build_dir = directory / "ROMS/compile_time_code"
+        # Mock properties for early exit conditions
+        with (
+            patch.object(
+                AdditionalCode,
+                "exists_locally",
+                new_callable=PropertyMock,
+                return_value=True,
+            ),
+            patch.object(Path, "exists", return_value=True),
+        ):  # Pretend the executable exists
+            sim._exe_hash = "dummy_hash"
+            sim.compile_time_code.working_path = build_dir
+            sim.build(rebuild=False)
+
+            # Ensure early exit message was printed
+            mock_print.assert_any_call(
+                f"ROMS has already been built at {build_dir/"roms"}, and "
+                "the source code appears not to have changed. "
+                "If you would like to recompile, call "
+                "ROMSComponent.build(rebuild = True)"
+            )
+
+            # Ensure subprocess.run was *not* called
+            mock_subprocess.assert_not_called()
+
+    @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @patch("subprocess.run")
+    def test_build_raises_if_make_clean_error(
+        self, mock_subprocess, mock_get_hash, example_roms_simulation
+    ):
+        sim, directory = example_roms_simulation
+        build_dir = directory / "ROMS/compile_time_code"
+        (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+        sim.compile_time_code.working_path = build_dir
+
+        mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
+        mock_get_hash.return_value = "mockhash123"
+
+        with pytest.raises(RuntimeError, match="Error 1 when compiling ROMS"):
+            sim.build()
+        assert mock_subprocess.call_count == 1
+        mock_subprocess.assert_any_call(
+            "make compile_clean",
+            cwd=build_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @patch("subprocess.run")
+    def test_build_raises_if_make_error(
+        self, mock_subprocess, mock_get_hash, example_roms_simulation
+    ):
+        sim, directory = example_roms_simulation
+        build_dir = directory / "ROMS/compile_time_code"
+        sim.compile_time_code.working_path = build_dir
+
+        mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
+        mock_get_hash.return_value = "mockhash123"
+
+        with pytest.raises(RuntimeError, match="Error 1 when compiling ROMS"):
+            sim.build()
+        assert mock_subprocess.call_count == 1
+
+        mock_subprocess.assert_any_call(
+            f"make COMPILER={cstar_sysmgr.environment.compiler}",
+            cwd=build_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_build_raises_if_no_build_dir(self, example_roms_simulation):
+        sim, directory = example_roms_simulation
+        with pytest.raises(ValueError, match="Unable to compile ROMSSimulation"):
+            sim.build()
+
+    @patch.object(ROMSInputDataset, "partition")  # Mock partition method
+    def test_pre_run(self, mock_partition, example_roms_simulation):
+        """Test that pre_run calls partition() only on datasets that exist locally."""
+
+        sim, _ = example_roms_simulation
+
+        # Mock some input datasets
+        dataset_1 = MagicMock(spec=ROMSInputDataset, exists_locally=True)
+        dataset_2 = MagicMock(
+            spec=ROMSInputDataset, exists_locally=False
+        )  # Should be ignored
+        dataset_3 = MagicMock(spec=ROMSInputDataset, exists_locally=True)
+        with patch.object(
+            ROMSSimulation, "input_datasets", new_callable=PropertyMock
+        ) as mock_input_datasets:
+            mock_input_datasets.return_value = [dataset_1, dataset_2, dataset_3]
+
+            # Call the method
+            sim.pre_run()
+
+            # Assert that partition() was called only on datasets that exist locally
+            dataset_1.partition.assert_called_once_with(np_xi=2, np_eta=3)
+            dataset_2.partition.assert_not_called()  # Does not exist → shouldn't be partitioned
+            dataset_3.partition.assert_called_once_with(np_xi=2, np_eta=3)

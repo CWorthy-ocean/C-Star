@@ -1111,16 +1111,14 @@ class ROMSSimulation(Simulation):
         setup : Ensures necessary files are available before compilation.
         run : Executes the compiled ROMS model.
         """
-
         self.compile_time_code = cast(AdditionalCode, self.compile_time_code)
         build_dir = self.compile_time_code.working_path
         if build_dir is None:
             raise ValueError(
-                "Unable to compile ROMSComponent: "
+                "Unable to compile ROMSSimulation: "
                 + "\nROMSComponent.compile_time_code.working_path is None."
                 + "\n Call ROMSComponent.compile_time_code.get() and try again"
             )
-
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())
