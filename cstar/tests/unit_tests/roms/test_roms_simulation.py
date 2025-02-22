@@ -19,7 +19,7 @@ from cstar.roms.input_dataset import (
 )
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.base.additional_code import AdditionalCode
-
+from cstar.execution.handler import ExecutionStatus
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -1252,3 +1252,215 @@ class TestProcessingAndExecution:
             ):
                 sim.run()
             mock_create_job.assert_not_called()
+
+    def test_post_run_raises_if_called_before_run(self, example_roms_simulation):
+        sim, _ = example_roms_simulation
+        with pytest.raises(
+            RuntimeError,
+            match=re.escape(
+                "Cannot call 'ROMSSimulation.post_run()' before calling 'ROMSSimulation.run()'"
+            ),
+        ):
+            sim.post_run()
+
+    def test_post_run_raises_if_still_running(self, example_roms_simulation):
+        sim, _ = example_roms_simulation
+
+        # Mock `_execution_handler` and set its `status` attribute to something *not* COMPLETED
+        sim._execution_handler = MagicMock()
+        sim._execution_handler.status = ExecutionStatus.RUNNING
+
+        # Ensure RuntimeError is raised
+        with pytest.raises(
+            RuntimeError,
+            match=re.escape(
+                "Cannot call 'ROMSSimulation.post_run()' until the ROMS run is completed"
+            ),
+        ):
+            sim.post_run()
+
+    @patch("subprocess.run")  # Mock ncjoin execution
+    def test_post_run_merges_netcdf_files(
+        self, mock_subprocess, example_roms_simulation
+    ):
+        """Test that post_run correctly identifies NetCDF output files and calls
+        ncjoin."""
+
+        # Setup
+        sim, directory = example_roms_simulation
+        output_dir = directory / "output"
+        output_dir.mkdir()
+
+        # Create fake partitioned NetCDF files
+        (output_dir / "ocean_his.20240101000000.001.nc").touch()
+        (output_dir / "ocean_his.20240101000000.002.nc").touch()
+        (output_dir / "ocean_rst.20240101000000.001.nc").touch()
+
+        # Mock execution handler
+        sim._execution_handler = MagicMock()
+        sim._execution_handler.status = (
+            ExecutionStatus.COMPLETED
+        )  # Ensure run is complete
+
+        mock_subprocess.return_value = MagicMock(returncode=0, stderr="")
+        # Call post_run
+        sim.post_run()
+
+        # Check that ncjoin was called correctly
+        mock_subprocess.assert_any_call(
+            "ncjoin ocean_his.20240101000000.*.nc",
+            cwd=output_dir,
+            capture_output=True,
+            text=True,
+            shell=True,
+        )
+        mock_subprocess.assert_any_call(
+            "ncjoin ocean_rst.20240101000000.*.nc",
+            cwd=output_dir,
+            capture_output=True,
+            text=True,
+            shell=True,
+        )
+
+        # Check that files were moved
+        partitioned_dir = output_dir / "PARTITIONED"
+        assert partitioned_dir.exists()
+        assert (partitioned_dir / "ocean_his.20240101000000.001.nc").exists()
+        assert (partitioned_dir / "ocean_his.20240101000000.002.nc").exists()
+        assert (partitioned_dir / "ocean_rst.20240101000000.001.nc").exists()
+
+    @patch("builtins.print")  # Mock print to check output
+    @patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
+    def test_post_run_prints_message_if_no_files(
+        self, mock_glob, mock_print, example_roms_simulation
+    ):
+        """Test that post_run prints a message and exits early if no suitable files are
+        found."""
+
+        # Setup
+        sim, _ = example_roms_simulation
+        sim._execution_handler = MagicMock()
+        sim._execution_handler.status = (
+            ExecutionStatus.COMPLETED
+        )  # Ensure simulation is complete
+
+        # Call post_run
+        sim.post_run()
+
+        # Check print was called with the expected message
+        mock_print.assert_called_once_with("no suitable output found")
+
+        # Ensure glob was called once
+        mock_glob.assert_called_once()
+
+    @patch("subprocess.run")  # Mock subprocess.run to simulate a failure
+    @patch.object(Path, "glob")  # Mock glob to return fake files
+    def test_post_run_raises_error_if_ncjoin_fails(
+        self, mock_glob, mock_subprocess, example_roms_simulation
+    ):
+        """Test that post_run raises a RuntimeError if ncjoin fails."""
+
+        # Setup
+        sim, directory = example_roms_simulation
+        output_dir = directory / "output"
+        output_dir.mkdir(exist_ok=True, parents=True)
+
+        # Fake file paths to match ncjoin pattern
+        fake_files = [
+            output_dir / "ocean_his.20240101000000.001.nc",
+            output_dir / "ocean_his.20240101000000.002.nc",
+        ]
+        mock_glob.return_value = fake_files
+
+        # Simulate ncjoin failure
+        mock_subprocess.return_value.returncode = 1  # Non-zero exit code
+        mock_subprocess.return_value.stderr = "ncjoin error message"
+
+        # Mock execution handler
+        sim._execution_handler = MagicMock()
+        sim._execution_handler.status = (
+            ExecutionStatus.COMPLETED
+        )  # Ensure run is complete
+
+        # Call post_run and expect error
+        with pytest.raises(RuntimeError, match="Error 1 while joining ROMS output"):
+            sim.post_run()
+
+        mock_subprocess.assert_called_once_with(
+            "ncjoin ocean_his.20240101000000.*.nc",
+            cwd=output_dir,
+            capture_output=True,
+            text=True,
+            shell=True,
+        )
+
+
+class TestROMSSimulationRestart:
+    """Test class for the `restart()` method of `ROMSSimulation`."""
+
+    @patch.object(Path, "glob")  # Mock file search
+    @patch.object(Path, "exists", return_value=True)
+    def test_restart(self, mock_exists, mock_glob, example_roms_simulation):
+        """Test that `restart()` creates a new ROMSSimulation and sets
+        initial_conditions correctly."""
+
+        # Setup mock simulation
+        sim, directory = example_roms_simulation
+        new_end_date = datetime(2026, 6, 1)
+
+        # Mock restart file found
+        restart_file = directory / "output/restart_rst.20251231000000.nc"
+        mock_glob.return_value = [restart_file]
+
+        # Call method
+        new_sim = sim.restart(new_end_date=new_end_date)
+
+        # Verify restart logic
+        mock_glob.assert_called_once_with("*_rst.20251231000000.nc")
+        assert isinstance(new_sim.initial_conditions, ROMSInitialConditions)
+        assert new_sim.initial_conditions.source.location == str(restart_file.resolve())
+
+    @patch.object(Path, "glob")  # Mock file search
+    @patch.object(Path, "exists", return_value=True)
+    def test_restart_raises_if_no_restart_files(
+        self, mock_exists, mock_glob, example_roms_simulation
+    ):
+        """Test that `restart()` creates a new ROMSSimulation and sets
+        initial_conditions correctly."""
+
+        # Setup mock simulation
+        sim, directory = example_roms_simulation
+        new_end_date = datetime(2026, 6, 1)
+
+        # Mock restart file found
+        mock_glob.return_value = []
+
+        # Call method
+        with pytest.raises(
+            FileNotFoundError, match=f"No files in {directory/'output'} match"
+        ):
+            sim.restart(new_end_date=new_end_date)
+
+        mock_glob.assert_called_once_with("*_rst.20251231000000.nc")
+
+    @patch.object(Path, "glob")
+    def test_restart_raises_if_multiple_restarts_found(
+        self, mock_glob, example_roms_simulation
+    ):
+        """Test that restart() raises a ValueError if multiple unique restart files are
+        found."""
+
+        sim, directory = example_roms_simulation
+        restart_dir = directory / "output"
+        new_end_date = datetime(2025, 6, 1)
+
+        # Fake multiple unique restart files
+        mock_glob.return_value = [
+            restart_dir / "restart_rst.20250601000000.nc",
+            restart_dir / "ocean_rst.20250601000000.nc",
+        ]
+
+        with pytest.raises(
+            ValueError, match="Found multiple distinct restart files corresponding to"
+        ):
+            sim.restart(new_end_date=new_end_date)
