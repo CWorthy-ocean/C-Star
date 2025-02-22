@@ -1,3 +1,4 @@
+import re
 import pytest
 import yaml
 import pickle
@@ -1032,7 +1033,7 @@ class TestProcessingAndExecution:
                 f"ROMS has already been built at {build_dir/"roms"}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
-                "ROMSComponent.build(rebuild = True)"
+                "ROMSSimulation.build(rebuild = True)"
             )
 
             # Ensure subprocess.run was *not* called
@@ -1115,3 +1116,139 @@ class TestProcessingAndExecution:
             dataset_1.partition.assert_called_once_with(np_xi=2, np_eta=3)
             dataset_2.partition.assert_not_called()  # Does not exist → shouldn't be partitioned
             dataset_3.partition.assert_called_once_with(np_xi=2, np_eta=3)
+
+    def test_run_no_executable(self, example_roms_simulation):
+        sim, directory = example_roms_simulation
+        with pytest.raises(ValueError, match="unable to find ROMS executable"):
+            sim.run()
+
+    def test_run_no_node_distribution(self, example_roms_simulation):
+        sim, directory = example_roms_simulation
+        sim.exe_path = directory / "ROMS/compile_time_code/roms"
+        with patch(
+            "cstar.roms.simulation.ROMSDiscretization.n_procs_tot",
+            new_callable=PropertyMock,
+            return_value=None,
+        ):
+            with pytest.raises(
+                ValueError, match="Unable to calculate node distribution"
+            ):
+                sim.run()
+
+    @patch("cstar.roms.simulation._replace_text_in_file")  # Mock text replacement
+    @patch.object(ROMSSimulation, "update_runtime_code")  # Mock updating runtime code
+    def test_run_local_execution(
+        self, mock_update_runtime_code, mock_replace_text, example_roms_simulation
+    ):
+        """Test that run() correctly starts a local process when no scheduler is
+        available."""
+
+        sim, directory = example_roms_simulation
+
+        # Mock no scheduler
+        with (
+            patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            patch(
+                "cstar.system.manager.CStarSystemManager.scheduler",
+                new_callable=PropertyMock,
+                return_value=None,
+            ),
+        ):
+            sim.exe_path = directory / "ROMS/compile_time_code/roms"
+            mock_process_instance = MagicMock()
+            mock_local_process.return_value = mock_process_instance
+
+            execution_handler = sim.run()
+
+            # Check LocalProcess was instantiated correctly
+            mock_local_process.assert_called_once_with(
+                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {sim.in_file}",
+                run_path=sim.directory / "output",
+            )
+
+            # Ensure process was started
+            mock_process_instance.start.assert_called_once()
+
+            # Ensure execution handler was set correctly
+            assert execution_handler == mock_process_instance
+
+    @patch("cstar.roms.simulation._replace_text_in_file")  # Mock text replacement
+    @patch.object(ROMSSimulation, "update_runtime_code")  # Mock updating runtime code
+    def test_run_with_scheduler(
+        self, mock_update_runtime_code, mock_replace_text, example_roms_simulation
+    ):
+        """Test that run() correctly uses scheduler defaults when queue_name and
+        walltime are None."""
+
+        sim, directory = example_roms_simulation
+        build_dir = directory / "ROMS/compile_time_code"
+
+        # Mock scheduler object
+        mock_scheduler = MagicMock()
+        mock_scheduler.primary_queue_name = "default_queue"
+        mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
+
+        with (
+            patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
+            patch(
+                "cstar.system.manager.CStarSystemManager.scheduler",
+                new_callable=PropertyMock,
+                return_value=mock_scheduler,
+            ),
+        ):
+            sim.exe_path = build_dir / "roms"
+            mock_job_instance = MagicMock()
+            mock_create_job.return_value = mock_job_instance
+
+            # Call `run()` without explicitly passing `queue_name` and `walltime`
+            execution_handler = sim.run(account_key="some_key")
+
+            mock_create_job.assert_called_once_with(
+                commands=f'mpirun -n 6 {build_dir/"roms"} file2.in',
+                job_name=None,
+                cpus=6,
+                account_key="some_key",
+                run_path=directory / "output",
+                queue_name="default_queue",
+                walltime="12:00:00",
+            )
+
+            mock_job_instance.submit.assert_called_once()
+
+            assert execution_handler == mock_job_instance
+
+    @patch("cstar.roms.simulation._replace_text_in_file")  # Mock text replacement
+    @patch.object(ROMSSimulation, "update_runtime_code")  # Mock updating runtime code
+    def test_run_with_scheduler_raises_if_no_account_key(
+        self, mock_update_runtime_code, mock_replace_text, example_roms_simulation
+    ):
+        """Test that run() correctly uses scheduler defaults when queue_name and
+        walltime are None."""
+
+        sim, directory = example_roms_simulation
+        build_dir = directory / "ROMS/compile_time_code"
+
+        # Mock scheduler object
+        mock_scheduler = MagicMock()
+        mock_scheduler.primary_queue_name = "default_queue"
+        mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
+
+        with (
+            patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
+            patch(
+                "cstar.system.manager.CStarSystemManager.scheduler",
+                new_callable=PropertyMock,
+                return_value=mock_scheduler,
+            ),
+        ):
+            sim.exe_path = build_dir / "roms"
+
+            # Call `run()` without explicitly passing `queue_name` and `walltime`
+            with pytest.raises(
+                ValueError,
+                match=re.escape(
+                    "please call Simulation.run() with a value for account_key"
+                ),
+            ):
+                sim.run()
+            mock_create_job.assert_not_called()

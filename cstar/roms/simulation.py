@@ -170,17 +170,17 @@ class ROMSSimulation(Simulation):
         """
         if discretization is None:
             raise ValueError(
-                "Cannot construct a ROMSComponent instance without a "
+                "Cannot construct a ROMSSimulation instance without a "
                 + "ROMSDiscretization object, but could not find 'discretization' entry"
             )
         if runtime_code is None:
             raise ValueError(
-                "Cannot construct a ROMSComponent instance without runtime "
+                "Cannot construct a ROMSSimulation instance without runtime "
                 + "code, but could not find 'runtime_code' entry"
             )
         if compile_time_code is None:
             raise NotImplementedError(
-                "This version of C-Star does not support ROMSComponent instances "
+                "This version of C-Star does not support ROMSSimulation instances "
                 + "without code to be included at compile time (.opt files, etc.), but "
                 + "could not find a 'compile_time_code' entry."
             )
@@ -204,14 +204,14 @@ class ROMSSimulation(Simulation):
         self.surface_forcing = [] if surface_forcing is None else surface_forcing
         if not all([isinstance(sf, ROMSSurfaceForcing) for sf in self.surface_forcing]):
             raise TypeError(
-                "ROMSComponent.surface_forcing must be a list of ROMSSurfaceForcing instances"
+                "ROMSSimulation.surface_forcing must be a list of ROMSSurfaceForcing instances"
             )
         self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
         if not all(
             [isinstance(bf, ROMSBoundaryForcing) for bf in self.boundary_forcing]
         ):
             raise TypeError(
-                "ROMSComponent.boundary_forcing must be a list of ROMSBoundaryForcing instances"
+                "ROMSSimulation.boundary_forcing must be a list of ROMSBoundaryForcing instances"
             )
 
         if marbl_codebase is None:
@@ -363,7 +363,7 @@ class ROMSSimulation(Simulation):
         in_files = []
         if self.runtime_code is None:
             raise ValueError(
-                "ROMSComponent.runtime_code not set."
+                "ROMSSimulation.runtime_code not set."
                 + " ROMS requires a runtime options file "
                 + "(typically roms.in)"
             )
@@ -381,7 +381,7 @@ class ROMSSimulation(Simulation):
             )
         elif len(in_files) == 0:
             raise ValueError(
-                "No '.in' file found in ROMSComponent.runtime_code."
+                "No '.in' file found in ROMSSimulation.runtime_code."
                 + "ROMS expects a runtime options file with the '.in'"
                 + "extension, e.g. roms.in"
             )
@@ -801,7 +801,7 @@ class ROMSSimulation(Simulation):
             if len(self.model_grid.partitioned_files) == 0:
                 raise ValueError(
                     "could not find a local path to a partitioned "
-                    + "ROMS grid file. Run ROMSComponent.pre_run() [or "
+                    + "ROMS grid file. Run ROMSSimulation.pre_run() [or "
                     + "Case.pre_run() if running a Case] to partition "
                     + "ROMS input datasets and try again."
                 )
@@ -815,7 +815,7 @@ class ROMSSimulation(Simulation):
             if len(self.initial_conditions.partitioned_files) == 0:
                 raise ValueError(
                     "could not find a local path to a partitioned "
-                    + "ROMS initial file. Run ROMSComponent.pre_run() [or "
+                    + "ROMS initial file. Run ROMSSimulation.pre_run() [or "
                     + "Case.pre_run() if running a Case] to partition "
                     + "ROMS input datasets and try again."
                 )
@@ -839,9 +839,9 @@ class ROMSSimulation(Simulation):
         if self.tidal_forcing is not None:
             if len(self.tidal_forcing.partitioned_files) == 0:
                 raise ValueError(
-                    "ROMSComponent has tidal_forcing attribute "
+                    "ROMSSimulation has tidal_forcing attribute "
                     + "but could not find a local path to a partitioned ROMS "
-                    + "tidal forcing file. Run ROMSComponent.pre_run() "
+                    + "tidal forcing file. Run ROMSSimulation.pre_run() "
                     + "[or Case.pre_run() if building a Case] "
                     + " to partition ROMS input datasets and try again."
                 )
@@ -1116,8 +1116,8 @@ class ROMSSimulation(Simulation):
         if build_dir is None:
             raise ValueError(
                 "Unable to compile ROMSSimulation: "
-                + "\nROMSComponent.compile_time_code.working_path is None."
-                + "\n Call ROMSComponent.compile_time_code.get() and try again"
+                + "\nROMSSimulation.compile_time_code.working_path is None."
+                + "\n Call ROMSSimulation.compile_time_code.get() and try again"
             )
         exe_path = build_dir / "roms"
         if (
@@ -1131,7 +1131,7 @@ class ROMSSimulation(Simulation):
                 f"ROMS has already been built at {exe_path}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
-                "ROMSComponent.build(rebuild = True)"
+                "ROMSSimulation.build(rebuild = True)"
             )
             return
 
@@ -1276,23 +1276,19 @@ class ROMSSimulation(Simulation):
 
         if self.exe_path is None:
             raise ValueError(
-                "C-STAR: ROMSComponent.exe_path is None; unable to find ROMS executable."
-                + "\nRun Component.build() first. "
-                + "\n If you have already run Component.build(), either run it again or "
-                + " add the executable path manually using Component.exe_path='YOUR/PATH'."
+                "C-STAR: ROMSSimulation.exe_path is None; unable to find ROMS executable."
+                + "\nRun Simulation.build() first. "
+                + "\n If you have already run Simulation.build(), either run it again or "
+                + " add the executable path manually using Simulation.exe_path='YOUR/PATH'."
+            )
+        if self.discretization.n_procs_tot is None:
+            raise ValueError(
+                "Unable to calculate node distribution for this Simulation. "
+                + "Simulation.n_procs_tot is not set"
             )
 
-        if (self.end_date is not None) and (self.start_date is not None):
-            run_length_seconds = int((self.end_date - self.start_date).total_seconds())
-            n_time_steps = run_length_seconds // self.discretization.time_step
-        else:
-            n_time_steps = 1
-            warnings.warn(
-                "n_time_steps not explicitly set, using default value of 1. "
-                "Please call ROMSComponent.run() with the n_time_steps argument "
-                "to specify the length of the run.",
-                UserWarning,
-            )
+        run_length_seconds = int((self.end_date - self.start_date).total_seconds())
+        n_time_steps = run_length_seconds // self.discretization.time_step
 
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
             queue_name = cstar_sysmgr.scheduler.primary_queue_name
@@ -1307,7 +1303,7 @@ class ROMSSimulation(Simulation):
 
         # 1. MODIFY NAMELIST
         # Copy template namelist and add all current known information
-        # from this Component instance:
+        # from this Simulation instance:
         self.update_runtime_code()
 
         # Now need to manually update number of time steps as it is unknown
@@ -1328,15 +1324,10 @@ class ROMSSimulation(Simulation):
             + f"{self.in_file}"
         )
 
-        if self.discretization.n_procs_tot is None:
-            raise ValueError(
-                "Unable to calculate node distribution for this Component. "
-                + "Component.n_procs_tot is not set"
-            )
         if cstar_sysmgr.scheduler is not None:
             if account_key is None:
                 raise ValueError(
-                    "please call Component.run() with a value for account_key"
+                    "please call Simulation.run() with a value for account_key"
                 )
 
             job_instance = create_scheduler_job(
@@ -1395,11 +1386,11 @@ class ROMSSimulation(Simulation):
 
         if self._execution_handler is None:
             raise RuntimeError(
-                "Cannot call 'ROMSComponent.post_run()' before calling 'ROMSComponent.run()'"
+                "Cannot call 'ROMSSimulation.post_run()' before calling 'ROMSSimulation.run()'"
             )
         elif self._execution_handler.status != ExecutionStatus.COMPLETED:
             raise RuntimeError(
-                "Cannot call 'ROMSComponent.post_run()' until the ROMS run is completed, "
+                "Cannot call 'ROMSSimulation.post_run()' until the ROMS run is completed, "
                 + f"but current execution status is '{self._execution_handler.status}'"
             )
 
