@@ -80,7 +80,7 @@ class AdditionalCode:
         # If there are namelists, make a parallel attribute to keep track of the ones we are editing
         # AdditionalCode.get() determines which namelists are editable templates and updates this list
         if self.files:
-            self.modified_files: list = []
+            self.modified_files: list = [None] * len(self.files)
 
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
@@ -197,7 +197,7 @@ class AdditionalCode:
 
             # Now go through the file and copy them to local_dir
             local_dir.mkdir(parents=True, exist_ok=True)
-            for f in self.files:
+            for i, f in enumerate(self.files):
                 src_file_path = source_dir / f
                 tgt_file_path = local_dir / Path(f).name
 
@@ -218,8 +218,7 @@ class AdditionalCode:
                         f"copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
                     )
                     shutil.copy(tgt_file_path, Path(str(tgt_file_path)[:-9]))
-                    self.modified_files = getattr(self, "modified_files", [])
-                    self.modified_files.append(f[:-9])
+                    self.modified_files[i] = f[:-9]
 
             self.working_path = local_dir
         finally:

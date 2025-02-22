@@ -3,11 +3,13 @@ import yaml
 import pickle
 from pathlib import Path
 from datetime import datetime
-from unittest.mock import patch, mock_open, MagicMock
+from unittest.mock import patch, mock_open, MagicMock, PropertyMock
+from cstar.base.external_codebase import ExternalCodeBase
 from cstar.roms.simulation import ROMSSimulation
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.input_dataset import (
+    ROMSInputDataset,
     ROMSModelGrid,
     ROMSInitialConditions,
     ROMSTidalForcing,
@@ -24,7 +26,7 @@ def example_roms_simulation(tmp_path):
     sim = ROMSSimulation(
         name="ROMSTest",
         directory=directory,
-        discretization=ROMSDiscretization(time_step=60),
+        discretization=ROMSDiscretization(time_step=60, n_procs_x=2, n_procs_y=3),
         codebase=ROMSExternalCodeBase(
             source_repo="http://my.code/repo.git", checkout_target="dev"
         ),
@@ -32,7 +34,13 @@ def example_roms_simulation(tmp_path):
             location=directory.parent,
             subdir="subdir/",
             checkout_target="main",
-            files=["file1", "file2.in_TEMPLATE"],
+            files=[
+                "file1",
+                "file2.in_TEMPLATE",
+                "marbl_in",
+                "marbl_tracer_output_list",
+                "marbl_diagnostic_output_list",
+            ],
         ),
         compile_time_code=AdditionalCode(
             location=directory.parent,
@@ -81,8 +89,8 @@ class TestROMSSimulationInitialization:
         assert sim.directory == directory
         assert sim.discretization.__dict__ == {
             "time_step": 60,
-            "n_procs_x": 1,
-            "n_procs_y": 1,
+            "n_procs_x": 2,
+            "n_procs_y": 3,
         }
 
         assert sim.codebase.source_repo == "http://my.code/repo.git"
@@ -90,7 +98,13 @@ class TestROMSSimulationInitialization:
         assert sim.runtime_code.source.location == str(directory.parent)
         assert sim.runtime_code.subdir == "subdir/"
         assert sim.runtime_code.checkout_target == "main"
-        assert sim.runtime_code.files == ["file1", "file2.in_TEMPLATE"]
+        assert sim.runtime_code.files == [
+            "file1",
+            "file2.in_TEMPLATE",
+            "marbl_in",
+            "marbl_tracer_output_list",
+            "marbl_diagnostic_output_list",
+        ]
         assert sim.compile_time_code.source.location == str(directory.parent)
         assert sim.compile_time_code.subdir == "subdir/"
         assert sim.compile_time_code.checkout_target == "main"
@@ -346,11 +360,11 @@ End date: 2025-12-31 00:00:00
 Valid start date: 2024-01-01 00:00:00
 Valid end date: 2026-01-01 00:00:00
 
-Discretization: ROMSDiscretization(time_step = 60, n_procs_x = 1, n_procs_y = 1)
+Discretization: ROMSDiscretization(time_step = 60, n_procs_x = 2, n_procs_y = 3)
 
 Code:
 Codebase: ROMSExternalCodeBase instance (query using ROMSSimulation.codebase)
-Runtime code: AdditionalCode instance with 2 files (query using ROMSSimulation.runtime_code)
+Runtime code: AdditionalCode instance with 5 files (query using ROMSSimulation.runtime_code)
 Compile-time code: AdditionalCode instance with 2 files (query using ROMSSimulation.compile_time_code)
 MARBL Codebase: MARBLExternalCodeBase instance (query using ROMSSimulation.marbl_codebase)
 
@@ -374,7 +388,7 @@ start_date = 2025-01-01 00:00:00,
 end_date = 2025-12-31 00:00:00,
 valid_start_date = 2024-01-01 00:00:00,
 valid_end_date = 2026-01-01 00:00:00,
-discretization = ROMSDiscretization(time_step = 60, n_procs_x = 1, n_procs_y = 1),
+discretization = ROMSDiscretization(time_step = 60, n_procs_x = 2, n_procs_y = 3),
 codebase = <ROMSExternalCodeBase instance>,
 runtime_code = <AdditionalCode instance>,
 compile_time_code = <AdditionalCode instance>
@@ -385,6 +399,32 @@ surface_forcing = <list of 1 ROMSSurfaceForcing instances>,
 boundary_forcing = <list of 1 ROMSBoundaryForcing instances>
 )"""
         assert expected_repr == sim.__repr__()
+
+    def test_tree(self, example_roms_simulation):
+        sim, directory = example_roms_simulation
+        expected_tree = f"""\
+{directory}
+└── ROMS
+    ├── input_datasets
+    │   ├── grid.nc
+    │   ├── initial.nc
+    │   ├── tidal.nc
+    │   ├── boundary.nc
+    │   └── surface.nc
+    ├── runtime_code
+    │   ├── file1
+    │   ├── file2.in_TEMPLATE
+    │   ├── marbl_in
+    │   ├── marbl_tracer_output_list
+    │   └── marbl_diagnostic_output_list
+    └── compile_time_code
+        ├── file1.h
+        └── file2.opt
+"""
+
+        # print(sim.tree())
+        # print(expected_tree)
+        assert sim.tree() == expected_tree
 
 
 class TestToAndFromDictAndBlueprint:
@@ -397,12 +437,18 @@ class TestToAndFromDictAndBlueprint:
                 "source_repo": "http://my.code/repo.git",
                 "checkout_target": "dev",
             },
-            "discretization": {"time_step": 60, "n_procs_x": 1, "n_procs_y": 1},
+            "discretization": {"time_step": 60, "n_procs_x": 2, "n_procs_y": 3},
             "runtime_code": {
                 "location": "some/dir",
                 "subdir": "subdir/",
                 "checkout_target": "main",
-                "files": ["file1", "file2.in_TEMPLATE"],
+                "files": [
+                    "file1",
+                    "file2.in_TEMPLATE",
+                    "marbl_in",
+                    "marbl_tracer_output_list",
+                    "marbl_diagnostic_output_list",
+                ],
             },
             "compile_time_code": {
                 "location": "some/dir",
@@ -607,3 +653,322 @@ class TestToAndFromDictAndBlueprint:
             end_date=sim.end_date,
         )
         assert sim.to_dict() == sim2.to_dict()
+
+
+class TestProcessingAndExecution:
+    def test_runtime_code_modifications(self, example_roms_simulation):
+        sim, directory = example_roms_simulation
+
+        # Fake the runtime code
+        rtc_dir = directory / "ROMS_runtime_code"
+        sim.runtime_code.working_path = rtc_dir
+
+        # Fake the partitioned files
+        dataset_directory = directory / "ROMS/input_datasets"
+        partitioned_directory = dataset_directory / "PARTITIONED"
+
+        for ind in sim.input_datasets:
+            ind.working_path = dataset_directory / ind.source.basename
+            partitioned_path = partitioned_directory / ind.source.basename
+            ind.partitioned_files = [
+                partitioned_path.with_suffix("").with_suffix(f".{i}.nc")
+                for i in range(sim.discretization.n_procs_tot)
+            ]
+
+        assert isinstance(sim._runtime_code_modifications, list)
+        assert [isinstance(rcm, dict) for rcm in sim._runtime_code_modifications]
+        assert [sim._runtime_code_modifications[i] == {} for i in [0, 2, 3, 4]]
+
+        rtcm_dict = sim._runtime_code_modifications[1]
+
+        assert rtcm_dict["__TIMESTEP_PLACEHOLDER__"] == sim.discretization.time_step
+        assert rtcm_dict["__GRID_FILE_PLACEHOLDER__"] == str(
+            partitioned_directory / "grid.nc"
+        )
+        assert rtcm_dict["__INITIAL_CONDITION_FILE_PLACEHOLDER__"] == str(
+            partitioned_directory / "initial.nc"
+        )
+        assert rtcm_dict["__FORCING_FILES_PLACEHOLDER__"] == (
+            f"{partitioned_directory/'surface.nc'}"
+            + f"\n     {partitioned_directory/'boundary.nc'}"
+            + f"\n     {partitioned_directory/'tidal.nc'}"
+        )
+
+        assert rtcm_dict["__MARBL_SETTINGS_FILE_PLACEHOLDER__"] == str(
+            rtc_dir / "marbl_in"
+        )
+        assert rtcm_dict["__MARBL_TRACER_LIST_FILE_PLACEHOLDER__"] == str(
+            rtc_dir / "marbl_tracer_output_list"
+        )
+        assert rtcm_dict["__MARBL_DIAG_LIST_FILE_PLACEHOLDER__"] == str(
+            rtc_dir / "marbl_diagnostic_output_list"
+        )
+
+    def test_runtime_code_modifications_raises_if_no_working_path(
+        self, example_roms_simulation
+    ):
+        sim, directory = example_roms_simulation
+        with pytest.raises(
+            ValueError, match="does not have a 'working_path' attribute."
+        ):
+            sim._runtime_code_modifications
+
+    def test_runtime_code_modifications_raises_if_no_template(
+        self, example_roms_simulation
+    ):
+        sim, directory = example_roms_simulation
+        sim.runtime_code.working_path = directory / "ROMS/runtime_code"
+        sim.runtime_code.files = [f.rstrip("_TEMPLATE") for f in sim.runtime_code.files]
+
+        with pytest.raises(ValueError, match="could not find expected template"):
+            sim._runtime_code_modifications
+
+    @pytest.mark.parametrize(
+        "missing_type", [ROMSModelGrid, ROMSInitialConditions, ROMSTidalForcing]
+    )
+    def test_runtime_code_modifications_raises_if_no_partitioned_files(
+        self, example_roms_simulation, missing_type
+    ):
+        sim, directory = example_roms_simulation
+        sim.runtime_code.working_path = directory / "ROMS/runtime_code"
+
+        # Fake the partitioned files
+        dataset_directory = directory / "ROMS/input_datasets"
+        partitioned_directory = dataset_directory / "PARTITIONED"
+
+        for ind in sim.input_datasets:
+            if not isinstance(ind, missing_type):
+                ind.working_path = dataset_directory / ind.source.basename
+                partitioned_path = partitioned_directory / ind.source.basename
+                ind.partitioned_files = [
+                    partitioned_path.with_suffix("").with_suffix(f".{i}.nc")
+                    for i in range(sim.discretization.n_procs_tot)
+                ]
+        with pytest.raises(
+            ValueError, match="could not find a local path to a partitioned ROMS"
+        ):
+            sim._runtime_code_modifications
+
+    @patch.object(
+        ROMSSimulation, "_runtime_code_modifications", new_callable=PropertyMock
+    )
+    @patch("cstar.roms.simulation._replace_text_in_file")
+    @patch("shutil.copy")
+    def test_update_runtime_code(
+        self, mock_copy, mock_replace_text, mock_rtcm, example_roms_simulation
+    ):
+        sim, directory = example_roms_simulation
+        runtime_directory = directory / "ROMS/runtime_code"
+        mock_rtcm.return_value = [{}, {"hello": "world"}, {}, {}, {}]
+
+        sim.runtime_code.working_path = runtime_directory
+        sim.runtime_code.modified_files = [None, "file2.in", None, None, None]
+
+        sim.update_runtime_code()
+
+        mock_copy.assert_called_once_with(
+            runtime_directory / "file2.in_TEMPLATE", runtime_directory / "file2.in"
+        )
+        mock_replace_text.assert_called_once_with(
+            runtime_directory / "file2.in", "hello", "world"
+        )
+
+    def test_update_runtime_code_warns_without_template(self, example_roms_simulation):
+        sim, directory = example_roms_simulation
+        sim.runtime_code.working_path = directory / "ROMS/runtime_code"
+        sim.runtime_code.files = ["file1.in", "file2", "marbl_in"]
+        sim.runtime_code.modified_files = [None, None, None]
+
+        with pytest.warns(UserWarning, match="No editable runtime code found"):
+            sim.update_runtime_code()
+
+    @patch.object(ROMSInputDataset, "get")
+    @patch.object(AdditionalCode, "get")
+    @patch.object(ExternalCodeBase, "handle_config_status")
+    def test_setup(
+        self,
+        mock_handle_config_status,
+        mock_additionalcode_get,
+        mock_inputdataset_get,
+        example_roms_simulation,
+    ):
+        sim, directory = example_roms_simulation
+        sim.setup()
+        assert mock_handle_config_status.call_count == 2
+        assert mock_additionalcode_get.call_count == 2
+        assert mock_inputdataset_get.call_count == 5
+
+    @pytest.mark.parametrize(
+        "codebase_status, marbl_status, expected",
+        [
+            (0, 0, True),  # ✅ Both correctly configured → should return True
+            (1, 0, False),  # ❌ Codebase not configured
+            (0, 1, False),  # ❌ MARBL codebase not configured
+            (1, 1, False),  # ❌ Both not configured
+        ],
+    )
+    @patch.object(
+        AdditionalCode, "exists_locally", new_callable=PropertyMock, return_value=True
+    )
+    def test_is_setup_external_codebases(
+        self,
+        mock_exists_locally,
+        codebase_status,
+        marbl_status,
+        expected,
+        example_roms_simulation,
+    ):
+        sim, _ = example_roms_simulation
+
+        with (
+            patch.object(
+                ROMSExternalCodeBase, "local_config_status", new_callable=PropertyMock
+            ) as mock_codebase_status,
+            patch.object(
+                MARBLExternalCodeBase, "local_config_status", new_callable=PropertyMock
+            ) as mock_marbl_status,
+            patch.object(
+                type(sim), "input_datasets", new_callable=PropertyMock, return_value=[]
+            ),
+        ):
+            mock_codebase_status.return_value = codebase_status
+            mock_marbl_status.return_value = marbl_status
+
+            assert sim.is_setup == expected
+
+    @pytest.mark.parametrize(
+        "runtime_exists, compile_exists, expected",
+        [
+            (True, True, True),  # ✅ Both exist → is_setup should be True
+            (False, True, False),  # ❌ Runtime code missing
+            (True, False, False),  # ❌ Compile-time code missing
+            (False, False, False),  # ❌ Both missing
+        ],
+    )
+    @patch.object(
+        ExternalCodeBase,
+        "local_config_status",
+        new_callable=PropertyMock,
+        return_value=0,
+    )
+    @patch.object(AdditionalCode, "exists_locally", new_callable=PropertyMock)
+    def test_is_setup_additional_code(
+        self,
+        mock_additionalcode_exists,
+        mock_local_config_status,
+        runtime_exists,
+        compile_exists,
+        expected,
+        example_roms_simulation,
+    ):
+        sim, _ = example_roms_simulation
+
+        mock_additionalcode_exists.side_effect = [runtime_exists, compile_exists]
+
+        with patch.object(
+            ROMSSimulation, "input_datasets", new_callable=PropertyMock, return_value=[]
+        ):
+            assert sim.is_setup == expected
+
+    @pytest.mark.parametrize(
+        "dataset_exists, dataset_start, dataset_end, sim_start, sim_end, expected",
+        [
+            (True, None, None, None, None, True),
+            (False, None, None, None, None, False),
+            (False, datetime(2025, 1, 1), datetime(2025, 12, 31), None, None, False),
+            (
+                False,
+                datetime(2025, 1, 1),
+                datetime(2025, 12, 31),
+                datetime(2025, 6, 1),
+                datetime(2025, 6, 30),
+                False,
+            ),
+            (
+                False,
+                datetime(2025, 1, 1),
+                datetime(2025, 3, 31),
+                datetime(2025, 6, 1),
+                datetime(2025, 6, 30),
+                True,
+            ),
+        ],
+    )
+    @patch.object(
+        ExternalCodeBase,
+        "local_config_status",
+        new_callable=PropertyMock,
+        return_value=0,
+    )
+    @patch.object(
+        AdditionalCode, "exists_locally", new_callable=PropertyMock, return_value=True
+    )
+    def test_is_setup_input_datasets(
+        self,
+        mock_additionalcode_exists,
+        mock_local_config_status,
+        dataset_exists,
+        dataset_start,
+        dataset_end,
+        sim_start,
+        sim_end,
+        expected,
+        example_roms_simulation,
+    ):
+        """Test the `is_setup` property of `ROMSSimulation` with different
+        configurations of input datasets, mocking any ExternalCodeBase and
+        AdditionalCode instances as correctly setup.
+
+        This test verifies whether a ROMS simulation is considered "set up" based on
+        the presence of required input datasets and their date ranges.
+
+        Parameters
+        ----------
+        dataset_exists : bool
+            Whether the dataset is found locally.
+        dataset_start : datetime or None
+            The start date of the dataset, if defined.
+        dataset_end : datetime or None
+            The end date of the dataset, if defined.
+        sim_start : datetime or None
+            The start date of the simulation, if defined.
+        sim_end : datetime or None
+            The end date of the simulation, if defined.
+        expected : bool
+            The expected result of `sim.is_setup`.
+        example_roms_simulation : fixture
+            A fixture providing a pre-configured `ROMSSimulation` instance.
+
+        Test Cases
+        ----------
+        |Case|dataset_exists|dataset_start|dataset_end|sim_start |sim_end   |Expected|
+        |----|--------------|-------------|-----------|----------|----------|--------|
+        | 1  |True          |None         |None       |None      |None      |False   |
+        | 2  |False         |None         |None       |None      |None      |False   |
+        | 3  |False         |2025-01-01   |2025-12-31 |None      |None      |False   |
+        | 4  |False         |2025-01-01   |2025-12-31 |2025-06-01|2025-06-30|False   |
+        | 5  |False         |2025-01-01   |2025-03-31 |2025-06-01|2025-06-30|True    |
+        """
+        sim, _ = example_roms_simulation
+
+        # Create a mock dataset
+        with patch("cstar.roms.input_dataset.ROMSInputDataset") as MockDataset:
+            # mock_dataset = patch("cstar.roms.input_dataset.ROMSInputDataset", autospec=True).start()
+            mock_dataset = MockDataset()
+            mock_dataset.exists_locally = dataset_exists
+            mock_dataset.start_date = dataset_start
+            mock_dataset.end_date = dataset_end
+
+            # Patch input_datasets list
+            with patch.object(
+                ROMSSimulation,
+                "input_datasets",
+                new_callable=PropertyMock,
+                return_value=[mock_dataset],
+            ):
+                sim.start_date = sim_start
+                sim.end_date = sim_end
+                print(
+                    f"Dataset exists: {dataset_exists}, Dataset range: ({dataset_start} - {dataset_end}), Sim range: ({sim_start} - {sim_end}), Expected: {expected}"
+                )
+                assert sim.is_setup == expected

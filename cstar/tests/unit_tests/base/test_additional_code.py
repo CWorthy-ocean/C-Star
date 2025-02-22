@@ -767,6 +767,7 @@ class TestAdditionalCodeGet:
 
         # Simulate template files with "_TEMPLATE"
         local_additional_code.files = ["file1_TEMPLATE", "file2_TEMPLATE"]
+        local_additional_code.modified_files = [None, None]
         local_additional_code.working_path = Path("/mock/local/dir")
 
         # Call get method

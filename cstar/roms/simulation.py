@@ -717,6 +717,7 @@ class ROMSSimulation(Simulation):
                 ].items():
                     _replace_text_in_file(mod_nl_path, placeholder, str(replacement))
                 self.runtime_code.modified_files[nl_idx] = mod_nl_path
+
         if no_template_found:
             warnings.warn(
                 "WARNING: No editable runtime code found to set ROMS runtime parameters. "
@@ -732,9 +733,9 @@ class ROMSSimulation(Simulation):
         """Generate a list of modifications to be applied to runtime code template
         files.
 
-        This method constructs a list of dictionaries, where each dictionary contains
-        placeholder keys and their corresponding replacement values. The placeholders
-        are replaced based on the current state of the `ROMSSimulation` instance.
+        This method constructs a list of dictionaries (one per file), where each
+        dictionary contains placeholder keys and their corresponding replacement values.
+        The placeholders are replaced based on the current state of this `ROMSSimulation`.
 
         Returns
         -------
@@ -752,6 +753,14 @@ class ROMSSimulation(Simulation):
         --------
         update_runtime_code : Uses this method to apply modifications to the runtime code.
         """
+        self.runtime_code = cast(AdditionalCode, self.runtime_code)
+
+        if self.runtime_code.working_path is None:
+            raise ValueError(
+                "ROMSSimulation.runtime_code does not have a "
+                + "'working_path' attribute. "
+                + "Run ROMSSimulation.runtime_code.get() and try again"
+            )
 
         # Helper function for formatting:
         def partitioned_files_to_runtime_code_string(input_dataset):
@@ -765,22 +774,16 @@ class ROMSSimulation(Simulation):
             }
             return "\n     ".join(sorted(list(unique_paths)))
 
-        # Initialise the list of dictionaries:
-        if self.runtime_code is None:
-            raise ValueError(
-                "attempted to access "
-                + "ROMSComponent._runtime_code_modifications, but "
-                + "ROMSComponent.runtime_code is None"
-            )
-
         runtime_code_modifications: list[dict] = [{} for f in self.runtime_code.files]
 
         ################################################################################
         # 'roms.in' file modifications (the only file to modify as of 2024-10-01):
         ################################################################################
+
         # First figure out which namelist is the one to modify
-        if "roms.in_TEMPLATE" in self.runtime_code.files:
-            nl_idx = self.runtime_code.files.index("roms.in_TEMPLATE")
+        nl_template = self.in_file.name + "_TEMPLATE"
+        if nl_template in self.runtime_code.files:
+            nl_idx = self.runtime_code.files.index(nl_template)
         else:
             raise ValueError(
                 "could not find expected template namelist file "
@@ -797,7 +800,7 @@ class ROMSSimulation(Simulation):
         if self.model_grid is not None:
             if len(self.model_grid.partitioned_files) == 0:
                 raise ValueError(
-                    "could not find a local path to a partitioned"
+                    "could not find a local path to a partitioned "
                     + "ROMS grid file. Run ROMSComponent.pre_run() [or "
                     + "Case.pre_run() if running a Case] to partition "
                     + "ROMS input datasets and try again."
@@ -811,7 +814,7 @@ class ROMSSimulation(Simulation):
         if self.initial_conditions is not None:
             if len(self.initial_conditions.partitioned_files) == 0:
                 raise ValueError(
-                    "could not find a local path to a partitioned"
+                    "could not find a local path to a partitioned "
                     + "ROMS initial file. Run ROMSComponent.pre_run() [or "
                     + "Case.pre_run() if running a Case] to partition "
                     + "ROMS input datasets and try again."
@@ -837,7 +840,7 @@ class ROMSSimulation(Simulation):
             if len(self.tidal_forcing.partitioned_files) == 0:
                 raise ValueError(
                     "ROMSComponent has tidal_forcing attribute "
-                    + "but could not find a local path to a partitioned "
+                    + "but could not find a local path to a partitioned ROMS "
                     + "tidal forcing file. Run ROMSComponent.pre_run() "
                     + "[or Case.pre_run() if building a Case] "
                     + " to partition ROMS input datasets and try again."
@@ -853,36 +856,16 @@ class ROMSSimulation(Simulation):
         # MARBL settings filepaths entries
         ## NOTE: WANT TO RAISE IF PLACEHOLDER IS IN NAMELIST BUT not Path(marbl_file.exists())
         if "marbl_in" in self.runtime_code.files:
-            if self.runtime_code.working_path is None:
-                raise ValueError(
-                    "ROMSComponent.runtime_code does not have a "
-                    + "'working_path' attribute. "
-                    + "Run ROMSComponent.runtime_code.get() and try again"
-                )
             runtime_code_modifications[nl_idx][
                 "__MARBL_SETTINGS_FILE_PLACEHOLDER__"
             ] = str(self.runtime_code.working_path / "marbl_in")
 
         if "marbl_tracer_output_list" in self.runtime_code.files:
-            if self.runtime_code.working_path is None:
-                raise ValueError(
-                    "ROMSComponent.runtime_code does not have a "
-                    + "'working_path' attribute. "
-                    + "Run ROMSComponent.runtime_code.get() and try again"
-                )
-
             runtime_code_modifications[nl_idx][
                 "__MARBL_TRACER_LIST_FILE_PLACEHOLDER__"
             ] = str(self.runtime_code.working_path / "marbl_tracer_output_list")
 
         if "marbl_diagnostic_output_list" in self.runtime_code.files:
-            if self.runtime_code.working_path is None:
-                raise ValueError(
-                    "ROMSComponent.runtime_code does not have a "
-                    + "'working_path' attribute. "
-                    + "Run ROMSComponent.runtime_code.get() and try again"
-                )
-
             runtime_code_modifications[nl_idx][
                 "__MARBL_DIAG_LIST_FILE_PLACEHOLDER__"
             ] = str(self.runtime_code.working_path / "marbl_diagnostic_output_list")
@@ -939,7 +922,7 @@ class ROMSSimulation(Simulation):
             ]
         print_dict = {}
         print_dict["ROMS"] = simulation_tree_dict
-        print(f"{self.directory}\n{_dict_to_tree(print_dict)}")
+        return f"{self.directory}\n{_dict_to_tree(print_dict)}"
 
     def setup(
         self,
@@ -1129,13 +1112,7 @@ class ROMSSimulation(Simulation):
         run : Executes the compiled ROMS model.
         """
 
-        if self.compile_time_code is None:
-            raise ValueError(
-                "Unable to compile ROMSComponent: "
-                + "\nROMSComponent.compile_time_code is None."
-                + "\n Compile-time files are needed to build ROMS"
-            )
-
+        self.compile_time_code = cast(AdditionalCode, self.compile_time_code)
         build_dir = self.compile_time_code.working_path
         if build_dir is None:
             raise ValueError(
