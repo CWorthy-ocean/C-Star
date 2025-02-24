@@ -25,6 +25,21 @@ from cstar.system.manager import cstar_sysmgr
 
 @pytest.fixture
 def example_roms_simulation(tmp_path):
+    """Fixture providing a `ROMSSimulation` instance for testing.
+
+    This fixture initializes a `ROMSSimulation` with a comprehensive configuration,
+    including discretization settings, mock external ROMS and MARBL codebases.
+    runtime and compile-time code, and multiple input datasets (grid, initial
+    conditions, tidal forcing, boundary forcing, and surface forcing). The
+    temporary directory (`tmp_path`) is used as the working directory.
+
+    Yields
+    ------
+    tuple[ROMSSimulation, Path]
+        A tuple containing:
+        - `ROMSSimulation` instance with fully configured attributes.
+        - The temporary directory where the simulation is stored.
+    """
     directory = tmp_path
     sim = ROMSSimulation(
         name="ROMSTest",
@@ -76,15 +91,63 @@ def example_roms_simulation(tmp_path):
     )
 
     yield sim, directory  # Ensures pytest can handle resource cleanup if needed
-    # sim.stop()  # Optional cleanup
 
 
 class TestROMSSimulationInitialization:
-    """Test the initialization of ROMSSimulation."""
+    """Unit tests for initializing a `ROMSSimulation` instance.
+
+    This test class verifies that the `ROMSSimulation` object is correctly initialized
+    with required and optional parameters, handles errors appropriately, and assigns
+    default values where necessary.
+
+    Tests
+    -----
+    - `test_init`: Ensures correct assignment of attributes when all required parameters
+      are provided.
+    - `test_init_raises_if_no_discretization`: Verifies that a `ValueError` is raised
+      if `discretization` is not provided.
+    - `test_init_raises_if_no_runtime_code`: Verifies that a `ValueError` is raised
+      if `runtime_code` is not provided.
+    - `test_init_raises_if_no_compile_time_code`: Ensures a `NotImplementedError`
+      is raised when `compile_time_code` is missing.
+    - `test_default_codebase_assignment`: Confirms that default external codebases
+      are correctly assigned if not explicitly provided.
+    - `test_invalid_surface_forcing_type`: Checks that a `TypeError` is raised if
+      `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
+    - `test_invalid_boundary_forcing_type`: Checks that a `TypeError` is raised if
+      `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
+    - `test_codebases`: Ensures the `codebases` property correctly returns the list
+      of external codebases associated with the simulation.
+    - `test_in_file_single_file`: Ensures the `in_file` property correctly retrieves
+      the runtime `.in` file from `runtime_code`.
+    - `test_in_file_no_file`: Ensures an error is raised if no `.in` file is found
+      in `runtime_code`.
+    - `test_in_file_multiple_files`: Ensures an error is raised if multiple `.in`
+      files are found in `runtime_code`.
+    - `test_in_file_no_runtime_code`: Ensures an error is raised if `runtime_code`
+      is not set.
+    - `test_in_file_working_path`: Ensures the `in_file` property correctly returns
+      the full path when `runtime_code` has a `working_path`.
+    - `test_input_datasets`: Ensures the `input_datasets` property correctly returns
+      a list of `ROMSInputDataset` instances.
+    """
 
     def test_init(self, example_roms_simulation):
-        """Test that the ROMSSimulation initializes correctly with only required
-        parameters."""
+        """Test correct initialization of a `ROMSSimulation` instance.
+
+        This test ensures that a `ROMSSimulation` object is properly instantiated
+        when provided with all required parameters.
+
+        Assertions
+        ----------
+        - Verifies that attributes match expected values.
+        - Checks that private attributes related to execution remain `None` initially.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance
+          and its corresponding directory.
+        """
 
         sim, directory = example_roms_simulation
 
@@ -150,6 +213,22 @@ class TestROMSSimulationInitialization:
         assert sim._execution_handler is None
 
     def test_init_raises_if_no_discretization(self, tmp_path):
+        """Ensure that `ROMSSimulation` raises a `ValueError` if no discretization is
+        provided.
+
+        This test verifies that an attempt to instantiate `ROMSSimulation` without
+        a required `discretization` parameter results in a `ValueError`.
+
+        Assertions
+        ----------
+        - Ensures that a `ValueError` is raised when `discretization=None`.
+
+        Mocks & Fixtures
+        ----------------
+        - `tmp_path` : A temporary directory fixture provided by `pytest` for
+          safely testing file system interactions.
+        """
+
         with pytest.raises(ValueError, match="could not find 'discretization' entry"):
             ROMSSimulation(
                 name="test",
@@ -164,6 +243,22 @@ class TestROMSSimulationInitialization:
             )
 
     def test_init_raises_if_no_runtime_code(self, tmp_path):
+        """Ensure that `ROMSSimulation` raises a `ValueError` if no runtime code is
+        provided.
+
+        This test checks that instantiating `ROMSSimulation` without a `runtime_code`
+        parameter results in a `ValueError` with an expected message substring.
+
+        Assertions
+        ----------
+        - Ensures that a `ValueError` is raised when `runtime_code=None`.
+
+        Mocks & Fixtures
+        ----------------
+        - `tmp_path` : A temporary directory fixture provided by `pytest` for
+          safely testing file system interactions.
+        """
+
         with pytest.raises(ValueError, match="could not find 'runtime_code' entry"):
             ROMSSimulation(
                 name="test",
@@ -178,6 +273,23 @@ class TestROMSSimulationInitialization:
             )
 
     def test_init_raises_if_no_compile_time_code(self, tmp_path):
+        """Test `ROMSSimulation` raises a `NotImplementedError` if no compile-time code
+        is provided.
+
+        This test verifies that attempting to instantiate `ROMSSimulation` without a
+        `compile_time_code` parameter results in a `NotImplementedError`. The error message
+        should indicate that the `compile_time_code` entry is missing.
+
+        Assertions
+        ----------
+        - Ensures that a `NotImplementedError` is raised when `compile_time_code=None`.
+
+        Mocks & Fixtures
+        ----------------
+        - `tmp_path` : A temporary directory fixture provided by `pytest` for
+          safely testing file system interactions.
+        """
+
         with pytest.raises(
             NotImplementedError, match="could not find a 'compile_time_code' entry"
         ):
@@ -194,7 +306,27 @@ class TestROMSSimulationInitialization:
             )
 
     def test_default_codebase_assignment(self, tmp_path):
-        """Ensure ROMSSimulation assigns default codebase when not provided."""
+        """Ensure `ROMSSimulation` reverts to default codebases when not provided.
+
+        This test verifies that if no `codebase` or `marbl_codebase` is explicitly
+        passed to `ROMSSimulation`, the instance correctly assigns default values.
+
+        Assertions
+        ----------
+        - Ensures that `sim.codebase` is an instance of `ROMSExternalCodeBase`.
+        - Ensures that `sim.codebase.source_repo` and `sim.codebase.checkout_target` match
+          the default ROMS repository settings.
+        - Ensures that `sim.marbl_codebase` is an instance of `MARBLExternalCodeBase`.
+        - Ensures that `sim.marbl_codebase.source_repo` and `sim.marbl_codebase.checkout_target`
+          match the default MARBL repository settings.
+        - A `UserWarning` is issued when no explicit MARBL codebase is provided.
+
+        Mocks & Fixtures
+        ----------------
+        - `tmp_path` : A temporary directory fixture provided by `pytest` for
+          safely testing file system interactions.
+        """
+
         with pytest.warns(UserWarning, match="default codebase will be used"):
             sim = ROMSSimulation(
                 name="test",
@@ -220,8 +352,24 @@ class TestROMSSimulationInitialization:
         assert sim.marbl_codebase.checkout_target == "marbl0.45.0"
 
     def test_invalid_surface_forcing_type(self, tmp_path):
-        """Ensure a TypeError is raised when surface_forcing is not a list of
-        ROMSSurfaceForcing."""
+        """Ensure a `TypeError` is raised when `surface_forcing` is not a list of
+        `ROMSSurfaceForcing` instances.
+
+        This test verifies that the `ROMSSimulation` constructor enforces type safety
+        by checking that `surface_forcing` is a list containing only `ROMSSurfaceForcing`
+        objects. Passing an invalid list should result in a `TypeError`.
+
+        Assertions
+        ----------
+        - A `TypeError` is raised when `surface_forcing` contains elements that are
+          not `ROMSSurfaceForcing` instances, including an expected message substring.
+
+        Mocks & Fixtures
+        ----------------
+        - `tmp_path` : A temporary directory fixture provided by `pytest` for
+          safely testing file system interactions.
+        """
+
         with pytest.raises(
             TypeError, match="must be a list of ROMSSurfaceForcing instances"
         ):
@@ -248,8 +396,24 @@ class TestROMSSimulationInitialization:
             )
 
     def test_invalid_boundary_forcing_type(self, tmp_path):
-        """Ensure a TypeError is raised when boundary_forcing is not a list of
-        ROMSBoundaryForcing."""
+        """Ensure a `TypeError` is raised when `boundary_forcing` is not a list of
+        `ROMSBoundaryForcing` instances.
+
+        This test verifies that the `ROMSSimulation` constructor enforces type safety
+        by ensuring that `boundary_forcing` is a list containing only `ROMSBoundaryForcing`
+        objects. Passing an invalid list should result in a `TypeError`.
+
+        Assertions
+        ----------
+        - A `TypeError` is raised when `boundary_forcing` contains elements that are
+          not `ROMSBoundaryForcing` instances with an expected message substring
+
+        Mocks & Fixtures
+        ----------------
+        - `tmp_path` : A temporary directory fixture provided by `pytest` for safely
+          testing file system interactions.
+        """
+
         with pytest.raises(
             TypeError, match="must be a list of ROMSBoundaryForcing instances"
         ):
@@ -276,8 +440,25 @@ class TestROMSSimulationInitialization:
             )
 
     def test_codebases(self, example_roms_simulation):
-        """Test that the `codebases` property correctly lists the ExternalCodeBase
-        instances."""
+        """Test that the `codebases` property correctly lists the `ExternalCodeBase`
+        instances.
+
+        This test verifies that the `codebases` property returns a list containing
+        both the ROMS and MARBL external codebases associated with the `ROMSSimulation`
+        instance.
+
+        Assertions
+        ----------
+        - `codebases` is a list.
+        - The first element in the list is an instance of `ROMSExternalCodeBase`.
+        - The second element in the list is an instance of `MARBLExternalCodeBase`.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : A fixture providing an initialized
+          `ROMSSimulation` instance.
+        """
+
         sim, _ = example_roms_simulation
         assert isinstance(sim.codebases, list)
         assert isinstance(sim.codebases[0], ROMSExternalCodeBase)
@@ -286,14 +467,44 @@ class TestROMSSimulationInitialization:
         assert sim.codebases[1] == sim.marbl_codebase
 
     def test_in_file_single_file(self, example_roms_simulation):
-        """Test that the `in_file` property correctly retrieves a .in file from
-        runtime_code."""
+        """Test that the `in_file` property correctly retrieves a single `.in` file from
+        `runtime_code`.
+
+        This test ensures that if exactly one `.in` or `.in_TEMPLATE` file is present
+        in `runtime_code.files`, the `in_file` property correctly identifies and
+        returns its path.
+
+        Assertions
+        ----------
+        - The retrieved `in_file` matches the expected `.in` file path.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : A fixture providing an initialized
+          `ROMSSimulation` instance.
+        """
+
         sim, _ = example_roms_simulation
         assert sim.in_file == Path("file2.in")
 
     def test_in_file_no_file(self, tmp_path, example_roms_simulation):
-        """Test that the `in_file` property raises an error if no suitable '.in' file is
-        found."""
+        """Test that the `in_file` property raises an error if no suitable `.in` file is
+        found in `runtime_code`.
+
+        This test ensures that if no file with an `.in` or `.in_TEMPLATE` extension
+        exists in `runtime_code.files`, the `in_file` property raises a `ValueError`.
+
+        Assertions
+        ----------
+        - A `ValueError` is raised with the expected error message.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : A fixture providing an initialized
+          `ROMSSimulation` instance.
+        - `tmp_path` : A temporary directory provided by pytest.
+        """
+
         sim, directory = example_roms_simulation
         sim.runtime_code = AdditionalCode(
             location=directory.parent,
@@ -305,9 +516,25 @@ class TestROMSSimulationInitialization:
         with pytest.raises(ValueError, match="No '.in' file found"):
             sim.in_file
 
-    def test_in_file_multiple_files(self, tmp_path, example_roms_simulation):
-        """Test that the `in_file` property raises an error if multiple '.in' files are
-        found."""
+    def test_in_file_multiple_files(self, example_roms_simulation):
+        """Test that the `in_file` property raises an error if multiple `.in` files
+        exist in `runtime_code`.
+
+        This test verifies that if more than one `.in` or `.in_TEMPLATE` file is found
+        in `runtime_code.files`, the `in_file` property raises a `ValueError`, ensuring
+        that ROMS runtime file selection is unambiguous.
+
+        Assertions
+        ----------
+        - A `ValueError` is raised with the expected error message indicating multiple
+          `.in` files were found.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : A fixture providing an initialized
+          `ROMSSimulation` instance.
+        """
+
         sim, directory = example_roms_simulation
         sim.runtime_code = AdditionalCode(
             location=directory.parent,
@@ -319,9 +546,24 @@ class TestROMSSimulationInitialization:
         with pytest.raises(ValueError, match="Multiple '.in' files found"):
             sim.in_file
 
-    def test_in_file_no_runtime_code(self, tmp_path, example_roms_simulation):
-        """Test that the `in_file` property raises an error if the runtime_code attr is
-        unset."""
+    def test_in_file_no_runtime_code(self, example_roms_simulation):
+        """Test that the `in_file` property raises an error if `runtime_code` is unset.
+
+        This test ensures that when `runtime_code` is `None`, attempting to access the
+        `in_file` property results in a `ValueError`. ROMS requires a valid runtime
+        options file, and the absence of `runtime_code` should prevent further execution.
+
+        Assertions
+        ----------
+        - A `ValueError` is raised with the expected message indicating that ROMS
+          requires a runtime options file.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : A fixture providing an initialized
+          `ROMSSimulation` instance.
+        """
+
         sim, directory = example_roms_simulation
         sim.runtime_code = None
 
@@ -329,8 +571,24 @@ class TestROMSSimulationInitialization:
             sim.in_file
 
     def test_in_file_working_path(self, tmp_path, example_roms_simulation):
-        """Test that the `in_file` property provides a correct path for local runtime
-        code."""
+        """Test that the `in_file` property provides the correct path when
+        `runtime_code` has a working path.
+
+        This test verifies that when `runtime_code.working_path` is set, the `in_file`
+        property correctly constructs the full path to the ROMS runtime input file.
+
+        Assertions
+        ----------
+        - The `in_file` property returns the correct absolute path, combining
+          `runtime_code.working_path` with the expected input file.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : A fixture providing an initialized
+          `ROMSSimulation` instance.
+        - `tmp_path` : A temporary directory provided by pytest.
+        """
+
         sim, directory = example_roms_simulation
         wp = tmp_path
         sim.runtime_code.working_path = wp
@@ -338,8 +596,29 @@ class TestROMSSimulationInitialization:
         assert sim.in_file == wp / "file2.in"
 
     def test_input_datasets(self, example_roms_simulation):
-        """Test that the input_datasets property returns the correct list of
-        ROMSInputDataset instances."""
+        """Test that the `input_datasets` property returns the correct list of
+        `ROMSInputDataset` instances.
+
+        This test ensures that `input_datasets` correctly aggregates all input datasets
+        associated with the simulation, including the model grid, initial conditions,
+        tidal forcing, boundary forcing, and surface forcing.
+
+        Assertions
+        ----------
+        - The `input_datasets` property returns a list containing:
+          - `model_grid`
+          - `initial_conditions`
+          - `tidal_forcing`
+          - All entries in `boundary_forcing`
+          - All entries in `surface_forcing`
+        - The order of elements in the list matches the expected order.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : A fixture providing an initialized
+          `ROMSSimulation` instance.
+        """
+
         sim, directory = example_roms_simulation
         mg = sim.model_grid
         ic = sim.initial_conditions
@@ -351,7 +630,47 @@ class TestROMSSimulationInitialization:
 
 
 class TestStrAndRepr:
+    """Test class for the `__str__`, `__repr__`, and `tree` methods of `ROMSSimulation`.
+
+    This test suite ensures that the string representations and tree structure output
+    of `ROMSSimulation` instances are correctly formatted and contain the expected
+    information.
+
+    Tests
+    -----
+    - `test_str()`: Verifies that the `__str__` method outputs a well-formatted summary
+      of the `ROMSSimulation` instance, including attributes such as name, directory,
+      dates, discretization settings, codebases, input datasets, and setup status.
+    - `test_repr()`: Ensures that the `__repr__` method provides a valid Python
+      expression that reconstructs the `ROMSSimulation` instance with all its attributes.
+    - `test_tree()`: Confirms that the `tree` method correctly formats a hierarchical
+      directory structure representing runtime code, compile-time code, and input datasets.
+
+    Mocks & Fixtures
+    ----------------
+    - `example_roms_simulation`: A fixture providing an initialized `ROMSSimulation`
+      instance with a populated directory structure.
+    """
+
     def test_str(self, example_roms_simulation):
+        """Test the `__str__` method of `ROMSSimulation`.
+
+        Ensures that calling `str()` on a `ROMSSimulation` instance produces a properly
+        formatted string containing key attributes, including name, directory, dates,
+        discretization settings, codebases, input datasets, and setup status.
+
+        The expected output is compared against a predefined string representation.
+
+        Parameters
+        ----------
+        example_roms_simulation : fixture
+            A fixture providing an initialized `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - The string representation matches a predefined string.
+        """
+
         sim, directory = example_roms_simulation
         expected_str = f"""\
 ROMSSimulation
@@ -382,6 +701,25 @@ Is setup: False"""
         assert sim.__str__() == expected_str
 
     def test_repr(self, example_roms_simulation):
+        """Test the `__repr__` method of `ROMSSimulation`.
+
+        Ensures that calling `repr()` on a `ROMSSimulation` instance returns a
+        properly formatted string representation that includes all key attributes.
+        This output should be a valid Python expression that can be used to
+        reconstruct the instance.
+
+        The expected output is compared against a predefined representation.
+
+        Parameters
+        ----------
+        example_roms_simulation : fixture
+            A fixture providing an initialized `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - The string representation matches a predefined string.
+        """
+
         sim, directory = example_roms_simulation
         expected_repr = f"""\
 ROMSSimulation(
@@ -404,6 +742,22 @@ boundary_forcing = <list of 1 ROMSBoundaryForcing instances>
         assert expected_repr == sim.__repr__()
 
     def test_tree(self, example_roms_simulation):
+        """Test the `tree` method of `ROMSSimulation`.
+
+        Ensures that calling `tree()` on a `ROMSSimulation` instance correctly
+        returns a hierarchical string representation of the simulation's directory
+        structure, including runtime code, compile-time code, and input datasets.
+
+        Parameters
+        ----------
+        example_roms_simulation : fixture
+            A fixture providing an initialized `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - The output of tree() matches a predefined string
+        """
+
         sim, directory = example_roms_simulation
         expected_tree = f"""\
 {directory}
@@ -431,7 +785,46 @@ boundary_forcing = <list of 1 ROMSBoundaryForcing instances>
 
 
 class TestToAndFromDictAndBlueprint:
+    """Tests for the `to_dict`, `from_dict`, `to_blueprint`, and `from_blueprint`
+    methods of `ROMSSimulation`.
+
+    This test suite ensures that `ROMSSimulation` instances can be correctly serialized
+    to dictionaries and YAML blueprints, and that they can be reconstructed accurately
+    from these representations.
+
+    Tests
+    -----
+    - `test_to_dict`:
+        Ensures that calling `to_dict()` produces a dictionary with the correct structure
+        and expected key-value pairs.
+    - `test_from_dict`:
+        Verifies that `from_dict()` reconstructs a `ROMSSimulation` instance that matches
+        the original.
+    - `test_from_dict_with_single_forcing_entries`:
+        Tests that `from_dict()` correctly handles boundary and surface forcing data
+        when they are represented as dictionaries instead of lists.
+    - `test_dict_roundtrip`:
+        Ensures that a `ROMSSimulation` instance serialized with `to_dict()` and
+        reconstructed with `from_dict()` retains all properties.
+    - `test_to_blueprint`:
+        Verifies that `to_blueprint()` correctly writes a YAML file with the expected
+        simulation data.
+    - `test_from_blueprint_valid_file`:
+        Tests `from_blueprint()` with a valid local YAML file.
+    - `test_from_blueprint_invalid_filetype`:
+        Ensures `from_blueprint()` raises an error when given a non-YAML file.
+    - `test_from_blueprint_url`:
+        Verifies that `from_blueprint()` correctly loads a YAML blueprint from a URL.
+    - `test_blueprint_roundtrip`:
+        Ensures that a `ROMSSimulation` instance serialized with `to_blueprint()` and
+        reconstructed with `from_blueprint()` retains all properties.
+    """
+
     def setup_method(self):
+        """Sets a common dictionary representation of the ROMSSimulation instance
+        associated with the `example_roms_simulation` fixture to be used across tests in
+        this class."""
+
         self.example_simulation_dict = {
             "name": "ROMSTest",
             "valid_start_date": datetime(2024, 1, 1, 0, 0),
@@ -481,8 +874,24 @@ class TestToAndFromDictAndBlueprint:
         }
 
     def test_to_dict(self, example_roms_simulation):
-        """Test key/value pairs unique ROMSSimulation.to_dict (Simulation.to_dict tested
-        elsewhere)"""
+        """Tests that `to_dict()` correctly represents a `ROMSSimulation` instance in a
+        dictionary.
+
+        This test ensures that the dictionary returned by `to_dict()` contains all expected
+        key-value pairs unique to `ROMSSimulation` (excluding those inherited from `Simulation`,
+        which are tested separately).
+
+        Assertions
+        --------------
+        - The dictionary contains the correct MARBL codebase information.
+        - The model grid, initial conditions, tidal forcing, boundary forcing, and
+          surface forcing data match the expected values.
+
+        Mocks & Fixtures
+        ---------------------
+        - `example_roms_simulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        """
+
         sim, directory = example_roms_simulation
         test_dict = sim.to_dict()
 
@@ -508,6 +917,20 @@ class TestToAndFromDictAndBlueprint:
         )
 
     def test_from_dict(self, example_roms_simulation):
+        """Tests that `from_dict()` correctly reconstructs a `ROMSSimulation` instance.
+
+        This test verifies that calling `from_dict()` with a valid simulation dictionary
+        results in an instance matching the expected `ROMSSimulation`.
+
+        Assertions
+        --------------
+        - The reconstructed instance matches the expected instance byte-for-byte.
+        - The properties of the new instance are identical to the expected instance.
+
+        Mocks & Fixtures
+        ---------------------
+        - `example_roms_simulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        """
         sim, directory = example_roms_simulation
         sim_dict = self.example_simulation_dict
         sim_dict["runtime_code"]["location"] = directory.parent
@@ -522,6 +945,25 @@ class TestToAndFromDictAndBlueprint:
         assert pickle.dumps(sim2) == pickle.dumps(sim), "Instances are not identical"
 
     def test_from_dict_with_single_forcing_entries(self, tmp_path):
+        """Tests that `from_dict()` works with single surface and boundary forcing
+        entries.
+
+        This test ensures that when `surface_forcing` and `boundary_forcing` are provided
+        as dictionaries (instead of lists), they are correctly converted into lists of
+        `ROMSSurfaceForcing` and `ROMSBoundaryForcing` instances.
+
+        Assertions
+        ----------
+        - The `boundary_forcing` attribute is a list.
+        - The `surface_forcing` attribute is a list.
+        - Each item in `boundary_forcing` is an instance of `ROMSBoundaryForcing`.
+        - Each item in `surface_forcing` is an instance of `ROMSSurfaceForcing`.
+        - The properties of the reconstructed instances match the input data.
+
+        Mocks & Fixtures
+        ----------------
+        - `tmp_path`: A pytest fixture providing a temporary directory for testing.
+        """
         sim_dict = self.example_simulation_dict.copy()
         sim_dict["surface_forcing"] = {
             "location": "http://my.files/surface.nc",
@@ -547,6 +989,21 @@ class TestToAndFromDictAndBlueprint:
         assert sim.surface_forcing[0].source.file_hash == "567"
 
     def test_dict_roundtrip(self, example_roms_simulation):
+        """Tests that `to_dict()` and `from_dict()` produce consistent results.
+
+        This test ensures that converting a `ROMSSimulation` instance to a dictionary
+        and then reconstructing it using `from_dict()` results in an equivalent object.
+
+        Assertions
+        ----------
+        - The dictionary produced by `to_dict()` matches the dictionary of the
+          reconstructed instance from `from_dict()`, ensuring data integrity.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        """
+
         sim, directory = example_roms_simulation
         sim_to_dict = sim.to_dict()
         sim_from_dict = sim.from_dict(
@@ -559,6 +1016,24 @@ class TestToAndFromDictAndBlueprint:
         assert sim_from_dict.to_dict() == sim_to_dict
 
     def test_to_blueprint(self, example_roms_simulation):
+        """Tests that `to_blueprint()` writes a `ROMSSimulation` dictionary to a YAML
+        file.
+
+        This test verifies that the `to_blueprint()` method writes a YAML file with
+        the expected dictionary representation of the `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - `open()` is called once with the correct filename and write mode.
+        - `yaml.dump()` is called with the dictionary representation of the simulation
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        - `mock_open`: A mock for Python's built-in `open()` function.
+        - `mock_yaml_dump`: A mock for `yaml.dump()` to intercept and verify the YAML writing operation.
+        """
+
         sim, directory = example_roms_simulation
         mock_file_path = "mock_path.yaml"
 
@@ -584,8 +1059,24 @@ class TestToAndFromDictAndBlueprint:
     def test_from_blueprint_valid_file(
         self, mock_open_file, mock_path_exists, tmp_path
     ):
-        """Ensure that from_blueprint correctly loads a ROMSSimulation from a valid YAML
-        file."""
+        """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
+        YAML file.
+
+        This test mocks the output of yaml.safe_load to return the expected dictionary
+        and then verifies that this output is properly processed.
+
+         Assertions
+         ----------
+         - The returned object is an instance of `ROMSSimulation`.
+         - `open()` is called exactly once with the expected file path in read mode.
+
+         Mocks & Fixtures
+         ----------------
+         - `mock_open_file`: Mocks the built-in `open()` function to simulate reading a YAML file.
+         - `mock_path_exists`: Mocks `Path.exists()` to return `True`, ensuring the test bypasses file existence checks.
+         - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint file's location.
+        """
+
         blueprint_path = tmp_path / "roms_blueprint.yaml"
 
         with patch("yaml.safe_load", return_value=self.example_simulation_dict):
@@ -609,8 +1100,23 @@ class TestToAndFromDictAndBlueprint:
     def test_from_blueprint_invalid_filetype(
         self, mock_open_file, mock_path_exists, tmp_path
     ):
-        """Ensure that from_blueprint correctly loads a ROMSSimulation from a valid YAML
-        file."""
+        """Tests that `from_blueprint()` raises a `ValueError` when given a non-YAML
+        file.
+
+        This test ensures that `from_blueprint()` enforces the expected file format by
+        raising an error if the blueprint file does not have a `.yaml` extension.
+
+        Assertions
+        ----------
+        - A `ValueError` is raised with the expected message.
+
+        Mocks & Fixtures
+        ----------------
+        - `mock_open_file`: Mocks the built-in `open()` function to simulate reading a non-YAML file.
+        - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
+        - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint's location.
+        """
+
         blueprint_path = tmp_path / "roms_blueprint.nc"
 
         with patch("yaml.safe_load", return_value=self.example_simulation_dict):
@@ -627,8 +1133,23 @@ class TestToAndFromDictAndBlueprint:
     @patch("requests.get")
     @patch("pathlib.Path.exists", return_value=True)
     def test_from_blueprint_url(self, mock_path_exists, mock_requests_get, tmp_path):
-        """Ensure that from_blueprint correctly loads a ROMSSimulation from a valid YAML
-        file."""
+        """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a URL.
+
+        This test ensures that when given a valid URL to a YAML blueprint file,
+        `from_blueprint()` retrieves, parses, and constructs a `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - The returned object is an instance of `ROMSSimulation`.
+        - The request to fetch the blueprint is made exactly once.
+
+        Mocks & Fixtures
+        ----------------
+        - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
+        - `mock_requests_get`: Mocks `requests.get()` to return a simulated YAML blueprint response.
+        - `tmp_path`: A temporary directory provided by `pytest` to simulate the simulation directory.
+        """
+
         mock_response = MagicMock()
         mock_response.text = yaml.dump(self.example_simulation_dict)
         mock_requests_get.return_value = mock_response
@@ -645,13 +1166,28 @@ class TestToAndFromDictAndBlueprint:
         mock_requests_get.assert_called_once()
 
     def test_blueprint_roundtrip(self, example_roms_simulation, tmp_path):
+        """Tests that a `ROMSSimulation` can be serialized to a YAML blueprint and
+        reconstructed correctly using `from_blueprint()`.
+
+        This test verifies that after saving a simulation instance to a YAML blueprint
+        and then reloading it, the reloaded instance matches the original.
+
+        Assertions
+        ----------
+        - The dictionary representation of the reloaded instance matches the original.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation`: A fixture providing a sample `ROMSSimulation` instance.
+        - `tmp_path`: A temporary directory provided by `pytest` to store the blueprint file.
+        """
+
         sim, _ = example_roms_simulation
-        sim.directory = tmp_path / "simdir"
         output_file = tmp_path / "test.yaml"
         sim.to_blueprint(filename=output_file)
         sim2 = ROMSSimulation.from_blueprint(
             blueprint=output_file,
-            directory=sim.directory,
+            directory=tmp_path / "sim2",
             start_date=sim.start_date,
             end_date=sim.end_date,
         )
@@ -659,7 +1195,104 @@ class TestToAndFromDictAndBlueprint:
 
 
 class TestProcessingAndExecution:
+    """Tests processing steps and execution methods of `ROMSSimulation`.
+
+    This test class covers functionality related to modifying runtime code,
+    preparing input datasets, executing the simulation, and handling post-run
+    processes.
+
+    Tests
+    -----
+    - `test_runtime_code_modifications`
+        Ensures that runtime code modifications are correctly generated based on
+        input datasets and runtime settings.
+    - `test_runtime_code_modifications_raises_if_no_working_path`
+        Verifies that an error is raised when runtime code modifications are accessed
+        but the `working_path` is not set.
+    - `test_runtime_code_modifications_raises_if_no_template`
+        Checks that a ValueError is raised when no template runtime file is found.
+    - `test_runtime_code_modifications_raises_if_no_partitioned_files`
+        Ensures that missing partitioned input files cause an error in runtime
+        modifications.
+    - `test_update_runtime_code`
+        Validates that the runtime code files are updated with the correct values
+        based on simulation configuration.
+    - `test_update_runtime_code_warns_without_template`
+        Checks that a warning is issued when no template runtime file is found.
+    - `test_setup`
+        Ensures that `setup()` correctly configures external codebases, runtime
+        code, and input datasets.
+    - `test_is_setup_external_codebases`
+        Validates that `is_setup` returns False if external codebases are not
+        configured properly.
+    - `test_is_setup_additional_code`
+        Ensures that `is_setup` returns False when required runtime or compile-time
+        code is missing.
+    - `test_is_setup_input_datasets`
+        Verifies that `is_setup` correctly considers input dataset availability and
+        date ranges.
+    - `test_build`
+        Tests that `build()` correctly compiles the ROMS executable.
+    - `test_build_no_rebuild`
+        Ensures that `build()` does not recompile if the source code and executable
+        remain unchanged.
+    - `test_build_raises_if_make_clean_error`
+        Checks that an error is raised when the `make compile_clean` step fails.
+    - `test_build_raises_if_make_error`
+        Ensures that a runtime error is raised when the `make` step fails during
+        compilation.
+    - `test_build_raises_if_no_build_dir`
+        Verifies that `build()` raises an error when no compile-time code directory
+        is set.
+    - `test_pre_run`
+        Ensures that `pre_run()` correctly partitions input datasets before execution.
+    - `test_run_no_executable`
+        Checks that `run()` raises an error when no executable is found.
+    - `test_run_no_node_distribution`
+        Verifies that `run()` raises an error when the node distribution is not set.
+    - `test_run_local_execution`
+        Ensures that `run()` correctly starts a local process when no scheduler is
+        available.
+    - `test_run_with_scheduler`
+        Tests that `run()` submits a job with scheduler defaults when queue and
+        walltime are not specified.
+    - `test_run_with_scheduler_raises_if_no_account_key`
+        Ensures that `run()` raises an error when executed with a scheduler but no
+        account key is provided.
+    - `test_post_run_raises_if_called_before_run`
+        Checks that `post_run()` raises an error if called before `run()`.
+    - `test_post_run_raises_if_still_running`
+        Ensures that `post_run()` raises an error if execution is not yet completed.
+    - `test_post_run_merges_netcdf_files`
+        Tests that `post_run()` correctly merges NetCDF output files after execution.
+    - `test_post_run_prints_message_if_no_files`
+        Verifies that `post_run()` prints a message and exits when no output files
+        are found.
+    - `test_post_run_raises_error_if_ncjoin_fails`
+        Ensures that `post_run()` raises an error if `ncjoin` fails during merging.
+    """
+
     def test_runtime_code_modifications(self, example_roms_simulation):
+        """Ensures the runtime code modifications dictionary is generated correctly.
+
+        This test verifies that the `_runtime_code_modifications` property
+        correctly constructs modifications to be applied to the runtime input
+        file. It checks that placeholders are properly replaced with values
+        from the simulation's configuration.
+
+        Mocks & Fixtures
+        ---------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation`
+          instance.
+
+        Assertions
+        ----------
+        - Ensures the returned modifications list has the expected structure.
+        - Verifies that grid, initial condition, and forcing file placeholders
+          are correctly replaced.
+        - Confirms that MARBL-related placeholders are correctly set.
+        """
+
         sim, directory = example_roms_simulation
 
         # Fake the runtime code
@@ -710,6 +1343,22 @@ class TestProcessingAndExecution:
     def test_runtime_code_modifications_raises_if_no_working_path(
         self, example_roms_simulation
     ):
+        """Ensures an error is raised if `runtime_code.working_path` is not set.
+
+        This test verifies that attempting to access `_runtime_code_modifications`
+        without a valid `runtime_code.working_path` results in a `ValueError`.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation`
+          instance.
+
+        Assertions
+        ----------
+        - Checks that accessing `_runtime_code_modifications` without setting
+          `runtime_code.working_path` raises a `ValueError`.
+        """
+
         sim, directory = example_roms_simulation
         with pytest.raises(
             ValueError, match="does not have a 'working_path' attribute."
@@ -719,6 +1368,23 @@ class TestProcessingAndExecution:
     def test_runtime_code_modifications_raises_if_no_template(
         self, example_roms_simulation
     ):
+        """Ensures an error is raised if no template namelist file is found.
+
+        This test verifies that `_runtime_code_modifications` raises a `ValueError`
+        when `runtime_code.files` does not contain a template namelist file
+        (i.e., a file ending in `_TEMPLATE`).
+
+        Mocks & Fixtures
+        ---------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation`
+          instance.
+
+        Assertions
+        ----------
+        - Checks that accessing `_runtime_code_modifications` without a
+          template namelist file raises a `ValueError`.
+        """
+
         sim, directory = example_roms_simulation
         sim.runtime_code.working_path = directory / "ROMS/runtime_code"
         sim.runtime_code.files = [f.rstrip("_TEMPLATE") for f in sim.runtime_code.files]
@@ -732,6 +1398,32 @@ class TestProcessingAndExecution:
     def test_runtime_code_modifications_raises_if_no_partitioned_files(
         self, example_roms_simulation, missing_type
     ):
+        """Ensures an error is raised if required input datasets are not partitioned.
+
+        This test verifies that `_runtime_code_modifications` raises a `ValueError`
+        if a required input dataset (e.g., grid, initial conditions, or tidal forcing)
+        has not been partitioned, and its `partitioned_files` attribute is unset.
+
+        It parametrizes InputDataset subclasses and unsets the `partitioned_files`
+        attribute for each in turn while mocking this attribute for the others.
+
+        Parameters
+        ----------
+        missing_type : type
+            The type of dataset to simulate as missing partitioned files. This
+            parameter is supplied via `pytest.mark.parametrize`.
+
+        Mocks & Fixtures
+        ---------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation`
+          instance.
+
+        Assertions
+        ----------
+        - Checks that accessing `_runtime_code_modifications` when the required
+          dataset lacks partitioned files raises a `ValueError`.
+        """
+
         sim, directory = example_roms_simulation
         sim.runtime_code.working_path = directory / "ROMS/runtime_code"
 
@@ -760,6 +1452,25 @@ class TestProcessingAndExecution:
     def test_update_runtime_code(
         self, mock_copy, mock_replace_text, mock_rtcm, example_roms_simulation
     ):
+        """Tests that `update_runtime_code` correctly applies modifications.
+
+        This test verifies that `update_runtime_code`:
+        - Copies the template runtime file to create an editable version.
+        - Replaces placeholders in the newly created runtime file with appropriate values.
+
+        Mocks & Fixtures
+        ---------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_rtcm` : Mocks `_runtime_code_modifications` to return a test dictionary.
+        - `mock_replace_text` : Mocks `_replace_text_in_file` to prevent actual file modifications.
+        - `mock_copy` : Mocks `shutil.copy` to prevent actual file copying.
+
+        Assertions
+        ----------
+        - Ensures the runtime file template is copied correctly.
+        - Ensures the placeholder replacement function is called with correct arguments.
+        """
+
         sim, directory = example_roms_simulation
         runtime_directory = directory / "ROMS/runtime_code"
         mock_rtcm.return_value = [{}, {"hello": "world"}, {}, {}, {}]
@@ -777,6 +1488,21 @@ class TestProcessingAndExecution:
         )
 
     def test_update_runtime_code_warns_without_template(self, example_roms_simulation):
+        """Tests that `update_runtime_code` issues a warning when no template file
+        exists.
+
+        This test verifies that if no runtime code file with a `_TEMPLATE` suffix is found,
+        `update_runtime_code` issues a warning instead of making modifications.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - Ensures a `UserWarning` is raised when no template file is found.
+        """
+
         sim, directory = example_roms_simulation
         sim.runtime_code.working_path = directory / "ROMS/runtime_code"
         sim.runtime_code.files = ["file1.in", "file2", "marbl_in"]
@@ -795,6 +1521,27 @@ class TestProcessingAndExecution:
         mock_inputdataset_get,
         example_roms_simulation,
     ):
+        """Tests that `setup` correctly fetches and organizes simulation components.
+
+        This test verifies that `setup` correctly:
+        - Configures external codebases.
+        - Retrieves and organizes compile-time and runtime code.
+        - Fetches input datasets.
+
+        Mocks & Fixtures
+        ---------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_handle_config_status` : Mocks `handle_config_status` for external codebases.
+        - `mock_additionalcode_get` : Mocks `get()` for runtime and compile-time code.
+        - `mock_inputdataset_get` : Mocks `get()` for input datasets.
+
+        Assertions
+        ----------
+        - Ensures `handle_config_status` is called twice (ROMS & MARBL codebases).
+        - Ensures `get()` is called twice for compile-time and runtime code.
+        - Ensures `get()` is called once per input dataset.
+        """
+
         sim, directory = example_roms_simulation
         sim.setup()
         assert mock_handle_config_status.call_count == 2
@@ -804,10 +1551,10 @@ class TestProcessingAndExecution:
     @pytest.mark.parametrize(
         "codebase_status, marbl_status, expected",
         [
-            (0, 0, True),  # ✅ Both correctly configured → should return True
-            (1, 0, False),  # ❌ Codebase not configured
-            (0, 1, False),  # ❌ MARBL codebase not configured
-            (1, 1, False),  # ❌ Both not configured
+            (0, 0, True),  # T Both correctly configured → should return True
+            (1, 0, False),  # F Codebase not configured
+            (0, 1, False),  # F MARBL codebase not configured
+            (1, 1, False),  # F Both not configured
         ],
     )
     @patch.object(
@@ -821,6 +1568,24 @@ class TestProcessingAndExecution:
         expected,
         example_roms_simulation,
     ):
+        """Tests that `is_setup` correctly checks external codebase configuration.
+
+        This test verifies that `is_setup` correctly evaluates the setup status based
+        on the configuration of the ROMS and MARBL external codebases. It parametrizes
+        the configuration status of each codebase and verifies different combinations.
+
+        Mocks & Fixtures
+        ---------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_exists_locally` : Mocks `exists_locally` for additional code components.
+        - `codebase_status` : Parameterized mock return value for `ROMSExternalCodeBase.local_config_status`.
+        - `marbl_status` : Parameterized mock return value for `MARBLExternalCodeBase.local_config_status`.
+
+        Assertions
+        ----------
+        - Ensures that `is_setup` returns `True` only when both codebases are configured.
+        - Ensures that `is_setup` returns `False` if either codebase is not configured.
+        """
         sim, _ = example_roms_simulation
 
         with (
@@ -842,10 +1607,10 @@ class TestProcessingAndExecution:
     @pytest.mark.parametrize(
         "runtime_exists, compile_exists, expected",
         [
-            (True, True, True),  # ✅ Both exist → is_setup should be True
-            (False, True, False),  # ❌ Runtime code missing
-            (True, False, False),  # ❌ Compile-time code missing
-            (False, False, False),  # ❌ Both missing
+            (True, True, True),  # T Both exist → is_setup should be True
+            (False, True, False),  # F Runtime code missing
+            (True, False, False),  # F Compile-time code missing
+            (False, False, False),  # F Both missing
         ],
     )
     @patch.object(
@@ -864,6 +1629,27 @@ class TestProcessingAndExecution:
         expected,
         example_roms_simulation,
     ):
+        """Tests that `is_setup` correctly checks for the presence of runtime and
+        compile-time code.
+
+        This test ensures that `is_setup` evaluates the setup status correctly based on whether
+        runtime and compile-time code components exist locally. It parametrizes the `exists_locally`
+        property on different AdditionalCode instances and checks different combinations.
+
+        Mocks & Fixtures
+        ---------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_additionalcode_exists` : Mocks `exists_locally` for runtime and compile-time code.
+        - `mock_local_config_status` : Mocks external codebase configuration status.
+        - `runtime_exists` : Parameterized mock return value indicating if runtime code exists.
+        - `compile_exists` : Parameterized mock return value indicating if compile-time code exists.
+
+        Assertions
+        ----------
+        - Ensures `is_setup` returns `True` only when both runtime and compile-time code exist.
+        - Ensures `is_setup` returns `False` when either component is missing.
+        """
+
         sim, _ = example_roms_simulation
 
         mock_additionalcode_exists.side_effect = [runtime_exists, compile_exists]
@@ -976,6 +1762,26 @@ class TestProcessingAndExecution:
     @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @patch("subprocess.run")
     def test_build(self, mock_subprocess, mock_get_hash, example_roms_simulation):
+        """Tests that `build` correctly compiles the ROMS executable.
+
+        This test ensures that the `build` method performs the following steps:
+        - Cleans the build directory if necessary.
+        - Calls `make compile_clean` and `make` to compile the executable.
+        - Stores the executable path and hash after a successful build.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_subprocess` : Mocks subprocess calls for compilation.
+        - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
+
+        Assertions
+        ----------
+        - Ensures `make compile_clean` and `make` commands are executed in sequence.
+        - Ensures the executable path is correctly stored in `exe_path`.
+        - Ensures the executable hash is stored in `_exe_hash` after successful compilation.
+        """
+
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
@@ -1012,6 +1818,28 @@ class TestProcessingAndExecution:
     def test_build_no_rebuild(
         self, mock_subprocess, mock_get_hash, mock_print, example_roms_simulation
     ):
+        """Tests that `build` does not recompile if the executable already exists and is
+        unchanged.
+
+        This test ensures that `build` exits early when:
+        - The ROMS executable already exists.
+        - The compile-time code exists locally.
+        - The hash of the existing executable matches the stored hash.
+        - `rebuild` is set to `False`.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_subprocess` : Mocks subprocess calls for compilation (should not be called).
+        - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
+        - `mock_print` : Mocks `print` to verify early exit message.
+
+        Assertions
+        ----------
+        - Ensures `build` exits early without calling `make compile_clean` or `make`.
+        - Ensures an informational message is printed about skipping recompilation.
+        """
+
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         # Mock properties for early exit conditions
@@ -1044,6 +1872,23 @@ class TestProcessingAndExecution:
     def test_build_raises_if_make_clean_error(
         self, mock_subprocess, mock_get_hash, example_roms_simulation
     ):
+        """Tests that `build` raises an error if `make compile_clean` fails.
+
+        This test ensures that if `make compile_clean` returns a nonzero exit code,
+        a `RuntimeError` is raised with the appropriate error message.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_subprocess` : Mocks subprocess calls for compilation.
+        - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
+
+        Assertions
+        ----------
+        - Ensures `make compile_clean` is called before compilation.
+        - Verifies that a `RuntimeError` is raised when `make compile_clean` fails.
+        """
+
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
@@ -1068,6 +1913,23 @@ class TestProcessingAndExecution:
     def test_build_raises_if_make_error(
         self, mock_subprocess, mock_get_hash, example_roms_simulation
     ):
+        """Tests that `build` raises an error if `make` fails during compilation.
+
+        This test ensures that if `make` returns a nonzero exit code during the ROMS
+        compilation process, a `RuntimeError` is raised with the appropriate error message.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_subprocess` : Mocks subprocess calls for compilation.
+        - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
+
+        Assertions
+        ----------
+        - Ensures `make` is called for ROMS compilation.
+        - Verifies that a `RuntimeError` is raised when `make` fails.
+        """
+
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         sim.compile_time_code.working_path = build_dir
@@ -1088,13 +1950,41 @@ class TestProcessingAndExecution:
         )
 
     def test_build_raises_if_no_build_dir(self, example_roms_simulation):
+        """Tests that `build` raises an error if no build directory is set.
+
+        This test verifies that calling `build` without a valid `compile_time_code.working_path`
+        results in a `ValueError`, as the build process requires a designated directory.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - Ensures that calling `build` without a build directory raises a `ValueError`.
+        """
+
         sim, directory = example_roms_simulation
         with pytest.raises(ValueError, match="Unable to compile ROMSSimulation"):
             sim.build()
 
     @patch.object(ROMSInputDataset, "partition")  # Mock partition method
     def test_pre_run(self, mock_partition, example_roms_simulation):
-        """Test that pre_run calls partition() only on datasets that exist locally."""
+        """Tests that `pre_run` partitions any locally available input datasets.
+
+        This test verifies that `pre_run` correctly calls `partition()` on input datasets
+        that exist locally, while skipping those that do not.
+
+        Mocks & Fixtures
+        ----------------
+        - `mock_partition` : Mocks the `partition` method of `ROMSInputDataset`.
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - Ensures that `partition()` is called only on datasets that exist locally.
+        - Ensures that datasets not found locally are not partitioned.
+        """
 
         sim, _ = example_roms_simulation
 
@@ -1118,11 +2008,40 @@ class TestProcessingAndExecution:
             dataset_3.partition.assert_called_once_with(np_xi=2, np_eta=3)
 
     def test_run_no_executable(self, example_roms_simulation):
+        """Tests that `run` raises an error if no executable is found.
+
+        This test ensures that calling `run` without a defined `exe_path` results in
+        a `ValueError`, preventing execution when the ROMS executable is missing.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - Ensures `ValueError` is raised with the expected error message when `exe_path` is `None`.
+        """
+
         sim, directory = example_roms_simulation
         with pytest.raises(ValueError, match="unable to find ROMS executable"):
             sim.run()
 
     def test_run_no_node_distribution(self, example_roms_simulation):
+        """Tests that `run` raises an error if node distribution is not set.
+
+        This test ensures that if `n_procs_tot` is `None`, calling `run` will
+        raise a `ValueError`, preventing execution without a valid node distribution.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - ROMSDiscretization.n_procs_tot: Mocks `n_procs_tot` to return `None`.
+
+        Assertions
+        ----------
+        - Ensures `ValueError` is raised with the expected error message when `n_procs_tot` is `None`.
+        """
+
         sim, directory = example_roms_simulation
         sim.exe_path = directory / "ROMS/compile_time_code/roms"
         with patch(
@@ -1140,8 +2059,25 @@ class TestProcessingAndExecution:
     def test_run_local_execution(
         self, mock_update_runtime_code, mock_replace_text, example_roms_simulation
     ):
-        """Test that run() correctly starts a local process when no scheduler is
-        available."""
+        """Tests that `run` correctly starts a local process when no scheduler is
+        available.
+
+        This test verifies that if a scheduler is not present, `run` initiates
+        local execution using `LocalProcess`. The method should construct the appropriate
+        command and set the execution handler correctly.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `patch("cstar.roms.simulation.LocalProcess")` : Mocks `LocalProcess` to track its instantiation.
+        - CStarSystemManager.scheduler: Mocks `cstar_sysmgr.scheduler` to return `None`
+
+        Assertions
+        ----------
+        - Ensures `LocalProcess` is instantiated with the correct command and run path.
+        - Ensures `LocalProcess.start()` is called.
+        - Ensures the returned execution handler matches the mocked `LocalProcess` instance.
+        """
 
         sim, directory = example_roms_simulation
 
@@ -1177,8 +2113,25 @@ class TestProcessingAndExecution:
     def test_run_with_scheduler(
         self, mock_update_runtime_code, mock_replace_text, example_roms_simulation
     ):
-        """Test that run() correctly uses scheduler defaults when queue_name and
-        walltime are None."""
+        """Tests that `run` correctly submits a job to a scheduler when available.
+
+        This test verifies that if a scheduler is present, `run` creates a scheduler job
+        with the appropriate parameters and submits it.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `patch("cstar.roms.simulation.create_scheduler_job")` : Mocks `create_scheduler_job`
+          to verify job creation.
+        - `patch("cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock)` :
+          Mocks `cstar_sysmgr.scheduler` to simulate a scheduler environment.
+
+        Assertions
+        ----------
+        - Ensures `create_scheduler_job` is called with the correct arguments.
+        - Ensures the scheduler job's `submit()` method is called.
+        - Ensures the returned execution handler matches the created job instance.
+        """
 
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
@@ -1222,8 +2175,24 @@ class TestProcessingAndExecution:
     def test_run_with_scheduler_raises_if_no_account_key(
         self, mock_update_runtime_code, mock_replace_text, example_roms_simulation
     ):
-        """Test that run() correctly uses scheduler defaults when queue_name and
-        walltime are None."""
+        """Tests that `run` raises a `ValueError` if no account key is provided when
+        using a scheduler.
+
+        This test ensures that if a scheduler is available but `account_key` is not provided,
+        the method raises an appropriate error instead of submitting a job.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `patch("cstar.roms.simulation.create_scheduler_job")` : Mocks job creation to prevent real execution.
+        - `patch("cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock)` :
+          Mocks `cstar_sysmgr.scheduler` to simulate a scheduler environment.
+
+        Assertions
+        ----------
+        - Ensures `create_scheduler_job` is never called if `account_key` is missing.
+        - Confirms that the expected `ValueError` is raised with an appropriate message.
+        """
 
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
@@ -1254,6 +2223,21 @@ class TestProcessingAndExecution:
             mock_create_job.assert_not_called()
 
     def test_post_run_raises_if_called_before_run(self, example_roms_simulation):
+        """Tests that `post_run` raises a `RuntimeError` if called before `run`.
+
+        This test ensures that attempting to execute `post_run` before the simulation has been run
+        results in an appropriate error, preventing unexpected behavior.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - Confirms that calling `post_run` without a prior `run` invocation raises `RuntimeError`.
+        - Checks the error message to verify it correctly informs the user of the issue.
+        """
+
         sim, _ = example_roms_simulation
         with pytest.raises(
             RuntimeError,
@@ -1264,6 +2248,24 @@ class TestProcessingAndExecution:
             sim.post_run()
 
     def test_post_run_raises_if_still_running(self, example_roms_simulation):
+        """Tests that `post_run` raises a `RuntimeError` if the simulation is still
+        running.
+
+        This test ensures that calling `post_run` while the execution status is not `COMPLETED`
+        results in an appropriate error, preventing premature post-processing.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - Mocks `_execution_handler` to simulate an active (non-completed) execution state.
+
+        Assertions
+        ----------
+        - Confirms that calling `post_run` while the execution handler's status is `RUNNING`
+          raises `RuntimeError`.
+        - Validates that the error message correctly informs the user of the issue.
+        """
+
         sim, _ = example_roms_simulation
 
         # Mock `_execution_handler` and set its `status` attribute to something *not* COMPLETED
@@ -1283,8 +2285,24 @@ class TestProcessingAndExecution:
     def test_post_run_merges_netcdf_files(
         self, mock_subprocess, example_roms_simulation
     ):
-        """Test that post_run correctly identifies NetCDF output files and calls
-        ncjoin."""
+        """Tests that `post_run` correctly merges partitioned NetCDF output files.
+
+        This test verifies that `post_run` identifies NetCDF output files, executes
+        `ncjoin` to merge them, and moves the partitioned files to the `PARTITIONED`
+        subdirectory. It creates mock netCDF files in a temporary directory (using
+        touch) and then checks these are correctly handled.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_subprocess` : Mocks `subprocess.run` to simulate successful `ncjoin` execution.
+
+        Assertions
+        ----------
+        - Ensures `ncjoin` is called correctly for each set of partitioned files.
+        - Confirms that the partitioned files are moved to `PARTITIONED` after merging.
+        - Validates that the `post_run` process completes without errors.
+        """
 
         # Setup
         sim, directory = example_roms_simulation
@@ -1334,8 +2352,23 @@ class TestProcessingAndExecution:
     def test_post_run_prints_message_if_no_files(
         self, mock_glob, mock_print, example_roms_simulation
     ):
-        """Test that post_run prints a message and exits early if no suitable files are
-        found."""
+        """Tests that `post_run` prints a message and exits early if no output files are
+        found.
+
+        This test ensures that when `post_run` is called and no partitioned NetCDF files
+        exist, a message is printed indicating that no suitable output was found.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_glob` : Mocks `Path.glob` to return an empty list, simulating no files.
+        - `mock_print` : Mocks `print()` to verify the correct message is displayed.
+
+        Assertions
+        ----------
+        - Ensures `print()` is called with the expected message.
+        - Confirms that `Path.glob` is called once to check for output files.
+        """
 
         # Setup
         sim, _ = example_roms_simulation
@@ -1358,7 +2391,24 @@ class TestProcessingAndExecution:
     def test_post_run_raises_error_if_ncjoin_fails(
         self, mock_glob, mock_subprocess, example_roms_simulation
     ):
-        """Test that post_run raises a RuntimeError if ncjoin fails."""
+        """Tests that `post_run` raises a `RuntimeError` if `ncjoin` fails during file
+        merging.
+
+        This test verifies that when `ncjoin` encounters an error while attempting to join
+        partitioned NetCDF output files, a `RuntimeError` is raised, ensuring the failure
+        is correctly handled.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
+        - `mock_glob` : Mocks `Path.glob` to return a list of fake NetCDF files.
+        - `mock_subprocess` : Mocks `subprocess.run` to simulate a failed `ncjoin` execution.
+
+        Assertions
+        ----------
+        - Ensures `ncjoin` is executed with the correct file pattern.
+        - Confirms that a `RuntimeError` is raised when `ncjoin` returns a non-zero exit code.
+        """
 
         # Setup
         sim, directory = example_roms_simulation
@@ -1396,13 +2446,51 @@ class TestProcessingAndExecution:
 
 
 class TestROMSSimulationRestart:
-    """Test class for the `restart()` method of `ROMSSimulation`."""
+    """Tests for the `restart` method of `ROMSSimulation`.
+
+    This test class verifies that the `restart` method correctly initializes a new
+    `ROMSSimulation` instance from an existing simulation's restart file. It ensures
+    that the new instance properly inherits the configuration and updates its
+    initial conditions.
+
+    Tests
+    -----
+    - `test_restart` : Verifies that `restart` creates a new `ROMSSimulation` instance
+      and correctly sets the initial conditions from the restart file.
+    - `test_restart_raises_if_no_restart_files` : Ensures `restart` raises a
+      `FileNotFoundError` when no restart files matching the expected pattern are found.
+    - `test_restart_raises_if_multiple_restarts_found` : Confirms `restart` raises a
+      `ValueError` if multiple restart files are found, preventing ambiguity.
+    """
 
     @patch.object(Path, "glob")  # Mock file search
     @patch.object(Path, "exists", return_value=True)
     def test_restart(self, mock_exists, mock_glob, example_roms_simulation):
-        """Test that `restart()` creates a new ROMSSimulation and sets
-        initial_conditions correctly."""
+        """Test that `restart` creates a new `ROMSSimulation` instance with updated
+        initial conditions.
+
+        This test ensures that when calling `restart` with a new end date, the method:
+        - Creates a new `ROMSSimulation` instance.
+        - Searches for the appropriate restart file in the output directory.
+        - Assigns the found restart file as the new instance’s initial conditions.
+
+        Mocks & Fixtures
+        ----------------
+        mock_exists : Mock
+            Mocks `Path.exists` to return `True`, ensuring that the output directory is
+            considered present.
+        mock_glob : Mock
+            Mocks `Path.glob` to return a list containing the expected restart file.
+        example_roms_simulation : Fixture
+            Provides an instance of `ROMSSimulation` and a temporary directory for testing.
+
+        Assertions
+        ----------
+        - The method searches for a restart file matching the expected timestamp format.
+        - A new `ROMSSimulation` instance is returned.
+        - The new instance's `initial_conditions` attribute is correctly assigned the
+          detected restart file.
+        """
 
         # Setup mock simulation
         sim, directory = example_roms_simulation
@@ -1425,8 +2513,26 @@ class TestROMSSimulationRestart:
     def test_restart_raises_if_no_restart_files(
         self, mock_exists, mock_glob, example_roms_simulation
     ):
-        """Test that `restart()` creates a new ROMSSimulation and sets
-        initial_conditions correctly."""
+        """Test that `restart` raises a `FileNotFoundError` if no restart files are
+        found.
+
+        This test ensures that if the method is unable to locate a valid ROMS restart file,
+        it raises a `FileNotFoundError` and does not proceed with simulation creation.
+
+        Mocks & Fixtures
+        ----------------
+        mock_exists : Mock
+            Mocks `Path.exists` to return `True`, ensuring the output directory exists.
+        mock_glob : Mock
+            Mocks `Path.glob` to return an empty list, simulating no restart files found.
+        example_roms_simulation : Fixture
+            Provides an instance of `ROMSSimulation` and a temporary directory for testing.
+
+        Assertions
+        ----------
+        - The method searches for restart files with the expected filename pattern.
+        - A `FileNotFoundError` is raised if no matching restart files are found.
+        """
 
         # Setup mock simulation
         sim, directory = example_roms_simulation
@@ -1447,8 +2553,24 @@ class TestROMSSimulationRestart:
     def test_restart_raises_if_multiple_restarts_found(
         self, mock_glob, example_roms_simulation
     ):
-        """Test that restart() raises a ValueError if multiple unique restart files are
-        found."""
+        """Test that `restart` raises a `ValueError` if multiple restart files are
+        found.
+
+        This test ensures that when multiple distinct restart files are found matching
+        the expected pattern, a `ValueError` is raised due to ambiguity.
+
+        Mocks & Fixtures
+        ----------------
+        mock_glob : Mock
+            Mocks `Path.glob` to return multiple restart files, simulating an ambiguous case.
+        example_roms_simulation : Fixture
+            Provides an instance of `ROMSSimulation` and a temporary directory for testing.
+
+        Assertions
+        ----------
+        - The method searches for restart files with the expected filename pattern.
+        - A `ValueError` is raised if multiple restart files are found.
+        """
 
         sim, directory = example_roms_simulation
         restart_dir = directory / "output"

@@ -114,6 +114,20 @@ class MockSimulation(Simulation):
 
 @pytest.fixture
 def example_simulation(tmp_path):
+    """Fixture providing a `MockSimulation` instance for testing.
+
+    This fixture sets up a minimal `MockSimulation` instance with a mock external
+    codebase, runtime and compile-time code, and basic discretization settings.
+    The temporary directory (`tmp_path`) serves as the working directory for the
+    simulation.
+
+    Yields
+    ------
+    tuple[MockSimulation, Path]
+        A tuple containing:
+        - `MockSimulation` instance configured for testing.
+        - The temporary directory where the simulation is stored.
+    """
     directory = tmp_path
     sim = MockSimulation(
         name="TestSim",
