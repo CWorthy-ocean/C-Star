@@ -27,15 +27,22 @@ A key strength of C-Star lies in its ability to run regional simulations using a
 
 .. toctree::
    :maxdepth: 1
-   :caption: Examples
+   :caption: Tutorials
 
-   Building a Case and exporting it as a blueprint <1_building_a_case_and_exporting_it_as_a_blueprint>
-   Importing and running a Case from a blueprint <2_importing_and_running_a_case_from_a_blueprint>
-   Restarting and continuing a Case <3_restarting_and_continuing_a_case>
-   Preparing input datasets for a Case with ROMS using roms-tools <4_preparing_roms_input_datasets>
-   Tracking runs executed as jobs on HPC systems <5_tracking_runs_executed_as_jobs_on_hpc_systems>
-   Tracking runs executed locally <6_tracking_runs_executed_locally>
+   Building a Simulation and exporting it as a blueprint <tutorials/1_building_a_simulation_and_exporting_it_as_a_blueprint>
+   Importing and running a Simulation from a blueprint <tutorials/2_importing_and_running_a_simulation_from_a_blueprint>
+   Restarting and continuing a Simulation <tutorials/3_restarting_and_continuing_a_simulation>
 
+.. toctree::
+   :maxdepth: 1
+   :caption: How-to Guides
+
+   Working with the AdditionalCode class <howto_guides/1_working_with_additionalcode>
+   Working with the InputDataset class <howto_guides/2_working_with_inputdatasets>
+   Working with the ExternalCodeBase class <howto_guides/3_working_with_externalcodebases>
+   Tracking runs executed locally <howto_guides/4_running_on_personal_computers>
+   Tracking runs executed as jobs on HPC systems <howto_guides/5_running_on_hpcs>
+   
 .. toctree::
    :maxdepth: 1
    :caption: Deployment

@@ -61,7 +61,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         target: src
             the path where ROMS will be cloned and compiled
         """
-
+        target = Path(target).expanduser()
         # TODO: Situation where environment variables like ROMS_ROOT are not set...
         # ... but repo already exists at local_path results in an error rather than a prompt
         _clone_and_checkout(

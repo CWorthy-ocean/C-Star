@@ -995,11 +995,7 @@ class ROMSSimulation(Simulation):
                 or (inp.start_date <= self.end_date)
                 and (self.end_date >= self.start_date)
             ):
-                inp.get(
-                    local_dir=input_datasets_dir,
-                    start_date=self.start_date,
-                    end_date=self.end_date,
-                )
+                inp.get(local_dir=input_datasets_dir)
 
     @property
     def is_setup(self) -> bool:
