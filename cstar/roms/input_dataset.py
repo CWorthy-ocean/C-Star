@@ -1,8 +1,6 @@
 import yaml
 import tempfile
-import dateutil
 import requests
-import datetime as dt
 import roms_tools
 
 from abc import ABC
@@ -117,8 +115,6 @@ class ROMSInputDataset(InputDataset, ABC):
     def get(
         self,
         local_dir: str | Path,
-        start_date: Optional[dt.datetime] | str = None,
-        end_date: Optional[dt.datetime] | str = None,
         np_xi: Optional[int] = None,
         np_eta: Optional[int] = None,
     ) -> None:
@@ -141,16 +137,15 @@ class ROMSInputDataset(InputDataset, ABC):
         -----------
         local_dir (str or Path):
            The directory in which to save the input dataset netCDF file
-        start_date,end_date (dt.datetime, optional):
-           If the dataset to be created is time-varying, it is made using these dates
         np_xi, np_eta (int, optional):
            If desired, save a partitioned copy of the input dataset to be used when
            running ROMS in parallel. np_xi is the number of x-direction processors,
            np_eta is the number of y-direction processors
         """
         # Ensure we're working with a Path object
-        local_dir = Path(local_dir).resolve()
+        local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)
+
         # If `working_path` is set, determine we're not fetching to the same parent dir:
         if self.working_path is None:
             working_path_parent = None
@@ -167,7 +162,7 @@ class ROMSInputDataset(InputDataset, ABC):
             super().get(local_dir=local_dir)
             return
         elif self.source.location_type == "path":
-            with open(self.source.location) as F:
+            with open(Path(self.source.location).expanduser()) as F:
                 raw_yaml_text = F.read()
         elif self.source.location_type == "url":
             raw_yaml_text = requests.get(self.source.location).text
@@ -184,12 +179,10 @@ class ROMSInputDataset(InputDataset, ABC):
                 f"roms tools yaml file has {len(yaml_keys)} sections. "
                 + "Expected 'Grid' and one other class"
             )
-        if isinstance(start_date, str):
-            start_date = dateutil.parser.parse(start_date)
-        if isinstance(end_date, str):
-            end_date = dateutil.parser.parse(end_date)
-        start_time = start_date.isoformat() if start_date is not None else None
-        end_time = end_date.isoformat() if end_date is not None else None
+        start_time = (
+            self.start_date.isoformat() if self.start_date is not None else None
+        )
+        end_time = self.end_date.isoformat() if self.end_date is not None else None
 
         yaml_entries_to_modify = {
             "start_time": start_time,
@@ -204,7 +197,7 @@ class ROMSInputDataset(InputDataset, ABC):
         roms_tools_class = getattr(roms_tools, roms_tools_class_name)
 
         # Create a temporary file that deletes itself when closed
-        with tempfile.NamedTemporaryFile(mode="w", delete=True) as temp_file:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
             temp_file.write(f"---{header}---\n" + yaml.dump(yaml_dict))
             temp_file.flush()  # Ensure data is written to disk
 

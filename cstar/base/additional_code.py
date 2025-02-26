@@ -86,7 +86,10 @@ class AdditionalCode:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nLocation: {self.source.location}"
-        base_str += f"\nsubdirectory: {self.subdir}"
+        if self.subdir is not None:
+            base_str += f"\nSubdirectory: {self.subdir}"
+        if self.checkout_target is not None:
+            base_str += f"\nCheckout target: {self.checkout_target}"
         base_str += f"\nWorking path: {self.working_path}"
         base_str += f"\nExists locally: {self.exists_locally}"
         if not self.exists_locally:
@@ -156,7 +159,7 @@ class AdditionalCode:
                 "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
             )
 
-        local_dir = Path(local_dir).resolve()
+        local_dir = Path(local_dir).expanduser().resolve()
         try:
             tmp_dir = None  # initialise the tmp_dir variable in case we need it later
             # CASE 1: Additional code is in a remote repository:
@@ -183,7 +186,7 @@ class AdditionalCode:
                 (self.source.source_type == "directory")
                 or (self.source.source_type == "repository")
             ):
-                source_dir = Path(self.source.location) / self.subdir
+                source_dir = Path(self.source.location).expanduser() / self.subdir
 
             else:
                 raise ValueError(

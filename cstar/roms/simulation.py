@@ -1168,6 +1168,8 @@ class ROMSSimulation(Simulation):
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
 
+        self.persist()
+
     def pre_run(self) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
@@ -1205,6 +1207,8 @@ class ROMSSimulation(Simulation):
                     np_xi=self.discretization.n_procs_x,
                     np_eta=self.discretization.n_procs_y,
                 )
+
+        self.persist()
 
     def run(
         self,
@@ -1350,6 +1354,8 @@ class ROMSSimulation(Simulation):
             romsprocess.start()
             return romsprocess
 
+        self.persist()
+
     def post_run(self) -> None:
         """Perform post-processing steps after the ROMS simulation run.
 
@@ -1419,6 +1425,8 @@ class ROMSSimulation(Simulation):
                     )
                 for F in output_dir.glob(wildcard_pattern):
                     F.rename(output_dir / "PARTITIONED" / F.name)
+
+        self.persist()
 
     def restart(self, new_end_date: str | datetime) -> "ROMSSimulation":
         """Restart the ROMS simulation from the end of the current simulation, if

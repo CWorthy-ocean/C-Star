@@ -52,7 +52,7 @@ class DataSource:
         urlparsed_location = urlparse(self.location)
         if all([urlparsed_location.scheme, urlparsed_location.netloc]):
             return "url"
-        elif Path(self.location).exists():
+        elif Path(self.location).expanduser().exists():
             return "path"
         else:
             raise ValueError(
@@ -62,7 +62,7 @@ class DataSource:
     @property
     def source_type(self) -> str:
         """Get the source type (e.g. "netcdf") from the "location" attribute."""
-        loc = Path(self.location)
+        loc = Path(self.location).expanduser()
 
         if (loc.suffix.lower() == ".git") or ((loc / ".git").is_dir()):
             # TODO: a remote repository might not have a .git suffix, more advanced handling needed
@@ -75,7 +75,7 @@ class DataSource:
             return "netcdf"
         else:
             raise ValueError(
-                f"{Path(self.location).suffix} is not a supported file type"
+                f"{Path(self.location)} does not exist or is not a supported file type"
             )
 
     @property
