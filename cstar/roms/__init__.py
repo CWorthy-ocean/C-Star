@@ -1,5 +1,4 @@
 from cstar.roms.external_codebase import ROMSExternalCodeBase
-from cstar.roms.component import ROMSComponent
 from cstar.roms.simulation import ROMSSimulation
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.input_dataset import (
