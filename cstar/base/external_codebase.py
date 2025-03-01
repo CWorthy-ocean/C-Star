@@ -27,10 +27,11 @@ class ExternalCodeBase(ABC):
     local_config_status: int
         A value corresponding to how the external codebase has been configured on the local machine
         The value of local_config_status may be interpreted as follows.
-           0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
-           1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
-           2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
-           3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
+
+            - 0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
+            - 1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
+            - 2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
+            - 3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
     default_source_repo: str
         The default value of `source_repo`
     default_checkout_target: str
@@ -208,15 +209,16 @@ class ExternalCodeBase(ABC):
         The config_status attribute should be set by the get_local_config_status method
 
         The method then proceeds as follows:
-        config_status=
-           0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
-              -> do nothing
-           1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
-              -> raise an EnvironmentError
-           2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
-              -> prompt checkout of correct hash
-           3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
-              -> prompt installation of the external codebase
+        config_status =
+
+           - 0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
+               -> do nothing
+           - 1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
+               -> raise an EnvironmentError
+           - 2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
+               -> prompt checkout of correct hash
+           - 3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
+               -> prompt installation of the external codebase
         """
         local_root = Path(
             cstar_sysmgr.environment.environment_variables.get(

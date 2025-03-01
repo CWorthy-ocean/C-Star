@@ -29,11 +29,6 @@ Discretization
 ```
 
 
-# Structure of C-Star Case
-
-![Structure of a C-Star Case](images/cstar_schematic.png)
-
-
 
 
 

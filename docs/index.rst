@@ -41,7 +41,7 @@ A key strength of C-Star lies in its ability to run regional simulations using a
    Working with the InputDataset class <howto_guides/2_working_with_inputdatasets>
    Working with the ExternalCodeBase class <howto_guides/3_working_with_externalcodebases>
    Tracking runs executed locally <howto_guides/4_running_on_personal_computers>
-   Tracking runs executed as jobs on HPC systems <howto_guides/5_running_on_hpcs>
+   Tracking runs executed as jobs on HPC systems <howto_guides/5_handling_jobs_on_hpc_systems>
    
 .. toctree::
    :maxdepth: 1

@@ -47,11 +47,11 @@ rst_prolog = """.. attention::
 
 extensions = [
     "myst_parser",
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "nbsphinx",
     "sphinxcontrib.bibtex",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",    
 ]
 
 numpydoc_show_class_members = True

@@ -15,7 +15,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
     the get() method to compile ROMS-specific libraries.
 
     Methods:
-    -------
+    --------
     get()
         overrides ExternalCodeBase.get() to clone the UCLA ROMS repository, set environment, and compile libraries
     """

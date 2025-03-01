@@ -6,7 +6,7 @@ v0.0.8-alpha ()
 ---------------------------
 
 New features:
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 - Add Case.persist() and Case.restore() methods to allow continuation of work in a new session
 - Add ExecutionHandler class to track tasks run locally (LocalProcess subclass) or submitted to a job scheduler (SchedulerJob subclass)
 - Improved tracking of local InputDataset and AdditionalCode files to prevent repeat fetching

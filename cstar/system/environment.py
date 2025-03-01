@@ -30,7 +30,6 @@ class CStarEnvironment:
     -------
     load_lmod_modules(lmod_file: str) -> None
         Loads the necessary Lmod modules for the current system based on a `.lmod` configuration file.
-
     _call_lmod(*args) -> None
         Executes a Linux Environment Modules command with specified arguments.
 
@@ -220,9 +219,10 @@ class CStarEnvironment:
         """Loads necessary modules for this machine using Linux Environment Modules.
 
         This function:
+
         - Resets the current module environment by executing `module reset`.
         - Loads each module listed in the `.lmod` file for the system, located at
-          `<root>/additional_files/lmod_lists/<system_name>.lmod`.
+            `<root>/additional_files/lmod_lists/<system_name>.lmod`.
 
         Raises
         ------

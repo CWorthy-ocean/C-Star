@@ -66,7 +66,7 @@ class ROMSInputDataset(InputDataset, ABC):
         Notes:
         ------
         - This method will only work on ROMSInputDataset instances corresponding
-        to locally available files, i.e. ROMSInputDataset.get() has been called.
+           to locally available files, i.e. ROMSInputDataset.get() has been called.
         - This method sets the ROMSInputDataset.partitioned_files attribute
         """
 
@@ -124,24 +124,26 @@ class ROMSInputDataset(InputDataset, ABC):
         instances where the source is a `roms-tools`-compatible `yaml` file.
 
         Steps:
-        i. Fetch the source file to `local_dir` using `InputDataset.get()`.
-            If the file is not in `yaml` format, we are done.
-        ii. If the file is in `yaml` format, modify the local copy so any
-            time-varying datasets are given the correct start and end date
-        iii. Pass the modified yaml to roms-tools and save the resulting
-            object to netCDF.
-        iv. Update the working_path attribute and cache the metadata and
-            checksums of any produced netCDF files
+
+        1. Fetch the source file to `local_dir` using `InputDataset.get()`.
+           If the file is not in `yaml` format, we are done.
+        2. If the file is in `yaml` format, modify the local copy so any
+           time-varying datasets are given the correct start and end date
+        3. Pass the modified yaml to roms-tools and save the resulting
+           object to netCDF.
+        4. Update the working_path attribute and cache the metadata and
+           checksums of any produced netCDF files
 
         Parameters:
         -----------
         local_dir (str or Path):
-           The directory in which to save the input dataset netCDF file
+            The directory in which to save the input dataset netCDF file
         np_xi, np_eta (int, optional):
-           If desired, save a partitioned copy of the input dataset to be used when
-           running ROMS in parallel. np_xi is the number of x-direction processors,
-           np_eta is the number of y-direction processors
+            If desired, save a partitioned copy of the input dataset to be used when
+            running ROMS in parallel. np_xi is the number of x-direction processors,
+            np_eta is the number of y-direction processors
         """
+
         # Ensure we're working with a Path object
         local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)

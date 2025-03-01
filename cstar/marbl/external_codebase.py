@@ -14,7 +14,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
     the get() method to compile MARBL.
 
     Methods:
-    -------
+    --------
     get()
         overrides ExternalCodeBase.get() to clone the MARBL repository, set environment, and compile library.
     """
