@@ -190,7 +190,8 @@ class TestStrAndRepr:
         AdditionalCode
         --------------
         Location: https://github.com/test/repo.git
-        subdirectory: test/subdir
+        Subdirectory: test/subdir
+        Checkout target: test123
         Working path: None
         Exists locally: False (get with AdditionalCode.get())
         Files:
@@ -221,7 +222,7 @@ class TestStrAndRepr:
         AdditionalCode
         --------------
         Location: /some/local/directory
-        subdirectory: some/subdirectory
+        Subdirectory: some/subdirectory
         Working path: None
         Exists locally: False (get with AdditionalCode.get())
         Files:

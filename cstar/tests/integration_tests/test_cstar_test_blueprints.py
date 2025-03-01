@@ -64,7 +64,6 @@ class TestCStar:
         modified_blueprint = modify_template_blueprint(
             template_blueprint_path=template_blueprint, strs_to_replace=strs_to_replace
         )
-
         cstar_test_case = ROMSSimulation.from_blueprint(
             modified_blueprint,
             directory=tmpdir / "cstar_test_simulation",

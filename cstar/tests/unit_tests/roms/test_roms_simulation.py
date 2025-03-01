@@ -2281,9 +2281,10 @@ class TestProcessingAndExecution:
         ):
             sim.post_run()
 
+    @patch("cstar.roms.ROMSSimulation.persist")
     @patch("subprocess.run")  # Mock ncjoin execution
     def test_post_run_merges_netcdf_files(
-        self, mock_subprocess, example_roms_simulation
+        self, mock_subprocess, mock_persist, example_roms_simulation
     ):
         """Tests that `post_run` correctly merges partitioned NetCDF output files.
 
@@ -2347,10 +2348,13 @@ class TestProcessingAndExecution:
         assert (partitioned_dir / "ocean_his.20240101000000.002.nc").exists()
         assert (partitioned_dir / "ocean_rst.20240101000000.001.nc").exists()
 
+        mock_persist.assert_called_once()
+
+    @patch("cstar.roms.ROMSSimulation.persist")
     @patch("builtins.print")  # Mock print to check output
     @patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
     def test_post_run_prints_message_if_no_files(
-        self, mock_glob, mock_print, example_roms_simulation
+        self, mock_glob, mock_print, mock_persist, example_roms_simulation
     ):
         """Tests that `post_run` prints a message and exits early if no output files are
         found.
@@ -2385,6 +2389,8 @@ class TestProcessingAndExecution:
 
         # Ensure glob was called once
         mock_glob.assert_called_once()
+
+        mock_persist.assert_called_once()
 
     @patch("subprocess.run")  # Mock subprocess.run to simulate a failure
     @patch.object(Path, "glob")  # Mock glob to return fake files

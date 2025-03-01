@@ -214,6 +214,8 @@ class ROMSSimulation(Simulation):
                 "ROMSSimulation.boundary_forcing must be a list of ROMSBoundaryForcing instances"
             )
 
+        self._check_inputdataset_dates()
+
         if marbl_codebase is None:
             self.marbl_codebase = MARBLExternalCodeBase()
             warnings.warn(
@@ -231,6 +233,45 @@ class ROMSSimulation(Simulation):
         self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
+
+    def _check_inputdataset_dates(self) -> None:
+        """For ROMSInputDatasets whose source type is `yaml`, ensure that any set
+        'start_date' and/or 'end_date' attributes of the ROMSInputDataset match the
+        'start_date' and 'end_date' of the ROMSSimulation, and override them, warning
+        the user, if not."""
+
+        for inp in [
+            self.initial_conditions,
+            *self.surface_forcing,
+            *self.boundary_forcing,
+        ]:
+            if (inp is not None) and (inp.source.source_type == "yaml"):
+                if (
+                    hasattr(inp, "start_date")
+                    and (inp.start_date is not None)
+                    and (inp.start_date != self.start_date)
+                ):
+                    warnings.warn(
+                        f"{inp.__class__.__name__} has start date attribute {inp.start_date} "
+                        + f"that does not match ROMSSimulation.start_date {self.start_date}. "
+                        f"C-Star will enforce {self.start_date} as the start date"
+                    )
+                inp.start_date = self.start_date
+
+                if isinstance(inp, ROMSInitialConditions):
+                    continue
+
+                if (
+                    hasattr(inp, "end_date")
+                    and (inp.end_date is not None)
+                    and (inp.end_date != self.end_date)
+                ):
+                    warnings.warn(
+                        f"{inp.__class__.__name__} has end date attribute {inp.end_date} "
+                        + f"that does not match ROMSSimulation.end_date {self.end_date}. "
+                        f"C-Star will enforce {self.end_date} as the end date"
+                    )
+                inp.end_date = self.end_date
 
     def __str__(self) -> str:
         """Returns a string representation of the simulation.
