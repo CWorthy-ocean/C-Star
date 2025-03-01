@@ -7,7 +7,7 @@ from cstar.base.utils import _clone_and_checkout, _list_to_concise_str, _get_sha
 
 
 class AdditionalCode:
-    """Additional code contributing to a model component.
+    """Additional code contributing to a model simulation.
 
     Additional code is assumed to be kept in a single directory or
     subdirectory of a repository (described by the `source` attribute).

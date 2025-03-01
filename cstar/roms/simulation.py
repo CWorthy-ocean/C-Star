@@ -842,8 +842,7 @@ class ROMSSimulation(Simulation):
             if len(self.model_grid.partitioned_files) == 0:
                 raise ValueError(
                     "could not find a local path to a partitioned "
-                    + "ROMS grid file. Run ROMSSimulation.pre_run() [or "
-                    + "Case.pre_run() if running a Case] to partition "
+                    + "ROMS grid file. Run ROMSSimulation.pre_run() to partition "
                     + "ROMS input datasets and try again."
                 )
 
@@ -856,8 +855,7 @@ class ROMSSimulation(Simulation):
             if len(self.initial_conditions.partitioned_files) == 0:
                 raise ValueError(
                     "could not find a local path to a partitioned "
-                    + "ROMS initial file. Run ROMSSimulation.pre_run() [or "
-                    + "Case.pre_run() if running a Case] to partition "
+                    + "ROMS initial file. Run ROMSSimulation.pre_run() to partition "
                     + "ROMS input datasets and try again."
                 )
 
@@ -883,7 +881,6 @@ class ROMSSimulation(Simulation):
                     "ROMSSimulation has tidal_forcing attribute "
                     + "but could not find a local path to a partitioned ROMS "
                     + "tidal forcing file. Run ROMSSimulation.pre_run() "
-                    + "[or Case.pre_run() if building a Case] "
                     + " to partition ROMS input datasets and try again."
                 )
             runtime_code_forcing_str += (
@@ -1029,7 +1026,7 @@ class ROMSSimulation(Simulation):
         # InputDatasets
         print("\nFetching input datasets..." + "\n--------------------------")
         for inp in self.input_datasets:
-            # Download input dataset if its date range overlaps Case's date range
+            # Download input dataset if its date range overlaps Simulation's date range
             if (
                 ((inp.start_date is None) or (inp.end_date is None))
                 or ((self.start_date is None) or (self.end_date is None))

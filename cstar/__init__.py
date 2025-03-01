@@ -9,7 +9,6 @@ from cstar.simulation import Simulation
 
 __all__ = [
     "Simulation",
-    # "Case"
 ]
 
 

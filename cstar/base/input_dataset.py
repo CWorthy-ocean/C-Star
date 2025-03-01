@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 class InputDataset(ABC):
     """Describes spatiotemporal data needed to run a unique instance of a model
-    component.
+    simulation.
 
     Attributes:
     -----------
@@ -38,7 +38,7 @@ class InputDataset(ABC):
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
     ):
-        """Initialize an InputDataset object associated with a model component using a
+        """Initialize an InputDataset object associated with a model simulation using a
         source URL and file hash.
 
         Parameters:

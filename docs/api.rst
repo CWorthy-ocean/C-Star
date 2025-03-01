@@ -1,7 +1,14 @@
-:orphan:
 API Reference
 #############
 
+Simulation
+----------
+
+.. autosummary::
+   :toctree: generated/
+	     
+   cstar.Simulation
+   cstar.roms.ROMSSimulation
 
 External Codebases
 ------------------------
