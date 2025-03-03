@@ -3,10 +3,6 @@ Release notes
 .. _v1.0.0:
 v1.0.0
 ------
-New Features:
-~~~~~~~~~~~~~
-- Add ability to read blueprints from URL
-- Remote yaml files are now accessed via requests rather than Pooch, negating need for hash checks
 
 Breaking Changes:
 ~~~~~~~~~~~~~~~~~
@@ -30,10 +26,9 @@ Documentation:
 
 Bugfixes:
 ~~~~~~~~~
-- git and DataSource information are now read-only attributes throughout
 - Complete missing unit test coverage from Case and Component in new Simulation modules
 - Add `expanduser` to `Path` instances to allow tildes to represent root in paths
-- Correct fix where `AdditionalCode.modified_files` list indices did not correspond to `AdditionalCode.files`
+- Correct issue where `AdditionalCode.modified_files` list indices did not correspond to `AdditionalCode.files`
 
   
 =============
@@ -47,6 +42,13 @@ New features:
 - Add Case.persist() and Case.restore() methods to allow continuation of work in a new session
 - Add ExecutionHandler class to track tasks run locally (LocalProcess subclass) or submitted to a job scheduler (SchedulerJob subclass)
 - Improved tracking of local InputDataset and AdditionalCode files to prevent repeat fetching
+- Add ability to read blueprints from URL
+- Remote yaml files are now accessed via requests rather than Pooch, negating need for hash checks
+
+Bugfixes:
+~~~~~~~~~
+- git and DataSource information are now read-only attributes throughout
+  
 
 .. _v0.0.3-alpha:
 
