@@ -610,18 +610,17 @@ class TestROMSInputDatasetGet:
         mock_stat.return_value = mock_stat_result
 
         # Call the method under test
-        local_roms_yaml_dataset.get(
-            local_dir="some/local/dir", start_date="2022-01-01", end_date="2022-01-31"
-        )
+        local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
         # Assert that start_time and end_time are updated in the YAML dictionary
+
         assert (
             yaml_dict["SurfaceForcing"]["start_time"]
-            == dt.datetime(2022, 1, 1).isoformat()
+            == dt.datetime(2024, 10, 22, 12, 34, 56).isoformat()
         )
         assert (
             yaml_dict["SurfaceForcing"]["end_time"]
-            == dt.datetime(2022, 1, 31).isoformat()
+            == dt.datetime(2024, 12, 31, 23, 59, 59).isoformat()
         )
 
         # Check that the yaml.safe_load was called properly
@@ -890,7 +889,7 @@ class TestROMSInputDatasetPartition:
         """Stop all patches."""
         mock.patch.stopall()
 
-    @mock.patch("cstar.roms.input_dataset.roms_tools.utils.partition_netcdf")
+    @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_single_file(
         self, mock_partition_netcdf, local_roms_netcdf_dataset
     ):
@@ -963,7 +962,7 @@ class TestROMSInputDatasetPartition:
                     == expected_partitioned_files
                 )
 
-    @mock.patch("cstar.roms.input_dataset.roms_tools.utils.partition_netcdf")
+    @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_multiple_files(
         self, mock_partition_netcdf, local_roms_netcdf_dataset
     ):

@@ -1,52 +1,53 @@
 import os
 import pytest
 from unittest import mock
-from cstar.roms.base_model import ROMSBaseModel
+from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.system.manager import cstar_sysmgr
 
 
 @pytest.fixture
-def roms_base_model():
-    """Fixture providing a configured instance of `ROMSBaseModel` for testing."""
+def roms_codebase():
+    """Fixture providing a configured instance of `ROMSExternalCodeBase` for testing."""
     source_repo = "https://github.com/CESR-lab/ucla-roms.git"
     checkout_target = "246c11fa537145ba5868f2256dfb4964aeb09a25"
-    return ROMSBaseModel(source_repo=source_repo, checkout_target=checkout_target)
-
-
-def test_default_source_repo(roms_base_model):
-    """Test if the default source repo is set correctly."""
-    assert (
-        roms_base_model.default_source_repo
-        == "https://github.com/CESR-lab/ucla-roms.git"
+    return ROMSExternalCodeBase(
+        source_repo=source_repo, checkout_target=checkout_target
     )
 
 
-def test_default_checkout_target(roms_base_model):
+def test_default_source_repo(roms_codebase):
+    """Test if the default source repo is set correctly."""
+    assert (
+        roms_codebase.default_source_repo == "https://github.com/CESR-lab/ucla-roms.git"
+    )
+
+
+def test_default_checkout_target(roms_codebase):
     """Test if the default checkout target is set correctly."""
-    assert roms_base_model.default_checkout_target == "main"
+    assert roms_codebase.default_checkout_target == "main"
 
 
-def test_expected_env_var(roms_base_model):
+def test_expected_env_var(roms_codebase):
     """Test if the expected environment variable is set correctly."""
-    assert roms_base_model.expected_env_var == "ROMS_ROOT"
+    assert roms_codebase.expected_env_var == "ROMS_ROOT"
 
 
 def test_defaults_are_set():
     """Test that the defaults are set correctly."""
 
-    roms_base_model = ROMSBaseModel()
-    assert roms_base_model.source_repo == "https://github.com/CESR-lab/ucla-roms.git"
-    assert roms_base_model.checkout_target == "main"
+    roms_codebase = ROMSExternalCodeBase()
+    assert roms_codebase.source_repo == "https://github.com/CESR-lab/ucla-roms.git"
+    assert roms_codebase.checkout_target == "main"
 
 
-class TestROMSBaseModelGet:
-    """Test cases for the `get` method of `ROMSBaseModel`.
+class TestROMSExternalCodeBaseGet:
+    """Test cases for the `get` method of `ROMSExternalCodeBase`.
 
     The original method:
-        1. clones ROMS from `ROMSBaseModel.source_repo`
-        2. checks out the correct commit from `ROMSBaseModel.checkout_target`
+        1. clones ROMS from `ROMSExternalCodeBase.source_repo`
+        2. checks out the correct commit from `ROMSExternalCodeBase.checkout_target`
         3. Sets environment variable ROMS_ROOT and appends $ROMS_ROOT/Tools-Roms to PATH
-        4. Replaces ROMS Makefiles for machine-agnostic compilation [_base_model_adjustments()]
+        4. Replaces ROMS Makefiles for machine-agnostic compilation [_codebase_adjustments()]
         5. Compiles the NHMG library
         6. Compiles the Tools-Roms package
 
@@ -64,8 +65,8 @@ class TestROMSBaseModelGet:
 
     Fixtures
     --------
-    roms_base_model : ROMSBaseModel
-        A configured instance of `ROMSBaseModel` for testing purposes, with predefined
+    roms_codebase : ROMSExternalCodeBase
+        A configured instance of `ROMSExternalCodeBase` for testing purposes, with predefined
         source repository and checkout target.
     tmp_path : pathlib.Path
         A temporary directory for isolating filesystem operations.
@@ -89,10 +90,10 @@ class TestROMSBaseModelGet:
         # Mock subprocess, _clone_and_checkout, and _write_to_config_file
         self.mock_subprocess_run = mock.patch("subprocess.run").start()
         self.mock_clone_and_checkout = mock.patch(
-            "cstar.roms.base_model._clone_and_checkout"
+            "cstar.roms.external_codebase._clone_and_checkout"
         ).start()
         self.mock_update_user_dotenv = mock.patch(
-            "cstar.roms.base_model._update_user_dotenv"
+            "cstar.roms.external_codebase._update_user_dotenv"
         ).start()
 
         self.mock_copytree = mock.patch("shutil.copytree").start()
@@ -105,7 +106,7 @@ class TestROMSBaseModelGet:
         """Common teardown after each test method."""
         mock.patch.stopall()
 
-    def test_get_success(self, roms_base_model, tmp_path):
+    def test_get_success(self, roms_codebase, tmp_path):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
         ## Make temporary target dir
@@ -116,7 +117,7 @@ class TestROMSBaseModelGet:
 
         # Test
         ## Call the get method
-        roms_base_model.get(target=roms_dir)
+        roms_codebase.get(target=roms_dir)
 
         # Assertions:
         ## Check environment variables
@@ -126,9 +127,9 @@ class TestROMSBaseModelGet:
 
         ## Check that _clone_and_checkout was (mock) called correctly
         self.mock_clone_and_checkout.assert_called_once_with(
-            source_repo=roms_base_model.source_repo,
+            source_repo=roms_codebase.source_repo,
             local_path=roms_dir,
-            checkout_target=roms_base_model.checkout_target,
+            checkout_target=roms_codebase.checkout_target,
         )
 
         ## Check that _update_user_dotenv was (mock) called correctly
@@ -158,7 +159,7 @@ class TestROMSBaseModelGet:
             shell=True,
         )
 
-    def test_make_nhmg_failure(self, roms_base_model, tmp_path):
+    def test_make_nhmg_failure(self, roms_codebase, tmp_path):
         """Test that the get method raises an error when 'make nhmg' fails."""
 
         ## There are two subprocess calls, we'd like one fail, one pass:
@@ -174,13 +175,13 @@ class TestROMSBaseModelGet:
             RuntimeError,
             match="Error 1 when compiling ROMS' NHMG library. STDERR stream: \n Compiling NHMG library failed successfully",
         ):
-            roms_base_model.get(target=tmp_path)
+            roms_codebase.get(target=tmp_path)
 
         # Assertions:
         ## Check that subprocess.run was called only once due to failure
         assert self.mock_subprocess_run.call_count == 1
 
-    def test_make_tools_roms_failure(self, roms_base_model, tmp_path):
+    def test_make_tools_roms_failure(self, roms_codebase, tmp_path):
         """Test that the get method raises an error when 'make Tools-Roms' fails."""
 
         # Simulate success for `make nhmg` and failure for `make Tools-Roms`
@@ -195,7 +196,7 @@ class TestROMSBaseModelGet:
         with pytest.raises(
             RuntimeError, match=" Compiling Tools-Roms failed successfully"
         ):
-            roms_base_model.get(target=tmp_path)
+            roms_codebase.get(target=tmp_path)
 
         # Check that subprocess.run was called twice
         assert self.mock_subprocess_run.call_count == 2

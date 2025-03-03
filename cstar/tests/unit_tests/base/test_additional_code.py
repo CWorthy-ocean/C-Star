@@ -190,7 +190,8 @@ class TestStrAndRepr:
         AdditionalCode
         --------------
         Location: https://github.com/test/repo.git
-        subdirectory: test/subdir
+        Subdirectory: test/subdir
+        Checkout target: test123
         Working path: None
         Exists locally: False (get with AdditionalCode.get())
         Files:
@@ -221,7 +222,7 @@ class TestStrAndRepr:
         AdditionalCode
         --------------
         Location: /some/local/directory
-        subdirectory: some/subdirectory
+        Subdirectory: some/subdirectory
         Working path: None
         Exists locally: False (get with AdditionalCode.get())
         Files:
@@ -767,6 +768,7 @@ class TestAdditionalCodeGet:
 
         # Simulate template files with "_TEMPLATE"
         local_additional_code.files = ["file1_TEMPLATE", "file2_TEMPLATE"]
+        local_additional_code.modified_files = [None, None]
         local_additional_code.working_path = Path("/mock/local/dir")
 
         # Call get method

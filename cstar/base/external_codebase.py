@@ -11,13 +11,13 @@ from cstar.base.utils import (
 from cstar.system.manager import cstar_sysmgr
 
 
-class BaseModel(ABC):
-    """The model from which this component is derived (e.g. MARBL v0.45.0)
+class ExternalCodeBase(ABC):
+    """Abstract base class to manage external non-python dependencies of C-Star.
 
     Attributes
     -----------
     source_repo: str
-        URL pointing to a git-controlled repository containing the base model source code
+        URL pointing to a git-controlled repository containing the source code
     checkout_target: str
         A tag, git hash, or other target to check out the source repo at the correct point in its history
     checkout_hash: str
@@ -25,53 +25,50 @@ class BaseModel(ABC):
     repo_basename: str
         The basename of the repository, e.g. "repo" for "https://github.com/dev-team/repo.git
     local_config_status: int
-        A value corresponding to how the base model has been configured on the local machine
+        A value corresponding to how the external codebase has been configured on the local machine
         The value of local_config_status may be interpreted as follows.
-           0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
-           1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
-           2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
-           3: The expected environment variable is not present and it is assumed the base model is not installed locally
 
-    Properties
-    ----------
+            - 0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
+            - 1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
+            - 2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
+            - 3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
     default_source_repo: str
         The default value of `source_repo`
     default_checkout_target: str
         The default value of `checkout_target`
     expected_env_var: str
-        Environment variable pointing to the root of the base model
-        indicating that the base model has been installed and configured on the local machine
-        BaseModel.check() will look for this variable as a first check.
+        Environment variable pointing to the root of the external codebase
+        indicating that the external codebase has been installed and configured on the local machine.
 
     Methods
     -------
     get_local_config_status()
-        Perform a series of checks to determine how the base model is configured on this machine
-        relative to this BaseModel instance.
+        Perform a series of checks to determine how the external codebase is configured on this machine
+        relative to this ExternalCodeBase instance.
     handle_local_config_status()
         Perform actions depending on the output of get_local_config_status()
     get()
-        Obtain and configure the base model on this machine if it is not already.
+        Obtain and configure the external codebase on this machine if it is not already.
         handle_local_config_status() prompts the user to run get() if the model cannot be found.
     """
 
     def __init__(
         self, source_repo: Optional[str] = None, checkout_target: Optional[str] = None
     ):
-        """Initialize a BaseModel object manually from a source repository and checkout
-        target.
+        """Initialize a ExternalCodeBase object manually from a source repository and
+        checkout target.
 
         Parameters:
         -----------
         source_repo: str
-            URL pointing to a git-controlled repository containing the base model source code
+            URL pointing to a git-controlled repository containing the external codebase source code
         checkout_target: str
             A tag, git hash, or other target to check out the source repo at the correct point in its history
 
         Returns:
         -------
-        BaseModel
-            An initialized BaseModel object
+        ExternalCodeBase
+            An initialized ExternalCodeBase object
         """
 
         # TODO: Type check here
@@ -100,7 +97,7 @@ class BaseModel(ABC):
             case 2:
                 base_str += f"(Environment variable {self.expected_env_var} is present, points to the correct repository remote, but is checked out at the wrong hash)"
             case 3:
-                base_str += f"(Environment variable {self.expected_env_var} is not present and it is assumed the base model is not installed locally)"
+                base_str += f"(Environment variable {self.expected_env_var} is not present and it is assumed the external codebase is not installed locally)"
 
         return base_str
 
@@ -151,16 +148,17 @@ class BaseModel(ABC):
     @property
     @abstractmethod
     def expected_env_var(self) -> str:
-        """Environment variable associated with the base model, e.g. MARBL_ROOT."""
+        """Environment variable associated with the external codebase, e.g.
+        MARBL_ROOT."""
 
     @property
     def local_config_status(self) -> int:
-        """Perform a series of checks to ensure that the base model is properly
+        """Perform a series of checks to ensure that the external codebase is properly
         configured on this machine.
 
         The method proceeds as follows:
-        1. Check `BaseModel.expected_env_var` is present in the environment
-        2. Check `BaseModel.expected_env_var` points to the correct remote repository
+        1. Check `ExternalCodeBase.expected_env_var` is present in the environment
+        2. Check `ExternalCodeBase.expected_env_var` points to the correct remote repository
         3. Check the repository is checked out to the correct target
 
         Returns:
@@ -170,7 +168,7 @@ class BaseModel(ABC):
            0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
            1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
            2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
-           3: The expected environment variable is not present and it is assumed the base model is not installed locally
+           3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
         """
 
         # check 1: X_ROOT variable is in user's env
@@ -189,7 +187,7 @@ class BaseModel(ABC):
             if not env_var_matches_repo:
                 return 1
             else:
-                # check 3: local basemodel repo HEAD matches correct checkout hash:
+                # check 3: local codebase repo HEAD matches correct checkout hash:
                 head_hash = _get_repo_head_hash(local_root)
                 head_hash_matches_checkout_hash = head_hash == self.checkout_hash
                 if head_hash_matches_checkout_hash:
@@ -206,20 +204,21 @@ class BaseModel(ABC):
 
     def handle_config_status(self) -> None:
         """Perform actions depending on the output of
-        BaseModel.get_local_config_status()
+        ExternalCodeBase.get_local_config_status()
 
         The config_status attribute should be set by the get_local_config_status method
 
         The method then proceeds as follows:
-        config_status=
-           0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
-              -> do nothing
-           1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
-              -> raise an EnvironmentError
-           2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
-              -> prompt checkout of correct hash
-           3: The expected environment variable is not present and it is assumed the base model is not installed locally
-              -> prompt installation of the base model
+        config_status =
+
+           - 0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
+               -> do nothing
+           - 1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
+               -> raise an EnvironmentError
+           - 2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
+               -> prompt checkout of correct hash
+           - 3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
+               -> prompt installation of the external codebase
         """
         local_root = Path(
             cstar_sysmgr.environment.environment_variables.get(
@@ -262,7 +261,7 @@ class BaseModel(ABC):
                             f"git -C {local_root} checkout {self.checkout_target}",
                             shell=True,
                         )
-                        self._base_model_adjustments()
+                        self._codebase_adjustments()
                         return
                     elif yn.casefold() in ["n", "no"]:
                         raise EnvironmentError()
@@ -280,7 +279,7 @@ class BaseModel(ABC):
                     + "if this is your first time running C-Star with "
                     + f"an instance of {self.__class__.__name__}, "
                     + "you will need to set it up.\n"
-                    + "It is recommended that you install this base model in \n"
+                    + "It is recommended that you install this external codebase in \n"
                     + f"{ext_dir}"
                     + "\nThis will also modify your `~/.cstar.env` file."
                     + "\n#######################################################"
@@ -304,9 +303,9 @@ class BaseModel(ABC):
 
     @abstractmethod
     def get(self, target: str | Path) -> None:
-        """Clone the basemodel code to your local machine."""
+        """Clone the external codebase to your local machine."""
 
-    def _base_model_adjustments(self) -> None:
-        """Perform any C-Star specific adjustments to the base model that would be
-        needed after a clean checkout."""
+    def _codebase_adjustments(self) -> None:
+        """Perform any C-Star specific adjustments to the external codebase that would
+        be needed after a clean checkout."""
         pass

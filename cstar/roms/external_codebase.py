@@ -2,22 +2,22 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from cstar.base.base_model import BaseModel
+from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
 from cstar.system.manager import cstar_sysmgr
 
 
-class ROMSBaseModel(BaseModel):
-    """An implementation of the BaseModel class for the UCLA Regional Ocean Modeling
-    System.
+class ROMSExternalCodeBase(ExternalCodeBase):
+    """An implementation of the ExternalCodeBase class for the UCLA Regional Ocean
+    Modeling System.
 
-    This subclass sets unique values for BaseModel properties specific to ROMS, and overrides
+    This subclass sets unique values for ExternalCodeBase properties specific to ROMS, and overrides
     the get() method to compile ROMS-specific libraries.
 
     Methods:
-    -------
+    --------
     get()
-        overrides BaseModel.get() to clone the UCLA ROMS repository, set environment, and compile libraries
+        overrides ExternalCodeBase.get() to clone the UCLA ROMS repository, set environment, and compile libraries
     """
 
     @property
@@ -32,7 +32,7 @@ class ROMSBaseModel(BaseModel):
     def expected_env_var(self) -> str:
         return "ROMS_ROOT"
 
-    def _base_model_adjustments(self) -> None:
+    def _codebase_adjustments(self) -> None:
         """Perform C-Star specific adjustments to stock ROMS code.
 
         In particular, this method replaces the default Makefiles with machine-agnostic
@@ -61,7 +61,7 @@ class ROMSBaseModel(BaseModel):
         target: src
             the path where ROMS will be cloned and compiled
         """
-
+        target = Path(target).expanduser()
         # TODO: Situation where environment variables like ROMS_ROOT are not set...
         # ... but repo already exists at local_path results in an error rather than a prompt
         _clone_and_checkout(
@@ -84,7 +84,7 @@ class ROMSBaseModel(BaseModel):
         _update_user_dotenv(env_file_str)
 
         # Distribute custom makefiles for ROMS
-        self._base_model_adjustments()
+        self._codebase_adjustments()
 
         # Make things
         print("Compiling UCLA ROMS' NHMG library...")

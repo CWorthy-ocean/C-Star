@@ -1,5 +1,5 @@
 import pytest
-from cstar import Case
+from cstar.roms.simulation import ROMSSimulation
 from cstar.tests.integration_tests.config import TEST_CONFIG
 
 
@@ -32,7 +32,7 @@ class TestCStar:
            Fixture to simulate user-supplied input
         modify_template_blueprint:
            Fixture to modify the contents of a template blueprint and save to a
-           temporary file (from which the Case instance is created)
+           temporary file (from which the ROMSSimulation instance is created)
         fetch_roms_tools_source_data:
            Fixture to fetch source data needed by roms-tools to generate input
            datasets for ROMS. Source data are saved to the system cache at the
@@ -60,14 +60,13 @@ class TestCStar:
         template_blueprint = config.get("template_blueprint_path")
         strs_to_replace = config.get("strs_to_replace")
 
-        print(f"Creating Case in {tmpdir / 'cstar_test_case'}")
+        print(f"Creating ROMSSimulation in {tmpdir / 'cstar_test_simulation'}")
         modified_blueprint = modify_template_blueprint(
             template_blueprint_path=template_blueprint, strs_to_replace=strs_to_replace
         )
-
-        cstar_test_case = Case.from_blueprint(
+        cstar_test_case = ROMSSimulation.from_blueprint(
             modified_blueprint,
-            caseroot=tmpdir / "cstar_test_case",
+            directory=tmpdir / "cstar_test_simulation",
             start_date="20120101 12:00:00",
             end_date="20120101 12:10:00",
         )
@@ -75,7 +74,7 @@ class TestCStar:
         with mock_user_input("y"):
             cstar_test_case.setup()
 
-        cstar_test_case.to_blueprint(tmpdir / "test_blueprint_persistence.yaml")
+        cstar_test_case.to_blueprint(tmpdir / "test_blueprint_export.yaml")
         cstar_test_case.build()
         cstar_test_case.pre_run()
         test_process = cstar_test_case.run()

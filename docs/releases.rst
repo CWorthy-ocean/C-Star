@@ -1,4 +1,36 @@
 Release notes
+
+.. _v1.0.0:
+v1.0.0
+------
+
+Breaking Changes:
+~~~~~~~~~~~~~~~~~
+- Merge Case and Component classes into a single class, Simulation, simplifying internal/blueprint structure. Remove old Case and Component modules.
+- Rename `caseroot` to `directory` 
+- Rename BaseModel to ExternalCodeBase
+- Remove `start_time` and `end_time` parameters from `InputDataset.get()`, these are now obtained from the corresponding attributes
+- Rename `ROMSComponent.namelists` to `ROMSSimulation.runtime_code` and `ROMSComponent.additional_source_code` to `ROMSSimulation.compile_time_code`
+
+Internal Changes:
+~~~~~~~~~~~~~~~~~
+- Update calls to `roms-tools` to reflect latest changes in API
+- Update internal/test blueprints to reflect new structure
+
+Documentation:
+~~~~~~~~~~~~~~
+- Run most examples in documentation locally (unless HPC-specific), so HPC access is not required
+- Add 'How-to Guides' section
+- Remove tutorial page on using roms-tools
+- Replace all URLs to other doc pages with relative links
+
+Bugfixes:
+~~~~~~~~~
+- Complete missing unit test coverage from Case and Component in new Simulation modules
+- Add `expanduser` to `Path` instances to allow tildes to represent root in paths
+- Correct issue where `AdditionalCode.modified_files` list indices did not correspond to `AdditionalCode.files`
+
+  
 =============
 .. _v0.0.8-alpha:
 
@@ -6,10 +38,17 @@ v0.0.8-alpha ()
 ---------------------------
 
 New features:
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 - Add Case.persist() and Case.restore() methods to allow continuation of work in a new session
 - Add ExecutionHandler class to track tasks run locally (LocalProcess subclass) or submitted to a job scheduler (SchedulerJob subclass)
 - Improved tracking of local InputDataset and AdditionalCode files to prevent repeat fetching
+- Add ability to read blueprints from URL
+- Remote yaml files are now accessed via requests rather than Pooch, negating need for hash checks
+
+Bugfixes:
+~~~~~~~~~
+- git and DataSource information are now read-only attributes throughout
+  
 
 .. _v0.0.3-alpha:
 

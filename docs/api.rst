@@ -1,35 +1,24 @@
 API Reference
 #############
 
+Simulation
+----------
 
-Cases
+.. autosummary::
+   :toctree: generated/
+	     
+   cstar.Simulation
+   cstar.roms.ROMSSimulation
+
+External Codebases
 ------------------------
 
 .. autosummary::
    :toctree: generated/
 
-   cstar.Case
-
-
-Components
-------------------------
-
-.. autosummary::
-   :toctree: generated/
-
-   cstar.base.Component
-   cstar.roms.ROMSComponent
-   cstar.marbl.MARBLComponent
-
-Base Models
-------------------------
-
-.. autosummary::
-   :toctree: generated/
-
-   cstar.base.BaseModel
-   cstar.roms.ROMSBaseModel
-   cstar.marbl.MARBLBaseModel
+   cstar.base.ExternalCodeBase
+   cstar.roms.ROMSExternalCodeBase
+   cstar.marbl.MARBLExternalCodeBase
 
 Additional Code
 ------------------
@@ -67,10 +56,11 @@ Scheduler Job
 .. autosummary::
    :toctree: generated/
 
+   cstar.execution.handler.ExecutionHandler
+   cstar.execution.local_process.LocalProcess
    cstar.execution.scheduler_job.SchedulerJob
    cstar.execution.scheduler_job.SlurmJob
    cstar.execution.scheduler_job.PBSJob
-   cstar.execution.local_process.LocalProcess
    
 System
 ------

@@ -1,63 +1,55 @@
-registry_attrs:
-  name: cstar_test_with_netcdf_datasets
-  valid_date_range:
-    start_date: 2012-01-01 12:00:00
-    end_date: 2012-12-31 12:00:00
+name: cstar_test_with_netcdf_datasets
+valid_start_date: 2012-01-01 12:00:00
+valid_end_date: 2012-12-31 12:00:00
 
-components:
-  - component:
-      component_type: 'MARBL'
-      base_model:
-        source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
-        checkout_target: 'marbl0.45.0'
-
-  - component:
-      component_type: 'ROMS'
-      base_model:
-        source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
-        checkout_target: '246c11fa537145ba5868f2256dfb4964aeb09a25'
-      discretization:
-        n_procs_x: 2
-        n_procs_y: 2
-        time_step: 60
-      namelists:
-        location: '<additional_code_location>'
-        checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
-        subdir: 'additional_code/ROMS/namelists'
-        files:
-          - "roms.in_TEMPLATE"
-          - "marbl_in"
-          - "marbl_tracer_output_list"
-          - "marbl_diagnostic_output_list"
-      additional_source_code:
-        location: '<additional_code_location>'
-        checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
-        subdir: 'additional_code/ROMS/source_mods'
-        files:
-          - "bgc.opt"
-          - "bulk_frc.opt"
-          - "cppdefs.opt"
-          - "diagnostics.opt"
-          - "ocean_vars.opt"
-          - "param.opt"
-          - "tracers.opt"
-          - "Makefile"
-      model_grid:
-        location: '<input_datasets_location>/roms_grd.nc'
-        file_hash: '4fe2beba68c16a7c4bccaad5d424c66255314543bc128faa527229e6e04f9e5d'
-      initial_conditions:
-        location: '<input_datasets_location>/roms_ini.nc'
-        file_hash: '55168d62d9206e03433f44c3fcd06830fbd322c9b543cc9813b747dbe24dd403'
-      tidal_forcing:
-        location: '<input_datasets_location>/roms_tides.nc'
-        file_hash: '4fe2beba68c16a7c4bccaad5d424c66255314543bc128faa527229e6e04f9e5d'
-      boundary_forcing:
-        - location: '<input_datasets_location>/roms_bry.nc'
-          file_hash: '694fd224f93bfbae5022bf38d6e81c5663112151d7a9875d9ea6d917adb09e85'
-        - location: '<input_datasets_location>/roms_bry_bgc.nc'
-          file_hash: 'b286fe317a8b4a64f25971ccd0ad03abcfde9aa0ab27a439013a99126453960d'
-      surface_forcing:
-        - location: '<input_datasets_location>/roms_frc.nc'
-          file_hash: '43c1e15e5a4ae0718f87eb10367b1f54262a251f8bc7f9b791880efb7843f41c'
-        - location: '<input_datasets_location>/roms_frc_bgc.nc'
-          file_hash: '754421b2d99a51d3bab6086f96f78b59d3a2b5cfcf0bd582449e1f310da1378d'
+codebase:
+  source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
+  checkout_target: '246c11fa537145ba5868f2256dfb4964aeb09a25'
+marbl_codebase:
+  source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
+  checkout_target: 'marbl0.45.0'
+runtime_code:
+  location: '<additional_code_location>'
+  checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
+  subdir: 'additional_code/ROMS/namelists'
+  files:
+    - "roms.in_TEMPLATE"
+    - "marbl_in"
+    - "marbl_tracer_output_list"
+    - "marbl_diagnostic_output_list"
+compile_time_code:
+  location: '<additional_code_location>'
+  checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
+  subdir: 'additional_code/ROMS/source_mods'
+  files:
+    - "bgc.opt"
+    - "bulk_frc.opt"
+    - "cppdefs.opt"
+    - "diagnostics.opt"
+    - "ocean_vars.opt"
+    - "param.opt"
+    - "tracers.opt"
+    - "Makefile"
+discretization:
+  n_procs_x: 2
+  n_procs_y: 2
+  time_step: 60
+model_grid:
+  location: '<input_datasets_location>/roms_grd.nc'
+  file_hash: 'cd8c8901a44eaaf30e3f4532ae34e039ee35b59ce3683b37597bd71feb18f51b'
+initial_conditions:
+  location: '<input_datasets_location>/roms_ini.nc'
+  file_hash: '049eb5a966e20e90e270557386d414def168017f2bdcf726ebc455b979728e1c'
+tidal_forcing:
+  location: '<input_datasets_location>/roms_tides.nc'
+  file_hash: 'cd8c8901a44eaaf30e3f4532ae34e039ee35b59ce3683b37597bd71feb18f51b'
+boundary_forcing:
+  - location: '<input_datasets_location>/roms_bry.nc'
+    file_hash: '5dff15e078bf075aed78d7b54b5d9be2c536a0d4f4daa29e5091b2d3076d0fb3'
+  - location: '<input_datasets_location>/roms_bry_bgc.nc'
+    file_hash: 'e9b25ab60c7631a61868015a0ef2cb10a5098cfb795275ebce1f851187e429e4'
+surface_forcing:
+  - location: '<input_datasets_location>/roms_frc.nc'
+    file_hash: '2479c18308367216fba78b1ff887792315535518faa3a29d1e2f4f280beb2b4e'
+  - location: '<input_datasets_location>/roms_frc_bgc.nc'
+    file_hash: '41ac621adece1883a553214f875f3dcad1e37ded9baacc8a130b918d2b874c65'

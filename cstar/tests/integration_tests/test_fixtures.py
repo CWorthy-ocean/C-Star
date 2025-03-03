@@ -18,8 +18,8 @@ def test_mock_input_fixture(mock_user_input):
 
 def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
     """This test verifies that the modify_template_blueprint fixture correctly reads a
-    specified blueprint, performs string replacements, and returns a Case instance with
-    the correct parameters corresponding to the string replacements.
+    specified blueprint, performs string replacements, and returns a Simulation instance
+    with the correct parameters corresponding to the string replacements.
 
     Parameters
     ----------
@@ -48,7 +48,7 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
         bpyaml = yaml.safe_load(bpfile)
 
     assert (
-        bpyaml["components"][1]["component"]["additional_source_code"]["location"]
+        bpyaml["compile_time_code"]["location"]
         == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
     )
 

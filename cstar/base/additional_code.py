@@ -7,7 +7,7 @@ from cstar.base.utils import _clone_and_checkout, _list_to_concise_str, _get_sha
 
 
 class AdditionalCode:
-    """Additional code contributing to a model component.
+    """Additional code contributing to a model simulation.
 
     Additional code is assumed to be kept in a single directory or
     subdirectory of a repository (described by the `source` attribute).
@@ -80,13 +80,16 @@ class AdditionalCode:
         # If there are namelists, make a parallel attribute to keep track of the ones we are editing
         # AdditionalCode.get() determines which namelists are editable templates and updates this list
         if self.files:
-            self.modified_files: list = []
+            self.modified_files: list = [None] * len(self.files)
 
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nLocation: {self.source.location}"
-        base_str += f"\nsubdirectory: {self.subdir}"
+        if self.subdir is not None:
+            base_str += f"\nSubdirectory: {self.subdir}"
+        if self.checkout_target is not None:
+            base_str += f"\nCheckout target: {self.checkout_target}"
         base_str += f"\nWorking path: {self.working_path}"
         base_str += f"\nExists locally: {self.exists_locally}"
         if not self.exists_locally:
@@ -156,7 +159,7 @@ class AdditionalCode:
                 "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
             )
 
-        local_dir = Path(local_dir).resolve()
+        local_dir = Path(local_dir).expanduser().resolve()
         try:
             tmp_dir = None  # initialise the tmp_dir variable in case we need it later
             # CASE 1: Additional code is in a remote repository:
@@ -183,7 +186,7 @@ class AdditionalCode:
                 (self.source.source_type == "directory")
                 or (self.source.source_type == "repository")
             ):
-                source_dir = Path(self.source.location) / self.subdir
+                source_dir = Path(self.source.location).expanduser() / self.subdir
 
             else:
                 raise ValueError(
@@ -197,7 +200,7 @@ class AdditionalCode:
 
             # Now go through the file and copy them to local_dir
             local_dir.mkdir(parents=True, exist_ok=True)
-            for f in self.files:
+            for i, f in enumerate(self.files):
                 src_file_path = source_dir / f
                 tgt_file_path = local_dir / Path(f).name
 
@@ -218,8 +221,7 @@ class AdditionalCode:
                         f"copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
                     )
                     shutil.copy(tgt_file_path, Path(str(tgt_file_path)[:-9]))
-                    self.modified_files = getattr(self, "modified_files", [])
-                    self.modified_files.append(f[:-9])
+                    self.modified_files[i] = f[:-9]
 
             self.working_path = local_dir
         finally:

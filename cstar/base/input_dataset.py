@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 class InputDataset(ABC):
     """Describes spatiotemporal data needed to run a unique instance of a model
-    component.
+    simulation.
 
     Attributes:
     -----------
@@ -38,7 +38,7 @@ class InputDataset(ABC):
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
     ):
-        """Initialize an InputDataset object associated with a model component using a
+        """Initialize an InputDataset object associated with a model simulation using a
         source URL and file hash.
 
         Parameters:
@@ -245,15 +245,15 @@ class InputDataset(ABC):
         local_dir: str
             The local directory in which this input dataset will be saved.
         """
-        Path(local_dir).mkdir(parents=True, exist_ok=True)
-        target_path = Path(local_dir).resolve() / self.source.basename
+        Path(local_dir).expanduser().mkdir(parents=True, exist_ok=True)
+        target_path = Path(local_dir).expanduser().resolve() / self.source.basename
 
         if (self.exists_locally) and (self.working_path == target_path):
             print(f"Input dataset already exists at {self.working_path}, skipping.")
             return
 
         if self.source.location_type == "path":
-            source_location = Path(self.source.location).resolve()
+            source_location = Path(self.source.location).expanduser().resolve()
             computed_source_hash = _get_sha256_hash(source_location)
             if (self.source.file_hash is not None) and (
                 self.source.file_hash != computed_source_hash

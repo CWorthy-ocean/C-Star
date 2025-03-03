@@ -1,21 +1,22 @@
 import os
 import subprocess
 from pathlib import Path
-from cstar.base import BaseModel
+from cstar.base import ExternalCodeBase
 from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
 from cstar.system.manager import cstar_sysmgr
 
 
-class MARBLBaseModel(BaseModel):
-    """An implementation of the BaseModel class for the Marine Biogeochemistry Library.
+class MARBLExternalCodeBase(ExternalCodeBase):
+    """An implementation of the ExternalCodeBase class for the Marine Biogeochemistry
+    Library.
 
-    This subclass sets unique values for BaseModel properties specific to MARBL, and overrides
+    This subclass sets unique values for ExternalCodeBase properties specific to MARBL, and overrides
     the get() method to compile MARBL.
 
     Methods:
-    -------
+    --------
     get()
-        overrides BaseModel.get() to clone the MARBL repository, set environment, and compile library.
+        overrides ExternalCodeBase.get() to clone the MARBL repository, set environment, and compile library.
     """
 
     @property
@@ -24,7 +25,7 @@ class MARBLBaseModel(BaseModel):
 
     @property
     def default_checkout_target(self) -> str:
-        return "v0.45.0"
+        return "marbl0.45.0"
 
     @property
     def expected_env_var(self) -> str:
