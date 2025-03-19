@@ -29,6 +29,7 @@ declare -A JIRA_IDS=(
   ["TomNicholas"]="712020:035c37ae-65d0-49c2-aa10-89ecfde5257a"
   ["NoraLoose"]="712020:383dc845-6121-46b3-a5f9-3b90a54478a5"
   ["dafyddstephenson"]="712020:41094963-a473-4408-9c16-c445f195fd65"
+  ["ScottEilerman"]="712020:88545277-44ba-4546-b3d9-647abc939a7d"
 )
 
 JIRA_ASSIGNEE_ID="${JIRA_IDS[$GITHUB_ASSIGNEE_USERNAME]}"
@@ -67,7 +68,7 @@ echo "Generated JSON payload:"
 cat payload.json
 
 # Make the API request to create the main story
-RESPONSE=$(curl -s -w "%{http_code}" -o response.json -X POST -u "$JIRA_EMAIL_DAFYDD:$JIRA_API_TOKEN_DAFYDD" \
+RESPONSE=$(curl -s -w "%{http_code}" -o response.json -X POST -u "$JIRA_EMAIL_MENDOCINO:$JIRA_API_TOKEN_MENDOCINO" \
   -H "Content-Type: application/json" \
   -d @payload.json \
   "https://cworthy.atlassian.net/rest/api/2/issue")
@@ -160,7 +161,7 @@ EOF
     cat subtask.json
 
     # Make the API request to create each subtask
-    SUBTASK_RESPONSE=$(curl -s -w "%{http_code}" -o subtask_response.json -X POST -u "$JIRA_EMAIL_DAFYDD:$JIRA_API_TOKEN_DAFYDD" \
+    SUBTASK_RESPONSE=$(curl -s -w "%{http_code}" -o subtask_response.json -X POST -u "$JIRA_EMAIL_MENDOCINO:$JIRA_API_TOKEN_MENDOCINO" \
       -H "Content-Type: application/json" \
       -d @subtask.json \
       "https://cworthy.atlassian.net/rest/api/2/issue")
