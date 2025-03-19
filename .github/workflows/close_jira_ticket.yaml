@@ -43,8 +43,8 @@ jobs:
             
       - name: Close Jira Ticket
         env:
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN_DAFYDD }}
-          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL_DAFYDD }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN_MENDOCINO }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL_MENDOCINO }}
           STORY_KEY: ${{ steps.extract_story_key.outputs.story_key }}
         run: |
           story_key="${{ steps.extract_story_key.outputs.story_key }}"
