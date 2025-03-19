@@ -67,7 +67,7 @@ echo "Generated JSON payload:"
 cat payload.json
 
 # Make the API request to create the main story
-RESPONSE=$(curl -s -w "%{http_code}" -o response.json -X POST -u "$JIRA_EMAIL_DAFYDD:$JIRA_API_TOKEN_DAFYDD" \
+RESPONSE=$(curl -s -w "%{http_code}" -o response.json -X POST -u "$JIRA_EMAIL_MENDOCINO:$JIRA_API_TOKEN_MENDOCINO" \
   -H "Content-Type: application/json" \
   -d @payload.json \
   "https://cworthy.atlassian.net/rest/api/2/issue")
@@ -160,7 +160,7 @@ EOF
     cat subtask.json
 
     # Make the API request to create each subtask
-    SUBTASK_RESPONSE=$(curl -s -w "%{http_code}" -o subtask_response.json -X POST -u "$JIRA_EMAIL_DAFYDD:$JIRA_API_TOKEN_DAFYDD" \
+    SUBTASK_RESPONSE=$(curl -s -w "%{http_code}" -o subtask_response.json -X POST -u "$JIRA_EMAIL_MENDOCINO:$JIRA_API_TOKEN_MENDOCINO" \
       -H "Content-Type: application/json" \
       -d @subtask.json \
       "https://cworthy.atlassian.net/rest/api/2/issue")

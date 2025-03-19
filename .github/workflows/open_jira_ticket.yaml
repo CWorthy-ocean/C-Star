@@ -14,8 +14,8 @@ jobs:
 
       - name: Run Jira Ticket Creation Script
         env:
-          JIRA_EMAIL_DAFYDD: ${{ secrets.JIRA_EMAIL_DAFYDD }}
-          JIRA_API_TOKEN_DAFYDD: ${{ secrets.JIRA_API_TOKEN_DAFYDD }}
+          JIRA_EMAIL_MENDOCINO: ${{ secrets.JIRA_EMAIL_MENDOCINO }}
+          JIRA_API_TOKEN_MENDOCINO: ${{ secrets.JIRA_API_TOKEN_MENDOCINO }}
           ISSUE_TITLE: "${{ github.event.issue.title }}"
           ISSUE_BODY: "${{ github.event.issue.body }}"
           GITHUB_ISSUE_URL: "https://github.com/${{ github.repository }}/issues/${{ github.event.issue.number }}"
