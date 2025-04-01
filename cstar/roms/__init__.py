@@ -8,6 +8,7 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
+    ROMSRiverForcing,
 )
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "ROMSTidalForcing",
     "ROMSBoundaryForcing",
     "ROMSSurfaceForcing",
+    "ROMSRiverForcing",
 ]

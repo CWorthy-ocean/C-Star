@@ -16,6 +16,7 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
+    ROMSRiverForcing,
 )
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.base.additional_code import AdditionalCode
@@ -80,6 +81,9 @@ def example_roms_simulation(tmp_path):
         tidal_forcing=ROMSTidalForcing(
             location="http://my.files/tidal.nc", file_hash="345"
         ),
+        river_forcing=ROMSRiverForcing(
+            location="http://my.files/river.nc", file_hash="543"
+        ),
         boundary_forcing=[
             ROMSBoundaryForcing(
                 location="http://my.files/boundary.nc", file_hash="456"
@@ -130,6 +134,10 @@ class TestROMSSimulationInitialization:
       the full path when `runtime_code` has a `working_path`.
     - `test_input_datasets`: Ensures the `input_datasets` property correctly returns
       a list of `ROMSInputDataset` instances.
+    - `test_check_inputdataset_dates_warns_and_sets_start_date`:
+      Test that `_check_inputdataset_dates` warns and overrides mismatched `start_date`
+    - `test_check_inputdataset_dates_warns_and_sets_end_date`:
+      Test that `_check_inputdataset_dates` warns and overrides mismatched `end_date`
     """
 
     def test_init(self, example_roms_simulation):
@@ -623,10 +631,75 @@ class TestROMSSimulationInitialization:
         mg = sim.model_grid
         ic = sim.initial_conditions
         td = sim.tidal_forcing
+        rf = sim.river_forcing
         bc = sim.boundary_forcing[0]
         sf = sim.surface_forcing[0]
 
-        assert sim.input_datasets == [mg, ic, td, bc, sf]
+        assert sim.input_datasets == [mg, ic, td, rf, bc, sf]
+
+    def test_check_inputdataset_dates_warns_and_sets_start_date(
+        self, example_roms_simulation
+    ):
+        """Test that `_check_inputdataset_dates` warns and overrides mismatched
+        `start_date`.
+
+        This test ensures that when an input dataset (with `source_type='yaml'`) defines a
+        `start_date` that differs from the simulation's `start_date`, a `UserWarning` is issued,
+        and the input dataset's `start_date` is overwritten.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - A `UserWarning` is raised with the expected message.
+        - The input dataset's `start_date` is set to match the simulation's `start_date`.
+        """
+
+        sim, _ = example_roms_simulation
+
+        sim.river_forcing = ROMSRiverForcing(
+            location="http://dodgyyamls4u.ru/riv.yaml", start_date="1999-01-01"
+        )
+
+        with pytest.warns(
+            UserWarning, match="does not match ROMSSimulation.start_date"
+        ):
+            sim._check_inputdataset_dates()
+
+        assert sim.river_forcing.start_date == sim.start_date
+
+    def test_check_inputdataset_dates_warns_and_sets_end_date(
+        self, example_roms_simulation
+    ):
+        """Test that `_check_inputdataset_dates` warns and overrides mismatched
+        `end_date`.
+
+        This test ensures that for non-initial-condition datasets with `source_type='yaml'`,
+        a `UserWarning` is issued and the `end_date` is corrected if it differs from the
+        simulation's `end_date`.
+
+        Mocks & Fixtures
+        ----------------
+        - `example_roms_simulation` : Provides a `ROMSSimulation` instance.
+
+        Assertions
+        ----------
+        - A `UserWarning` is raised with the expected message.
+        - The input dataset's `end_date` is updated to match the simulation's `end_date`.
+        """
+
+        sim, _ = example_roms_simulation
+
+        sim.river_forcing = ROMSRiverForcing(
+            location="http://dodgyyamls4u.ru/riv.yaml", end_date="1999-12-31"
+        )
+
+        with pytest.warns(UserWarning, match="does not match ROMSSimulation.end_date"):
+            sim._check_inputdataset_dates()
+
+        assert sim.river_forcing.end_date == sim.end_date
 
 
 class TestStrAndRepr:
@@ -694,6 +767,7 @@ Input Datasets:
 Model grid: <ROMSModelGrid instance>
 Initial conditions: <ROMSInitialConditions instance>
 Tidal forcing: <ROMSTidalForcing instance>
+River forcing: <ROMSRiverForcing instance>
 Surface forcing: <list of 1 ROMSSurfaceForcing instances>
 Boundary forcing: <list of 1 ROMSBoundaryForcing instances>
 
@@ -736,6 +810,7 @@ compile_time_code = <AdditionalCode instance>
 model_grid = <ROMSModelGrid instance>,
 initial_conditions = <ROMSInitialConditions instance>,
 tidal_forcing = <ROMSTidalForcing instance>,
+river_forcing = <ROMSRiverForcing instance>,
 surface_forcing = <list of 1 ROMSSurfaceForcing instances>,
 boundary_forcing = <list of 1 ROMSBoundaryForcing instances>
 )"""
@@ -766,6 +841,7 @@ boundary_forcing = <list of 1 ROMSBoundaryForcing instances>
     │   ├── grid.nc
     │   ├── initial.nc
     │   ├── tidal.nc
+    │   ├── river.nc
     │   ├── boundary.nc
     │   └── surface.nc
     ├── runtime_code
@@ -864,6 +940,10 @@ class TestToAndFromDictAndBlueprint:
             "tidal_forcing": {
                 "location": "http://my.files/tidal.nc",
                 "file_hash": "345",
+            },
+            "river_forcing": {
+                "location": "http://my.files/river.nc",
+                "file_hash": "543",
             },
             "surface_forcing": [
                 {"location": "http://my.files/surface.nc", "file_hash": "567"}
@@ -1328,6 +1408,7 @@ class TestProcessingAndExecution:
             f"{partitioned_directory/'surface.nc'}"
             + f"\n     {partitioned_directory/'boundary.nc'}"
             + f"\n     {partitioned_directory/'tidal.nc'}"
+            + f"\n     {partitioned_directory/'river.nc'}"
         )
 
         assert rtcm_dict["__MARBL_SETTINGS_FILE_PLACEHOLDER__"] == str(
@@ -1393,7 +1474,8 @@ class TestProcessingAndExecution:
             sim._runtime_code_modifications
 
     @pytest.mark.parametrize(
-        "missing_type", [ROMSModelGrid, ROMSInitialConditions, ROMSTidalForcing]
+        "missing_type",
+        [ROMSModelGrid, ROMSInitialConditions, ROMSTidalForcing, ROMSRiverForcing],
     )
     def test_runtime_code_modifications_raises_if_no_partitioned_files(
         self, example_roms_simulation, missing_type
@@ -1546,7 +1628,7 @@ class TestProcessingAndExecution:
         sim.setup()
         assert mock_handle_config_status.call_count == 2
         assert mock_additionalcode_get.call_count == 2
-        assert mock_inputdataset_get.call_count == 5
+        assert mock_inputdataset_get.call_count == 6
 
     @pytest.mark.parametrize(
         "codebase_status, marbl_status, expected",
