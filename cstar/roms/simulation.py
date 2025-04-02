@@ -2,7 +2,6 @@ import yaml
 import shutil
 import warnings
 import requests
-import subprocess
 from pathlib import Path
 from datetime import datetime
 from cstar.roms.external_codebase import ROMSExternalCodeBase
@@ -19,7 +18,12 @@ from cstar.marbl.external_codebase import MARBLExternalCodeBase
 
 from cstar.base.datasource import DataSource
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.utils import _get_sha256_hash, _replace_text_in_file, _dict_to_tree
+from cstar.base.utils import (
+    _get_sha256_hash,
+    _replace_text_in_file,
+    _dict_to_tree,
+    _run_cmd,
+)
 
 from cstar.execution.handler import ExecutionHandler
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -1170,34 +1174,27 @@ class ROMSSimulation(Simulation):
             return
 
         if (build_dir / "Compile").is_dir():
-            make_clean_result = subprocess.run(
+            _run_cmd(
                 "make compile_clean",
                 cwd=build_dir,
-                shell=True,
-                capture_output=True,
-                text=True,
+                msg_err=(
+                    "Error {result.returncode} when compiling ROMS. STDERR stream: "
+                    "\n {result.stderr}"
+                ),
+                raise_on_error=True,
             )
-            if make_clean_result.returncode != 0:
-                raise RuntimeError(
-                    f"Error {make_clean_result.returncode} when compiling ROMS. STDERR stream: "
-                    + f"\n {make_clean_result.stderr}"
-                )
 
-        print("Compiling UCLA-ROMS configuration...")
-        make_roms_result = subprocess.run(
+        _run_cmd(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
-            shell=True,
-            capture_output=True,
-            text=True,
+            msg_pre="Compiling UCLA-ROMS configuration...",
+            msg_post=f"UCLA-ROMS compiled at {build_dir}",
+            msg_err=(
+                "Error {result.returncode} when compiling ROMS. STDERR stream: "
+                "\n {result.stderr}"
+            ),
+            raise_on_error=True,
         )
-        if make_roms_result.returncode != 0:
-            raise RuntimeError(
-                f"Error {make_roms_result.returncode} when compiling ROMS. STDERR stream: "
-                + f"\n {make_roms_result.stderr}"
-            )
-
-        print(f"UCLA-ROMS compiled at {build_dir}")
 
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
@@ -1444,19 +1441,17 @@ class ROMSSimulation(Simulation):
             for wildcard_pattern in unique_wildcards:
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
 
-                print(f"Joining netCDF files {wildcard_pattern}...")
-                ncjoin_result = subprocess.run(
+                _run_cmd(
                     f"ncjoin {wildcard_pattern}",
                     cwd=output_dir,
-                    capture_output=True,
-                    text=True,
-                    shell=True,
+                    msg_pre=f"Joining netCDF files {wildcard_pattern}...",
+                    msg_err=(
+                        "Error {result.returncode} while joining ROMS output. "
+                        "STDERR stream:\n {result.stderr}"
+                    ),
+                    raise_on_error=True,
                 )
-                if ncjoin_result.returncode != 0:
-                    raise RuntimeError(
-                        f"Error {ncjoin_result.returncode} while joining ROMS output. "
-                        + f"STDERR stream:\n {ncjoin_result.stderr}"
-                    )
+
                 for F in output_dir.glob(wildcard_pattern):
                     F.rename(output_dir / "PARTITIONED" / F.name)
 

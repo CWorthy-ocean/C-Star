@@ -2,12 +2,12 @@ import os
 import re
 import json
 import warnings
-import subprocess
 from math import ceil
 from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
+from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus, ExecutionHandler
 from cstar.system.manager import cstar_sysmgr
 from cstar.system.scheduler import (
@@ -594,14 +594,11 @@ class SlurmJob(SchedulerJob):
             return ExecutionStatus.UNSUBMITTED
         else:
             sacct_cmd = f"sacct -j {self.id} --format=State%20 --noheader"
-            result = subprocess.run(
-                sacct_cmd, capture_output=True, text=True, shell=True
+            msg_err = (
+                f"Failed to retrieve job status using {sacct_cmd}."
+                "STDOUT: {result.stdout}, STDERR: {result.stderr}"
             )
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"Failed to retrieve job status using {sacct_cmd}."
-                    f"STDOUT: {result.stdout}, STDERR: {result.stderr}"
-                )
+            stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
 
         # Map sacct states to ExecutionStatus enum
         sacct_status_map = {
@@ -612,7 +609,7 @@ class SlurmJob(SchedulerJob):
             "FAILED": ExecutionStatus.FAILED,
         }
         for state, status in sacct_status_map.items():
-            if state in result.stdout:
+            if state in stdout:
                 return status
 
         # Fallback if no known state is found
@@ -686,30 +683,21 @@ class SlurmJob(SchedulerJob):
             k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
         }
 
-        result = subprocess.run(
+        stdout = _run_cmd(
             f"sbatch {self.script_path}",
-            shell=True,
             cwd=self.run_path,
             env=slurm_env,
-            capture_output=True,
-            text=True,
+            msg_err="Non-zero exit code when submitting job. STDERR: \n{result.stderr}",
+            raise_on_error=True,
         )
 
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Non-zero exit code when submitting job. STDERR: "
-                + f"\n{result.stderr}"
-            )
-
         # Extract the job ID from the output
-        matches = re.search(r"Submitted batch job (\d+)", result.stdout)
+        matches = re.search(r"Submitted batch job (\d+)", stdout)
         if matches:
             self._id = int(matches.group(1))
             return self._id
         else:
-            raise RuntimeError(
-                f"Failed to parse job ID from sbatch output: {result.stdout}"
-            )
+            raise RuntimeError(f"Failed to parse job ID from sbatch output: {stdout}")
 
     def cancel(self):
         """Cancel the job in the SLURM scheduler.
@@ -729,21 +717,13 @@ class SlurmJob(SchedulerJob):
             print(f"Cannot cancel job with status '{self.status}'")
             return
 
-        result = subprocess.run(
+        _run_cmd(
             f"scancel {self.id}",
-            shell=True,
             cwd=self.run_path,
-            capture_output=True,
-            text=True,
+            raise_on_error=True,
+            msg_post=f"Job {self.id} cancelled",
+            msg_err="Non-zero exit code when cancelling job. STDERR: \n{result.stderr}",
         )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Non-zero exit code when cancelling job. STDERR: "
-                + f"\n{result.stderr}"
-            )
-        else:
-            print(f"Job {self.id} cancelled")
 
 
 class PBSJob(SchedulerJob):
@@ -860,17 +840,15 @@ class PBSJob(SchedulerJob):
             return ExecutionStatus.UNSUBMITTED
 
         qstat_cmd = f"qstat -x -f -F json {self.id}"
-        result = subprocess.run(qstat_cmd, capture_output=True, text=True, shell=True)
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to retrieve job status using {qstat_cmd}."
-                f"STDOUT: {result.stdout}, STDERR: {result.stderr}"
-            )
+        msg_err = (
+            f"Failed to retrieve job status using {qstat_cmd}."
+            "STDOUT: {result.stdout}, STDERR: {result.stderr}"
+        )
+        stdout = _run_cmd(qstat_cmd, raise_on_error=True, msg_err=msg_err)
 
         # Parse the JSON output
         try:
-            job_data = json.loads(result.stdout)
+            job_data = json.loads(stdout)
             try:
                 job_info = next(iter(job_data["Jobs"].values()))
             except StopIteration:
@@ -922,27 +900,20 @@ class PBSJob(SchedulerJob):
 
         self.save_script()
 
-        result = subprocess.run(
+        # job_id_full will contain full job ID (e.g., "7063621.desched1")
+        job_id_full = _run_cmd(
             f"qsub {self.script_path}",
-            shell=True,
             cwd=self.run_path,
-            capture_output=True,
-            text=True,
+            raise_on_error=True,
+            msg_err="Non-zero exit code when submitting job. STDERR: \n{result.stderr}",
         )
 
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Non-zero exit code when submitting job. STDERR: "
-                + f"\n{result.stderr}"
-            )
-
         # Validate the format of the job ID (e.g., "<int>.<str>")
-        job_id_full = result.stdout.strip()  # Full job ID (e.g., "7063621.desched1")
         if not re.match(r"^\d+\.\w+$", job_id_full):
             raise RuntimeError(f"Unexpected job ID format from qsub: {job_id_full}")
 
         # Extract the job ID from the output
-        self._id = int(result.stdout.strip().split(".")[0])
+        self._id = int(job_id_full.split(".")[0])
         return self._id
 
     def cancel(self):
@@ -966,18 +937,12 @@ class PBSJob(SchedulerJob):
             print(f"Cannot cancel job with status {self.status}")
             return
 
-        result = subprocess.run(
+        _run_cmd(
             f"qdel {self.id}",
-            shell=True,
             cwd=self.run_path,
-            capture_output=True,
-            text=True,
+            msg_err=(
+                "Non-zero exit code when cancelling job. STDERR: \n{result.stderr}"
+            ),
+            msg_post=f"Job {self.id} cancelled",
+            raise_on_error=True,
         )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Non-zero exit code when cancelling job. STDERR: "
-                + f"\n{result.stderr}"
-            )
-        else:
-            print(f"Job {self.id} cancelled")

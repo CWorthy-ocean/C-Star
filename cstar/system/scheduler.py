@@ -1,6 +1,7 @@
-import subprocess
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
+
+from cstar.base.utils import _run_cmd
 
 ################################################################################
 
@@ -144,10 +145,7 @@ class SlurmQOS(SlurmQueue):
         """
 
         sp_cmd = f"sacctmgr show qos {self.name} format=MaxWall --noheader"
-        sp_run = subprocess.run(sp_cmd, shell=True, text=True, capture_output=True)
-        if sp_run.returncode != 0:
-            raise RuntimeError(f"Command {sp_cmd} failed: {sp_run.stderr.strip()}")
-        mw = sp_run.stdout.strip()
+        mw = _run_cmd(sp_cmd)
         return self._parse_walltime(mw) if mw else None
 
 
@@ -187,10 +185,7 @@ class SlurmPartition(SlurmQueue):
         """
 
         sp_cmd = f"sinfo -h -o '%l' -p {self.name}"
-        sp_run = subprocess.run(sp_cmd, shell=True, text=True, capture_output=True)
-        if sp_run.returncode != 0:
-            raise RuntimeError(f"Command {sp_cmd} failed: {sp_run.stderr.strip()}")
-        mw = sp_run.stdout.strip()
+        mw = _run_cmd(sp_cmd)
         return self._parse_walltime(mw) if mw else None
 
 
@@ -440,16 +435,13 @@ class SlurmScheduler(Scheduler):
         RuntimeError
             If the command to query the SLURM scheduler fails.
         """
-        result = subprocess.run(
+        if so := _run_cmd(
             'scontrol show nodes | grep -o "cpu=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
-            shell=True,
-            text=True,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            print(f"Error querying node property. STDERR: {result.stderr}")
-        so = result.stdout.strip()
-        return int(so) if so else None
+            msg_err="Error querying node property. STDERR: {result.stderr}",
+        ):
+            return int(so)
+
+        return None
 
     @property
     def global_max_mem_per_node_gb(self) -> Optional[float]:
@@ -470,16 +462,13 @@ class SlurmScheduler(Scheduler):
             If the command to query the SLURM scheduler fails.
         """
 
-        result = subprocess.run(
+        if so := _run_cmd(
             'scontrol show nodes | grep -o "RealMemory=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
-            shell=True,
-            text=True,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            print(f"Error querying node property. STDERR: {result.stderr}")
-        so = result.stdout.strip()
-        return float(so) / (1024) if so else None
+            msg_err="Error querying node property. STDERR: {result.stderr}",
+        ):
+            return float(so) / (1024)
+
+        return None
 
 
 class PBSScheduler(Scheduler):
@@ -530,16 +519,13 @@ class PBSScheduler(Scheduler):
             If the command to query the PBS scheduler fails.
         """
 
-        result = subprocess.run(
+        if so := _run_cmd(
             'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
-            shell=True,
-            text=True,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            print(f"Error querying node property. STDERR: {result.stderr}")
-        so = result.stdout.strip()
-        return int(so) if so else None
+            msg_err="Error querying node property. STDERR: {result.stderr}",
+        ):
+            return int(so)
+
+        return None
 
     @property
     def global_max_mem_per_node_gb(self) -> Optional[float]:
@@ -560,23 +546,18 @@ class PBSScheduler(Scheduler):
             If the command to query the PBS scheduler fails.
         """
 
-        result = subprocess.run(
+        stdout = _run_cmd(
             'pbsnodes -a | grep "resources_available.mem" | cut -d== -f2 | sort -nr | head -1',
-            shell=True,
-            text=True,
-            capture_output=True,
+            msg_err="Error querying node property. STDERR: {result.stderr}",
         )
-        if result.returncode != 0:
-            print(f"Error querying node property. STDERR: {result.stderr}")
-        so = result.stdout.strip()
-        if so.endswith("kb"):
-            return float(so[:-2]) / (1024**2)  # Convert kilobytes to gigabytes
-        elif so.endswith("mb"):
-            return float(so[:-2]) / 1024  # Convert megabytes to gigabytes
-        elif so.endswith("gb"):
-            return float(so[:-2])  # Already in gigabytes
-        else:
-            return None
+        if stdout.endswith("kb"):
+            return float(stdout[:-2]) / (1024**2)  # Convert kilobytes to gigabytes
+        elif stdout.endswith("mb"):
+            return float(stdout[:-2]) / 1024  # Convert megabytes to gigabytes
+        elif stdout.endswith("gb"):
+            return float(stdout[:-2])  # Already in gigabytes
+
+        return None
 
 
 ################################################################################

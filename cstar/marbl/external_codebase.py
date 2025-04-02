@@ -1,8 +1,7 @@
 import os
-import subprocess
 from pathlib import Path
 from cstar.base import ExternalCodeBase
-from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
+from cstar.base.utils import _clone_and_checkout, _update_user_dotenv, _run_cmd
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -47,7 +46,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         """
         _clone_and_checkout(
             source_repo=self.source_repo,
-            local_path=target,
+            local_path=Path(target),
             checkout_target=self.checkout_target,
         )
         # Set environment variables for this session:
@@ -59,17 +58,14 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         _update_user_dotenv(env_file_str)
 
         # Make things
-        print("Compiling MARBL...")
-        make_marbl_result = subprocess.run(
+        _run_cmd(
             f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
-            cwd=f"{target}/src",
-            shell=True,
-            text=True,
-            capture_output=True,
+            cwd=Path(target) / "src",
+            msg_pre="Compiling MARBL...",
+            msg_post=f"MARBL successfully installed at {target}",
+            msg_err=(
+                "Error {result.returncode} when compiling MARBL. STDERR stream: "
+                "\n {result.stderr}"
+            ),
+            raise_on_error=True,
         )
-        if make_marbl_result.returncode != 0:
-            raise RuntimeError(
-                f"Error {make_marbl_result.returncode} when compiling MARBL. STDERR stream: "
-                + f"\n {make_marbl_result.stderr}"
-            )
-        print(f"MARBL successfully installed at {target}")
