@@ -435,11 +435,11 @@ class SlurmScheduler(Scheduler):
         RuntimeError
             If the command to query the SLURM scheduler fails.
         """
-        if so := _run_cmd(
+        if stdout := _run_cmd(
             'scontrol show nodes | grep -o "cpu=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
             msg_err="Error querying node property. STDERR: {result.stderr}",
         ):
-            return int(so)
+            return int(stdout)
 
         return None
 
@@ -462,11 +462,11 @@ class SlurmScheduler(Scheduler):
             If the command to query the SLURM scheduler fails.
         """
 
-        if so := _run_cmd(
+        if stdout := _run_cmd(
             'scontrol show nodes | grep -o "RealMemory=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
             msg_err="Error querying node property. STDERR: {result.stderr}",
         ):
-            return float(so) / (1024)
+            return float(stdout) / (1024)
 
         return None
 
@@ -519,11 +519,11 @@ class PBSScheduler(Scheduler):
             If the command to query the PBS scheduler fails.
         """
 
-        if so := _run_cmd(
+        if stdout := _run_cmd(
             'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
             msg_err="Error querying node property. STDERR: {result.stderr}",
         ):
-            return int(so)
+            return int(stdout)
 
         return None
 
