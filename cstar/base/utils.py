@@ -366,7 +366,9 @@ def _run_cmd(
     msg_post (str | None), default = None):
         An overridden message logged after the command is successfully executed.
     msg_err (str | None), default = None):
-        An overridden message logged when a command returns a non-zero code.
+        An overridden message logged when a command returns a non-zero code. Logs
+        will be supplied with the subprocess output using the name `result`,
+        e.g. `msg_err.format(result=result)`.
     raise_on_error (bool, default = False):
         If True, raises a RuntimeError if the command returns a non-zero code.
 
