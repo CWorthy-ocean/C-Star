@@ -344,7 +344,7 @@ def _dict_to_tree(input_dict: dict, prefix: str = "") -> str:
 
 def _run_cmd(
     cmd: str,
-    cwd: PathLike | None = None,
+    cwd: Path | None = None,
     env: dict[str, str] | None = None,
     msg_pre: str | None = None,
     msg_post: str | None = None,
@@ -357,7 +357,7 @@ def _run_cmd(
     -----------
     cmd (str):
        The command to be executed as a separate process.
-    cwd (PathLike, default = None):
+    cwd (Path, default = None):
        The working directory for the command. If None, use current working directory.
     env (Dict[str, str], default = None):
        A dictionary of environment variables to be passed to the command.
