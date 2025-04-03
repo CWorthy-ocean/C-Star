@@ -4,6 +4,10 @@ Release notes
 v1.0.0
 ------
 
+New features:
+~~~~~~~~~~~~~
+- Add support for river forcing
+
 Breaking Changes:
 ~~~~~~~~~~~~~~~~~
 - Merge Case and Component classes into a single class, Simulation, simplifying internal/blueprint structure. Remove old Case and Component modules.
