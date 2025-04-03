@@ -379,15 +379,15 @@ def _run_cmd(
 
     Examples:
     --------
-    In: _execute_cmd("python foo.py", "Running script", "Script completed")
+    In: _run_cmd("python foo.py", "Running script", "Script completed")
     Out: Running script
          Script completed
 
-    In: _execute_cmd("python foo.py")
+    In: _run_cmd("python foo.py")
     Out: Running command: python foo.py
          Command completed successfully. STDOUT: <output of foo.py>
 
-    In: _execute_cmd("python return_nonzero.py")
+    In: _run_cmd("python return_nonzero.py")
     Out: Running command: python return_nonzero.py
          Command python return_nonzero.py failed: <stderror of foo.py>
     """
