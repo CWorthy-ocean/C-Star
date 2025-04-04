@@ -3,7 +3,7 @@ import datetime as dt
 from unittest import mock
 from pathlib import Path
 from textwrap import dedent
-from cstar.roms import ROMSInputDataset
+from cstar.roms import ROMSInputDataset, ROMSForcingCorrections
 from cstar.base.datasource import DataSource
 
 
@@ -128,6 +128,20 @@ def remote_roms_yaml_dataset():
 
 
 ################################################################################
+
+
+class TestROMSInputDatasetInit:
+    """Test class for initializing ROMSInputDataset subclasses."""
+
+    def test_correction_cannot_be_yaml(self):
+        with pytest.raises(ValueError) as exception_info:
+            ROMSForcingCorrections(
+                location="https://www.totallylegityamlfiles.pk/downloadme.yaml"
+            )
+            expected_message = (
+                "ROMSForcingCorrections cannot be initialized with a source YAML file."
+            )
+            assert expected_message in str(exception_info.value)
 
 
 class TestStrAndRepr:
