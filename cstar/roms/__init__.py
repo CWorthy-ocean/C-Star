@@ -9,6 +9,7 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
     ROMSRiverForcing,
+    ROMSForcingCorrections,
 )
 
 __all__ = [

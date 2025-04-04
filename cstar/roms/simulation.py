@@ -333,7 +333,7 @@ class ROMSSimulation(Simulation):
         if len(self.boundary_forcing) > 0:
             base_str += (
                 f"\nBoundary forcing: <list of {len(self.boundary_forcing)} "
-                + f"{self.boundary_forcing[0].__class__.__name__} instances>\n"
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
             )
         if len(self.forcing_corrections) > 0:
             base_str += (
@@ -378,7 +378,7 @@ class ROMSSimulation(Simulation):
         if hasattr(self, "boundary_forcing") and len(self.boundary_forcing) > 0:
             repr_str += (
                 f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
-                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>,"
             )
         if hasattr(self, "forcing_corrections") and len(self.forcing_corrections) > 0:
             repr_str += (
