@@ -15,6 +15,7 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
     ROMSInputDataset,
+    ROMSForcingCorrections,
 )
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 
@@ -72,6 +73,8 @@ class ROMSSimulation(Simulation):
         List of surface forcing datasets.
     boundary_forcing : list[ROMSBoundaryForcing]
         List of boundary forcing datasets.
+    forcing_corrections : list[ROMSForcingCorrections]
+        List of forcing correction datasets.
     exe_path : Path
         Path to the compiled ROMS executable.
     partitioned_files : List[Path]
@@ -120,6 +123,7 @@ class ROMSSimulation(Simulation):
         river_forcing: Optional["ROMSRiverForcing"] = None,
         boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
         surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
+        forcing_corrections: Optional[list["ROMSForcingCorrections"]] = None,
     ):
         """Initializes a `ROMSSimulation` instance.
 
@@ -165,12 +169,15 @@ class ROMSSimulation(Simulation):
             List of datasets specifying boundary conditions for ROMS.
         surface_forcing : list[ROMSBoundaryForcing]
             List of surface forcing datasets (e.g., wind stress, heat flux).
+        forcing_corrections : list[ROMSForcingCorrections]
+            List of surface forcing correction datasets.
 
         Raises
         ------
         TypeError
             If `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
             If `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
+            If `forcing_corrections` is not a list of `ROMSForcingCorrections` instances.
         """
         if discretization is None:
             raise ValueError(
@@ -217,6 +224,15 @@ class ROMSSimulation(Simulation):
         ):
             raise TypeError(
                 "ROMSSimulation.boundary_forcing must be a list of ROMSBoundaryForcing instances"
+            )
+        self.forcing_corrections = (
+            [] if forcing_corrections is None else forcing_corrections
+        )
+        if not all(
+            [isinstance(bf, ROMSForcingCorrections) for bf in self.forcing_corrections]
+        ):
+            raise TypeError(
+                "ROMSSimulation.forcing_corrections must be a list of ROMSForcingCorrections instances"
             )
 
         self._check_inputdataset_dates()
@@ -319,6 +335,11 @@ class ROMSSimulation(Simulation):
                 f"\nBoundary forcing: <list of {len(self.boundary_forcing)} "
                 + f"{self.boundary_forcing[0].__class__.__name__} instances>\n"
             )
+        if len(self.forcing_corrections) > 0:
+            base_str += (
+                f"\nForcing corrections: <list of {len(self.forcing_corrections)} "
+                + f"{self.forcing_corrections[0].__class__.__name__} instances>\n"
+            )
 
         base_str += f"\nIs setup: {self.is_setup}"
 
@@ -359,6 +380,12 @@ class ROMSSimulation(Simulation):
                 f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
                 + f"{self.boundary_forcing[0].__class__.__name__} instances>"
             )
+        if hasattr(self, "forcing_corrections") and len(self.forcing_corrections) > 0:
+            repr_str += (
+                f"\nforcing_corrections = <list of {len(self.forcing_corrections)} "
+                + f"{self.forcing_corrections[0].__class__.__name__} instances>"
+            )
+
         repr_str += "\n)"
 
         return repr_str
@@ -473,6 +500,8 @@ class ROMSSimulation(Simulation):
             input_datasets.extend(self.boundary_forcing)
         if len(self.surface_forcing) > 0:
             input_datasets.extend(self.surface_forcing)
+        if len(self.forcing_corrections) > 0:
+            input_datasets.extend(self.forcing_corrections)
         return input_datasets
 
     @classmethod
@@ -607,6 +636,19 @@ class ROMSSimulation(Simulation):
         for sf_kwargs in surface_forcing_entries:
             simulation_kwargs["surface_forcing"].append(ROMSSurfaceForcing(**sf_kwargs))
 
+        # Construct any ROMSForcingCorrections instances:
+        forcing_corrections_entries = simulation_dict.get("forcing_corrections", [])
+        if len(forcing_corrections_entries) > 0:
+            simulation_kwargs["forcing_corrections"] = []
+        if isinstance(forcing_corrections_entries, dict):
+            forcing_corrections_entries = [
+                forcing_corrections_entries,
+            ]
+        for fc_kwargs in forcing_corrections_entries:
+            simulation_kwargs["forcing_corrections"].append(
+                ROMSForcingCorrections(**fc_kwargs)
+            )
+
         return cls(**simulation_kwargs)
 
     def to_dict(self) -> dict:
@@ -660,6 +702,10 @@ class ROMSSimulation(Simulation):
         if len(self.boundary_forcing) > 0:
             simulation_dict["boundary_forcing"] = [
                 bf.to_dict() for bf in self.boundary_forcing
+            ]
+        if len(self.forcing_corrections) > 0:
+            simulation_dict["forcing_corrections"] = [
+                fc.to_dict() for fc in self.forcing_corrections
             ]
 
         return simulation_dict
@@ -923,6 +969,11 @@ class ROMSSimulation(Simulation):
             runtime_code_forcing_str += (
                 "\n     " + partitioned_files_to_runtime_code_string(self.river_forcing)
             )
+        for fc in self.forcing_corrections:
+            if len(fc.partitioned_files) > 0:
+                runtime_code_forcing_str += (
+                    "\n     " + partitioned_files_to_runtime_code_string(fc)
+                )
 
         runtime_code_modifications[nl_idx]["__FORCING_FILES_PLACEHOLDER__"] = (
             runtime_code_forcing_str.lstrip()

@@ -23,4 +23,5 @@ __all__ = [
     "ROMSBoundaryForcing",
     "ROMSSurfaceForcing",
     "ROMSRiverForcing",
+    "ROMSForcingCorrections",
 ]
