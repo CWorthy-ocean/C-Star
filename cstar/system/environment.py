@@ -1,9 +1,10 @@
 import os
 import platform
-import subprocess
 import importlib.util
 from pathlib import Path
 from dotenv import dotenv_values
+
+from cstar.base.utils import _run_cmd
 
 
 class CStarEnvironment:
@@ -202,18 +203,18 @@ class CStarEnvironment:
 
         lmod_path = Path(os.environ.get("LMOD_CMD", ""))
         command = f"{lmod_path} python {' '.join(list(args))}"
-        lmod_result = subprocess.run(
-            command, shell=True, text=True, capture_output=True
-        )
-        if lmod_result.returncode != 0:
-            raise RuntimeError(
+        stdout = _run_cmd(
+            command,
+            msg_err=(
                 "Linux Environment Modules command "
-                + f"\n{command} "
-                + f"\n failed with code {lmod_result.returncode}. STDERR: "
-                + f"{lmod_result.stderr}"
-            )
-        else:
-            exec(lmod_result.stdout)
+                f"\n{command} "
+                "\n failed with code {result.returncode}. STDERR: "
+                "{result.stderr}"
+            ),
+            raise_on_error=True,
+        )
+
+        exec(stdout)
 
     def load_lmod_modules(self, lmod_file) -> None:
         """Loads necessary modules for this machine using Linux Environment Modules.

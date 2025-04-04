@@ -145,7 +145,7 @@ class TestROMSExternalCodeBaseGet:
 
         self.mock_subprocess_run.assert_any_call(
             f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=f"{roms_dir}/Work",
+            cwd=roms_dir / "Work",
             capture_output=True,
             text=True,
             shell=True,
@@ -153,7 +153,7 @@ class TestROMSExternalCodeBaseGet:
 
         self.mock_subprocess_run.assert_any_call(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=f"{roms_dir}/Tools-Roms",
+            cwd=roms_dir / "Tools-Roms",
             capture_output=True,
             text=True,
             shell=True,
