@@ -5,7 +5,7 @@ import roms_tools
 
 from abc import ABC
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Any
 from cstar.base.input_dataset import InputDataset
 from cstar.base.utils import _list_to_concise_str, _get_sha256_hash
 
@@ -199,34 +199,37 @@ class ROMSInputDataset(InputDataset, ABC):
         roms_tools_class = getattr(roms_tools, roms_tools_class_name)
 
         # Create a temporary file that deletes itself when closed
-        with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(mode="w", delete=True) as temp_file:
+            from_yaml_kwargs: dict[Any, Any] = {}
             temp_file.write(f"---{header}---\n" + yaml.dump(yaml_dict))
             temp_file.flush()  # Ensure data is written to disk
 
-            # roms-tools currently requires dask for every class except Grid
+            from_yaml_kwargs["filepath"] = temp_file.name
+            # roms-tools currently requires dask for every class except Grid,RiverForcing
             # in order to use wildcards in filepaths (known xarray issue):
-            if roms_tools_class_name == "Grid":
-                roms_tools_class_instance = roms_tools_class.from_yaml(temp_file.name)
-            else:
-                roms_tools_class_instance = roms_tools_class.from_yaml(
-                    temp_file.name, use_dask=True
-                )
+            if roms_tools_class_name not in ["Grid", "RiverForcing"]:
+                from_yaml_kwargs["use_dask"] = True
+
+            roms_tools_class_instance = roms_tools_class.from_yaml(**from_yaml_kwargs)
         ##
 
         # ... and save:
         print(f"Saving roms-tools dataset created from {self.source.location}...")
+        save_kwargs: dict[Any, Any] = {}
         if (np_eta is not None) and (np_xi is not None):
-            savepath = roms_tools_class_instance.save(
-                local_dir / "PARTITIONED" / Path(self.source.location).stem,
-                np_xi=np_xi,
-                np_eta=np_eta,
+            save_kwargs["np_xi"] = np_xi
+            save_kwargs["np_eta"] = np_eta
+            save_kwargs["filepath"] = (
+                local_dir / "PARTITIONED" / Path(self.source.location).stem
             )
-            self.partitioned_files = savepath
-
         else:
-            savepath = roms_tools_class_instance.save(
-                Path(f"{local_dir/Path(self.source.location).stem}.nc")
+            save_kwargs["filepath"] = Path(
+                f"{local_dir/Path(self.source.location).stem}.nc"
             )
+
+        savepath = roms_tools_class_instance.save(**save_kwargs)
+        self.partitioned_files = savepath
+
         self.working_path = savepath[0] if len(savepath) == 1 else savepath
 
         self._local_file_hash_cache = {
@@ -264,5 +267,11 @@ class ROMSBoundaryForcing(ROMSInputDataset):
 class ROMSSurfaceForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model surface forcing
     files."""
+
+    pass
+
+
+class ROMSRiverForcing(ROMSInputDataset):
+    """An implementation of the ROMSInputDataset class for river forcing files."""
 
     pass

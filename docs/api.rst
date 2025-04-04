@@ -39,6 +39,7 @@ Input Datasets
    cstar.roms.ROMSModelGrid
    cstar.roms.ROMSInitialConditions
    cstar.roms.ROMSTidalForcing
+   cstar.roms.ROMSRiverForcing
    cstar.roms.ROMSBoundaryForcing
    cstar.roms.ROMSSurfaceForcing
 

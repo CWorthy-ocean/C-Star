@@ -5,6 +5,7 @@ dependencies:
   - python>=3.10
   - numpy
   - xarray
+  - roms-tools
   - netCDF4
   - pip
   # testing

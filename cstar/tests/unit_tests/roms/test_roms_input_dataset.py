@@ -438,7 +438,7 @@ class TestROMSInputDatasetGet:
 
         # Finally, ensure the save method is called
         self.mock_rt_grid_instance.save.assert_called_once_with(
-            Path("some/local/dir/PARTITIONED/local_file"), np_xi=3, np_eta=4
+            filepath=Path("some/local/dir/PARTITIONED/local_file"), np_xi=3, np_eta=4
         )
 
         # Assert partitioned files are updated correctly
@@ -531,7 +531,7 @@ class TestROMSInputDatasetGet:
 
         # Finally, ensure the save method is called
         self.mock_rt_grid_instance.save.assert_called_once_with(
-            Path("some/local/dir/remote_file.nc")
+            filepath=Path("some/local/dir/remote_file.nc")
         )
 
         # Ensure stat was called for the saved file
@@ -631,7 +631,7 @@ class TestROMSInputDatasetGet:
 
         # Ensure the save method was called for the SurfaceForcing instance
         self.mock_rt_surface_forcing_instance.save.assert_called_once_with(
-            Path("some/local/dir/local_file.nc")
+            filepath=Path("some/local/dir/local_file.nc")
         )
 
         # Ensure stat was called for the saved file

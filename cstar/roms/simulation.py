@@ -11,6 +11,7 @@ from cstar.roms.input_dataset import (
     ROMSModelGrid,
     ROMSInitialConditions,
     ROMSTidalForcing,
+    ROMSRiverForcing,
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
     ROMSInputDataset,
@@ -116,6 +117,7 @@ class ROMSSimulation(Simulation):
         model_grid: Optional["ROMSModelGrid"] = None,
         initial_conditions: Optional["ROMSInitialConditions"] = None,
         tidal_forcing: Optional["ROMSTidalForcing"] = None,
+        river_forcing: Optional["ROMSRiverForcing"] = None,
         boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
         surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
     ):
@@ -157,6 +159,8 @@ class ROMSSimulation(Simulation):
             Initial conditions dataset specifying the starting ocean state.
         tidal_forcing : ROMSTidalForcing
             Tidal forcing dataset providing tidal components for the simulation.
+        river_forcing: ROMSRiverForcing
+            River forcing dataset providing river location and flux information.
         boundary_forcing : list[ROMSBoundaryForcing]
             List of datasets specifying boundary conditions for ROMS.
         surface_forcing : list[ROMSBoundaryForcing]
@@ -201,6 +205,7 @@ class ROMSSimulation(Simulation):
         self.model_grid = model_grid
         self.initial_conditions = initial_conditions
         self.tidal_forcing = tidal_forcing
+        self.river_forcing = river_forcing
         self.surface_forcing = [] if surface_forcing is None else surface_forcing
         if not all([isinstance(sf, ROMSSurfaceForcing) for sf in self.surface_forcing]):
             raise TypeError(
@@ -242,6 +247,7 @@ class ROMSSimulation(Simulation):
 
         for inp in [
             self.initial_conditions,
+            self.river_forcing,
             *self.surface_forcing,
             *self.boundary_forcing,
         ]:
@@ -299,6 +305,10 @@ class ROMSSimulation(Simulation):
             base_str += (
                 f"\nTidal forcing: <{self.tidal_forcing.__class__.__name__} instance>"
             )
+        if self.river_forcing is not None:
+            base_str += (
+                f"\nRiver forcing: <{self.river_forcing.__class__.__name__} instance>"
+            )
         if len(self.surface_forcing) > 0:
             base_str += (
                 f"\nSurface forcing: <list of {len(self.surface_forcing)} "
@@ -334,6 +344,10 @@ class ROMSSimulation(Simulation):
         if hasattr(self, "tidal_forcing") and self.tidal_forcing is not None:
             repr_str += (
                 f"\ntidal_forcing = <{self.tidal_forcing.__class__.__name__} instance>,"
+            )
+        if hasattr(self, "river_forcing") and self.river_forcing is not None:
+            repr_str += (
+                f"\nriver_forcing = <{self.river_forcing.__class__.__name__} instance>,"
             )
         if hasattr(self, "surface_forcing") and len(self.surface_forcing) > 0:
             repr_str += (
@@ -453,6 +467,8 @@ class ROMSSimulation(Simulation):
             input_datasets.append(self.initial_conditions)
         if self.tidal_forcing is not None:
             input_datasets.append(self.tidal_forcing)
+        if self.river_forcing is not None:
+            input_datasets.append(self.river_forcing)
         if len(self.boundary_forcing) > 0:
             input_datasets.extend(self.boundary_forcing)
         if len(self.surface_forcing) > 0:
@@ -560,6 +576,13 @@ class ROMSSimulation(Simulation):
                 **tidal_forcing_kwargs
             )
 
+        # Construct any ROMSRiverForcing instance:
+        river_forcing_kwargs = simulation_dict.get("river_forcing")
+        if river_forcing_kwargs is not None:
+            simulation_kwargs["river_forcing"] = ROMSRiverForcing(
+                **river_forcing_kwargs
+            )
+
         # Construct any ROMSBoundaryForcing instances:
         boundary_forcing_entries = simulation_dict.get("boundary_forcing", [])
         if len(boundary_forcing_entries) > 0:
@@ -628,6 +651,8 @@ class ROMSSimulation(Simulation):
             simulation_dict["initial_conditions"] = self.initial_conditions.to_dict()
         if self.tidal_forcing is not None:
             simulation_dict["tidal_forcing"] = self.tidal_forcing.to_dict()
+        if self.river_forcing is not None:
+            simulation_dict["river_forcing"] = self.river_forcing.to_dict()
         if len(self.surface_forcing) > 0:
             simulation_dict["surface_forcing"] = [
                 sf.to_dict() for sf in self.surface_forcing
@@ -885,6 +910,18 @@ class ROMSSimulation(Simulation):
                 )
             runtime_code_forcing_str += (
                 "\n     " + partitioned_files_to_runtime_code_string(self.tidal_forcing)
+            )
+
+        if self.river_forcing is not None:
+            if len(self.river_forcing.partitioned_files) == 0:
+                raise ValueError(
+                    "ROMSSimulation has river_forcing attribute "
+                    + "but could not find a local path to a partitioned ROMS "
+                    + "river forcing file. Run ROMSSimulation.pre_run() "
+                    + " to partition ROMS input datasets and try again."
+                )
+            runtime_code_forcing_str += (
+                "\n     " + partitioned_files_to_runtime_code_string(self.river_forcing)
             )
 
         runtime_code_modifications[nl_idx]["__FORCING_FILES_PLACEHOLDER__"] = (
