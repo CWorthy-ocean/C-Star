@@ -378,17 +378,17 @@ def _run_cmd(
 
     Examples:
     --------
-    In: _run_cmd("python foo.py", "Running script", "Script completed")
+    In: _run_cmd("python foo.py", msg_pre="Running script", msg_post="Script completed")
     Out: Running script
          Script completed
 
     In: _run_cmd("python foo.py")
     Out: Running command: python foo.py
-         Command completed successfully. STDOUT: <output of foo.py>
+         Command completed successfully.
 
     In: _run_cmd("python return_nonzero.py")
     Out: Running command: python return_nonzero.py
-         Command python return_nonzero.py failed: <stderror of foo.py>
+         Command `python return_nonzero.py` failed. STDERR: <stderror of foo.py>
     """
     print(msg_pre or f"Running command: {cmd}")
     stdout: str = ""
@@ -421,5 +421,5 @@ def _run_cmd(
 
         print(msg)
 
-    print(msg_post or f"Command completed successfully. STDOUT: {result.stdout}")
+    print(msg_post or "Command completed successfully.")
     return stdout
