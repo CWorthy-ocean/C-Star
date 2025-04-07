@@ -100,7 +100,7 @@ class ExecutionHandler(ABC, LoggingMixin):
 
         pass
 
-    def updates(self, seconds: int = 10, confirm_indefinite: bool = True):
+    def updates(self, seconds: float = 10, confirm_indefinite: bool = True):
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
