@@ -116,7 +116,7 @@ class TestExecutionHandlerUpdates:
         updater_thread.start()
 
         # Run the `updates` method
-        handler.updates(seconds=1)
+        handler.updates(seconds=0.25)
 
         # Ensure both initial and live update lines are printed
         captured = caplog.text
