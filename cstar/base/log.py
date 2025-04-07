@@ -28,21 +28,6 @@ def get_logger(
     fmt = format or DEFAULT_LOG_FORMAT
     logging.basicConfig(level=logging.DEBUG, format=fmt)
 
-    # formatter = logging.Formatter(fmt)
-
-    # err_handler = logging.StreamHandler(sys.stderr)
-    # err_handler.setLevel(logging.ERROR)
-    # err_handler.setFormatter(formatter)
-
-    # log_handler = logging.StreamHandler(sys.stdout)
-    # log_handler.setLevel(logging.INFO)
-    # log_handler.setFormatter(formatter)
-
-    # handlers = [err_handler, log_handler]
-
-    # for h in handlers:
-    #     logger.addHandler(h)
-
     return logger
 
 
