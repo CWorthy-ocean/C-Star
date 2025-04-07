@@ -90,10 +90,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
             f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=target / "Work",
             msg_pre="Compiling NHMG library...",
-            msg_err=(
-                "Error {result.returncode} when compiling ROMS' NHMG library. STDERR stream: "
-                "\n {result.stderr}"
-            ),
+            msg_err="Error when compiling ROMS' NHMG library.",
             raise_on_error=True,
         )
         _run_cmd(
@@ -101,9 +98,6 @@ class ROMSExternalCodeBase(ExternalCodeBase):
             cwd=target / "Tools-Roms",
             msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
             msg_post=f"UCLA-ROMS is installed at {target}",
-            msg_err=(
-                "Error {result.returncode} when compiling Tools-Roms. STDERR stream: "
-                "\n {result.stderr}"
-            ),
+            msg_err="Error when compiling Tools-Roms.",
             raise_on_error=True,
         )

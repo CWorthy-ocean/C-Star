@@ -311,6 +311,7 @@ class TestScheduler:
 
         Captures printed error messages to ensure the failure is logged correctly.
         """
+        capsys.readouterr()  # Clear previous output
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying CPUs"
         )

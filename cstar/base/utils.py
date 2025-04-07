@@ -367,8 +367,7 @@ def _run_cmd(
         An overridden message logged after the command is successfully executed.
     msg_err (str | None), default = None):
         An overridden message logged when a command returns a non-zero code. Logs
-        will be supplied with the subprocess output using the name `result`,
-        e.g. `msg_err.format(result=result)`.
+        will automatically append the stderr output of the command.
     raise_on_error (bool, default = False):
         If True, raises a RuntimeError if the command returns a non-zero code.
 
@@ -413,9 +412,9 @@ def _run_cmd(
 
     if result.returncode != 0:
         if msg_err:
-            msg = msg_err.format(result=result)
+            msg = f"{msg_err} STDERR: {result.stderr.strip()}"
         else:
-            msg = f"Command `{cmd}` failed: {result.stderr.strip()}"
+            msg = f"Command `{cmd}` failed. STDERR: {result.stderr.strip()}"
 
         if raise_on_error:
             raise RuntimeError(msg)

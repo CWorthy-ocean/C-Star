@@ -437,7 +437,7 @@ class SlurmScheduler(Scheduler):
         """
         if stdout := _run_cmd(
             'scontrol show nodes | grep -o "cpu=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
-            msg_err="Error querying node property. STDERR: {result.stderr}",
+            msg_err="Error querying node property.",
         ):
             return int(stdout)
 
@@ -464,7 +464,7 @@ class SlurmScheduler(Scheduler):
 
         if stdout := _run_cmd(
             'scontrol show nodes | grep -o "RealMemory=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
-            msg_err="Error querying node property. STDERR: {result.stderr}",
+            msg_err="Error querying node property.",
         ):
             return float(stdout) / (1024)
 
@@ -521,7 +521,7 @@ class PBSScheduler(Scheduler):
 
         if stdout := _run_cmd(
             'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
-            msg_err="Error querying node property. STDERR: {result.stderr}",
+            msg_err="Error querying node property.",
         ):
             return int(stdout)
 
@@ -548,7 +548,7 @@ class PBSScheduler(Scheduler):
 
         stdout = _run_cmd(
             'pbsnodes -a | grep "resources_available.mem" | cut -d== -f2 | sort -nr | head -1',
-            msg_err="Error querying node property. STDERR: {result.stderr}",
+            msg_err="Error querying node property.",
         )
         if stdout.endswith("kb"):
             return float(stdout[:-2]) / (1024**2)  # Convert kilobytes to gigabytes

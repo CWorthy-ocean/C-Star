@@ -63,9 +63,6 @@ class MARBLExternalCodeBase(ExternalCodeBase):
             cwd=Path(target) / "src",
             msg_pre="Compiling MARBL...",
             msg_post=f"MARBL successfully installed at {target}",
-            msg_err=(
-                "Error {result.returncode} when compiling MARBL. STDERR stream: "
-                "\n {result.stderr}"
-            ),
+            msg_err="Error when compiling MARBL.",
             raise_on_error=True,
         )

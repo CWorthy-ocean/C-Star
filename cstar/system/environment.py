@@ -205,12 +205,7 @@ class CStarEnvironment:
         command = f"{lmod_path} python {' '.join(list(args))}"
         stdout = _run_cmd(
             command,
-            msg_err=(
-                "Linux Environment Modules command "
-                f"\n{command} "
-                "\n failed with code {result.returncode}. STDERR: "
-                "{result.stderr}"
-            ),
+            msg_err=f"Linux Environment Modules command `{command}` failed.",
             raise_on_error=True,
         )
 

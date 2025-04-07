@@ -368,7 +368,7 @@ class TestExceptions:
 
         with pytest.raises(
             RuntimeError,
-            match="Linux Environment Modules command \n/mock/lmod python reset \n failed with code 1. STDERR: Module reset error",
+            match="Linux Environment Modules command `/mock/lmod python reset` failed. STDERR: Module reset error",
         ):
             MockEnvironment()
 
@@ -414,6 +414,6 @@ class TestExceptions:
 
         with pytest.raises(
             RuntimeError,
-            match=r"Linux Environment Modules command\s+\n/mock/lmod python load module1\s+\n failed with code 1\. STDERR: Module load error",
+            match=r"Linux Environment Modules command\s+`/mock/lmod python load module1\s` failed. STDERR: Module load error",
         ):
             MockEnvironment()

@@ -594,10 +594,7 @@ class SlurmJob(SchedulerJob):
             return ExecutionStatus.UNSUBMITTED
         else:
             sacct_cmd = f"sacct -j {self.id} --format=State%20 --noheader"
-            msg_err = (
-                f"Failed to retrieve job status using {sacct_cmd}."
-                "STDOUT: {result.stdout}, STDERR: {result.stderr}"
-            )
+            msg_err = f"Failed to retrieve job status using {sacct_cmd}."
             stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
 
         # Map sacct states to ExecutionStatus enum
@@ -687,7 +684,7 @@ class SlurmJob(SchedulerJob):
             f"sbatch {self.script_path}",
             cwd=self.run_path,
             env=slurm_env,
-            msg_err="Non-zero exit code when submitting job. STDERR: \n{result.stderr}",
+            msg_err="Non-zero exit code when submitting job.",
             raise_on_error=True,
         )
 
@@ -722,7 +719,7 @@ class SlurmJob(SchedulerJob):
             cwd=self.run_path,
             raise_on_error=True,
             msg_post=f"Job {self.id} cancelled",
-            msg_err="Non-zero exit code when cancelling job. STDERR: \n{result.stderr}",
+            msg_err="Non-zero exit code when cancelling job.",
         )
 
 
@@ -840,10 +837,7 @@ class PBSJob(SchedulerJob):
             return ExecutionStatus.UNSUBMITTED
 
         qstat_cmd = f"qstat -x -f -F json {self.id}"
-        msg_err = (
-            f"Failed to retrieve job status using {qstat_cmd}."
-            "STDOUT: {result.stdout}, STDERR: {result.stderr}"
-        )
+        msg_err = f"Failed to retrieve job status using {qstat_cmd}."
         stdout = _run_cmd(qstat_cmd, raise_on_error=True, msg_err=msg_err)
 
         # Parse the JSON output
@@ -905,7 +899,7 @@ class PBSJob(SchedulerJob):
             f"qsub {self.script_path}",
             cwd=self.run_path,
             raise_on_error=True,
-            msg_err="Non-zero exit code when submitting job. STDERR: \n{result.stderr}",
+            msg_err="Non-zero exit code when submitting job.",
         )
 
         # Validate the format of the job ID (e.g., "<int>.<str>")
@@ -940,9 +934,7 @@ class PBSJob(SchedulerJob):
         _run_cmd(
             f"qdel {self.id}",
             cwd=self.run_path,
-            msg_err=(
-                "Non-zero exit code when cancelling job. STDERR: \n{result.stderr}"
-            ),
+            msg_err="Non-zero exit code when cancelling job.",
             msg_post=f"Job {self.id} cancelled",
             raise_on_error=True,
         )

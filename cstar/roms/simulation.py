@@ -1177,10 +1177,7 @@ class ROMSSimulation(Simulation):
             _run_cmd(
                 "make compile_clean",
                 cwd=build_dir,
-                msg_err=(
-                    "Error {result.returncode} when compiling ROMS. STDERR stream: "
-                    "\n {result.stderr}"
-                ),
+                msg_err="Error when compiling ROMS.",
                 raise_on_error=True,
             )
 
@@ -1189,10 +1186,7 @@ class ROMSSimulation(Simulation):
             cwd=build_dir,
             msg_pre="Compiling UCLA-ROMS configuration...",
             msg_post=f"UCLA-ROMS compiled at {build_dir}",
-            msg_err=(
-                "Error {result.returncode} when compiling ROMS. STDERR stream: "
-                "\n {result.stderr}"
-            ),
+            msg_err="Error when compiling ROMS.",
             raise_on_error=True,
         )
 
@@ -1445,10 +1439,7 @@ class ROMSSimulation(Simulation):
                     f"ncjoin {wildcard_pattern}",
                     cwd=output_dir,
                     msg_pre=f"Joining netCDF files {wildcard_pattern}...",
-                    msg_err=(
-                        "Error {result.returncode} while joining ROMS output. "
-                        "STDERR stream:\n {result.stderr}"
-                    ),
+                    msg_err="Error while joining ROMS output.",
                     raise_on_error=True,
                 )
 

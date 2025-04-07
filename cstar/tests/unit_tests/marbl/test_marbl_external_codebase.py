@@ -141,6 +141,6 @@ class TestMARBLExternalCodeBaseGet:
         # Test
         with pytest.raises(
             RuntimeError,
-            match="Error 1 when compiling MARBL. STDERR stream: \n Mocked MARBL Compilation Failure",
+            match="Error when compiling MARBL. STDERR: Mocked MARBL Compilation Failure",
         ):
             marbl_codebase.get(target=tmp_path)
