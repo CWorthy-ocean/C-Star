@@ -163,4 +163,4 @@ class ExecutionHandler(ABC, LoggingMixin):
                     else:
                         time.sleep(0.1)  # 100ms delay between updates
         except KeyboardInterrupt:
-            self.log.exception("Live status updates stopped by user.")
+            self.log.warning("Live status updates stopped by user.")
