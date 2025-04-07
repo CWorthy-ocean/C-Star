@@ -449,7 +449,7 @@ class SlurmScheduler(Scheduler):
             capture_output=True,
         )
         if result.returncode != 0:
-            self.log.info(f"Error querying node property. STDERR: {result.stderr}")
+            self.log.error(f"Error querying node property. STDERR: {result.stderr}")
         so = result.stdout.strip()
         return int(so) if so else None
 
@@ -479,7 +479,7 @@ class SlurmScheduler(Scheduler):
             capture_output=True,
         )
         if result.returncode != 0:
-            self.log.info(f"Error querying node property. STDERR: {result.stderr}")
+            self.log.error(f"Error querying node property. STDERR: {result.stderr}")
         so = result.stdout.strip()
         return float(so) / (1024) if so else None
 
@@ -539,7 +539,7 @@ class PBSScheduler(Scheduler):
             capture_output=True,
         )
         if result.returncode != 0:
-            self.log.info(f"Error querying node property. STDERR: {result.stderr}")
+            self.log.error(f"Error querying node property. STDERR: {result.stderr}")
         so = result.stdout.strip()
         return int(so) if so else None
 
@@ -569,7 +569,7 @@ class PBSScheduler(Scheduler):
             capture_output=True,
         )
         if result.returncode != 0:
-            self.log.info(f"Error querying node property. STDERR: {result.stderr}")
+            self.log.error(f"Error querying node property. STDERR: {result.stderr}")
             return None
 
         so = result.stdout.strip()
