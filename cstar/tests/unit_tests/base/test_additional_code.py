@@ -1,3 +1,4 @@
+import logging
 import pytest
 
 from pathlib import Path
@@ -745,7 +746,7 @@ class TestAdditionalCodeGet:
         assert self.mock_exists.call_count == 3
         assert self.mock_copy.call_count == 2  # Only the first two files were copied
 
-    def test_get_with_template_files(self, local_additional_code):
+    def test_get_with_template_files(self, local_additional_code, log: logging.Logger):
         """Test that `get` correctly handles files with the '_TEMPLATE' filename suffix.
 
         Fixtures:
@@ -774,7 +775,7 @@ class TestAdditionalCodeGet:
         # Call get method
         local_additional_code.get("/mock/local/dir")
 
-        print(f"DEBUG: All copy calls: {self.mock_copy.call_args_list}")
+        log.debug(f"DEBUG: All copy calls: {self.mock_copy.call_args_list}")
         # Ensure that the template files were copied and renamed
         assert self.mock_copy.call_count == 4  # 2 original files + 2 template renames
         self.mock_copy.assert_any_call(

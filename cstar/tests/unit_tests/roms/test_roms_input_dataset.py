@@ -165,10 +165,12 @@ class TestStrAndRepr:
             "local_file.001.nc",
             "local_file.002.nc",
         ]
-        expected_str = dedent("""\
+        expected_str = dedent(
+            """\
             Partitioned files: ['local_file.001.nc',
                                 'local_file.002.nc']
-        """).strip()
+        """
+        ).strip()
         actual_str = str(local_roms_netcdf_dataset).strip()
         assert (
             expected_str in actual_str
@@ -195,10 +197,12 @@ class TestStrAndRepr:
             "local_file.001.nc",
             "local_file.002.nc",
         ]
-        expected_repr = dedent("""\
+        expected_repr = dedent(
+            """\
             State: <partitioned_files = ['local_file.001.nc',
                                          'local_file.002.nc']>
-        """).strip()
+        """
+        ).strip()
         actual_repr = repr(local_roms_netcdf_dataset)
 
         # Normalize whitespace for comparison
@@ -236,11 +240,13 @@ class TestStrAndRepr:
         ]
         local_roms_netcdf_dataset.working_path = "/some/path/local_file.nc"
 
-        expected_repr = dedent("""\
+        expected_repr = dedent(
+            """\
             State: <working_path = /some/path/local_file.nc (does not exist),
                     partitioned_files = ['local_file.001.nc',
                                          'local_file.002.nc'] >
-        """).strip()
+        """
+        ).strip()
         actual_repr = repr(local_roms_netcdf_dataset)
 
         # Normalize whitespace for comparison
@@ -711,7 +717,10 @@ class TestROMSInputDatasetGet:
         new_callable=mock.PropertyMock,
     )
     def test_get_skips_if_working_path_in_same_parent_dir(
-        self, mock_exists_locally, local_roms_yaml_dataset
+        self,
+        mock_exists_locally,
+        local_roms_yaml_dataset,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Test that the `get` method skips execution when `working_path` is set and
         points to the same parent directory as `local_dir`.
@@ -723,12 +732,12 @@ class TestROMSInputDatasetGet:
         Fixtures:
         ---------
         - `local_roms_yaml_dataset`: Provides a ROMSInputDataset with a mocked `source` attribute.
+        - `caplog`: Captures log outputs to verify the correct skip message is displayed.
 
         Mocks:
         ------
         - `exists_locally`: Simulates the local existence check for `working_path`.
         - `Path.resolve`: Simulates resolving paths to their actual locations.
-        - `print`: Captures output to ensure the correct skip message is displayed.
 
         Asserts:
         --------
@@ -745,14 +754,11 @@ class TestROMSInputDatasetGet:
         # Set the `mock_resolve` side effect to resolve `local_dir` correctly
         self.mock_resolve.return_value = Path("some/local/dir")
 
-        # Capture print output
-        with mock.patch("builtins.print") as mock_print:
-            local_roms_yaml_dataset.get(local_dir="some/local/dir")
+        local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
         # Assert the skip message was printed
-        mock_print.assert_called_once_with(
-            "Input dataset already exists in some/local/dir, skipping."
-        )
+        captured = caplog.text
+        assert "Input dataset already exists in some/local/dir, skipping." in captured
 
         # Ensure no further operations were performed
         self.mock_get.assert_not_called()
@@ -763,7 +769,10 @@ class TestROMSInputDatasetGet:
         new_callable=mock.PropertyMock,
     )
     def test_get_skips_if_working_path_list_in_same_parent_dir(
-        self, mock_exists_locally, local_roms_yaml_dataset
+        self,
+        mock_exists_locally,
+        local_roms_yaml_dataset,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Test that the `get` method skips execution when `working_path` is a list and
         its first element points to the same parent directory as `local_dir`.
@@ -775,12 +784,12 @@ class TestROMSInputDatasetGet:
         Fixtures:
         ---------
         - `local_roms_yaml_dataset`: Provides a ROMSInputDataset with a mocked `source` attribute.
+        - `caplog`: Captures log outputs to verify the correct skip message is displayed.
 
         Mocks:
         ------
         - `exists_locally`: Simulates the local existence check for `working_path`.
         - `Path.resolve`: Simulates resolving paths to their actual locations.
-        - `print`: Captures output to ensure the correct skip message is displayed.
 
         Asserts:
         --------
@@ -800,14 +809,11 @@ class TestROMSInputDatasetGet:
         # Set the `mock_resolve` side effect to resolve `local_dir` correctly
         self.mock_resolve.return_value = Path("some/local/dir")
 
-        # Capture print output
-        with mock.patch("builtins.print") as mock_print:
-            local_roms_yaml_dataset.get(local_dir="some/local/dir")
+        local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
         # Assert the skip message was printed
-        mock_print.assert_called_once_with(
-            "Input dataset already exists in some/local/dir, skipping."
-        )
+        captured = caplog.text
+        assert "Input dataset already exists in some/local/dir, skipping." in captured
 
         # Ensure no further operations were performed
         self.mock_get.assert_not_called()
@@ -851,8 +857,7 @@ class TestROMSInputDatasetGet:
             self.mock_resolve.return_value = Path("some/local/dir")
 
             # Call the method under test
-            with mock.patch("builtins.print") as mock_print:
-                local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
+            local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
 
             # Assert the parent `get` method was called with the correct arguments
             self.mock_get.assert_called_once_with(
@@ -860,7 +865,6 @@ class TestROMSInputDatasetGet:
             )
 
             # Ensure no further processing happened
-            mock_print.assert_not_called()
             assert (
                 not self.mock_yaml_load.called
             ), "Expected no calls to yaml.safe_load, but some occurred."

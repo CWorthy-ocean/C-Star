@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from enum import Enum, auto
 from pathlib import Path
 
+from cstar.base.log import LoggingMixin
+
 
 class ExecutionStatus(Enum):
     """Enum representing possible states of a process to be executed.
@@ -43,7 +45,7 @@ class ExecutionStatus(Enum):
         return self.name.lower()  # Convert enum name to lowercase for display
 
 
-class ExecutionHandler(ABC):
+class ExecutionHandler(ABC, LoggingMixin):
     """Abstract base class for managing the execution of a task or process.
 
     This class defines the interface and common behavior for handling task
@@ -126,13 +128,13 @@ class ExecutionHandler(ABC):
         """
 
         if self.status != ExecutionStatus.RUNNING:
-            print(
+            self.log.warning(
                 f"This job is currently not running ({self.status}). Live updates cannot be provided."
             )
             if (self.status in {ExecutionStatus.FAILED, ExecutionStatus.COMPLETED}) or (
                 self.status == ExecutionStatus.CANCELLED and self.output_file.exists()
             ):
-                print(f"See {self.output_file.resolve()} for job output")
+                self.log.info(f"See {self.output_file.resolve()} for job output")
             return
 
         if (seconds == 0) and (confirm_indefinite):
@@ -157,8 +159,8 @@ class ExecutionHandler(ABC):
                     if self.status != ExecutionStatus.RUNNING:
                         return
                     elif line:
-                        print(line, end="")
+                        self.log.info(line)
                     else:
                         time.sleep(0.1)  # 100ms delay between updates
         except KeyboardInterrupt:
-            print("\nLive status updates stopped by user.")
+            self.log.exception("Live status updates stopped by user.")

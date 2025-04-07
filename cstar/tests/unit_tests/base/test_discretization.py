@@ -1,3 +1,4 @@
+import logging
 import pytest
 from cstar.base.discretization import Discretization
 
@@ -8,10 +9,10 @@ def discretization():
     return Discretization(time_step=3)
 
 
-def test_init(discretization):
+def test_init(discretization, log: logging.Logger):
     """Test the attributes were set correctly."""
     assert discretization.time_step == 3
-    print(discretization)
+    log.info(discretization)
 
 
 def test_str(discretization):
