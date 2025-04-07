@@ -1091,7 +1091,7 @@ class ROMSSimulation(Simulation):
 
         # Setup ExternalCodeBase
         infostr = f"Configuring {self.__class__.__name__}"
-        (infostr + "\n" + "-" * len(infostr))
+        self.log.info(infostr + "\n" + "-" * len(infostr))
         self.log.info(f"Setting up {self.codebase.__class__.__name__}...")
         self.codebase.handle_config_status()
 
