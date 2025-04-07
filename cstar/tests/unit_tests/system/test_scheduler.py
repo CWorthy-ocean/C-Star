@@ -221,7 +221,7 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, capsys
+        self, mock_subprocess_run, caplog
     ):
         """Validate SlurmScheduler handles subprocess failures when querying CPUs.
 
@@ -235,11 +235,9 @@ class TestScheduler:
         result = scheduler.global_max_cpus_per_node
         assert result is None
 
-        captured = capsys.readouterr()
-        assert (
-            "Error querying node property. Return Code: `2`. STDERR:\nError querying CPUs"
-            in captured.out
-        )
+        expected_err = "Error querying node property. STDERR: Error querying CPUs"
+        captured = caplog.text
+        assert expected_err in captured
 
     def test_slurmscheduler_global_max_mem_per_node_gb_success(
         self, mock_subprocess_run
@@ -265,7 +263,7 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_mem_per_node_gb_failure(
-        self, mock_subprocess_run, capsys
+        self, mock_subprocess_run, caplog
     ):
         """Validate SlurmScheduler handles subprocess failures when querying memory.
 
@@ -279,11 +277,8 @@ class TestScheduler:
         result = scheduler.global_max_mem_per_node_gb
         assert result is None
 
-        captured = capsys.readouterr()
-        assert (
-            "Error querying node property. Return Code: `1`. STDERR:\nError querying memory"
-            in captured.out
-        )
+        captured = caplog.text
+        assert "Error querying node property. STDERR: Error querying memory" in captured
 
     def test_pbsscheduler_global_max_cpus_per_node_success(self, mock_subprocess_run):
         """Confirm PBSScheduler queries and sets the maximum CPUs per node successfully.
@@ -306,7 +301,7 @@ class TestScheduler:
         )
 
     def test_pbsscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, capsys
+        self, mock_subprocess_run, caplog
     ):
         """Validate PBSScheduler handles subprocess failures when querying CPUs.
 
@@ -320,14 +315,11 @@ class TestScheduler:
         result = scheduler.global_max_cpus_per_node
         assert result is None
 
-        captured = capsys.readouterr()
-        assert (
-            "Error querying node property. Return Code: `1`. STDERR:\nError querying CPUs"
-            in captured.out
-        )
+        captured = caplog.text
+        assert "Error querying node property. STDERR: Error querying CPUs" in captured
 
     def test_pbsscheduler_global_max_mem_per_node_gb_failure(
-        self, mock_subprocess_run, capsys
+        self, mock_subprocess_run, caplog
     ):
         """Validate PBSScheduler handles subprocess failures when querying memory.
 
@@ -341,11 +333,8 @@ class TestScheduler:
         result = scheduler.global_max_mem_per_node_gb
         assert result is None
 
-        captured = capsys.readouterr()
-        assert (
-            "Error querying node property. Return Code: `1`. STDERR:\nError querying memory"
-            in captured.out
-        )
+        captured = caplog.text
+        assert "Error querying node property. STDERR: Error querying memory" in captured
 
     @pytest.mark.parametrize(
         "stdout,expected",

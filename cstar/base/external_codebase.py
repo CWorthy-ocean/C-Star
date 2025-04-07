@@ -8,11 +8,11 @@ from cstar.base.gitutils import (
     _get_repo_remote,
     _get_repo_head_hash,
 )
-
+from cstar.base.log import LoggingMixin
 from cstar.system.manager import cstar_sysmgr
 
 
-class ExternalCodeBase(ABC):
+class ExternalCodeBase(ABC, LoggingMixin):
     """Abstract base class to manage external non-python dependencies of C-Star.
 
     Attributes
@@ -229,7 +229,7 @@ class ExternalCodeBase(ABC):
 
         match self.local_config_status:
             case 0:
-                print(
+                self.log.info(
                     f"{self.__class__.__name__} correctly configured. Nothing to be done"
                 )
                 return
@@ -246,7 +246,7 @@ class ExternalCodeBase(ABC):
                 )
             case 2:
                 head_hash = _get_repo_head_hash(local_root)
-                print(
+                self.log.info(
                     "############################################################\n"
                     + f"C-STAR: {self.expected_env_var} points to the correct repo "
                     + f"{self.source_repo} but HEAD is at: \n"
@@ -270,13 +270,13 @@ class ExternalCodeBase(ABC):
                     elif yn.casefold() in ["n", "no"]:
                         raise EnvironmentError()
                     else:
-                        print("invalid selection; enter 'y' or 'n'")
+                        self.log.warning("invalid selection; enter 'y' or 'n'")
             case 3:
                 ext_dir = (
                     cstar_sysmgr.environment.package_root
                     / f"externals/{self.repo_basename}"
                 )
-                print(
+                self.log.warning(
                     "#######################################################\n"
                     + f"C-STAR: {self.expected_env_var}"
                     + " not found in current cstar_sysmgr.environment. \n"
@@ -303,7 +303,7 @@ class ExternalCodeBase(ABC):
                         self.get(Path(custom_path).resolve())
                         break
                     else:
-                        print("invalid selection; enter 'y','n',or 'custom'")
+                        self.log.warning("invalid selection; enter 'y','n',or 'custom'")
 
     @abstractmethod
     def get(self, target: str | Path) -> None:

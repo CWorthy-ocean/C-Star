@@ -1,3 +1,4 @@
+import logging
 import re
 import pytest
 import yaml
@@ -5,6 +6,7 @@ import pickle
 from typing import cast, Any
 from pathlib import Path
 from datetime import datetime
+from typing import Tuple, Generator
 from unittest.mock import patch, mock_open, MagicMock, PropertyMock
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.roms.simulation import ROMSSimulation
@@ -27,7 +29,9 @@ from cstar.system.manager import cstar_sysmgr
 
 
 @pytest.fixture
-def example_roms_simulation(tmp_path):
+def example_roms_simulation(
+    tmp_path,
+) -> Generator[Tuple[ROMSSimulation, Path], None, None]:
     """Fixture providing a `ROMSSimulation` instance for testing.
 
     This fixture initializes a `ROMSSimulation` with a comprehensive configuration,
@@ -865,7 +869,7 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
 )"""
         assert expected_repr == sim.__repr__()
 
-    def test_tree(self, example_roms_simulation):
+    def test_tree(self, example_roms_simulation, log: logging.Logger):
         """Test the `tree` method of `ROMSSimulation`.
 
         Ensures that calling `tree()` on a `ROMSSimulation` instance correctly
@@ -905,8 +909,8 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
         └── file2.opt
 """
 
-        # print(sim.tree())
-        # print(expected_tree)
+        log.debug(sim.tree())
+        log.debug(expected_tree)
         assert sim.tree() == expected_tree
 
 
@@ -1946,13 +1950,16 @@ class TestProcessingAndExecution:
         assert sim.exe_path == build_dir / "roms"
         assert sim._exe_hash == "mockhash123"
 
-    @patch("builtins.print")  # Mock print to check if the early exit message is printed
     @patch(
         "cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash"
     )  # Mock hash function
     @patch("subprocess.run")  # Mock subprocess (should not be called)
     def test_build_no_rebuild(
-        self, mock_subprocess, mock_get_hash, mock_print, example_roms_simulation
+        self,
+        mock_subprocess,
+        mock_get_hash,
+        example_roms_simulation,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Tests that `build` does not recompile if the executable already exists and is
         unchanged.
@@ -1968,7 +1975,7 @@ class TestProcessingAndExecution:
         - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
         - `mock_subprocess` : Mocks subprocess calls for compilation (should not be called).
         - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
-        - `mock_print` : Mocks `print` to verify early exit message.
+        - `caplog` : Captures log outputs to verify early exit message.
 
         Assertions
         ----------
@@ -1987,18 +1994,21 @@ class TestProcessingAndExecution:
                 return_value=True,
             ),
             patch.object(Path, "exists", return_value=True),
-        ):  # Pretend the executable exists
+        ):
+            # Pretend the executable exists
             sim._exe_hash = "dummy_hash"
             sim.compile_time_code.working_path = build_dir
             sim.build(rebuild=False)
 
-            # Ensure early exit message was printed
-            mock_print.assert_any_call(
+            # Ensure early exit exception was triggered
+            expected_msg = (
                 f"ROMS has already been built at {build_dir/"roms"}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
                 "ROMSSimulation.build(rebuild = True)"
             )
+            captured = caplog.text
+            assert expected_msg in captured
 
             # Ensure subprocess.run was *not* called
             mock_subprocess.assert_not_called()
@@ -2487,10 +2497,13 @@ class TestProcessingAndExecution:
         mock_persist.assert_called_once()
 
     @patch("cstar.roms.ROMSSimulation.persist")
-    @patch("builtins.print")  # Mock print to check output
     @patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
     def test_post_run_prints_message_if_no_files(
-        self, mock_glob, mock_print, mock_persist, example_roms_simulation
+        self,
+        mock_glob,
+        mock_persist,
+        example_roms_simulation,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Tests that `post_run` prints a message and exits early if no output files are
         found.
@@ -2502,11 +2515,11 @@ class TestProcessingAndExecution:
         ----------------
         - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance.
         - `mock_glob` : Mocks `Path.glob` to return an empty list, simulating no files.
-        - `mock_print` : Mocks `print()` to verify the correct message is displayed.
+        - `caplog` : Capture logging output to verify the correct message is displayed.
 
         Assertions
         ----------
-        - Ensures `print()` is called with the expected message.
+        - Ensures `logger.info()` is called with the expected message.
         - Confirms that `Path.glob` is called once to check for output files.
         """
 
@@ -2520,8 +2533,9 @@ class TestProcessingAndExecution:
         # Call post_run
         sim.post_run()
 
-        # Check print was called with the expected message
-        mock_print.assert_called_once_with("no suitable output found")
+        # Check that the expected messages were logged
+        captured = caplog.text
+        assert "No suitable output found" in captured
 
         # Ensure glob was called once
         mock_glob.assert_called_once()

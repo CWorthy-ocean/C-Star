@@ -1,6 +1,7 @@
 import time
 import threading
 from unittest.mock import patch, PropertyMock
+import pytest
 from pathlib import Path
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 
@@ -34,7 +35,7 @@ class TestExecutionHandlerUpdates:
         Confirms that `updates()` runs indefinitely when `seconds=0` and allows termination via user interruption.
     """
 
-    def test_updates_non_running_job(self, tmp_path):
+    def test_updates_non_running_job(self, tmp_path, caplog: pytest.LogCaptureFixture):
         """Validates that `updates()` provides appropriate feedback when the job is not
         running.
 
@@ -45,8 +46,8 @@ class TestExecutionHandlerUpdates:
         -----
         MockExecutionHandler.status
             Mocked to return `ExecutionStatus.COMPLETED`, simulating a non-running job.
-        builtins.print
-            Mocked to capture printed messages for validation.
+        LogCaptureFixture
+            Captures log outputs to verify output messages.
 
         Asserts
         -------
@@ -58,16 +59,18 @@ class TestExecutionHandlerUpdates:
             ExecutionStatus.COMPLETED, tmp_path / "mock_output.log"
         )
 
-        with patch("builtins.print") as mock_print:
-            handler.updates(seconds=10)
-            mock_print.assert_any_call(
-                "This job is currently not running (completed). Live updates cannot be provided."
-            )
-            mock_print.assert_any_call(
-                f"See {handler.output_file.resolve()} for job output"
-            )
+        handler.updates(seconds=10)
 
-    def test_updates_running_job_with_tmp_file(self, tmp_path):
+        captured = caplog.text
+        assert (
+            "This job is currently not running (completed). Live updates cannot be provided."
+            in captured
+        )
+        assert f"See {handler.output_file.resolve()} for job output" in captured
+
+    def test_updates_running_job_with_tmp_file(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ):
         """Verifies that `updates()` streams live updates from the job's output file
         when the job is running.
 
@@ -80,8 +83,8 @@ class TestExecutionHandlerUpdates:
         -----
         MockExecutionHandler.status
             Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
-        builtins.print
-            Mocked to capture printed messages for validation.
+        LogCaptureFixture
+            Captures log outputs to verify output messages
 
         Asserts
         -------
@@ -113,17 +116,20 @@ class TestExecutionHandlerUpdates:
         updater_thread.start()
 
         # Run the `updates` method
-        with patch("builtins.print") as mock_print:
-            handler.updates(seconds=0.25)
+        handler.updates(seconds=1)
 
-            # Ensure both initial and live update lines are printed
-            for line in live_updates:
-                mock_print.assert_any_call(line, end="")
+        # Ensure both initial and live update lines are printed
+        captured = caplog.text
+
+        for line in live_updates:
+            assert line in captured
 
         # Ensure the thread finishes before the test ends
         updater_thread.join()
 
-    def test_updates_indefinite_with_seconds_param_0(self, tmp_path):
+    def test_updates_indefinite_with_seconds_param_0(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ):
         """Confirms that `updates()` runs indefinitely when `seconds=0` and allows
         termination via user interruption.
 
@@ -139,8 +145,8 @@ class TestExecutionHandlerUpdates:
             Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
         builtins.input
             Mocked to simulate user responses to the confirmation prompt.
-        builtins.print
-            Mocked to capture printed messages for validation.
+        LogCaptureFixture
+            Captures log outputs to verify output messages
         time.sleep
             Mocked to simulate a `KeyboardInterrupt` during indefinite updates.
 
@@ -169,15 +175,12 @@ class TestExecutionHandlerUpdates:
             # Patch input to simulate the confirmation prompt
             with patch("builtins.input", side_effect=["y"]) as mock_input:
                 # Replace `time.sleep` with a side effect that raises KeyboardInterrupt
-                with patch("builtins.print") as mock_print:
-                    # Simulate a KeyboardInterrupt during the updates call
-                    with patch("time.sleep", side_effect=KeyboardInterrupt):
-                        handler.updates(seconds=0)  # Run updates indefinitely
+                # Simulate a KeyboardInterrupt during the updates call
+                with patch("time.sleep", side_effect=KeyboardInterrupt):
+                    handler.updates(seconds=0)  # Run updates indefinitely
 
-                        # Assert that the "stopped by user" message was printed
-                        mock_print.assert_any_call(
-                            "\nLive status updates stopped by user."
-                        )
+                    # Assert that the "stopped by user" message was printed
+                    assert "Live status updates stopped by user." in caplog.text
 
                 # Verify that the prompt was displayed to the user
                 mock_input.assert_called_once_with(
@@ -190,7 +193,9 @@ class TestExecutionHandlerUpdates:
                     handler.updates(seconds=0)
                     mock_open.assert_not_called()
 
-    def test_updates_stops_when_status_changes(self, tmp_path):
+    def test_updates_stops_when_status_changes(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ):
         """Verifies that `updates()` stops execution when `status` changes to non-
         RUNNING.
 
@@ -233,19 +238,17 @@ class TestExecutionHandlerUpdates:
         updater_thread.start()
 
         # Run the `updates` method
-        with patch("builtins.print") as mock_print:
-            handler.updates(seconds=0, confirm_indefinite=False)
+        handler.updates(seconds=0, confirm_indefinite=False)
 
-            # Verify that only lines from `running_updates` were printed
-            printed_calls = [call[0][0] for call in mock_print.call_args_list]
-            # print(printed_calls)
+        # Verify that only lines from `running_updates` were printed
+        printed_calls = caplog.text
 
-            for line in running_updates:
-                assert line in printed_calls
+        for line in running_updates:
+            assert line in printed_calls
 
-            # Verify that lines from `completed_updates` were not printed
-            for line in completed_updates:
-                assert line not in printed_calls
+        # Verify that lines from `completed_updates` were not printed
+        for line in completed_updates:
+            assert line not in printed_calls
 
         # Ensure the thread finishes before the test ends
         updater_thread.join()

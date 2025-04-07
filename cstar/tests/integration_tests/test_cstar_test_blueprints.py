@@ -1,3 +1,4 @@
+import logging
 import pytest
 from cstar.roms.simulation import ROMSSimulation
 from cstar.tests.integration_tests.config import TEST_CONFIG
@@ -21,6 +22,7 @@ class TestCStar:
         fetch_roms_tools_source_data,
         fetch_remote_test_case_data,
         test_config_key,
+        log: logging.Logger,
     ):
         """Run the C-Star minimal test case from a selection of different blueprints.
 
@@ -47,6 +49,8 @@ class TestCStar:
         test_config_key (str):
            Key determining the specific variation of the test case that is run, as
            defined in the dictionary TEST_CONFIG in the config.py module
+        log (logging.Logger):
+            Logger instance for logging messages during test execution.
         """
 
         # Regardless of remote or local, if yaml_datasets we need roms-tools support data
@@ -57,10 +61,15 @@ class TestCStar:
             fetch_remote_test_case_data()
 
         config = TEST_CONFIG.get(test_config_key)
+        if config is None:
+            raise ValueError(
+                "No test configuration found for the provided key: "
+                f"{test_config_key}. Please check the TEST_CONFIG dictionary."
+            )
         template_blueprint = config.get("template_blueprint_path")
         strs_to_replace = config.get("strs_to_replace")
 
-        print(f"Creating ROMSSimulation in {tmpdir / 'cstar_test_simulation'}")
+        log.info(f"Creating ROMSSimulation in {tmpdir / 'cstar_test_simulation'}")
         modified_blueprint = modify_template_blueprint(
             template_blueprint_path=template_blueprint, strs_to_replace=strs_to_replace
         )

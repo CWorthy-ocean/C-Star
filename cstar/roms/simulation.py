@@ -1093,16 +1093,16 @@ class ROMSSimulation(Simulation):
 
         # Setup ExternalCodeBase
         infostr = f"Configuring {self.__class__.__name__}"
-        print(infostr + "\n" + "-" * len(infostr))
-        print(f"Setting up {self.codebase.__class__.__name__}...")
+        (infostr + "\n" + "-" * len(infostr))
+        self.log.info(f"Setting up {self.codebase.__class__.__name__}...")
         self.codebase.handle_config_status()
 
         if self.marbl_codebase is not None:
-            print(f"Setting up {self.marbl_codebase.__class__.__name__}...")
+            self.log.info(f"Setting up {self.marbl_codebase.__class__.__name__}...")
             self.marbl_codebase.handle_config_status()
 
         # Compile-time code
-        print(
+        self.log.info(
             "\nFetching compile-time code code..."
             + "\n----------------------------------"
         )
@@ -1110,12 +1110,12 @@ class ROMSSimulation(Simulation):
             self.compile_time_code.get(compile_time_code_dir)
 
         # Runtime code
-        print("\nFetching runtime code... " + "\n----------------------")
+        self.log.info("\nFetching runtime code... " + "\n----------------------")
         if self.runtime_code is not None:
             self.runtime_code.get(runtime_code_dir)
 
         # InputDatasets
-        print("\nFetching input datasets..." + "\n--------------------------")
+        self.log.info("\nFetching input datasets..." + "\n--------------------------")
         for inp in self.input_datasets:
             # Download input dataset if its date range overlaps Simulation's date range
             if (
@@ -1252,7 +1252,7 @@ class ROMSSimulation(Simulation):
             and (_get_sha256_hash(exe_path) == self._exe_hash)
             and not rebuild
         ):
-            print(
+            self.log.info(
                 f"ROMS has already been built at {exe_path}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
@@ -1516,7 +1516,7 @@ class ROMSSimulation(Simulation):
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
-            print("no suitable output found")
+            self.log.info("No suitable output found")
         else:
             (output_dir / "PARTITIONED").mkdir(exist_ok=True)
             for wildcard_pattern in unique_wildcards:

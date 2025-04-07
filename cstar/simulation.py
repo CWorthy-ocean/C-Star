@@ -9,11 +9,12 @@ from pathlib import Path
 from datetime import datetime
 
 from cstar.base import ExternalCodeBase, AdditionalCode, Discretization
+from cstar.base.log import LoggingMixin
 from cstar.execution.handler import ExecutionStatus, ExecutionHandler
 from cstar.execution.local_process import LocalProcess
 
 
-class Simulation(ABC):
+class Simulation(ABC, LoggingMixin):
     """An abstract base class representing a C-Star simulation.
 
     Attributes

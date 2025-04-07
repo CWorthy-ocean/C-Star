@@ -421,7 +421,9 @@ class SchedulerJob(ExecutionHandler, ABC):
         """
 
         if self._id is None:
-            print("No Job ID found. Submit this job with SchedulerJob.submit()")
+            self.log.warning(
+                "No Job ID found. Submit this job with SchedulerJob.submit()"
+            )
         return self._id
 
     @property
@@ -711,7 +713,7 @@ class SlurmJob(SchedulerJob):
         """
 
         if self.status not in {ExecutionStatus.RUNNING, ExecutionStatus.PENDING}:
-            print(f"Cannot cancel job with status '{self.status}'")
+            self.log.warning(f"Cannot cancel job with status '{self.status}'")
             return
 
         _run_cmd(
@@ -928,7 +930,7 @@ class PBSJob(SchedulerJob):
             ExecutionStatus.PENDING,
             ExecutionStatus.HELD,
         }:
-            print(f"Cannot cancel job with status {self.status}")
+            self.log.warning(f"Cannot cancel job with status {self.status}")
             return
 
         _run_cmd(

@@ -1,6 +1,9 @@
+import logging
+from cstar.base.log import get_logger
 from cstar.tests.integration_tests.fixtures import fetch_roms_tools_source_data  # noqa: F401
 from cstar.tests.integration_tests.fixtures import fetch_remote_test_case_data  # noqa: F401
 from cstar.tests.integration_tests.blueprints.fixtures import modify_template_blueprint  # noqa : F401
+
 
 import builtins
 from contextlib import contextmanager
@@ -34,3 +37,8 @@ def mock_user_input():
             builtins.input = original_input
 
     return _mock_input
+
+
+@pytest.fixture
+def log() -> logging.Logger:
+    return get_logger("cstar.tests.integration_tests")

@@ -5,6 +5,7 @@ import dateutil.parser
 from pathlib import Path
 from urllib.parse import urljoin
 from cstar.base.datasource import DataSource
+from cstar.base.log import LoggingMixin
 from cstar.base.utils import _get_sha256_hash
 from typing import Optional, List, Dict, TYPE_CHECKING
 
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
     pass
 
 
-class InputDataset(ABC):
+class InputDataset(ABC, LoggingMixin):
     """Describes spatiotemporal data needed to run a unique instance of a model
     simulation.
 
@@ -255,7 +256,9 @@ class InputDataset(ABC):
         target_path = Path(local_dir).expanduser().resolve() / self.source.basename
 
         if (self.exists_locally) and (self.working_path == target_path):
-            print(f"Input dataset already exists at {self.working_path}, skipping.")
+            self.log.warning(
+                f"Input dataset already exists at {self.working_path}, skipping."
+            )
             return
 
         if self.source.location_type == "path":
