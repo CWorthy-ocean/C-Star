@@ -26,7 +26,7 @@ def get_logger(
         return logger
 
     fmt = format or DEFAULT_LOG_FORMAT
-    logging.basicConfig(level=logging.DEBUG, format=fmt)
+    logging.basicConfig(level=level, format=fmt)
 
     return logger
 
