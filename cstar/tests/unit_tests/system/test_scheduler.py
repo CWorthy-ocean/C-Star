@@ -1,3 +1,4 @@
+import logging
 import pytest
 from unittest.mock import patch, MagicMock, PropertyMock
 from cstar.system.scheduler import (
@@ -221,7 +222,7 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, caplog
+        self, mock_subprocess_run, caplog: pytest.LogCaptureFixture
     ):
         """Validate SlurmScheduler handles subprocess failures when querying CPUs.
 
@@ -230,6 +231,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=2, stdout="", stderr="Error querying CPUs"
         )
+        caplog.set_level(logging.ERROR)
         scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
 
         result = scheduler.global_max_cpus_per_node
@@ -272,6 +274,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying memory"
         )
+        caplog.set_level(logging.ERROR)
         scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
 
         result = scheduler.global_max_mem_per_node_gb
@@ -310,6 +313,7 @@ class TestScheduler:
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying CPUs"
         )
+        caplog.set_level(logging.ERROR)
         scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
 
         result = scheduler.global_max_cpus_per_node

@@ -160,7 +160,7 @@ class ROMSInputDataset(InputDataset, ABC):
             working_path_parent = self.working_path.parent
 
         if (self.exists_locally) and (working_path_parent == local_dir):
-            self.log.info(
+            self.log.warning(
                 f"Input dataset already exists in {working_path_parent}, skipping."
             )
             return

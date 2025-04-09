@@ -134,7 +134,7 @@ class ExecutionHandler(ABC, LoggingMixin):
             if (self.status in {ExecutionStatus.FAILED, ExecutionStatus.COMPLETED}) or (
                 self.status == ExecutionStatus.CANCELLED and self.output_file.exists()
             ):
-                self.log.info(f"See {self.output_file.resolve()} for job output")
+                self.log.warning(f"See {self.output_file.resolve()} for job output")
             return
 
         if (seconds == 0) and (confirm_indefinite):

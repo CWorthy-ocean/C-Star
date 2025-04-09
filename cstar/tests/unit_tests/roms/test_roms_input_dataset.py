@@ -1,3 +1,4 @@
+import logging
 import pytest
 import datetime as dt
 from unittest import mock
@@ -745,6 +746,8 @@ class TestROMSInputDatasetGet:
         - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
         """
 
+        caplog.set_level(logging.WARNING)
+
         # Mock `working_path` to point to a file in `some/local/dir`
         local_roms_yaml_dataset.working_path = Path("some/local/dir/local_file.yaml")
 
@@ -796,6 +799,8 @@ class TestROMSInputDatasetGet:
         - Ensures the skip message is printed when a `working_path` in the list exists in `local_dir`.
         - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
         """
+
+        caplog.set_level(logging.WARNING)
 
         # Mock `working_path` to be a list pointing to files in `some/local/dir`
         local_roms_yaml_dataset.working_path = [

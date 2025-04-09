@@ -301,6 +301,7 @@ class TestExternalCodeBaseConfigHandling:
         """Test when local_config_status == 0 (correct configuration)"""
         # Mock the config status to be 0 (everything is correct)
         self.mock_local_config_status.return_value = 0
+        caplog.set_level(logging.INFO)
 
         # Call the method
         generic_codebase.handle_config_status()
@@ -334,7 +335,7 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_invalid(
-        self, mock_input, generic_codebase, caplog
+        self, mock_input, generic_codebase, caplog: pytest.LogCaptureFixture
     ):
         # Assert that it raises an EnvironmentError
         self.mock_local_config_status.return_value = 2
@@ -342,7 +343,7 @@ class TestExternalCodeBaseConfigHandling:
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
         # Expect StopIteration after the invalid input due to no further inputs
-        with pytest.raises(StopIteration):
+        with pytest.raises(StopIteration), caplog.at_level(logging.WARNING):
             generic_codebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y' or 'n'"
@@ -374,6 +375,8 @@ class TestExternalCodeBaseConfigHandling:
 
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
+
+        caplog.set_level(logging.WARNING)
 
         # Call the method to trigger the flow
         generic_codebase.handle_config_status()
@@ -407,6 +410,7 @@ class TestExternalCodeBaseConfigHandling:
         self, mock_input, generic_codebase, caplog: pytest.LogCaptureFixture
     ):
         self.mock_local_config_status.return_value = 3
+        caplog.set_level(logging.INFO)
 
         generic_codebase.handle_config_status()
 
@@ -431,12 +435,12 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_no_env_var_user_invalid(
-        self, mock_input, generic_codebase, caplog
+        self, mock_input, generic_codebase, caplog: pytest.LogCaptureFixture
     ):
         self.mock_local_config_status.return_value = 3
 
         # Expect StopIteration after the invalid input due to no further inputs
-        with pytest.raises(StopIteration):
+        with pytest.raises(StopIteration), caplog.at_level(logging.WARNING):
             generic_codebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y','n',or 'custom'"
@@ -450,6 +454,8 @@ class TestExternalCodeBaseConfigHandling:
         self, mock_input, generic_codebase, caplog
     ):
         self.mock_local_config_status.return_value = 3
+        caplog.set_level(logging.INFO)
+
         generic_codebase.handle_config_status()
         expected_install_dir = Path("some/install/path").resolve()
 

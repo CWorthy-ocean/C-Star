@@ -1250,7 +1250,7 @@ class ROMSSimulation(Simulation):
             and (_get_sha256_hash(exe_path) == self._exe_hash)
             and not rebuild
         ):
-            self.log.info(
+            self.log.warning(
                 f"ROMS has already been built at {exe_path}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
@@ -1514,7 +1514,7 @@ class ROMSSimulation(Simulation):
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
-            self.log.info("No suitable output found")
+            self.log.warning("No suitable output found")
         else:
             (output_dir / "PARTITIONED").mkdir(exist_ok=True)
             for wildcard_pattern in unique_wildcards:
