@@ -858,9 +858,8 @@ class ROMSSimulation(Simulation):
             )
 
         # Time step entry
-        runtime_code_modifications[nl_idx]["__TIMESTEP_PLACEHOLDER__"] = (
-            self.discretization.time_step
-        )
+        namelist = runtime_code_modifications[nl_idx]
+        namelist["__TIMESTEP_PLACEHOLDER__"] = self.discretization.time_step
 
         # Grid file entry
         if self.model_grid is not None:
@@ -924,9 +923,8 @@ class ROMSSimulation(Simulation):
                 "\n     " + partitioned_files_to_runtime_code_string(self.river_forcing)
             )
 
-        runtime_code_modifications[nl_idx]["__FORCING_FILES_PLACEHOLDER__"] = (
-            runtime_code_forcing_str.lstrip()
-        )
+        namelist = runtime_code_modifications[nl_idx]
+        namelist["__FORCING_FILES_PLACEHOLDER__"] = runtime_code_forcing_str.lstrip()
 
         # MARBL settings filepaths entries
         ## NOTE: WANT TO RAISE IF PLACEHOLDER IS IN NAMELIST BUT not Path(marbl_file.exists())
@@ -1039,16 +1037,16 @@ class ROMSSimulation(Simulation):
 
         # Setup ExternalCodeBase
         infostr = f"Configuring {self.__class__.__name__}"
-        print(infostr + "\n" + "-" * len(infostr))
-        print(f"Setting up {self.codebase.__class__.__name__}...")
+        self.log.info(infostr + "\n" + "-" * len(infostr))
+        self.log.info(f"Setting up {self.codebase.__class__.__name__}...")
         self.codebase.handle_config_status()
 
         if self.marbl_codebase is not None:
-            print(f"Setting up {self.marbl_codebase.__class__.__name__}...")
+            self.log.info(f"Setting up {self.marbl_codebase.__class__.__name__}...")
             self.marbl_codebase.handle_config_status()
 
         # Compile-time code
-        print(
+        self.log.info(
             "\nFetching compile-time code code..."
             + "\n----------------------------------"
         )
@@ -1056,12 +1054,12 @@ class ROMSSimulation(Simulation):
             self.compile_time_code.get(compile_time_code_dir)
 
         # Runtime code
-        print("\nFetching runtime code... " + "\n----------------------")
+        self.log.info("\nFetching runtime code... " + "\n----------------------")
         if self.runtime_code is not None:
             self.runtime_code.get(runtime_code_dir)
 
         # InputDatasets
-        print("\nFetching input datasets..." + "\n--------------------------")
+        self.log.info("\nFetching input datasets..." + "\n--------------------------")
         for inp in self.input_datasets:
             # Download input dataset if its date range overlaps Simulation's date range
             if (
@@ -1198,7 +1196,7 @@ class ROMSSimulation(Simulation):
             and (_get_sha256_hash(exe_path) == self._exe_hash)
             and not rebuild
         ):
-            print(
+            self.log.warning(
                 f"ROMS has already been built at {exe_path}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
@@ -1220,7 +1218,7 @@ class ROMSSimulation(Simulation):
                     + f"\n {make_clean_result.stderr}"
                 )
 
-        print("Compiling UCLA-ROMS configuration...")
+        self.log.info("Compiling UCLA-ROMS configuration...")
         make_roms_result = subprocess.run(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
@@ -1234,7 +1232,7 @@ class ROMSSimulation(Simulation):
                 + f"\n {make_roms_result.stderr}"
             )
 
-        print(f"UCLA-ROMS compiled at {build_dir}")
+        self.log.info(f"UCLA-ROMS compiled at {build_dir}")
 
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
@@ -1475,13 +1473,13 @@ class ROMSSimulation(Simulation):
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
-            print("no suitable output found")
+            self.log.warning("No suitable output found")
         else:
             (output_dir / "PARTITIONED").mkdir(exist_ok=True)
             for wildcard_pattern in unique_wildcards:
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
 
-                print(f"Joining netCDF files {wildcard_pattern}...")
+                self.log.info(f"Joining netCDF files {wildcard_pattern}...")
                 ncjoin_result = subprocess.run(
                     f"ncjoin {wildcard_pattern}",
                     cwd=output_dir,

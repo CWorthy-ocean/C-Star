@@ -1,4 +1,5 @@
 import json
+import logging
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import PBSScheduler, PBSQueue
@@ -262,9 +263,12 @@ class TestPBSJob:
 
     @patch("subprocess.run")
     @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
-    @patch("builtins.print")
     def test_cancel_completed_job(
-        self, mock_print, mock_status, mock_subprocess, tmp_path
+        self,
+        mock_status,
+        mock_subprocess,
+        tmp_path,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Verifies that the `cancel` method does not proceed if the job is already
         completed.
@@ -278,8 +282,8 @@ class TestPBSJob:
             Mocked to return "completed", simulating a completed job.
         subprocess.run
             Mocked to ensure that the `qdel` command is not executed.
-        builtins.print
-            Mocked to capture printed messages for validation.
+        LogCaptureFixture
+            Captures log outputs to verify output messages
 
         Asserts
         -------
@@ -288,6 +292,7 @@ class TestPBSJob:
         """
         # Mock the status to "completed"
         mock_status.return_value = "completed"
+        caplog.set_level(logging.WARNING)
 
         # Create a PBSJob with a set job ID
         job = PBSJob(
@@ -300,7 +305,8 @@ class TestPBSJob:
         job.cancel()
 
         # Verify the message was printed
-        mock_print.assert_called_with("Cannot cancel job with status completed")
+        captured = caplog.text
+        assert "Cannot cancel job with status completed" in captured
 
         # Verify qdel was not called
         mock_subprocess.assert_not_called()

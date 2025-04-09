@@ -3,10 +3,11 @@ import tempfile
 from typing import Optional, Dict
 from pathlib import Path
 from cstar.base.datasource import DataSource
+from cstar.base.log import LoggingMixin
 from cstar.base.utils import _clone_and_checkout, _list_to_concise_str, _get_sha256_hash
 
 
-class AdditionalCode:
+class AdditionalCode(LoggingMixin):
     """Additional code contributing to a model simulation.
 
     Additional code is assumed to be kept in a single directory or
@@ -204,7 +205,7 @@ class AdditionalCode:
                 src_file_path = source_dir / f
                 tgt_file_path = local_dir / Path(f).name
 
-                print(
+                self.log.info(
                     f"copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
                 )
                 if src_file_path.exists():
@@ -217,7 +218,7 @@ class AdditionalCode:
                     raise FileNotFoundError(f"Error: {src_file_path} does not exist.")
                 # Special case for template namelists:
                 if str(src_file_path)[-9:] == "_TEMPLATE":
-                    print(
+                    self.log.info(
                         f"copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
                     )
                     shutil.copy(tgt_file_path, Path(str(tgt_file_path)[:-9]))

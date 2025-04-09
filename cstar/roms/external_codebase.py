@@ -87,7 +87,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         self._codebase_adjustments()
 
         # Make things
-        print("Compiling UCLA ROMS' NHMG library...")
+        self.log.info("Compiling UCLA ROMS' NHMG library...")
         make_nhmg_result = subprocess.run(
             f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=str(target) + "/Work",
@@ -100,7 +100,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
                 f"Error {make_nhmg_result.returncode} when compiling ROMS' NHMG library. STDERR stream: "
                 + f"\n {make_nhmg_result.stderr}"
             )
-        print("Compiling Tools-Roms package for UCLA ROMS...")
+        self.log.info("Compiling Tools-Roms package for UCLA ROMS...")
         make_tools_roms_result = subprocess.run(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=str(target) + "/Tools-Roms",
@@ -113,4 +113,4 @@ class ROMSExternalCodeBase(ExternalCodeBase):
                 f"Error {make_tools_roms_result.returncode} when compiling Tools-Roms. STDERR stream: "
                 + f"\n {make_tools_roms_result.stderr}"
             )
-        print(f"UCLA-ROMS is installed at {target}")
+        self.log.info(f"UCLA-ROMS is installed at {target}")

@@ -59,7 +59,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         _update_user_dotenv(env_file_str)
 
         # Make things
-        print("Compiling MARBL...")
+        self.log.info("Compiling MARBL...")
         make_marbl_result = subprocess.run(
             f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
             cwd=f"{target}/src",
@@ -72,4 +72,4 @@ class MARBLExternalCodeBase(ExternalCodeBase):
                 f"Error {make_marbl_result.returncode} when compiling MARBL. STDERR stream: "
                 + f"\n {make_marbl_result.stderr}"
             )
-        print(f"MARBL successfully installed at {target}")
+        self.log.info(f"MARBL successfully installed at {target}")
