@@ -1,9 +1,8 @@
 import os
 import shutil
-import subprocess
 from pathlib import Path
 from cstar.base.external_codebase import ExternalCodeBase
-from cstar.base.utils import _clone_and_checkout, _update_user_dotenv
+from cstar.base.utils import _clone_and_checkout, _run_cmd, _update_user_dotenv
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -87,30 +86,18 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         self._codebase_adjustments()
 
         # Make things
-        print("Compiling UCLA ROMS' NHMG library...")
-        make_nhmg_result = subprocess.run(
+        _run_cmd(
             f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=str(target) + "/Work",
-            capture_output=True,
-            text=True,
-            shell=True,
+            cwd=target / "Work",
+            msg_pre="Compiling NHMG library...",
+            msg_err="Error when compiling ROMS' NHMG library.",
+            raise_on_error=True,
         )
-        if make_nhmg_result.returncode != 0:
-            raise RuntimeError(
-                f"Error {make_nhmg_result.returncode} when compiling ROMS' NHMG library. STDERR stream: "
-                + f"\n {make_nhmg_result.stderr}"
-            )
-        print("Compiling Tools-Roms package for UCLA ROMS...")
-        make_tools_roms_result = subprocess.run(
+        _run_cmd(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=str(target) + "/Tools-Roms",
-            shell=True,
-            capture_output=True,
-            text=True,
+            cwd=target / "Tools-Roms",
+            msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
+            msg_post=f"UCLA-ROMS is installed at {target}",
+            msg_err="Error when compiling Tools-Roms.",
+            raise_on_error=True,
         )
-        if make_tools_roms_result.returncode != 0:
-            raise RuntimeError(
-                f"Error {make_tools_roms_result.returncode} when compiling Tools-Roms. STDERR stream: "
-                + f"\n {make_tools_roms_result.stderr}"
-            )
-        print(f"UCLA-ROMS is installed at {target}")

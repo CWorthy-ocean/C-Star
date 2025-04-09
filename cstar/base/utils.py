@@ -1,7 +1,9 @@
 import re
+import functools
 import hashlib
 import warnings
 import subprocess
+from os import PathLike
 from pathlib import Path
 
 
@@ -338,3 +340,89 @@ def _dict_to_tree(input_dict: dict, prefix: str = "") -> str:
                 tree_str += f"{prefix}{sub_prefix}{item_branch}{item}\n"
 
     return tree_str
+
+
+def _run_cmd(
+    cmd: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    msg_pre: str | None = None,
+    msg_post: str | None = None,
+    msg_err: str | None = None,
+    raise_on_error: bool = False,
+) -> str:
+    """Execute a subprocess using default configuration, blocking until it completes.
+
+    Parameters:
+    -----------
+    cmd (str):
+       The command to be executed as a separate process.
+    cwd (Path, default = None):
+       The working directory for the command. If None, use current working directory.
+    env (Dict[str, str], default = None):
+       A dictionary of environment variables to be passed to the command.
+    msg_pre (str  | None), default = None):
+       An overridden message logged before the command is executed.
+    msg_post (str | None), default = None):
+        An overridden message logged after the command is successfully executed.
+    msg_err (str | None), default = None):
+        An overridden message logged when a command returns a non-zero code. Logs
+        will automatically append the stderr output of the command.
+    raise_on_error (bool, default = False):
+        If True, raises a RuntimeError if the command returns a non-zero code.
+
+    Returns:
+    -------
+    stdout: str
+       The captured standard output of the process.
+
+    Examples:
+    --------
+    In: _run_cmd("python foo.py", msg_pre="Running script", msg_post="Script completed")
+    Out: Running script
+         Script completed
+
+    In: _run_cmd("python foo.py")
+    Out: Running command: python foo.py
+         Command completed successfully.
+
+    In: _run_cmd("python return_nonzero.py")
+    Out: Running command: python return_nonzero.py
+         Command `python return_nonzero.py` failed. STDERR: <stderror of foo.py>
+    """
+    print(msg_pre or f"Running command: {cmd}")
+    stdout: str = ""
+
+    fn = functools.partial(
+        subprocess.run,
+        cmd,
+        shell=True,
+        text=True,
+        capture_output=True,
+    )
+
+    kwargs: dict[str, str | PathLike | dict[str, str]] = {}
+    if cwd:
+        kwargs["cwd"] = cwd
+    if env:
+        kwargs["env"] = env
+
+    result: subprocess.CompletedProcess[str] = fn(**kwargs)
+    stdout = str(result.stdout).strip() if result.stdout is not None else ""
+
+    if result.returncode != 0:
+        rc_out = f"Return Code: `{result.returncode}`."
+        stderr_out = f"STDERR:\n{result.stderr.strip()}"
+
+        if not msg_err:
+            msg_err = f"Command `{cmd}` failed."
+
+        msg = f"{msg_err} {rc_out} {stderr_out}"
+
+        if raise_on_error:
+            raise RuntimeError(msg)
+
+        print(msg)
+
+    print(msg_post or "Command completed successfully.")
+    return stdout

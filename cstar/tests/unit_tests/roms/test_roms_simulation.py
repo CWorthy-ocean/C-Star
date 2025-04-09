@@ -1979,7 +1979,7 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(RuntimeError, match="Error 1 when compiling ROMS"):
+        with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
             sim.build()
         assert mock_subprocess.call_count == 1
         mock_subprocess.assert_any_call(
@@ -2019,7 +2019,7 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(RuntimeError, match="Error 1 when compiling ROMS"):
+        with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
             sim.build()
         assert mock_subprocess.call_count == 1
 
@@ -2521,7 +2521,7 @@ class TestProcessingAndExecution:
         )  # Ensure run is complete
 
         # Call post_run and expect error
-        with pytest.raises(RuntimeError, match="Error 1 while joining ROMS output"):
+        with pytest.raises(RuntimeError, match="Error while joining ROMS output"):
             sim.post_run()
 
         mock_subprocess.assert_called_once_with(
