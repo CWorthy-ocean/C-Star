@@ -411,10 +411,13 @@ def _run_cmd(
     stdout = str(result.stdout).strip() if result.stdout is not None else ""
 
     if result.returncode != 0:
-        if msg_err:
-            msg = f"{msg_err} STDERR:\n{result.stderr.strip()}"
-        else:
-            msg = f"Command `{cmd}` failed. STDERR:\n{result.stderr.strip()}"
+        rc_out = f"Return Code: `{result.returncode}`."
+        stderr_out = f"STDERR:\n{result.stderr.strip()}"
+
+        if not msg_err:
+            msg_err = f"Command `{cmd}` failed."
+
+        msg = f"{msg_err} {rc_out} {stderr_out}"
 
         if raise_on_error:
             raise RuntimeError(msg)

@@ -205,7 +205,7 @@ class CStarEnvironment:
         command = f"{lmod_path} python {' '.join(list(args))}"
         stdout = _run_cmd(
             command,
-            msg_err=f"Linux Environment Modules command `{command}` failed.",
+            msg_err=f"Linux Environment Modules command `{command.strip()}` failed.",
             raise_on_error=True,
         )
 
