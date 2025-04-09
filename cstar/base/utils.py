@@ -412,9 +412,9 @@ def _run_cmd(
 
     if result.returncode != 0:
         if msg_err:
-            msg = f"{msg_err} STDERR: {result.stderr.strip()}"
+            msg = f"{msg_err} STDERR:\n{result.stderr.strip()}"
         else:
-            msg = f"Command `{cmd}` failed. STDERR: {result.stderr.strip()}"
+            msg = f"Command `{cmd}` failed. STDERR:\n{result.stderr.strip()}"
 
         if raise_on_error:
             raise RuntimeError(msg)
