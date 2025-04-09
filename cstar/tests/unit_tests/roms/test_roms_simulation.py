@@ -1940,6 +1940,7 @@ class TestProcessingAndExecution:
                 return_value=True,
             ),
             patch.object(Path, "exists", return_value=True),
+            caplog.at_level(logging.WARNING),
         ):
             # Pretend the executable exists
             sim._exe_hash = "dummy_hash"
@@ -2475,6 +2476,7 @@ class TestProcessingAndExecution:
         sim._execution_handler.status = (
             ExecutionStatus.COMPLETED
         )  # Ensure simulation is complete
+        caplog.set_level(logging.WARNING)
 
         # Call post_run
         sim.post_run()

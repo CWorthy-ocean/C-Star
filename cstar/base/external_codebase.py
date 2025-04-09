@@ -246,7 +246,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                 )
             case 2:
                 head_hash = _get_repo_head_hash(local_root)
-                self.log.info(
+                self.log.warning(
                     "############################################################\n"
                     + f"C-STAR: {self.expected_env_var} points to the correct repo "
                     + f"{self.source_repo} but HEAD is at: \n"

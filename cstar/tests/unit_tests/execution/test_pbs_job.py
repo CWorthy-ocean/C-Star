@@ -1,4 +1,5 @@
 import json
+import logging
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from cstar.system.scheduler import PBSScheduler, PBSQueue
@@ -291,6 +292,7 @@ class TestPBSJob:
         """
         # Mock the status to "completed"
         mock_status.return_value = "completed"
+        caplog.set_level(logging.WARNING)
 
         # Create a PBSJob with a set job ID
         job = PBSJob(

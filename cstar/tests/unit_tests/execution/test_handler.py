@@ -1,3 +1,4 @@
+import logging
 import time
 import threading
 from unittest.mock import patch, PropertyMock
@@ -55,6 +56,8 @@ class TestExecutionHandlerUpdates:
         - That instructions for viewing the job output are provided if the job status
           is `COMPLETED` or similar.
         """
+
+        caplog.set_level(logging.WARNING)
         handler = MockExecutionHandler(
             ExecutionStatus.COMPLETED, tmp_path / "mock_output.log"
         )
@@ -167,9 +170,12 @@ class TestExecutionHandlerUpdates:
         handler = MockExecutionHandler(ExecutionStatus.RUNNING, output_file)
 
         # Mock the `status` property to return "running"
-        with patch.object(
-            MockExecutionHandler, "status", new_callable=PropertyMock
-        ) as mock_status:
+        with (
+            patch.object(
+                MockExecutionHandler, "status", new_callable=PropertyMock
+            ) as mock_status,
+            caplog.at_level(logging.WARNING),
+        ):
             mock_status.return_value = ExecutionStatus.RUNNING
 
             # Patch input to simulate the confirmation prompt
@@ -214,6 +220,7 @@ class TestExecutionHandlerUpdates:
 
         # Initialize the handler with status `RUNNING`
         handler = MockExecutionHandler(ExecutionStatus.RUNNING, output_file)
+        caplog.set_level(logging.INFO)
 
         # Function to simulate appending live updates and changing status
         def append_updates_and_change_status():

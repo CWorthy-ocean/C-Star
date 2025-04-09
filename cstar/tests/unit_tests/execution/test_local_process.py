@@ -1,3 +1,4 @@
+import logging
 import pytest
 import subprocess
 
@@ -405,6 +406,7 @@ class TestLocalProcess:
         mock_local_process._process = (
             self.mock_subprocess
         )  # Directly assign the mock process
+        caplog.set_level(logging.WARNING)
 
         # Test cancel on a completed process
         mock_local_process.cancel()
@@ -481,6 +483,7 @@ class TestLocalProcess:
 
         mock_local_process._process = None  # Assign mock process
         mock_local_process._cancelled = True
+        caplog.set_level(logging.WARNING)
 
         mock_local_process.wait()
         captured = caplog.text
