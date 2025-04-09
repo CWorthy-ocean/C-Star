@@ -173,7 +173,7 @@ class TestROMSExternalCodeBaseGet:
         # Test
         with pytest.raises(
             RuntimeError,
-            match="Error when compiling ROMS' NHMG library. STDERR: Compiling NHMG library failed successfully",
+            match="Error when compiling ROMS' NHMG library. STDERR:\nCompiling NHMG library failed successfully",
         ):
             roms_codebase.get(target=tmp_path)
 
@@ -189,12 +189,12 @@ class TestROMSExternalCodeBaseGet:
             mock.Mock(returncode=0),  # Success for nhmg
             mock.Mock(
                 returncode=1,
-                stderr="Error when compiling Tools-Roms. STDERR: Compiling Tools-Roms failed successfully",
+                stderr="Error when compiling Tools-Roms. STDERR:\nCompiling Tools-Roms failed successfully",
             ),  # Fail Tools-Roms
         ]
 
         with pytest.raises(
-            RuntimeError, match=" Compiling Tools-Roms failed successfully"
+            RuntimeError, match="Compiling Tools-Roms failed successfully"
         ):
             roms_codebase.get(target=tmp_path)
 

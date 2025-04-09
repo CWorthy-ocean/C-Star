@@ -237,7 +237,7 @@ class TestScheduler:
 
         captured = capsys.readouterr()
         assert (
-            "Error querying node property. STDERR: Error querying CPUs" in captured.out
+            "Error querying node property. STDERR:\nError querying CPUs" in captured.out
         )
 
     def test_slurmscheduler_global_max_mem_per_node_gb_success(
@@ -280,7 +280,7 @@ class TestScheduler:
 
         captured = capsys.readouterr()
         assert (
-            "Error querying node property. STDERR: Error querying memory"
+            "Error querying node property. STDERR:\nError querying memory"
             in captured.out
         )
 
@@ -321,7 +321,7 @@ class TestScheduler:
 
         captured = capsys.readouterr()
         assert (
-            "Error querying node property. STDERR: Error querying CPUs" in captured.out
+            "Error querying node property. STDERR:\nError querying CPUs" in captured.out
         )
 
     def test_pbsscheduler_global_max_mem_per_node_gb_failure(
@@ -341,7 +341,7 @@ class TestScheduler:
 
         captured = capsys.readouterr()
         assert (
-            "Error querying node property. STDERR: Error querying memory"
+            "Error querying node property. STDERR:\nError querying memory"
             in captured.out
         )
 
