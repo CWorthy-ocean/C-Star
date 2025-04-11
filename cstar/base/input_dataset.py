@@ -75,6 +75,12 @@ class InputDataset(ABC):
         self._local_file_hash_cache: Optional[Dict] = None
         self._local_file_stat_cache: Optional[Dict] = None
 
+        # Subclass-specific  confirmation that everything is set up correctly:
+        self.validate()
+
+    def validate(self):
+        pass
+
     @property
     def exists_locally(self) -> bool:
         """Check if this InputDataset exists on the local filesystem.

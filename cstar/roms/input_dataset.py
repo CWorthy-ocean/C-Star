@@ -286,8 +286,7 @@ class ROMSForcingCorrections(ROMSInputDataset):
     a NetCDF or similar file.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def validate(self):
         if self.source.source_type == "yaml":
             raise ValueError(
                 "Hey, you! we said no funny business! -Scotty E."
