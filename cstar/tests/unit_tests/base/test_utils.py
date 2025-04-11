@@ -2,13 +2,15 @@ import pytest
 import hashlib
 import warnings
 from unittest import mock
-from cstar.base.utils import (
-    _get_sha256_hash,
-    _update_user_dotenv,
+from cstar.base.gitutils import (
     _clone_and_checkout,
     _get_repo_head_hash,
     _get_repo_remote,
     _get_hash_from_checkout_target,
+)
+from cstar.base.utils import (
+    _get_sha256_hash,
+    _update_user_dotenv,
     _replace_text_in_file,
     _list_to_concise_str,
     _dict_to_tree,
@@ -154,8 +156,10 @@ class TestCloneAndCheckout:
         # Check the clone command arguments
         assert clone_call[0][0] == f"git clone {self.source_repo} {self.local_path}"
         # Check the checkout command with correct directory and target
-        assert checkout_call[1]["cwd"] == self.local_path
-        assert checkout_call[0][0] == f"git checkout {self.checkout_target}"
+        assert (
+            checkout_call[0][0]
+            == f"git -C {self.local_path} checkout {self.checkout_target}"
+        )
 
     def test_clone_and_checkout_clone_failure(self):
         """Test `_clone_and_checkout` raises RuntimeError if `git clone` fails.
@@ -172,7 +176,7 @@ class TestCloneAndCheckout:
         ]
 
         # Check that the function raises a RuntimeError on clone failure
-        with pytest.raises(RuntimeError, match="Error 1 when cloning"):
+        with pytest.raises(RuntimeError, match="Error when cloning"):
             _clone_and_checkout(self.source_repo, self.local_path, self.checkout_target)
 
     def test_clone_and_checkout_checkout_failure(self):
@@ -189,7 +193,7 @@ class TestCloneAndCheckout:
         ]
 
         # Check that the function raises a RuntimeError on checkout failure
-        with pytest.raises(RuntimeError, match="Error 1 when checking out"):
+        with pytest.raises(RuntimeError, match="Error when checking out"):
             _clone_and_checkout(self.source_repo, self.local_path, self.checkout_target)
 
 

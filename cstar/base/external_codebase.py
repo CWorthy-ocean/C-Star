@@ -1,13 +1,14 @@
 from pathlib import Path
 from typing import Optional
 from abc import ABC, abstractmethod
-import subprocess
 
-from cstar.base.utils import (
+from cstar.base.gitutils import (
+    _checkout,
     _get_hash_from_checkout_target,
     _get_repo_remote,
     _get_repo_head_hash,
 )
+
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -257,11 +258,14 @@ class ExternalCodeBase(ABC):
                 while True:
                     yn = input("Would you like to checkout this target now?")
                     if yn.casefold() in ["y", "yes"]:
-                        subprocess.run(
-                            f"git -C {local_root} checkout {self.checkout_target}",
-                            shell=True,
-                        )
-                        self._codebase_adjustments()
+                        try:
+                            _checkout(
+                                self.source_repo, local_root, self.checkout_target
+                            )
+                        except Exception as ex:
+                            print(ex)
+                        else:
+                            self._codebase_adjustments()
                         return
                     elif yn.casefold() in ["n", "no"]:
                         raise EnvironmentError()

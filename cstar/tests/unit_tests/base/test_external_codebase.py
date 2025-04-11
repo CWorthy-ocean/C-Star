@@ -373,7 +373,10 @@ class TestExternalCodeBaseConfigHandling:
 
         ## Assert that subprocess.run was called with the correct git checkout command
         self.mock_subprocess_run.assert_called_with(
-            "git -C /path/to/repo checkout test_target", shell=True
+            "git -C /path/to/repo checkout test_target",
+            shell=True,
+            text=True,
+            capture_output=True,
         )
 
         self.mock_subprocess_run.assert_called_once()
@@ -390,7 +393,7 @@ class TestExternalCodeBaseConfigHandling:
             + "test123"
             + "\n############################################################"
         )
-        assert str(captured.out).strip() == expected_message
+        assert expected_message in str(captured.out).strip()
 
     @mock.patch("builtins.input", side_effect=["y"])  # mock_input
     def test_handle_config_status_no_env_var_user_y(

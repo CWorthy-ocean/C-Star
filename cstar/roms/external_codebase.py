@@ -2,7 +2,8 @@ import os
 import shutil
 from pathlib import Path
 from cstar.base.external_codebase import ExternalCodeBase
-from cstar.base.utils import _clone_and_checkout, _run_cmd, _update_user_dotenv
+from cstar.base.gitutils import _clone_and_checkout
+from cstar.base.utils import _run_cmd, _update_user_dotenv
 from cstar.system.manager import cstar_sysmgr
 
 
