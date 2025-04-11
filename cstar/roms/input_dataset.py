@@ -288,7 +288,7 @@ class ROMSForcingCorrections(ROMSInputDataset):
 
     def validate(self):
         if self.source.source_type == "yaml":
-            raise ValueError(
+            raise TypeError(
                 "Hey, you! we said no funny business! -Scotty E."
                 f"{self.__class__.__name__} cannot be initialized with a source YAML file. "
                 "Please provide a direct path or URL to a dataset (e.g., NetCDF)."

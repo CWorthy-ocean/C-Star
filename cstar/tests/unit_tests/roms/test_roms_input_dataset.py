@@ -130,20 +130,6 @@ def remote_roms_yaml_dataset():
 ################################################################################
 
 
-class TestROMSInputDatasetInit:
-    """Test class for initializing ROMSInputDataset subclasses."""
-
-    def test_correction_cannot_be_yaml(self):
-        with pytest.raises(ValueError) as exception_info:
-            ROMSForcingCorrections(
-                location="https://www.totallylegityamlfiles.pk/downloadme.yaml"
-            )
-            expected_message = (
-                "ROMSForcingCorrections cannot be initialized with a source YAML file."
-            )
-            assert expected_message in str(exception_info.value)
-
-
 class TestStrAndRepr:
     """Test class for verifying the string and repr outputs of ROMSInputDataset.
 
@@ -1135,3 +1121,17 @@ class TestROMSInputDatasetPartition:
                 f"{local_roms_netcdf_dataset.working_path}."
             )
             assert str(exception_info.value) == expected_message
+
+
+def test_correction_cannot_be_yaml(self):
+    """Checks that the `validate()` method correctly raises a TypeError if
+    `ROMSForcingCorrections.source.source_type` is `yaml` (unsupported)"""
+
+    with pytest.raises(ValueError) as exception_info:
+        ROMSForcingCorrections(
+            location="https://www.totallylegityamlfiles.pk/downloadme.yaml"
+        )
+        expected_msg = (
+            "ROMSForcingCorrections cannot be initialized with a source YAML file."
+        )
+        assert expected_msg in str(exception_info.value)

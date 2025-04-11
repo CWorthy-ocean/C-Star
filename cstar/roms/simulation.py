@@ -169,7 +169,7 @@ class ROMSSimulation(Simulation):
             List of datasets specifying boundary conditions for ROMS.
         surface_forcing : list[ROMSBoundaryForcing]
             List of surface forcing datasets (e.g., wind stress, heat flux).
-        forcing_corrections : list[ROMSForcingCorrections]
+        forcing_corrections : list[ROMSForcingCorrections], optional
             List of surface forcing correction datasets.
 
         Raises
@@ -246,6 +246,9 @@ class ROMSSimulation(Simulation):
         self._execution_handler: Optional["ExecutionHandler"] = None
 
     def _check_forcing_collection_types(self, collection, expected_class):
+        """For forcing types that may correspond to multiple InputDataset instances
+        (ROMSSurfaceForcing, ROMSBoundaryForcing, ROMSForcingCorrections), ensure that
+        the corresponding attribute is a list of instances of the correct type."""
         if not all([isinstance(ind, expected_class) for ind in collection]):
             raise TypeError(
                 f"ROMSSimulation.{collection} must be a list of {expected_class} instances"

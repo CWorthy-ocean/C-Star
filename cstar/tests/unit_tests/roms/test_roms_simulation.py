@@ -2,6 +2,7 @@ import re
 import pytest
 import yaml
 import pickle
+from typing import cast, Any
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch, mock_open, MagicMock, PropertyMock
@@ -122,10 +123,8 @@ class TestROMSSimulationInitialization:
       is raised when `compile_time_code` is missing.
     - `test_default_codebase_assignment`: Confirms that default external codebases
       are correctly assigned if not explicitly provided.
-    - `test_invalid_surface_forcing_type`: Checks that a `TypeError` is raised if
-      `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
-    - `test_invalid_boundary_forcing_type`: Checks that a `TypeError` is raised if
-      `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
+    - `test_check_forcing_collection`: Confirms that an error is raised if forcing
+      attributes corresponding to lists are incorrectly typed
     - `test_codebases`: Ensures the `codebases` property correctly returns the list
       of external codebases associated with the simulation.
     - `test_in_file_single_file`: Ensures the `in_file` property correctly retrieves
@@ -366,46 +365,55 @@ class TestROMSSimulationInitialization:
         assert sim.marbl_codebase.checkout_target == "marbl0.45.0"
 
     @pytest.mark.parametrize(
-        "argname, expected_type_name",
+        "attrname, expected_type_name",
         [
             ("surface_forcing", "ROMSSurfaceForcing"),
             ("boundary_forcing", "ROMSBoundaryForcing"),
             ("forcing_corrections", "ROMSForcingCorrections"),
         ],
     )
-    def test_check_forcing_collection(self, tmp_path, argname, expected_type_name):
-        """Ensure a TypeError is raised when entries that should be lists of
-        ROMSInputDatasets (ROMSSurfaceForcing, ROMSBoundaryForcing,
+    def test_check_forcing_collection(
+        self, tmp_path: Path, attrname: str, expected_type_name: str
+    ) -> None:
+        """Ensure a TypeError is raised when attributes of ROMSSimulation that should be
+        lists of ROMSInputDatasets (e.g., ROMSSurfaceForcing, ROMSBoundaryForcing,
         ROMSForcingCorrections) are not.
+
+        Parameters
+        ----------
+        attrname : str
+            The attribute being checked (e.g., "surface_forcing").
+        expected_type_name : str
+            The name of the expected input dataset class for elements of the attribute.
 
         Assertions
         ----------
-        - A `TypeError` is raised when entries that should be lists of ROMSInputDatasets are not
+        - A `TypeError` is raised when attributes that should be lists of ROMSInputDatasets
+          are incorrectly set to other types.
 
         Mocks & Fixtures
         ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for safely
-          testing file system interactions.
+        tmp_path : Path
+            Temporary directory fixture provided by `pytest` for safely
+            testing file system interactions.
         """
-
-        kwargs = {
-            "name": "test",
-            "directory": tmp_path,
-            "discretization": ROMSDiscretization(time_step=60),
-            "codebase": ROMSExternalCodeBase(),
-            "runtime_code": AdditionalCode(location="some/dir"),
-            "compile_time_code": AdditionalCode(location="some/dir"),
-            "start_date": "2012-01-01",
-            "end_date": "2012-01-02",
-            "valid_start_date": "2012-01-01",
-            "valid_end_date": "2012-01-02",
-            argname: ["this", "is", "not", "valid"],
-        }
-
         expected_msg = f"must be a list of {expected_type_name} instances"
+        test_args = cast(dict[str, Any], {attrname: ["this", "is", "not", "valid"]})
 
         with pytest.raises(TypeError) as exception_info:
-            ROMSSimulation(**kwargs)
+            ROMSSimulation(
+                name="test",
+                directory=tmp_path,
+                discretization=ROMSDiscretization(time_step=60),
+                codebase=ROMSExternalCodeBase(),
+                runtime_code=AdditionalCode(location="some/dir"),
+                compile_time_code=AdditionalCode(location="some/dir"),
+                start_date="2012-01-01",
+                end_date="2012-01-02",
+                valid_start_date="2012-01-01",
+                valid_end_date="2012-01-02",
+                **test_args,
+            )
 
             assert expected_msg in str(exception_info.value)
 
