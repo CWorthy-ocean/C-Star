@@ -214,26 +214,16 @@ class ROMSSimulation(Simulation):
         self.tidal_forcing = tidal_forcing
         self.river_forcing = river_forcing
         self.surface_forcing = [] if surface_forcing is None else surface_forcing
-        if not all([isinstance(sf, ROMSSurfaceForcing) for sf in self.surface_forcing]):
-            raise TypeError(
-                "ROMSSimulation.surface_forcing must be a list of ROMSSurfaceForcing instances"
-            )
+        self._check_forcing_collection_types(self.surface_forcing, ROMSSurfaceForcing)
+
         self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
-        if not all(
-            [isinstance(bf, ROMSBoundaryForcing) for bf in self.boundary_forcing]
-        ):
-            raise TypeError(
-                "ROMSSimulation.boundary_forcing must be a list of ROMSBoundaryForcing instances"
-            )
+        self._check_forcing_collection_types(self.boundary_forcing, ROMSBoundaryForcing)
         self.forcing_corrections = (
             [] if forcing_corrections is None else forcing_corrections
         )
-        if not all(
-            [isinstance(bf, ROMSForcingCorrections) for bf in self.forcing_corrections]
-        ):
-            raise TypeError(
-                "ROMSSimulation.forcing_corrections must be a list of ROMSForcingCorrections instances"
-            )
+        self._check_forcing_collection_types(
+            self.forcing_corrections, ROMSForcingCorrections
+        )
 
         self._check_inputdataset_dates()
 
@@ -254,6 +244,12 @@ class ROMSSimulation(Simulation):
         self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
+
+    def _check_forcing_collection_types(self, collection, expected_class):
+        if not all([isinstance(ind, expected_class) for ind in collection]):
+            raise TypeError(
+                f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
+            )
 
     def _check_inputdataset_dates(self) -> None:
         """For ROMSInputDatasets whose source type is `yaml`, ensure that any set

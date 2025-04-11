@@ -373,9 +373,7 @@ class TestROMSSimulationInitialization:
             ("forcing_corrections", "ROMSForcingCorrections"),
         ],
     )
-    def test_lists_of_input_datasets_raise_if_invalid(
-        self, tmp_path, argname, expected_type_name
-    ):
+    def test_check_forcing_collection(self, tmp_path, argname, expected_type_name):
         """Ensure a TypeError is raised when entries that should be lists of
         ROMSInputDatasets (ROMSSurfaceForcing, ROMSBoundaryForcing,
         ROMSForcingCorrections) are not.
@@ -406,8 +404,10 @@ class TestROMSSimulationInitialization:
 
         expected_msg = f"must be a list of {expected_type_name} instances"
 
-        with pytest.raises(TypeError, match=expected_msg):
+        with pytest.raises(TypeError) as exception_info:
             ROMSSimulation(**kwargs)
+
+            assert expected_msg in str(exception_info.value)
 
     def test_codebases(self, example_roms_simulation):
         """Test that the `codebases` property correctly lists the `ExternalCodeBase`
