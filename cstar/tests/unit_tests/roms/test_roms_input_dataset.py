@@ -1123,11 +1123,11 @@ class TestROMSInputDatasetPartition:
             assert str(exception_info.value) == expected_message
 
 
-def test_correction_cannot_be_yaml(self):
+def test_correction_cannot_be_yaml():
     """Checks that the `validate()` method correctly raises a TypeError if
     `ROMSForcingCorrections.source.source_type` is `yaml` (unsupported)"""
 
-    with pytest.raises(ValueError) as exception_info:
+    with pytest.raises(TypeError) as exception_info:
         ROMSForcingCorrections(
             location="https://www.totallylegityamlfiles.pk/downloadme.yaml"
         )
