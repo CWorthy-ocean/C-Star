@@ -141,7 +141,6 @@ class TestROMSExternalCodeBaseGet:
         self.mock_update_user_dotenv.assert_called_once_with(env_file_str)
 
         ## Check that subprocess.run was (mock) called twice for `make nhmg` and `make Tools-Roms`
-        log.info(self.mock_subprocess_run.call_args_list)
         assert self.mock_subprocess_run.call_count == 2
 
         self.mock_subprocess_run.assert_any_call(

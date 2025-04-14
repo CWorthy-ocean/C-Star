@@ -907,8 +907,8 @@ class ROMSSimulation(Simulation):
             )
 
         # Time step entry
-        namelist = runtime_code_modifications[nl_idx]
-        namelist["__TIMESTEP_PLACEHOLDER__"] = self.discretization.time_step
+        formatting = runtime_code_modifications[nl_idx]
+        formatting["__TIMESTEP_PLACEHOLDER__"] = self.discretization.time_step
 
         # Grid file entry
         if self.model_grid is not None:
@@ -977,8 +977,8 @@ class ROMSSimulation(Simulation):
                     "\n     " + partitioned_files_to_runtime_code_string(fc)
                 )
 
-        namelist = runtime_code_modifications[nl_idx]
-        namelist["__FORCING_FILES_PLACEHOLDER__"] = runtime_code_forcing_str.lstrip()
+        formatting = runtime_code_modifications[nl_idx]
+        formatting["__FORCING_FILES_PLACEHOLDER__"] = runtime_code_forcing_str.lstrip()
 
         # MARBL settings filepaths entries
         ## NOTE: WANT TO RAISE IF PLACEHOLDER IS IN NAMELIST BUT not Path(marbl_file.exists())

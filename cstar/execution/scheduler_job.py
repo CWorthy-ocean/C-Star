@@ -713,7 +713,7 @@ class SlurmJob(SchedulerJob):
         """
 
         if self.status not in {ExecutionStatus.RUNNING, ExecutionStatus.PENDING}:
-            self.log.warning(f"Cannot cancel job with status '{self.status}'")
+            self.log.info(f"Cannot cancel job with status '{self.status}'")
             return
 
         _run_cmd(
@@ -930,7 +930,7 @@ class PBSJob(SchedulerJob):
             ExecutionStatus.PENDING,
             ExecutionStatus.HELD,
         }:
-            self.log.warning(f"Cannot cancel job with status {self.status}")
+            self.log.info(f"Cannot cancel job with status {self.status}")
             return
 
         _run_cmd(

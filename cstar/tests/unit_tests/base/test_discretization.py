@@ -12,7 +12,6 @@ def discretization():
 def test_init(discretization, log: logging.Logger):
     """Test the attributes were set correctly."""
     assert discretization.time_step == 3
-    log.info(discretization)
 
 
 def test_str(discretization):

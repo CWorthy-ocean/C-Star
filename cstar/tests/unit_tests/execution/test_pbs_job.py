@@ -292,7 +292,7 @@ class TestPBSJob:
         """
         # Mock the status to "completed"
         mock_status.return_value = "completed"
-        caplog.set_level(logging.WARNING)
+        caplog.set_level(logging.INFO)
 
         # Create a PBSJob with a set job ID
         job = PBSJob(

@@ -826,9 +826,6 @@ class TestLocalHash:
 
         result = local_input_dataset.local_hash
 
-        # Debug: Confirm resolve was invoked
-        log.info(f"Resolved path: {local_input_dataset.working_path.resolve()}")
-
         # Check that the result uses the resolved path
         assert result == {
             Path("/some/local/path"): "mocked_hash"

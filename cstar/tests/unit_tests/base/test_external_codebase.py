@@ -335,7 +335,7 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_invalid(
-        self, mock_input, generic_codebase, caplog: pytest.LogCaptureFixture
+        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
     ):
         # Assert that it raises an EnvironmentError
         self.mock_local_config_status.return_value = 2
@@ -343,11 +343,11 @@ class TestExternalCodeBaseConfigHandling:
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
         # Expect StopIteration after the invalid input due to no further inputs
-        with pytest.raises(StopIteration), caplog.at_level(logging.WARNING):
+        with pytest.raises(StopIteration):
             generic_codebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y' or 'n'"
-        captured = caplog.text
+        captured = capsys.readouterr().out
         assert expected_message in captured
 
     @mock.patch("builtins.input", side_effect=["n"])  # mock_input
@@ -366,7 +366,7 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["y"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_y(
-        self, mock_input, generic_codebase, caplog: pytest.LogCaptureFixture
+        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
     ):
         """Test handling when local_config_status == 2 (right remote, wrong hash) and
         user agrees to checkout."""
@@ -375,8 +375,6 @@ class TestExternalCodeBaseConfigHandling:
 
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
-
-        caplog.set_level(logging.WARNING)
 
         # Call the method to trigger the flow
         generic_codebase.handle_config_status()
@@ -392,7 +390,7 @@ class TestExternalCodeBaseConfigHandling:
         self.mock_subprocess_run.assert_called_once()
 
         # Check that the prompt for user input was shown
-        captured = caplog.text
+        captured = capsys.readouterr().out
 
         expected_message = (
             "############################################################\n"
@@ -435,16 +433,16 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_no_env_var_user_invalid(
-        self, mock_input, generic_codebase, caplog: pytest.LogCaptureFixture
+        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
     ):
         self.mock_local_config_status.return_value = 3
 
         # Expect StopIteration after the invalid input due to no further inputs
-        with pytest.raises(StopIteration), caplog.at_level(logging.WARNING):
+        with pytest.raises(StopIteration):
             generic_codebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y','n',or 'custom'"
-        captured = caplog.text
+        captured = capsys.readouterr().out
         assert expected_message in captured
 
     @mock.patch(

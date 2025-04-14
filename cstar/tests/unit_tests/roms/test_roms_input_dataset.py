@@ -746,7 +746,7 @@ class TestROMSInputDatasetGet:
         - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
         """
 
-        caplog.set_level(logging.WARNING)
+        caplog.set_level(logging.INFO)
 
         # Mock `working_path` to point to a file in `some/local/dir`
         local_roms_yaml_dataset.working_path = Path("some/local/dir/local_file.yaml")
@@ -800,7 +800,7 @@ class TestROMSInputDatasetGet:
         - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
         """
 
-        caplog.set_level(logging.WARNING)
+        caplog.set_level(logging.INFO)
 
         # Mock `working_path` to be a list pointing to files in `some/local/dir`
         local_roms_yaml_dataset.working_path = [

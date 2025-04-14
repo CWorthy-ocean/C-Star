@@ -174,7 +174,7 @@ class TestExecutionHandlerUpdates:
             patch.object(
                 MockExecutionHandler, "status", new_callable=PropertyMock
             ) as mock_status,
-            caplog.at_level(logging.WARNING),
+            caplog.at_level(logging.INFO),
         ):
             mock_status.return_value = ExecutionStatus.RUNNING
 

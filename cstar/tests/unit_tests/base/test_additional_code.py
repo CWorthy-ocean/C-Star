@@ -775,7 +775,6 @@ class TestAdditionalCodeGet:
         # Call get method
         local_additional_code.get("/mock/local/dir")
 
-        log.debug(f"DEBUG: All copy calls: {self.mock_copy.call_args_list}")
         # Ensure that the template files were copied and renamed
         assert self.mock_copy.call_count == 4  # 2 original files + 2 template renames
         self.mock_copy.assert_any_call(

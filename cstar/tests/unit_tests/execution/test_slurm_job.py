@@ -411,9 +411,6 @@ class TestSlurmJob:
         ):
             job.cancel()
 
-        # Log mock call arguments
-        log.info(f"Mock call args after failure: {mock_subprocess.call_args_list}")
-
         # Verify that scancel was still called
         mock_subprocess.assert_called_once_with(
             "scancel 12345",

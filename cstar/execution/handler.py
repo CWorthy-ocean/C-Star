@@ -128,13 +128,19 @@ class ExecutionHandler(ABC, LoggingMixin):
         """
 
         if self.status != ExecutionStatus.RUNNING:
-            self.log.warning(
-                f"This job is currently not running ({self.status}). Live updates cannot be provided."
-            )
-            if (self.status in {ExecutionStatus.FAILED, ExecutionStatus.COMPLETED}) or (
+            error_msg = f"This job is currently not running ({self.status}). Live updates cannot be provided."
+            is_complete = self.status in {
+                ExecutionStatus.FAILED,
+                ExecutionStatus.COMPLETED,
+            }
+            is_cancelled = (
                 self.status == ExecutionStatus.CANCELLED and self.output_file.exists()
-            ):
-                self.log.warning(f"See {self.output_file.resolve()} for job output")
+            )
+
+            if is_complete or is_cancelled:
+                error_msg += f" See {self.output_file.resolve()} for job output"
+
+            self.log.warning(error_msg)
             return
 
         if (seconds == 0) and (confirm_indefinite):
@@ -163,4 +169,4 @@ class ExecutionHandler(ABC, LoggingMixin):
                     else:
                         time.sleep(0.1)  # 100ms delay between updates
         except KeyboardInterrupt:
-            self.log.warning("Live status updates stopped by user.")
+            self.log.info("Live status updates stopped by user.")

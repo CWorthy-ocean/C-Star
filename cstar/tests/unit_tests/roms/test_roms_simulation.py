@@ -909,8 +909,6 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
         └── file2.opt
 """
 
-        log.debug(sim.tree())
-        log.debug(expected_tree)
         assert sim.tree() == expected_tree
 
 
