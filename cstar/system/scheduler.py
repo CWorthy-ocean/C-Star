@@ -444,7 +444,6 @@ class SlurmScheduler(Scheduler):
 
         return None
 
-
     @property
     def global_max_mem_per_node_gb(self) -> Optional[float]:
         """Retrieve the maximum memory available per node across all SLURM nodes, in
