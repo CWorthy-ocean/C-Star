@@ -3,7 +3,8 @@ import tempfile
 from typing import Optional, Dict
 from pathlib import Path
 from cstar.base.datasource import DataSource
-from cstar.base.utils import _clone_and_checkout, _list_to_concise_str, _get_sha256_hash
+from cstar.base.gitutils import _clone_and_checkout
+from cstar.base.utils import _list_to_concise_str, _get_sha256_hash
 
 
 class AdditionalCode:
