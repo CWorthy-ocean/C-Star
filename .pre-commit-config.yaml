@@ -1,11 +1,11 @@
 exclude: '^(?!cstar/).*'
 ci:
   autoupdate_schedule: monthly
-
+files: '^cstar/'
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
-    files: '^cstar/'
+    
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
