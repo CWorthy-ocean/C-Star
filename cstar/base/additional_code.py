@@ -207,7 +207,7 @@ class AdditionalCode(LoggingMixin):
                 tgt_file_path = local_dir / Path(f).name
 
                 self.log.info(
-                    f"copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
+                    f"Copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
                 )
                 if src_file_path.exists():
                     shutil.copy(src_file_path, tgt_file_path)
@@ -220,7 +220,7 @@ class AdditionalCode(LoggingMixin):
                 # Special case for template namelists:
                 if str(src_file_path)[-9:] == "_TEMPLATE":
                     self.log.info(
-                        f"copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
+                        f"Copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
                     )
                     shutil.copy(tgt_file_path, Path(str(tgt_file_path)[:-9]))
                     self.modified_files[i] = f[:-9]

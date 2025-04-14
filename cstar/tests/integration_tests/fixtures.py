@@ -89,7 +89,7 @@ def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
 
         def cleanup():
             if symlink_path.is_symlink():
-                log.info(f"removing {symlink_path}")
+                log.info(f"Removing {symlink_path}")
                 symlink_path.unlink()
 
         request.addfinalizer(cleanup)
