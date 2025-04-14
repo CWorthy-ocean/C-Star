@@ -132,14 +132,10 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
         f"to be a valid reference for this repository ({repo_url}).\n"
     )
     if branches:
-        error_message += (
-            "Available branches:\n"
-            + "\n".join(f" - {branch}" for branch in sorted(branches))
-            + "\n"
-        )
+        branch_names = "\n".join(f" - {branch}" for branch in sorted(branches))
+        error_message += f"Available branches:\n{branch_names}\n"
     if tags:
-        error_message += (
-            "Available tags:\n" + "\n".join(f" - {tag}" for tag in sorted(tags)) + "\n"
-        )
+        tag_names = "\n".join(f" - {tag}" for tag in sorted(tags))
+        error_message += f"Available tags:\n{tag_names}\n"
 
     raise ValueError(error_message.strip())
