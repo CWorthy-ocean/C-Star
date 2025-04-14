@@ -70,6 +70,9 @@ include-package-data = true
 
 [tool.pytest.ini_options]
 norecursedirs = [".tox", ".git", "__pycache__", ".#*", "*~"]
+log_cli_format = "%(asctime)s | %(levelname)s | %(name)s::%(funcName)s:%(lineno)d: %(message)s"
+log_cli_level = "INFO"
+
 
 # Use addopts to ignore specific files and directories
 addopts = [
