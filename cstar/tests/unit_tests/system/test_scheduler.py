@@ -235,9 +235,9 @@ class TestScheduler:
         result = scheduler.global_max_cpus_per_node
         assert result is None
 
-        expected_err = "Error querying node property. STDERR: Error querying CPUs"
         captured = capsys.readouterr().out
-        assert expected_err in captured
+        assert "Error querying node property." in captured
+        assert "STDERR:\nError querying CPUs" in captured
 
     def test_slurmscheduler_global_max_mem_per_node_gb_success(
         self, mock_subprocess_run
@@ -278,7 +278,8 @@ class TestScheduler:
         assert result is None
 
         captured = capsys.readouterr().out
-        assert "Error querying node property. STDERR: Error querying memory" in captured
+        assert "Error querying node property." in captured
+        assert "STDERR:\nError querying memory" in captured
 
     def test_pbsscheduler_global_max_cpus_per_node_success(self, mock_subprocess_run):
         """Confirm PBSScheduler queries and sets the maximum CPUs per node successfully.
@@ -316,7 +317,8 @@ class TestScheduler:
         assert result is None
 
         captured = capsys.readouterr().out
-        assert "Error querying node property. STDERR: Error querying CPUs" in captured
+        assert "Error querying node property." in captured
+        assert "STDERR:\nError querying CPUs" in captured
 
     def test_pbsscheduler_global_max_mem_per_node_gb_failure(
         self, mock_subprocess_run, capsys: pytest.CaptureFixture
@@ -334,7 +336,8 @@ class TestScheduler:
         assert result is None
 
         captured = capsys.readouterr().out
-        assert "Error querying node property. STDERR: Error querying memory" in captured
+        assert "Error querying node property." in captured
+        assert "STDERR:\nError querying memory" in captured
 
     @pytest.mark.parametrize(
         "stdout,expected",
