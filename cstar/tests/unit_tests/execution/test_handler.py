@@ -47,6 +47,9 @@ class TestExecutionHandlerUpdates:
         -----
         MockExecutionHandler.status
             Mocked to return `ExecutionStatus.COMPLETED`, simulating a non-running job.
+
+        Fixtures
+        --------
         LogCaptureFixture
             Captures log outputs to verify output messages.
 
@@ -86,6 +89,9 @@ class TestExecutionHandlerUpdates:
         -----
         MockExecutionHandler.status
             Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
+
+        Fixtures
+        --------
         LogCaptureFixture
             Captures log outputs to verify output messages
 
@@ -148,10 +154,13 @@ class TestExecutionHandlerUpdates:
             Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
         builtins.input
             Mocked to simulate user responses to the confirmation prompt.
-        LogCaptureFixture
-            Captures log outputs to verify output messages
         time.sleep
             Mocked to simulate a `KeyboardInterrupt` during indefinite updates.
+
+        Fixtures
+        --------
+        LogCaptureFixture
+            Captures log outputs to verify output messages
 
         Asserts
         -------
@@ -208,6 +217,11 @@ class TestExecutionHandlerUpdates:
         This test ensures:
         - The conditional block exits `updates` when `status` is not `RUNNING`.
         - Only lines added while the job is `RUNNING` are streamed.
+
+        Fixtures
+        --------
+        LogCaptureFixture
+            Captures log outputs to verify output messages
         """
         # Create a temporary output file
         output_file = tmp_path / "output.log"

@@ -298,7 +298,13 @@ class TestExternalCodeBaseConfigHandling:
     def test_handle_config_status_valid(
         self, generic_codebase, caplog: pytest.LogCaptureFixture
     ):
-        """Test when local_config_status == 0 (correct configuration)"""
+        """Test when local_config_status == 0 (correct configuration)
+
+        Fixtures
+        --------
+        LogCaptureFixture
+            Captures log outputs to verify output messages
+        """
         # Mock the config status to be 0 (everything is correct)
         self.mock_local_config_status.return_value = 0
         caplog.set_level(logging.INFO)
