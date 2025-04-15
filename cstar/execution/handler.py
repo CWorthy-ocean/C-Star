@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from enum import Enum, auto
 from pathlib import Path
 
+from cstar.base.log import LoggingMixin
+
 
 class ExecutionStatus(Enum):
     """Enum representing possible states of a process to be executed.
@@ -43,7 +45,7 @@ class ExecutionStatus(Enum):
         return self.name.lower()  # Convert enum name to lowercase for display
 
 
-class ExecutionHandler(ABC):
+class ExecutionHandler(ABC, LoggingMixin):
     """Abstract base class for managing the execution of a task or process.
 
     This class defines the interface and common behavior for handling task
@@ -98,7 +100,7 @@ class ExecutionHandler(ABC):
 
         pass
 
-    def updates(self, seconds: int = 10, confirm_indefinite: bool = True):
+    def updates(self, seconds: float = 10, confirm_indefinite: bool = True):
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
@@ -126,13 +128,19 @@ class ExecutionHandler(ABC):
         """
 
         if self.status != ExecutionStatus.RUNNING:
-            print(
-                f"This job is currently not running ({self.status}). Live updates cannot be provided."
-            )
-            if (self.status in {ExecutionStatus.FAILED, ExecutionStatus.COMPLETED}) or (
+            error_msg = f"This job is currently not running ({self.status}). Live updates cannot be provided."
+            is_complete = self.status in {
+                ExecutionStatus.FAILED,
+                ExecutionStatus.COMPLETED,
+            }
+            is_cancelled = (
                 self.status == ExecutionStatus.CANCELLED and self.output_file.exists()
-            ):
-                print(f"See {self.output_file.resolve()} for job output")
+            )
+
+            if is_complete or is_cancelled:
+                error_msg += f" See {self.output_file.resolve()} for job output"
+
+            self.log.warning(error_msg)
             return
 
         if (seconds == 0) and (confirm_indefinite):
@@ -157,8 +165,8 @@ class ExecutionHandler(ABC):
                     if self.status != ExecutionStatus.RUNNING:
                         return
                     elif line:
-                        print(line, end="")
+                        self.log.info(line)
                     else:
                         time.sleep(0.1)  # 100ms delay between updates
         except KeyboardInterrupt:
-            print("\nLive status updates stopped by user.")
+            self.log.info("Live status updates stopped by user.")
