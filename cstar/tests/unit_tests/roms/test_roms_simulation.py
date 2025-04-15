@@ -1992,7 +1992,7 @@ class TestProcessingAndExecution:
                 return_value=True,
             ),
             patch.object(Path, "exists", return_value=True),
-            caplog.at_level(logging.WARNING),
+            caplog.at_level(logging.INFO),
         ):
             # Pretend the executable exists
             sim._exe_hash = "dummy_hash"

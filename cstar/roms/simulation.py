@@ -1250,7 +1250,7 @@ class ROMSSimulation(Simulation):
             and (_get_sha256_hash(exe_path) == self._exe_hash)
             and not rebuild
         ):
-            self.log.warning(
+            self.log.info(
                 f"ROMS has already been built at {exe_path}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
