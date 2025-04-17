@@ -5,15 +5,72 @@ from collections import OrderedDict
 
 
 class ROMSInputSettings:
+    """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
+    files.
+
+    This class represents the structured input used by ROMS for a single model run.
+    It supports loading settings from disk via `from_file()`, editing or inspecting
+    values via named attributes, and writing a valid ROMS `.in` file via `to_file()`.
+
+    Attributes
+    ----------
+    title : str
+        Description of the ROMS run.
+    time_stepping : OrderedDict
+        Time integration parameters: ntimes, dt, ndtfast, ninfo.
+    bottom_drag : OrderedDict
+        Bottom drag coefficients: rdrg, rdrg2, zob.
+    initial : OrderedDict
+        Initial condition parameters: nrrec and ininame.
+    forcing : list of Path
+        List of forcing NetCDF files.
+    output_root_name : str
+        Base name for output NetCDF files.
+
+    Optional Attributes (depending on CPP flags)
+    --------------------------------------------
+    s_coord : OrderedDict or None
+        S-coordinate transformation parameters.
+    rho0 : float or None
+        Boussinesq reference density.
+    lin_rho_eos : OrderedDict or None
+        Linear equation of state parameters.
+    marbl_biogeochemistry : OrderedDict or None
+        Filenames for MARBL namelist and diagnostics.
+    lateral_visc : float or None
+        Horizontal viscosity coefficient.
+    gamma2 : float or None
+        Lateral boundary slipperiness coefficient.
+    tracer_diff2 : np.ndarray or None
+        Horizontal tracer diffusivities.
+    vertical_mixing : OrderedDict or None
+        Vertical mixing parameters: Akv_bak and Akt_bak.
+    my_bak_mixing : np.ndarray or None
+        Background vertical mixing for MY2.5.
+    sss_correction : float or None
+        Surface salinity correction factor.
+    sst_correction : float or None
+        Surface temperature correction factor.
+    ubind : float or None
+        Boundary binding velocity scale.
+    v_sponge : float or None
+        Maximum sponge layer viscosity.
+    grid : Path or None
+        Grid file path.
+    climatology : Path or None
+        Climatology file path.
+    """
+
     def __init__(
         self,
+        # Non-optional:
         title: str,
         time_stepping: list[int],
         bottom_drag: list[float],
-        initial: tuple[int, str | Path | None],  # not optional, even with ana
+        initial: tuple[int, str | Path | None],
         forcing: list[str | Path],
         output_root_name: str,
-        # Optional (cpp-key dependent)
+        # Optional (cpp-key dependent):
         s_coord: Optional[list[float]] = None,
         rho0: Optional[float] = None,
         lin_rho_eos: Optional[list[float]] = None,
@@ -21,15 +78,71 @@ class ROMSInputSettings:
         lateral_visc: Optional[float] = None,
         gamma2: Optional[float] = None,
         tracer_diff2: Optional[np.ndarray] = None,
-        vertical_mixing: Optional[tuple[float, np.ndarray]] = None,  # float, NT
-        my_bak_mixing: Optional[np.array] = None,
+        vertical_mixing: Optional[tuple[float, np.ndarray]] = None,
+        my_bak_mixing: Optional[list[float]] = None,
         sss_correction: Optional[float] = None,
         sst_correction: Optional[float] = None,
         ubind: Optional[float] = None,
         v_sponge: Optional[float] = None,
-        grid: Optional[str | Path] = None,  # will run w/o
+        grid: Optional[str | Path] = None,
         climatology: Optional[str | Path] = None,
     ):
+        """Initialize a ROMSInputSettings instance.
+
+        Parameters
+        ----------
+        title : str
+            Description of the ROMS run.
+        time_stepping : list[int]
+            List containing [ntimes, dt, ndtfast, ninfo].
+        bottom_drag : list[float]
+            List containing [rdrg, rdrg2, zob].
+        initial : tuple[int, str | Path | None]
+            A tuple (num. records, filename) for initial conditions.
+            Required, but filename can be None and num. records 0.
+        forcing : list[str | Path]
+            List of paths to forcing files. Required, but can be empty.
+        output_root_name : str
+            Base name for ROMS output files.
+        s_coord : list[float], optional
+            List containing vertical co-ordinate params [theta_s, theta_b, tcline].
+        rho0 : float, optional
+            Boussinesq reference density.
+        lin_rho_eos : list[float], optional
+            Linear equation of state coefficients [Tcoef, T0, Scoef, S0].
+        marbl_biogeochemistry : list[str | Path], optional
+            Paths to MARBL input files.
+        lateral_visc : float, optional
+            Horizontal viscosity parameter.
+        gamma2 : float, optional
+            Lateral boundary slipperiness parameter.
+        tracer_diff2 : np.ndarray, optional
+            Array of horizontal tracer diffusivities.
+        vertical_mixing : tuple[float, np.ndarray], optional
+            Tuple of background viscosity and (one per tracer) mixing coefficients.
+        my_bak_mixing : list[float], optional
+            List containing [Akq_bak, q2nu2, q2nu4]
+            for Mellor-Yamada 2.5 turbulent closure
+        sss_correction : float, optional
+            Surface salinity correction factor.
+        sst_correction : float, optional
+            Surface temperature correction factor.
+        ubind : float, optional
+            Open boundary binding velocity scale.
+        v_sponge : float, optional
+            Maximum viscosity in sponge layers.
+        grid : str or Path, optional
+            Path to grid file.
+        climatology : str or Path, optional
+            Path to climatology file.
+
+        See Also
+        --------
+        - ROMSInputSettings:
+            Container for reading, manipulating, and writing ROMS
+            `.in` runtime configuration files.
+        """
+
         self.title: str = title
         self.time_stepping: OrderedDict = OrderedDict(
             [
@@ -50,11 +163,6 @@ class ROMSInputSettings:
 
         self.initial: OrderedDict = OrderedDict([("nrrec", initial[0])])
         self.initial["ininame"] = Path(initial[1]) if initial[1] else ""
-
-        # self.initial: OrderedDict = OrderedDict([
-        #     ("nrrec", initial[0]),
-        #     ("ininame", Path(initial[1]))
-        # ])
 
         self.forcing = [Path(f) for f in forcing]
         self.output_root_name = output_root_name
@@ -111,7 +219,17 @@ class ROMSInputSettings:
         else:
             self.vertical_mixing = None
 
-        self.my_bak_mixing = my_bak_mixing
+        if my_bak_mixing is not None:
+            self.my_bak_mixing: OrderedDict | None = OrderedDict(
+                [
+                    ("Akq_bak", my_bak_mixing[0]),
+                    ("q2nu2", my_bak_mixing[1]),
+                    ("q2nu4", my_bak_mixing[2]),
+                ]
+            )
+        else:
+            self.my_bak_mixing = None
+
         self.sss_correction = sss_correction
         self.sst_correction = sst_correction
         self.ubind = ubind
@@ -214,11 +332,11 @@ class ROMSInputSettings:
         lin_rho_eos = _single_line_section_to_list("lin_rho_eos", float)
         lateral_visc = _single_line_section_to_scalar("lateral_visc", float)
         gamma2 = _single_line_section_to_scalar("gamma2", float)
+
         tracer_diff2_list = _single_line_section_to_list("tracer_diff2", float)
         tracer_diff2 = np.array(tracer_diff2_list) if tracer_diff2_list else None
 
-        my_bak_mixing_list = _single_line_section_to_list("MY_bak_mixing", float)
-        my_bak_mixing = np.array(my_bak_mixing_list) if my_bak_mixing_list else None
+        my_bak_mixing = _single_line_section_to_list("MY_bak_mixing", float)
 
         vmix_list = _single_line_section_to_list("vertical_mixing", float)
         vertical_mixing = (vmix_list[0], np.array(vmix_list[1:])) if vmix_list else None
@@ -262,27 +380,47 @@ class ROMSInputSettings:
         )
 
     def to_file(self, filepath: Path | str) -> None:
+        """Write the current settings to a ROMS-compatible `.in` file.
+
+        Parameters
+        ----------
+        filepath : str or Path
+            Path where the output file will be written.
+        """
+
         filepath = Path(filepath)
 
         def _format_value(val):
+            """Format a single value for .in file, using exponents for large or small
+            values."""
+
             if isinstance(val, float):
                 if val == 0.0:
                     return "0."
                 elif abs(val) < 1e-2 or abs(val) >= 1e4:
-                    return f"{val:.6E}".replace(
-                        "E+00", "E0"
-                    )  # force exponent if large/small
+                    return f"{val:.6E}".replace("E+00", "E0")
                 else:
                     return str(val)
             return str(val)
 
         def _format_float_list(lst):
+            """Format a list of values for .in file."""
+
             return " ".join(_format_value(x) for x in lst)
 
-        def _flatten_dict_values(d: OrderedDict) -> str:
-            return " ".join(_format_value(v) for v in d.values())
-
         def write_section(name: str, data: dict | list | str, multi_line: bool = False):
+            """Write a section to file using ROMS input formatting conventions.
+
+            Parameters
+            ----------
+            name : str
+                Name of the ROMS input section.
+            data : dict, list, or str
+                Section content. Dicts print keys inline, lists print items.
+            multi_line : bool, default=False
+                Whether to write each value on its own line.
+            """
+
             if multi_line:
                 value_joiner = "\n    "
             else:
@@ -362,7 +500,7 @@ class ROMSInputSettings:
                 )
 
             if self.my_bak_mixing is not None:
-                write_section("MY_bak_mixing", _format_float_list(self.my_bak_mixing))
+                write_section("MY_bak_mixing", self.my_bak_mixing)
 
             if self.sss_correction is not None:
                 write_section("SSS_correction", _format_value(self.sss_correction))
