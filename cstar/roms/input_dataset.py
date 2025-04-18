@@ -89,14 +89,14 @@ class ROMSInputDataset(InputDataset, ABC):
                 )
 
             # If they are, we want to partition them all in the same place
-            partdir = self.working_path[0].parent / "PARTITIONED"
+            partdir = self.working_path[0].parent  # / "PARTITIONED"
             id_files_to_partition = self.working_path[:]
 
         else:
             id_files_to_partition = [
                 self.working_path,
             ]
-            partdir = self.working_path.parent / "PARTITIONED"
+            partdir = self.working_path.parent  # / "PARTITIONED"
 
         partdir.mkdir(parents=True, exist_ok=True)
         parted_files = []
