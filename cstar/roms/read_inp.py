@@ -4,7 +4,7 @@ from typing import Optional
 from collections import OrderedDict
 
 
-class ROMSInputSettings:
+class ROMSRuntimeSettings:
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -138,7 +138,7 @@ class ROMSInputSettings:
 
         See Also
         --------
-        - ROMSInputSettings:
+        - ROMSRuntimeSettings:
             Container for reading, manipulating, and writing ROMS
             `.in` runtime configuration files.
         """
@@ -240,13 +240,13 @@ class ROMSInputSettings:
 
     @classmethod
     def from_file(cls, filepath: Path | str):
-        """Read ROMS input settings from a `.in` file.
+        """Read ROMS runtime settings from a `.in` file.
 
         ROMS runtime settings are specified via a `.in` file with sections corresponding
         to different sets of parameters (e.g. time_stepping, bottom_drag). This method
         first parses the file, creating a dict[str,list[str]] where the keys are the
         section names and the values are a list of lines in that section. It then
-        translates that dictionary into a ROMSInputSettings instance with properly
+        translates that dictionary into a ROMSRuntimeSettings instance with properly
         formatted attributes.
 
         Parameters
@@ -256,7 +256,7 @@ class ROMSInputSettings:
 
         See Also
         --------
-        - `ROMSInputSettings.to_file()`: writes a ROMSInputSettings instance to a
+        - `ROMSRuntimeSettings.to_file()`: writes a ROMSRuntimeSettings instance to a
            ROMS-compatible `.in` file
         """
 
@@ -469,6 +469,7 @@ class ROMSInputSettings:
                         str(self.marbl_biogeochemistry[k])
                         for k in self.marbl_biogeochemistry
                     ],
+                    multi_line=True,
                 )
 
             if self.lateral_visc is not None:
