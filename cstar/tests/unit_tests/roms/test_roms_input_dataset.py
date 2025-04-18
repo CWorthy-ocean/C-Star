@@ -3,7 +3,7 @@ import datetime as dt
 from unittest import mock
 from pathlib import Path
 from textwrap import dedent
-from cstar.roms import ROMSInputDataset
+from cstar.roms import ROMSInputDataset, ROMSForcingCorrections
 from cstar.base.datasource import DataSource
 
 
@@ -1121,3 +1121,17 @@ class TestROMSInputDatasetPartition:
                 f"{local_roms_netcdf_dataset.working_path}."
             )
             assert str(exception_info.value) == expected_message
+
+
+def test_correction_cannot_be_yaml():
+    """Checks that the `validate()` method correctly raises a TypeError if
+    `ROMSForcingCorrections.source.source_type` is `yaml` (unsupported)"""
+
+    with pytest.raises(TypeError) as exception_info:
+        ROMSForcingCorrections(
+            location="https://www.totallylegityamlfiles.pk/downloadme.yaml"
+        )
+        expected_msg = (
+            "ROMSForcingCorrections cannot be initialized with a source YAML file."
+        )
+        assert expected_msg in str(exception_info.value)

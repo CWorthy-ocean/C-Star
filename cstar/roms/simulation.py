@@ -2,7 +2,6 @@ import yaml
 import shutil
 import warnings
 import requests
-import subprocess
 from pathlib import Path
 from datetime import datetime
 from cstar.roms.external_codebase import ROMSExternalCodeBase
@@ -15,12 +14,18 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
     ROMSInputDataset,
+    ROMSForcingCorrections,
 )
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 
 from cstar.base.datasource import DataSource
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.utils import _get_sha256_hash, _replace_text_in_file, _dict_to_tree
+from cstar.base.utils import (
+    _get_sha256_hash,
+    _replace_text_in_file,
+    _dict_to_tree,
+    _run_cmd,
+)
 
 from cstar.execution.handler import ExecutionHandler
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -72,6 +77,8 @@ class ROMSSimulation(Simulation):
         List of surface forcing datasets.
     boundary_forcing : list[ROMSBoundaryForcing]
         List of boundary forcing datasets.
+    forcing_corrections : list[ROMSForcingCorrections]
+        List of forcing correction datasets.
     exe_path : Path
         Path to the compiled ROMS executable.
     partitioned_files : List[Path]
@@ -120,6 +127,7 @@ class ROMSSimulation(Simulation):
         river_forcing: Optional["ROMSRiverForcing"] = None,
         boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
         surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
+        forcing_corrections: Optional[list["ROMSForcingCorrections"]] = None,
     ):
         """Initializes a `ROMSSimulation` instance.
 
@@ -165,12 +173,15 @@ class ROMSSimulation(Simulation):
             List of datasets specifying boundary conditions for ROMS.
         surface_forcing : list[ROMSBoundaryForcing]
             List of surface forcing datasets (e.g., wind stress, heat flux).
+        forcing_corrections : list[ROMSForcingCorrections], optional
+            List of surface forcing correction datasets.
 
         Raises
         ------
         TypeError
             If `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
             If `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
+            If `forcing_corrections` is not a list of `ROMSForcingCorrections` instances.
         """
         if discretization is None:
             raise ValueError(
@@ -207,17 +218,16 @@ class ROMSSimulation(Simulation):
         self.tidal_forcing = tidal_forcing
         self.river_forcing = river_forcing
         self.surface_forcing = [] if surface_forcing is None else surface_forcing
-        if not all([isinstance(sf, ROMSSurfaceForcing) for sf in self.surface_forcing]):
-            raise TypeError(
-                "ROMSSimulation.surface_forcing must be a list of ROMSSurfaceForcing instances"
-            )
+        self._check_forcing_collection_types(self.surface_forcing, ROMSSurfaceForcing)
+
         self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
-        if not all(
-            [isinstance(bf, ROMSBoundaryForcing) for bf in self.boundary_forcing]
-        ):
-            raise TypeError(
-                "ROMSSimulation.boundary_forcing must be a list of ROMSBoundaryForcing instances"
-            )
+        self._check_forcing_collection_types(self.boundary_forcing, ROMSBoundaryForcing)
+        self.forcing_corrections = (
+            [] if forcing_corrections is None else forcing_corrections
+        )
+        self._check_forcing_collection_types(
+            self.forcing_corrections, ROMSForcingCorrections
+        )
 
         self._check_inputdataset_dates()
 
@@ -238,6 +248,15 @@ class ROMSSimulation(Simulation):
         self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
+
+    def _check_forcing_collection_types(self, collection, expected_class):
+        """For forcing types that may correspond to multiple InputDataset instances
+        (ROMSSurfaceForcing, ROMSBoundaryForcing, ROMSForcingCorrections), ensure that
+        the corresponding attribute is a list of instances of the correct type."""
+        if not all([isinstance(ind, expected_class) for ind in collection]):
+            raise TypeError(
+                f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
+            )
 
     def _check_inputdataset_dates(self) -> None:
         """For ROMSInputDatasets whose source type is `yaml`, ensure that any set
@@ -317,7 +336,12 @@ class ROMSSimulation(Simulation):
         if len(self.boundary_forcing) > 0:
             base_str += (
                 f"\nBoundary forcing: <list of {len(self.boundary_forcing)} "
-                + f"{self.boundary_forcing[0].__class__.__name__} instances>\n"
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
+            )
+        if len(self.forcing_corrections) > 0:
+            base_str += (
+                f"\nForcing corrections: <list of {len(self.forcing_corrections)} "
+                + f"{self.forcing_corrections[0].__class__.__name__} instances>\n"
             )
 
         base_str += f"\nIs setup: {self.is_setup}"
@@ -357,8 +381,14 @@ class ROMSSimulation(Simulation):
         if hasattr(self, "boundary_forcing") and len(self.boundary_forcing) > 0:
             repr_str += (
                 f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
-                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
+                + f"{self.boundary_forcing[0].__class__.__name__} instances>,"
             )
+        if hasattr(self, "forcing_corrections") and len(self.forcing_corrections) > 0:
+            repr_str += (
+                f"\nforcing_corrections = <list of {len(self.forcing_corrections)} "
+                + f"{self.forcing_corrections[0].__class__.__name__} instances>"
+            )
+
         repr_str += "\n)"
 
         return repr_str
@@ -473,6 +503,8 @@ class ROMSSimulation(Simulation):
             input_datasets.extend(self.boundary_forcing)
         if len(self.surface_forcing) > 0:
             input_datasets.extend(self.surface_forcing)
+        if len(self.forcing_corrections) > 0:
+            input_datasets.extend(self.forcing_corrections)
         return input_datasets
 
     @classmethod
@@ -607,6 +639,19 @@ class ROMSSimulation(Simulation):
         for sf_kwargs in surface_forcing_entries:
             simulation_kwargs["surface_forcing"].append(ROMSSurfaceForcing(**sf_kwargs))
 
+        # Construct any ROMSForcingCorrections instances:
+        forcing_corrections_entries = simulation_dict.get("forcing_corrections", [])
+        if len(forcing_corrections_entries) > 0:
+            simulation_kwargs["forcing_corrections"] = []
+        if isinstance(forcing_corrections_entries, dict):
+            forcing_corrections_entries = [
+                forcing_corrections_entries,
+            ]
+        for fc_kwargs in forcing_corrections_entries:
+            simulation_kwargs["forcing_corrections"].append(
+                ROMSForcingCorrections(**fc_kwargs)
+            )
+
         return cls(**simulation_kwargs)
 
     def to_dict(self) -> dict:
@@ -660,6 +705,10 @@ class ROMSSimulation(Simulation):
         if len(self.boundary_forcing) > 0:
             simulation_dict["boundary_forcing"] = [
                 bf.to_dict() for bf in self.boundary_forcing
+            ]
+        if len(self.forcing_corrections) > 0:
+            simulation_dict["forcing_corrections"] = [
+                fc.to_dict() for fc in self.forcing_corrections
             ]
 
         return simulation_dict
@@ -923,6 +972,11 @@ class ROMSSimulation(Simulation):
             runtime_code_forcing_str += (
                 "\n     " + partitioned_files_to_runtime_code_string(self.river_forcing)
             )
+        for fc in self.forcing_corrections:
+            if len(fc.partitioned_files) > 0:
+                runtime_code_forcing_str += (
+                    "\n     " + partitioned_files_to_runtime_code_string(fc)
+                )
 
         runtime_code_modifications[nl_idx]["__FORCING_FILES_PLACEHOLDER__"] = (
             runtime_code_forcing_str.lstrip()
@@ -1207,34 +1261,21 @@ class ROMSSimulation(Simulation):
             return
 
         if (build_dir / "Compile").is_dir():
-            make_clean_result = subprocess.run(
+            _run_cmd(
                 "make compile_clean",
                 cwd=build_dir,
-                shell=True,
-                capture_output=True,
-                text=True,
+                msg_err="Error when compiling ROMS.",
+                raise_on_error=True,
             )
-            if make_clean_result.returncode != 0:
-                raise RuntimeError(
-                    f"Error {make_clean_result.returncode} when compiling ROMS. STDERR stream: "
-                    + f"\n {make_clean_result.stderr}"
-                )
 
-        print("Compiling UCLA-ROMS configuration...")
-        make_roms_result = subprocess.run(
+        _run_cmd(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
-            shell=True,
-            capture_output=True,
-            text=True,
+            msg_pre="Compiling UCLA-ROMS configuration...",
+            msg_post=f"UCLA-ROMS compiled at {build_dir}",
+            msg_err="Error when compiling ROMS.",
+            raise_on_error=True,
         )
-        if make_roms_result.returncode != 0:
-            raise RuntimeError(
-                f"Error {make_roms_result.returncode} when compiling ROMS. STDERR stream: "
-                + f"\n {make_roms_result.stderr}"
-            )
-
-        print(f"UCLA-ROMS compiled at {build_dir}")
 
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
@@ -1481,19 +1522,14 @@ class ROMSSimulation(Simulation):
             for wildcard_pattern in unique_wildcards:
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
 
-                print(f"Joining netCDF files {wildcard_pattern}...")
-                ncjoin_result = subprocess.run(
+                _run_cmd(
                     f"ncjoin {wildcard_pattern}",
                     cwd=output_dir,
-                    capture_output=True,
-                    text=True,
-                    shell=True,
+                    msg_pre=f"Joining netCDF files {wildcard_pattern}...",
+                    msg_err="Error while joining ROMS output.",
+                    raise_on_error=True,
                 )
-                if ncjoin_result.returncode != 0:
-                    raise RuntimeError(
-                        f"Error {ncjoin_result.returncode} while joining ROMS output. "
-                        + f"STDERR stream:\n {ncjoin_result.stderr}"
-                    )
+
                 for F in output_dir.glob(wildcard_pattern):
                     F.rename(output_dir / "PARTITIONED" / F.name)
 

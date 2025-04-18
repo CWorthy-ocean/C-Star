@@ -275,3 +275,21 @@ class ROMSRiverForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for river forcing files."""
 
     pass
+
+
+class ROMSForcingCorrections(ROMSInputDataset):
+    """ROMS forcing correction file, such as SW correction or restoring fields.
+
+    These are used by older ROMS configurations, and included in C-Star to support them.
+
+    This file must not be generated from a roms-tools YAML. It should point directly to
+    a NetCDF or similar file.
+    """
+
+    def validate(self):
+        if self.source.source_type == "yaml":
+            raise TypeError(
+                "Hey, you! we said no funny business! -Scotty E."
+                f"{self.__class__.__name__} cannot be initialized with a source YAML file. "
+                "Please provide a direct path or URL to a dataset (e.g., NetCDF)."
+            )

@@ -228,7 +228,7 @@ class TestScheduler:
         Captures printed error messages to ensure the failure is logged correctly.
         """
         mock_subprocess_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="Error querying CPUs"
+            returncode=2, stdout="", stderr="Error querying CPUs"
         )
         scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
 
@@ -237,7 +237,8 @@ class TestScheduler:
 
         captured = capsys.readouterr()
         assert (
-            "Error querying node property. STDERR: Error querying CPUs" in captured.out
+            "Error querying node property. Return Code: `2`. STDERR:\nError querying CPUs"
+            in captured.out
         )
 
     def test_slurmscheduler_global_max_mem_per_node_gb_success(
@@ -280,7 +281,7 @@ class TestScheduler:
 
         captured = capsys.readouterr()
         assert (
-            "Error querying node property. STDERR: Error querying memory"
+            "Error querying node property. Return Code: `1`. STDERR:\nError querying memory"
             in captured.out
         )
 
@@ -321,7 +322,8 @@ class TestScheduler:
 
         captured = capsys.readouterr()
         assert (
-            "Error querying node property. STDERR: Error querying CPUs" in captured.out
+            "Error querying node property. Return Code: `1`. STDERR:\nError querying CPUs"
+            in captured.out
         )
 
     def test_pbsscheduler_global_max_mem_per_node_gb_failure(
@@ -341,7 +343,7 @@ class TestScheduler:
 
         captured = capsys.readouterr()
         assert (
-            "Error querying node property. STDERR: Error querying memory"
+            "Error querying node property. Return Code: `1`. STDERR:\nError querying memory"
             in captured.out
         )
 

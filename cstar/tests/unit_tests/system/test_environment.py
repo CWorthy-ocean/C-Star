@@ -32,7 +32,7 @@ class TestSetupEnvironmentFromFiles:
     """
 
     @pytest.mark.parametrize("lmod_syshost", ["perlmutter", "derecho", "expanse"])
-    @patch("cstar.system.environment.subprocess.run")
+    @patch("cstar.base.utils.subprocess.run")
     @patch.object(
         cstar.system.environment.CStarEnvironment,
         "uses_lmod",
@@ -283,7 +283,7 @@ class TestExceptions:
         """
 
         self.subprocess_patcher = patch(
-            "cstar.system.environment.subprocess.run",
+            "cstar.base.utils.subprocess.run",
             return_value=subprocess.CompletedProcess(args="module reset", returncode=0),
         )
         self.mock_subprocess = self.subprocess_patcher.start()
@@ -346,7 +346,7 @@ class TestExceptions:
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
-    @patch("cstar.system.environment.subprocess.run")
+    @patch("cstar.base.utils.subprocess.run")
     def test_load_lmod_modules_raises_runtime_error_on_module_reset_failure(
         self, mock_subprocess
     ):
@@ -368,7 +368,10 @@ class TestExceptions:
 
         with pytest.raises(
             RuntimeError,
-            match="Linux Environment Modules command \n/mock/lmod python reset \n failed with code 1. STDERR: Module reset error",
+            match=(
+                "Linux Environment Modules command `/mock/lmod python reset` failed. "
+                "Return Code: `1`. STDERR:\nModule reset error"
+            ),
         ):
             MockEnvironment()
 
@@ -414,6 +417,9 @@ class TestExceptions:
 
         with pytest.raises(
             RuntimeError,
-            match=r"Linux Environment Modules command\s+\n/mock/lmod python load module1\s+\n failed with code 1\. STDERR: Module load error",
+            match=(
+                "Linux Environment Modules command `/mock/lmod python load module1` "
+                "failed. Return Code: `1`. STDERR:\nModule load error"
+            ),
         ):
             MockEnvironment()

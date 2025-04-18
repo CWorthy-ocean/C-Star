@@ -124,7 +124,7 @@ class TestMARBLExternalCodeBaseGet:
 
         self.mock_subprocess_run.assert_called_once_with(
             f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
-            cwd=f"{marbl_dir}/src",
+            cwd=marbl_dir / "src",
             capture_output=True,
             text=True,
             shell=True,
@@ -135,12 +135,12 @@ class TestMARBLExternalCodeBaseGet:
 
         ## There are two subprocess calls, we'd like one fail, one pass:
         self.mock_subprocess_run.side_effect = [
-            mock.Mock(returncode=1, stderr="Compiling MARBL failed successfully"),
+            mock.Mock(returncode=1, stderr="Mocked MARBL Compilation Failure"),
         ]
 
         # Test
         with pytest.raises(
             RuntimeError,
-            match="Error 1 when compiling MARBL. STDERR stream: \n Compiling MARBL failed successfully",
+            match="Error when compiling MARBL. Return Code: `1`. STDERR:\nMocked MARBL Compilation Failure",
         ):
             marbl_codebase.get(target=tmp_path)

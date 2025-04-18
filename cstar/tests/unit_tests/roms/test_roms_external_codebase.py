@@ -145,7 +145,7 @@ class TestROMSExternalCodeBaseGet:
 
         self.mock_subprocess_run.assert_any_call(
             f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=f"{roms_dir}/Work",
+            cwd=roms_dir / "Work",
             capture_output=True,
             text=True,
             shell=True,
@@ -153,7 +153,7 @@ class TestROMSExternalCodeBaseGet:
 
         self.mock_subprocess_run.assert_any_call(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=f"{roms_dir}/Tools-Roms",
+            cwd=roms_dir / "Tools-Roms",
             capture_output=True,
             text=True,
             shell=True,
@@ -173,7 +173,7 @@ class TestROMSExternalCodeBaseGet:
         # Test
         with pytest.raises(
             RuntimeError,
-            match="Error 1 when compiling ROMS' NHMG library. STDERR stream: \n Compiling NHMG library failed successfully",
+            match="Error when compiling ROMS' NHMG library. Return Code: `1`. STDERR:\nCompiling NHMG library failed successfully",
         ):
             roms_codebase.get(target=tmp_path)
 
@@ -189,12 +189,12 @@ class TestROMSExternalCodeBaseGet:
             mock.Mock(returncode=0),  # Success for nhmg
             mock.Mock(
                 returncode=1,
-                stderr="Error 1 when compiling Tools-Roms. STDERR stream: \n Compiling Tools-Roms failed successfully",
+                stderr="Error when compiling Tools-Roms. Return Code: `1`. STDERR:\nCompiling Tools-Roms failed successfully",
             ),  # Fail Tools-Roms
         ]
 
         with pytest.raises(
-            RuntimeError, match=" Compiling Tools-Roms failed successfully"
+            RuntimeError, match="Compiling Tools-Roms failed successfully"
         ):
             roms_codebase.get(target=tmp_path)
 

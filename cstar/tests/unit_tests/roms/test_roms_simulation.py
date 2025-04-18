@@ -2,6 +2,7 @@ import re
 import pytest
 import yaml
 import pickle
+from typing import cast, Any
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch, mock_open, MagicMock, PropertyMock
@@ -17,6 +18,7 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSSurfaceForcing,
     ROMSRiverForcing,
+    ROMSForcingCorrections,
 )
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.base.additional_code import AdditionalCode
@@ -92,6 +94,11 @@ def example_roms_simulation(tmp_path):
         surface_forcing=[
             ROMSSurfaceForcing(location="http://my.files/surface.nc", file_hash="567"),
         ],
+        forcing_corrections=[
+            ROMSForcingCorrections(
+                location="http://my.files/sw_corr.nc", file_hash="890"
+            ),
+        ],
     )
 
     yield sim, directory  # Ensures pytest can handle resource cleanup if needed
@@ -116,10 +123,8 @@ class TestROMSSimulationInitialization:
       is raised when `compile_time_code` is missing.
     - `test_default_codebase_assignment`: Confirms that default external codebases
       are correctly assigned if not explicitly provided.
-    - `test_invalid_surface_forcing_type`: Checks that a `TypeError` is raised if
-      `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
-    - `test_invalid_boundary_forcing_type`: Checks that a `TypeError` is raised if
-      `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
+    - `test_check_forcing_collection`: Confirms that an error is raised if forcing
+      attributes corresponding to lists are incorrectly typed
     - `test_codebases`: Ensures the `codebases` property correctly returns the list
       of external codebases associated with the simulation.
     - `test_in_file_single_file`: Ensures the `in_file` property correctly retrieves
@@ -359,28 +364,43 @@ class TestROMSSimulationInitialization:
         )
         assert sim.marbl_codebase.checkout_target == "marbl0.45.0"
 
-    def test_invalid_surface_forcing_type(self, tmp_path):
-        """Ensure a `TypeError` is raised when `surface_forcing` is not a list of
-        `ROMSSurfaceForcing` instances.
+    @pytest.mark.parametrize(
+        "attrname, expected_type_name",
+        [
+            ("surface_forcing", "ROMSSurfaceForcing"),
+            ("boundary_forcing", "ROMSBoundaryForcing"),
+            ("forcing_corrections", "ROMSForcingCorrections"),
+        ],
+    )
+    def test_check_forcing_collection(
+        self, tmp_path: Path, attrname: str, expected_type_name: str
+    ) -> None:
+        """Ensure a TypeError is raised when attributes of ROMSSimulation that should be
+        lists of ROMSInputDatasets (e.g., ROMSSurfaceForcing, ROMSBoundaryForcing,
+        ROMSForcingCorrections) are not.
 
-        This test verifies that the `ROMSSimulation` constructor enforces type safety
-        by checking that `surface_forcing` is a list containing only `ROMSSurfaceForcing`
-        objects. Passing an invalid list should result in a `TypeError`.
+        Parameters
+        ----------
+        attrname : str
+            The attribute being checked (e.g., "surface_forcing").
+        expected_type_name : str
+            The name of the expected input dataset class for elements of the attribute.
 
         Assertions
         ----------
-        - A `TypeError` is raised when `surface_forcing` contains elements that are
-          not `ROMSSurfaceForcing` instances, including an expected message substring.
+        - A `TypeError` is raised when attributes that should be lists of ROMSInputDatasets
+          are incorrectly set to other types.
 
         Mocks & Fixtures
         ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for
-          safely testing file system interactions.
+        tmp_path : Path
+            Temporary directory fixture provided by `pytest` for safely
+            testing file system interactions.
         """
+        expected_msg = f"must be a list of {expected_type_name} instances"
+        test_args = cast(dict[str, Any], {attrname: ["this", "is", "not", "valid"]})
 
-        with pytest.raises(
-            TypeError, match="must be a list of ROMSSurfaceForcing instances"
-        ):
+        with pytest.raises(TypeError) as exception_info:
             ROMSSimulation(
                 name="test",
                 directory=tmp_path,
@@ -392,60 +412,10 @@ class TestROMSSimulationInitialization:
                 end_date="2012-01-02",
                 valid_start_date="2012-01-01",
                 valid_end_date="2012-01-02",
-                surface_forcing=[
-                    "list",
-                    "of",
-                    "strings",
-                    "instead",
-                    "of",
-                    "ROMSSurfaceForcing",
-                    "instances",
-                ],
+                **test_args,
             )
 
-    def test_invalid_boundary_forcing_type(self, tmp_path):
-        """Ensure a `TypeError` is raised when `boundary_forcing` is not a list of
-        `ROMSBoundaryForcing` instances.
-
-        This test verifies that the `ROMSSimulation` constructor enforces type safety
-        by ensuring that `boundary_forcing` is a list containing only `ROMSBoundaryForcing`
-        objects. Passing an invalid list should result in a `TypeError`.
-
-        Assertions
-        ----------
-        - A `TypeError` is raised when `boundary_forcing` contains elements that are
-          not `ROMSBoundaryForcing` instances with an expected message substring
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for safely
-          testing file system interactions.
-        """
-
-        with pytest.raises(
-            TypeError, match="must be a list of ROMSBoundaryForcing instances"
-        ):
-            ROMSSimulation(
-                name="test",
-                directory=tmp_path,
-                discretization=ROMSDiscretization(time_step=60),
-                codebase=ROMSExternalCodeBase(),
-                runtime_code=AdditionalCode("some/dir"),
-                compile_time_code=AdditionalCode("some/dir"),
-                start_date="2012-01-01",
-                end_date="2012-01-02",
-                valid_start_date="2012-01-01",
-                valid_end_date="2012-01-02",
-                boundary_forcing=[
-                    "list",
-                    "of",
-                    "strings",
-                    "instead",
-                    "of",
-                    "ROMSBoundaryForcing",
-                    "instances",
-                ],
-            )
+            assert expected_msg in str(exception_info.value)
 
     def test_codebases(self, example_roms_simulation):
         """Test that the `codebases` property correctly lists the `ExternalCodeBase`
@@ -634,8 +604,85 @@ class TestROMSSimulationInitialization:
         rf = sim.river_forcing
         bc = sim.boundary_forcing[0]
         sf = sim.surface_forcing[0]
+        fc = sim.forcing_corrections[0]
 
-        assert sim.input_datasets == [mg, ic, td, rf, bc, sf]
+        assert sim.input_datasets == [mg, ic, td, rf, bc, sf, fc]
+
+    @pytest.mark.parametrize(
+        "start_date, valid_start_date, end_date, valid_end_date, substring",
+        [
+            (
+                "1992-02-11",
+                "1993-05-15",
+                "2000-01-01",
+                "2000-01-01",
+                "before the earliest",
+            ),
+            (
+                "1992-02-11",
+                "1992-02-11",
+                "2001-01-01",
+                "2000-01-01",
+                "after the latest",
+            ),
+            ("1993-05-15", "1900-01-01", "1992-02-11", "2000-01-01", "after end_date"),
+        ],
+    )
+    def test_validate_date_range(
+        self,
+        tmp_path,
+        start_date,
+        valid_start_date,
+        end_date,
+        valid_end_date,
+        substring,
+    ):
+        """Test the _validate_date_range function.
+
+        This test ensures the _validate_date_range function correctly raises
+        a ValueError in each of the following cases:
+        - The start date is before the valid_start_date
+        - The end date is after the valid_end_date
+        - The start date is after the end date
+
+
+        Parameters
+        ----------
+        start_date : str
+           The requested simulation start date.
+        valid_start_date : str
+           The earliest valid start date for the simulation.
+        end_date : str
+           The requested simulation end date.
+        valid_end_date : str
+           The latest valid end date for the simulation.
+        substring : str
+           A substring expected to be found in the raised error message.
+
+        Mocks & Fixtures
+        ----------------
+        - `tmp_path` : A pytest fixture providing a temporary directory for filesystem-safe tests.
+
+        Assertions
+        ----------
+        - Checks that `ROMSSimulation` raises a `ValueError` when the provided dates are invalid.
+        - Asserts that the error message contains a specific substring identifying the issue.
+        """
+
+        with pytest.raises(ValueError) as exception_info:
+            ROMSSimulation(
+                name="test",
+                directory=tmp_path,
+                runtime_code=[],
+                compile_time_code=[],
+                discretization=ROMSDiscretization(time_step=1),
+                start_date=start_date,
+                end_date=end_date,
+                valid_start_date=valid_start_date,
+                valid_end_date=valid_end_date,
+            )
+
+            assert substring in str(exception_info.value)
 
     def test_check_inputdataset_dates_warns_and_sets_start_date(
         self, example_roms_simulation
@@ -770,6 +817,7 @@ Tidal forcing: <ROMSTidalForcing instance>
 River forcing: <ROMSRiverForcing instance>
 Surface forcing: <list of 1 ROMSSurfaceForcing instances>
 Boundary forcing: <list of 1 ROMSBoundaryForcing instances>
+Forcing corrections: <list of 1 ROMSForcingCorrections instances>
 
 Is setup: False"""
         assert sim.__str__() == expected_str
@@ -812,7 +860,8 @@ initial_conditions = <ROMSInitialConditions instance>,
 tidal_forcing = <ROMSTidalForcing instance>,
 river_forcing = <ROMSRiverForcing instance>,
 surface_forcing = <list of 1 ROMSSurfaceForcing instances>,
-boundary_forcing = <list of 1 ROMSBoundaryForcing instances>
+boundary_forcing = <list of 1 ROMSBoundaryForcing instances>,
+forcing_corrections = <list of 1 ROMSForcingCorrections instances>
 )"""
         assert expected_repr == sim.__repr__()
 
@@ -843,7 +892,8 @@ boundary_forcing = <list of 1 ROMSBoundaryForcing instances>
     │   ├── tidal.nc
     │   ├── river.nc
     │   ├── boundary.nc
-    │   └── surface.nc
+    │   ├── surface.nc
+    │   └── sw_corr.nc
     ├── runtime_code
     │   ├── file1
     │   ├── file2.in_TEMPLATE
@@ -949,7 +999,10 @@ class TestToAndFromDictAndBlueprint:
                 {"location": "http://my.files/surface.nc", "file_hash": "567"}
             ],
             "boundary_forcing": [
-                {"location": "http://my.files/boundary.nc", "file_hash": "456"}
+                {"location": "http://my.files/boundary.nc", "file_hash": "456"},
+            ],
+            "forcing_corrections": [
+                {"location": "http://my.files/sw_corr.nc", "file_hash": "890"}
             ],
         }
 
@@ -1409,6 +1462,7 @@ class TestProcessingAndExecution:
             + f"\n     {partitioned_directory/'boundary.nc'}"
             + f"\n     {partitioned_directory/'tidal.nc'}"
             + f"\n     {partitioned_directory/'river.nc'}"
+            + f"\n     {partitioned_directory/'sw_corr.nc'}"
         )
 
         assert rtcm_dict["__MARBL_SETTINGS_FILE_PLACEHOLDER__"] == str(
@@ -1628,7 +1682,7 @@ class TestProcessingAndExecution:
         sim.setup()
         assert mock_handle_config_status.call_count == 2
         assert mock_additionalcode_get.call_count == 2
-        assert mock_inputdataset_get.call_count == 6
+        assert mock_inputdataset_get.call_count == 7
 
     @pytest.mark.parametrize(
         "codebase_status, marbl_status, expected",
@@ -1979,7 +2033,7 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(RuntimeError, match="Error 1 when compiling ROMS"):
+        with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
             sim.build()
         assert mock_subprocess.call_count == 1
         mock_subprocess.assert_any_call(
@@ -2019,7 +2073,7 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(RuntimeError, match="Error 1 when compiling ROMS"):
+        with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
             sim.build()
         assert mock_subprocess.call_count == 1
 
@@ -2521,7 +2575,7 @@ class TestProcessingAndExecution:
         )  # Ensure run is complete
 
         # Call post_run and expect error
-        with pytest.raises(RuntimeError, match="Error 1 while joining ROMS output"):
+        with pytest.raises(RuntimeError, match="Error while joining ROMS output"):
             sim.post_run()
 
         mock_subprocess.assert_called_once_with(

@@ -7,6 +7,7 @@ v1.0.0
 New features:
 ~~~~~~~~~~~~~
 - Add support for river forcing
+- Add support for forcing corrections (used in legacy ROMS configurations)
 
 Breaking Changes:
 ~~~~~~~~~~~~~~~~~

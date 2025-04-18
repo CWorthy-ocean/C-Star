@@ -274,7 +274,11 @@ class TestSlurmJob:
         "subprocess_stdout, subprocess_returncode, expected_exception_message",
         [
             # Case 1: Non-zero return code from subprocess.run
-            ("", 1, "Non-zero exit code when submitting job. STDERR:"),
+            (
+                "",
+                1,
+                "Non-zero exit code when submitting job. Return Code: `1`. STDERR:",
+            ),
             # Case 2: Missing job ID in subprocess stdout
             (
                 "Submitted job without ID",
