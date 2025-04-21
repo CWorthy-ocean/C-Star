@@ -10,16 +10,16 @@ marbl_codebase:
   checkout_target: 'marbl0.45.0'
 runtime_code:
   location: '<additional_code_location>'
-  checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
+  checkout_target: '93601045f7811919fb92e33bcbc53f25d0f64ad7'
   subdir: 'additional_code/ROMS/namelists'
   files:
-    - "roms.in_TEMPLATE"
+    - "roms.in"
     - "marbl_in"
     - "marbl_tracer_output_list"
     - "marbl_diagnostic_output_list"
 compile_time_code:
   location: '<additional_code_location>'
-  checkout_target: 'd7996aea8d4fd4ca4148b34d2d898f019c90a8ff'
+  checkout_target: '93601045f7811919fb92e33bcbc53f25d0f64ad7'
   subdir: 'additional_code/ROMS/source_mods'
   files:
     - "bgc.opt"
