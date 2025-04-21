@@ -57,7 +57,7 @@ def example_roms_simulation(tmp_path):
             checkout_target="main",
             files=[
                 "file1",
-                "file2.in_TEMPLATE",
+                "file2.in",
                 "marbl_in",
                 "marbl_tracer_output_list",
                 "marbl_diagnostic_output_list",
@@ -179,7 +179,7 @@ class TestROMSSimulationInitialization:
         assert sim.runtime_code.checkout_target == "main"
         assert sim.runtime_code.files == [
             "file1",
-            "file2.in_TEMPLATE",
+            "file2.in",
             "marbl_in",
             "marbl_tracer_output_list",
             "marbl_diagnostic_output_list",
@@ -518,7 +518,7 @@ class TestROMSSimulationInitialization:
             location=directory.parent,
             subdir="subdir/",
             checkout_target="main",
-            files=["file1.in_TEMPLATE", "file2.in"],
+            files=["file1.in", "file2.in"],
         )
 
         with pytest.raises(ValueError, match="Multiple '.in' files found"):
@@ -896,7 +896,7 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
     │   └── sw_corr.nc
     ├── runtime_code
     │   ├── file1
-    │   ├── file2.in_TEMPLATE
+    │   ├── file2.in
     │   ├── marbl_in
     │   ├── marbl_tracer_output_list
     │   └── marbl_diagnostic_output_list
@@ -966,7 +966,7 @@ class TestToAndFromDictAndBlueprint:
                 "checkout_target": "main",
                 "files": [
                     "file1",
-                    "file2.in_TEMPLATE",
+                    "file2.in",
                     "marbl_in",
                     "marbl_tracer_output_list",
                     "marbl_diagnostic_output_list",
@@ -1617,7 +1617,7 @@ class TestProcessingAndExecution:
         sim.update_runtime_code()
 
         mock_copy.assert_called_once_with(
-            runtime_directory / "file2.in_TEMPLATE", runtime_directory / "file2.in"
+            runtime_directory / "file2.in", runtime_directory / "file2.in"
         )
         mock_replace_text.assert_called_once_with(
             runtime_directory / "file2.in", "hello", "world"

@@ -94,8 +94,6 @@ class AdditionalCode:
             base_str += "\nFiles:"
             for filename in self.files:
                 base_str += f"\n    {filename}"
-                if filename[-9:] == "_TEMPLATE":
-                    base_str += f"      ({filename[:-9]} will be used by C-Star based on this template)"
         return base_str
 
     def __repr__(self) -> str:
