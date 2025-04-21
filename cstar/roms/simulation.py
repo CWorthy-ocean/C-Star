@@ -65,6 +65,9 @@ class ROMSSimulation(Simulation):
         The repository containing the base source code for MARBL (Marine Biogeochemistry Library).
     runtime_code : AdditionalCode
         Additional code needed by ROMS at runtime (e.g. a `.in` file)
+    roms_runtime_settings : ROMSRuntimeSettings
+        A structured representation of the `.in` file found in runtime_code, available
+        after the code has been fetched with ROMSSimulation.runtime_code.get() or ROMSSimulation.setup()
     compile_time_code : AdditionalCode
         Additional ROMS source code to be included at compile time (e.g. `.opt` files)
     model_grid : ROMSModelGrid
@@ -73,6 +76,8 @@ class ROMSSimulation(Simulation):
         Initial conditions for the simulation.
     tidal_forcing : ROMSTidalForcing
         Tidal forcing data used in the simulation.
+    river_forcing : ROMSRiverForcing
+        River inflow data specifying locations and fluxes.
     surface_forcing : list[ROMSSurfaceForcing]
         List of surface forcing datasets.
     boundary_forcing : list[ROMSBoundaryForcing]
@@ -83,8 +88,13 @@ class ROMSSimulation(Simulation):
         Path to the compiled ROMS executable.
     partitioned_files : List[Path]
         Paths to partitioned input files for distributed ROMS runs.
-    _execution_handler : ExecutionHandler
-        Object handling execution status and control.
+    input_datasets : list[ROMSInputDataset]
+        A flat list of all input datasets attached to this simulation.
+    codebases : list
+        List of all external codebases in use (e.g., ROMS, MARBL).
+    is_setup : bool
+        True if all required components have been retrieved and configured locally.
+
 
     Methods
     -------
@@ -255,6 +265,18 @@ class ROMSSimulation(Simulation):
         self._execution_handler: Optional["ExecutionHandler"] = None
 
     def _find_dotin_file(self) -> None:
+        """Identify the runtime settings (.in) file from runtime code.
+
+        This internal method checks the `ROMSSimulation.runtime_code.files`
+        list for exactly one file ending in `.in`, which is required to
+        configure ROMS runtime settings.
+
+        Raises
+        ------
+        ValueError
+            If no `.in` file or more than one is found in the runtime code files.
+        """
+
         in_files = [f for f in self.runtime_code.files if f.endswith(".in")]
         if len(in_files) != 1:
             raise ValueError(
@@ -266,19 +288,51 @@ class ROMSSimulation(Simulation):
         self._in_file = in_files[0]
 
     def _check_forcing_collection_types(self, collection, expected_class):
-        """For forcing types that may correspond to multiple InputDataset instances
+        """Validate the types of input datasets in a forcing collection.
+
+        For forcing types that may correspond to multiple ROMSInputDataset instances
         (ROMSSurfaceForcing, ROMSBoundaryForcing, ROMSForcingCorrections), ensure that
-        the corresponding attribute is a list of instances of the correct type."""
+        the corresponding attribute is a list of instances of the correct type.
+
+        Parameters
+        ----------
+        collection : list
+            A list of dataset objects to validate.
+        expected_class : type
+            The expected class (e.g., `ROMSSurfaceForcing`).
+
+        Raises
+        ------
+        TypeError
+            If any item in the list is not an instance of `expected_class`.
+        """
+
         if not all([isinstance(ind, expected_class) for ind in collection]):
             raise TypeError(
                 f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
             )
 
     def _check_inputdataset_dates(self) -> None:
-        """For ROMSInputDatasets whose source type is `yaml`, ensure that any set
-        'start_date' and/or 'end_date' attributes of the ROMSInputDataset match the
-        'start_date' and 'end_date' of the ROMSSimulation, and override them, warning
-        the user, if not."""
+        """Ensure input dataset date ranges align with the simulation date range.
+
+        For each input dataset with `source_type='yaml'`, this method verifies that
+        its `start_date` and `end_date` match the simulation’s `start_date` and
+        `end_date`. If they do not match, a warning is issued and the dataset's
+        dates are overwritten to enforce alignment.
+
+        Raises
+        ------
+        AttributeError
+            If any dataset is missing expected date attributes.
+        Warning
+            A warning is issued (not raised) when mismatched dates are corrected.
+
+        Notes
+        -----
+        - Only datasets with a `source_type` of `"yaml"` are modified.
+        - `ROMSInitialConditions` datasets only have their `start_date` checked;
+          `end_date` is not required or enforced for initial conditions.
+        """
 
         for inp in [
             self.initial_conditions,
@@ -325,6 +379,10 @@ class ROMSSimulation(Simulation):
 
         class_name = self.__class__.__name__
         base_str = super().__str__()
+
+        # ROMS runtime settings
+        if self.runtime_code.exists_locally:
+            base_str += f"\nRuntime Settings: {self.roms_runtime_settings.__class__.__name__} instance (query using {class_name}.roms_runtime_settings)\n"
 
         # MARBL Codebase
         if self.marbl_codebase is not None:
@@ -441,6 +499,30 @@ class ROMSSimulation(Simulation):
 
     @property
     def _forcing_paths(self) -> list[Path]:
+        """Collect and return all local paths to ROMS forcing input datasets.
+
+        This internal property gathers the `working_path` attributes of all forcing-related
+        datasets attached to the simulation — including tidal, river, surface, boundary, and
+        correction datasets — and returns a flat list of resolved file paths.
+
+        Returns
+        -------
+        list of pathlib.Path
+            A list of paths to all local forcing input files required by ROMS.
+
+        Raises
+        ------
+        ValueError
+            If any required forcing dataset does not have a `working_path` set,
+            indicating it has not been retrieved or prepared.
+
+        Notes
+        -----
+        - If any `working_path` is a list of files (e.g., multiple NetCDFs), each path
+          is included individually.
+        - This property is used to populate `runtime_settings.forcing`.
+        """
+
         forcing_sources: list[Optional[ROMSInputDataset]] = [
             self.tidal_forcing,
             self.river_forcing,
@@ -471,11 +553,56 @@ class ROMSSimulation(Simulation):
 
     @property
     def _n_time_steps(self) -> int:
+        """Calculate the total number of time steps for the simulation.
+
+        This internal property determines the number of time steps based on the
+        start and end dates of the simulation and the time step size specified in
+        `discretization`.
+
+        Returns
+        -------
+        int
+            The total number of model time steps between `start_date` and `end_date`.
+
+        Raises
+        ------
+        AttributeError
+            If `start_date`, `end_date`, or `discretization.time_step` is not set.
+        """
+
         run_length_seconds = int((self.end_date - self.start_date).total_seconds())
         return run_length_seconds // self.discretization.time_step
 
     @property
     def roms_runtime_settings(self) -> ROMSRuntimeSettings:
+        """Generate and return a ROMSRuntimeSettings object for the simulation.
+
+        This property constructs a `ROMSRuntimeSettings` instance from the ROMS `.in`
+        file found in the `runtime_code`, and updates key runtime values based on the
+        current simulation configuration. These include the time step, number of time
+        steps, grid path, initial conditions, forcing datasets, and optionally, MARBL
+        input files.
+
+        Returns
+        -------
+        ROMSRuntimeSettings
+            A fully-populated runtime settings object representing the current state
+            of the ROMS simulation configuration.
+
+        Raises
+        ------
+        ValueError
+            If the runtime `.in` file has not been retrieved locally via `setup()` or
+            `runtime_code.get()`.
+
+        Notes
+        -----
+        - This method overrides runtime settings using values from `self.discretization`,
+          `self.model_grid`, `self.initial_conditions`, and all forcing datasets.
+        - If MARBL configuration files are present in `runtime_code.files`, their paths
+          are also included.
+        """
+
         if self.runtime_code.working_path is None:
             raise ValueError(
                 "Cannot access runtime settings without local "
@@ -868,15 +995,15 @@ class ROMSSimulation(Simulation):
         --------
         >>> simulation.tree()
         /path/to/simulation
-        ├── ROMS
-        │   ├── runtime_code
-        │   │   ├── namelist_file.in
-        │   │   ├── another_file.in
-        │   ├── compile_time_code
-        │   │   ├── some_source_file.F90
-        │   ├── input_datasets
-        │   │   ├── grid_file.nc
-        │   │   ├── forcing_file.nc
+        └─── ROMS
+             ├── runtime_code
+             │   ├── namelist_file.in
+             │   └──  another_file.in
+             ├── compile_time_code
+             │   └── some_source_file.F90
+             └──  input_datasets
+                  ├── grid_file.nc
+                  └──  forcing_file.nc
 
         Notes
         -----

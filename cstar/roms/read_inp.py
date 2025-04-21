@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Optional
 from collections import OrderedDict
 
+from cstar.base.utils import _list_to_concise_str
+
 
 class ROMSRuntimeSettings:
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
@@ -378,6 +380,184 @@ class ROMSRuntimeSettings:
             climatology=climatology,
             output_root_name=output_root_name,
         )
+
+    def __str__(self) -> str:
+        """Returns a string representation of the input settings.
+
+        Returns
+        -------
+        str
+            A formatted string summarizing the ROMS input settings.
+        """
+        class_name = self.__class__.__name__
+        lines = [f"{class_name}"]
+        lines.append("-" * len(class_name))
+        lines.append(f"Title (`ROMSRuntimeSettings.title`): {self.title}")
+        lines.append(
+            f"Output filename prefix (`ROMSRuntimeSettings.output_root_name`): {self.output_root_name}"
+        )
+        lines.append("Time stepping (`ROMSRuntimeSettings.time_stepping`):")
+        lines.append(f"- Number of steps (`ntimes`) = {self.time_stepping['ntimes']}, ")
+        lines.append(f"- Time step (`dt`, sec) = {self.time_stepping['dt']}, ")
+        lines.append(
+            f"- Mode-splitting ratio (`ndtfast`) = {self.time_stepping['ndtfast']}, "
+        )
+        lines.append(
+            f"- Runtime diagnostic frequency (`ninfo`, steps) = {self.time_stepping['ninfo']}"
+        )
+        lines.append("Bottom drag (`ROMSRuntimeSettings.bottom_drag`): ")
+        lines.append(
+            f"- Linear bottom drag coefficient (`rdrg`, m/s) = {self.bottom_drag['rdrg']}, "
+        )
+        lines.append(
+            f"- Quadratic bottom drag coefficient (`rdrg2`, nondim) = {self.bottom_drag['rdrg2']}"
+        )
+        lines.append(f"- Bottom roughness height (`zob`,m) = {self.bottom_drag['zob']}")
+        lines.append(
+            f"Grid file (`ROMSRuntimeSettings.grid`): {self.grid if self.grid else 'Not set'}"
+        )
+        lines.append(
+            f"Initial conditions file (`ROMSRuntimeSettings.initial`): {self.initial.get('ininame', 'None')}"
+        )
+        lines.append(f"Forcing file(s): {_list_to_concise_str(self.forcing,pad=10)}")
+        if self.s_coord is not None:
+            lines.append("S-coordinate parameters (`ROMSRuntimeSettings.s_coord`):")
+            lines.append(
+                f"Surface stretching parameter (`theta_s`) = {self.s_coord['theta_s']}, "
+            )
+            lines.append(
+                f"Bottom stretching parameter (`theta_b`) = {self.s_coord['theta_b']}, "
+            )
+            lines.append(
+                f"Critical depth (`hc` or `tcline`, m) = {self.s_coord['tcline']} "
+            )
+        if self.rho0 is not None:
+            lines.append(f"Boussinesq reference density (`rho0`, kg/m3) = {self.rho0}")
+        if self.lin_rho_eos is not None:
+            lines.append(
+                "Linear equation of state parameters (`ROMSRuntimeSettings.lin_rho_eos`):"
+            )
+            lines.append(
+                f"- Thermal expansion coefficient, ⍺ (`Tcoef`, kg/m3/K) = {self.lin_rho_eos['Tcoef']}, "
+            )
+            lines.append(
+                f"- Reference temperature (`T0`, °C) = {self.lin_rho_eos['T0']},"
+            )
+            lines.append(
+                f"- Haline contraction coefficient, β (`Scoef`, kg/m3/PSU) = {self.lin_rho_eos['Scoef']}, "
+            )
+            lines.append(f"- Reference salinity (`S0`, psu) = {self.lin_rho_eos['S0']}")
+
+        if self.marbl_biogeochemistry is not None:
+            lines.append("MARBL input (`ROMSRuntimeSettings.marbl_biogeochemistry`):")
+            lines.append(
+                f"- MARBL runtime settings file: {self.marbl_biogeochemistry['marbl_namelist_fname']}, "
+            )
+            lines.append(
+                f"- MARBL output tracer list: {self.marbl_biogeochemistry['marbl_tracer_list_fname']}, "
+            )
+            lines.append(
+                f"- MARBL output diagnostics list: {self.marbl_biogeochemistry['marbl_diag_list_fname']}"
+            )
+        if self.lateral_visc is not None:
+            lines.append(
+                f"Horizontal Laplacian kinematic viscosity (`ROMSRuntimeSettings.lateral_visc`, m2/s) = {self.lateral_visc}"
+            )
+        if self.gamma2 is not None:
+            lines.append(
+                f"Boundary slipperiness parameter (`ROMSRuntimeSettings.gamma2`, free-slip=+1, no-slip=-1) = {self.gamma2}"
+            )
+        if self.tracer_diff2 is not None:
+            lines.append(
+                f"Horizontal Laplacian mixing coefficients for tracers (`ROMSRuntimeSettings.tracer_diff2`, m2/s) = {self.tracer_diff2.tolist()}"
+            )
+        if self.vertical_mixing is not None:
+            lines.append(
+                "Vertical mixing parameters (`ROMSRuntimeSettings.vertical_mixing`):"
+            )
+            lines.append(
+                f"- Background vertical viscosity (`Akv_bak`, m2/s) = {self.vertical_mixing['Akv_bak']}, "
+            )
+            lines.append(
+                f"- Background vertical mixing for tracers (`Akt_bak`, m2/s) = {self.vertical_mixing['Akt_bak']}, "
+            )
+        if self.my_bak_mixing is not None:
+            lines.append(
+                "Mellor-Yamada Level 2.5 turbulent closure parameters (`ROMSRuntimeSettings.my_bak_mixing`):"
+            )
+            lines.append(
+                f"- Backround vertical TKE mixing [`Akq_bak`, m2/s] = {self.my_bak_mixing['Akq_bak']}, "
+            )
+            lines.append(
+                f"- Horizontal Laplacian TKE mixing [`q2nu2`, m2/s] = {self.my_bak_mixing['q2nu2']}, "
+            )
+            lines.append(
+                f"- Horizontal biharmonic TKE mixing [`q2nu4`, m4/s] = {self.my_bak_mixing['q2nu4']}, "
+            )
+
+        if self.sss_correction is not None:
+            lines.append(
+                f"SSS correction (`ROMSRuntimeSettings.sss_correction`): {self.sss_correction}"
+            )
+        if self.sst_correction is not None:
+            lines.append(
+                f"SST correction (`ROMSRuntimeSettings.sst_correction`): {self.sst_correction}"
+            )
+        if self.ubind is not None:
+            lines.append(
+                f"Open boundary binding velocity (`ROMSRuntimeSettings.ubind`, m/s) = {self.ubind}"
+            )
+        if self.v_sponge is not None:
+            lines.append(
+                f"Maximum sponge layer viscosity (`ROMSRuntimeSettings.v_sponge`, m2/s) = {self.v_sponge}"
+            )
+        if self.climatology is not None:
+            lines.append(
+                f"Climatology data files (`ROMSRuntimeSettings.climatology`): {self.climatology}"
+            )
+
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        """Return a full debug-style string representation of the settings.
+
+        Returns
+        -------
+        str
+            A detailed summary of the object, suitable for debugging.
+        """
+        attrs = {
+            "title": self.title,
+            "time_stepping": dict(self.time_stepping),
+            "bottom_drag": dict(self.bottom_drag),
+            "initial": dict(self.initial),
+            "forcing": [str(f) for f in self.forcing],
+            "output_root_name": self.output_root_name,
+            "grid": str(self.grid) if self.grid else None,
+            "climatology": str(self.climatology) if self.climatology else None,
+            "s_coord": dict(self.s_coord) if self.s_coord else None,
+            "rho0": self.rho0,
+            "lin_rho_eos": dict(self.lin_rho_eos) if self.lin_rho_eos else None,
+            "marbl_biogeochemistry": dict(self.marbl_biogeochemistry)
+            if self.marbl_biogeochemistry
+            else None,
+            "lateral_visc": self.lateral_visc,
+            "gamma2": self.gamma2,
+            "tracer_diff2": self.tracer_diff2.tolist()
+            if self.tracer_diff2 is not None
+            else None,
+            "vertical_mixing": dict(self.vertical_mixing)
+            if self.vertical_mixing
+            else None,
+            "my_bak_mixing": dict(self.my_bak_mixing) if self.my_bak_mixing else None,
+            "sss_correction": self.sss_correction,
+            "sst_correction": self.sst_correction,
+            "ubind": self.ubind,
+            "v_sponge": self.v_sponge,
+        }
+
+        inner = ", ".join(f"{k}={repr(v)}" for k, v in attrs.items() if v is not None)
+        return f"{self.__class__.__name__}({inner})"
 
     def to_file(self, filepath: Path | str) -> None:
         """Write the current settings to a ROMS-compatible `.in` file.
