@@ -1372,13 +1372,6 @@ class ROMSSimulation(Simulation):
         post_run : Handles output processing after execution.
         """
 
-        if self.runtime_code.working_path is None:
-            raise FileNotFoundError(
-                "local copy of ROMSSimulation.runtime_code does not exist. "
-                + "Call ROMSSimulation.setup() or ROMSSimulation.runtime_code.get() "
-                + "and try again"
-            )
-
         if self.exe_path is None:
             raise ValueError(
                 "C-STAR: ROMSSimulation.exe_path is None; unable to find ROMS executable."
@@ -1386,10 +1379,18 @@ class ROMSSimulation(Simulation):
                 + "\n If you have already run Simulation.build(), either run it again or "
                 + " add the executable path manually using Simulation.exe_path='YOUR/PATH'."
             )
+
         if self.discretization.n_procs_tot is None:
             raise ValueError(
                 "Unable to calculate node distribution for this Simulation. "
                 + "Simulation.n_procs_tot is not set"
+            )
+
+        if self.runtime_code.working_path is None:
+            raise FileNotFoundError(
+                "local copy of ROMSSimulation.runtime_code does not exist. "
+                + "Call ROMSSimulation.setup() or ROMSSimulation.runtime_code.get() "
+                + "and try again"
             )
 
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):

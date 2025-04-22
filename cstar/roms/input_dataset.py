@@ -89,16 +89,16 @@ class ROMSInputDataset(InputDataset, ABC):
                 )
 
             # If they are, we want to partition them all in the same place
-            partdir = self.working_path[0].parent  # / "PARTITIONED"
+            # partdir = self.working_path[0].parent  # / "PARTITIONED"
             id_files_to_partition = self.working_path[:]
 
         else:
             id_files_to_partition = [
                 self.working_path,
             ]
-            partdir = self.working_path.parent  # / "PARTITIONED"
+            # partdir = self.working_path.parent  # / "PARTITIONED"
 
-        partdir.mkdir(parents=True, exist_ok=True)
+            # partdir.mkdir(parents=True, exist_ok=True)
         parted_files = []
 
         for idfile in id_files_to_partition:
@@ -108,9 +108,9 @@ class ROMSInputDataset(InputDataset, ABC):
             )
 
             # [p.rename(partdir / p.name) for p in parted_files[-1]]
-        [p.rename(partdir / p.name) for p in parted_files]
-        parted_files = [partdir / p.name for p in parted_files]
-        self.partitioned_files = parted_files
+            # [p.rename(partdir / p.name) for p in parted_files]
+            # parted_files = [partdir / p.name for p in parted_files]
+        self.partitioned_files = [f.resolve() for f in parted_files]
 
     def get(
         self,
@@ -216,16 +216,9 @@ class ROMSInputDataset(InputDataset, ABC):
         # ... and save:
         print(f"Saving roms-tools dataset created from {self.source.location}...")
         save_kwargs: dict[Any, Any] = {}
-        if (np_eta is not None) and (np_xi is not None):
-            save_kwargs["np_xi"] = np_xi
-            save_kwargs["np_eta"] = np_eta
-            save_kwargs["filepath"] = (
-                local_dir / "PARTITIONED" / Path(self.source.location).stem
-            )
-        else:
-            save_kwargs["filepath"] = Path(
-                f"{local_dir/Path(self.source.location).stem}.nc"
-            )
+        save_kwargs["filepath"] = Path(
+            f"{local_dir/Path(self.source.location).stem}.nc"
+        )
 
         savepath = roms_tools_class_instance.save(**save_kwargs)
         self.partitioned_files = savepath

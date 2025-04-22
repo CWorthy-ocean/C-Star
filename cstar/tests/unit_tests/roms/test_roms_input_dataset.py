@@ -261,10 +261,10 @@ class TestROMSInputDatasetGet:
 
     Tests:
     ------
-    - `test_get_grid_from_local_yaml_partitioned`:
-      Verifies the creation of partitioned ROMS grid files from a local YAML file.
-    - `test_get_surface_forcing_from_local_yaml_unpartitioned`:
-      Checks the handling of unpartitioned ROMS surface forcing files from a YAML file.
+    - `test_get_grid_from_remote_yaml`:
+      Verifies the creation of a ROMS grid file from a remote YAML file.
+    - `test_get_surface_forcing_from_local_yaml`:
+      Checks the handling of ROMS surface forcing files from a YAML file.
     - `test_get_raises_with_wrong_number_of_keys`:
       Asserts that a ValueError is raised for invalid YAML file structures.
     - `test_get_skips_if_working_path_in_same_parent_dir`:
@@ -352,117 +352,16 @@ class TestROMSInputDatasetGet:
 
     @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
     @mock.patch("pathlib.Path.stat", autospec=True)
-    def test_get_grid_from_local_yaml_partitioned(
-        self, mock_stat, mock_get_hash, local_roms_yaml_dataset
-    ):
-        """Test the `get` method for partitioned ROMS grid files from a local YAML
-        source.
-
-        This test ensures the `get` method correctly processes a `roms-tools` YAML file to
-        create partitioned ROMS grid files. It covers opening and reading a YAML file,
-        editing it in memory, creating a Grid object,
-        and saving the Grid object with proper partitioning.
-
-        Fixtures:
-        ---------
-        - `local_roms_yaml_dataset`: Provides a ROMSInputDataset instance with a local YAML source.
-
-        Mocks:
-        ------
-        - `Path.stat`: Simulates retrieving file metadata for partitioned files.
-        - `_get_sha256_hash`: Simulates computing the hash of each partitioned file.
-        - `yaml.safe_load`: Simulates loading YAML content from a file.
-        - `roms_tools.Grid.from_yaml`: Simulates creating a Grid object from the YAML file.
-        - `roms_tools.Grid.save`: Simulates saving Grid data as partitioned NetCDF files.
-
-        Asserts:
-        --------
-        - Confirms `resolve` is called for the directory, and partitioned files.
-        - Ensures `yaml.safe_load` processes the YAML content as expected.
-        - Validates `roms_tools.Grid.from_yaml` creates the Grid object from the YAML file.
-        - Verifies `roms_tools.Grid.save` saves files with correct partitioning parameters.
-        - Confirms the list of partitioned files is updated correctly in the dataset.
-        - Ensures metadata and checksums for partitioned files are cached via `stat` and `_get_sha256_hash`.
-        """
-
-        # Mock the stat result
-        mock_stat_result = mock.Mock(
-            st_size=12345, st_mtime=1678901234, st_mode=0o100644
-        )
-        mock_stat.return_value = mock_stat_result
-
-        # Mock resolve to return a resolved path
-        self.mock_resolve.side_effect = [
-            Path("some/local/dir"),  # First resolve: local_dir passed to 'get'
-            *(
-                Path(f"some/local/dir/PARTITIONED/local_file.{i:02d}.nc")
-                for i in range(1, 13)
-            ),  # Resolves for partitioned files
-        ]
-
-        # Mock yaml loading
-        self.mock_yaml_load.return_value = {
-            "Grid": {"source": "ETOPO5", "fake": "entry"}
-        }
-
-        # Configure the save method to return a list of partitioned file paths
-        partitioned_paths = [
-            Path(f"some/local/dir/PARTITIONED/local_file.{i:02d}.nc")
-            for i in range(1, 13)
-        ]
-        self.mock_rt_grid_instance.save.return_value = partitioned_paths
-        self.mock_yaml_dump.return_value = "mocked_yaml_content"
-
-        # Call the method under test
-        local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"), np_xi=3, np_eta=4)
-
-        # Assert resolve calls
-        expected_resolve_calls = [
-            mock.call(Path("some/local/dir")),
-            # mock.call(Path("some/local/dir/local_file.yaml")),
-            *(
-                mock.call(Path(f"some/local/dir/PARTITIONED/local_file.{i:02d}.nc"))
-                for i in range(1, 13)
-            ),
-        ]
-        assert self.mock_resolve.call_args_list == expected_resolve_calls, (
-            f"Expected resolve calls:\n{expected_resolve_calls}\n"
-            f"But got:\n{self.mock_resolve.call_args_list}"
-        )
-
-        # Check that the yaml.safe_load was called properly
-        self.mock_yaml_load.assert_called_once()
-
-        # Assert that roms_tools.Grid.from_yaml was called
-        self.mock_rt_grid.from_yaml.assert_called_once()
-
-        # Finally, ensure the save method is called
-        self.mock_rt_grid_instance.save.assert_called_once_with(
-            filepath=Path("some/local/dir/PARTITIONED/local_file"), np_xi=3, np_eta=4
-        )
-
-        # Assert partitioned files are updated correctly
-        assert local_roms_yaml_dataset.partitioned_files == partitioned_paths
-
-        # Ensure stat was called for each partitioned file
-        assert mock_stat.call_count == len(partitioned_paths), (
-            f"Expected stat to be called {len(partitioned_paths)} times, "
-            f"but got {mock_stat.call_count} calls."
-        )
-
-    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
-    @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("requests.get", autospec=True)
-    def test_get_grid_from_remote_yaml_partitioned(
+    def test_get_grid_from_remote_yaml(
         self, mock_request, mock_stat, mock_get_hash, remote_roms_yaml_dataset
     ):
-        """Test the `get` method for unpartitioned ROMS grid files from a remote YAML
-        source.
+        """Test the `get` method for ROMS grid files from a remote YAML source.
 
         This test ensures the `get` method correctly processes a `roms-tools` YAML file to
-        create partitioned ROMS grid files. It covers requesting yaml data from a URL,
+        create ROMS grid files. It covers requesting yaml data from a URL,
         editing it in memory, creating a Grid object,
-        and saving the Grid object with proper partitioning.
+        and saving the Grid object.
 
         Fixtures:
         ---------
@@ -470,19 +369,19 @@ class TestROMSInputDatasetGet:
 
         Mocks:
         ------
-        - `Path.stat`: Simulates retrieving file metadata for partitioned files.
-        - `_get_sha256_hash`: Simulates computing the hash of each partitioned file.
+        - `Path.stat`: Simulates retrieving file metadata for file.
+        - `_get_sha256_hash`: Simulates computing the hash of the file.
         - `yaml.safe_load`: Simulates loading YAML content from a file.
         - `roms_tools.Grid.from_yaml`: Simulates creating a Grid object from the YAML file.
-        - `roms_tools.Grid.save`: Simulates saving Grid data as partitioned NetCDF files.
+        - `roms_tools.Grid.save`: Simulates saving Grid data as a NetCDF file.
 
         Asserts:
         --------
         - Confirms `resolve` is called for the directory, and saved file.
         - Ensures `yaml.safe_load` processes the YAML content as expected.
         - Validates `roms_tools.Grid.from_yaml` creates the Grid object from the YAML file.
-        - Verifies `roms_tools.Grid.save` saves files with correct partitioning parameters.
-        - Ensures metadata and checksums for partitioned files are cached via `stat` and `_get_sha256_hash`.
+        - Verifies `roms_tools.Grid.save` saves files with correct parameters.
+        - Ensures metadata and checksums for saved file is cached via `stat` and `_get_sha256_hash`.
         """
 
         # Mock the stat result
@@ -541,15 +440,14 @@ class TestROMSInputDatasetGet:
 
     @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
-    def test_get_surface_forcing_from_local_yaml_unpartitioned(
+    def test_get_surface_forcing_from_local_yaml(
         self, mock_get_hash, mock_stat, local_roms_yaml_dataset
     ):
-        """Test the `get` method for creating unpartitioned SurfaceForcing from a local
-        YAML source.
+        """Test the `get` method for creating SurfaceForcing from a local YAML source.
 
         This test verifies that the `get` method processes a `roms-tools` YAML file correctly to
-        create a SurfaceForcing dataset without partitioning. It ensures proper handling of YAML
-        content and the creation of unpartitioned NetCDF files.
+        create a SurfaceForcing dataset. It ensures proper handling of YAML
+        content and the creation of associated NetCDF files.
 
         Fixtures:
         ---------
@@ -561,7 +459,7 @@ class TestROMSInputDatasetGet:
         - `_get_sha256_hash`: Simulates computing the hash of the saved file.
         - `yaml.safe_load`: Simulates loading YAML content from a file.
         - `roms_tools.SurfaceForcing.from_yaml`: Simulates creating a SurfaceForcing object from the YAML file.
-        - `roms_tools.SurfaceForcing.save`: Simulates saving SurfaceForcing data as an unpartitioned NetCDF file.
+        - `roms_tools.SurfaceForcing.save`: Simulates saving SurfaceForcing data as a NetCDF file.
 
         Asserts:
         --------
@@ -898,7 +796,7 @@ class TestROMSInputDatasetPartition:
         Mocks:
         ------
         - partition_netcdf: Simulates the behavior of the partitioning utility.
-        - Path.rename: Mocks the moving of partitioned files to the PARTITIONED directory.
+        - Path.resolve: Mocks the resolution of the partitioned filepaths
 
         Fixtures:
         ---------
@@ -907,7 +805,6 @@ class TestROMSInputDatasetPartition:
         Asserts:
         --------
         - `partition_netcdf` is called with the correct arguments.
-        - Files are renamed correctly to the PARTITIONED directory.
         - `partitioned_files` is updated with the expected file paths.
         """
 
@@ -932,8 +829,16 @@ class TestROMSInputDatasetPartition:
                 Path(f"local_file.{i}.nc") for i in range(1, num_partitions + 1)
             ]
 
-            # Mock the rename method
-            with mock.patch.object(Path, "rename", autospec=True) as mock_rename:
+            # Test partitioned_files attribute is updated correctly
+            expected_partitioned_files = [
+                Path(f"some/local/source/path/local_file.{i}.nc")
+                for i in range(1, num_partitions + 1)
+            ]
+
+            # # Mock the resolve method
+            with mock.patch.object(
+                Path, "resolve", autospec=True, side_effect=expected_partitioned_files
+            ):
                 # Call the method under test
                 local_roms_netcdf_dataset.partition(np_xi=np_xi, np_eta=np_eta)
 
@@ -942,21 +847,6 @@ class TestROMSInputDatasetPartition:
                     local_roms_netcdf_dataset.working_path, np_xi=np_xi, np_eta=np_eta
                 )
 
-                # Assert rename is called for each file
-                expected_calls = [
-                    mock.call(
-                        Path(f"local_file.{i}.nc"),
-                        Path(f"some/local/source/path/PARTITIONED/local_file.{i}.nc"),
-                    )
-                    for i in range(1, num_partitions + 1)
-                ]
-                mock_rename.assert_has_calls(expected_calls, any_order=False)
-
-                # Assert partitioned_files attribute is updated correctly
-                expected_partitioned_files = [
-                    Path(f"some/local/source/path/PARTITIONED/local_file.{i}.nc")
-                    for i in range(1, num_partitions + 1)
-                ]
                 assert (
                     local_roms_netcdf_dataset.partitioned_files
                     == expected_partitioned_files
@@ -971,7 +861,7 @@ class TestROMSInputDatasetPartition:
         Mocks:
         ------
         - partition_netcdf: Simulates the behavior of the partitioning utility.
-        - Path.rename: Mocks the renaming of partitioned files to the PARTITIONED directory.
+        - Path.resolve: mocks the resolution of the partitioned filepaths
 
         Fixtures:
         ---------
@@ -980,7 +870,6 @@ class TestROMSInputDatasetPartition:
         Asserts:
         --------
         - `partition_netcdf` is called the correct number of times.
-        - Files are moved correctly to the PARTITIONED directory.
         - `partitioned_files` is updated with the expected file paths.
         """
 
@@ -1007,8 +896,19 @@ class TestROMSInputDatasetPartition:
                 [Path(f"file2.{i}.nc") for i in range(1, num_partitions + 1)],
             ]
 
+            # Assert partitioned_files attribute is updated correctly
+            expected_partitioned_files = [
+                Path(f"some/local/source/path/file1.{i}.nc")
+                for i in range(1, num_partitions + 1)
+            ] + [
+                Path(f"some/local/source/path/file2.{i}.nc")
+                for i in range(1, num_partitions + 1)
+            ]
+
             # Mock the rename method
-            with mock.patch.object(Path, "rename", autospec=True) as mock_rename:
+            with mock.patch.object(
+                Path, "resolve", autospec=True, side_effect=expected_partitioned_files
+            ):
                 # Call the method under test
                 local_roms_netcdf_dataset.partition(np_xi=np_xi, np_eta=np_eta)
 
@@ -1017,30 +917,22 @@ class TestROMSInputDatasetPartition:
                     local_roms_netcdf_dataset.working_path
                 )
 
-                # Assert rename is called for each file
-                expected_calls = [
-                    mock.call(
-                        Path(f"file1.{i}.nc"),
-                        Path(f"some/local/source/path/PARTITIONED/file1.{i}.nc"),
-                    )
-                    for i in range(1, num_partitions + 1)
-                ] + [
-                    mock.call(
-                        Path(f"file2.{i}.nc"),
-                        Path(f"some/local/source/path/PARTITIONED/file2.{i}.nc"),
-                    )
-                    for i in range(1, num_partitions + 1)
-                ]
-                mock_rename.assert_has_calls(expected_calls, any_order=False)
+                # # Assert rename is called for each file
+                # expected_calls = [
+                #     mock.call(
+                #         Path(f"file1.{i}.nc"),
+                #         Path(f"some/local/source/path/PARTITIONED/file1.{i}.nc"),
+                #     )
+                #     for i in range(1, num_partitions + 1)
+                # ] + [
+                #     mock.call(
+                #         Path(f"file2.{i}.nc"),
+                #         Path(f"some/local/source/path/PARTITIONED/file2.{i}.nc"),
+                #     )
+                #     for i in range(1, num_partitions + 1)
+                # ]
+                # mock_rename.assert_has_calls(expected_calls, any_order=False)
 
-                # Assert partitioned_files attribute is updated correctly
-                expected_partitioned_files = [
-                    Path(f"some/local/source/path/PARTITIONED/file1.{i}.nc")
-                    for i in range(1, num_partitions + 1)
-                ] + [
-                    Path(f"some/local/source/path/PARTITIONED/file2.{i}.nc")
-                    for i in range(1, num_partitions + 1)
-                ]
                 assert (
                     local_roms_netcdf_dataset.partitioned_files
                     == expected_partitioned_files
