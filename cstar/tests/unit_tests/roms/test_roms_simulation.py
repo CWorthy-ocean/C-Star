@@ -362,12 +362,16 @@ class TestROMSSimulationInitialization:
         assert sim.marbl_codebase.checkout_target == "marbl0.45.0"
 
     def test_find_dotin_file(self, example_roms_simulation):
-        # DOCSTRING TODO
+        """Test that the `_find_dotin_file` helper function correctly finds and sets the
+        `_in_file` non-public attribute to the `.in` file."""
+
         sim, _ = example_roms_simulation
         assert sim._in_file == "file2.in"
 
     def test_find_dotin_file_raises_if_no_dot_in_files(self, example_roms_simulation):
-        # DOCSTRING TODO
+        """Test that the `_find_dotin_file` helper function correctly raises a
+        ValueError if a single `.in` file is not found."""
+
         sim, _ = example_roms_simulation
         sim.runtime_code = AdditionalCode(
             location="some/dir", files=["no", "dotin.files", "here"]
@@ -458,7 +462,9 @@ class TestROMSSimulationInitialization:
         assert sim.codebases[1] == sim.marbl_codebase
 
     def test_forcing_paths(self, example_roms_simulation):
-        # DOCSTRINGS TODO
+        """Test that the `_forcing_paths` property correctly takes any forcing-related
+        InputDatasets associated with the ROMSSimulation and returns a list of paths to
+        the relevant forcing files."""
         sim, _ = example_roms_simulation
         fake_paths = [
             Path("tidal.nc"),
@@ -505,7 +511,32 @@ class TestROMSSimulationInitialization:
     def test_roms_runtime_settings(
         self, mock_forcing_paths, mock_from_file, example_roms_simulation
     ):
-        # TODO DOCSTRING
+        """Test that the ROMSSimulation.runtime_settings property correctly returns a
+        modified ROMSRuntimeSettings instance containing a combination of parameters
+        (mock) read from a file and those overriden by the ROMSSimulation itself (e.g.
+        number of timesteps).
+
+        Assertions
+        ----------
+        - Asserts any parameters overriden by ROMSSimulation attributes are correctly set
+        - Asserts that the `marbl_biogeochemistry` entry is None for an alternate
+          ROMSSimulation instance where the `runtime_code` attribute corresponds to a single
+          (`.in`) file
+
+        Fixtures
+        --------
+        example_roms_simulation: ROMSSimulation
+           A pytest fixture returning a common, example ROMSSimulation instance.
+
+        Mocks
+        -----
+        mock_forcing_paths: PropertyMock
+           Mocks the output of the `ROMSSimulation._forcing_paths` property to return a
+           list of imitation forcing filepaths
+        mock_from_file: unittest.mock.MagicMock
+           Mock the output of ROMSRuntimeSettings.from_file to return a basic, mocked
+           ROMSRuntimeSettings instance.
+        """
 
         sim, _ = example_roms_simulation
 
@@ -558,7 +589,20 @@ class TestROMSSimulationInitialization:
     def test_roms_runtime_settings_raises_if_no_runtime_code_working_path(
         self, example_roms_simulation
     ):
-        # TODO DOCSTRING
+        """Test that the ROMSSimulation.runtime_settings property correctly raises a
+        ValueError if there is no local `.in` file from which to create a base
+        ROMSRuntimeSettings instance.
+
+        Assertions
+        ----------
+        - A ValueError is raised if the `.in` file is missing
+
+        Fixtures
+        --------
+        example_roms_simulation: ROMSSimulation
+           A pytest fixture returning a common, example ROMSSimulation instance.
+        """
+
         sim, _ = example_roms_simulation
         with pytest.raises(
             ValueError, match="Cannot access runtime settings without local `.in` file."
@@ -1920,7 +1964,9 @@ class TestProcessingAndExecution:
             dataset_3.partition.assert_called_once_with(np_xi=2, np_eta=3)
 
     def test_run_raises_if_no_runtime_code_working_path(self, example_roms_simulation):
-        # DOCSTRING TODO
+        """Confirm that ROMSSimulation.run() raises a FileNotFoundError if
+        ROMSSimulation.runtime_code does not exist locally."""
+
         sim, _ = example_roms_simulation
         sim.exe_path = Path("madeup.exe")
         with pytest.raises(
