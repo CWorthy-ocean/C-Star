@@ -21,6 +21,7 @@ Internal Changes:
 ~~~~~~~~~~~~~~~~~
 - Update calls to `roms-tools` to reflect latest changes in API
 - Update internal/test blueprints to reflect new structure
+- Add ROMSRuntimeSettings class with ability to parse and create roms `.in` files
 
 Documentation:
 ~~~~~~~~~~~~~~
