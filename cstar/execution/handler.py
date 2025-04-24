@@ -100,7 +100,11 @@ class ExecutionHandler(ABC, LoggingMixin):
 
         pass
 
-    def updates(self, seconds: float = 10, confirm_indefinite: bool = True):
+    def updates(
+        self,
+        seconds: float = 10,
+        interactive: bool = True,
+    ):
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
@@ -115,10 +119,10 @@ class ExecutionHandler(ABC, LoggingMixin):
             The duration (in seconds) for which updates should be streamed.
             If set to 0, updates will be streamed indefinitely until
             interrupted by the user.
-        confirm_indefinite: bool, optional, default = True
+        interactive: bool, optional, default = True
             If 'seconds' is set to 0, the user will be prompted to confirm
             whether they want to continue with an indefinite update stream
-            if confirm_indefinite is set to True
+            if interactive is set to True
         Notes
         -----
         - This method moves to the end of the output file and streams only
@@ -143,7 +147,7 @@ class ExecutionHandler(ABC, LoggingMixin):
             self.log.warning(error_msg)
             return
 
-        if (seconds == 0) and (confirm_indefinite):
+        if interactive and seconds == 0:
             # Confirm indefinite tailing
             confirmation = (
                 input(

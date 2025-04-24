@@ -262,6 +262,7 @@ def _run_cmd(
         msg = f"{msg_err} {rc_out} {stderr_out}"
 
         if raise_on_error:
+            print(result.stderr)
             raise RuntimeError(msg)
 
         log.error(msg)

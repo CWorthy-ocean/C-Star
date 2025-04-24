@@ -475,7 +475,7 @@ class ROMSSimulation(Simulation):
                 return Path(in_files[0])
 
     @property
-    def input_datasets(self) -> list:
+    def input_datasets(self) -> list[ROMSInputDataset]:
         """Retrieves all input datasets associated with this ROMS simulation.
 
         This property compiles a list of `ROMSInputDataset` instances that are used
@@ -765,7 +765,10 @@ class ROMSSimulation(Simulation):
             bp_dict = yaml.safe_load(requests.get(source.location).text)
 
         return cls.from_dict(
-            bp_dict, directory=directory, start_date=start_date, end_date=end_date
+            bp_dict,
+            directory=directory,
+            start_date=start_date,
+            end_date=end_date,
         )
 
     def to_blueprint(self, filename: str) -> None:
@@ -1087,10 +1090,14 @@ class ROMSSimulation(Simulation):
         runtime_code_dir = self.directory / "ROMS/runtime_code"
         input_datasets_dir = self.directory / "ROMS/input_datasets"
 
-        self.log.info(f"🛠️  Configuring {self.__class__.__name__}")
+        # Setup ExternalCodeBase
+        infostr = f"🛠️  Configuring {self.__class__.__name__}"
+        self.log.info(infostr + "\n" + "-" * len(infostr))
         self.log.info(f"🔧 Setting up {self.codebase.__class__.__name__}...")
 
-        # Setup ExternalCodeBase
+        for codebase in self.codebases:
+            codebase.interactive = self.interactive
+
         self.codebase.handle_config_status()
 
         if self.marbl_codebase is not None:

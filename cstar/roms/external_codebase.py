@@ -82,6 +82,9 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         # Distribute custom makefiles for ROMS
         self._codebase_adjustments()
 
+        # MM = "MARBL_ROOT=/Users/chris/code/cstar/cstar/externals/MARBL"
+        # RR = "ROMS_ROOT=/Users/chris/code/cstar/cstar/externals/ucla-roms"
+
         # Make things
         _run_cmd(
             f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
