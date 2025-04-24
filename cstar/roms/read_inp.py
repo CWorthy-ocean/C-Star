@@ -1,6 +1,6 @@
 import numpy as np
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from collections import OrderedDict
 
 from cstar.base.utils import _list_to_concise_str
@@ -288,8 +288,13 @@ class ROMSRuntimeSettings:
             else:
                 i += 1
 
-        # import pdb; pdb.set_trace()
-        def _single_line_section_to_list(section_name, expected_type) -> list:
+        def _single_line_section_to_list(
+            section_name: str, expected_type: Any
+        ) -> Optional[list]:
+            if (section_name not in sections.keys()) or (
+                len(sections[section_name]) == 0
+            ):
+                return None
             section = sections[section_name][0].split()
             if expected_type == float:
                 section = [x.replace("D", "E") for x in section]
@@ -297,16 +302,27 @@ class ROMSRuntimeSettings:
 
             return section
 
-        def _single_line_section_to_scalar(section_name, expected_type):
+        def _single_line_section_to_scalar(
+            section_name: str, expected_type: Any
+        ) -> Optional[Any]:
             lst = _single_line_section_to_list(section_name, expected_type)
             return lst[0] if lst else None
 
         # Non-optional
         # One-line sections:
         title = sections["title"][0]
-        time_stepping = _single_line_section_to_list("time_stepping", int)
-        bottom_drag = _single_line_section_to_list("bottom_drag", float)
+        time_stepping = _single_line_section_to_list("time_stepping", int) or []
+        bottom_drag = _single_line_section_to_list("bottom_drag", float) or []
         output_root_name = sections["output_root_name"][0]
+
+        if not all([title, time_stepping, bottom_drag, output_root_name]):
+            raise ValueError(
+                "Required field missing from file. Required fields: "
+                "\n- title"
+                "\n- time_steppings"
+                "\n- bottom_drag"
+                "\n- output_root_name"
+            )
 
         # Multi-line sections:
         nrrec = int(sections["initial"][0])
@@ -386,17 +402,17 @@ class ROMSRuntimeSettings:
             f"Output filename prefix (`ROMSRuntimeSettings.output_root_name`): {self.output_root_name}"
         )
         lines.append("Time stepping (`ROMSRuntimeSettings.time_stepping`):")
-        lines.append(f"- Number of steps (`ntimes`) = {self.time_stepping['ntimes']}, ")
-        lines.append(f"- Time step (`dt`, sec) = {self.time_stepping['dt']}, ")
+        lines.append(f"- Number of steps (`ntimes`) = {self.time_stepping['ntimes']},")
+        lines.append(f"- Time step (`dt`, sec) = {self.time_stepping['dt']},")
         lines.append(
-            f"- Mode-splitting ratio (`ndtfast`) = {self.time_stepping['ndtfast']}, "
+            f"- Mode-splitting ratio (`ndtfast`) = {self.time_stepping['ndtfast']},"
         )
         lines.append(
             f"- Runtime diagnostic frequency (`ninfo`, steps) = {self.time_stepping['ninfo']}"
         )
-        lines.append("Bottom drag (`ROMSRuntimeSettings.bottom_drag`): ")
+        lines.append("Bottom drag (`ROMSRuntimeSettings.bottom_drag`):")
         lines.append(
-            f"- Linear bottom drag coefficient (`rdrg`, m/s) = {self.bottom_drag['rdrg']}, "
+            f"- Linear bottom drag coefficient (`rdrg`, m/s) = {self.bottom_drag['rdrg']},"
         )
         lines.append(
             f"- Quadratic bottom drag coefficient (`rdrg2`, nondim) = {self.bottom_drag['rdrg2']}"
@@ -412,13 +428,13 @@ class ROMSRuntimeSettings:
         if self.s_coord is not None:
             lines.append("S-coordinate parameters (`ROMSRuntimeSettings.s_coord`):")
             lines.append(
-                f"Surface stretching parameter (`theta_s`) = {self.s_coord['theta_s']}, "
+                f"Surface stretching parameter (`theta_s`) = {self.s_coord['theta_s']},"
             )
             lines.append(
-                f"Bottom stretching parameter (`theta_b`) = {self.s_coord['theta_b']}, "
+                f"Bottom stretching parameter (`theta_b`) = {self.s_coord['theta_b']},"
             )
             lines.append(
-                f"Critical depth (`hc` or `tcline`, m) = {self.s_coord['tcline']} "
+                f"Critical depth (`hc` or `tcline`, m) = {self.s_coord['tcline']}"
             )
         if self.rho0 is not None:
             lines.append(f"Boussinesq reference density (`rho0`, kg/m3) = {self.rho0}")
@@ -427,23 +443,23 @@ class ROMSRuntimeSettings:
                 "Linear equation of state parameters (`ROMSRuntimeSettings.lin_rho_eos`):"
             )
             lines.append(
-                f"- Thermal expansion coefficient, ⍺ (`Tcoef`, kg/m3/K) = {self.lin_rho_eos['Tcoef']}, "
+                f"- Thermal expansion coefficient, ⍺ (`Tcoef`, kg/m3/K) = {self.lin_rho_eos['Tcoef']},"
             )
             lines.append(
                 f"- Reference temperature (`T0`, °C) = {self.lin_rho_eos['T0']},"
             )
             lines.append(
-                f"- Haline contraction coefficient, β (`Scoef`, kg/m3/PSU) = {self.lin_rho_eos['Scoef']}, "
+                f"- Haline contraction coefficient, β (`Scoef`, kg/m3/PSU) = {self.lin_rho_eos['Scoef']},"
             )
             lines.append(f"- Reference salinity (`S0`, psu) = {self.lin_rho_eos['S0']}")
 
         if self.marbl_biogeochemistry is not None:
             lines.append("MARBL input (`ROMSRuntimeSettings.marbl_biogeochemistry`):")
             lines.append(
-                f"- MARBL runtime settings file: {self.marbl_biogeochemistry['marbl_namelist_fname']}, "
+                f"- MARBL runtime settings file: {self.marbl_biogeochemistry['marbl_namelist_fname']},"
             )
             lines.append(
-                f"- MARBL output tracer list: {self.marbl_biogeochemistry['marbl_tracer_list_fname']}, "
+                f"- MARBL output tracer list: {self.marbl_biogeochemistry['marbl_tracer_list_fname']},"
             )
             lines.append(
                 f"- MARBL output diagnostics list: {self.marbl_biogeochemistry['marbl_diag_list_fname']}"
@@ -465,23 +481,23 @@ class ROMSRuntimeSettings:
                 "Vertical mixing parameters (`ROMSRuntimeSettings.vertical_mixing`):"
             )
             lines.append(
-                f"- Background vertical viscosity (`Akv_bak`, m2/s) = {self.vertical_mixing['Akv_bak']}, "
+                f"- Background vertical viscosity (`Akv_bak`, m2/s) = {self.vertical_mixing['Akv_bak']},"
             )
             lines.append(
-                f"- Background vertical mixing for tracers (`Akt_bak`, m2/s) = {self.vertical_mixing['Akt_bak']}, "
+                f"- Background vertical mixing for tracers (`Akt_bak`, m2/s) = {self.vertical_mixing['Akt_bak']},"
             )
         if self.my_bak_mixing is not None:
             lines.append(
                 "Mellor-Yamada Level 2.5 turbulent closure parameters (`ROMSRuntimeSettings.my_bak_mixing`):"
             )
             lines.append(
-                f"- Backround vertical TKE mixing [`Akq_bak`, m2/s] = {self.my_bak_mixing['Akq_bak']}, "
+                f"- Backround vertical TKE mixing [`Akq_bak`, m2/s] = {self.my_bak_mixing['Akq_bak']},"
             )
             lines.append(
-                f"- Horizontal Laplacian TKE mixing [`q2nu2`, m2/s] = {self.my_bak_mixing['q2nu2']}, "
+                f"- Horizontal Laplacian TKE mixing [`q2nu2`, m2/s] = {self.my_bak_mixing['q2nu2']},"
             )
             lines.append(
-                f"- Horizontal biharmonic TKE mixing [`q2nu4`, m4/s] = {self.my_bak_mixing['q2nu4']}, "
+                f"- Horizontal biharmonic TKE mixing [`q2nu4`, m4/s] = {self.my_bak_mixing['q2nu4']},"
             )
 
         if self.sss_correction is not None:
@@ -559,7 +575,7 @@ class ROMSRuntimeSettings:
 
         filepath = Path(filepath)
 
-        def _format_value(val):
+        def _format_value(val: float | str) -> str:
             """Format a single value for .in file, using exponents for large or small
             values."""
 
@@ -568,11 +584,9 @@ class ROMSRuntimeSettings:
                     return "0."
                 elif abs(val) < 1e-2 or abs(val) >= 1e4:
                     return f"{val:.6E}".replace("E+00", "E0")
-                else:
-                    return str(val)
             return str(val)
 
-        def _format_float_list(lst):
+        def _format_float_list(lst: list) -> str:
             """Format a list of values for .in file."""
 
             return " ".join(_format_value(x) for x in lst)

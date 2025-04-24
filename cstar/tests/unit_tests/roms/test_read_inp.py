@@ -1,12 +1,27 @@
 import pytest
+import shutil
 import numpy as np
 from pathlib import Path
 from cstar.roms import ROMSRuntimeSettings
+from cstar.base.utils import _replace_text_in_file
 
 
 @pytest.fixture
 def example_runtime_settings():
-    return ROMSRuntimeSettings(
+    """Fixture providing a `ROMSRuntimeSettings` instance for testing.
+
+    The example instance corresponds to the file `fixtures/example_runtime_settings.in`
+    in order to test the `ROMSRuntimeSettings.to_file` and `from_file` methods.
+
+    Paths do not correspond to real files.
+
+    Yields
+    ------
+    ROMSRuntimeSettings
+       The example ROMSRuntimeSettings instance
+    """
+
+    yield ROMSRuntimeSettings(
         title="Example runtime settings",
         time_stepping=[360, 60, 60, 1],
         bottom_drag=[0.0e-4, 1e-3, 1e-2, 1e-4, 1e-2],
@@ -42,6 +57,26 @@ def example_runtime_settings():
 
 class TestROMSRuntimeSettings:
     def test_to_file(self, example_runtime_settings, tmp_path):
+        """Test the ROMSRuntimeSettings.to_file method.
+
+        This test writes the example ROMSRuntimeSettings instance
+        defined by the example_runtime_settings fixture to a temporary
+        file and compares each non-commented line in the example `.in`
+        file `fixtures/example_runtime_settings.in` with those in the
+        temporary file.
+
+        Mocks and Fixtures
+        ------------------
+        example_runtime_settings: ROMSRuntimeSettings
+           Fixture returning an example ROMSRuntimeSettings instance
+        tmp_path: Path
+           Fixture creating and returning a temporary pathlib.Path
+
+        Asserts
+        -------
+        - The lines in the written file match those in the reference file
+        """
+
         example_runtime_settings.to_file(tmp_path / "test.in")
 
         with (
@@ -57,6 +92,22 @@ class TestROMSRuntimeSettings:
             assert ref == out
 
     def test_from_file(self, example_runtime_settings):
+        """Test the ROMSRuntimeSettings.from_file method.
+
+        This test compares the ROMSRuntimeSettings instance created from
+        the reference file `fixtures/example_runtime_settings.in` with the
+        example instance returned by the `example_runtime_settings` fixture.
+
+        Mocks and Fixtures
+        ------------------
+        example_runtime_settings: ROMSRuntimeSettings
+           Fixture returning an example ROMSRuntimeSettings instance
+
+        Asserts
+        -------
+        - Compares each attribute of the reference and tested ROMSRuntimeSettings
+          instances and checks for equality.
+        """
         tested_settings = ROMSRuntimeSettings.from_file(
             Path(__file__).parent / "fixtures/example_runtime_settings.in"
         )
@@ -88,6 +139,8 @@ class TestROMSRuntimeSettings:
             tested_settings.tracer_diff2, expected_settings.tracer_diff2
         )
 
+        # Slightly more complicated equality check for dictionary with
+        # numpy array entry:
         assert {
             k: (v.tolist() if isinstance(v, np.ndarray) else v)
             for k, v in tested_settings.vertical_mixing.items()
@@ -96,11 +149,58 @@ class TestROMSRuntimeSettings:
             for k, v in expected_settings.vertical_mixing.items()
         }
 
-    def test_from_file_raises_if_nonexistent(self, tmp_path):
+    def test_from_file_with_missing_optional_sections(self, tmp_path):
+        """Confirms that ROMSRuntimeSettings.from_file sets the attributes corresponding
+        to settings that are not present in the file to None.
+
+        This test copies the reference file in `fixtures/example_runtime_settings.in`
+        to a temporary path and modifies it to remove the value of the `climatology`
+        entry, then confirms that `ROMSRuntimeSettings.from_file(tmp_file).climatology
+        is None
+
+        Mocks and Fixtures
+        ------------------
+        tmp_path: Path
+           Fixture creating and returning a temporary pathlib.Path
+
+        Asserts
+        -------
+        - The ROMSRuntimeSettings instance returned by `from_file` with the modified
+          file has `None` for its `climatology` attribute
+        """
+
+        modified_file = tmp_path / "modified_example_settings.in"
+        shutil.copy2(
+            Path(__file__).parent / "fixtures/example_runtime_settings.in",
+            modified_file,
+        )
+        _replace_text_in_file(modified_file, "climfile2.nc", "")
+        tested_settings = ROMSRuntimeSettings.from_file(modified_file)
+        assert tested_settings.climatology is None
+
+    def test_from_file_raises_if_nonexistent(self):
+        """Test that ROMSRuntimeSettings.from_file raises a FileNotFoundError if the
+        supplied file does not exist."""
         with pytest.raises(FileNotFoundError, match="does not exist"):
-            ROMSRuntimeSettings.from_file(tmp_path / "nonexistentfile.in")
+            ROMSRuntimeSettings.from_file("nonexistentfile.in")
 
     def test_file_roundtrip(self, example_runtime_settings, tmp_path):
+        """Tests that the `to_file`/`from_file` roundtrip results in a functionally
+        indentical ROMSRuntimeSettings instance.
+
+        Mocks and Fixtures
+        ------------------
+        - example_runtime_settings: ROMSRuntimeSettings
+           A fixture returning an example ROMSRuntimeSettings instance
+        - tmp_path: Path
+           Fixture creating and returning a temporary pathlib.Path
+
+        Asserts
+        -------
+        - Each attribute in the instance returned by `from_file` is equal
+          to those in the instance passed to `to_file`
+        """
+
         expected_settings = example_runtime_settings
         expected_settings.to_file(tmp_path / "test.in")
 
@@ -143,6 +243,19 @@ class TestROMSRuntimeSettings:
 
 class TestStrAndRepr:
     def test_str(self, example_runtime_settings):
+        """Test that the __str__ function of ROMSRuntimeSettings matches an expected
+        string for the example instance.
+
+        Mocks and Fixtures
+        ------------------
+        example_runtime_settings: ROMSRuntimeSettings
+           A fixture returning an example ROMSRuntimeSettings instance
+
+        Asserts
+        -------
+        - str(example_runtime_settings) matches an expected reference string
+        """
+
         expected_str = """ROMSRuntimeSettings
 -------------------
 Title (`ROMSRuntimeSettings.title`): Example runtime settings
@@ -196,6 +309,19 @@ Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
         assert str(example_runtime_settings) == expected_str
 
     def test_repr(self, example_runtime_settings):
+        """Test that the __repr__ function of ROMSRuntimeSettings matches an expected
+        string for the example instance.
+
+        Mocks and Fixtures
+        ------------------
+        example_runtime_settings: ROMSRuntimeSettings
+           A fixture returning an example ROMSRuntimeSettings instance
+
+        Asserts
+        -------
+        - repr(example_runtime_settings) matches an expected reference string
+        """
+
         expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=['input_datasets/roms_frc.nc', 'input_datasets/roms_frc_bgc.nc', 'input_datasets/roms_bry.nc', 'input_datasets/roms_bry_bgc.nc'], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_output_list'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0, 'Akt_bak': array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
        0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
        0., 0., 0.])}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
