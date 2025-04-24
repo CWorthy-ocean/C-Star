@@ -1,9 +1,11 @@
+!This line is a comment
 title:
     Example runtime settings
 
 time_stepping: ntimes dt ndtfast ninfo
     360    60    60    1
 
+! This line is also a comment
 bottom_drag: rdrg rdrg2 zob
     0.    1.000000E-03    0.01
 

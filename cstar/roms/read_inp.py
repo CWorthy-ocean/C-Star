@@ -264,7 +264,7 @@ class ROMSRuntimeSettings:
 
         filepath = Path(filepath)
         if not filepath.exists():
-            raise FileNotFoundError(filepath)
+            raise FileNotFoundError(f"File {filepath} does not exist.")
 
         sections = {}
         with filepath.open() as f:
@@ -273,11 +273,7 @@ class ROMSRuntimeSettings:
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-            if not line or line.startswith("!"):
-                i += 1
-                continue
-
-            if ":" in line:
+            if ":" in line and not line.startswith("!"):
                 section_name = line.split(":")[0].strip()
                 i += 1
                 section_lines = []
@@ -289,27 +285,20 @@ class ROMSRuntimeSettings:
                     i += 1
 
                 sections[section_name] = section_lines
-
             else:
                 i += 1
 
         # import pdb; pdb.set_trace()
-        def _single_line_section_to_list(section_name, expected_type):
-            if section_name not in sections:
-                return None
-            else:
-                section = sections[section_name][0].split()
-                if expected_type == float:
-                    section = [x.replace("D", "E") for x in section]
-                section = [expected_type(x) for x in section]
+        def _single_line_section_to_list(section_name, expected_type) -> list:
+            section = sections[section_name][0].split()
+            if expected_type == float:
+                section = [x.replace("D", "E") for x in section]
+            section = [expected_type(x) for x in section]
 
-                return section
+            return section
 
         def _single_line_section_to_scalar(section_name, expected_type):
             lst = _single_line_section_to_list(section_name, expected_type)
-            # if len(lst) > 1:
-            #     raise ValueError(f"Expected single {expected_type} entry for {section_name} but found {len(lst)}")
-            # else:
             return lst[0] if lst else None
 
         # Non-optional

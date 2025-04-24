@@ -50,7 +50,11 @@ class TestROMSRuntimeSettings:
                 Path(__file__).parent / "fixtures/example_runtime_settings.in"
             ) as ref_f,
         ):
-            assert out_f.readlines() == ref_f.readlines()
+            ref = [
+                line for line in ref_f.readlines() if not line.strip().startswith("!")
+            ]
+            out = out_f.readlines()
+            assert ref == out
 
     def test_from_file(self, example_runtime_settings):
         tested_settings = ROMSRuntimeSettings.from_file(
@@ -92,6 +96,10 @@ class TestROMSRuntimeSettings:
             for k, v in expected_settings.vertical_mixing.items()
         }
 
+    def test_from_file_raises_if_nonexistent(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="does not exist"):
+            ROMSRuntimeSettings.from_file(tmp_path / "nonexistentfile.in")
+
     def test_file_roundtrip(self, example_runtime_settings, tmp_path):
         expected_settings = example_runtime_settings
         expected_settings.to_file(tmp_path / "test.in")
@@ -131,3 +139,65 @@ class TestROMSRuntimeSettings:
             k: (v.tolist() if isinstance(v, np.ndarray) else v)
             for k, v in expected_settings.vertical_mixing.items()
         }
+
+
+class TestStrAndRepr:
+    def test_str(self, example_runtime_settings):
+        expected_str = """ROMSRuntimeSettings
+-------------------
+Title (`ROMSRuntimeSettings.title`): Example runtime settings
+Output filename prefix (`ROMSRuntimeSettings.output_root_name`): ROMS_test
+Time stepping (`ROMSRuntimeSettings.time_stepping`):
+- Number of steps (`ntimes`) = 360,
+- Time step (`dt`, sec) = 60,
+- Mode-splitting ratio (`ndtfast`) = 60,
+- Runtime diagnostic frequency (`ninfo`, steps) = 1
+Bottom drag (`ROMSRuntimeSettings.bottom_drag`):
+- Linear bottom drag coefficient (`rdrg`, m/s) = 0.0,
+- Quadratic bottom drag coefficient (`rdrg2`, nondim) = 0.001
+- Bottom roughness height (`zob`,m) = 0.01
+Grid file (`ROMSRuntimeSettings.grid`): input_datasets/roms_grd.nc
+Initial conditions file (`ROMSRuntimeSettings.initial`): input_datasets/roms_ini.nc
+Forcing file(s): [PosixPath('input_datasets/roms_frc.nc'),
+          PosixPath('input_datasets/roms_frc_bgc.nc'),
+          PosixPath('input_datasets/roms_bry.nc'),
+          PosixPath('input_datasets/roms_bry_bgc.nc')]
+S-coordinate parameters (`ROMSRuntimeSettings.s_coord`):
+Surface stretching parameter (`theta_s`) = 5.0,
+Bottom stretching parameter (`theta_b`) = 2.0,
+Critical depth (`hc` or `tcline`, m) = 300.0
+Boussinesq reference density (`rho0`, kg/m3) = 1000.0
+Linear equation of state parameters (`ROMSRuntimeSettings.lin_rho_eos`):
+- Thermal expansion coefficient, ⍺ (`Tcoef`, kg/m3/K) = 0.2,
+- Reference temperature (`T0`, °C) = 1.0,
+- Haline contraction coefficient, β (`Scoef`, kg/m3/PSU) = 0.822,
+- Reference salinity (`S0`, psu) = 1.0
+MARBL input (`ROMSRuntimeSettings.marbl_biogeochemistry`):
+- MARBL runtime settings file: marbl_in,
+- MARBL output tracer list: marbl_tracer_output_list,
+- MARBL output diagnostics list: marbl_diagnostic_output_list
+Horizontal Laplacian kinematic viscosity (`ROMSRuntimeSettings.lateral_visc`, m2/s) = 0.0
+Boundary slipperiness parameter (`ROMSRuntimeSettings.gamma2`, free-slip=+1, no-slip=-1) = 1.0
+Horizontal Laplacian mixing coefficients for tracers (`ROMSRuntimeSettings.tracer_diff2`, m2/s) = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+Vertical mixing parameters (`ROMSRuntimeSettings.vertical_mixing`):
+- Background vertical viscosity (`Akv_bak`, m2/s) = 0,
+- Background vertical mixing for tracers (`Akt_bak`, m2/s) = [0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
+ 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.],
+Mellor-Yamada Level 2.5 turbulent closure parameters (`ROMSRuntimeSettings.my_bak_mixing`):
+- Backround vertical TKE mixing [`Akq_bak`, m2/s] = 1e-05,
+- Horizontal Laplacian TKE mixing [`q2nu2`, m2/s] = 0.0,
+- Horizontal biharmonic TKE mixing [`q2nu4`, m4/s] = 0.0,
+SSS correction (`ROMSRuntimeSettings.sss_correction`): 7.777
+SST correction (`ROMSRuntimeSettings.sst_correction`): 10.0
+Open boundary binding velocity (`ROMSRuntimeSettings.ubind`, m/s) = 0.1
+Maximum sponge layer viscosity (`ROMSRuntimeSettings.v_sponge`, m2/s) = 0.0
+Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
+
+        assert str(example_runtime_settings) == expected_str
+
+    def test_repr(self, example_runtime_settings):
+        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=['input_datasets/roms_frc.nc', 'input_datasets/roms_frc_bgc.nc', 'input_datasets/roms_bry.nc', 'input_datasets/roms_bry_bgc.nc'], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_output_list'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0, 'Akt_bak': array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+       0., 0., 0.])}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
+
+        assert expected_repr == repr(example_runtime_settings)
