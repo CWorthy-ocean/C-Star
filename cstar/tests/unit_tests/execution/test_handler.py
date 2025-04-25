@@ -1,7 +1,8 @@
-import time
 import threading
-from unittest.mock import patch, PropertyMock
+import time
 from pathlib import Path
+from unittest.mock import PropertyMock, patch
+
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 
 

@@ -1,28 +1,30 @@
+import pickle
 import re
+from datetime import datetime
+from pathlib import Path
+from typing import Any, cast
+from unittest.mock import MagicMock, PropertyMock, mock_open, patch
+
 import pytest
 import yaml
-import pickle
-from typing import cast, Any
-from pathlib import Path
-from datetime import datetime
-from unittest.mock import patch, mock_open, MagicMock, PropertyMock
+
+from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
-from cstar.roms.simulation import ROMSSimulation
-from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.execution.handler import ExecutionStatus
+from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
+from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
+    ROMSBoundaryForcing,
+    ROMSForcingCorrections,
+    ROMSInitialConditions,
     ROMSInputDataset,
     ROMSModelGrid,
-    ROMSInitialConditions,
-    ROMSTidalForcing,
-    ROMSBoundaryForcing,
-    ROMSSurfaceForcing,
     ROMSRiverForcing,
-    ROMSForcingCorrections,
+    ROMSSurfaceForcing,
+    ROMSTidalForcing,
 )
-from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.base.additional_code import AdditionalCode
-from cstar.execution.handler import ExecutionStatus
+from cstar.roms.simulation import ROMSSimulation
 from cstar.system.manager import cstar_sysmgr
 
 

@@ -1,9 +1,11 @@
-import pytest
 import os
-from unittest.mock import patch, PropertyMock
-from cstar.system.manager import CStarSystemManager
-from cstar.system.scheduler import SlurmScheduler, PBSScheduler
+from unittest.mock import PropertyMock, patch
+
+import pytest
+
 from cstar.system.environment import CStarEnvironment
+from cstar.system.manager import CStarSystemManager
+from cstar.system.scheduler import PBSScheduler, SlurmScheduler
 
 
 @pytest.fixture

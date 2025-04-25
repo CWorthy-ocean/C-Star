@@ -1,19 +1,21 @@
-import pytest
 import hashlib
 import warnings
 from unittest import mock
+
+import pytest
+
 from cstar.base.gitutils import (
     _clone_and_checkout,
+    _get_hash_from_checkout_target,
     _get_repo_head_hash,
     _get_repo_remote,
-    _get_hash_from_checkout_target,
 )
 from cstar.base.utils import (
-    _get_sha256_hash,
-    _update_user_dotenv,
-    _replace_text_in_file,
-    _list_to_concise_str,
     _dict_to_tree,
+    _get_sha256_hash,
+    _list_to_concise_str,
+    _replace_text_in_file,
+    _update_user_dotenv,
 )
 
 

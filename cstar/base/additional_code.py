@@ -1,10 +1,11 @@
 import shutil
 import tempfile
-from typing import Optional, Dict
 from pathlib import Path
+from typing import Dict, Optional
+
 from cstar.base.datasource import DataSource
 from cstar.base.gitutils import _clone_and_checkout
-from cstar.base.utils import _list_to_concise_str, _get_sha256_hash
+from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
 
 
 class AdditionalCode:

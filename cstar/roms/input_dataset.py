@@ -1,13 +1,14 @@
-import yaml
 import tempfile
-import requests
-import roms_tools
-
 from abc import ABC
 from pathlib import Path
-from typing import Optional, List, Any
+from typing import Any, List, Optional
+
+import requests
+import roms_tools
+import yaml
+
 from cstar.base.input_dataset import InputDataset
-from cstar.base.utils import _list_to_concise_str, _get_sha256_hash
+from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
 
 
 class ROMSInputDataset(InputDataset, ABC):

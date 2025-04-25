@@ -1,8 +1,10 @@
 import stat
-import pytest
-from unittest import mock
 from pathlib import Path
 from textwrap import dedent
+from unittest import mock
+
+import pytest
+
 from cstar.base import InputDataset
 from cstar.base.datasource import DataSource
 

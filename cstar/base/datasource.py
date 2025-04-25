@@ -1,6 +1,6 @@
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
-from pathlib import Path
 
 
 class DataSource:
