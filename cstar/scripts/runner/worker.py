@@ -1,48 +1,116 @@
+import argparse
+import asyncio
+import dataclasses as dc
+import logging
+import pathlib
 import shutil
 import sys
 from datetime import datetime, timezone
-from cstar.execution.handler import ExecutionHandler, ExecutionStatus
-import cstar.scripts.runner.util as util
-import logging
-import pathlib
-import contextvars
+from typing import override
 
 from cstar import Simulation
-from cstar.base.exceptions import CstarException
+from cstar.base.exceptions import BlueprintError, CstarException
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
-from cstar.base import log
+from cstar.scripts.service import Service, ServiceConfiguration
 
-
-ctx_correlation_id = contextvars.ContextVar("correlation_id", default=None)
 CSTAR_USER_ENV_PATH = "~/.cstar.env"
 CSTAR_EXTERNALS_ROOT = "~/code/cstar/cstar/externals"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
-class Worker(log.LoggingMixin):
+def create_parser() -> argparse.ArgumentParser:
+    """Creates a parser for command line arguments expected by the c-star Worker."""
+    parser = argparse.ArgumentParser(
+        description="Run a c-star simulation.",
+    )
+    parser.add_argument(
+        "--blueprint-uri",
+        type=str,
+        required=True,
+        help="The URI of a blueprint.",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        type=str,
+        required=False,
+        help="Logging level for the simulation.",
+        choices=[
+            logging._levelToName[i]
+            for i in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
+        ],
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="~/code/cstar/examples/",
+        type=str,
+        required=False,
+        help="Local path to write simulation outputs to",
+    )
+    parser.add_argument(
+        "--start-date",
+        default="2012-01-03 12:00:00",
+        type=str,
+        required=False,
+        help=f"The date on which to begin the simulation, formatted as `{DATE_FORMAT}`",
+    )
+    parser.add_argument(
+        "--end-date",
+        default="2012-01-04 12:00:00",
+        type=str,
+        required=False,
+        help=f"The date on which to end the simulation, formatted as `{DATE_FORMAT}`",
+    )
+    return parser
+
+
+def get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
+    """Create a unique path name to avoid collisions."""
+    current_time = datetime.now(timezone.utc)
+    return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
+
+
+@dc.dataclass
+class BlueprintRequest:
+    """Represents a request to run a c-star simulation."""
+
+    blueprint_uri: str = dc.field(
+        metadata={"description": "The path to the blueprint."},
+    )
+    output_dir: pathlib.Path = dc.field(
+        metadata={"description": "The directory to write simulation outputs to"},
+    )
+    start_date: datetime = dc.field(
+        metadata={"description": "The date on which to begin the simulation"},
+    )
+    end_date: datetime = dc.field(
+        metadata={"description": "The date on which to end the simulation"},
+    )
+
+
+class SimulationRunner(Service):
     """Worker class to run c-star simulations."""
 
-    def __init__(self, request: util.RunRequest):
+    def __init__(self, request: BlueprintRequest, service_cfg: ServiceConfiguration):
         """Initialize the worker with a request."""
+        super().__init__(service_cfg)
+
         self._blueprint_uri = request.blueprint_uri
-        self._log_level = request.log_level
-        self._simulation: Simulation | None = None
         self._output_root = request.output_dir.expanduser()
-        self._output_dir = self._get_unique_path(self._output_root)
-        self._simulation = ROMSSimulation.from_blueprint(
+        self._output_dir = get_unique_path(self._output_root)
+        self._simulation: Simulation = ROMSSimulation.from_blueprint(
             blueprint=self._blueprint_uri,
             directory=self._output_dir,
-            start_date="2012-01-03 12:00:00",
-            end_date="2012-01-04 12:00:00",
+            start_date=request.start_date,
+            end_date=request.end_date,
         )
+        self._handler: ExecutionHandler | None = None
         self._simulation.interactive = False
         # TODO: get this from the cstar env
         self._user_env_path = pathlib.Path(CSTAR_USER_ENV_PATH).expanduser()
         # TODO: get this from the cstar env
         self._externals_path = pathlib.Path(CSTAR_EXTERNALS_ROOT).expanduser()
-
-    def _get_unique_path(self, root_path: pathlib.Path) -> pathlib.Path:
-        """Create a unique path name for outputs to avoid collision with other runs."""
-        return root_path / f"{datetime.now(timezone.utc):%Y%m%d_%H%M%S}"
 
     def _prepare_file_system(self) -> None:
         """Clean up old directories to avoid collisions and create new locations for the
@@ -51,49 +119,32 @@ class Worker(log.LoggingMixin):
         NOTE: this may be unnecessary if the worker starts
         up a new container w/fresh directories every time.
         """
+        # a leftover .cstar.env cause empty repo/compilation errors; remove it.
         if self._user_env_path.exists():
             self._user_env_path.unlink()
 
+        # a leftover root_dir may have files in it, breaking download; remove it.
         if self._output_root.exists():
             shutil.rmtree(self._output_root)
 
+        # leftover external code folder causes non-empty repo errors; remove it.
         if self._externals_path.exists():
             shutil.rmtree(self._externals_path)
         self._externals_path.mkdir(parents=True, exist_ok=False)
 
+        # create a clean location to write outputs.
         if not self._output_dir.exists():
             self._output_dir.mkdir(parents=True, exist_ok=True)
 
-    # @util.autolog
-    def _on_pre_run(self) -> None:
-        """Prepare the simulation by setting up the input and output directories."""
-        self._prepare_file_system()
+    def _log_disposition(self) -> None:
+        """Helper method to log the status of the simulation at time of shutdown."""
+        disposition: ExecutionStatus = (
+            self._handler.status if self._handler else ExecutionStatus.UNKNOWN
+        )
 
-        if self._blueprint_uri is None:  # TODO: move out to caller
-            raise ValueError("No blueprint URI provided")
+        if self._handler:
+            self.log.info(f"Completed simulation logs at: {self._handler.output_file}")
 
-        try:
-            if self._simulation is None:
-                raise CstarException("Unable to load the blueprint")
-
-            # Prepare the simulation
-            self._simulation.setup()
-            self._simulation.build()
-            self._simulation.pre_run()
-        except ValueError as ex:
-            raise CstarException("Failed to prepare simulation") from ex
-
-    def _on_running(self, handler: ExecutionHandler) -> None:
-        # Check for updates... handler.updates is blocking w/0
-        # - consider looping for more control of output?
-        handler.updates(0, interactive=False)
-
-    def _on_complete(self, disposition: ExecutionStatus) -> None:
-        if not self._simulation:
-            self.log.info("No simulation for completion hook")
-            return
-
-        # TODO: we probably want to be more specific about the status
         if disposition == ExecutionStatus.COMPLETED:
             self.log.info("Simulation completed successfully.")
         elif disposition == ExecutionStatus.FAILED:
@@ -101,69 +152,131 @@ class Worker(log.LoggingMixin):
         else:
             self.log.warning(f"Simulation ended with status: {disposition}")
 
-        self._simulation.post_run()
+    @override
+    def _on_start(self) -> None:
+        """Prepare the simulation for execution by verifying the simulation loaded
+        properly, configuring the file system, retrieving remote resources, and building
+        third-party codebases."""
+        self._prepare_file_system()
 
-    # @util.autolog
-    def run(self) -> int:
+        if self._blueprint_uri is None:
+            raise BlueprintError("No blueprint URI provided")
+
+        if self._simulation is None:
+            raise BlueprintError(f"Unable to load the blueprint: {self._blueprint_uri}")
+
+        try:
+            self._simulation.setup()
+            self._simulation.build()
+            self._simulation.pre_run()
+        except ValueError as ex:
+            raise CstarException("Failed to prepare simulation") from ex
+
+    @override
+    def _on_shutdown(self) -> None:
+        """Perform shutdown of the worker service and log the final disposition of the
+        simulation."""
+        if not self._simulation:
+            self.log.warning("No simulation available at shutdown")
+            return
+
+        # Ensure simulation status has been logged (handler updates may be suppressed)
+        self._log_disposition()
+
+    @override
+    def _on_iteration(self) -> None:
         """Execute the c-star simulation."""
 
         try:
-            if not self._blueprint_uri:
-                raise ValueError("No blueprint path")
-
-            if self._simulation is None:
-                self.log.error("Simulation failed to load from blueprint")
-                return 1
-
-            # Retrieve & compile external resources
-            self._on_pre_run()
-            if self._simulation is None:
-                self.log.error("Failed to prepare simulation")
-                return 1
-
-            # Run the simulation
-            handler: ExecutionHandler = self._simulation.run()
-            self._on_running(handler)
-
+            self._handler = self._simulation.run()
         except Exception:
-            logging.exception("Failed to execute blueprint")
-            return 1
-        else:
-            result = handler.status != ExecutionStatus.COMPLETED
-            self._on_complete(handler.status)
+            logging.exception("An error occurred while running the simulation")
 
-        return result
+    @override
+    def _on_iteration_complete(self) -> None:
+        """Perform post-simulation behaviors."""
+        # Check for updates... handler.updates is blocking w/0
+        # - consider allowing main iteration to loop for more control of output
+        if self._handler:
+            self._handler.updates(0, interactive=False)
+
+        self._simulation.post_run()
+
+    @override
+    def _can_shutdown(self) -> bool:
+        """Determine if the service can shutdown."""
+        if self._simulation is None:
+            self.log.error("Simulation is not set. Allowing shutdown.")
+            return True
+
+        if not self._handler:
+            self.log.error("Execution handler is not set. Allowing shutdown.")
+            return True
+
+        if self._handler.status != ExecutionStatus.RUNNING:
+            self.log.info("Simulation is no longer running. Allowing shutdown.")
+            return True
+
+        return False
 
 
-def main() -> int:
-    """Main entry point for the c-star worker script."""
+def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
+    """Create a ServiceConfiguration instance using CLI arguments to configure the
+    behavior of the service."""
+    return ServiceConfiguration(
+        health_check_frequency=60,
+        log_level=logging._nameToLevel[args.log_level],
+        name="SimulationRunner",
+    )
+
+
+def config_from_args(args: argparse.Namespace) -> BlueprintRequest:
+    """Creates a WorkerConfig instance from CLI arguments supplied to the entrypoint
+    script."""
+
+    return BlueprintRequest(
+        blueprint_uri=args.blueprint_uri,
+        output_dir=pathlib.Path(args.output_dir),
+        start_date=datetime.strptime(args.start_date, DATE_FORMAT),
+        end_date=datetime.strptime(args.end_date, DATE_FORMAT),
+    )
+
+
+async def main() -> int:
+    """Main entry point for the c-star worker script.
+
+    Trigger
+    the `Service` lifecycle for a Worker.
+    """
 
     try:
-        parser = util.create_parser()
+        parser = create_parser()
         args = parser.parse_args()
     except SystemExit:
         # If the argument parsing fails, we exit with a non-zero status
         return 1
     else:
-        request = util.RunRequest.from_args(args=args)
-        ctx_correlation_id.set(request.request_id)  # type: ignore
+        service_cfg = get_service_config(args)
+        blueprint_req = config_from_args(args)
 
-    # logging.basicConfig(level=request.log_level, fmt="%(message)s")
-    log = logging.getLogger()
-    log.setLevel(request.log_level)  # __name__)
-
-    worker = Worker(request)
+    log_level = service_cfg.log_level
+    logging.basicConfig(level=log_level, format="%(message)s")
+    log = logging.getLogger(__name__)
+    log.setLevel(log_level)
 
     try:
-        result = worker.run()
+        worker = SimulationRunner(blueprint_req, service_cfg)
+        await worker.execute()
     except CstarException:
-        log.exception("An error occurred during simulation")
+        log.exception("An error occurred during the simulation")
+        return 1
+    except Exception:
+        log.exception("An unexpected exception occurred during the simulation")
         return 1
 
-    return result
+    return 0
 
 
 if __name__ == "__main__":
-    # rc = asyncio.run(main())
-    rc = main()
+    rc = asyncio.run(main())
     sys.exit(rc)
