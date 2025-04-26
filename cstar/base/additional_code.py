@@ -207,7 +207,7 @@ class AdditionalCode(LoggingMixin):
                 tgt_file_path = local_dir / Path(f).name
 
                 self.log.info(
-                    f"Copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
+                    f"• Copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
                 )
                 if src_file_path.exists():
                     shutil.copy(src_file_path, tgt_file_path)
@@ -224,7 +224,7 @@ class AdditionalCode(LoggingMixin):
                     )
                     shutil.copy(tgt_file_path, Path(str(tgt_file_path)[:-9]))
                     self.modified_files[i] = f[:-9]
-
+            self.log.info("✅ All files copied successfully")
             self.working_path = local_dir
         finally:
             if tmp_dir:

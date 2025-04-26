@@ -230,7 +230,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
         match self.local_config_status:
             case 0:
                 self.log.info(
-                    f"{self.__class__.__name__} correctly configured. Nothing to be done"
+                    f"✅ {self.__class__.__name__} correctly configured. Nothing to be done"
                 )
                 return
             case 1:

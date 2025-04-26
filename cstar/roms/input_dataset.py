@@ -160,9 +160,7 @@ class ROMSInputDataset(InputDataset, ABC):
             working_path_parent = self.working_path.parent
 
         if (self.exists_locally) and (working_path_parent == local_dir):
-            self.log.info(
-                f"Input dataset already exists in {working_path_parent}, skipping."
-            )
+            self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
             return
 
         if self.source.source_type != "yaml":
@@ -220,7 +218,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
         # ... and save:
         self.log.info(
-            f"Saving roms-tools dataset created from {self.source.location}..."
+            f"💾 Saving roms-tools dataset created from {self.source.location}..."
         )
         save_kwargs: dict[Any, Any] = {}
 

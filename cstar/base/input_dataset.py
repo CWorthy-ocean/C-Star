@@ -256,9 +256,7 @@ class InputDataset(ABC, LoggingMixin):
         target_path = Path(local_dir).expanduser().resolve() / self.source.basename
 
         if (self.exists_locally) and (self.working_path == target_path):
-            self.log.info(
-                f"Input dataset already exists at {self.working_path}, skipping."
-            )
+            self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
             return
 
         if self.source.location_type == "path":

@@ -1,14 +1,13 @@
+import sys
 import logging
 
 
 DEFAULT_LOG_LEVEL = logging.INFO
-DEFAULT_LOG_FORMAT = (
-    "%(asctime)s | %(levelname)s | %(name)s::%(funcName)s:%(lineno)d: %(message)s"
-)
+DEFAULT_LOG_FORMAT = "[%(levelname)s] %(message)s"
 
 
 def get_logger(
-    name: str | None = None, level: int = logging.INFO, fmt: str | None = None
+    name: str | None = None, level: int = DEFAULT_LOG_LEVEL, fmt: str | None = None
 ) -> logging.Logger:
     """Get a logger instance with the specified name.
 
@@ -28,18 +27,39 @@ def get_logger(
     """
 
     fmt = fmt or DEFAULT_LOG_FORMAT
-    root = logging.getLogger()
-    if not root.hasHandlers():
-        logging.basicConfig(level=DEFAULT_LOG_LEVEL, format=DEFAULT_LOG_FORMAT)
 
     logger = logging.getLogger(name)
+
+    # Prevent propagation during setting up handlers
+    logger.propagate = False
+
     logger.setLevel(level)
+    formatter = logging.Formatter(fmt)
 
-    if logger.handlers:
-        # Ensure handlers use specified format
-        for handler in logger.handlers:
-            handler.setFormatter(logging.Formatter(fmt))
+    # Set up root logger if not already configured
+    root = logging.getLogger()
 
+    if not root.hasHandlers():
+        logging.basicConfig(level=logging.WARNING, format=DEFAULT_LOG_FORMAT)
+
+    # Ensure root handlers only handle WARNING and higher
+    for handler in root.handlers:
+        handler.setLevel(logging.WARNING)
+
+    # Create specific STDOUT handler for INFO and lower:
+    if not logger.hasHandlers():
+        # Root logger defaults to STDERR, we want anything at INFO or lower in STDOUT
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(logging.DEBUG)
+
+        # Filter out any WARNING or higher (goes to STDERR):
+        stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+        stdout_handler.setFormatter(formatter)
+
+        logger.addHandler(stdout_handler)
+
+    # Re-enable propagation on final logger
+    logger.propagate = True
     return logger
 
 

@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import warnings
 from math import ceil
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -260,14 +259,14 @@ class SchedulerJob(ExecutionHandler, ABC):
                 + " as it cannot be determined"
             )
         elif self.queue.max_walltime is None:
-            warnings.warn(
-                f"WARNING: Unable to determine the maximum allowed walltime for chosen queue {queue_name}. "
+            self.log.warning(
+                f"Unable to determine the maximum allowed walltime for chosen queue {queue_name}. "
                 + f"If your chosen walltime {walltime} exceeds the (unknown) limit, this job may be "
                 + "rejected by your system's job scheduler.",
                 UserWarning,
             )
         elif walltime is None:
-            warnings.warn(
+            self.log.warning(
                 "Walltime parameter unspecified. Creating scheduler job with maximum walltime "
                 + f"for queue {queue_name}, {self.queue.max_walltime}"
             )
@@ -321,9 +320,9 @@ class SchedulerJob(ExecutionHandler, ABC):
             nnodes, ncpus = self._calculate_node_distribution(
                 cpus, scheduler.global_max_cpus_per_node
             )
-            warnings.warn(
+            self.log.warning(
                 (
-                    "WARNING: Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
+                    "Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
                     + "parameters, but your system requires an explicitly specified task distribution."
                     + "\n C-Star will attempt "
                     + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
