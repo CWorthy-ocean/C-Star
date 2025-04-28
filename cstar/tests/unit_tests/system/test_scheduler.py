@@ -1,3 +1,4 @@
+import logging
 import pytest
 from unittest.mock import patch, MagicMock, PropertyMock
 from cstar.system.scheduler import (
@@ -221,12 +222,23 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, capsys: pytest.CaptureFixture
+        self, mock_subprocess_run, caplog: pytest.CaptureFixture
     ):
         """Validate SlurmScheduler handles subprocess failures when querying CPUs.
 
         Captures printed error messages to ensure the failure is logged correctly.
+
+        Mocks and Fixtures
+        ------------------
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log messages
+
+        Asserts
+        -------
+        - Appropriate error messages are logged
         """
+        caplog.set_level(logging.INFO, logger="cstar.utils.log")
+
         mock_subprocess_run.return_value = MagicMock(
             returncode=2, stdout="", stderr="Error querying CPUs"
         )
@@ -235,7 +247,7 @@ class TestScheduler:
         result = scheduler.global_max_cpus_per_node
         assert result is None
 
-        captured = capsys.readouterr().out
+        captured = caplog.text
         assert "Error querying node property." in captured
         assert "STDERR:\nError querying CPUs" in captured
 
@@ -263,12 +275,23 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_mem_per_node_gb_failure(
-        self, mock_subprocess_run, capsys: pytest.CaptureFixture
+        self, mock_subprocess_run, caplog: pytest.CaptureFixture
     ):
         """Validate SlurmScheduler handles subprocess failures when querying memory.
 
         Captures printed error messages to ensure the failure is logged correctly.
+
+        Mocks and Fixtures
+        ------------------
+        caplog (pytest.LogCaptureFixture)
+            captures log messages
+
+        Asserts
+        -------
+        - Appropriate error messages are logged
         """
+        caplog.set_level(logging.DEBUG, logger="cstar.base.utils.log")
+
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying memory"
         )
@@ -277,7 +300,7 @@ class TestScheduler:
         result = scheduler.global_max_mem_per_node_gb
         assert result is None
 
-        captured = capsys.readouterr().out
+        captured = caplog.text
         assert "Error querying node property." in captured
         assert "STDERR:\nError querying memory" in captured
 
@@ -302,12 +325,26 @@ class TestScheduler:
         )
 
     def test_pbsscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, capsys: pytest.CaptureFixture
+        self, mock_subprocess_run, caplog: pytest.CaptureFixture
     ):
         """Validate PBSScheduler handles subprocess failures when querying CPUs.
 
         Captures printed error messages to ensure the failure is logged correctly.
+
+        Mocks and Fixtures
+        ------------------
+        caplog (pytest.LogCaptureFixture)
+            captures log messages
+        mock_subprocess_run (unittest.mock.MagicMock)
+            Mocks the subprocess.run method
+
+        Asserts
+        -------
+        - An appropriate error message is logged
         """
+
+        caplog.set_level(logging.DEBUG, logger="cstar.base.utils.log")
+
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying CPUs"
         )
@@ -316,17 +353,31 @@ class TestScheduler:
         result = scheduler.global_max_cpus_per_node
         assert result is None
 
-        captured = capsys.readouterr().out
+        captured = caplog.text
         assert "Error querying node property." in captured
         assert "STDERR:\nError querying CPUs" in captured
 
     def test_pbsscheduler_global_max_mem_per_node_gb_failure(
-        self, mock_subprocess_run, capsys: pytest.CaptureFixture
+        self, mock_subprocess_run, caplog: pytest.CaptureFixture
     ):
         """Validate PBSScheduler handles subprocess failures when querying memory.
 
         Captures printed error messages to ensure the failure is logged correctly.
+
+        Mocks and Fixtures
+        ------------------
+        caplog (pytest.LogCaptureFixture)
+            captures log messages
+        mock_subprocess_run (unittest.mock.MagicMock)
+            Mocks the subprocess.run method
+
+        Asserts
+        -------
+        - An appropriate error message is logged
         """
+
+        caplog.set_level(logging.DEBUG, logger="cstar.base.utils.log")
+
         mock_subprocess_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="Error querying memory"
         )
@@ -335,7 +386,7 @@ class TestScheduler:
         result = scheduler.global_max_mem_per_node_gb
         assert result is None
 
-        captured = capsys.readouterr().out
+        captured = caplog.text
         assert "Error querying node property." in captured
         assert "STDERR:\nError querying memory" in captured
 

@@ -120,7 +120,6 @@ class Simulation(ABC, LoggingMixin):
         if self.valid_start_date is None or self.valid_end_date is None:
             self.log.warning(
                 "Cannot enforce date range validation: Missing `valid_start_date` or `valid_end_date`.",
-                RuntimeWarning,
             )
 
         # Set start and end dates, using defaults where needed

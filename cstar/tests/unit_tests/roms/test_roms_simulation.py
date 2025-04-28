@@ -322,7 +322,7 @@ class TestROMSSimulationInitialization:
                 valid_end_date="2012-01-02",
             )
 
-    def test_default_codebase_assignment(self, tmp_path):
+    def test_default_codebase_assignment(self, tmp_path, caplog):
         """Ensure `ROMSSimulation` reverts to default codebases when not provided.
 
         This test verifies that if no `codebase` or `marbl_codebase` is explicitly
@@ -330,6 +330,7 @@ class TestROMSSimulationInitialization:
 
         Assertions
         ----------
+        - An information message is logged
         - Ensures that `sim.codebase` is an instance of `ROMSExternalCodeBase`.
         - Ensures that `sim.codebase.source_repo` and `sim.codebase.checkout_target` match
           the default ROMS repository settings.
@@ -340,22 +341,25 @@ class TestROMSSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for
-          safely testing file system interactions.
+        - tmp_path (pathlib.Path)
+            Builtin fixture providing a temporary filepath
+        - caplog (pytest.LogCaptureFixture)
+            Builtin fixture capturing log messages
         """
 
-        with pytest.warns(UserWarning, match="default codebase will be used"):
-            sim = ROMSSimulation(
-                name="test",
-                directory=tmp_path,
-                discretization=ROMSDiscretization(time_step=60),
-                runtime_code=AdditionalCode(location="some/dir"),
-                compile_time_code=AdditionalCode(location="some/dir"),
-                start_date="2012-01-01",
-                end_date="2012-01-02",
-                valid_start_date="2012-01-01",
-                valid_end_date="2012-01-02",
-            )
+        sim = ROMSSimulation(
+            name="test",
+            directory=tmp_path,
+            discretization=ROMSDiscretization(time_step=60),
+            runtime_code=AdditionalCode(location="some/dir"),
+            compile_time_code=AdditionalCode(location="some/dir"),
+            start_date="2012-01-01",
+            end_date="2012-01-02",
+            valid_start_date="2012-01-01",
+            valid_end_date="2012-01-02",
+        )
+        caplog.set_level(logging.INFO, logger=sim.log.name)
+        assert "default codebase will be used" in caplog.text
 
         assert isinstance(sim.codebase, ROMSExternalCodeBase)
         assert sim.codebase.source_repo == "https://github.com/CESR-lab/ucla-roms.git"
@@ -689,7 +693,7 @@ class TestROMSSimulationInitialization:
             assert substring in str(exception_info.value)
 
     def test_check_inputdataset_dates_warns_and_sets_start_date(
-        self, example_roms_simulation
+        self, example_roms_simulation, caplog
     ):
         """Test that `_check_inputdataset_dates` warns and overrides mismatched
         `start_date`.
@@ -700,29 +704,31 @@ class TestROMSSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `example_roms_simulation` : Provides a `ROMSSimulation` instance.
+        example_roms_simulation (cstar.roms.ROMSSimulation)
+            Provides a `ROMSSimulation` instance.
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log messages
 
         Assertions
         ----------
-        - A `UserWarning` is raised with the expected message.
+        - A warning is logged
         - The input dataset's `start_date` is set to match the simulation's `start_date`.
         """
 
         sim, _ = example_roms_simulation
+        caplog.set_level(logging.INFO, logger=sim.log.name)
 
         sim.river_forcing = ROMSRiverForcing(
             location="http://dodgyyamls4u.ru/riv.yaml", start_date="1999-01-01"
         )
 
-        with pytest.warns(
-            UserWarning, match="does not match ROMSSimulation.start_date"
-        ):
-            sim._check_inputdataset_dates()
+        sim._check_inputdataset_dates()
 
         assert sim.river_forcing.start_date == sim.start_date
+        assert "does not match ROMSSimulation.start_date" in caplog.text
 
     def test_check_inputdataset_dates_warns_and_sets_end_date(
-        self, example_roms_simulation
+        self, example_roms_simulation, caplog
     ):
         """Test that `_check_inputdataset_dates` warns and overrides mismatched
         `end_date`.
@@ -733,23 +739,25 @@ class TestROMSSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `example_roms_simulation` : Provides a `ROMSSimulation` instance.
+        example_roms_simulation (cstar.roms.ROMSSimulation)
+            Provides a `ROMSSimulation` instance.
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture capturing output logs
 
         Assertions
         ----------
-        - A `UserWarning` is raised with the expected message.
+        - An appropriate warning message is logged
         - The input dataset's `end_date` is updated to match the simulation's `end_date`.
         """
 
         sim, _ = example_roms_simulation
-
+        caplog.set_level(logging.INFO, logger=sim.log.name)
         sim.river_forcing = ROMSRiverForcing(
             location="http://dodgyyamls4u.ru/riv.yaml", end_date="1999-12-31"
         )
 
-        with pytest.warns(UserWarning, match="does not match ROMSSimulation.end_date"):
-            sim._check_inputdataset_dates()
-
+        sim._check_inputdataset_dates()
+        assert "does not match ROMSSimulation.end_date" in caplog.text
         assert sim.river_forcing.end_date == sim.end_date
 
 
@@ -1642,6 +1650,7 @@ class TestProcessingAndExecution:
         """
 
         sim, directory = example_roms_simulation
+
         sim.runtime_code.working_path = directory / "ROMS/runtime_code"
         sim.runtime_code.files = ["file1.in", "file2", "marbl_in"]
         sim.runtime_code.modified_files = [None, None, None]
@@ -1978,10 +1987,11 @@ class TestProcessingAndExecution:
         Assertions
         ----------
         - Ensures `build` exits early without calling `make compile_clean` or `make`.
-        - Ensures an informational message is printed about skipping recompilation.
+        - Ensures an informational message is logged about skipping recompilation.
         """
 
         sim, directory = example_roms_simulation
+        caplog.set_level(logging.INFO, logger=sim.log.name)
         build_dir = directory / "ROMS/compile_time_code"
         # Mock properties for early exit conditions
         with (
@@ -1992,7 +2002,6 @@ class TestProcessingAndExecution:
                 return_value=True,
             ),
             patch.object(Path, "exists", return_value=True),
-            caplog.at_level(logging.INFO),
         ):
             # Pretend the executable exists
             sim._exe_hash = "dummy_hash"
@@ -2589,7 +2598,9 @@ class TestProcessingAndExecution:
         )  # Ensure run is complete
 
         # Call post_run and expect error
-        with pytest.raises(RuntimeError, match="Error while joining ROMS output"):
+        with pytest.raises(
+            RuntimeError, match="Command `ncjoin ocean_his.20240101000000.*.nc` failed."
+        ):
             sim.post_run()
 
         mock_subprocess.assert_called_once_with(

@@ -92,15 +92,16 @@ class TestExecutionHandlerUpdates:
 
         Fixtures
         --------
-        LogCaptureFixture
-            Captures log outputs to verify output messages
+        tmp_path (pathlib.Path): builtin fixture creating a temporary pathlib.Path object
+        caplog (pytest.LogCaptureFixture): Builtin fixture to capture log outputs
 
         Asserts
         -------
-        - That all live updates appended to the output file are printed correctly.
-        - That previously existing content in the file is also printed.
+        - That all live updates appended to the output file are logged correctly.
+        - That previously existing content in the file is also logged.
         - That the method properly interacts with the output file in real-time.
         """
+
         # Create a temporary output file
         output_file = tmp_path / "output.log"
         initial_content = ["First line\n"]
@@ -111,6 +112,9 @@ class TestExecutionHandlerUpdates:
             f.writelines(initial_content)
 
         handler = MockExecutionHandler(ExecutionStatus.RUNNING, output_file)
+
+        # Get the logger from the ExecutionHandler instance:
+        caplog.set_level(logging.INFO, logger=handler.log.name)
 
         # Function to simulate appending live updates to the file
         def append_live_updates():
@@ -129,7 +133,6 @@ class TestExecutionHandlerUpdates:
 
         # Ensure both initial and live update lines are printed
         captured = caplog.text
-
         for line in live_updates:
             assert line in captured
 
@@ -159,8 +162,10 @@ class TestExecutionHandlerUpdates:
 
         Fixtures
         --------
-        LogCaptureFixture
-            Captures log outputs to verify output messages
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to captures log outputs
+        tmp_path (pathlib.Path)
+            Builtin fixture to provide a temporary file path
 
         Asserts
         -------
@@ -177,6 +182,8 @@ class TestExecutionHandlerUpdates:
             f.writelines(content)
 
         handler = MockExecutionHandler(ExecutionStatus.RUNNING, output_file)
+        # Get logger to capture from ExecutionHandler instance:
+        caplog.set_level(logging.INFO, logger=handler.log.name)
 
         # Mock the `status` property to return "running"
         with (
@@ -220,9 +227,10 @@ class TestExecutionHandlerUpdates:
 
         Fixtures
         --------
-        LogCaptureFixture
-            Captures log outputs to verify output messages
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log outputs
         """
+
         # Create a temporary output file
         output_file = tmp_path / "output.log"
         initial_content = ["First line\n"]
@@ -234,7 +242,7 @@ class TestExecutionHandlerUpdates:
 
         # Initialize the handler with status `RUNNING`
         handler = MockExecutionHandler(ExecutionStatus.RUNNING, output_file)
-        caplog.set_level(logging.INFO)
+        caplog.set_level(logging.INFO, logger=handler.log.name)
 
         # Function to simulate appending live updates and changing status
         def append_updates_and_change_status():

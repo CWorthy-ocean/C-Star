@@ -744,9 +744,10 @@ class TestROMSInputDatasetGet:
         --------
         - Ensures the skip message is printed when `working_path` exists in `local_dir`.
         - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
+        - An information message is logged
         """
 
-        caplog.set_level(logging.INFO)
+        caplog.set_level(logging.INFO, logger=local_roms_yaml_dataset.log.name)
 
         # Mock `working_path` to point to a file in `some/local/dir`
         local_roms_yaml_dataset.working_path = Path("some/local/dir/local_file.yaml")
@@ -761,7 +762,7 @@ class TestROMSInputDatasetGet:
 
         # Assert the skip message was printed
         captured = caplog.text
-        assert "Input dataset already exists in some/local/dir, skipping." in captured
+        assert "already exists, skipping." in captured
 
         # Ensure no further operations were performed
         self.mock_get.assert_not_called()
@@ -800,7 +801,7 @@ class TestROMSInputDatasetGet:
         - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
         """
 
-        caplog.set_level(logging.INFO)
+        caplog.set_level(logging.INFO, logger=local_roms_yaml_dataset.log.name)
 
         # Mock `working_path` to be a list pointing to files in `some/local/dir`
         local_roms_yaml_dataset.working_path = [
@@ -817,8 +818,7 @@ class TestROMSInputDatasetGet:
         local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
         # Assert the skip message was printed
-        captured = caplog.text
-        assert "Input dataset already exists in some/local/dir, skipping." in captured
+        assert "already exists, skipping." in caplog.text
 
         # Ensure no further operations were performed
         self.mock_get.assert_not_called()

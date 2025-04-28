@@ -279,7 +279,7 @@ def _run_cmd(
         if raise_on_error:
             raise RuntimeError(msg)
 
-        log.debug(msg)
+        log.error(msg)
 
     log.debug(msg_post or "Command completed successfully.")
     return stdout

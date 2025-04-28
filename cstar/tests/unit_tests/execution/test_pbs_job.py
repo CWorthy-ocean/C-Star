@@ -278,12 +278,14 @@ class TestPBSJob:
 
         Mocks
         -----
-        PBSJob.status
+        mock_status (PBSJob.status)
             Mocked to return "completed", simulating a completed job.
-        subprocess.run
+        mock_subprocess (subprocess.run)
             Mocked to ensure that the `qdel` command is not executed.
-        LogCaptureFixture
-            Captures log outputs to verify output messages
+        tmp_path (pathlib.Path)
+            Builtin fixture to create a temporary filepath
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log outputs
 
         Asserts
         -------
@@ -292,7 +294,6 @@ class TestPBSJob:
         """
         # Mock the status to "completed"
         mock_status.return_value = "completed"
-        caplog.set_level(logging.INFO)
 
         # Create a PBSJob with a set job ID
         job = PBSJob(
@@ -300,6 +301,9 @@ class TestPBSJob:
             run_path=tmp_path,
         )
         job._id = 12345  # Manually set the job ID
+
+        # Get the logger from the job instance
+        caplog.set_level(logging.INFO, logger=job.log.name)
 
         # Attempt to cancel the job
         job.cancel()

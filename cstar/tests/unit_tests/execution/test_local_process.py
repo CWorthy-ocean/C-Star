@@ -387,16 +387,16 @@ class TestLocalProcess:
 
         Fixtures
         --------
-        tmp_path
+        tmp_path (pathlib.Path)
             Builtin fixture to create and use a temporary path for filesystem interaction
-        mock_local_process
+        mock_local_process (cstar.execution.LocalProcess)
             Creates a simple local process
-        LogCaptureFixture
-            Captures log outputs to verify output messages
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to captures log outputs
 
         Asserts
         -------
-        - That the `print` statement outputs the correct message.
+        - That the correct message is logged
         - That neither `terminate` nor `kill` is called.
         """
 
@@ -406,7 +406,8 @@ class TestLocalProcess:
         mock_local_process._process = (
             self.mock_subprocess
         )  # Directly assign the mock process
-        caplog.set_level(logging.INFO)
+
+        caplog.set_level(logging.INFO, logger=mock_local_process.log.name)
 
         # Test cancel on a completed process
         mock_local_process.cancel()
@@ -468,22 +469,22 @@ class TestLocalProcess:
 
         Fixtures
         --------
-        tmp_path
+        tmp_path (pathlib.Path)
             Builtin fixture to create and use a temporary path for filesystem interaction
-        mock_local_process
+        mock_local_process (cstar.execution.LocalProcess)
             Creates a simple local process
-        LogCaptureFixture
-            Captures log outputs to verify output messages
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log outputs
 
         Asserts
         -------
-        - An information message is printed
+        - An information message is logged
         - subprocess.Popen.wait is not called
         """
 
         mock_local_process._process = None  # Assign mock process
         mock_local_process._cancelled = True
-        caplog.set_level(logging.INFO)
+        caplog.set_level(logging.INFO, logger=mock_local_process.log.name)
 
         mock_local_process.wait()
         captured = caplog.text

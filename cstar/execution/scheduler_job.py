@@ -263,7 +263,6 @@ class SchedulerJob(ExecutionHandler, ABC):
                 f"Unable to determine the maximum allowed walltime for chosen queue {queue_name}. "
                 + f"If your chosen walltime {walltime} exceeds the (unknown) limit, this job may be "
                 + "rejected by your system's job scheduler.",
-                UserWarning,
             )
         elif walltime is None:
             self.log.warning(
@@ -330,7 +329,6 @@ class SchedulerJob(ExecutionHandler, ABC):
                     + f"{scheduler.global_max_cpus_per_node} CPUS per node "
                     + f"\nand your job requirement of {cpus} CPUS."
                 ),
-                UserWarning,
             )
             self._cpus_per_node = ncpus
             self._nodes = nnodes
