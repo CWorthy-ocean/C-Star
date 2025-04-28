@@ -224,7 +224,7 @@ def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
     """Create a ServiceConfiguration instance using CLI arguments to configure the
     behavior of the service."""
     return ServiceConfiguration(
-        health_check_frequency=60,
+        health_check_frequency=10,
         log_level=logging._nameToLevel[args.log_level],
         name="SimulationRunner",
     )
