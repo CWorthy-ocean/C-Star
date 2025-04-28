@@ -19,58 +19,6 @@ CSTAR_EXTERNALS_ROOT = "~/code/cstar/cstar/externals"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
-def create_parser() -> argparse.ArgumentParser:
-    """Creates a parser for command line arguments expected by the c-star Worker."""
-    parser = argparse.ArgumentParser(
-        description="Run a c-star simulation.",
-    )
-    parser.add_argument(
-        "--blueprint-uri",
-        type=str,
-        required=True,
-        help="The URI of a blueprint.",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        type=str,
-        required=False,
-        help="Logging level for the simulation.",
-        choices=[
-            logging._levelToName[i]
-            for i in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
-        ],
-    )
-    parser.add_argument(
-        "--output-dir",
-        default="~/code/cstar/examples/",
-        type=str,
-        required=False,
-        help="Local path to write simulation outputs to",
-    )
-    parser.add_argument(
-        "--start-date",
-        default="2012-01-03 12:00:00",
-        type=str,
-        required=False,
-        help=f"The date on which to begin the simulation, formatted as `{DATE_FORMAT}`",
-    )
-    parser.add_argument(
-        "--end-date",
-        default="2012-01-04 12:00:00",
-        type=str,
-        required=False,
-        help=f"The date on which to end the simulation, formatted as `{DATE_FORMAT}`",
-    )
-    return parser
-
-
-def get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
-    """Create a unique path name to avoid collisions."""
-    current_time = datetime.now(timezone.utc)
-    return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
-
-
 @dc.dataclass
 class BlueprintRequest:
     """Represents a request to run a c-star simulation."""
@@ -98,7 +46,7 @@ class SimulationRunner(Service):
 
         self._blueprint_uri = request.blueprint_uri
         self._output_root = request.output_dir.expanduser()
-        self._output_dir = get_unique_path(self._output_root)
+        self._output_dir = self._get_unique_path(self._output_root)
         self._simulation: Simulation = ROMSSimulation.from_blueprint(
             blueprint=self._blueprint_uri,
             directory=self._output_dir,
@@ -111,6 +59,12 @@ class SimulationRunner(Service):
         self._user_env_path = pathlib.Path(CSTAR_USER_ENV_PATH).expanduser()
         # TODO: get this from the cstar env
         self._externals_path = pathlib.Path(CSTAR_EXTERNALS_ROOT).expanduser()
+
+    @staticmethod
+    def _get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
+        """Create a unique path name to avoid collisions."""
+        current_time = datetime.now(timezone.utc)
+        return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
 
     def _prepare_file_system(self) -> None:
         """Clean up old directories to avoid collisions and create new locations for the
@@ -180,6 +134,9 @@ class SimulationRunner(Service):
             self.log.warning("No simulation available at shutdown")
             return
 
+        # perform simulation cleanup activities
+        self._simulation.post_run()
+
         # Ensure simulation status has been logged (handler updates may be suppressed)
         self._log_disposition()
 
@@ -188,19 +145,14 @@ class SimulationRunner(Service):
         """Execute the c-star simulation."""
 
         try:
-            self._handler = self._simulation.run()
+            if not self._handler:
+                self._handler = self._simulation.run()
+            else:
+                # TODO: determine if the update message has been retrieved previously?
+                self._handler.updates(1.0, interactive=False)
+                self._send_hc_update({"status": str(self._handler.status)})
         except Exception:
             logging.exception("An error occurred while running the simulation")
-
-    @override
-    def _on_iteration_complete(self) -> None:
-        """Perform post-simulation behaviors."""
-        # Check for updates... handler.updates is blocking w/0
-        # - consider allowing main iteration to loop for more control of output
-        if self._handler:
-            self._handler.updates(0, interactive=False)
-
-        self._simulation.post_run()
 
     @override
     def _can_shutdown(self) -> bool:
@@ -220,9 +172,57 @@ class SimulationRunner(Service):
         return False
 
 
+def create_parser() -> argparse.ArgumentParser:
+    """Creates a parser for command line arguments expected by the c-star Worker."""
+    parser = argparse.ArgumentParser(
+        description="Run a c-star simulation.",
+    )
+    parser.add_argument(
+        "--blueprint-uri",
+        type=str,
+        required=True,
+        help="The URI of a blueprint.",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        type=str,
+        required=False,
+        help="Logging level for the simulation.",
+        choices=[
+            logging._levelToName[i]
+            for i in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
+        ],
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="~/code/cstar/examples/",
+        type=str,
+        required=False,
+        help="Local path to write simulation outputs to",
+    )
+    parser.add_argument(
+        "--start-date",
+        default="2012-01-03 12:00:00",
+        type=str,
+        required=False,
+        help=f"The date on which to begin the simulation, formatted as `{DATE_FORMAT}`",
+    )
+    parser.add_argument(
+        "--end-date",
+        default="2012-01-04 12:00:00",
+        type=str,
+        required=False,
+        help=f"The date on which to end the simulation, formatted as `{DATE_FORMAT}`",
+    )
+    return parser
+
+
 def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
     """Create a ServiceConfiguration instance using CLI arguments."""
     return ServiceConfiguration(
+        as_service=True,
+        loop_delay=5,
         health_check_frequency=10,
         log_level=logging._nameToLevel[args.log_level],
         name="SimulationRunner",
@@ -258,8 +258,8 @@ async def main() -> int:
         blueprint_req = config_from_args(args)
 
     log_level = service_cfg.log_level
-    logging.basicConfig(level=log_level, format="%(message)s")
     log = logging.getLogger(__name__)
+    log.addHandler(logging.FileHandler(f"{__package__}.{__name__}.log"))
     log.setLevel(log_level)
 
     try:

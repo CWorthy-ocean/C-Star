@@ -1,13 +1,16 @@
 import asyncio
 import dataclasses as dc
 import logging
+import signal
 import time
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from multiprocessing import Queue
 from queue import Empty, ShutDown
 from threading import Thread
+from types import FrameType
 
-from cstar.base.log import LoggingMixin
+from cstar.base.log import DEFAULT_LOG_FORMAT, LoggingMixin
 
 
 @dc.dataclass
@@ -67,6 +70,8 @@ class Service(ABC, LoggingMixin):
         self._hc_queue: Queue | None = None
         """A queue for sending shutdown messages to the healthcheck thread."""
 
+        self._register_signal_handlers()
+
     @abstractmethod
     def _on_iteration(self) -> None:
         """The user-defined event handler.
@@ -118,11 +123,35 @@ class Service(ABC, LoggingMixin):
         """
         self.log.debug(f"Service iteration waiting for {self.__class__.__name__}s")
 
+    def _create_hc_update(self, content: dict[str, str]) -> dict[str, str]:
+        update_base = {"ts": datetime.now(tz=timezone.utc).isoformat()}
+        update_base.update(content)
+        return update_base
+
+    def _send_hc_update(self, content: dict[str, str]) -> None:
+        if self._hc_queue:
+            msg = self._create_hc_update(content)
+            self._hc_queue.put_nowait(msg)
+        else:
+            self.log.debug("No healthcheck queue available")
+
+    def _send_hc_terminate(self, reason: str) -> None:
+        self.log.debug("Terminating healthcheck")
+        self._send_hc_update({"cmd": "quit", "reason": reason})
+
     def _healthcheck(self, config: ServiceConfiguration, msg_queue: Queue) -> None:
         """Health-check event loop."""
         if config.health_check_frequency >= 0:
+            self.log.handlers.clear()
+            fh = logging.FileHandler(f"{__package__}.{__name__}._healthcheck.log")
+            fh.setFormatter(logging.Formatter(DEFAULT_LOG_FORMAT))
+            self.log.addHandler(fh)
+            self.log.setLevel(self.log.level)
+
             last_health_check = time.time()  # timestamp of the latest health check
             running = True
+            last_update = time.time()
+            update_delay = 0.0
 
             while running:
                 hc_elapsed = time.time() - last_health_check
@@ -131,13 +160,25 @@ class Service(ABC, LoggingMixin):
                     last_health_check = time.time()
                     time.sleep(max(config.health_check_frequency - hc_elapsed, 0))
 
+                # report large gaps between updates.
+                update_delay = time.time() - last_update
+                if update_delay > 3 * config.health_check_frequency:
+                    self.log.warning(
+                        f"No health update in last {update_delay} seconds."
+                    )
+
                 try:
                     if msg := msg_queue.get(
                         True, timeout=config.health_check_frequency
                     ):
-                        self.log.info(f"Healthcheck thread received command: {msg}")
-                        # currently only one command to receive on queue. quit.
-                        running = False
+                        last_update = time.time()
+
+                        if "cmd" not in msg:
+                            self.log.info(f"Healthcheck thread received message: {msg}")
+                        else:
+                            cmd = msg.get("cmd", None)
+                            if cmd and cmd == "quit":
+                                running = False
                 except Empty:
                     ...  # ignore empty queue; just wait for shutdown msg
                 except ShutDown:
@@ -192,6 +233,7 @@ class Service(ABC, LoggingMixin):
 
             # shutdown if service reports completion
             if self._can_shutdown():
+                self.log.info("Service is ready for shutdown.")
                 running = False
 
             # execute delay before next iteration
@@ -200,11 +242,24 @@ class Service(ABC, LoggingMixin):
                 await asyncio.sleep(max(self._config.loop_delay, 0))
 
         try:
-            if self._hc_queue:
-                self._hc_queue.put_nowait("quit")
-
+            self._send_hc_terminate(reason="Run complete")
             if self._hc_thread and self._hc_thread.is_alive():
                 self._hc_thread.join()
             self._on_shutdown()
         except Exception:
             self.log.exception("Service shutdown may not have completed.")
+
+    def _handle_signal(self, sig_num: int, _frame: FrameType | None) -> None:
+        signal_msg = f"Received signal: {sig_num}"
+        self.log.info(signal_msg)
+
+        # kill the healthcheck thread
+        if sig_num in [signal.SIGINT, signal.SIGTERM]:
+            self._send_hc_terminate(reason=signal_msg)
+
+        # perform sub-class specific clean-up
+        self._on_shutdown()
+
+    def _register_signal_handlers(self) -> None:
+        for sig_num in [signal.SIGINT, signal.SIGTERM]:
+            signal.signal(sig_num, self._handle_signal)
