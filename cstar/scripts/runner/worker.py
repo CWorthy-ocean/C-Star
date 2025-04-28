@@ -221,8 +221,7 @@ class SimulationRunner(Service):
 
 
 def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
-    """Create a ServiceConfiguration instance using CLI arguments to configure the
-    behavior of the service."""
+    """Create a ServiceConfiguration instance using CLI arguments."""
     return ServiceConfiguration(
         health_check_frequency=10,
         log_level=logging._nameToLevel[args.log_level],
@@ -231,8 +230,7 @@ def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
 
 
 def config_from_args(args: argparse.Namespace) -> BlueprintRequest:
-    """Creates a WorkerConfig instance from CLI arguments supplied to the entrypoint
-    script."""
+    """Creates a WorkerConfig instance from CLI arguments."""
 
     return BlueprintRequest(
         blueprint_uri=args.blueprint_uri,
@@ -245,8 +243,8 @@ def config_from_args(args: argparse.Namespace) -> BlueprintRequest:
 async def main() -> int:
     """Main entry point for the c-star worker script.
 
-    Trigger
-    the `Service` lifecycle for a Worker.
+    Triggers the `Service` lifecycle of a Worker and runs a blueprint
+    from parameters.
     """
 
     try:
