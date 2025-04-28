@@ -1,12 +1,14 @@
-import pooch
-from abc import ABC
 import datetime as dt
-import dateutil.parser
+from abc import ABC
 from pathlib import Path
+from typing import TYPE_CHECKING, Dict, List, Optional
 from urllib.parse import urljoin
+
+import dateutil.parser
+import pooch
+
 from cstar.base.datasource import DataSource
 from cstar.base.utils import _get_sha256_hash
-from typing import Optional, List, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     pass

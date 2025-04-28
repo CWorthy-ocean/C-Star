@@ -2,14 +2,15 @@ import os
 import platform
 from enum import Enum
 from typing import Optional
+
 from cstar.system.environment import CStarEnvironment
 from cstar.system.scheduler import (
-    Scheduler,
-    SlurmScheduler,
-    SlurmQOS,
-    SlurmPartition,
     PBSQueue,
     PBSScheduler,
+    Scheduler,
+    SlurmPartition,
+    SlurmQOS,
+    SlurmScheduler,
 )
 
 

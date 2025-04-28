@@ -10,6 +10,7 @@ from which the test case is constructed.
 """
 
 from pathlib import Path
+
 from pooch import os_cache
 
 ## Common paths used in tests

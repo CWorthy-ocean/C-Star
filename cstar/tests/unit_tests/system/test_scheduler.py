@@ -1,12 +1,14 @@
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
+
 from cstar.system.scheduler import (
-    Queue,
-    SlurmQOS,
-    SlurmPartition,
     PBSQueue,
-    SlurmScheduler,
     PBSScheduler,
+    Queue,
+    SlurmPartition,
+    SlurmQOS,
+    SlurmScheduler,
 )
 
 ################################################################################

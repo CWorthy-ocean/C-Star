@@ -1,15 +1,15 @@
 import copy
 import pickle
 import warnings
+from abc import ABC, abstractmethod
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
 import dateutil
 
-from abc import ABC, abstractmethod
-from typing import Optional, Any
-from pathlib import Path
-from datetime import datetime
-
-from cstar.base import ExternalCodeBase, AdditionalCode, Discretization
-from cstar.execution.handler import ExecutionStatus, ExecutionHandler
+from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 
 

@@ -1,7 +1,8 @@
+import importlib.util
 import os
 import platform
-import importlib.util
 from pathlib import Path
+
 from dotenv import dotenv_values
 
 from cstar.base.utils import _run_cmd

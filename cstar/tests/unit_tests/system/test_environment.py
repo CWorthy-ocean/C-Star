@@ -1,7 +1,9 @@
-import pytest
-from unittest.mock import patch, call, PropertyMock, mock_open
-import cstar
 import subprocess
+from unittest.mock import PropertyMock, call, mock_open, patch
+
+import pytest
+
+import cstar
 
 
 class MockEnvironment(cstar.system.environment.CStarEnvironment):
