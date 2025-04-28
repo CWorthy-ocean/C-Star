@@ -1,11 +1,13 @@
-import logging
-import pytest
 import datetime as dt
-from unittest import mock
+import logging
 from pathlib import Path
 from textwrap import dedent
-from cstar.roms import ROMSInputDataset, ROMSForcingCorrections
+from unittest import mock
+
+import pytest
+
 from cstar.base.datasource import DataSource
+from cstar.roms import ROMSForcingCorrections, ROMSInputDataset
 
 
 class MockROMSInputDataset(ROMSInputDataset):

@@ -1,12 +1,14 @@
 import json
 import logging
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from cstar.system.scheduler import PBSScheduler, PBSQueue
+
 from cstar.execution.scheduler_job import (
     ExecutionStatus,
     PBSJob,
 )
+from cstar.system.scheduler import PBSQueue, PBSScheduler
 
 
 class TestPBSJob:

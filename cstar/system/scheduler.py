@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
-from cstar.base.utils import _run_cmd
 from cstar.base.log import LoggingMixin
+from cstar.base.utils import _run_cmd
 
 ################################################################################
 

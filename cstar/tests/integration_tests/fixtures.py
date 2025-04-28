@@ -1,13 +1,14 @@
-import pooch
-import pytest
 import shutil
 import zipfile
-from typing import Callable
 from pathlib import Path
+from typing import Callable
+
+import pooch
+import pytest
 
 from cstar.tests.integration_tests.config import (
-    ROMS_TOOLS_DATA_DIRECTORY,
     CSTAR_TEST_DATA_DIRECTORY,
+    ROMS_TOOLS_DATA_DIRECTORY,
 )
 
 

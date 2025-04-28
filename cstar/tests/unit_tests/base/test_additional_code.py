@@ -1,9 +1,9 @@
 import logging
-import pytest
-
 from pathlib import Path
-from unittest import mock
 from textwrap import dedent
+from unittest import mock
+
+import pytest
 
 from cstar.base import AdditionalCode
 from cstar.base.datasource import DataSource

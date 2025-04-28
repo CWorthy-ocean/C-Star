@@ -1,13 +1,15 @@
 import logging
 import pickle
-import pytest
-from pathlib import Path
 from datetime import datetime
-from unittest.mock import patch, MagicMock
-from cstar.base import ExternalCodeBase, AdditionalCode, Discretization
-from cstar.simulation import Simulation
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
+from cstar.simulation import Simulation
 
 
 # Minimal concrete subclass for testing

@@ -1,5 +1,7 @@
 import logging
+
 import pytest
+
 from cstar.base.discretization import Discretization
 
 

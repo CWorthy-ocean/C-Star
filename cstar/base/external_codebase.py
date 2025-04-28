@@ -1,12 +1,12 @@
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
-from abc import ABC, abstractmethod
 
 from cstar.base.gitutils import (
     _checkout,
     _get_hash_from_checkout_target,
-    _get_repo_remote,
     _get_repo_head_hash,
+    _get_repo_remote,
 )
 from cstar.base.log import LoggingMixin
 from cstar.system.manager import cstar_sysmgr

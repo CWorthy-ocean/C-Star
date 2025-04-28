@@ -1,12 +1,12 @@
 import logging
-import pytest
 import subprocess
-
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
-from cstar.execution.local_process import LocalProcess, ExecutionStatus
+import pytest
+
+from cstar.execution.local_process import ExecutionStatus, LocalProcess
 
 
 @pytest.fixture

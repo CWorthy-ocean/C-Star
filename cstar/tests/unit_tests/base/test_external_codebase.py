@@ -1,9 +1,11 @@
 import logging
-import pytest
 from pathlib import Path
 from unittest import mock
-from cstar.system.manager import cstar_sysmgr
+
+import pytest
+
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.system.manager import cstar_sysmgr
 
 ################################################################################
 

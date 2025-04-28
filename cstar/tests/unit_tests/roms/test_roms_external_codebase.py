@@ -1,7 +1,9 @@
 import logging
 import os
-import pytest
 from unittest import mock
+
+import pytest
+
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.system.manager import cstar_sysmgr
 

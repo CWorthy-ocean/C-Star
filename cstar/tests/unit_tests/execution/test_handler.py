@@ -1,9 +1,11 @@
 import logging
-import time
 import threading
-from unittest.mock import patch, PropertyMock
-import pytest
+import time
 from pathlib import Path
+from unittest.mock import PropertyMock, patch
+
+import pytest
+
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 
 

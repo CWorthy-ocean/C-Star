@@ -1,6 +1,5 @@
-import sys
 import logging
-
+import sys
 
 DEFAULT_LOG_LEVEL = logging.INFO
 DEFAULT_LOG_FORMAT = "[%(levelname)s] %(message)s"

@@ -1,11 +1,13 @@
 """Test suite to test fixtures defined in conftest.py and fixtures.py files."""
 
-import yaml
 from pathlib import Path
+
+import yaml
 from _pytest._py.path import LocalPath
+
 from cstar.tests.integration_tests.config import (
-    ROMS_TOOLS_DATA_DIRECTORY,
     CSTAR_TEST_DATA_DIRECTORY,
+    ROMS_TOOLS_DATA_DIRECTORY,
     TEST_DIRECTORY,
 )
 

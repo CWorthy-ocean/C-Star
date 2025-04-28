@@ -1,8 +1,10 @@
 import logging
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from cstar.system.scheduler import SlurmScheduler, SlurmQOS, SlurmPartition
-from cstar.execution.scheduler_job import SlurmJob, ExecutionStatus
+
+from cstar.execution.scheduler_job import ExecutionStatus, SlurmJob
+from cstar.system.scheduler import SlurmPartition, SlurmQOS, SlurmScheduler
 
 
 class TestSlurmJob:

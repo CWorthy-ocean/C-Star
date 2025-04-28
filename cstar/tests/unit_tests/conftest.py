@@ -1,4 +1,5 @@
 import logging
+
 import pytest
 
 from cstar.base.log import get_logger

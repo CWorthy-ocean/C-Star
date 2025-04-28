@@ -1,7 +1,8 @@
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from datetime import datetime
+
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 
 

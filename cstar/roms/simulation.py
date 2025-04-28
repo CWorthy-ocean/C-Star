@@ -1,40 +1,38 @@
-import yaml
 import shutil
 import warnings
-import requests
-from pathlib import Path
 from datetime import datetime
-from cstar.roms.external_codebase import ROMSExternalCodeBase
-from cstar.roms.discretization import ROMSDiscretization
-from cstar.roms.input_dataset import (
-    ROMSModelGrid,
-    ROMSInitialConditions,
-    ROMSTidalForcing,
-    ROMSRiverForcing,
-    ROMSBoundaryForcing,
-    ROMSSurfaceForcing,
-    ROMSInputDataset,
-    ROMSForcingCorrections,
-)
-from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from pathlib import Path
+from typing import Any, List, Optional, cast
 
-from cstar.base.datasource import DataSource
-from cstar.base.additional_code import AdditionalCode
-from cstar.base.utils import (
-    _get_sha256_hash,
-    _replace_text_in_file,
-    _dict_to_tree,
-    _run_cmd,
-)
-
-from cstar.execution.handler import ExecutionHandler
-from cstar.execution.scheduler_job import create_scheduler_job
-from cstar.execution.local_process import LocalProcess
-from cstar.execution.handler import ExecutionStatus
+import requests
+import yaml
 
 from cstar import Simulation
+from cstar.base.additional_code import AdditionalCode
+from cstar.base.datasource import DataSource
+from cstar.base.utils import (
+    _dict_to_tree,
+    _get_sha256_hash,
+    _replace_text_in_file,
+    _run_cmd,
+)
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.execution.local_process import LocalProcess
+from cstar.execution.scheduler_job import create_scheduler_job
+from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.roms.discretization import ROMSDiscretization
+from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.roms.input_dataset import (
+    ROMSBoundaryForcing,
+    ROMSForcingCorrections,
+    ROMSInitialConditions,
+    ROMSInputDataset,
+    ROMSModelGrid,
+    ROMSRiverForcing,
+    ROMSSurfaceForcing,
+    ROMSTidalForcing,
+)
 from cstar.system.manager import cstar_sysmgr
-from typing import Optional, List, cast, Any
 
 
 class ROMSSimulation(Simulation):
