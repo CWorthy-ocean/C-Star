@@ -206,13 +206,12 @@ class Service(ABC, LoggingMixin):
         """
 
         try:
+            running = True
             self._start_healthcheck()
             self._on_start()
         except Exception:
             self.log.exception("Unable to start service.")
-            return
-
-        running = True
+            running = False
 
         while running:
             try:

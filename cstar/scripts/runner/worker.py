@@ -134,6 +134,8 @@ class SimulationRunner(Service):
 
             self.log.debug("Executing simulation pre-run")
             self._simulation.pre_run()
+        except RuntimeError as ex:
+            raise CstarException("Failed to build simulation") from ex
         except ValueError as ex:
             raise CstarException("Failed to prepare simulation") from ex
 
