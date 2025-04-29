@@ -14,9 +14,10 @@ class MockExternalCodeBase(ExternalCodeBase):
     """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
     purposes."""
 
-    def __init__(self, log: logging.Logger):
+    def __init__(self, log: logging.Logger, interactive: bool = True):
         super().__init__(None, None)
         self._log = log
+        self._interactive = interactive
 
     @property
     def expected_env_var(self):
@@ -260,6 +261,9 @@ class TestExternalCodeBaseConfigHandling:
         Mocks `cstar_sysmgr.environment.environment_variables` to control the environment variables.
     """
 
+    def __init__(self, tmp_path: Path):
+        self._tmp_path = tmp_path
+
     def setup_method(self):
         self.patch_get_repo_remote = mock.patch(
             "cstar.base.external_codebase._get_repo_remote"
@@ -284,7 +288,7 @@ class TestExternalCodeBaseConfigHandling:
             new_callable=mock.PropertyMock,
             return_value=mock.Mock(
                 environment_variables={"TEST_ROOT": "/path/to/repo"},
-                package_root=Path("/mock/package/root"),
+                package_root=self._tmp_path / "ext_root",
             ),
         )
         self.mock_environment = self.patch_environment.start()
@@ -441,9 +445,14 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_no_env_var_user_invalid(
-        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
+        self,
+        mock_input,
+        generic_codebase,
+        capsys: pytest.CaptureFixture,
+        # tmp_path: Path,
     ):
         self.mock_local_config_status.return_value = 3
+        # mock.patch("cstar_sysmgr.environment.package_root", tmp_path)
 
         # Expect StopIteration after the invalid input due to no further inputs
         with pytest.raises(StopIteration):
