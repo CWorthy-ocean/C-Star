@@ -452,7 +452,6 @@ class TestExternalCodeBaseConfigHandling:
         # tmp_path: Path,
     ):
         self.mock_local_config_status.return_value = 3
-        # mock.patch("cstar_sysmgr.environment.package_root", tmp_path)
 
         # Expect StopIteration after the invalid input due to no further inputs
         with pytest.raises(StopIteration):

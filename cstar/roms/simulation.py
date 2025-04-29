@@ -1091,18 +1091,12 @@ class ROMSSimulation(Simulation):
         input_datasets_dir = self.directory / "ROMS/input_datasets"
 
         # Setup ExternalCodeBase
-        infostr = f"🛠️  Configuring {self.__class__.__name__}"
-        self.log.info(infostr + "\n" + "-" * len(infostr))
-        self.log.info(f"🔧 Setting up {self.codebase.__class__.__name__}...")
+        self.log.info(f"🛠️  Configuring {self.__class__.__name__}")
 
         for codebase in self.codebases:
+            self.log.info(f"🔧 Setting up {self.codebase.__class__.__name__}...")
             codebase.interactive = self.interactive
-
-        self.codebase.handle_config_status()
-
-        if self.marbl_codebase is not None:
-            self.log.info(f"🔧 Setting up {self.marbl_codebase.__class__.__name__}...")
-            self.marbl_codebase.handle_config_status()
+            self.codebase.handle_config_status()
 
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")
