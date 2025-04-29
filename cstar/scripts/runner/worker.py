@@ -11,11 +11,11 @@ from typing import override
 from cstar import Simulation
 from cstar.base.exceptions import BlueprintError, CstarException
 from cstar.base.log import get_logger
+from cstar.base.utils import CSTAR_USER_ENV_PATH
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
 from cstar.scripts.service import Service, ServiceConfiguration
 
-CSTAR_USER_ENV_PATH = "~/.cstar.env"
 CSTAR_EXTERNALS_ROOT = "~/code/cstar/cstar/externals"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL = "cstar-worker.{0}.log"
@@ -163,7 +163,6 @@ class SimulationRunner(Service):
                 self.log.debug("Running simulation.")
                 self._handler = self._simulation.run()
             else:
-                # TODO: determine if the update message has been retrieved previously?
                 self._handler.updates(1.0, interactive=False)
                 self._send_hc_update({"status": str(self._handler.status)})
         except Exception:

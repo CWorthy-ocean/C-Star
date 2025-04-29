@@ -1094,9 +1094,9 @@ class ROMSSimulation(Simulation):
         self.log.info(f"🛠️  Configuring {self.__class__.__name__}")
 
         for codebase in self.codebases:
-            self.log.info(f"🔧 Setting up {self.codebase.__class__.__name__}...")
+            self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
             codebase.interactive = self.interactive
-            self.codebase.handle_config_status()
+            codebase.handle_config_status()
 
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")

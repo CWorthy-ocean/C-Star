@@ -449,7 +449,6 @@ class TestExternalCodeBaseConfigHandling:
         mock_input,
         generic_codebase,
         capsys: pytest.CaptureFixture,
-        # tmp_path: Path,
     ):
         self.mock_local_config_status.return_value = 3
 
