@@ -18,25 +18,21 @@ from cstar.scripts.service import Service, ServiceConfiguration
 CSTAR_USER_ENV_PATH = "~/.cstar.env"
 CSTAR_EXTERNALS_ROOT = "~/code/cstar/cstar/externals"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-CSTAR_WORKER_LOG_TPL = "cstar-worker.{0}.log"
+WORKER_LOG_FILE_TPL = "cstar-worker.{0}.log"
 
 
 @dc.dataclass
 class BlueprintRequest:
     """Represents a request to run a c-star simulation."""
 
-    blueprint_uri: str = dc.field(
-        metadata={"description": "The path to the blueprint."},
-    )
-    output_dir: pathlib.Path = dc.field(
-        metadata={"description": "The directory to write simulation outputs to"},
-    )
-    start_date: datetime = dc.field(
-        metadata={"description": "The date on which to begin the simulation"},
-    )
-    end_date: datetime = dc.field(
-        metadata={"description": "The date on which to end the simulation"},
-    )
+    blueprint_uri: str
+    """The path to the blueprint."""
+    output_dir: pathlib.Path
+    """The directory where simulation outputs will be written."""
+    start_date: datetime
+    """The date on which to begin the simulation."""
+    end_date: datetime
+    """The date on which to end the simulation."""
 
 
 class SimulationRunner(Service):
@@ -276,7 +272,7 @@ async def main() -> int:
         service_cfg = get_service_config(args)
         blueprint_req = config_from_args(args)
 
-    log_file = CSTAR_WORKER_LOG_TPL.format(datetime.now(timezone.utc))
+    log_file = WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
     log = get_logger(__name__, level=service_cfg.log_level, filename=log_file)
 
     try:
