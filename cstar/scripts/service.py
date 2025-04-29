@@ -10,7 +10,7 @@ from queue import Empty, ShutDown
 from threading import Thread
 from types import FrameType
 
-from cstar.base.log import DEFAULT_LOG_FORMAT, LoggingMixin
+from cstar.base.log import LoggingMixin
 
 
 @dc.dataclass
@@ -142,12 +142,6 @@ class Service(ABC, LoggingMixin):
     def _healthcheck(self, config: ServiceConfiguration, msg_queue: Queue) -> None:
         """Health-check event loop."""
         if config.health_check_frequency >= 0:
-            self.log.handlers.clear()
-            fh = logging.FileHandler(f"{__package__}.{__name__}._healthcheck.log")
-            fh.setFormatter(logging.Formatter(DEFAULT_LOG_FORMAT))
-            self.log.addHandler(fh)
-            self.log.setLevel(self.log.level)
-
             last_health_check = time.time()  # timestamp of the latest health check
             running = True
             last_update = time.time()
@@ -186,9 +180,14 @@ class Service(ABC, LoggingMixin):
                     running = False
 
     def _start_healthcheck(self) -> None:
-        """Create an independent thread for health check updates that is not blocked by
-        the main thread if simulation is blocking."""
+        """Create a thread for health check updates that is not blocked by the main
+        thread when service operations are blocking."""
         if self._config.health_check_frequency >= 0:
+            self.log.debug(
+                "Starting healthcheck thread w/frequency: %s.",
+                self._config.health_check_frequency,
+            )
+
             thread_name = f"{self._config.name}.healthcheck"
             self._hc_queue = Queue()
             self._hc_thread = Thread(
@@ -218,16 +217,14 @@ class Service(ABC, LoggingMixin):
         while running:
             try:
                 self._on_iteration()
+                self._on_iteration_complete()
             except Exception:
                 running = False
-                self.log.exception(
-                    "Failure in event loop resulted in service termination"
-                )
-            else:
-                self._on_iteration_complete()
+                self.log.exception("Terminating service due to failure in event loop.")
 
             # shutdown if not set to run as a service
             if not self._config.as_service:
+                self.log.debug("Terminating non-service immediately.")
                 running = False
                 continue
 
@@ -250,6 +247,7 @@ class Service(ABC, LoggingMixin):
             self.log.exception("Service shutdown may not have completed.")
 
     def _handle_signal(self, sig_num: int, _frame: FrameType | None) -> None:
+        """Handle OS signals requesting process shutdown."""
         signal_msg = f"Received signal: {sig_num}"
         self.log.info(signal_msg)
 
@@ -257,9 +255,14 @@ class Service(ABC, LoggingMixin):
         if sig_num in [signal.SIGINT, signal.SIGTERM]:
             self._send_hc_terminate(reason=signal_msg)
 
-        # perform sub-class specific clean-up
-        self._on_shutdown()
+        try:
+            # perform sub-class specific clean-up
+            self._on_shutdown()
+        except Exception:
+            self.log.exception("Unable to perform a clean shutdown in signal handler.")
 
     def _register_signal_handlers(self) -> None:
+        """Register handlers for SIGTERM and SIGINT to shutdown the simulation cleanly
+        when interrupted."""
         for sig_num in [signal.SIGINT, signal.SIGTERM]:
             signal.signal(sig_num, self._handle_signal)

@@ -77,19 +77,23 @@ class SimulationRunner(Service):
         """
         # a leftover .cstar.env cause empty repo/compilation errors; remove it.
         if self._user_env_path.exists():
+            self.log.debug(f"Removing existing user env: {self._user_env_path}")
             self._user_env_path.unlink()
 
         # a leftover root_dir may have files in it, breaking download; remove it.
         if self._output_root.exists():
+            self.log.debug(f"Removing existing output dir: {self._output_root}")
             shutil.rmtree(self._output_root)
 
         # leftover external code folder causes non-empty repo errors; remove it.
         if self._externals_path.exists():
+            self.log.debug(f"Removing existing externals dir: {self._externals_path}")
             shutil.rmtree(self._externals_path)
         self._externals_path.mkdir(parents=True, exist_ok=False)
 
         # create a clean location to write outputs.
         if not self._output_dir.exists():
+            self.log.debug(f"Creating clean output dir: {self._output_dir}")
             self._output_dir.mkdir(parents=True, exist_ok=True)
 
     def _log_disposition(self) -> None:
@@ -122,8 +126,13 @@ class SimulationRunner(Service):
             raise BlueprintError(f"Unable to load the blueprint: {self._blueprint_uri}")
 
         try:
+            self.log.debug("Setting up simulation")
             self._simulation.setup()
+
+            self.log.debug("Building simulation")
             self._simulation.build()
+
+            self.log.debug("Executing simulation pre-run")
             self._simulation.pre_run()
         except ValueError as ex:
             raise CstarException("Failed to prepare simulation") from ex
@@ -148,6 +157,7 @@ class SimulationRunner(Service):
 
         try:
             if not self._handler:
+                self.log.debug("Running simulation.")
                 self._handler = self._simulation.run()
             else:
                 # TODO: determine if the update message has been retrieved previously?
