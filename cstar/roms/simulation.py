@@ -1,40 +1,37 @@
-import yaml
-import warnings
-import requests
-from pathlib import Path
-from datetime import datetime
 from collections import OrderedDict
-from cstar.roms.read_inp import ROMSRuntimeSettings
-from cstar.roms.external_codebase import ROMSExternalCodeBase
-from cstar.roms.discretization import ROMSDiscretization
-from cstar.roms.input_dataset import (
-    ROMSModelGrid,
-    ROMSInitialConditions,
-    ROMSTidalForcing,
-    ROMSRiverForcing,
-    ROMSBoundaryForcing,
-    ROMSSurfaceForcing,
-    ROMSInputDataset,
-    ROMSForcingCorrections,
-)
-from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from datetime import datetime
+from pathlib import Path
+from typing import Any, List, Optional, cast
 
-from cstar.base.datasource import DataSource
-from cstar.base.additional_code import AdditionalCode
-from cstar.base.utils import (
-    _get_sha256_hash,
-    _dict_to_tree,
-    _run_cmd,
-)
-
-from cstar.execution.handler import ExecutionHandler
-from cstar.execution.scheduler_job import create_scheduler_job
-from cstar.execution.local_process import LocalProcess
-from cstar.execution.handler import ExecutionStatus
+import requests
+import yaml
 
 from cstar import Simulation
+from cstar.base.additional_code import AdditionalCode
+from cstar.base.datasource import DataSource
+from cstar.base.utils import (
+    _dict_to_tree,
+    _get_sha256_hash,
+    _run_cmd,
+)
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.execution.local_process import LocalProcess
+from cstar.execution.scheduler_job import create_scheduler_job
+from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.roms.discretization import ROMSDiscretization
+from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.roms.input_dataset import (
+    ROMSBoundaryForcing,
+    ROMSForcingCorrections,
+    ROMSInitialConditions,
+    ROMSInputDataset,
+    ROMSModelGrid,
+    ROMSRiverForcing,
+    ROMSSurfaceForcing,
+    ROMSTidalForcing,
+)
+from cstar.roms.read_inp import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
-from typing import Optional, List, cast, Any
 
 
 class ROMSSimulation(Simulation):
@@ -244,11 +241,11 @@ class ROMSSimulation(Simulation):
 
         if marbl_codebase is None:
             self.marbl_codebase = MARBLExternalCodeBase()
-            warnings.warn(
+            self.log.warning(
                 "Creating MARBLSimulation instance without a specified "
                 + "MARBLExternalCodeBase, default codebase will be used:\n"
-                + f"Source location: {self.marbl_codebase.source_repo}\n"
-                + f"Checkout target: {self.marbl_codebase.checkout_target}\n"
+                + f"          • Source location: {self.marbl_codebase.source_repo}\n"
+                + f"          • Checkout target: {self.marbl_codebase.checkout_target}\n"
             )
         else:
             self.marbl_codebase = marbl_codebase
@@ -346,7 +343,7 @@ class ROMSSimulation(Simulation):
                     and (inp.start_date is not None)
                     and (inp.start_date != self.start_date)
                 ):
-                    warnings.warn(
+                    self.log.warning(
                         f"{inp.__class__.__name__} has start date attribute {inp.start_date} "
                         + f"that does not match ROMSSimulation.start_date {self.start_date}. "
                         f"C-Star will enforce {self.start_date} as the start date"
@@ -361,7 +358,7 @@ class ROMSSimulation(Simulation):
                     and (inp.end_date is not None)
                     and (inp.end_date != self.end_date)
                 ):
-                    warnings.warn(
+                    self.log.warning(
                         f"{inp.__class__.__name__} has end date attribute {inp.end_date} "
                         + f"that does not match ROMSSimulation.end_date {self.end_date}. "
                         f"C-Star will enforce {self.end_date} as the end date"
@@ -1073,31 +1070,28 @@ class ROMSSimulation(Simulation):
         runtime_code_dir = self.directory / "ROMS/runtime_code"
         input_datasets_dir = self.directory / "ROMS/input_datasets"
 
+        self.log.info(f"🛠️  Configuring {self.__class__.__name__}")
+        self.log.info(f"🔧 Setting up {self.codebase.__class__.__name__}...")
+
         # Setup ExternalCodeBase
-        infostr = f"Configuring {self.__class__.__name__}"
-        print(infostr + "\n" + "-" * len(infostr))
-        print(f"Setting up {self.codebase.__class__.__name__}...")
         self.codebase.handle_config_status()
 
         if self.marbl_codebase is not None:
-            print(f"Setting up {self.marbl_codebase.__class__.__name__}...")
+            self.log.info(f"🔧 Setting up {self.marbl_codebase.__class__.__name__}...")
             self.marbl_codebase.handle_config_status()
 
         # Compile-time code
-        print(
-            "\nFetching compile-time code code..."
-            + "\n----------------------------------"
-        )
+        self.log.info("📦 Fetching compile-time code...")
         if self.compile_time_code is not None:
             self.compile_time_code.get(compile_time_code_dir)
 
         # Runtime code
-        print("\nFetching runtime code... " + "\n----------------------")
+        self.log.info("📦 Fetching runtime code... ")
         if self.runtime_code is not None:
             self.runtime_code.get(runtime_code_dir)
 
         # InputDatasets
-        print("\nFetching input datasets..." + "\n--------------------------")
+        self.log.info("📦 Fetching input datasets...")
         for inp in self.input_datasets:
             # Download input dataset if its date range overlaps Simulation's date range
             if (
@@ -1234,7 +1228,7 @@ class ROMSSimulation(Simulation):
             and (_get_sha256_hash(exe_path) == self._exe_hash)
             and not rebuild
         ):
-            print(
+            self.log.info(
                 f"ROMS has already been built at {exe_path}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
@@ -1493,17 +1487,15 @@ class ROMSSimulation(Simulation):
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
-            print("no suitable output found")
+            self.log.warning("No suitable output found")
         else:
             (output_dir / "PARTITIONED").mkdir(exist_ok=True)
             for wildcard_pattern in unique_wildcards:
                 # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
-
+                self.log.info(f"Joining netCDF files {wildcard_pattern}...")
                 _run_cmd(
                     f"ncjoin {wildcard_pattern}",
                     cwd=output_dir,
-                    msg_pre=f"Joining netCDF files {wildcard_pattern}...",
-                    msg_err="Error while joining ROMS output.",
                     raise_on_error=True,
                 )
 

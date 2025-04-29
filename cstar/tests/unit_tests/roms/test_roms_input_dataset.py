@@ -1,10 +1,13 @@
-import pytest
 import datetime as dt
-from unittest import mock
+import logging
 from pathlib import Path
 from textwrap import dedent
-from cstar.roms import ROMSInputDataset, ROMSForcingCorrections
+from unittest import mock
+
+import pytest
+
 from cstar.base.datasource import DataSource
+from cstar.roms import ROMSForcingCorrections, ROMSInputDataset
 
 
 class MockROMSInputDataset(ROMSInputDataset):
@@ -165,10 +168,12 @@ class TestStrAndRepr:
             "local_file.001.nc",
             "local_file.002.nc",
         ]
-        expected_str = dedent("""\
+        expected_str = dedent(
+            """\
             Partitioned files: ['local_file.001.nc',
                                 'local_file.002.nc']
-        """).strip()
+        """
+        ).strip()
         actual_str = str(local_roms_netcdf_dataset).strip()
         assert (
             expected_str in actual_str
@@ -195,10 +200,12 @@ class TestStrAndRepr:
             "local_file.001.nc",
             "local_file.002.nc",
         ]
-        expected_repr = dedent("""\
+        expected_repr = dedent(
+            """\
             State: <partitioned_files = ['local_file.001.nc',
                                          'local_file.002.nc']>
-        """).strip()
+        """
+        ).strip()
         actual_repr = repr(local_roms_netcdf_dataset)
 
         # Normalize whitespace for comparison
@@ -236,11 +243,13 @@ class TestStrAndRepr:
         ]
         local_roms_netcdf_dataset.working_path = "/some/path/local_file.nc"
 
-        expected_repr = dedent("""\
+        expected_repr = dedent(
+            """\
             State: <working_path = /some/path/local_file.nc (does not exist),
                     partitioned_files = ['local_file.001.nc',
                                          'local_file.002.nc'] >
-        """).strip()
+        """
+        ).strip()
         actual_repr = repr(local_roms_netcdf_dataset)
 
         # Normalize whitespace for comparison
@@ -609,7 +618,10 @@ class TestROMSInputDatasetGet:
         new_callable=mock.PropertyMock,
     )
     def test_get_skips_if_working_path_in_same_parent_dir(
-        self, mock_exists_locally, local_roms_yaml_dataset
+        self,
+        mock_exists_locally,
+        local_roms_yaml_dataset,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Test that the `get` method skips execution when `working_path` is set and
         points to the same parent directory as `local_dir`.
@@ -621,18 +633,21 @@ class TestROMSInputDatasetGet:
         Fixtures:
         ---------
         - `local_roms_yaml_dataset`: Provides a ROMSInputDataset with a mocked `source` attribute.
+        - `caplog`: Captures log outputs to verify the correct skip message is displayed.
 
         Mocks:
         ------
         - `exists_locally`: Simulates the local existence check for `working_path`.
         - `Path.resolve`: Simulates resolving paths to their actual locations.
-        - `print`: Captures output to ensure the correct skip message is displayed.
 
         Asserts:
         --------
         - Ensures the skip message is printed when `working_path` exists in `local_dir`.
         - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
+        - An information message is logged
         """
+
+        caplog.set_level(logging.INFO, logger=local_roms_yaml_dataset.log.name)
 
         # Mock `working_path` to point to a file in `some/local/dir`
         local_roms_yaml_dataset.working_path = Path("some/local/dir/local_file.yaml")
@@ -643,14 +658,11 @@ class TestROMSInputDatasetGet:
         # Set the `mock_resolve` side effect to resolve `local_dir` correctly
         self.mock_resolve.return_value = Path("some/local/dir")
 
-        # Capture print output
-        with mock.patch("builtins.print") as mock_print:
-            local_roms_yaml_dataset.get(local_dir="some/local/dir")
+        local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
         # Assert the skip message was printed
-        mock_print.assert_called_once_with(
-            "Input dataset already exists in some/local/dir, skipping."
-        )
+        captured = caplog.text
+        assert "already exists, skipping." in captured
 
         # Ensure no further operations were performed
         self.mock_get.assert_not_called()
@@ -661,7 +673,10 @@ class TestROMSInputDatasetGet:
         new_callable=mock.PropertyMock,
     )
     def test_get_skips_if_working_path_list_in_same_parent_dir(
-        self, mock_exists_locally, local_roms_yaml_dataset
+        self,
+        mock_exists_locally,
+        local_roms_yaml_dataset,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Test that the `get` method skips execution when `working_path` is a list and
         its first element points to the same parent directory as `local_dir`.
@@ -673,18 +688,20 @@ class TestROMSInputDatasetGet:
         Fixtures:
         ---------
         - `local_roms_yaml_dataset`: Provides a ROMSInputDataset with a mocked `source` attribute.
+        - `caplog`: Captures log outputs to verify the correct skip message is displayed.
 
         Mocks:
         ------
         - `exists_locally`: Simulates the local existence check for `working_path`.
         - `Path.resolve`: Simulates resolving paths to their actual locations.
-        - `print`: Captures output to ensure the correct skip message is displayed.
 
         Asserts:
         --------
         - Ensures the skip message is printed when a `working_path` in the list exists in `local_dir`.
         - Confirms that no further operations (e.g., copying, YAML parsing) are performed.
         """
+
+        caplog.set_level(logging.INFO, logger=local_roms_yaml_dataset.log.name)
 
         # Mock `working_path` to be a list pointing to files in `some/local/dir`
         local_roms_yaml_dataset.working_path = [
@@ -698,14 +715,10 @@ class TestROMSInputDatasetGet:
         # Set the `mock_resolve` side effect to resolve `local_dir` correctly
         self.mock_resolve.return_value = Path("some/local/dir")
 
-        # Capture print output
-        with mock.patch("builtins.print") as mock_print:
-            local_roms_yaml_dataset.get(local_dir="some/local/dir")
+        local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
         # Assert the skip message was printed
-        mock_print.assert_called_once_with(
-            "Input dataset already exists in some/local/dir, skipping."
-        )
+        assert "already exists, skipping." in caplog.text
 
         # Ensure no further operations were performed
         self.mock_get.assert_not_called()
@@ -749,8 +762,7 @@ class TestROMSInputDatasetGet:
             self.mock_resolve.return_value = Path("some/local/dir")
 
             # Call the method under test
-            with mock.patch("builtins.print") as mock_print:
-                local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
+            local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
 
             # Assert the parent `get` method was called with the correct arguments
             self.mock_get.assert_called_once_with(
@@ -758,7 +770,6 @@ class TestROMSInputDatasetGet:
             )
 
             # Ensure no further processing happened
-            mock_print.assert_not_called()
             assert (
                 not self.mock_yaml_load.called
             ), "Expected no calls to yaml.safe_load, but some occurred."
@@ -916,23 +927,6 @@ class TestROMSInputDatasetPartition:
                 assert mock_partition_netcdf.call_count == len(
                     local_roms_netcdf_dataset.working_path
                 )
-
-                # # Assert rename is called for each file
-                # expected_calls = [
-                #     mock.call(
-                #         Path(f"file1.{i}.nc"),
-                #         Path(f"some/local/source/path/PARTITIONED/file1.{i}.nc"),
-                #     )
-                #     for i in range(1, num_partitions + 1)
-                # ] + [
-                #     mock.call(
-                #         Path(f"file2.{i}.nc"),
-                #         Path(f"some/local/source/path/PARTITIONED/file2.{i}.nc"),
-                #     )
-                #     for i in range(1, num_partitions + 1)
-                # ]
-                # mock_rename.assert_has_calls(expected_calls, any_order=False)
-
                 assert (
                     local_roms_netcdf_dataset.partitioned_files
                     == expected_partitioned_files

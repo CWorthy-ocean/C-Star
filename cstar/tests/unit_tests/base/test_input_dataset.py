@@ -1,8 +1,11 @@
+import logging
 import stat
-import pytest
-from unittest import mock
 from pathlib import Path
 from textwrap import dedent
+from unittest import mock
+
+import pytest
+
 from cstar.base import InputDataset
 from cstar.base.datasource import DataSource
 
@@ -218,41 +221,48 @@ class TestStrAndRepr:
 
     def test_local_str(self, local_input_dataset):
         """Test the string representation of a local InputDataset."""
-        expected_str = dedent("""\
+        expected_str = dedent(
+            """\
     ----------------
     MockInputDataset
     ----------------
     Source location: some/local/source/path/local_file.nc
     start_date: 2024-10-22 12:34:56
     end_date: 2024-12-31 23:59:59
-    Working path: None ( does not yet exist. Call InputDataset.get() )""")
+    Working path: None ( does not yet exist. Call InputDataset.get() )"""
+        )
         assert str(local_input_dataset) == expected_str
 
     def test_local_repr(self, local_input_dataset):
         """Test the repr representation of a local InputDataset."""
-        expected_repr = dedent("""\
+        expected_repr = dedent(
+            """\
     MockInputDataset(
     location = 'some/local/source/path/local_file.nc',
     file_hash = None,
     start_date = datetime.datetime(2024, 10, 22, 12, 34, 56),
     end_date = datetime.datetime(2024, 12, 31, 23, 59, 59)
-    )""")
+    )"""
+        )
         assert repr(local_input_dataset) == expected_repr
 
     def test_remote_repr(self, remote_input_dataset):
         """Test the repr representation of a remote InputDataset."""
-        expected_repr = dedent("""\
+        expected_repr = dedent(
+            """\
     MockInputDataset(
     location = 'http://example.com/remote_file.nc',
     file_hash = 'abc123',
     start_date = datetime.datetime(2024, 10, 22, 12, 34, 56),
     end_date = datetime.datetime(2024, 12, 31, 23, 59, 59)
-    )""")
+    )"""
+        )
         assert repr(remote_input_dataset) == expected_repr
 
     def test_remote_str(self, remote_input_dataset):
         """Test the string representation of a remote InputDataset."""
-        expected_str = dedent("""\
+        expected_str = dedent(
+            """\
     ----------------
     MockInputDataset
     ----------------
@@ -260,7 +270,8 @@ class TestStrAndRepr:
     Source file hash: abc123
     start_date: 2024-10-22 12:34:56
     end_date: 2024-12-31 23:59:59
-    Working path: None ( does not yet exist. Call InputDataset.get() )""")
+    Working path: None ( does not yet exist. Call InputDataset.get() )"""
+        )
         assert str(remote_input_dataset) == expected_str
 
     @mock.patch.object(
@@ -807,7 +818,7 @@ class TestLocalHash:
         """Stop all patches."""
         mock.patch.stopall()
 
-    def test_local_hash_single_file(self, local_input_dataset):
+    def test_local_hash_single_file(self, local_input_dataset, log: logging.Logger):
         """Test `local_hash` calculation for a single file."""
         local_input_dataset._local_file_hash_cache = None
         local_input_dataset.working_path = Path("/some/local/path")
@@ -816,9 +827,6 @@ class TestLocalHash:
         self.mock_resolve.return_value = Path("/resolved/local/path")
 
         result = local_input_dataset.local_hash
-
-        # Debug: Confirm resolve was invoked
-        print(f"Resolved path: {local_input_dataset.working_path.resolve()}")
 
         # Check that the result uses the resolved path
         assert result == {

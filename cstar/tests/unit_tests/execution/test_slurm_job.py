@@ -1,7 +1,10 @@
+import logging
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from cstar.system.scheduler import SlurmScheduler, SlurmQOS, SlurmPartition
-from cstar.execution.scheduler_job import SlurmJob, ExecutionStatus
+
+from cstar.execution.scheduler_job import ExecutionStatus, SlurmJob
+from cstar.system.scheduler import SlurmPartition, SlurmQOS, SlurmScheduler
 
 
 class TestSlurmJob:
@@ -341,7 +344,7 @@ class TestSlurmJob:
 
     @patch("subprocess.run")
     @patch("cstar.execution.scheduler_job.SlurmJob.status", new_callable=PropertyMock)
-    def test_cancel(self, mock_status, mock_subprocess, tmp_path):
+    def test_cancel(self, mock_status, mock_subprocess, tmp_path, log: logging.Logger):
         """Verifies that the `cancel` method cancels a SLURM job and raises an exception
         if it fails.
 
@@ -385,7 +388,7 @@ class TestSlurmJob:
         job.cancel()
 
         # Log mock call arguments
-        print(f"Mock call args after success: {mock_subprocess.call_args_list}")
+        log.info(f"Mock call args after success: {mock_subprocess.call_args_list}")
 
         # Check that scancel was called correctly
         mock_subprocess.assert_called_once_with(
@@ -409,9 +412,6 @@ class TestSlurmJob:
             RuntimeError, match="Non-zero exit code when cancelling job."
         ):
             job.cancel()
-
-        # Log mock call arguments
-        print(f"Mock call args after failure: {mock_subprocess.call_args_list}")
 
         # Verify that scancel was still called
         mock_subprocess.assert_called_once_with(

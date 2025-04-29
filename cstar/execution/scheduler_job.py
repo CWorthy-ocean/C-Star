@@ -1,22 +1,22 @@
+import json
 import os
 import re
-import json
-import warnings
-from math import ceil
 from abc import ABC, abstractmethod
-from pathlib import Path
 from datetime import datetime, timedelta
+from math import ceil
+from pathlib import Path
 from typing import Optional, Tuple
+
 from cstar.base.utils import _run_cmd
-from cstar.execution.handler import ExecutionStatus, ExecutionHandler
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.system.manager import cstar_sysmgr
 from cstar.system.scheduler import (
-    Queue,
-    SlurmScheduler,
     PBSScheduler,
+    Queue,
     Scheduler,
-    SlurmQOS,
     SlurmPartition,
+    SlurmQOS,
+    SlurmScheduler,
 )
 
 
@@ -260,14 +260,13 @@ class SchedulerJob(ExecutionHandler, ABC):
                 + " as it cannot be determined"
             )
         elif self.queue.max_walltime is None:
-            warnings.warn(
-                f"WARNING: Unable to determine the maximum allowed walltime for chosen queue {queue_name}. "
+            self.log.warning(
+                f"Unable to determine the maximum allowed walltime for chosen queue {queue_name}. "
                 + f"If your chosen walltime {walltime} exceeds the (unknown) limit, this job may be "
                 + "rejected by your system's job scheduler.",
-                UserWarning,
             )
         elif walltime is None:
-            warnings.warn(
+            self.log.warning(
                 "Walltime parameter unspecified. Creating scheduler job with maximum walltime "
                 + f"for queue {queue_name}, {self.queue.max_walltime}"
             )
@@ -321,9 +320,9 @@ class SchedulerJob(ExecutionHandler, ABC):
             nnodes, ncpus = self._calculate_node_distribution(
                 cpus, scheduler.global_max_cpus_per_node
             )
-            warnings.warn(
+            self.log.warning(
                 (
-                    "WARNING: Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
+                    "Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
                     + "parameters, but your system requires an explicitly specified task distribution."
                     + "\n C-Star will attempt "
                     + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
@@ -331,7 +330,6 @@ class SchedulerJob(ExecutionHandler, ABC):
                     + f"{scheduler.global_max_cpus_per_node} CPUS per node "
                     + f"\nand your job requirement of {cpus} CPUS."
                 ),
-                UserWarning,
             )
             self._cpus_per_node = ncpus
             self._nodes = nnodes
@@ -421,7 +419,9 @@ class SchedulerJob(ExecutionHandler, ABC):
         """
 
         if self._id is None:
-            print("No Job ID found. Submit this job with SchedulerJob.submit()")
+            self.log.warning(
+                "No Job ID found. Submit this job with SchedulerJob.submit()"
+            )
         return self._id
 
     @property
@@ -711,7 +711,7 @@ class SlurmJob(SchedulerJob):
         """
 
         if self.status not in {ExecutionStatus.RUNNING, ExecutionStatus.PENDING}:
-            print(f"Cannot cancel job with status '{self.status}'")
+            self.log.info(f"Cannot cancel job with status '{self.status}'")
             return
 
         _run_cmd(
@@ -928,7 +928,7 @@ class PBSJob(SchedulerJob):
             ExecutionStatus.PENDING,
             ExecutionStatus.HELD,
         }:
-            print(f"Cannot cancel job with status {self.status}")
+            self.log.info(f"Cannot cancel job with status {self.status}")
             return
 
         _run_cmd(

@@ -1,18 +1,18 @@
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
-from abc import ABC, abstractmethod
 
 from cstar.base.gitutils import (
     _checkout,
     _get_hash_from_checkout_target,
-    _get_repo_remote,
     _get_repo_head_hash,
+    _get_repo_remote,
 )
-
+from cstar.base.log import LoggingMixin
 from cstar.system.manager import cstar_sysmgr
 
 
-class ExternalCodeBase(ABC):
+class ExternalCodeBase(ABC, LoggingMixin):
     """Abstract base class to manage external non-python dependencies of C-Star.
 
     Attributes
@@ -229,8 +229,8 @@ class ExternalCodeBase(ABC):
 
         match self.local_config_status:
             case 0:
-                print(
-                    f"{self.__class__.__name__} correctly configured. Nothing to be done"
+                self.log.info(
+                    f"✅ {self.__class__.__name__} correctly configured. Nothing to be done"
                 )
                 return
             case 1:

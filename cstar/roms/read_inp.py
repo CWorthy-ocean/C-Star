@@ -1,7 +1,8 @@
-import numpy as np
-from pathlib import Path
-from typing import Optional, Any
 from collections import OrderedDict
+from pathlib import Path
+from typing import Any, Optional
+
+import numpy as np
 
 from cstar.base.utils import _list_to_concise_str
 

@@ -1,11 +1,12 @@
-import pytest
+import logging
 import subprocess
-
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
-from cstar.execution.local_process import LocalProcess, ExecutionStatus
+import pytest
+
+from cstar.execution.local_process import ExecutionStatus, LocalProcess
 
 
 @pytest.fixture
@@ -96,13 +97,15 @@ class TestLocalProcess:
             run_path="test/path",
             output_file="outfile.out",
         )
-        test_str = dedent("""\
+        test_str = dedent(
+            """\
         LocalProcess
         ------------
         Commands: echo "Hello, World"
         Run path: test/path
         Output file: outfile.out
-        Status: unsubmitted""")
+        Status: unsubmitted"""
+        )
 
         assert mock_local_process.__str__() == test_str
 
@@ -112,13 +115,15 @@ class TestLocalProcess:
             run_path="test/path",
             output_file="outfile.out",
         )
-        test_repr = dedent("""\
+        test_repr = dedent(
+            """\
         LocalProcess(
         commands = 'echo "Hello, World"',
         output_file = PosixPath('outfile.out'),
         run_path = PosixPath('test/path')
         )
-        State: <status = <ExecutionStatus.UNSUBMITTED: 1>>""")
+        State: <status = <ExecutionStatus.UNSUBMITTED: 1>>"""
+        )
 
         assert (
             mock_local_process.__repr__() == test_repr
@@ -366,8 +371,9 @@ class TestLocalProcess:
 
         assert mock_local_process.status == ExecutionStatus.CANCELLED
 
-    @patch("builtins.print")
-    def test_cancel_non_running_process(self, mock_print, tmp_path, mock_local_process):
+    def test_cancel_non_running_process(
+        self, tmp_path, mock_local_process, caplog: pytest.LogCaptureFixture
+    ):
         """Ensures that `cancel` does not attempt to terminate a non-running process.
 
         This test verifies:
@@ -378,20 +384,19 @@ class TestLocalProcess:
         -----
         subprocess.Popen
             Mocked to simulate the subprocess lifecycle.
-        builtins.print
-            Mocked to capture printed messages for validation.
 
         Fixtures
         --------
-        tmp_path
+        tmp_path (pathlib.Path)
             Builtin fixture to create and use a temporary path for filesystem interaction
-        mock_local_process
+        mock_local_process (cstar.execution.LocalProcess)
             Creates a simple local process
-
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to captures log outputs
 
         Asserts
         -------
-        - That the `print` statement outputs the correct message.
+        - That the correct message is logged
         - That neither `terminate` nor `kill` is called.
         """
 
@@ -402,29 +407,29 @@ class TestLocalProcess:
             self.mock_subprocess
         )  # Directly assign the mock process
 
+        caplog.set_level(logging.INFO, logger=mock_local_process.log.name)
+
         # Test cancel on a completed process
         mock_local_process.cancel()
-        mock_print.assert_called_once_with(
-            f"Cannot cancel job with status '{mock_local_process.status}'"
+
+        captured = caplog.text
+        assert (
+            f"Cannot cancel job with status '{mock_local_process.status}'" in captured
         )
         self.mock_subprocess.terminate.assert_not_called()
         self.mock_subprocess.kill.assert_not_called()
 
-    @patch("builtins.print")
-    def test_wait_running_process(self, mock_print, tmp_path, mock_local_process):
+    def test_wait_running_process(self, tmp_path, mock_local_process):
         """Ensures that `wait` correctly waits for a running process to complete.
 
         This test verifies:
         - `wait()` is called on the process when it is running.
-        - `print` is not called for valid process states.
         - The process's final status is updated correctly.
 
         Mocks
         -----
         subprocess.Popen
             Mocked to simulate the subprocess lifecycle.
-        builtins.print
-            Mocked to capture printed messages for validation.
 
         Fixtures
         --------
@@ -447,10 +452,10 @@ class TestLocalProcess:
         # Test wait on a running process
         mock_local_process.wait()
         self.mock_subprocess.wait.assert_called_once()  # Ensure `wait` was called on the process
-        assert not mock_print.called  # Confirm `print` was not called
 
-    @patch("builtins.print")
-    def test_wait_non_running_process(self, mock_print, tmp_path, mock_local_process):
+    def test_wait_non_running_process(
+        self, tmp_path, mock_local_process, caplog: pytest.LogCaptureFixture
+    ):
         """Ensures that `wait` does not perform actions for non-running processes.
 
         This test verifies:
@@ -461,27 +466,30 @@ class TestLocalProcess:
         -----
         subprocess.Popen
             Mocked to simulate the subprocess lifecycle.
-        builtins.print
-            Mocked to capture printed messages for validation.
 
         Fixtures
         --------
-        tmp_path
+        tmp_path (pathlib.Path)
             Builtin fixture to create and use a temporary path for filesystem interaction
-        mock_local_process
+        mock_local_process (cstar.execution.LocalProcess)
             Creates a simple local process
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log outputs
 
         Asserts
         -------
-        - An information message is printed
+        - An information message is logged
         - subprocess.Popen.wait is not called
         """
 
         mock_local_process._process = None  # Assign mock process
         mock_local_process._cancelled = True
+        caplog.set_level(logging.INFO, logger=mock_local_process.log.name)
 
         mock_local_process.wait()
-        mock_print.assert_called_once_with(
-            f"cannot wait for process with execution status '{ExecutionStatus.CANCELLED}'"
+        captured = caplog.text
+        assert (
+            f"Cannot wait for process with execution status '{ExecutionStatus.CANCELLED}'"
+            in captured
         )
         self.mock_subprocess.wait.assert_not_called()

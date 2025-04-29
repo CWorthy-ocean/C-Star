@@ -1,9 +1,11 @@
-import pytest
 import shutil
-import numpy as np
 from pathlib import Path
-from cstar.roms import ROMSRuntimeSettings
+
+import numpy as np
+import pytest
+
 from cstar.base.utils import _replace_text_in_file
+from cstar.roms import ROMSRuntimeSettings
 
 
 @pytest.fixture

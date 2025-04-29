@@ -1,19 +1,19 @@
 import copy
 import pickle
-import warnings
+from abc import ABC, abstractmethod
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
 import dateutil
 
-from abc import ABC, abstractmethod
-from typing import Optional, Any
-from pathlib import Path
-from datetime import datetime
-
-from cstar.base import ExternalCodeBase, AdditionalCode, Discretization
-from cstar.execution.handler import ExecutionStatus, ExecutionHandler
+from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
+from cstar.base.log import LoggingMixin
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 
 
-class Simulation(ABC):
+class Simulation(ABC, LoggingMixin):
     """An abstract base class representing a C-Star simulation.
 
     Attributes
@@ -118,9 +118,8 @@ class Simulation(ABC):
             date=valid_end_date, field_name="Valid end date"
         )
         if self.valid_start_date is None or self.valid_end_date is None:
-            warnings.warn(
+            self.log.warning(
                 "Cannot enforce date range validation: Missing `valid_start_date` or `valid_end_date`.",
-                RuntimeWarning,
             )
 
         # Set start and end dates, using defaults where needed
@@ -136,11 +135,11 @@ class Simulation(ABC):
 
         if codebase is None:
             self.codebase = self.default_codebase
-            warnings.warn(
+            self.log.warning(
                 f"Creating {self.__class__.__name__} instance without a specified "
                 + "ExternalCodeBase, default codebase will be used:\n"
-                + f"Source location: {self.codebase.source_repo}\n"
-                + f"Checkout target: {self.codebase.checkout_target}\n"
+                + f"          • Source location: {self.codebase.source_repo}\n"
+                + f"          • Checkout target: {self.codebase.checkout_target}\n"
             )
         else:
             self.codebase = codebase
@@ -256,7 +255,8 @@ class Simulation(ABC):
 
         if parsed_date is None:  # If no date is provided, use the fallback
             if fallback is not None:
-                warnings.warn(f"{field_name} not provided. Defaulting to {fallback}.")
+                warn_msg = f"{field_name} not provided. Defaulting to {fallback}."
+                self.log.warning(warn_msg)
                 return fallback
             raise ValueError(f"Neither {field_name} nor a valid fallback was provided.")
 
@@ -584,6 +584,10 @@ class Simulation(ABC):
                 "local process is currently running in. Await "
                 "completion or use LocalProcess.cancel(), then try again"
             )
+
+        # Loggers do not survive roundtrip
+        if hasattr(self, "_log"):
+            del self._log
 
         with open(f"{self.directory}/simulation_state.pkl", "wb") as state_file:
             pickle.dump(self, state_file)

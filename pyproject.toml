@@ -28,7 +28,7 @@ dependencies = [
     "python-dotenv",
     "PyYAML==6.0.2",
     "pooch>=1.8.1",
-    "roms_tools[dask]>=2.6.2"
+    "roms_tools[dask]==2.6.2"
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
@@ -58,6 +58,7 @@ exclude = "properties|asv_bench|docs"
 # Configuration for ruff linter and formatter
 [tool.ruff]
 fix = true
+extend-select = ["I"]
 
 [tool.pre-commit]
 config = ".pre-commit-config.yaml"
@@ -70,6 +71,9 @@ include-package-data = true
 
 [tool.pytest.ini_options]
 norecursedirs = [".tox", ".git", "__pycache__", ".#*", "*~"]
+log_cli_format = "%(asctime)s | %(levelname)s | %(name)s::%(funcName)s:%(lineno)d: %(message)s"
+log_cli_level = "INFO"
+
 
 # Use addopts to ignore specific files and directories
 addopts = [

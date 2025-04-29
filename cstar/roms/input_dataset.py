@@ -1,18 +1,20 @@
-import yaml
 import tempfile
-import requests
-import roms_tools
-
 from abc import ABC
 from pathlib import Path
-from typing import Optional, List, Any
+from typing import Any, List, Optional
+
+import requests
+import roms_tools
+import yaml
+
 from cstar.base.input_dataset import InputDataset
-from cstar.base.utils import _list_to_concise_str, _get_sha256_hash
+from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
 
 
 class ROMSInputDataset(InputDataset, ABC):
     (
-        """
+        (
+            """
     ROMS-specific implementation of `InputDataset` (doc below)
 
     Extends `get()` method to generate dataset using roms-tools in the case that `source`
@@ -21,7 +23,9 @@ class ROMSInputDataset(InputDataset, ABC):
     Docstring for InputDataset:
     ---------------------------
     """
-    ) + (InputDataset.__doc__ or "")
+        )
+        + (InputDataset.__doc__ or "")
+    )
 
     partitioned_files: List[Path] = []
 
@@ -89,27 +93,21 @@ class ROMSInputDataset(InputDataset, ABC):
                 )
 
             # If they are, we want to partition them all in the same place
-            # partdir = self.working_path[0].parent  # / "PARTITIONED"
             id_files_to_partition = self.working_path[:]
 
         else:
             id_files_to_partition = [
                 self.working_path,
             ]
-            # partdir = self.working_path.parent  # / "PARTITIONED"
 
-            # partdir.mkdir(parents=True, exist_ok=True)
         parted_files = []
 
         for idfile in id_files_to_partition:
-            print(f"Partitioning {idfile} into ({np_xi},{np_eta})")
+            self.log.info(f"Partitioning {idfile} into ({np_xi},{np_eta})")
             parted_files += roms_tools.partition_netcdf(
                 idfile, np_xi=np_xi, np_eta=np_eta
             )
 
-            # [p.rename(partdir / p.name) for p in parted_files[-1]]
-            # [p.rename(partdir / p.name) for p in parted_files]
-            # parted_files = [partdir / p.name for p in parted_files]
         self.partitioned_files = [f.resolve() for f in parted_files]
 
     def get(
@@ -157,7 +155,7 @@ class ROMSInputDataset(InputDataset, ABC):
             working_path_parent = self.working_path.parent
 
         if (self.exists_locally) and (working_path_parent == local_dir):
-            print(f"Input dataset already exists in {working_path_parent}, skipping.")
+            self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
             return
 
         if self.source.source_type != "yaml":
@@ -214,15 +212,15 @@ class ROMSInputDataset(InputDataset, ABC):
         ##
 
         # ... and save:
-        print(f"Saving roms-tools dataset created from {self.source.location}...")
+        self.log.info(
+            f"💾 Saving roms-tools dataset created from {self.source.location}..."
+        )
         save_kwargs: dict[Any, Any] = {}
         save_kwargs["filepath"] = Path(
             f"{local_dir/Path(self.source.location).stem}.nc"
         )
 
         savepath = roms_tools_class_instance.save(**save_kwargs)
-        self.partitioned_files = savepath
-
         self.working_path = savepath[0] if len(savepath) == 1 else savepath
 
         self._local_file_hash_cache = {

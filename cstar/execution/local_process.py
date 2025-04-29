@@ -1,7 +1,8 @@
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from datetime import datetime
+
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 
 
@@ -226,7 +227,7 @@ class LocalProcess(ExecutionHandler):
                 self._cancelled = True
                 self._drop_process()
         else:
-            print(f"Cannot cancel job with status '{self.status}'")
+            self.log.info(f"Cannot cancel job with status '{self.status}'")
             return
 
     def wait(self):
@@ -240,4 +241,6 @@ class LocalProcess(ExecutionHandler):
         if self.status == ExecutionStatus.RUNNING:
             self._process.wait()
         else:
-            print(f"cannot wait for process with execution status '{self.status}'")
+            self.log.info(
+                f"Cannot wait for process with execution status '{self.status}'"
+            )

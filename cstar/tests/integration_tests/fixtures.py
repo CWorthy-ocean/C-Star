@@ -1,18 +1,19 @@
-import pooch
-import pytest
 import shutil
 import zipfile
-from typing import Callable
 from pathlib import Path
+from typing import Callable
+
+import pooch
+import pytest
 
 from cstar.tests.integration_tests.config import (
-    ROMS_TOOLS_DATA_DIRECTORY,
     CSTAR_TEST_DATA_DIRECTORY,
+    ROMS_TOOLS_DATA_DIRECTORY,
 )
 
 
 @pytest.fixture
-def fetch_roms_tools_source_data(request) -> Callable[[str | Path], None]:
+def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
     """Fixture that provides a factory function to fetch source data needed by roms-
     tools.
 
@@ -89,7 +90,7 @@ def fetch_roms_tools_source_data(request) -> Callable[[str | Path], None]:
 
         def cleanup():
             if symlink_path.is_symlink():
-                print(f"removing {symlink_path}")
+                log.info(f"Removing {symlink_path}")
                 symlink_path.unlink()
 
         request.addfinalizer(cleanup)

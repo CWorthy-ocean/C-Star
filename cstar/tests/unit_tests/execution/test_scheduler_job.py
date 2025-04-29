@@ -1,17 +1,20 @@
+import logging
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from cstar.system.scheduler import (
-    Scheduler,
-    PBSScheduler,
-    PBSQueue,
-    SlurmScheduler,
-    SlurmQOS,
-)
+
 from cstar.execution.scheduler_job import (
-    SchedulerJob,
     PBSJob,
+    SchedulerJob,
     SlurmJob,
     create_scheduler_job,
+)
+from cstar.system.scheduler import (
+    PBSQueue,
+    PBSScheduler,
+    Scheduler,
+    SlurmQOS,
+    SlurmScheduler,
 )
 
 
@@ -190,9 +193,9 @@ class TestSchedulerJobBase:
             ):
                 MockSchedulerJob(**params)
 
-    def test_init_walltime_provided_but_no_queue_max_walltime(self):
+    def test_init_walltime_provided_but_no_queue_max_walltime(self, caplog):
         """Verifies that a user-provided walltime is applied when the queue's max
-        walltime is unavailable, and a warning is issued that the user walltime cannot
+        walltime is unavailable, and a warning is logged that the user walltime cannot
         be checked.
 
         Mocks
@@ -200,37 +203,45 @@ class TestSchedulerJobBase:
         MockScheduler.get_queue
             Returns a mocked queue object with `max_walltime=None`.
 
+        Fixtures
+        --------
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log messages
+
         Asserts
         -------
-        - That a warning is issued about the missing queue walltime.
+        - That a warning is logged about the missing queue walltime.
         - That the job's walltime matches the user-provided value ("01:00:00").
         """
 
         with patch.object(
             MockScheduler, "get_queue", return_value=MagicMock(max_walltime=None)
         ):
-            with pytest.warns(
-                UserWarning,
-                match="Unable to determine the maximum allowed walltime for chosen queue",
-            ):
-                job = MockSchedulerJob(**self.common_job_params)
-                assert job.walltime == "01:00:00"
+            job = MockSchedulerJob(**self.common_job_params)
+            caplog.set_level(logging.INFO, job.log.name)
+            assert job.walltime == "01:00:00"
+            assert (
+                "Unable to determine the maximum allowed walltime for chosen queue"
+                in caplog.text
+            )
 
-    def test_init_no_walltime_but_queue_max_walltime_provided(self):
+    def test_init_no_walltime_but_queue_max_walltime_provided(self, caplog):
         """Ensures that the queue's max walltime is applied when no walltime is provided
         by the user.
 
         This test verifies that if the user does not specify a walltime, the job uses
         the queue's maximum walltime and issues a warning about the unspecified walltime.
 
-        Mocks
-        -----
+        Mocks & Fixtures
+        ----------------
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log messages
         MockScheduler.get_queue
             Returns a mocked queue object with `max_walltime="02:00:00"`.
 
         Asserts
         -------
-        - That a warning is issued about the unspecified walltime.
+        - That a warning is logged about the unspecified walltime.
         - That the job's walltime matches the queue's maximum walltime ("02:00:00").
         """
 
@@ -242,9 +253,10 @@ class TestSchedulerJobBase:
                 for key, value in self.common_job_params.items()
                 if key != "walltime"
             }
-            with pytest.warns(UserWarning, match="Walltime parameter unspecified"):
-                job = MockSchedulerJob(**params)
-                assert job.walltime == "02:00:00"
+            job = MockSchedulerJob(**params)
+            caplog.set_level(logging.INFO, logger=job.log.name)
+            assert job.walltime == "02:00:00"
+            assert "Walltime parameter unspecified" in caplog.text
 
     def test_init_walltime_exceeds_max_walltime(self):
         """Ensures that a `ValueError` is raised if the user-provided walltime exceeds
@@ -321,7 +333,7 @@ class TestSchedulerJobBase:
         assert job.nodes == 2
         assert job.cpus_per_node == 2  # cpus=4, nodes=2
 
-    def test_init_without_nodes_or_cpus_per_node(self):
+    def test_init_without_nodes_or_cpus_per_node(self, caplog):
         """Ensures that both `nodes` and `cpus_per_node` are automatically calculated
         when neither is provided.
 
@@ -335,10 +347,16 @@ class TestSchedulerJobBase:
         MockScheduler.global_max_cpus_per_node
             Provides the system's maximum CPUs per node (64).
 
+        Fixtures
+        --------
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log messages
+
         Asserts
         -------
         - That the calculated number of nodes matches the expected value (2).
         - That the calculated `cpus_per_node` matches the expected value (64).
+        - An expected info message is logged
         """
         params = self.common_job_params.copy()
         params.update(
@@ -348,14 +366,15 @@ class TestSchedulerJobBase:
                 "cpus": 128,
             }
         )
-        with pytest.warns(
-            UserWarning,
-            match="Attempting to create scheduler job without 'nodes' and 'cpus_per_node'",
-        ):
-            job = MockSchedulerJob(**params)
-            # Check the calculated values from _calculate_node_distribution
-            assert job.nodes == 2
-            assert job.cpus_per_node == 64  # cpus=128, max_cpus_per_node=64
+        job = MockSchedulerJob(**params)
+        caplog.set_level(logging.INFO, logger=job.log.name)
+        # Check the calculated values from _calculate_node_distribution
+        assert job.nodes == 2
+        assert job.cpus_per_node == 64  # cpus=128, max_cpus_per_node=64
+        assert (
+            "Attempting to create scheduler job without 'nodes' and 'cpus_per_node'"
+            in caplog.text
+        )
 
     @pytest.mark.parametrize(
         "nodes, cpus_per_node, expected_nodes, expected_cpus_per_node",

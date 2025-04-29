@@ -1,6 +1,9 @@
+import logging
 import os
-import pytest
 from unittest import mock
+
+import pytest
+
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.system.manager import cstar_sysmgr
 
@@ -106,7 +109,7 @@ class TestROMSExternalCodeBaseGet:
         """Common teardown after each test method."""
         mock.patch.stopall()
 
-    def test_get_success(self, roms_codebase, tmp_path):
+    def test_get_success(self, roms_codebase, tmp_path, log: logging.Logger):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
         ## Make temporary target dir
@@ -140,7 +143,6 @@ class TestROMSExternalCodeBaseGet:
         self.mock_update_user_dotenv.assert_called_once_with(env_file_str)
 
         ## Check that subprocess.run was (mock) called twice for `make nhmg` and `make Tools-Roms`
-        print(self.mock_subprocess_run.call_args_list)
         assert self.mock_subprocess_run.call_count == 2
 
         self.mock_subprocess_run.assert_any_call(
