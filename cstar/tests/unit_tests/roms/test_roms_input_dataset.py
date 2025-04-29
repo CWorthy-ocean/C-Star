@@ -404,7 +404,8 @@ class TestROMSInputDatasetGet:
 
         self.mock_resolve.side_effect = [
             Path("some/local/dir"),  # First resolve: local_dir
-            Path("some/local/dir/remote_file.nc"),  # Second resolve: during caching
+            Path("some/local/dir"),  # Second resolve: local_dir in _get_from_yaml
+            Path("some/local/dir/remote_file.nc"),  # Third resolve: during caching
         ]
 
         # Mock the list of paths returned by roms_tools.save
@@ -423,6 +424,7 @@ class TestROMSInputDatasetGet:
 
         # Assert resolve calls
         expected_resolve_calls = [
+            mock.call(Path("some/local/dir")),
             mock.call(Path("some/local/dir")),
             mock.call(Path("some/local/dir/remote_file.nc")),
         ]
@@ -483,7 +485,8 @@ class TestROMSInputDatasetGet:
         # Mock resolve to return a resolved path
         self.mock_resolve.side_effect = [
             Path("some/local/dir"),  # First resolve: local_dir
-            Path("some/local/dir/local_file.nc"),  # Second resolve: during caching
+            Path("some/local/dir"),  # Second resolve: local_dir in _get_from_yaml
+            Path("some/local/dir/local_file.nc"),  # Third resolve: during caching
         ]
 
         # Mock yaml loading for a more complex YAML with both Grid and SurfaceForcing

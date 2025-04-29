@@ -1,3 +1,4 @@
+import datetime as dt
 import tempfile
 from abc import ABC
 from pathlib import Path
@@ -28,6 +29,22 @@ class ROMSInputDataset(InputDataset, ABC):
     )
 
     partitioned_files: List[Path] = []
+
+    def __init__(
+        self,
+        location: str,
+        file_hash: Optional[str] = None,
+        start_date: Optional[str | dt.datetime] = None,
+        end_date: Optional[str | dt.datetime] = None,
+        n_source_partitions: Optional[int] = 1,
+    ):
+        super().__init__(
+            location=location,
+            file_hash=file_hash,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        self.n_source_partitions = n_source_partitions
 
     def __str__(self) -> str:
         base_str = super().__str__()
@@ -113,35 +130,18 @@ class ROMSInputDataset(InputDataset, ABC):
     def get(
         self,
         local_dir: str | Path,
-        np_xi: Optional[int] = None,
-        np_eta: Optional[int] = None,
     ) -> None:
-        """Make this input dataset available as a netCDF file in `local_dir`.
+        """Ensure this input dataset is available as a NetCDF file in `local_dir`.
 
-        This method extends the `InputDataset.get()` method to accommodate
-        instances where the source is a `roms-tools`-compatible `yaml` file.
-
-        Steps:
-
-        1. Fetch the source file to `local_dir` using `InputDataset.get()`.
-           If the file is not in `yaml` format, we are done.
-        2. If the file is in `yaml` format, modify the local copy so any
-           time-varying datasets are given the correct start and end date
-        3. Pass the modified yaml to roms-tools and save the resulting
-           object to netCDF.
-        4. Update the working_path attribute and cache the metadata and
-           checksums of any produced netCDF files
+        If the source is not a YAML file, this method delegates to the base class
+        `InputDataset.get()`. Otherwise, it processes the YAML using `roms-tools`
+        to create the dataset.
 
         Parameters:
         -----------
         local_dir (str or Path):
-            The directory in which to save the input dataset netCDF file
-        np_xi, np_eta (int, optional):
-            If desired, save a partitioned copy of the input dataset to be used when
-            running ROMS in parallel. np_xi is the number of x-direction processors,
-            np_eta is the number of y-direction processors
+            Directory to save the dataset files.
         """
-
         # Ensure we're working with a Path object
         local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)
@@ -160,8 +160,34 @@ class ROMSInputDataset(InputDataset, ABC):
 
         if self.source.source_type != "yaml":
             super().get(local_dir=local_dir)
-            return
-        elif self.source.location_type == "path":
+        else:
+            self._get_from_yaml(local_dir=local_dir)
+
+    def _get_from_yaml(self, local_dir: str | Path) -> None:
+        """Handle the special case where the input dataset source is a `roms-tools`
+        compatible YAML file.
+
+        This method:
+        - Fetches and optionally modifies the YAML based on start/end dates,
+        - Creates a `roms-tools` instance from a modified temporary copy of the YAML
+        - Saves this `roms-tools` class instance to a netCDF file in `local_dir`
+        - Updates `working_path` and caches file metadata.
+
+        Parameters:
+        -----------
+        local_dir (Path):
+            Directory where the resulting NetCDF files should be saved.
+        """
+        # Ensure we're working with a Path object
+        local_dir = Path(local_dir).expanduser().resolve()
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.source.source_type != "yaml":
+            raise ValueError(
+                "_get_from_yaml requires a ROMSInputDataset whose source_type is yaml"
+            )
+
+        if self.source.location_type == "path":
             with open(Path(self.source.location).expanduser()) as F:
                 raw_yaml_text = F.read()
         elif self.source.location_type == "url":
