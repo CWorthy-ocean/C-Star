@@ -145,8 +145,13 @@ class SimulationRunner(Service):
             self.log.warning("No simulation available at shutdown")
             return
 
-        # perform simulation cleanup activities
-        self._simulation.post_run()
+        # perform simulation cleanup activities when possible
+        if self._handler and self._handler.status == ExecutionStatus.COMPLETED:
+            # note: calling post_run on any status but completed fails.
+            self.log.debug("Executing simulation post-run")
+            self._simulation.post_run()
+        else:
+            self.log.debug("Skipping simulation post-run.")
 
         # Ensure simulation status has been logged (handler updates may be suppressed)
         self._log_disposition()
