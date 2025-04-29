@@ -47,6 +47,7 @@ def get_logger(
     # Ensure root handlers only handle WARNING and higher
     for handler in root.handlers:
         handler.setLevel(logging.WARNING)
+        handler.setFormatter(logging.Formatter(fmt))
 
     # Create specific STDOUT handler for INFO and lower:
     if not logger.hasHandlers():
