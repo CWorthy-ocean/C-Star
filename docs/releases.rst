@@ -21,6 +21,7 @@ Internal Changes:
 ~~~~~~~~~~~~~~~~~
 - Update calls to `roms-tools` to reflect latest changes in API
 - Update internal/test blueprints to reflect new structure
+- Save partitioned `ROMSInputDatasets` in the same directory as their un-partitioned versions, rather than a subdirectory "PARTITIONED"
 
 Documentation:
 ~~~~~~~~~~~~~~
