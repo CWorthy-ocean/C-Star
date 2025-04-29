@@ -13,7 +13,8 @@ from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
 
 class ROMSInputDataset(InputDataset, ABC):
     (
-        """
+        (
+            """
     ROMS-specific implementation of `InputDataset` (doc below)
 
     Extends `get()` method to generate dataset using roms-tools in the case that `source`
@@ -22,7 +23,9 @@ class ROMSInputDataset(InputDataset, ABC):
     Docstring for InputDataset:
     ---------------------------
     """
-    ) + (InputDataset.__doc__ or "")
+        )
+        + (InputDataset.__doc__ or "")
+    )
 
     partitioned_files: List[Path] = []
 
@@ -103,7 +106,7 @@ class ROMSInputDataset(InputDataset, ABC):
         parted_files = []
 
         for idfile in id_files_to_partition:
-            print(f"Partitioning {idfile} into ({np_xi},{np_eta})")
+            self.log.info(f"Partitioning {idfile} into ({np_xi},{np_eta})")
             parted_files += roms_tools.partition_netcdf(
                 idfile, np_xi=np_xi, np_eta=np_eta
             )
@@ -158,7 +161,7 @@ class ROMSInputDataset(InputDataset, ABC):
             working_path_parent = self.working_path.parent
 
         if (self.exists_locally) and (working_path_parent == local_dir):
-            print(f"Input dataset already exists in {working_path_parent}, skipping.")
+            self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
             return
 
         if self.source.source_type != "yaml":
@@ -215,8 +218,11 @@ class ROMSInputDataset(InputDataset, ABC):
         ##
 
         # ... and save:
-        print(f"Saving roms-tools dataset created from {self.source.location}...")
+        self.log.info(
+            f"💾 Saving roms-tools dataset created from {self.source.location}..."
+        )
         save_kwargs: dict[Any, Any] = {}
+
         if (np_eta is not None) and (np_xi is not None):
             save_kwargs["np_xi"] = np_xi
             save_kwargs["np_eta"] = np_eta

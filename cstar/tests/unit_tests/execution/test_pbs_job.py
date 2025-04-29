@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -264,9 +265,12 @@ class TestPBSJob:
 
     @patch("subprocess.run")
     @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
-    @patch("builtins.print")
     def test_cancel_completed_job(
-        self, mock_print, mock_status, mock_subprocess, tmp_path
+        self,
+        mock_status,
+        mock_subprocess,
+        tmp_path,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Verifies that the `cancel` method does not proceed if the job is already
         completed.
@@ -276,12 +280,14 @@ class TestPBSJob:
 
         Mocks
         -----
-        PBSJob.status
+        mock_status (PBSJob.status)
             Mocked to return "completed", simulating a completed job.
-        subprocess.run
+        mock_subprocess (subprocess.run)
             Mocked to ensure that the `qdel` command is not executed.
-        builtins.print
-            Mocked to capture printed messages for validation.
+        tmp_path (pathlib.Path)
+            Builtin fixture to create a temporary filepath
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log outputs
 
         Asserts
         -------
@@ -298,11 +304,15 @@ class TestPBSJob:
         )
         job._id = 12345  # Manually set the job ID
 
+        # Get the logger from the job instance
+        caplog.set_level(logging.INFO, logger=job.log.name)
+
         # Attempt to cancel the job
         job.cancel()
 
         # Verify the message was printed
-        mock_print.assert_called_with("Cannot cancel job with status completed")
+        captured = caplog.text
+        assert "Cannot cancel job with status completed" in captured
 
         # Verify qdel was not called
         mock_subprocess.assert_not_called()

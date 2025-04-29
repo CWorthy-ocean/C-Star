@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
+from cstar.base.log import LoggingMixin
 from cstar.base.utils import _run_cmd
 
 ################################################################################
@@ -245,7 +246,7 @@ class PBSQueue(Queue):
 ################################################################################
 
 
-class Scheduler(ABC):
+class Scheduler(ABC, LoggingMixin):
     """Abstract base class for representing a job scheduler.
 
     This class defines the structure and common behavior for managing queues and

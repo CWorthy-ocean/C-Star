@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from unittest import mock
 
@@ -12,6 +13,10 @@ from cstar.system.manager import cstar_sysmgr
 class MockExternalCodeBase(ExternalCodeBase):
     """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
     purposes."""
+
+    def __init__(self, log: logging.Logger):
+        super().__init__(None, None)
+        self._log = log
 
     @property
     def expected_env_var(self):
@@ -30,12 +35,12 @@ class MockExternalCodeBase(ExternalCodeBase):
         pass
 
     def get(self, target: str | Path):
-        print(f"mock installing ExternalCodeBase at {target}")
+        self.log.info(f"mock installing ExternalCodeBase at {target}")
         pass
 
 
 @pytest.fixture
-def generic_codebase():
+def generic_codebase(log: logging.Logger):
     """Yields a generic codebase (instance of MockExternalCodeBase defined above) for
     use in testing."""
     # Correctly patch the imported _get_hash_from_checkout_target in the ExternalCodeBase's module
@@ -43,7 +48,7 @@ def generic_codebase():
         "cstar.base.external_codebase._get_hash_from_checkout_target",
         return_value="test123",
     ):
-        yield MockExternalCodeBase()
+        yield MockExternalCodeBase(log=log)
 
 
 def test_codebase_str(generic_codebase):
@@ -292,17 +297,26 @@ class TestExternalCodeBaseConfigHandling:
         self.patch_get_repo_remote.stop()
         self.patch_environment.stop()
 
-    def test_handle_config_status_valid(self, generic_codebase, capsys):
-        """Test when local_config_status == 0 (correct configuration)"""
+    def test_handle_config_status_valid(
+        self, generic_codebase, caplog: pytest.LogCaptureFixture
+    ):
+        """Test when local_config_status == 0 (correct configuration)
+
+        Fixtures
+        --------
+        LogCaptureFixture
+            Captures log outputs to verify output messages
+        """
         # Mock the config status to be 0 (everything is correct)
         self.mock_local_config_status.return_value = 0
+        caplog.set_level(logging.INFO)
 
         # Call the method
         generic_codebase.handle_config_status()
 
         # Capture printed output and check that nothing happens
-        captured = capsys.readouterr()
-        assert "correctly configured. Nothing to be done" in captured.out
+        captured = caplog.text
+        assert "correctly configured. Nothing to be done" in captured
 
     def test_handle_config_status_wrong_repo(self, generic_codebase):
         """Test when local_config_status == 1 (wrong repository remote)"""
@@ -329,7 +343,7 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_invalid(
-        self, mock_input, generic_codebase, capsys
+        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
     ):
         # Assert that it raises an EnvironmentError
         self.mock_local_config_status.return_value = 2
@@ -341,8 +355,8 @@ class TestExternalCodeBaseConfigHandling:
             generic_codebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y' or 'n'"
-        captured = capsys.readouterr()
-        assert expected_message in str(captured.out)
+        captured = capsys.readouterr().out
+        assert expected_message in captured
 
     @mock.patch("builtins.input", side_effect=["n"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_n(
@@ -360,7 +374,7 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["y"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_y(
-        self, mock_input, generic_codebase, capsys
+        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
     ):
         """Test handling when local_config_status == 2 (right remote, wrong hash) and
         user agrees to checkout."""
@@ -384,7 +398,7 @@ class TestExternalCodeBaseConfigHandling:
         self.mock_subprocess_run.assert_called_once()
 
         # Check that the prompt for user input was shown
-        captured = capsys.readouterr()
+        captured = capsys.readouterr().out
 
         expected_message = (
             "############################################################\n"
@@ -395,13 +409,14 @@ class TestExternalCodeBaseConfigHandling:
             + "test123"
             + "\n############################################################"
         )
-        assert expected_message in str(captured.out).strip()
+        assert expected_message in captured
 
     @mock.patch("builtins.input", side_effect=["y"])  # mock_input
     def test_handle_config_status_no_env_var_user_y(
-        self, mock_input, generic_codebase, capsys
+        self, mock_input, generic_codebase, caplog: pytest.LogCaptureFixture
     ):
         self.mock_local_config_status.return_value = 3
+        caplog.set_level(logging.INFO)
 
         generic_codebase.handle_config_status()
 
@@ -410,10 +425,10 @@ class TestExternalCodeBaseConfigHandling:
         )
 
         # Verify that 'get' (defined above)  is called when user inputs 'y':
-        captured = capsys.readouterr()
-        assert (f"mock installing ExternalCodeBase at {expected_install_dir}") in str(
-            captured.out
-        )
+        captured = caplog.text
+        assert (
+            f"mock installing ExternalCodeBase at {expected_install_dir}"
+        ) in captured
 
     @mock.patch("builtins.input", side_effect=["n"])  # mock_input
     def test_handle_config_status_no_env_var_user_n(
@@ -426,7 +441,7 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_no_env_var_user_invalid(
-        self, mock_input, generic_codebase, capsys
+        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
     ):
         self.mock_local_config_status.return_value = 3
 
@@ -435,20 +450,22 @@ class TestExternalCodeBaseConfigHandling:
             generic_codebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y','n',or 'custom'"
-        captured = capsys.readouterr()
-        assert expected_message in str(captured.out)
+        captured = capsys.readouterr().out
+        assert expected_message in captured
 
     @mock.patch(
         "builtins.input", side_effect=["custom", "some/install/path"]
     )  # mock_input
     def test_handle_config_status_no_env_var_user_custom(
-        self, mock_input, generic_codebase, capsys
+        self, mock_input, generic_codebase, caplog
     ):
         self.mock_local_config_status.return_value = 3
+        caplog.set_level(logging.INFO)
+
         generic_codebase.handle_config_status()
         expected_install_dir = Path("some/install/path").resolve()
 
-        captured = capsys.readouterr()
-        assert (f"mock installing ExternalCodeBase at {expected_install_dir}") in str(
-            captured.out
-        )
+        captured = caplog.text
+        assert (
+            f"mock installing ExternalCodeBase at {expected_install_dir}"
+        ) in captured

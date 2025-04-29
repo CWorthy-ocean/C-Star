@@ -1,3 +1,4 @@
+import logging
 import pickle
 from datetime import datetime
 from pathlib import Path
@@ -233,7 +234,8 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `example_simulation`: Provides a mock `Simulation` instance.
+        example_simulation (cstar.Simulation)
+            Provides a mock `Simulation` instance.
 
         Assertions
         ----------
@@ -245,7 +247,7 @@ class TestSimulationInitialization:
             date="2025-01-01", fallback=datetime(2024, 1, 1), field_name="start_date"
         ) == datetime(2025, 1, 1)
 
-    def test_get_date_or_fallback_fallback(self, example_simulation):
+    def test_get_date_or_fallback_fallback(self, example_simulation, caplog):
         """Test `_get_date_or_fallback()` when the date is missing.
 
         This test verifies that `_get_date_or_fallback()` correctly defaults to the
@@ -253,19 +255,24 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `example_simulation`: Provides a mock `Simulation` instance.
+        example_simulation (cstar.Simulation)
+            Provides a mock `Simulation` instance.
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture capturing log messages
 
         Assertions
         ----------
-        - A `UserWarning` is issued indicating that the fallback value is being used.
+        - A warning is logged indicating that the fallback value is being used.
         - The returned value matches the fallback date.
         """
 
         sim, _ = example_simulation
-        with pytest.warns(UserWarning, match="start_date not provided"):
-            assert sim._get_date_or_fallback(
-                date=None, fallback=datetime(2024, 1, 1), field_name="start_date"
-            ) == datetime(2024, 1, 1)
+        caplog.set_level(logging.DEBUG, logger=sim.log.name)
+
+        assert sim._get_date_or_fallback(
+            date=None, fallback=datetime(2024, 1, 1), field_name="start_date"
+        ) == datetime(2024, 1, 1)
+        assert "start_date not provided" in caplog.text
 
     def test_get_date_or_fallback_raises_if_no_dates(self, example_simulation):
         """Test `_get_date_or_fallback()` when both date and fallback are `None`.
@@ -486,7 +493,7 @@ class TestSimulationInitialization:
             assert sim.valid_start_date == datetime(2024, 1, 1)
             assert sim.valid_end_date == datetime(2026, 1, 1)
 
-    def test_simulation_uses_fallback_dates(self, tmp_path):
+    def test_simulation_uses_fallback_dates(self, tmp_path, caplog):
         """Test that missing `start_date` and `end_date` default to valid ranges.
 
         This test ensures that when `start_date` or `end_date` is not provided,
@@ -495,29 +502,34 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `tmp_path`: Temporary directory for simulation setup.
+        tmp_path (pathlib.Path)
+            Temporary directory for simulation setup.
+        caplog (pytest.LogCaptureFixture)
+            builtin fixture for capturing logged messages
 
         Assertions
         ----------
         - The `Simulation` instance's `start_date` is set to `valid_start_date`.
         - The `Simulation` instance's `end_date` is set to `valid_end_date`.
-        - A `UserWarning` is issued indicating that default values are being used.
+        - A warning is logged indicating that default values are being used.
         """
 
-        with pytest.warns(UserWarning, match="not provided. Defaulting to"):
-            sim = MockSimulation(
-                name="FallbackSim",
-                directory=tmp_path,
-                codebase=MockExternalCodeBase(),
-                discretization=Discretization(time_step=60),
-                valid_start_date="2025-01-01",
-                valid_end_date="2025-12-31",
-            )
+        sim = MockSimulation(
+            name="FallbackSim",
+            directory=tmp_path,
+            codebase=MockExternalCodeBase(),
+            discretization=Discretization(time_step=60),
+            valid_start_date="2025-01-01",
+            valid_end_date="2025-12-31",
+        )
 
+        caplog.set_level(logging.DEBUG, logger=sim.log.name)
+
+        assert "not provided. Defaulting to" in caplog.text
         assert sim.start_date == datetime(2025, 1, 1)
         assert sim.end_date == datetime(2025, 12, 31)
 
-    def test_simulation_warns_if_no_valid_dates(self, tmp_path):
+    def test_simulation_warns_if_no_valid_dates(self, tmp_path, caplog):
         """Test that a warning is issued when no valid date constraints are provided.
 
         This test ensures that if neither `valid_start_date` nor `valid_end_date`
@@ -526,22 +538,27 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `tmp_path`: Temporary directory for simulation setup.
+        tmp_path (pathlib.Path)
+            Temporary directory for simulation setup.
+        caplog (pytest.LogCaptureFixture)
+            builtin fixture for capturing logged messages
 
         Assertions
         ----------
-          - A `RuntimeWarning` is raised indicating that date range validation is not possible.
+          - A warning is logged indicating that date range validation is not possible.
         """
 
-        with pytest.warns(RuntimeWarning, match="Cannot enforce date range validation"):
-            MockSimulation(
-                name="FallbackSim",
-                codebase=MockExternalCodeBase(),
-                directory=tmp_path,
-                discretization=Discretization(time_step=60),
-                start_date="2025-01-01",
-                end_date="2025-01-02",
-            )
+        sim = MockSimulation(
+            name="FallbackSim",
+            codebase=MockExternalCodeBase(),
+            directory=tmp_path,
+            discretization=Discretization(time_step=60),
+            start_date="2025-01-01",
+            end_date="2025-01-02",
+        )
+        caplog.set_level(logging.DEBUG, logger=sim.log.name)
+
+        assert "Cannot enforce date range validation" in caplog.text
 
 
 class TestStrAndRepr:
