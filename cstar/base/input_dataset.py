@@ -75,8 +75,8 @@ class InputDataset(ABC, LoggingMixin):
 
         # Initialize object state:
         self.working_path: Optional[Path | List[Path]] = None
-        self._local_file_hash_cache: Optional[Dict] = None
-        self._local_file_stat_cache: Optional[Dict] = None
+        self._local_file_hash_cache: Dict = {}
+        self._local_file_stat_cache: Dict = {}
 
         # Subclass-specific  confirmation that everything is set up correctly:
         self.validate()
@@ -104,7 +104,7 @@ class InputDataset(ABC, LoggingMixin):
             If C-Star cannot access cached file statistics, it is impossible to verify
             whether the InputDataset is correct, and so `False` is returned.
         """
-        if (self.working_path is None) or (self._local_file_stat_cache is None):
+        if (self.working_path is None) or (not self._local_file_stat_cache):
             return False
 
         # Ensure working_path is a list for unified iteration
@@ -159,11 +159,11 @@ class InputDataset(ABC, LoggingMixin):
             - `None` if `working_path` is not set or no files exist locally.
         """
 
-        if self._local_file_hash_cache is not None:
+        if self._local_file_hash_cache:
             return self._local_file_hash_cache
 
         if (not self.exists_locally) or (self.working_path is None):
-            local_hash = None
+            local_hash = {}
         elif isinstance(self.working_path, list):
             local_hash = {
                 path: _get_sha256_hash(path.resolve()) for path in self.working_path
@@ -171,7 +171,7 @@ class InputDataset(ABC, LoggingMixin):
         elif isinstance(self.working_path, Path):
             local_hash = {self.working_path: _get_sha256_hash(self.working_path)}
 
-        self._local_file_hash_cache = local_hash
+        self._local_file_hash_cache.update(local_hash)
         return local_hash
 
     def __str__(self) -> str:
@@ -193,7 +193,7 @@ class InputDataset(ABC, LoggingMixin):
         else:
             base_str += " ( does not yet exist. Call InputDataset.get() )"
 
-        if self.local_hash is not None:
+        if self.local_hash:
             base_str += f"\nLocal hash: {self.local_hash}"
         return base_str
 
@@ -212,7 +212,7 @@ class InputDataset(ABC, LoggingMixin):
             info_str += f"working_path = {self.working_path}"
             if not self.exists_locally:
                 info_str += " (does not exist)"
-        if self.local_hash is not None:
+        if self.local_hash:
             info_str += f", local_hash = {self.local_hash}"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
@@ -270,8 +270,8 @@ class InputDataset(ABC, LoggingMixin):
         )
 
         self.working_path = target_path
-        self._local_file_hash_cache = {target_path: computed_file_hash}  # 27
-        self._local_file_stat_cache = {target_path: target_path.stat()}
+        self._local_file_hash_cache.update({target_path: computed_file_hash})  # 27
+        self._local_file_stat_cache.update({target_path: target_path.stat()})
 
     @staticmethod
     def _symlink_or_download_from_source(

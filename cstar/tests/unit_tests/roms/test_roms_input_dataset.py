@@ -801,15 +801,19 @@ class TestROMSInputDatasetPartition:
         """Stop all patches."""
         mock.patch.stopall()
 
+    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
+    @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_single_file(
-        self, mock_partition_netcdf, local_roms_netcdf_dataset
+        self, mock_partition_netcdf, mock_get_hash, mock_stat, local_roms_netcdf_dataset
     ):
-        """Ensures that a single NetCDF file is partitioned and relocated correctly.
+        """Ensures that a single NetCDF file is partitioned and tracked correctly.
 
         Mocks:
         ------
         - partition_netcdf: Simulates the behavior of the partitioning utility.
+        - Path.stat: Mocks computation of file statistics
+        - _get_sha256_hash: Mocks file shasum calculation
         - Path.resolve: Mocks the resolution of the partitioned filepaths
 
         Fixtures:
@@ -820,6 +824,7 @@ class TestROMSInputDatasetPartition:
         --------
         - `partition_netcdf` is called with the correct arguments.
         - `partitioned_files` is updated with the expected file paths.
+        - `Path.stat` is called once for each partitioned file
         """
 
         np_xi, np_eta = 2, 3
@@ -851,7 +856,10 @@ class TestROMSInputDatasetPartition:
 
             # # Mock the resolve method
             with mock.patch.object(
-                Path, "resolve", autospec=True, side_effect=expected_partitioned_files
+                Path,
+                "resolve",
+                autospec=True,
+                side_effect=expected_partitioned_files * 2,
             ):
                 # Call the method under test
                 local_roms_netcdf_dataset.partition(np_xi=np_xi, np_eta=np_eta)
@@ -866,16 +874,25 @@ class TestROMSInputDatasetPartition:
                     == expected_partitioned_files
                 )
 
+                # Ensure stat was called for each saved file
+                assert (
+                    mock_stat.call_count == 6
+                ), f"Expected stat to be called 6 times, but got {mock_stat.call_count} calls."
+
+    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
+    @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_multiple_files(
-        self, mock_partition_netcdf, local_roms_netcdf_dataset
+        self, mock_partition_netcdf, mock_get_hash, mock_stat, local_roms_netcdf_dataset
     ):
         """Verifies partitioning behavior when multiple files are provided.
 
         Mocks:
         ------
         - partition_netcdf: Simulates the behavior of the partitioning utility.
-        - Path.resolve: mocks the resolution of the partitioned filepaths
+        - Path.stat: Mocks computation of file statistics
+        - _get_sha256_hash: Mocks file shasum calculation
+        - Path.resolve: Mocks the resolution of the partitioned filepaths
 
         Fixtures:
         ---------
@@ -885,6 +902,7 @@ class TestROMSInputDatasetPartition:
         --------
         - `partition_netcdf` is called the correct number of times.
         - `partitioned_files` is updated with the expected file paths.
+        - `Path.stat` is called once for each partitioned file
         """
 
         np_xi, np_eta = 2, 2
@@ -919,9 +937,12 @@ class TestROMSInputDatasetPartition:
                 for i in range(1, num_partitions + 1)
             ]
 
-            # Mock the rename method
+            # Mock the resolve method
             with mock.patch.object(
-                Path, "resolve", autospec=True, side_effect=expected_partitioned_files
+                Path,
+                "resolve",
+                autospec=True,
+                side_effect=expected_partitioned_files * 2,
             ):
                 # Call the method under test
                 local_roms_netcdf_dataset.partition(np_xi=np_xi, np_eta=np_eta)
@@ -934,6 +955,11 @@ class TestROMSInputDatasetPartition:
                     local_roms_netcdf_dataset.partitioned_files
                     == expected_partitioned_files
                 )
+
+                # Ensure stat was called for each saved file
+                assert (
+                    mock_stat.call_count == 8
+                ), f"Expected stat to be called 8 times, but got {mock_stat.call_count} calls."
 
     def test_partition_raises_when_not_local(self, local_roms_netcdf_dataset):
         """Confirms an error is raised when `working_path` does not exist locally.

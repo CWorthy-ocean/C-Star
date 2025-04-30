@@ -70,6 +70,38 @@ class ROMSInputDataset(InputDataset, ABC):
 
         return repr_str
 
+    @property
+    def _is_partitioned(self):
+        # Largely cribbed from InputDataset.exists_locally - TODO consolidate!
+        # TODO this check alone isn't enough - perhaps user wants to partition again with different np_xi and np_eta
+        if (self.partitioned_files is None) or (not self._local_file_stat_cache):
+            return False
+
+        for path in self.partitioned_files:
+            # Check if the file exists
+            if not path.exists():
+                return False
+
+            # Retrieve the cached stats
+            cached_stats = self._local_file_stat_cache.get(path)
+            if cached_stats is None:
+                return False
+
+            # Compare size first
+            current_stats = path.stat()
+            if current_stats.st_size != cached_stats.st_size:
+                return False
+
+            # Compare modification time, fallback to hash check if mismatched
+            if current_stats.st_mtime != cached_stats.st_mtime:
+                current_hash = _get_sha256_hash(path.resolve())
+                if (self._local_file_hash_cache is None) or (
+                    self._local_file_hash_cache.get(path) != current_hash
+                ):
+                    return False
+
+        return True
+
     def partition(self, np_xi: int, np_eta: int):
         """Partition a netCDF dataset into tiles to run ROMS in parallel.
 
@@ -90,7 +122,8 @@ class ROMSInputDataset(InputDataset, ABC):
            to locally available files, i.e. ROMSInputDataset.get() has been called.
         - This method sets the ROMSInputDataset.partitioned_files attribute
         """
-
+        if self._is_partitioned:
+            self.log.info(f"⏭️  {self.__class__.__name__} already partitioned, skipping")
         if not self.exists_locally:
             raise ValueError(
                 f"working_path of InputDataset \n {self.working_path}, "
@@ -126,6 +159,10 @@ class ROMSInputDataset(InputDataset, ABC):
             )
 
         self.partitioned_files = [f.resolve() for f in parted_files]
+        self._local_file_hash_cache.update(
+            {path: _get_sha256_hash(path.resolve()) for path in parted_files}
+        )  # 27
+        self._local_file_stat_cache.update({path: path.stat() for path in parted_files})
 
     def get(
         self,
@@ -184,8 +221,12 @@ class ROMSInputDataset(InputDataset, ABC):
             parted_files.append(local_dir / source_basename)
 
         self.partitioned_files = parted_files
+        self.working_path = parted_files
 
-        pass
+        self._local_file_hash_cache = {
+            path: _get_sha256_hash(path.resolve()) for path in parted_files
+        }  # 27
+        self._local_file_stat_cache = {path: path.stat() for path in parted_files}
 
     def _get_from_yaml(self, local_dir: str | Path) -> None:
         """Handle the special case where the input dataset source is a `roms-tools`
@@ -202,6 +243,7 @@ class ROMSInputDataset(InputDataset, ABC):
         local_dir (Path):
             Directory where the resulting NetCDF files should be saved.
         """
+
         # Ensure we're working with a Path object
         local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)
@@ -273,10 +315,10 @@ class ROMSInputDataset(InputDataset, ABC):
         savepath = roms_tools_class_instance.save(**save_kwargs)
         self.working_path = savepath[0] if len(savepath) == 1 else savepath
 
-        self._local_file_hash_cache = {
-            path: _get_sha256_hash(path.resolve()) for path in savepath
-        }  # 27
-        self._local_file_stat_cache = {path: path.stat() for path in savepath}
+        self._local_file_hash_cache.update(
+            {path: _get_sha256_hash(path.resolve()) for path in savepath}
+        )  # 27
+        self._local_file_stat_cache.update({path: path.stat() for path in savepath})
 
 
 class ROMSModelGrid(ROMSInputDataset):
