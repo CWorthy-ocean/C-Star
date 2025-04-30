@@ -3,9 +3,11 @@ import os
 import platform
 from pathlib import Path
 
-from dotenv import dotenv_values
+from dotenv import dotenv_values, set_key
 
 from cstar.base.utils import _run_cmd
+
+CSTAR_USER_ENV_PATH = Path("~/.cstar.env").expanduser()
 
 
 class CStarEnvironment:
@@ -120,7 +122,7 @@ class CStarEnvironment:
         env_vars = dotenv_values(
             self.package_root / f"additional_files/env_files/{self._system_name}.env"
         )
-        user_env_vars = dotenv_values(Path("~/.cstar.env").expanduser())
+        user_env_vars = dotenv_values(CSTAR_USER_ENV_PATH)
         env_vars.update(user_env_vars)
         return env_vars
 
@@ -240,3 +242,17 @@ class CStarEnvironment:
             lmod_list = F.readlines()
             for mod in lmod_list:
                 self._call_lmod(f"load {mod}")
+
+    def set_key(self, key: str, value: str) -> None:
+        """Set value of an environment variable and store it in the user environment
+        file.
+
+        Parameters
+        ----------
+        key : str
+            The environment variable to set.
+        value : str
+            The value to set for the environment variable.
+        """
+        os.environ[key] = value
+        set_key(CSTAR_USER_ENV_PATH, key, value)

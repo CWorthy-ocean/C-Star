@@ -1,6 +1,8 @@
 import os
+import pathlib
 from unittest import mock
 
+import dotenv
 import pytest
 
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -79,13 +81,10 @@ class TestMARBLExternalCodeBaseGet:
 
     def setup_method(self):
         """Common setup before each test method."""
-        # Mock subprocess, _clone_and_checkout, and _update_user_dotenv
+        # Mock subprocess and _clone_and_checkout
         self.mock_subprocess_run = mock.patch("subprocess.run").start()
         self.mock_clone_and_checkout = mock.patch(
             "cstar.marbl.external_codebase._clone_and_checkout"
-        ).start()
-        self.mock_update_user_dotenv = mock.patch(
-            "cstar.marbl.external_codebase._update_user_dotenv"
         ).start()
 
         # Clear environment variables
@@ -96,7 +95,9 @@ class TestMARBLExternalCodeBaseGet:
         """Common teardown after each test method."""
         mock.patch.stopall()
 
-    def test_get_success(self, marbl_codebase, tmp_path):
+    def test_get_success(
+        self, marbl_codebase: MARBLExternalCodeBase, tmp_path: pathlib.Path
+    ):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
         ## Make temporary target dir
@@ -105,40 +106,59 @@ class TestMARBLExternalCodeBaseGet:
         ## Mock success of calls to subprocess.run:
         self.mock_subprocess_run.return_value.returncode = 0
 
-        # Test
-        ## Call the get method
-        marbl_codebase.get(target=marbl_dir)
+        dotenv_path = tmp_path / ".cstar.env"
+        key = "MARBL_ROOT"
+        value = str(marbl_dir)
 
-        # Assertions:
-        ## Check environment variables
-        assert os.environ["MARBL_ROOT"] == str(marbl_dir)
+        with (
+            mock.patch(
+                "cstar.system.environment.CSTAR_USER_ENV_PATH",
+                dotenv_path,
+            ),
+            mock.patch.dict(os.environ, {key: "old-value"}),
+        ):
+            # Test
+            ## Call the get method
+            marbl_codebase.get(target=marbl_dir)
 
-        ## Check that _clone_and_checkout was (mock) called correctly
-        self.mock_clone_and_checkout.assert_called_once_with(
-            source_repo=marbl_codebase.source_repo,
-            local_path=marbl_dir,
-            checkout_target=marbl_codebase.checkout_target,
-        )
+            # Assertions:
+            ## Check environment variables
+            cstar_sysmgr.environment.set_key(key, value)
 
-        ## Check that _update_user_dotenv was (mock) called correctly
-        env_file_str = f'MARBL_ROOT="{marbl_dir}"\n'
-        self.mock_update_user_dotenv.assert_called_once_with(env_file_str)
+            assert os.environ[key] == str(value)
 
-        self.mock_subprocess_run.assert_called_once_with(
-            f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
-            cwd=marbl_dir / "src",
-            capture_output=True,
-            text=True,
-            shell=True,
-        )
+            ## Check that _clone_and_checkout was (mock) called correctly
+            self.mock_clone_and_checkout.assert_called_once_with(
+                source_repo=marbl_codebase.source_repo,
+                local_path=marbl_dir,
+                checkout_target=marbl_codebase.checkout_target,
+            )
+
+            ## Check that _update_user_dotenv was (mock) called correctly
+            actual_value = dotenv.get_key(tmp_path / ".cstar.env", key)
+            assert actual_value == value
+
+            self.mock_subprocess_run.assert_called_once_with(
+                f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
+                cwd=marbl_dir / "src",
+                capture_output=True,
+                text=True,
+                shell=True,
+            )
 
     def test_make_failure(self, marbl_codebase, tmp_path):
         """Test that the get method raises an error when 'make' fails."""
 
         ## There are two subprocess calls, we'd like one fail, one pass:
+        dotenv_path = tmp_path / ".cstar.env"
+
         self.mock_subprocess_run.side_effect = [
             mock.Mock(returncode=1, stderr="Mocked MARBL Compilation Failure"),
         ]
+        self.mock_update_user_dotenv = mock.patch(
+            "cstar.marbl.external_codebase.CSTAR_USER_ENV_PATH",
+            dotenv_path,
+        )
 
         # Test
         with pytest.raises(
