@@ -760,9 +760,7 @@ class TestInputDatasetGet:
         self.mock_exists.return_value = False
         self.mock_resolve.return_value = self.target_dir
         expected_message = (
-            "InputDataset.source.source_type is 'url' "
-            + "but no InputDataset.source.file_hash is not defined. "
-            + "Cannot proceed."
+            "Source type is URL but no file hash was not provided. Cannot proceed."
         )
 
         with pytest.raises(ValueError) as exception_info:

@@ -36,7 +36,7 @@ class ROMSInputDataset(InputDataset, ABC):
         file_hash: Optional[str] = None,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
-        n_source_partitions: Optional[int] = 1,
+        n_source_partitions: int = 1,
     ):
         super().__init__(
             location=location,
@@ -158,10 +158,34 @@ class ROMSInputDataset(InputDataset, ABC):
             self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
             return
 
-        if self.source.source_type != "yaml":
-            super().get(local_dir=local_dir)
-        else:
+        if self.source.source_type == "yaml":
             self._get_from_yaml(local_dir=local_dir)
+        elif self.n_source_partitions > 1:
+            self._get_from_partitioned_source(local_dir=local_dir)
+        else:
+            super().get(local_dir=local_dir)
+
+    def _get_from_partitioned_source(self, local_dir: Path) -> None:
+        ndigits = len(str(self.n_source_partitions))
+        parted_files: list[Path] = []
+
+        for i in range(self.n_source_partitions):
+            source = self.source.location.replace(".nc", f"{i:0{ndigits}d}.nc")
+            source_basename = self.source.basename.replace(".nc", f"{i:0{ndigits}d}.nc")
+
+            self._symlink_or_download_from_source(
+                source_location=source,
+                location_type=self.source.location_type,
+                expected_file_hash=None,
+                target_path=local_dir / source_basename,
+                logger=self.log,
+            )
+
+            parted_files.append(local_dir / source_basename)
+
+        self.partitioned_files = parted_files
+
+        pass
 
     def _get_from_yaml(self, local_dir: str | Path) -> None:
         """Handle the special case where the input dataset source is a `roms-tools`
