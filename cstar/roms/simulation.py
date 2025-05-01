@@ -242,7 +242,6 @@ class ROMSSimulation(Simulation):
         # roms-specific
         self.exe_path: Optional[Path] = None
         self._exe_hash: Optional[str] = None
-        # self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
 
@@ -261,9 +260,10 @@ class ROMSSimulation(Simulation):
         ValueError if not."""
 
         for inp in self.input_datasets:
-            if (inp.source_np_xi != self.discretization.n_procs_x) or (
-                inp.source_np_eta != self.discretization.n_procs_y
-            ):
+            if (
+                (inp.source_np_xi != self.discretization.n_procs_x)
+                or (inp.source_np_eta != self.discretization.n_procs_y)
+            ) and (inp.source_np_xi * inp.source_np_eta > 1):
                 raise ValueError(
                     f"Cannot instantiate ROMSSimulation with n_procs_x={self.discretization.n_procs_x}, "
                     f"n_procs_y={self.discretization.n_procs_y} when {inp.__class__.__name__} has partitioning "

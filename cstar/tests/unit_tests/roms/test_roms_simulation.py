@@ -21,6 +21,7 @@ from cstar.roms.input_dataset import (
     ROMSInitialConditions,
     ROMSInputDataset,
     ROMSModelGrid,
+    ROMSPartitioning,
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
@@ -227,7 +228,6 @@ class TestROMSSimulationInitialization:
         # Uninitialized at outset/private
         assert sim.exe_path is None
         assert sim._exe_hash is None
-        assert sim.partitioned_files is None
         assert sim._execution_handler is None
 
     def test_init_raises_if_no_discretization(self, tmp_path):
@@ -1450,10 +1450,18 @@ class TestProcessingAndExecution:
         for ind in sim.input_datasets:
             ind.working_path = dataset_directory / ind.source.basename
             partitioned_path = partitioned_directory / ind.source.basename
-            ind.partitioned_files = [
-                partitioned_path.with_suffix("").with_suffix(f".{i}.nc")
-                for i in range(sim.discretization.n_procs_tot)
-            ]
+            # ind.partitionined_files = [
+            #     partitioned_path.with_suffix("").with_suffix(f".{i}.nc")
+            #     for i in range(sim.discretization.n_procs_tot)
+            # ]
+            ind.partitioning = ROMSPartitioning(
+                np_xi=sim.discretization.n_procs_x,
+                np_eta=sim.discretization.n_procs_y,
+                files=[
+                    partitioned_path.with_suffix("").with_suffix(f".{i}.nc")
+                    for i in range(sim.discretization.n_procs_tot)
+                ],
+            )
 
         assert isinstance(sim._runtime_code_modifications, list)
         assert [isinstance(rcm, dict) for rcm in sim._runtime_code_modifications]

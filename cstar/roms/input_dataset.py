@@ -12,8 +12,33 @@ from cstar.base.input_dataset import InputDataset
 from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
 
 
-class Partitioning:
-    """TODO DOCSTRING."""
+class ROMSPartitioning:
+    """Describes a partitioning of a ROMS input dataset into a grid of subdomains.
+
+    This object stores the number of partitions along the xi and eta dimensions,
+    along with the list of corresponding file paths. It supports indexing and
+    length queries like a sequence.
+
+    Parameters
+    ----------
+    np_xi : int
+        Number of partitions along the xi (longitude-like) axis.
+    np_eta : int
+        Number of partitions along the eta (latitude-like) axis.
+    files : list of Path
+        List of paths to partitioned NetCDF files. The expected length is
+        `np_xi * np_eta`, and the order should be consistent with the ROMS
+        partitioning convention.
+
+    Attributes
+    ----------
+    np_xi : int
+        Number of xi-direction partitions.
+    np_eta : int
+        Number of eta-direction partitions.
+    files : list of Path
+        Paths to the partitioned files.
+    """
 
     def __init__(self, np_xi: int, np_eta: int, files: List[Path]):
         self.np_xi = np_xi
@@ -23,7 +48,7 @@ class Partitioning:
         self._local_file_stat_cache: Dict = {}
 
     def __repr__(self) -> str:
-        return f"Partitioning(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files)}"
+        return f"{self.__class__.__name__}(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files,pad=57)})"
 
     def __len__(self):
         return len(self.files)
@@ -48,8 +73,6 @@ class ROMSInputDataset(InputDataset, ABC):
         + (InputDataset.__doc__ or "")
     )
 
-    # partitioned_files: List[Path] = []
-
     def __init__(
         self,
         location: str,
@@ -65,20 +88,19 @@ class ROMSInputDataset(InputDataset, ABC):
             start_date=start_date,
             end_date=end_date,
         )
-        # self.n_source_partitions = n_source_partitions
+
         self.source_np_xi = source_np_xi
         self.source_np_eta = source_np_eta
-        self.partitioning: Optional[Partitioning] = None
+        self.partitioning: Optional[ROMSPartitioning] = None
 
     def __str__(self) -> str:
         base_str = super().__str__()
         if self.partitioning is not None:
-            base_str += f"\nPartitioning : {self.partitioning}"
+            base_str += f"\nPartitioning: {self.partitioning}"
         return base_str
 
     def __repr__(self) -> str:
         repr_str = super().__repr__()
-        # if hasattr(self, "partitioned_files") and len(self.partitioned_files) > 0:
         if self.partitioning is not None:
             info_str = f"partitioning  = {self.partitioning}"
             if "State:" in repr_str:
@@ -89,7 +111,9 @@ class ROMSInputDataset(InputDataset, ABC):
 
         return repr_str
 
-    def partition(self, np_xi: int, np_eta: int):
+    def partition(
+        self, np_xi: int, np_eta: int, overwrite_existing_files: bool = False
+    ):
         """Partition a netCDF dataset into tiles to run ROMS in parallel.
 
         Takes a local InputDataset and parallelisation parameters and uses
@@ -116,12 +140,13 @@ class ROMSInputDataset(InputDataset, ABC):
                 self.log.info(
                     f"⏭️  {self.__class__.__name__} already partitioned, skipping"
                 )
-            else:
-                # TODO overwrite option
-                raise NotImplementedError(
-                    f"The file has already been partitioned into a different arrangement ({self.partitioning.np_xi},{self.partitioning.np_eta}). Overwriting will be supported in future."
+                return
+            elif not overwrite_existing_files:
+                raise FileExistsError(
+                    f"The file has already been partitioned into a different arrangement "
+                    f"({self.partitioning.np_xi},{self.partitioning.np_eta}). "
+                    "To overwrite these files, try again with overwrite_existing_files=True"
                 )
-            return
 
         if not self.exists_locally:
             raise ValueError(
@@ -153,11 +178,15 @@ class ROMSInputDataset(InputDataset, ABC):
 
         for idfile in id_files_to_partition:
             self.log.info(f"Partitioning {idfile} into ({np_xi},{np_eta})")
-            parted_files += roms_tools.partition_netcdf(
-                idfile, np_xi=np_xi, np_eta=np_eta
+            parted_files.extend(
+                roms_tools.partition_netcdf(idfile, np_xi=np_xi, np_eta=np_eta)
             )
 
-        self.partitioning = Partitioning(np_xi=np_xi, np_eta=np_eta, files=parted_files)
+        parted_files = [f.resolve() for f in parted_files]
+
+        self.partitioning = ROMSPartitioning(
+            np_xi=np_xi, np_eta=np_eta, files=parted_files
+        )
         self.partitioning._local_file_hash_cache.update(
             {path: _get_sha256_hash(path.resolve()) for path in parted_files}
         )  # 27
@@ -230,7 +259,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
             parted_files.append(local_dir / source_basename)
 
-        self.partitioning = Partitioning(
+        self.partitioning = ROMSPartitioning(
             np_xi=source_np_xi, np_eta=source_np_eta, files=parted_files
         )
         self.working_path = parted_files

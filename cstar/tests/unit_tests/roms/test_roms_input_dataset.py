@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 
 from cstar.base.datasource import DataSource
-from cstar.roms import ROMSForcingCorrections, ROMSInputDataset
+from cstar.roms import ROMSForcingCorrections, ROMSInputDataset, ROMSPartitioning
 
 
 class MockROMSInputDataset(ROMSInputDataset):
@@ -164,16 +164,21 @@ class TestStrAndRepr:
         - String representation of the dataset includes the list of
           partitioned files in the correct format.
         """
-        local_roms_netcdf_dataset.partitioned_files = [
-            "local_file.001.nc",
-            "local_file.002.nc",
-        ]
+        local_roms_netcdf_dataset.partitioning = ROMSPartitioning(
+            np_xi=1,
+            np_eta=2,
+            files=[
+                "local_file.001.nc",
+                "local_file.002.nc",
+            ],
+        )
         expected_str = dedent(
             """\
-            Partitioned files: ['local_file.001.nc',
-                                'local_file.002.nc']
+            Partitioning: ROMSPartitioning(np_xi=1, np_eta=2, files=['local_file.001.nc',
+                                                                     'local_file.002.nc'])
         """
         ).strip()
+
         actual_str = str(local_roms_netcdf_dataset).strip()
         assert (
             expected_str in actual_str
@@ -196,14 +201,17 @@ class TestStrAndRepr:
         - The format of the `partitioned_files` list matches the expected string output.
         """
 
-        local_roms_netcdf_dataset.partitioned_files = [
-            "local_file.001.nc",
-            "local_file.002.nc",
-        ]
+        local_roms_netcdf_dataset.partitioning = ROMSPartitioning(
+            np_xi=1,
+            np_eta=2,
+            files=[
+                "local_file.001.nc",
+                "local_file.002.nc",
+            ],
+        )
         expected_repr = dedent(
             """\
-            State: <partitioned_files = ['local_file.001.nc',
-                                         'local_file.002.nc']>
+            State: <partitioning = ROMSPartitioning(np_xi=1, np_eta=2, files=['local_file.001.nc', 'local_file.002.nc'])>
         """
         ).strip()
         actual_repr = repr(local_roms_netcdf_dataset)
@@ -237,17 +245,20 @@ class TestStrAndRepr:
         - The format of both attributes matches the expected string output.
         """
 
-        local_roms_netcdf_dataset.partitioned_files = [
-            "local_file.001.nc",
-            "local_file.002.nc",
-        ]
+        local_roms_netcdf_dataset.partitioning = ROMSPartitioning(
+            np_xi=1,
+            np_eta=2,
+            files=[
+                "local_file.001.nc",
+                "local_file.002.nc",
+            ],
+        )
+
         local_roms_netcdf_dataset.working_path = "/some/path/local_file.nc"
 
         expected_repr = dedent(
             """\
-            State: <working_path = /some/path/local_file.nc (does not exist),
-                    partitioned_files = ['local_file.001.nc',
-                                         'local_file.002.nc'] >
+            State: <working_path = /some/path/local_file.nc (does not exist), partitioning = ROMSPartitioning(np_xi=1, np_eta=2, files=['local_file.001.nc', 'local_file.002.nc']) >
         """
         ).strip()
         actual_repr = repr(local_roms_netcdf_dataset)
@@ -823,7 +834,7 @@ class TestROMSInputDatasetPartition:
         Asserts:
         --------
         - `partition_netcdf` is called with the correct arguments.
-        - `partitioned_files` is updated with the expected file paths.
+        - `ROMSInputDataset.partitioning.files` is updated with the expected file paths.
         - `Path.stat` is called once for each partitioned file
         """
 
@@ -870,7 +881,7 @@ class TestROMSInputDatasetPartition:
                 )
 
                 assert (
-                    local_roms_netcdf_dataset.partitioned_files
+                    local_roms_netcdf_dataset.partitioning.files
                     == expected_partitioned_files
                 )
 
@@ -901,7 +912,7 @@ class TestROMSInputDatasetPartition:
         Asserts:
         --------
         - `partition_netcdf` is called the correct number of times.
-        - `partitioned_files` is updated with the expected file paths.
+        - `ROMSInputDataset.partitioning.files` is updated with the expected file paths.
         - `Path.stat` is called once for each partitioned file
         """
 
@@ -952,7 +963,7 @@ class TestROMSInputDatasetPartition:
                     local_roms_netcdf_dataset.working_path
                 )
                 assert (
-                    local_roms_netcdf_dataset.partitioned_files
+                    local_roms_netcdf_dataset.partitioning.files
                     == expected_partitioned_files
                 )
 
