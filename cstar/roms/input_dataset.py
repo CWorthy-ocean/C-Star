@@ -74,7 +74,11 @@ class ROMSInputDataset(InputDataset, ABC):
     def _is_partitioned(self):
         # Largely cribbed from InputDataset.exists_locally - TODO consolidate!
         # TODO this check alone isn't enough - perhaps user wants to partition again with different np_xi and np_eta
-        if (self.partitioned_files is None) or (not self._local_file_stat_cache):
+        if (
+            (self.partitioned_files is None)
+            or (len(self.partitioned_files) == 0)
+            or (not self._local_file_stat_cache)
+        ):
             return False
 
         for path in self.partitioned_files:
@@ -124,6 +128,7 @@ class ROMSInputDataset(InputDataset, ABC):
         """
         if self._is_partitioned:
             self.log.info(f"⏭️  {self.__class__.__name__} already partitioned, skipping")
+            return
         if not self.exists_locally:
             raise ValueError(
                 f"working_path of InputDataset \n {self.working_path}, "
@@ -207,8 +212,10 @@ class ROMSInputDataset(InputDataset, ABC):
         parted_files: list[Path] = []
 
         for i in range(self.n_source_partitions):
-            source = self.source.location.replace(".nc", f"{i:0{ndigits}d}.nc")
-            source_basename = self.source.basename.replace(".nc", f"{i:0{ndigits}d}.nc")
+            source = self.source.location.replace(".nc", f".{i:0{ndigits}d}.nc")
+            source_basename = self.source.basename.replace(
+                ".nc", f".{i:0{ndigits}d}.nc"
+            )
 
             self._symlink_or_download_from_source(
                 source_location=source,

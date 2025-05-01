@@ -1306,7 +1306,6 @@ class ROMSSimulation(Simulation):
             [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
         ):
             datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
-
             for f in datasets_to_partition:
                 f.partition(
                     np_xi=self.discretization.n_procs_x,
