@@ -2,7 +2,7 @@ import datetime as dt
 import tempfile
 from abc import ABC
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 import roms_tools
@@ -10,6 +10,26 @@ import yaml
 
 from cstar.base.input_dataset import InputDataset
 from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
+
+
+class Partitioning:
+    """TODO DOCSTRING."""
+
+    def __init__(self, np_xi: int, np_eta: int, files: List[Path]):
+        self.np_xi = np_xi
+        self.np_eta = np_eta
+        self.files = files
+        self._local_file_hash_cache: Dict = {}
+        self._local_file_stat_cache: Dict = {}
+
+    def __repr__(self) -> str:
+        return f"Partitioning(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files)}"
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        return self.files[index]
 
 
 class ROMSInputDataset(InputDataset, ABC):
@@ -28,7 +48,7 @@ class ROMSInputDataset(InputDataset, ABC):
         + (InputDataset.__doc__ or "")
     )
 
-    partitioned_files: List[Path] = []
+    # partitioned_files: List[Path] = []
 
     def __init__(
         self,
@@ -36,7 +56,8 @@ class ROMSInputDataset(InputDataset, ABC):
         file_hash: Optional[str] = None,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
-        n_source_partitions: int = 1,
+        source_np_xi: int = 1,
+        source_np_eta: int = 1,
     ):
         super().__init__(
             location=location,
@@ -44,24 +65,22 @@ class ROMSInputDataset(InputDataset, ABC):
             start_date=start_date,
             end_date=end_date,
         )
-        self.n_source_partitions = n_source_partitions
+        # self.n_source_partitions = n_source_partitions
+        self.source_np_xi = source_np_xi
+        self.source_np_eta = source_np_eta
+        self.partitioning: Optional[Partitioning] = None
 
     def __str__(self) -> str:
         base_str = super().__str__()
-        if hasattr(self, "partitioned_files") and len(self.partitioned_files) > 0:
-            base_str += "\nPartitioned files: "
-            base_str += _list_to_concise_str(
-                [str(f) for f in self.partitioned_files], pad=20
-            )
+        if self.partitioning is not None:
+            base_str += f"\nPartitioning : {self.partitioning}"
         return base_str
 
     def __repr__(self) -> str:
         repr_str = super().__repr__()
-        if hasattr(self, "partitioned_files") and len(self.partitioned_files) > 0:
-            info_str = "partitioned_files = "
-            info_str += _list_to_concise_str(
-                [str(f) for f in self.partitioned_files], pad=29
-            )
+        # if hasattr(self, "partitioned_files") and len(self.partitioned_files) > 0:
+        if self.partitioning is not None:
+            info_str = f"partitioning  = {self.partitioning}"
             if "State:" in repr_str:
                 repr_str = repr_str.strip(",>")
                 repr_str += ",\n" + (" " * 8) + info_str + "\n>"
@@ -69,42 +88,6 @@ class ROMSInputDataset(InputDataset, ABC):
                 repr_str += f"\nState: <{info_str}>"
 
         return repr_str
-
-    @property
-    def _is_partitioned(self):
-        # Largely cribbed from InputDataset.exists_locally - TODO consolidate!
-        # TODO this check alone isn't enough - perhaps user wants to partition again with different np_xi and np_eta
-        if (
-            (self.partitioned_files is None)
-            or (len(self.partitioned_files) == 0)
-            or (not self._local_file_stat_cache)
-        ):
-            return False
-
-        for path in self.partitioned_files:
-            # Check if the file exists
-            if not path.exists():
-                return False
-
-            # Retrieve the cached stats
-            cached_stats = self._local_file_stat_cache.get(path)
-            if cached_stats is None:
-                return False
-
-            # Compare size first
-            current_stats = path.stat()
-            if current_stats.st_size != cached_stats.st_size:
-                return False
-
-            # Compare modification time, fallback to hash check if mismatched
-            if current_stats.st_mtime != cached_stats.st_mtime:
-                current_hash = _get_sha256_hash(path.resolve())
-                if (self._local_file_hash_cache is None) or (
-                    self._local_file_hash_cache.get(path) != current_hash
-                ):
-                    return False
-
-        return True
 
     def partition(self, np_xi: int, np_eta: int):
         """Partition a netCDF dataset into tiles to run ROMS in parallel.
@@ -124,11 +107,22 @@ class ROMSInputDataset(InputDataset, ABC):
         ------
         - This method will only work on ROMSInputDataset instances corresponding
            to locally available files, i.e. ROMSInputDataset.get() has been called.
-        - This method sets the ROMSInputDataset.partitioned_files attribute
+        - This method sets the ROMSInputDataset.partitioning attribute
         """
-        if self._is_partitioned:
-            self.log.info(f"⏭️  {self.__class__.__name__} already partitioned, skipping")
+        if self.partitioning is not None:
+            if (self.partitioning.np_xi == np_xi) and (
+                self.partitioning.np_eta == np_eta
+            ):
+                self.log.info(
+                    f"⏭️  {self.__class__.__name__} already partitioned, skipping"
+                )
+            else:
+                # TODO overwrite option
+                raise NotImplementedError(
+                    f"The file has already been partitioned into a different arrangement ({self.partitioning.np_xi},{self.partitioning.np_eta}). Overwriting will be supported in future."
+                )
             return
+
         if not self.exists_locally:
             raise ValueError(
                 f"working_path of InputDataset \n {self.working_path}, "
@@ -163,11 +157,13 @@ class ROMSInputDataset(InputDataset, ABC):
                 idfile, np_xi=np_xi, np_eta=np_eta
             )
 
-        self.partitioned_files = [f.resolve() for f in parted_files]
-        self._local_file_hash_cache.update(
+        self.partitioning = Partitioning(np_xi=np_xi, np_eta=np_eta, files=parted_files)
+        self.partitioning._local_file_hash_cache.update(
             {path: _get_sha256_hash(path.resolve()) for path in parted_files}
         )  # 27
-        self._local_file_stat_cache.update({path: path.stat() for path in parted_files})
+        self.partitioning._local_file_stat_cache.update(
+            {path: path.stat() for path in parted_files}
+        )
 
     def get(
         self,
@@ -202,16 +198,23 @@ class ROMSInputDataset(InputDataset, ABC):
 
         if self.source.source_type == "yaml":
             self._get_from_yaml(local_dir=local_dir)
-        elif self.n_source_partitions > 1:
-            self._get_from_partitioned_source(local_dir=local_dir)
+        elif (self.source_np_xi > 1) or (self.source_np_eta > 1):
+            self._get_from_partitioned_source(
+                local_dir=local_dir,
+                source_np_xi=self.source_np_xi,
+                source_np_eta=self.source_np_eta,
+            )
         else:
             super().get(local_dir=local_dir)
 
-    def _get_from_partitioned_source(self, local_dir: Path) -> None:
-        ndigits = len(str(self.n_source_partitions))
+    def _get_from_partitioned_source(
+        self, local_dir: Path, source_np_xi: int, source_np_eta: int
+    ) -> None:
+        n_source_partitions = source_np_xi * source_np_eta
+        ndigits = len(str(n_source_partitions))
         parted_files: list[Path] = []
 
-        for i in range(self.n_source_partitions):
+        for i in range(n_source_partitions):
             source = self.source.location.replace(".nc", f".{i:0{ndigits}d}.nc")
             source_basename = self.source.basename.replace(
                 ".nc", f".{i:0{ndigits}d}.nc"
@@ -227,13 +230,17 @@ class ROMSInputDataset(InputDataset, ABC):
 
             parted_files.append(local_dir / source_basename)
 
-        self.partitioned_files = parted_files
+        self.partitioning = Partitioning(
+            np_xi=source_np_xi, np_eta=source_np_eta, files=parted_files
+        )
         self.working_path = parted_files
 
-        self._local_file_hash_cache = {
+        self.partitioning._local_file_hash_cache = {
             path: _get_sha256_hash(path.resolve()) for path in parted_files
         }  # 27
-        self._local_file_stat_cache = {path: path.stat() for path in parted_files}
+        self.partitioning._local_file_stat_cache = {
+            path: path.stat() for path in parted_files
+        }
 
     def _get_from_yaml(self, local_dir: str | Path) -> None:
         """Handle the special case where the input dataset source is a `roms-tools`
