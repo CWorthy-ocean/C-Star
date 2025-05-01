@@ -2166,9 +2166,13 @@ class TestProcessingAndExecution:
             sim.pre_run()
 
             # Assert that partition() was called only on datasets that exist locally
-            dataset_1.partition.assert_called_once_with(np_xi=2, np_eta=3)
+            dataset_1.partition.assert_called_once_with(
+                np_xi=2, np_eta=3, overwrite_existing_files=False
+            )
             dataset_2.partition.assert_not_called()  # Does not exist → shouldn't be partitioned
-            dataset_3.partition.assert_called_once_with(np_xi=2, np_eta=3)
+            dataset_3.partition.assert_called_once_with(
+                np_xi=2, np_eta=3, overwrite_existing_files=False
+            )
 
     def test_run_no_executable(self, example_roms_simulation):
         """Tests that `run` raises an error if no executable is found.
