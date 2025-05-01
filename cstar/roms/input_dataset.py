@@ -79,8 +79,8 @@ class ROMSInputDataset(InputDataset, ABC):
         file_hash: Optional[str] = None,
         start_date: Optional[str | dt.datetime] = None,
         end_date: Optional[str | dt.datetime] = None,
-        source_np_xi: int = 1,
-        source_np_eta: int = 1,
+        source_np_xi: Optional[int] = None,
+        source_np_eta: Optional[int] = None,
     ):
         super().__init__(
             location=location,
@@ -92,6 +92,14 @@ class ROMSInputDataset(InputDataset, ABC):
         self.source_np_xi = source_np_xi
         self.source_np_eta = source_np_eta
         self.partitioning: Optional[ROMSPartitioning] = None
+
+    def to_dict(self) -> dict:
+        input_dataset_dict = super().to_dict()
+        if self.source_np_xi is not None:
+            input_dataset_dict["source_np_xi"] = self.source_np_xi
+        if self.source_np_eta is not None:
+            input_dataset_dict["source_np_eta"] = self.source_np_eta
+        return input_dataset_dict
 
     def __str__(self) -> str:
         base_str = super().__str__()
@@ -227,7 +235,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
         if self.source.source_type == "yaml":
             self._get_from_yaml(local_dir=local_dir)
-        elif (self.source_np_xi > 1) or (self.source_np_eta > 1):
+        elif (self.source_np_xi is not None) and (self.source_np_eta is not None):
             self._get_from_partitioned_source(
                 local_dir=local_dir,
                 source_np_xi=self.source_np_xi,

@@ -261,9 +261,11 @@ class ROMSSimulation(Simulation):
 
         for inp in self.input_datasets:
             if (
+                (inp.source_np_xi is not None) and (inp.source_np_eta is not None)
+            ) and (
                 (inp.source_np_xi != self.discretization.n_procs_x)
                 or (inp.source_np_eta != self.discretization.n_procs_y)
-            ) and (inp.source_np_xi * inp.source_np_eta > 1):
+            ):
                 raise ValueError(
                     f"Cannot instantiate ROMSSimulation with n_procs_x={self.discretization.n_procs_x}, "
                     f"n_procs_y={self.discretization.n_procs_y} when {inp.__class__.__name__} has partitioning "
