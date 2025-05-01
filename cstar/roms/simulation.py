@@ -260,17 +260,17 @@ class ROMSSimulation(Simulation):
         ValueError if not."""
 
         for inp in self.input_datasets:
-            if (
-                (inp.source_np_xi is not None) and (inp.source_np_eta is not None)
-            ) and (
-                (inp.source_np_xi != self.discretization.n_procs_x)
-                or (inp.source_np_eta != self.discretization.n_procs_y)
-            ):
-                raise ValueError(
-                    f"Cannot instantiate ROMSSimulation with n_procs_x={self.discretization.n_procs_x}, "
-                    f"n_procs_y={self.discretization.n_procs_y} when {inp.__class__.__name__} has partitioning "
-                    f"({inp.source_np_xi},{inp.source_np_eta}) at source."
-                )
+            if inp.source_partitioning:
+                if (inp.source_np_xi != self.discretization.n_procs_x) or (
+                    inp.source_np_eta != self.discretization.n_procs_y
+                ):
+                    raise ValueError(
+                        f"Cannot instantiate ROMSSimulation with "
+                        f"n_procs_x={self.discretization.n_procs_x}, "
+                        f"n_procs_y={self.discretization.n_procs_y} "
+                        "when {inp.__class__.__name__} has partitioning "
+                        f"({inp.source_np_xi},{inp.source_np_eta}) at source."
+                    )
 
     def _check_inputdataset_dates(self) -> None:
         """For ROMSInputDatasets whose source type is `yaml`, ensure that any set

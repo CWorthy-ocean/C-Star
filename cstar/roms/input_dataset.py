@@ -93,11 +93,16 @@ class ROMSInputDataset(InputDataset, ABC):
         self.source_np_eta = source_np_eta
         self.partitioning: Optional[ROMSPartitioning] = None
 
+    @property
+    def source_partitioning(self):
+        if (self.source_np_xi is not None) and (self.source_np_eta is not None):
+            return (self.source_np_xi, self.source_np_eta)
+        return None
+
     def to_dict(self) -> dict:
         input_dataset_dict = super().to_dict()
-        if self.source_np_xi is not None:
+        if self.source_partitioning is not None:
             input_dataset_dict["source_np_xi"] = self.source_np_xi
-        if self.source_np_eta is not None:
             input_dataset_dict["source_np_eta"] = self.source_np_eta
         return input_dataset_dict
 
@@ -235,11 +240,11 @@ class ROMSInputDataset(InputDataset, ABC):
 
         if self.source.source_type == "yaml":
             self._get_from_yaml(local_dir=local_dir)
-        elif (self.source_np_xi is not None) and (self.source_np_eta is not None):
+        elif self.source_partitioning is not None:
             self._get_from_partitioned_source(
                 local_dir=local_dir,
-                source_np_xi=self.source_np_xi,
-                source_np_eta=self.source_np_eta,
+                source_np_xi=self.source_partitioning[0],
+                source_np_eta=self.source_partitioning[1],
             )
         else:
             super().get(local_dir=local_dir)
