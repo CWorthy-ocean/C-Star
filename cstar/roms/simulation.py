@@ -1291,13 +1291,18 @@ class ROMSSimulation(Simulation):
 
         self.persist()
 
-    def pre_run(self) -> None:
+    def pre_run(self, overwrite_existing_files=False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
         This method partitions any required input datasets according to
         the computational domain decomposition specified in the discretization
         settings. Each dataset is divided into smaller files so that they
         can be processed in parallel by ROMS during execution.
+
+        Parameters
+        ----------
+        overwrite_existing_files (bool, default False)
+            If True, any existing partitioned files will be overwritten
 
         Raises
         ------
@@ -1326,6 +1331,7 @@ class ROMSSimulation(Simulation):
                 f.partition(
                     np_xi=self.discretization.n_procs_x,
                     np_eta=self.discretization.n_procs_y,
+                    overwrite_existing_files=overwrite_existing_files,
                 )
 
         self.persist()

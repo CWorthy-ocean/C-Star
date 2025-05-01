@@ -141,7 +141,7 @@ class ROMSInputDataset(InputDataset, ABC):
            to locally available files, i.e. ROMSInputDataset.get() has been called.
         - This method sets the ROMSInputDataset.partitioning attribute
         """
-        if self.partitioning is not None:
+        if (self.partitioning is not None) and (not overwrite_existing_files):
             if (self.partitioning.np_xi == np_xi) and (
                 self.partitioning.np_eta == np_eta
             ):
@@ -149,7 +149,7 @@ class ROMSInputDataset(InputDataset, ABC):
                     f"⏭️  {self.__class__.__name__} already partitioned, skipping"
                 )
                 return
-            elif not overwrite_existing_files:
+            else:
                 raise FileExistsError(
                     f"The file has already been partitioned into a different arrangement "
                     f"({self.partitioning.np_xi},{self.partitioning.np_eta}). "
