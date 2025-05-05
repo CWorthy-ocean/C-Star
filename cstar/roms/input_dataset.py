@@ -53,9 +53,6 @@ class ROMSPartitioning:
     def __len__(self):
         return len(self.files)
 
-    def __getitem__(self, index):
-        return self.files[index]
-
 
 class ROMSInputDataset(InputDataset, ABC):
     (
