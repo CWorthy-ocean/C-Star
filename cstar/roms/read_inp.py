@@ -1,20 +1,16 @@
-
-from enum import StrEnum
 from pathlib import Path
-from typing import Any, Optional, ClassVar
+from typing import Any, ClassVar, Optional
 
 import numpy as np
-
+from pydantic import (
+    BaseModel,
+    FieldSerializationInfo,
+    field_serializer,
+    model_serializer,
+)
 
 from cstar.base.utils import _list_to_concise_str
 
-from pydantic import (
-    BaseModel,
-    RootModel,
-    model_serializer,
-    FieldSerializationInfo,
-    field_serializer,
-)
 
 # Used to print values in a human-readable, fortran-friendly way
 def _format_value(val: float | str) -> str:
@@ -25,22 +21,22 @@ def _format_value(val: float | str) -> str:
             return f"{val:.6E}".replace("E+00", "E0")
     return str(val)
 
-def _list_of_formatted_values(v: Any) -> list[str]:
-    """Apply format_value to one or many values and return as a list to iterate over""" 
-    if isinstance(v, (list, np.ndarray)):
-        return [_format_value(x) for x in v]
-    return [_format_value(v)]
+
+def _format_float_list(lst: list) -> str:
+    """Format a list of values for .in file."""
+    return " ".join(_format_value(x) for x in lst)
 
 
+# # Scratch this
+# def _list_of_formatted_values(v: Any) -> list[str]:
+#     """Apply format_value to one or many values and return as a list to iterate over."""
+#     if isinstance(v, (list, np.ndarray)):
+#         return [_format_value(x) for x in v]
+#     return [_format_value(v)]
 
-class SerializeModes(StrEnum):
-    KV = "kv"
-    LIST = "list"
-    SINGLE = "single"
 
 # Subclassing BaseModel creates something that behaves similarly to (but isn't) a dataclass
 class RomsSection(BaseModel):
-
     # typing sth as a ClassVar tells pydantic it's not supposed to be serialized,
     # and is for internal use.
     # This is the base class, so everything here is a ClassVar. Subclasses define
@@ -48,7 +44,6 @@ class RomsSection(BaseModel):
     section_name: ClassVar[str]
     multi_line: ClassVar[bool] = False
     key_order: ClassVar[list[str]]
-    serialize_mode: ClassVar[SerializeModes] = SerializeModes.KV
 
     # Shouldn't normally need to define __init__ for a BaseModel (~dataclass)
     # This allows positional args instead of kwargs, e.g.
@@ -60,13 +55,11 @@ class RomsSection(BaseModel):
         else:
             super().__init__(**kwargs)
 
-
     # This was previously in `write_section`. If `multi_line` (e.g. forcing) the joiner contains `\n`
     # if single line (e.g. time-stepping) it just separates by 4 spaces
     @property
     def value_joiner(self):
         return "\n    " if self.multi_line else "    "
-
 
     ################################################################################
     # SERIALIZERS
@@ -89,55 +82,45 @@ class RomsSection(BaseModel):
     # class and then override it for the ForcingBlock subclass
     ################################################################################
 
-    def _kv_serializer(self) -> str:
-
+    @model_serializer
+    def default_serializer(self) -> str:
+        # Make a dictionary out of the attributes:
         data = {k: getattr(self, k) for k in self.key_order}
-        keys_line = " ".join(data.keys())
+
+        # Make a line for keys
+        keys_str = " ".join(data.keys())
+
+        # Initialize empty list to hold values
+        str_formatted_values_as_list = []
+        # Check formatting of values
+        for v in data.values():
+            # List of floats:
+            if isinstance(v, list) and all(isinstance(f, float) for f in v):
+                str_formatted_values_as_list.append(_format_float_list(v))
+            # List of str or path:
+            elif isinstance(v, list):
+                str_formatted_values_as_list.append(
+                    self.value_joiner.join([str(s) for s in v])
+                )
+            # Single value that can be formatted:
+            else:
+                str_formatted_values_as_list.append(_format_value(v))
+
+        values_str = self.value_joiner.join(str_formatted_values_as_list)
+        # Build the serialized string
         string = ""
-        # values = self.value_joiner.join(_format_value(v) for v in data.values())
-        
-        values = self.value_joiner.join(
-            val for v in data.values() for val in _list_of_formatted_values(v)
-        )        
-        string += f"{self.section_name}: {keys_line}\n"
-        string += f"    {values}\n"
+        string += f"{self.section_name}: {keys_str}\n"
+        string += f"    {values_str}\n"
         string += "\n"
         return string
-
-    def _list_serializer(
-        self,
-    ) -> str:
-        data = self.root
-        string = f"{self.section_name}:\n"
-        values = "    " + self.value_joiner.join([_format_value(v) for v in data]) + "\n"
-        string += values
-        string += "\n"
-        return string
-
-    def _single_line_serializer(
-        self, data: str
-    ) -> str:
-        string = f"{self.section_name}:\n"
-        string += f"    {data}\n"
-        string += "\n"
-        return string
-
-    # Here's where we actually define the serializer for ROMSSection
-    @model_serializer()
-    def serialize(self) -> str:
-        mapping = {
-            SerializeModes.KV: self._kv_serializer,
-            SerializeModes.LIST: self._list_serializer,
-            SerializeModes.SINGLE: self._single_line_serializer
-        }
-
-        return mapping[self.serialize_mode]()
 
     ################################################################################
+
 
 ################################################################################
 ## ROMS SECTION SUBCLASSES
 ################################################################################
+
 
 class TimeStepping(RomsSection):
     ntimes: int
@@ -147,7 +130,6 @@ class TimeStepping(RomsSection):
 
     section_name = "time_stepping"
     key_order = ["ntimes", "dt", "ndtfast", "ninfo"]
-
 
 
 class BottomDrag(RomsSection):
@@ -161,7 +143,6 @@ class BottomDrag(RomsSection):
     key_order = ["rdrg", "rdrg2", "zob"]
 
 
-
 class InitialBlock(RomsSection):
     nrrec: int
     ininame: str | Path
@@ -171,21 +152,20 @@ class InitialBlock(RomsSection):
     key_order = ["nrrec", "ininame"]
 
 
-class ForcingBlock(RootModel, RomsSection):
-    root: list[Path]
+class ForcingBlock(RomsSection):
+    filenames: list[Path]
 
     section_name = "forcing"
     multi_line = True
-    serialize_mode = SerializeModes.LIST
+    key_order = ["filenames"]
+
 
 class VerticalMixing(RomsSection):
-    model_config = {"arbitrary_types_allowed": True}
     Akv_bak: float
-    # Akt_bak: np.ndarray
     Akt_bak: list[float]
     section_name = "vertical_mixing"
-    key_order = ["Akv_bak","Akt_bak"]
-    
+    key_order = ["Akv_bak", "Akt_bak"]
+
 
 class MarblBGC(RomsSection):
     marbl_namelist_fname: Path
@@ -194,9 +174,12 @@ class MarblBGC(RomsSection):
 
     section_name = "MARBL_biogeochemistry"
     multi_line = True
-    key_order = ["marbl_namelist_fname",
+    key_order = [
+        "marbl_namelist_fname",
         "marbl_tracer_list_fname",
-        "marbl_diag_list_fname",]
+        "marbl_diag_list_fname",
+    ]
+
 
 class SCoord(RomsSection):
     theta_s: float
@@ -214,15 +197,19 @@ class LinRhoEos(RomsSection):
     S0: float
 
     section_name = "lin_rho_eos"
-    key_order = ["Tcoef",
+    key_order = [
+        "Tcoef",
         "T0",
         "Scoef",
-        "S0",]
+        "S0",
+    ]
+
 
 ################################################################################
 ## THE MAIN BEAST
 ################################################################################
-    
+
+
 class ROMSRuntimeSettings(BaseModel):
     title: str
     time_stepping: TimeStepping
@@ -236,7 +223,7 @@ class ROMSRuntimeSettings(BaseModel):
     lin_rho_eos: LinRhoEos | None
     lateral_visc: float | None
     gamma2: float | None
-    tracer_diff2: list[float] | None #np.ndarray | None # change to list[float]
+    tracer_diff2: list[float] | None  # np.ndarray | None # change to list[float]
     vertical_mixing: VerticalMixing | None
     my_bak_mixing: list[float] | None
     sss_correction: float | None
@@ -248,27 +235,46 @@ class ROMSRuntimeSettings(BaseModel):
 
     # This line says that types which aren't typically encodable with pydantic
     # (e.g. ndarray, tuple[float, np.ndarray]). Currently these mess up in `to_file`
-    model_config = {"arbitrary_types_allowed": True}
+    # model_config = {"arbitrary_types_allowed": True}
 
     # file_serializers can be applied to specific fields, e.g. @field_serializer("title","rho0")
     # here, "*" says 'apply to all' and then overrides any ROMSSection instance, on which
     # (see above) individual serializers are defined
-    
-    @field_serializer("*")
-    def single_line_serializer(self, data: str | float, info: FieldSerializationInfo) -> str:
+
+    # Define a serializer for any single-entry section that isn't covered by a RomsSection instance:
+    single_entry_sections: ClassVar[list] = [
+        "title",
+        "output_root_name",
+        "rho0",
+        "lateral_visc",
+        "gamma2",
+        "tracer_diff2",
+        "my_bak_mixing",
+        "sss_correction",
+        "sst_correction",
+        "ubind",
+        "v_sponge",
+        "grid",
+        "climatology",
+    ]
+
+    @field_serializer(*single_entry_sections)
+    def single_entry_serializer(
+        self, data: str | float, info: FieldSerializationInfo
+    ) -> str:
         name = info.field_name
-        
-        if isinstance(data, RomsSection):
-            return data.model_dump()
-        elif isinstance(data, (list, np.ndarray)):
-            values = "    " + " ".join(_list_of_formatted_values(data)) + "\n"
+
+        # list of values:
+        if isinstance(data, (list, np.ndarray)):
+            # values = "    " + " ".join(_list_of_formatted_values(data)) + "\n"
+            values = "    " + _format_float_list(data) + "\n"
             return f"{name}:\n{values}\n"
-        
+
+        # single value
         string = f"{name}:\n"
         string += f"    {_format_value(data)}\n"
         string += "\n"
         return string
-
 
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
@@ -291,7 +297,7 @@ class ROMSRuntimeSettings(BaseModel):
         List of forcing NetCDF files.
     output_root_name : str
         Base name for output NetCDF files.
-                 
+
     Optional Attributes (depending on CPP flags)
     --------------------------------------------
     s_coord : OrderedDict or None
@@ -326,37 +332,36 @@ class ROMSRuntimeSettings(BaseModel):
         Climatology file path.
     """
 
-
     @classmethod
     def from_file(cls, filepath: Path | str):
         """Read ROMS runtime settings from a `.in` file.
-        
+
         ROMS runtime settings are specified via a `.in` file with sections corresponding
         to different sets of parameters (e.g. time_stepping, bottom_drag). This method
         first parses the file, creating a dict[str,list[str]] where the keys are the
         section names and the values are a list of lines in that section. It then
         translates that dictionary into a ROMSRuntimeSettings instance with properly
         formatted attributes.
-        
+
         Parameters
         ----------
         - filepath (Path or str):
            The path to the `.in` file
-        
+
         See Also
         --------
         - `ROMSRuntimeSettings.to_file()`: writes a ROMSRuntimeSettings instance to a
            ROMS-compatible `.in` file
         """
-        
+
         filepath = Path(filepath)
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist.")
-        
+
         sections = {}
         with filepath.open() as f:
             lines = list(f)
-            
+
         i = 0
         while i < len(lines):
             line = lines[i].strip()
@@ -364,17 +369,17 @@ class ROMSRuntimeSettings(BaseModel):
                 section_name = line.split(":")[0].strip()
                 i += 1
                 section_lines = []
-                
+
                 while i < len(lines) and ":" not in lines[i]:
                     line = lines[i].strip()
                     if line and not line.startswith("!"):
                         section_lines.append(line)
                     i += 1
-                    
+
                 sections[section_name] = section_lines
             else:
                 i += 1
-                
+
         def _single_line_section_to_list(
             section_name: str, expected_type: Any
         ) -> Optional[list]:
@@ -386,22 +391,22 @@ class ROMSRuntimeSettings(BaseModel):
             if expected_type == float:
                 section = [x.upper().replace("D", "E") for x in section]
             section = [expected_type(x) for x in section]
-            
+
             return section
-        
+
         def _single_line_section_to_scalar(
             section_name: str, expected_type: Any
         ) -> Optional[Any]:
             lst = _single_line_section_to_list(section_name, expected_type)
             return lst[0] if lst else None
-        
+
         # Non-optional
         # One-line sections:
         title = sections["title"][0]
         time_stepping = _single_line_section_to_list("time_stepping", int) or []
         bottom_drag = _single_line_section_to_list("bottom_drag", float) or []
         output_root_name = sections["output_root_name"][0]
-        
+
         if not all([title, time_stepping, bottom_drag, output_root_name]):
             raise ValueError(
                 "Required field missing from file. Required fields: "
@@ -410,7 +415,7 @@ class ROMSRuntimeSettings(BaseModel):
                 "\n- bottom_drag"
                 "\n- output_root_name"
             )
-        
+
         # Multi-line sections:
         nrrec = int(sections["initial"][0])
         ini_path = (
@@ -418,7 +423,7 @@ class ROMSRuntimeSettings(BaseModel):
         )
         initial = (nrrec, ini_path)
         forcing: list[Path | str] = [Path(f) for f in sections["forcing"]]
-        
+
         # Optional
         # One-line sections:
         s_coord = _single_line_section_to_list("S-coord", float)
@@ -460,7 +465,9 @@ class ROMSRuntimeSettings(BaseModel):
             gamma2=gamma2,
             tracer_diff2=tracer_diff2,
             bottom_drag=BottomDrag(*bottom_drag),
-            vertical_mixing=VerticalMixing(Akv_bak=vertical_mixing[0],Akt_bak=vertical_mixing[1:]),
+            vertical_mixing=VerticalMixing(
+                Akv_bak=vertical_mixing[0], Akt_bak=vertical_mixing[1:]
+            ),
             my_bak_mixing=my_bak_mixing,
             sss_correction=sss_correction,
             sst_correction=sst_correction,
@@ -472,8 +479,6 @@ class ROMSRuntimeSettings(BaseModel):
             climatology=climatology,
             output_root_name=output_root_name,
         )
-
-
 
     def __str__(self) -> str:
         """Returns a string representation of the input settings.
@@ -513,7 +518,9 @@ class ROMSRuntimeSettings(BaseModel):
         lines.append(
             f"Initial conditions file (`ROMSRuntimeSettings.initial`): {self.initial.ininame}"
         )
-        lines.append(f"Forcing file(s): {_list_to_concise_str(self.forcing.root,pad=10)}")
+        lines.append(
+            f"Forcing file(s): {_list_to_concise_str(self.forcing.filenames,pad=10)}"
+        )
         if self.s_coord is not None:
             lines.append("S-coordinate parameters (`ROMSRuntimeSettings.s_coord`):")
             lines.append(
@@ -534,9 +541,7 @@ class ROMSRuntimeSettings(BaseModel):
             lines.append(
                 f"- Thermal expansion coefficient, ⍺ (`Tcoef`, kg/m3/K) = {self.lin_rho_eos.Tcoef},"
             )
-            lines.append(
-                f"- Reference temperature (`T0`, °C) = {self.lin_rho_eos.T0},"
-            )
+            lines.append(f"- Reference temperature (`T0`, °C) = {self.lin_rho_eos.T0},")
             lines.append(
                 f"- Haline contraction coefficient, β (`Scoef`, kg/m3/PSU) = {self.lin_rho_eos.Scoef},"
             )
@@ -653,7 +658,6 @@ class ROMSRuntimeSettings(BaseModel):
         inner = ", ".join(f"{k}={repr(v)}" for k, v in attrs.items() if v is not None)
         return f"{self.__class__.__name__}({inner})"
 
-
     def to_file(self, filepath: Path | str) -> None:
         """Write the current settings to a ROMS-compatible `.in` file.
 
@@ -665,34 +669,36 @@ class ROMSRuntimeSettings(BaseModel):
 
         filepath = Path(filepath)
 
-        output_order = ["title",
-                        "time_stepping",
-                        "bottom_drag",
-                        "initial",
-                        "forcing",
-                        "output_root_name",
-                        "s_coord",
-                        "grid",
-                        "marbl_biogeochemistry",
-                        "lateral_visc",
-                        "rho0",
-                        "lin_rho_eos",
-                        "gamma2",
-                        "tracer_diff2",
-                        "vertical_mixing",
-                        "my_bak_mixing",
-                        "sss_correction",
-                        "sst_correction",
-                        "ubind",
-                        "v_sponge",
-                        "climatology"]
+        output_order = [
+            "title",
+            "time_stepping",
+            "bottom_drag",
+            "initial",
+            "forcing",
+            "output_root_name",
+            "s_coord",
+            "grid",
+            "marbl_biogeochemistry",
+            "lateral_visc",
+            "rho0",
+            "lin_rho_eos",
+            "gamma2",
+            "tracer_diff2",
+            "vertical_mixing",
+            "my_bak_mixing",
+            "sss_correction",
+            "sst_correction",
+            "ubind",
+            "v_sponge",
+            "climatology",
+        ]
 
         with filepath.open("w") as f:
-
             for field in output_order:
                 if getattr(self, field) is None:
                     continue
                 f.write(self.model_dump()[field])
+
 
 if __name__ == "__main__":
     ff = "/Users/dafyddstephenson/Code/my_ucla_roms/Examples/Wales/roms.in"
