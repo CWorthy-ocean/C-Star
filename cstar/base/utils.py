@@ -9,9 +9,6 @@ from cstar.base.log import get_logger
 log = get_logger(__name__)
 
 
-CSTAR_USER_ENV_PATH = "~/.cstar.env"
-
-
 def _get_sha256_hash(file_path: str | Path) -> str:
     """Calculate the 256-bit SHA checksum of a file.
 

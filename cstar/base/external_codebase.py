@@ -9,7 +9,6 @@ from cstar.base.gitutils import (
     _get_repo_remote,
 )
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import CSTAR_USER_ENV_PATH
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -300,7 +299,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         "you will need to set it up.\n"
                         "It is recommended that you install this external codebase in \n"
                         f"{ext_dir}"
-                        f"\nThis will also modify your `{CSTAR_USER_ENV_PATH}` file."
+                        f"\nThis will also modify your `~/.cstar.env` file."
                         "\n#######################################################"
                     )
                 )

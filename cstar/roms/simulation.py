@@ -475,7 +475,7 @@ class ROMSSimulation(Simulation):
                 return Path(in_files[0])
 
     @property
-    def input_datasets(self) -> list[ROMSInputDataset]:
+    def input_datasets(self) -> list:
         """Retrieves all input datasets associated with this ROMS simulation.
 
         This property compiles a list of `ROMSInputDataset` instances that are used
@@ -765,10 +765,7 @@ class ROMSSimulation(Simulation):
             bp_dict = yaml.safe_load(requests.get(source.location).text)
 
         return cls.from_dict(
-            bp_dict,
-            directory=directory,
-            start_date=start_date,
-            end_date=end_date,
+            bp_dict, directory=directory, start_date=start_date, end_date=end_date
         )
 
     def to_blueprint(self, filename: str) -> None:
