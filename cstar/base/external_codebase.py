@@ -315,7 +315,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
                                 "('y', 'n', or 'custom' to install at a custom path)\n"
                             )
                         )
-                    yn = "y"
                     if yn.casefold() in ["y", "yes", "ok"]:
                         self.get(ext_dir)
                         break
