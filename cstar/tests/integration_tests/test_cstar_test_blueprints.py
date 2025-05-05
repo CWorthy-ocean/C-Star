@@ -104,5 +104,8 @@ class TestCStar:
             cstar_test_case.build()
             cstar_test_case.pre_run()
             test_process = cstar_test_case.run()
-            test_process.updates(seconds=0, confirm_indefinite=False)
+            
+            with mock_user_input("y"):
+                test_process.updates(seconds=0, interactive=True)
+            
             cstar_test_case.post_run()
