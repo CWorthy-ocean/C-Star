@@ -6,7 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from multiprocessing import Queue
-from queue import Empty, ShutDown
+from queue import Empty
 from threading import Thread
 from types import FrameType
 
@@ -175,8 +175,8 @@ class Service(ABC, LoggingMixin):
                                 running = False
                 except Empty:
                     ...  # ignore empty queue; just wait for shutdown msg
-                except ShutDown:
-                    # queue was shutdown on other side. allow thread to terminate
+                except Exception:
+                    # queue was shutdown on other side.
                     running = False
 
     def _start_healthcheck(self) -> None:
