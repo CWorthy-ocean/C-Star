@@ -278,7 +278,7 @@ class TestSetupEnvironmentFromFiles:
             updated_vars = [(k0, v0), (k1, v1), (k2, v2)]
 
             for key, exp_value in updated_vars:
-                env.set_key(key, exp_value)
+                env.set_env_var(key, exp_value)
 
             # Confirm setting a key on CStarEnvironment is loaded to os.env and persisted
             raw_env = user_env_file_path.read_text()

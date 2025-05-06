@@ -123,7 +123,7 @@ class TestMARBLExternalCodeBaseGet:
 
             # Assertions:
             ## Check environment variables
-            cstar_sysmgr.environment.set_key(key, value)
+            cstar_sysmgr.environment.set_env_var(key, value)
 
             assert os.environ[key] == str(value)
 

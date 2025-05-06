@@ -243,7 +243,7 @@ class CStarEnvironment:
             for mod in lmod_list:
                 self._call_lmod(f"load {mod}")
 
-    def set_key(self, key: str, value: str) -> None:
+    def set_env_var(self, key: str, value: str) -> None:
         """Set value of an environment variable and store it in the user environment
         file.
 
