@@ -45,7 +45,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         )
         shutil.copytree(
             roms_root / "ci/ci_makefiles/",
-            str(roms_root),
+            roms_root,
             dirs_exist_ok=True,
         )
 
