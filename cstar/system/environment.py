@@ -3,7 +3,7 @@ import os
 import platform
 from pathlib import Path
 
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values, load_dotenv, set_key
 
 from cstar.base.utils import _run_cmd
 
@@ -254,5 +254,5 @@ class CStarEnvironment:
         value : str
             The value to set for the environment variable.
         """
-        os.environ[key] = value
         set_key(CSTAR_USER_ENV_PATH, key, value)
+        load_dotenv(CSTAR_USER_ENV_PATH, override=True)

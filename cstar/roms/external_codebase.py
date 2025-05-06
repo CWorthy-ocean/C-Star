@@ -1,4 +1,3 @@
-import os
 import shutil
 from pathlib import Path
 
@@ -76,9 +75,8 @@ class ROMSExternalCodeBase(ExternalCodeBase):
 
         # Set environment variables for this session:
         cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(target))
-        curr_path_value = os.environ.get("PATH", "")
         cstar_sysmgr.environment.set_env_var(
-            "PATH", f"{curr_path_value}:{target / 'Tools-Roms'}"
+            "PATH", f"${{PATH}}:{target / 'Tools-Roms'}"
         )
 
         # Distribute custom makefiles for ROMS
