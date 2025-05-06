@@ -895,10 +895,6 @@ class TestROMSInputDatasetGet:
 
         mock_get_hash.side_effect = [f"mock_hash_{i}" for i in range(12)]
 
-        self.mock_resolve.side_effect = [
-            Path(f"/some/dir/local_file.{i:03d}.nc") for i in range(1000)
-        ]
-
         assert mock_symlink_or_download.call_count == 12
         expected_calls = [
             mock.call(
