@@ -91,7 +91,7 @@ class ROMSInputDataset(InputDataset, ABC):
         self.partitioning: Optional[ROMSPartitioning] = None
 
     @property
-    def source_partitioning(self):
+    def source_partitioning(self) -> tuple[int,int] | None:
         if (self.source_np_xi is not None) and (self.source_np_eta is not None):
             return (self.source_np_xi, self.source_np_eta)
         return None
