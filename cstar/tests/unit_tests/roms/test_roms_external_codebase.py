@@ -135,11 +135,14 @@ class TestROMSExternalCodeBaseGet:
             ## Check environment variables
             dotenv.load_dotenv(dotenv_path, override=True)
 
-            assert mock_env["ROMS_ROOT"] == str(roms_dir)
-            assert f":{roms_dir}/Tools-Roms/" in mock_env["PATH"]
+            exp_roms_value = str(roms_dir)
+            exp_roms_tools_value = f":{roms_dir / 'Tools-Roms'}"
 
-            assert os.environ["ROMS_ROOT"] == str(roms_dir)
-            assert f":{roms_dir}/Tools-Roms/" in os.environ["PATH"]
+            assert mock_env["ROMS_ROOT"] == exp_roms_value
+            assert exp_roms_tools_value in mock_env["PATH"]
+
+            assert os.environ["ROMS_ROOT"] == exp_roms_value
+            assert exp_roms_tools_value in os.environ["PATH"]
 
             ## Check that _clone_and_checkout was (mock) called correctly
             self.mock_clone_and_checkout.assert_called_once_with(
@@ -149,7 +152,7 @@ class TestROMSExternalCodeBaseGet:
             )
 
             k0, v0 = "ROMS_ROOT", str(roms_dir)
-            k1, v1 = "PATH", f"${{PATH}}:{roms_dir}/Tools-Roms"
+            k1, v1 = "PATH", f"${{PATH}}{exp_roms_tools_value}"
 
             cfg = dotenv.dotenv_values(dotenv_path)
 

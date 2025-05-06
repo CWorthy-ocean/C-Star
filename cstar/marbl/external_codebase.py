@@ -51,7 +51,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
             checkout_target=self.checkout_target,
         )
         # Set environment variables for this session:
-        cstar_sysmgr.environment.set_key(self.expected_env_var, f'"{str(target)}"')
+        cstar_sysmgr.environment.set_key(self.expected_env_var, str(target))
 
         # Make things
         _run_cmd(

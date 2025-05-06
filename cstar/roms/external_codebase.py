@@ -78,7 +78,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         cstar_sysmgr.environment.set_key(self.expected_env_var, str(target))
         curr_path_value = os.environ.get("PATH", "")
         cstar_sysmgr.environment.set_key(
-            "PATH", f"{curr_path_value}:{target}/Tools-Roms/"
+            "PATH", f"{curr_path_value}:{target / 'Tools-Roms'}"
         )
 
         # Distribute custom makefiles for ROMS
