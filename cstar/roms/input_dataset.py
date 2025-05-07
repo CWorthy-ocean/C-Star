@@ -1,4 +1,5 @@
 import datetime as dt
+import shutil
 import tempfile
 from abc import ABC
 from pathlib import Path
@@ -48,7 +49,7 @@ class ROMSPartitioning:
         self._local_file_stat_cache: Dict = {}
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files,pad=57)})"
+        return f"{self.__class__.__name__}(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files,pad=43)})"
 
     def __len__(self):
         return len(self.files)
@@ -136,6 +137,9 @@ class ROMSInputDataset(InputDataset, ABC):
            The number of tiles in the x direction
         np_eta (int):
            The number of tiles in the y direction
+        overwrite_existing_files (bool, optional):
+           If `True` and this `ROMSInputDataset` has already been partitioned,
+           the existing files will be overwritten
 
         Notes:
         ------
@@ -143,66 +147,124 @@ class ROMSInputDataset(InputDataset, ABC):
            to locally available files, i.e. ROMSInputDataset.get() has been called.
         - This method sets the ROMSInputDataset.partitioning attribute
         """
-        if (self.partitioning is not None) and (not overwrite_existing_files):
-            if (self.partitioning.np_xi == np_xi) and (
-                self.partitioning.np_eta == np_eta
-            ):
-                self.log.info(
-                    f"⏭️  {self.__class__.__name__} already partitioned, skipping"
-                )
-                return
-            else:
-                raise FileExistsError(
-                    f"The file has already been partitioned into a different arrangement "
-                    f"({self.partitioning.np_xi},{self.partitioning.np_eta}). "
-                    "To overwrite these files, try again with overwrite_existing_files=True"
-                )
 
-        if not self.exists_locally:
-            raise ValueError(
-                f"working_path of InputDataset \n {self.working_path}, "
-                + "refers to a non-existent file"
-                + "\n call InputDataset.get() and try again."
-            )
-        else:
-            assert self.working_path is not None  # if exists_locally then can't be None
+        # Helper functions
+        def validate_partitioning_request() -> bool:
+            """Helper function to skip, raise, or proceed with partitioning request."""
+            if (self.partitioning is not None) and (not overwrite_existing_files):
+                if (self.partitioning.np_xi == np_xi) and (
+                    self.partitioning.np_eta == np_eta
+                ):
+                    self.log.info(
+                        f"⏭️  {self.__class__.__name__} already partitioned, skipping"
+                    )
+                    return False
+                else:
+                    raise FileExistsError(
+                        f"The file has already been partitioned into a different arrangement "
+                        f"({self.partitioning.np_xi},{self.partitioning.np_eta}). "
+                        "To overwrite these files, try again with overwrite_existing_files=True"
+                    )
 
-        if isinstance(self.working_path, list):
-            # if single InputDataset corresponds to many files, check they're colocated
-            if not all(
-                [d.parent == self.working_path[0].parent for d in self.working_path]
-            ):
+            if not self.exists_locally:
                 raise ValueError(
-                    f"A single input dataset exists in multiple directories: {self.working_path}."
+                    f"working_path of InputDataset \n {self.working_path}, "
+                    + "refers to a non-existent file"
+                    + "\n call InputDataset.get() and try again."
+                )
+            return True
+
+        def get_files_to_partition():
+            """Helper function to obtain a list of files associated with this
+            ROMSInputDataset to partition."""
+            if isinstance(self.working_path, list):
+                # if single InputDataset corresponds to many files, check they're colocated
+                if not all(
+                    [d.parent == self.working_path[0].parent for d in self.working_path]
+                ):
+                    raise ValueError(
+                        f"A single input dataset exists in multiple directories: {self.working_path}."
+                    )
+
+                # If they are, we want to partition them all in the same place
+                id_files_to_partition = self.working_path[:]
+
+            else:
+                id_files_to_partition = [
+                    self.working_path,
+                ]
+            return id_files_to_partition
+
+        def partition_files(files: list[Path]) -> list[Path]:
+            """Helper function that wraps the actual roms_tools.partition_netcdf
+            call."""
+            new_parted_files = []
+
+            for idfile in id_files_to_partition:
+                self.log.info(f"Partitioning {idfile} into ({np_xi},{np_eta})")
+                new_parted_files.extend(
+                    roms_tools.partition_netcdf(idfile, np_xi=np_xi, np_eta=np_eta)
                 )
 
-            # If they are, we want to partition them all in the same place
-            id_files_to_partition = self.working_path[:]
+            return [f.resolve() for f in new_parted_files]
 
-        else:
-            id_files_to_partition = [
-                self.working_path,
-            ]
-
-        parted_files = []
-
-        for idfile in id_files_to_partition:
-            self.log.info(f"Partitioning {idfile} into ({np_xi},{np_eta})")
-            parted_files.extend(
-                roms_tools.partition_netcdf(idfile, np_xi=np_xi, np_eta=np_eta)
+        def update_attributes(files: list[Path]):
+            """Helper function to set ROMSInputDataset.partitioning after
+            partitioning."""
+            self.partitioning = ROMSPartitioning(
+                np_xi=np_xi, np_eta=np_eta, files=files
+            )
+            self.partitioning._local_file_hash_cache.update(
+                {path: _get_sha256_hash(path.resolve()) for path in files}
+            )  # 27
+            self.partitioning._local_file_stat_cache.update(
+                {path: path.stat() for path in files}
             )
 
-        parted_files = [f.resolve() for f in parted_files]
+        def backup_existing_partitioned_files(files: list[Path]):
+            """Helper function to move existing parted files to a tmp dir while
+            attempting to create new ones."""
+            tmpdir = tempfile.TemporaryDirectory()
+            backup_path = Path(tmpdir.name)
 
-        self.partitioning = ROMSPartitioning(
-            np_xi=np_xi, np_eta=np_eta, files=parted_files
-        )
-        self.partitioning._local_file_hash_cache.update(
-            {path: _get_sha256_hash(path.resolve()) for path in parted_files}
-        )  # 27
-        self.partitioning._local_file_stat_cache.update(
-            {path: path.stat() for path in parted_files}
-        )
+            for f in files:
+                shutil.move(f.resolve(), backup_path / f.name)
+            return tmpdir, backup_path
+
+        def restore_existing_partitioned_files(
+            backup_dir: Path, restore_paths: list[Path]
+        ):
+            """Helper function to restore existing parted files if partitioning
+            fails."""
+
+            for f in restore_paths:
+                shutil.move(backup_dir / f.name, f.resolve())
+
+        # Main logic:
+        if not validate_partitioning_request():
+            return
+
+        id_files_to_partition = get_files_to_partition()
+        existing_files = self.partitioning.files if self.partitioning else None
+        tempdir_obj, backupdir, partitioning_succeeded = None, None, False
+
+        try:
+            if existing_files:
+                tempdir_obj, backupdir = backup_existing_partitioned_files(
+                    existing_files
+                )
+
+            new_files = partition_files(id_files_to_partition)
+            self._update_partitioning_attribute(
+                parted_files=new_files, new_np_xi=np_xi, new_np_eta=np_eta
+            )
+            partitioning_succeeded = True
+        finally:
+            if (existing_files) and (not partitioning_succeeded) and (backupdir):
+                self.log.error("Partitioning failed - restoring previous files")
+                restore_existing_partitioned_files(backupdir, existing_files)
+            if tempdir_obj:
+                tempdir_obj.cleanup()
 
     def get(
         self,
@@ -230,6 +292,8 @@ class ROMSInputDataset(InputDataset, ABC):
             working_path_parent = self.working_path[0].parent
         else:
             working_path_parent = self.working_path.parent
+        # import pdb
+        # pdb.set_trace()
 
         if (self.exists_locally) and (working_path_parent == local_dir):
             self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
@@ -254,10 +318,10 @@ class ROMSInputDataset(InputDataset, ABC):
         parted_files: list[Path] = []
 
         for i in range(n_source_partitions):
-            source = self.source.location.replace(".nc", f".{i:0{ndigits}d}.nc")
-            source_basename = self.source.basename.replace(
-                ".nc", f".{i:0{ndigits}d}.nc"
-            )
+            old_suffix = f".{0:0{ndigits}d}.nc"
+            new_suffix = f".{i:0{ndigits}d}.nc"
+            source = self.source.location.replace(old_suffix, new_suffix)
+            source_basename = self.source.basename.replace(old_suffix, new_suffix)
 
             self._symlink_or_download_from_source(
                 source_location=source,
@@ -269,17 +333,13 @@ class ROMSInputDataset(InputDataset, ABC):
 
             parted_files.append(local_dir / source_basename)
 
-        self.partitioning = ROMSPartitioning(
-            np_xi=source_np_xi, np_eta=source_np_eta, files=parted_files
+        self._update_partitioning_attribute(
+            new_np_xi=source_np_xi, new_np_eta=source_np_eta, parted_files=parted_files
         )
         self.working_path = parted_files
-
-        self.partitioning._local_file_hash_cache = {
-            path: _get_sha256_hash(path.resolve()) for path in parted_files
-        }  # 27
-        self.partitioning._local_file_stat_cache = {
-            path: path.stat() for path in parted_files
-        }
+        assert self.partitioning is not None
+        self._local_file_stat_cache.update(self.partitioning._local_file_stat_cache)
+        self._local_file_hash_cache.update(self.partitioning._local_file_hash_cache)
 
     def _get_from_yaml(self, local_dir: str | Path) -> None:
         """Handle the special case where the input dataset source is a `roms-tools`
@@ -372,6 +432,20 @@ class ROMSInputDataset(InputDataset, ABC):
             {path: _get_sha256_hash(path.resolve()) for path in savepath}
         )  # 27
         self._local_file_stat_cache.update({path: path.stat() for path in savepath})
+
+    def _update_partitioning_attribute(
+        self, new_np_xi: int, new_np_eta: int, parted_files: list[Path]
+    ):
+        self.partitioning = ROMSPartitioning(
+            np_xi=new_np_xi, np_eta=new_np_eta, files=parted_files
+        )
+
+        self.partitioning._local_file_hash_cache = {
+            path: _get_sha256_hash(path.resolve()) for path in parted_files
+        }  # 27
+        self.partitioning._local_file_stat_cache = {
+            path: path.stat() for path in parted_files
+        }
 
 
 class ROMSModelGrid(ROMSInputDataset):
