@@ -37,13 +37,9 @@ def local_roms_netcdf_dataset():
         mock.patch.object(
             DataSource, "source_type", new_callable=mock.PropertyMock
         ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
     ):
         mock_location_type.return_value = "path"
         mock_source_type.return_value = "netcdf"
-        mock_basename.return_value = "local_file.nc"
 
         dataset = MockROMSInputDataset(
             location="some/local/source/path/local_file.nc",
@@ -172,12 +168,11 @@ class TestStrAndRepr:
                 "local_file.002.nc",
             ],
         )
-        expected_str = dedent(
-            """\
-            Partitioning: ROMSPartitioning(np_xi=1, np_eta=2, files=['local_file.001.nc',
-                                                                     'local_file.002.nc'])
-        """
-        ).strip()
+        expected_str = (
+            "Partitioning: ROMSPartitioning(np_xi=1, np_eta=2, files=['local_file.001.nc',\n"
+            + " " * 43
+            + "'local_file.002.nc'])"
+        )
 
         actual_str = str(local_roms_netcdf_dataset).strip()
         assert (
@@ -834,6 +829,9 @@ class TestROMSInputDatasetGet:
         self.mock_resolve.return_value = Path("/some/dir")
 
         # Set source partitioning attributes
+        local_roms_netcdf_dataset.source._location = (
+            "some/local/source/path/local_file.00.nc"
+        )
         local_roms_netcdf_dataset.source_np_xi = 4
         local_roms_netcdf_dataset.source_np_eta = 3
 
@@ -884,6 +882,9 @@ class TestROMSInputDatasetGet:
         """
 
         # Set source partitioning attributes
+        local_roms_netcdf_dataset.source._location = (
+            "some/local/source/path/local_file.00.nc"
+        )
         local_roms_netcdf_dataset.source_np_xi = 4
         local_roms_netcdf_dataset.source_np_eta = 3
 
