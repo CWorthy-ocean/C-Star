@@ -108,66 +108,56 @@ class TestROMSExternalCodeBaseGet:
         mock.patch.stopall()
 
     def test_get_success(
-        self, roms_codebase: ROMSExternalCodeBase, tmp_path: pathlib.Path
+        self,
+        dotenv_path: pathlib.Path,
+        roms_path: pathlib.Path,
+        roms_codebase: ROMSExternalCodeBase,
     ):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
-        ## Make temporary target dir
-
-        roms_dir = tmp_path / "roms"
-        dotenv_path = tmp_path / ".cstar.env"
-
-        with (
-            mock.patch(
-                "cstar.system.environment.CSTAR_USER_ENV_PATH",
-                dotenv_path,
-            ),
-            mock.patch.dict(os.environ, {}) as mock_env,
+        with mock.patch(
+            "cstar.system.environment.CSTAR_USER_ENV_PATH",
+            dotenv_path,
         ):
             ## Mock success of calls to subprocess.run:
             self.mock_subprocess_run.return_value.returncode = 0
 
             # Test
             ## Call the get method
-            roms_codebase.get(target=roms_dir)
+            roms_codebase.get(target=roms_path)
 
             # Assertions:
             ## Check environment variables
             dotenv.load_dotenv(dotenv_path, override=True)
 
-            exp_roms_value = str(roms_dir)
-            exp_roms_tools_value = f":{roms_dir / 'Tools-Roms'}"
+            exp_roms_value = str(roms_path)
+            exp_roms_tools_value = f":{roms_path / 'Tools-Roms'}"
 
-            assert mock_env["ROMS_ROOT"] == exp_roms_value
-            assert exp_roms_tools_value in mock_env["PATH"]
-
-            assert os.environ["ROMS_ROOT"] == exp_roms_value
+            assert os.environ[roms_codebase.expected_env_var] == exp_roms_value
             assert exp_roms_tools_value in os.environ["PATH"]
 
             ## Check that _clone_and_checkout was (mock) called correctly
             self.mock_clone_and_checkout.assert_called_once_with(
                 source_repo=roms_codebase.source_repo,
-                local_path=roms_dir,
+                local_path=roms_path,
                 checkout_target=roms_codebase.checkout_target,
             )
 
-            k0, v0 = "ROMS_ROOT", str(roms_dir)
+            k0, v0 = roms_codebase.expected_env_var, str(roms_path)
             k1, v1 = "PATH", f"${{PATH}}{exp_roms_tools_value}"
 
             cfg = dotenv.dotenv_values(dotenv_path)
 
             # confirm user environment file was updated
-            for k, v in [(k0, v0), (k1, v1)]:
-                actual_value = cfg[k]
-                if ":" in v:
-                    assert len(actual_value.split(":")) >= len(v.split(":"))
-                    assert v.split(":")[1] in actual_value
-                else:
-                    assert v in actual_value
+            actual_value = cfg[k0]
+            assert v0 == actual_value
+
+            actual_value = cfg[k1]
+            assert v1.split(":")[1] in actual_value
 
             self.mock_subprocess_run.assert_any_call(
                 f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
-                cwd=roms_dir / "Work",
+                cwd=roms_path / "Work",
                 capture_output=True,
                 text=True,
                 shell=True,
@@ -175,7 +165,7 @@ class TestROMSExternalCodeBaseGet:
 
             self.mock_subprocess_run.assert_any_call(
                 f"make COMPILER={cstar_sysmgr.environment.compiler}",
-                cwd=roms_dir / "Tools-Roms",
+                cwd=roms_path / "Tools-Roms",
                 capture_output=True,
                 text=True,
                 shell=True,

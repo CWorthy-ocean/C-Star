@@ -96,51 +96,45 @@ class TestMARBLExternalCodeBaseGet:
         mock.patch.stopall()
 
     def test_get_success(
-        self, marbl_codebase: MARBLExternalCodeBase, tmp_path: pathlib.Path
+        self,
+        dotenv_path: pathlib.Path,
+        marbl_path: pathlib.Path,
+        marbl_codebase: MARBLExternalCodeBase,
     ):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
-        ## Make temporary target dir
-        marbl_dir = tmp_path / "marbl"
-
         ## Mock success of calls to subprocess.run:
         self.mock_subprocess_run.return_value.returncode = 0
 
-        dotenv_path = tmp_path / ".cstar.env"
-        key = "MARBL_ROOT"
-        value = str(marbl_dir)
+        key = marbl_codebase.expected_env_var
+        value = str(marbl_path)
 
-        with (
-            mock.patch(
-                "cstar.system.environment.CSTAR_USER_ENV_PATH",
-                dotenv_path,
-            ),
-            mock.patch.dict(os.environ, {key: "old-value"}),
+        with mock.patch(
+            "cstar.system.environment.CSTAR_USER_ENV_PATH",
+            dotenv_path,
         ):
             # Test
             ## Call the get method
-            marbl_codebase.get(target=marbl_dir)
+            marbl_codebase.get(target=marbl_path)
 
             # Assertions:
             ## Check environment variables
-            cstar_sysmgr.environment.set_env_var(key, value)
-
             assert os.environ[key] == str(value)
 
             ## Check that _clone_and_checkout was (mock) called correctly
             self.mock_clone_and_checkout.assert_called_once_with(
                 source_repo=marbl_codebase.source_repo,
-                local_path=marbl_dir,
+                local_path=marbl_path,
                 checkout_target=marbl_codebase.checkout_target,
             )
 
             ## Check that _update_user_dotenv was (mock) called correctly
-            actual_value = dotenv.get_key(tmp_path / ".cstar.env", key)
+            actual_value = dotenv.get_key(dotenv_path, key)
             assert actual_value == value
 
             self.mock_subprocess_run.assert_called_once_with(
                 f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
-                cwd=marbl_dir / "src",
+                cwd=marbl_path / "src",
                 capture_output=True,
                 text=True,
                 shell=True,
