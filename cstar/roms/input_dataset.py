@@ -208,19 +208,6 @@ class ROMSInputDataset(InputDataset, ABC):
 
             return [f.resolve() for f in new_parted_files]
 
-        def update_attributes(files: list[Path]):
-            """Helper function to set ROMSInputDataset.partitioning after
-            partitioning."""
-            self.partitioning = ROMSPartitioning(
-                np_xi=np_xi, np_eta=np_eta, files=files
-            )
-            self.partitioning._local_file_hash_cache.update(
-                {path: _get_sha256_hash(path.resolve()) for path in files}
-            )  # 27
-            self.partitioning._local_file_stat_cache.update(
-                {path: path.stat() for path in files}
-            )
-
         def backup_existing_partitioned_files(files: list[Path]):
             """Helper function to move existing parted files to a tmp dir while
             attempting to create new ones."""

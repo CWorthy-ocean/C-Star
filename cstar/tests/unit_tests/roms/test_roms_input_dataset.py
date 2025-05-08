@@ -936,6 +936,8 @@ class TestROMSInputDatasetPartition:
     - test_partition_raises_if_already_partitioned_differently:
         Test that a FileExistsError is raised if this ROMSInputDataset has been
         partitioned in a different arrangement to that requested.
+    - test_partition_restores_existing_files_if_repeat_partitioning_fails
+        Test that existing partitioned files are restored if a repeat call fails
     - test_partition_raises_when_not_local:
         Confirms an error is raised when `working_path` does not exist locally.
     - test_partition_raises_with_mismatched_directories:
@@ -1202,6 +1204,73 @@ class TestROMSInputDatasetPartition:
             local_roms_netcdf_dataset.partition(np_xi=3, np_eta=4)
 
         mock_partition_netcdf.assert_not_called
+
+    @mock.patch("cstar.roms.input_dataset.shutil.move")
+    @mock.patch(
+        "cstar.base.input_dataset.InputDataset.exists_locally",
+        new_callable=mock.PropertyMock,
+    )
+    @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
+    def test_partition_restores_existing_files_if_repeat_partitioning_fails(
+        self, mock_partition_netcdf, mock_exists, mock_move, local_roms_netcdf_dataset
+    ):
+        """Test that existing partitioned files are restored if _repeat_ partitioning
+        fails.
+
+        This test simulates a scenario where `partition()` is called on an
+        already partitioned ROMSInputDataset with `overwrite_existing_files=True`,
+        but the actual partitioning operation raises an exception.
+        The test ensures that any existing partitioned
+        files are backed up before the attempt, and correctly restored after
+        the failure.
+
+        Mocks:
+        ------
+        - `partition_netcdf`: Simulates failure by raising a RuntimeError.
+        - `exists_locally`: Ensures the dataset is treated as locally available.
+        - `shutil.move`: Tracks file move operations during backup and restore.
+        - `Path.resolve`: Returns deterministic paths for assertions.
+
+        Asserts:
+        --------
+        - `shutil.move` is called four times: twice to back up existing files,
+          and twice to restore them after failure.
+        - The first two calls move files into a temporary directory.
+        - The last two calls restore files from the backup location.
+        - The original exception (`RuntimeError`) is raised.
+        """
+
+        existing_files = [
+            Path("/some/dir/local_file.0.nc"),
+            Path("/some/dir/local_file.1.nc"),
+        ]
+        local_roms_netcdf_dataset.partitioning = ROMSPartitioning(
+            np_xi=1, np_eta=2, files=existing_files
+        )
+        local_roms_netcdf_dataset.working_path = "/some/dir/local_file.nc"
+        mock_exists.return_value = True
+        mock_partition_netcdf.side_effect = RuntimeError("simulated failure")
+        with mock.patch.object(
+            Path, "resolve", autospec=True, side_effect=existing_files * 2
+        ):
+            with pytest.raises(RuntimeError, match="simulated failure"):
+                local_roms_netcdf_dataset.partition(
+                    np_xi=3, np_eta=3, overwrite_existing_files=True
+                )
+
+        assert mock_move.call_count == 4
+
+        backup_calls = mock_move.call_args_list[:2]
+        for call, original in zip(backup_calls, existing_files):
+            src, dst = call[0]
+            assert src == original
+            assert "tmp" in str(dst)  # destination should be in a temp dir
+
+        restore_calls = mock_move.call_args_list[2:]
+        for call, original in zip(restore_calls, existing_files):
+            src, dst = call[0]
+            assert dst == original
+            assert "tmp" in str(src)
 
     def test_partition_raises_when_not_local(self, local_roms_netcdf_dataset):
         """Confirms an error is raised when `working_path` does not exist locally.
