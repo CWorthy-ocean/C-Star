@@ -58,6 +58,8 @@ exclude = "properties|asv_bench|docs"
 # Configuration for ruff linter and formatter
 [tool.ruff]
 fix = true
+
+[tool.ruff.lint]
 extend-select = ["I"]
 
 [tool.pre-commit]

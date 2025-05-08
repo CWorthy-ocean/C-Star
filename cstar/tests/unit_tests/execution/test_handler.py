@@ -269,7 +269,7 @@ class TestExecutionHandlerUpdates:
         updater_thread.start()
 
         # Run the `updates` method
-        handler.updates(seconds=0, confirm_indefinite=False)
+        handler.updates(seconds=0, interactive=False)
 
         # Verify that only lines from `running_updates` were printed
         printed_calls = caplog.text

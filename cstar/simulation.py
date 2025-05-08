@@ -79,6 +79,7 @@ class Simulation(ABC, LoggingMixin):
         end_date: Optional[str | datetime] = None,
         valid_start_date: Optional[str | datetime] = None,
         valid_end_date: Optional[str | datetime] = None,
+        interactive: bool = True,
     ):
         """Initialize a Simulation object with a given name, directory, codebase, and
         configuration parameters.
@@ -137,9 +138,9 @@ class Simulation(ABC, LoggingMixin):
             self.codebase = self.default_codebase
             self.log.warning(
                 f"Creating {self.__class__.__name__} instance without a specified "
-                + "ExternalCodeBase, default codebase will be used:\n"
-                + f"          • Source location: {self.codebase.source_repo}\n"
-                + f"          • Checkout target: {self.codebase.checkout_target}\n"
+                "ExternalCodeBase, default codebase will be used:\n"
+                f"          • Source location: {self.codebase.source_repo}\n"
+                f"          • Checkout target: {self.codebase.checkout_target}\n"
             )
         else:
             self.codebase = codebase
@@ -147,6 +148,7 @@ class Simulation(ABC, LoggingMixin):
         self.runtime_code = runtime_code or None
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization
+        self.interactive = interactive
 
     def _validate_simulation_directory(self, directory: str | Path) -> Path:
         """Validates and resolves the simulation directory.

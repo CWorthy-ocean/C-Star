@@ -6,7 +6,10 @@ DEFAULT_LOG_FORMAT = "[%(levelname)s] %(message)s"
 
 
 def get_logger(
-    name: str | None = None, level: int = DEFAULT_LOG_LEVEL, fmt: str | None = None
+    name: str | None = None,
+    level: int = DEFAULT_LOG_LEVEL,
+    fmt: str | None = None,
+    filename: str | None = None,
 ) -> logging.Logger:
     """Get a logger instance with the specified name.
 
@@ -44,6 +47,7 @@ def get_logger(
     # Ensure root handlers only handle WARNING and higher
     for handler in root.handlers:
         handler.setLevel(logging.WARNING)
+        handler.setFormatter(logging.Formatter(fmt))
 
     # Create specific STDOUT handler for INFO and lower:
     if not logger.hasHandlers():
@@ -56,6 +60,18 @@ def get_logger(
         stdout_handler.setFormatter(formatter)
 
         logger.addHandler(stdout_handler)
+
+    if filename:
+        existing_fh = [
+            h
+            for h in logger.handlers
+            if isinstance(h, logging.FileHandler) and h.baseFilename == filename
+        ]
+        if not existing_fh:
+            file_handler = logging.FileHandler(filename)
+            file_handler.setLevel(level)
+            file_handler.setFormatter(logging.Formatter(fmt=fmt))
+            logger.addHandler(file_handler)
 
     # Re-enable propagation on final logger
     logger.propagate = True
