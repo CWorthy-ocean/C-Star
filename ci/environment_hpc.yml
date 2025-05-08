@@ -8,6 +8,7 @@ dependencies:
   - roms-tools
   - netCDF4
   - pip
+  - pydantic
   # testing
   - pre-commit==3.8.0
   - coverage

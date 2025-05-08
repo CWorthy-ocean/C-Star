@@ -10,6 +10,7 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
+from cstar.roms.read_inp import ROMSRuntimeSettings
 from cstar.roms.simulation import ROMSSimulation
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "ROMSComponent",
     "ROMSSimulation",
     "ROMSDiscretization",
+    "ROMSRuntimeSettings",
     "ROMSInputDataset",
     "ROMSModelGrid",
     "ROMSInitialConditions",
