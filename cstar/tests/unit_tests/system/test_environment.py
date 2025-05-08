@@ -30,6 +30,7 @@ class TestSetupEnvironmentFromFiles:
     -----
     - test_load_lmod_modules: Confirms correct module loading sequence for systems with Linux Environment Modules.
     - test_env_file_loading: Validates environment variable loading and merging from .env files.
+    - test_env_file_updating: Tests that environment variables are updated correctly in the user .env file
 
     Methods
     -------
