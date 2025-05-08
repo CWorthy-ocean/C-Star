@@ -1,38 +1,63 @@
 from pathlib import Path
-from typing import Any, ClassVar, Optional
+from typing import ClassVar, Optional, get_args, get_origin
 
-import numpy as np
 from pydantic import (
     BaseModel,
-    FieldSerializationInfo,
-    field_serializer,
     model_serializer,
 )
 
 from cstar.base.utils import _list_to_concise_str
 
 
-# Used to print values in a human-readable, fortran-friendly way
-def _format_value(val: float | str) -> str:
-    if isinstance(val, float):
-        if val == 0.0:
-            return "0."
-        elif abs(val) < 1e-2 or abs(val) >= 1e4:
-            return f"{val:.6E}".replace("E+00", "E0")
-    return str(val)
+################################################################################
+def _format_list_of_floats(float_list: list[float]) -> str:
+    joiner = " "
+    return joiner.join(_format_float(x) for x in float_list)
 
 
-def _format_float_list(lst: list) -> str:
-    """Format a list of values for .in file."""
-    return " ".join(_format_value(x) for x in lst)
+def _format_list_of_paths(
+    path_list: list[Path], multi_line: Optional[bool] = False
+) -> str:
+    joiner = "\n    " if multi_line else " "
+    return joiner.join(_format_path(x) for x in path_list)
 
 
-# # Scratch this
-# def _list_of_formatted_values(v: Any) -> list[str]:
-#     """Apply format_value to one or many values and return as a list to iterate over."""
-#     if isinstance(v, (list, np.ndarray)):
-#         return [_format_value(x) for x in v]
-#     return [_format_value(v)]
+def _format_list_of_other(other_list: list[str | int]) -> str:
+    joiner = " "
+    return joiner.join(_format_other(x) for x in other_list)
+
+
+def _format_float(val) -> str:
+    if val == 0.0:
+        return "0."
+    elif abs(val) < 1e-2 or abs(val) >= 1e4:
+        return f"{val:.6E}".replace("E+00", "E0")
+    else:
+        return str(val)
+
+
+def _format_path(path: Path) -> str:
+    return str(path)
+
+
+def _format_other(other: str | int) -> str:
+    return str(other)
+
+
+################################################################################
+# # Used to print values in a human-readable, fortran-friendly way
+# def _format_value(val: float | str) -> str:
+#     if isinstance(val, float):
+#         if val == 0.0:
+#             return "0."
+#         elif abs(val) < 1e-2 or abs(val) >= 1e4:
+#             return f"{val:.6E}".replace("E+00", "E0")
+#     return str(val)
+
+
+# def _format_float_list(lst: list) -> str:
+#     """Format a list of values for .in file."""
+#     return " ".join(_format_value(x) for x in lst)
 
 
 # Subclassing BaseModel creates something that behaves similarly to (but isn't) a dataclass
@@ -87,32 +112,93 @@ class RomsSection(BaseModel):
         # Make a dictionary out of the attributes:
         data = {k: getattr(self, k) for k in self.key_order}
 
-        # Make a line for keys
-        keys_str = " ".join(data.keys())
+        # # Make a line for keys
+        # section_header = " ".join(data.keys())
 
         # Initialize empty list to hold values
-        str_formatted_values_as_list = []
-        # Check formatting of values
-        for v in data.values():
-            # List of floats:
-            if isinstance(v, list) and all(isinstance(f, float) for f in v):
-                str_formatted_values_as_list.append(_format_float_list(v))
-            # List of str or path:
-            elif isinstance(v, list):
-                str_formatted_values_as_list.append(
-                    self.value_joiner.join([str(s) for s in v])
-                )
-            # Single value that can be formatted:
-            else:
-                str_formatted_values_as_list.append(_format_value(v))
+        # str_formatted_values_as_list = []
+        section_values_as_list_of_str = []
 
-        values_str = self.value_joiner.join(str_formatted_values_as_list)
+        # Check formatting of values
+        for value in data.values():
+            match value:
+                case list() if all(isinstance(v, float) for v in value):
+                    section_values_as_list_of_str.append(_format_list_of_floats(value))
+                case list() if all(isinstance(v, Path) for v in value):
+                    section_values_as_list_of_str.append(
+                        _format_list_of_paths(value, multi_line=self.multi_line)
+                    )
+                case list():
+                    section_values_as_list_of_str.append(_format_list_of_other(value))
+                case float():
+                    section_values_as_list_of_str.append(_format_float(value))
+                case Path():
+                    section_values_as_list_of_str.append(_format_path(value))
+                case _:
+                    section_values_as_list_of_str.append(_format_other(value))
+        section_values_as_single_str = self.value_joiner.join(
+            section_values_as_list_of_str
+        )
+
+        section_header = f"{self.section_name}: {' '.join(data.keys())}\n"
         # Build the serialized string
         string = ""
-        string += f"{self.section_name}: {keys_str}\n"
-        string += f"    {values_str}\n"
+        string += section_header
+        string += f"    {section_values_as_single_str}\n"
         string += "\n"
         return string
+
+    @classmethod
+    def from_lines(cls, lines: Optional[list[str]]) -> Optional["RomsSection"]:
+        """This takes a list of lines as would be found under the section header of a
+        roms.in file and returns a RomsSection instance.
+
+        It uses the typehints of the RomsSection subclass under consideration to map
+        values from entries in the lines to correctly typed values.
+
+        If the type of an entry is "list", this is either the sole or final entry,
+        so we add all the remaining values to the list and break.
+
+        Parameters
+        ----------
+        lines: list[str]
+           Raw lines taken from a UCLA-ROMS runtime settings (`.in`) file.
+
+        Examples
+        --------
+        >>> LinRhoEos.from_lines(["0.2 1.0 0.822 1.0"])
+            LinRhoEos(Tcoef=0.2, T0=1.0, Scoef=0.822, S0=1.0)
+
+        >>> InitialBlock.from_lines(["1", "input_datasets/roms_ini.nc"])
+            InitialBlock(nrrec=1, ininame=Path("input_datasets/roms_ini.nc"))
+        """
+        if lines is None:
+            return None
+
+        annotations = cls.__annotations__
+        kwargs = {}
+
+        # Decide how to flatten the section based on multi_line flag
+        flat = lines if cls.multi_line else lines[0].split()
+
+        i = 0  # index of the entry
+        for key in cls.key_order:
+            expected_type = annotations[key]
+            if get_origin(expected_type) is not list:
+                # This doesn't reformat e.g. 5.0D0 -> 5.0
+                if expected_type is float:
+                    kwargs[key] = expected_type(flat[i].replace("D", "E"))
+                else:
+                    kwargs[key] = expected_type(flat[i])
+                i += 1
+            # Handle list[...] types
+            else:
+                item_type = get_args(expected_type)[0]
+                values = lines if cls.multi_line else flat[i:]
+                kwargs[key] = [item_type(v) for v in values]
+                break  # assume list field consumes the rest
+
+        return cls(**kwargs)
 
     ################################################################################
 
@@ -120,6 +206,110 @@ class RomsSection(BaseModel):
 ################################################################################
 ## ROMS SECTION SUBCLASSES
 ################################################################################
+
+
+class Title(RomsSection):
+    title: str
+    section_name = "title"
+    key_order = [
+        "title",
+    ]
+
+
+class OutputRootName(RomsSection):
+    output_root_name: str
+    section_name = "output_root_name"
+    key_order = [
+        "output_root_name",
+    ]
+
+
+class Rho0(RomsSection):
+    rho0: float
+    section_name = "rho0"
+    key_order = [
+        "rho0",
+    ]
+
+
+class Gamma2(RomsSection):
+    gamma2: float
+    section_name = "gamma2"
+    key_order = [
+        "gamma2",
+    ]
+
+
+class LateralVisc(RomsSection):
+    lateral_visc: float
+    section_name = "lateral_visc"
+    key_order = [
+        "lateral_visc",
+    ]
+
+
+class TracerDiff2(RomsSection):
+    tracer_diff2: list[float]
+    section_name = "tracer_diff2"
+    key_order = [
+        "tracer_diff2",
+    ]
+
+
+class MYBakMixing(RomsSection):
+    my_bak_mixing: list[float]
+    section_name = "my_bak_mixing"
+    key_order = [
+        "my_bak_mixing",
+    ]
+
+
+class SSSCorrection(RomsSection):
+    sss_correction: float
+    section_name = "sss_correction"
+    key_order = [
+        "sss_correction",
+    ]
+
+
+class SSTCorrection(RomsSection):
+    sst_correction: float
+    section_name = "sst_correction"
+    key_order = [
+        "sst_correction",
+    ]
+
+
+class UBind(RomsSection):
+    ubind: float
+    section_name = "ubind"
+    key_order = [
+        "ubind",
+    ]
+
+
+class VSponge(RomsSection):
+    v_sponge: float
+    section_name = "v_sponge"
+    key_order = [
+        "v_sponge",
+    ]
+
+
+class Grid(RomsSection):
+    grid: Path
+    section_name = "grid"
+    key_order = [
+        "grid",
+    ]
+
+
+class Climatology(RomsSection):
+    climatology: Path
+    section_name = "climatology"
+    key_order = [
+        "climatology",
+    ]
 
 
 class TimeStepping(RomsSection):
@@ -145,7 +335,7 @@ class BottomDrag(RomsSection):
 
 class InitialBlock(RomsSection):
     nrrec: int
-    ininame: str | Path
+    ininame: Path
 
     section_name = "initial"
     multi_line = True
@@ -211,27 +401,40 @@ class LinRhoEos(RomsSection):
 
 
 class ROMSRuntimeSettings(BaseModel):
-    title: str
+    # title: str
+    title: Title
     time_stepping: TimeStepping
     bottom_drag: BottomDrag
     initial: InitialBlock
     forcing: ForcingBlock
-    output_root_name: str
-    marbl_biogeochemistry: MarblBGC | None
-    s_coord: SCoord | None
-    rho0: float
-    lin_rho_eos: LinRhoEos | None
-    lateral_visc: float | None
-    gamma2: float | None
-    tracer_diff2: list[float] | None  # np.ndarray | None # change to list[float]
-    vertical_mixing: VerticalMixing | None
-    my_bak_mixing: list[float] | None
-    sss_correction: float | None
-    sst_correction: float | None
-    ubind: float | None
-    v_sponge: float | None
-    grid: Path | None
-    climatology: str | None
+    # output_root_name: str
+    output_root_name: OutputRootName
+    # rho0: float
+    rho0: Rho0
+    marbl_biogeochemistry: Optional[MarblBGC]
+    s_coord: Optional[SCoord]
+    lin_rho_eos: Optional[LinRhoEos]
+    # lateral_visc: Optional[float]
+    lateral_visc: Optional[LateralVisc]
+    # gamma2: Optional[float]
+    gamma2: Optional[Gamma2]
+    # tracer_diff2: Optional[list[float]]
+    tracer_diff2: Optional[TracerDiff2]
+    vertical_mixing: Optional[VerticalMixing]
+    # my_bak_mixing: Optional[list[float]]
+    my_bak_mixing: Optional[MYBakMixing]
+    # sss_correction: Optional[float]
+    sss_correction: Optional[SSSCorrection]
+    # sst_correction: Optional[float]
+    sst_correction: Optional[SSTCorrection]
+    # ubind: Optional[float]
+    ubind: Optional[UBind]
+    # v_sponge: Optional[float]
+    v_sponge: Optional[VSponge]
+    # grid: Optional[Path]
+    grid: Optional[Grid]
+    # climatology: Optional[str]
+    climatology: Optional[Climatology]
 
     # This line says that types which aren't typically encodable with pydantic
     # (e.g. ndarray, tuple[float, np.ndarray]). Currently these mess up in `to_file`
@@ -242,40 +445,39 @@ class ROMSRuntimeSettings(BaseModel):
     # (see above) individual serializers are defined
 
     # Define a serializer for any single-entry section that isn't covered by a RomsSection instance:
-    single_entry_sections: ClassVar[list] = [
-        "title",
-        "output_root_name",
-        "rho0",
-        "lateral_visc",
-        "gamma2",
-        "tracer_diff2",
-        "my_bak_mixing",
-        "sss_correction",
-        "sst_correction",
-        "ubind",
-        "v_sponge",
-        "grid",
-        "climatology",
-    ]
 
-    @field_serializer(*single_entry_sections)
-    def single_entry_serializer(
-        self, data: str | float, info: FieldSerializationInfo
-    ) -> str:
-        name = info.field_name
+    # single_entry_sections: ClassVar[list] = [
+    #     # "title",
+    #     # "output_root_name",
+    #     # "rho0",
+    #     # "lateral_visc",
+    #     # "gamma2",
+    #     # "tracer_diff2",
+    #     # "my_bak_mixing",
+    #     # "sss_correction",
+    #     # "sst_correction",
+    #     # "ubind",
+    #     # "v_sponge",
+    #     # "grid",
+    #     # "climatology",
+    # ]
 
-        # list of values:
-        if isinstance(data, (list, np.ndarray)):
-            # values = "    " + " ".join(_list_of_formatted_values(data)) + "\n"
-            values = "    " + _format_float_list(data) + "\n"
-            return f"{name}:\n{values}\n"
+    # @field_serializer(*single_entry_sections)
+    # def single_entry_serializer(
+    #     self, data: str | float, info: FieldSerializationInfo
+    # ) -> str:
+    #     name = info.field_name
 
-        # single value
-        string = f"{name}:\n"
-        string += f"    {_format_value(data)}\n"
-        string += "\n"
-        return string
+    #     # list of values:
+    #     if isinstance(data, (list, np.ndarray)):
+    #         values = "    " + _format_list_of_floats(data) + "\n"
+    #         return f"{name}:\n{values}\n"
 
+    #     # single value
+    #     string = f"{name}:\n"
+    #     string += f"    {_format_value(data)}\n"
+    #     string += "\n"
+    #     return string
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -332,28 +534,7 @@ class ROMSRuntimeSettings(BaseModel):
         Climatology file path.
     """
 
-    @classmethod
-    def from_file(cls, filepath: Path | str):
-        """Read ROMS runtime settings from a `.in` file.
-
-        ROMS runtime settings are specified via a `.in` file with sections corresponding
-        to different sets of parameters (e.g. time_stepping, bottom_drag). This method
-        first parses the file, creating a dict[str,list[str]] where the keys are the
-        section names and the values are a list of lines in that section. It then
-        translates that dictionary into a ROMSRuntimeSettings instance with properly
-        formatted attributes.
-
-        Parameters
-        ----------
-        - filepath (Path or str):
-           The path to the `.in` file
-
-        See Also
-        --------
-        - `ROMSRuntimeSettings.to_file()`: writes a ROMSRuntimeSettings instance to a
-           ROMS-compatible `.in` file
-        """
-
+    def _load_raw_sections(filepath: Path) -> dict:
         filepath = Path(filepath)
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist.")
@@ -379,35 +560,66 @@ class ROMSRuntimeSettings(BaseModel):
                 sections[section_name] = section_lines
             else:
                 i += 1
+        return sections
 
-        def _single_line_section_to_list(
-            section_name: str, expected_type: Any
-        ) -> Optional[list]:
-            if (section_name not in sections.keys()) or (
-                len(sections[section_name]) == 0
-            ):
-                return None
-            section = sections[section_name][0].split()
-            if expected_type == float:
-                section = [x.upper().replace("D", "E") for x in section]
-            section = [expected_type(x) for x in section]
+    @classmethod
+    def from_file(cls, filepath: Path | str):
+        """Read ROMS runtime settings from a `.in` file.
 
-            return section
+        ROMS runtime settings are specified via a `.in` file with sections corresponding
+        to different sets of parameters (e.g. time_stepping, bottom_drag). This method
+        first parses the file, creating a dict[str,list[str]] where the keys are the
+        section names and the values are a list of lines in that section. It then
+        translates that dictionary into a ROMSRuntimeSettings instance with properly
+        formatted attributes.
 
-        def _single_line_section_to_scalar(
-            section_name: str, expected_type: Any
-        ) -> Optional[Any]:
-            lst = _single_line_section_to_list(section_name, expected_type)
-            return lst[0] if lst else None
+        Parameters
+        ----------
+        - filepath (Path or str):
+           The path to the `.in` file
+
+        See Also
+        --------
+        - `ROMSRuntimeSettings.to_file()`: writes a ROMSRuntimeSettings instance to a
+           ROMS-compatible `.in` file
+        """
+
+        # def _single_line_section_to_list(
+        #     section_name: str, expected_type: Any
+        # ) -> Optional[list]:
+        #     if (section_name not in sections.keys()) or (
+        #         len(sections[section_name]) == 0
+        #     ):
+        #         return None
+
+        #     section = sections[section_name][0].split()
+        #     if expected_type == float:
+        #         section = [x.upper().replace("D", "E") for x in section]
+        #     section = [expected_type(x) for x in section]
+
+        #     return section
+
+        # def _single_line_section_to_scalar(
+        #     section_name: str, expected_type: Any
+        # ) -> Optional[Any]:
+        #     lst = _single_line_section_to_list(section_name, expected_type)
+        #     return lst[0] if lst else None
+
+        # Read file
+        filepath = Path(filepath)
+        sections = cls._load_raw_sections(filepath)
 
         # Non-optional
         # One-line sections:
-        title = sections["title"][0]
-        time_stepping = _single_line_section_to_list("time_stepping", int) or []
-        bottom_drag = _single_line_section_to_list("bottom_drag", float) or []
-        output_root_name = sections["output_root_name"][0]
+        # title = sections["title"][0]
+        # time_stepping = _single_line_section_to_list("time_stepping", int) or []
+        # bottom_drag = _single_line_section_to_list("bottom_drag", float) or []
+        # output_root_name = sections["output_root_name"][0]
 
-        if not all([title, time_stepping, bottom_drag, output_root_name]):
+        if not all(
+            key in sections.keys()
+            for key in ["title", "time_stepping", "bottom_drag", "output_root_name"]
+        ):
             raise ValueError(
                 "Required field missing from file. Required fields: "
                 "\n- title"
@@ -417,67 +629,97 @@ class ROMSRuntimeSettings(BaseModel):
             )
 
         # Multi-line sections:
-        nrrec = int(sections["initial"][0])
-        ini_path = (
-            Path(sections["initial"][1]) if len(sections["initial"]) > 1 else None
-        )
-        initial = (nrrec, ini_path)
-        forcing: list[Path | str] = [Path(f) for f in sections["forcing"]]
+        # nrrec = int(sections["initial"][0])
+        # ini_path = (
+        #     Path(sections["initial"][1]) if len(sections["initial"]) > 1 else None
+        # )
+        # initial = (nrrec, ini_path)
+        # forcing: list[Path | str] = [Path(f) for f in sections["forcing"]]
 
         # Optional
         # One-line sections:
-        s_coord = _single_line_section_to_list("S-coord", float)
-        rho0 = _single_line_section_to_scalar("rho0", float)
-        lin_rho_eos = _single_line_section_to_list("lin_rho_eos", float)
-        lateral_visc = _single_line_section_to_scalar("lateral_visc", float)
-        gamma2 = _single_line_section_to_scalar("gamma2", float)
+        # s_coord = _single_line_section_to_list("S-coord", float)
+        # rho0 = _single_line_section_to_scalar("rho0", float)
+        # lin_rho_eos = _single_line_section_to_list("lin_rho_eos", float)
+        # lateral_visc = _single_line_section_to_scalar("lateral_visc", float)
+        # gamma2 = _single_line_section_to_scalar("gamma2", float)
 
-        tracer_diff2 = _single_line_section_to_list("tracer_diff2", float)
+        # tracer_diff2 = _single_line_section_to_list("tracer_diff2", float)
         # tracer_diff2_list = _single_line_section_to_list("tracer_diff2", float)
         # tracer_diff2 = np.array(tracer_diff2_list) if tracer_diff2_list else None
 
-        my_bak_mixing = _single_line_section_to_list("MY_bak_mixing", float)
+        # my_bak_mixing = _single_line_section_to_list("MY_bak_mixing", float)
 
-        vertical_mixing = _single_line_section_to_list("vertical_mixing", float)
+        # vertical_mixing = _single_line_section_to_list("vertical_mixing", float)
 
-        sss_correction = _single_line_section_to_scalar("SSS_correction", float)
-        sst_correction = _single_line_section_to_scalar("SST_correction", float)
-        ubind = _single_line_section_to_scalar("ubind", float)
-        v_sponge = _single_line_section_to_scalar("v_sponge", float)
-        grid = _single_line_section_to_scalar("grid", Path)
-        climatology = _single_line_section_to_scalar("climatology", Path)
+        # sss_correction = _single_line_section_to_scalar("SSS_correction", float)
+        # sst_correction = _single_line_section_to_scalar("SST_correction", float)
+        # ubind = _single_line_section_to_scalar("ubind", float)
+        # v_sponge = _single_line_section_to_scalar("v_sponge", float)
+        # grid = _single_line_section_to_scalar("grid", Path)
+        # climatology = _single_line_section_to_scalar("climatology", Path)
 
         # Multi-line sections:
-        marbl_biogeochemistry: Optional[list[Path | str]] = (
-            [Path(x) for x in sections["MARBL_biogeochemistry"]]
-            if "MARBL_biogeochemistry" in sections
-            else None
-        )
+        # marbl_biogeochemistry: Optional[list[Path | str]] = (
+        #     [Path(x) for x in sections["MARBL_biogeochemistry"]]
+        #     if "MARBL_biogeochemistry" in sections
+        #     else None
+        # )
 
         return cls(
-            title=title,
-            time_stepping=TimeStepping(*time_stepping),
-            marbl_biogeochemistry=MarblBGC(*marbl_biogeochemistry),
-            s_coord=None if s_coord is None else SCoord(*s_coord),
-            rho0=rho0,
-            lin_rho_eos=None if lin_rho_eos is None else LinRhoEos(*lin_rho_eos),
-            lateral_visc=lateral_visc,
-            gamma2=gamma2,
-            tracer_diff2=tracer_diff2,
-            bottom_drag=BottomDrag(*bottom_drag),
-            vertical_mixing=VerticalMixing(
-                Akv_bak=vertical_mixing[0], Akt_bak=vertical_mixing[1:]
+            # title=title,
+            # title = sections.get("title")[0],
+            title=Title.from_lines(sections["title"]),
+            # time_stepping=TimeStepping(*time_stepping),
+            time_stepping=TimeStepping.from_lines(sections["time_stepping"]),
+            # marbl_biogeochemistry=MarblBGC(*marbl_biogeochemistry),
+            marbl_biogeochemistry=MarblBGC.from_lines(
+                sections["MARBL_biogeochemistry"]
             ),
-            my_bak_mixing=my_bak_mixing,
-            sss_correction=sss_correction,
-            sst_correction=sst_correction,
-            ubind=ubind,
-            v_sponge=v_sponge,
-            grid=grid,
-            initial=None if initial is None else InitialBlock(*initial),
-            forcing=None if forcing is None else ForcingBlock(forcing),
-            climatology=climatology,
-            output_root_name=output_root_name,
+            # s_coord=None if s_coord is None else SCoord(*s_coord),
+            s_coord=SCoord.from_lines(sections.get("S-coord")),
+            # rho0=rho0,
+            # rho0 = float(sections.get("rho0")[0].split()[0].replace("D","E")),
+            rho0=Rho0.from_lines(sections.get("rho0")),
+            # lin_rho_eos=None if lin_rho_eos is None else LinRhoEos(*lin_rho_eos),
+            lin_rho_eos=LinRhoEos.from_lines(sections.get("lin_rho_eos")),
+            # lateral_visc=lateral_visc,
+            # lateral_visc = float(sections.get("lateral_visc")[0].split()[0].replace("D","E")),
+            lateral_visc=LateralVisc.from_lines(sections.get("lateral_visc")),
+            # gamma2=gamma2
+            gamma2=Gamma2.from_lines(sections.get("gamma2")),
+            # gamma2 = float(sections.get("gamma2")[0].split()[0].replace("D","E")),
+            # tracer_diff2=tracer_diff2,
+            tracer_diff2=TracerDiff2.from_lines(sections.get("tracer_diff2")),
+            # bottom_drag=BottomDrag(*bottom_drag),
+            bottom_drag=BottomDrag.from_lines(sections.get("bottom_drag")),
+            # vertical_mixing=VerticalMixing(
+            #     Akv_bak=vertical_mixing[0], Akt_bak=vertical_mixing[1:]
+            # ),
+            vertical_mixing=VerticalMixing.from_lines(sections.get("vertical_mixing")),
+            # my_bak_mixing=my_bak_mixing,
+            my_bak_mixing=MYBakMixing.from_lines(sections.get("my_bak_mixing")),
+            # sss_correction=sss_correction,
+            sss_correction=SSSCorrection.from_lines(sections.get("sss_correction")),
+            # sst_correction=sst_correction,
+            sst_correction=SSTCorrection.from_lines(sections.get("sst_correction")),
+            # ubind=ubind,
+            ubind=UBind.from_lines(sections.get("ubind")),
+            # v_sponge=v_sponge,
+            v_sponge=VSponge.from_lines(sections.get("v_sponge")),
+            # grid=grid,
+            grid=Grid.from_lines(sections.get("grid")),
+            # initial=None if initial is None else InitialBlock(*initial),
+            initial=InitialBlock.from_lines(sections.get("initial")),
+            # forcing=None if forcing is None else ForcingBlock(forcing),
+            forcing=ForcingBlock.from_lines(sections.get("forcing")),
+            # climatology=climatology,
+            climatology=Climatology.from_lines(sections.get("climatology")),
+            # output_root_name=output_root_name,
+            # output_root_name = sections.get("output_root_name")[0]
+            output_root_name=OutputRootName.from_lines(
+                sections.get("output_root_name")
+            ),
         )
 
     def __str__(self) -> str:
