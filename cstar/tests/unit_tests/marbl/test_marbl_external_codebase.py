@@ -73,8 +73,6 @@ class TestMARBLExternalCodeBaseGet:
         Mocks `subprocess.run` to simulate `make` commands and other shell operations.
     mock_clone_and_checkout : MagicMock
         Mocks `_clone_and_checkout` to simulate repository cloning and checkout.
-    mock_update_user_dotenv : MagicMock
-        Mocks `_update_user_dotenv` to simulate writing environment variables to a config file.
     env_patch : MagicMock
         Mocks `os.environ` to control environment variables during tests.
     """
@@ -128,7 +126,7 @@ class TestMARBLExternalCodeBaseGet:
                 checkout_target=marbl_codebase.checkout_target,
             )
 
-            ## Check that _update_user_dotenv was (mock) called correctly
+            ## Check that environment was updated correctly
             actual_value = dotenv.get_key(dotenv_path, key)
             assert actual_value == value
 
@@ -149,14 +147,19 @@ class TestMARBLExternalCodeBaseGet:
         self.mock_subprocess_run.side_effect = [
             mock.Mock(returncode=1, stderr="Mocked MARBL Compilation Failure"),
         ]
-        self.mock_update_user_dotenv = mock.patch(
-            "cstar.marbl.external_codebase.CSTAR_USER_ENV_PATH",
-            dotenv_path,
-        )
 
         # Test
-        with pytest.raises(
-            RuntimeError,
-            match="Error when compiling MARBL. Return Code: `1`. STDERR:\nMocked MARBL Compilation Failure",
+        with (
+            pytest.raises(
+                RuntimeError,
+                match=(
+                    "Error when compiling MARBL. Return Code: `1`. STDERR:\n"
+                    "Mocked MARBL Compilation Failure"
+                ),
+            ),
+            mock.patch(
+                "cstar.system.environment.CSTAR_USER_ENV_PATH",
+                dotenv_path,
+            ),
         ):
             marbl_codebase.get(target=tmp_path)
