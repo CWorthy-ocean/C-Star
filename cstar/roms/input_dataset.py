@@ -279,8 +279,6 @@ class ROMSInputDataset(InputDataset, ABC):
             working_path_parent = self.working_path[0].parent
         else:
             working_path_parent = self.working_path.parent
-        # import pdb
-        # pdb.set_trace()
 
         if (self.exists_locally) and (working_path_parent == local_dir):
             self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
