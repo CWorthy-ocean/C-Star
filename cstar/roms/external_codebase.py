@@ -1,10 +1,9 @@
-import os
 import shutil
 from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import _clone_and_checkout
-from cstar.base.utils import _run_cmd, _update_user_dotenv
+from cstar.base.utils import _run_cmd
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -40,9 +39,12 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         versions, allowing C-Star to be used with ROMS across multiple different
         computing systems.
         """
+        roms_root = Path(
+            cstar_sysmgr.environment.environment_variables[self.expected_env_var]
+        )
         shutil.copytree(
-            Path(os.environ[self.expected_env_var]) / "ci/ci_makefiles/",
-            os.environ[self.expected_env_var],
+            roms_root / "ci/ci_makefiles/",
+            roms_root,
             dirs_exist_ok=True,
         )
 
@@ -72,17 +74,10 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         )
 
         # Set environment variables for this session:
-        os.environ["ROMS_ROOT"] = str(target)
-        cstar_sysmgr.environment.environment_variables["ROMS_ROOT"] = os.environ[
-            "ROMS_ROOT"
-        ]
-        os.environ["PATH"] = os.environ.get("PATH", "") + f":{target}/Tools-Roms/"
-        # os.environ["PATH"] += f":{target}/Tools-Roms/"
-        cstar_sysmgr.environment.environment_variables["PATH"] = os.environ["PATH"]
-        env_file_str = (
-            f"ROMS_ROOT={target}" + "\nPATH=${PATH}:" + f"{target}/Tools-Roms\n"
+        cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(target))
+        cstar_sysmgr.environment.set_env_var(
+            "PATH", f"${{PATH}}:{target / 'Tools-Roms'}"
         )
-        _update_user_dotenv(env_file_str)
 
         # Distribute custom makefiles for ROMS
         self._codebase_adjustments()

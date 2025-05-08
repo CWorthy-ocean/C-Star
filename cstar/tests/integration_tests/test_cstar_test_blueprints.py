@@ -1,7 +1,9 @@
 import logging
+from unittest import mock
 
 import pytest
 
+import cstar
 from cstar.roms.simulation import ROMSSimulation
 from cstar.tests.integration_tests.config import TEST_CONFIG
 
@@ -55,39 +57,52 @@ class TestCStar:
             Logger instance for logging messages during test execution.
         """
 
-        # Regardless of remote or local, if yaml_datasets we need roms-tools support data
-        if "yaml_datasets" in test_config_key:
-            fetch_roms_tools_source_data(symlink_path="roms_tools_datasets")
+        dotenv_path = tmpdir / ".cstar.env"
+        ext_root = tmpdir / "externals"
 
-        if "local" in test_config_key:
-            fetch_remote_test_case_data()
+        with (
+            mock.patch(
+                "cstar.system.environment.CSTAR_USER_ENV_PATH",
+                dotenv_path,
+            ),
+            mock.patch.object(
+                cstar.system.environment.CStarEnvironment, "package_root", new=ext_root
+            ),
+        ):
+            # Regardless of remote or local, if yaml_datasets we need roms-tools support data
+            if "yaml_datasets" in test_config_key:
+                fetch_roms_tools_source_data(symlink_path="roms_tools_datasets")
 
-        config = TEST_CONFIG.get(test_config_key)
-        if config is None:
-            raise ValueError(
-                "No test configuration found for the provided key: "
-                f"{test_config_key}. Please check the TEST_CONFIG dictionary."
+            if "local" in test_config_key:
+                fetch_remote_test_case_data()
+
+            config = TEST_CONFIG.get(test_config_key)
+            if config is None:
+                raise ValueError(
+                    "No test configuration found for the provided key: "
+                    f"{test_config_key}. Please check the TEST_CONFIG dictionary."
+                )
+            template_blueprint = config.get("template_blueprint_path")
+            strs_to_replace = config.get("strs_to_replace")
+
+            log.info(f"Creating ROMSSimulation in {tmpdir / 'cstar_test_simulation'}")
+            modified_blueprint = modify_template_blueprint(
+                template_blueprint_path=template_blueprint,
+                strs_to_replace=strs_to_replace,
             )
-        template_blueprint = config.get("template_blueprint_path")
-        strs_to_replace = config.get("strs_to_replace")
+            cstar_test_case = ROMSSimulation.from_blueprint(
+                modified_blueprint,
+                directory=tmpdir / "cstar_test_simulation",
+                start_date="20120101 12:00:00",
+                end_date="20120101 12:10:00",
+            )
 
-        log.info(f"Creating ROMSSimulation in {tmpdir / 'cstar_test_simulation'}")
-        modified_blueprint = modify_template_blueprint(
-            template_blueprint_path=template_blueprint, strs_to_replace=strs_to_replace
-        )
-        cstar_test_case = ROMSSimulation.from_blueprint(
-            modified_blueprint,
-            directory=tmpdir / "cstar_test_simulation",
-            start_date="20120101 12:00:00",
-            end_date="20120101 12:10:00",
-        )
+            with mock_user_input("y"):
+                cstar_test_case.setup()
 
-        with mock_user_input("y"):
-            cstar_test_case.setup()
-
-        cstar_test_case.to_blueprint(tmpdir / "test_blueprint_export.yaml")
-        cstar_test_case.build()
-        cstar_test_case.pre_run()
-        test_process = cstar_test_case.run()
-        test_process.updates(seconds=0, confirm_indefinite=False)
-        cstar_test_case.post_run()
+            cstar_test_case.to_blueprint(tmpdir / "test_blueprint_export.yaml")
+            cstar_test_case.build()
+            cstar_test_case.pre_run()
+            test_process = cstar_test_case.run()
+            test_process.updates(seconds=0, confirm_indefinite=False)
+            cstar_test_case.post_run()

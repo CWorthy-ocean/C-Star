@@ -1,9 +1,8 @@
-import os
 from pathlib import Path
 
 from cstar.base import ExternalCodeBase
 from cstar.base.gitutils import _clone_and_checkout
-from cstar.base.utils import _run_cmd, _update_user_dotenv
+from cstar.base.utils import _run_cmd
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -52,12 +51,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
             checkout_target=self.checkout_target,
         )
         # Set environment variables for this session:
-        os.environ["MARBL_ROOT"] = str(target)
-        cstar_sysmgr.environment.environment_variables["MARBL_ROOT"] = os.environ[
-            "MARBL_ROOT"
-        ]
-        env_file_str = f'MARBL_ROOT="{target}"\n'
-        _update_user_dotenv(env_file_str)
+        cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(target))
 
         # Make things
         _run_cmd(
