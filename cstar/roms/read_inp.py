@@ -8,8 +8,10 @@ from pydantic import (
 
 from cstar.base.utils import _list_to_concise_str
 
-
 ################################################################################
+# Formatting methods for serializer:
+
+
 def _format_list_of_floats(float_list: list[float]) -> str:
     joiner = " "
     return joiner.join(_format_float(x) for x in float_list)
@@ -45,80 +47,29 @@ def _format_other(other: str | int) -> str:
 
 
 ################################################################################
-# # Used to print values in a human-readable, fortran-friendly way
-# def _format_value(val: float | str) -> str:
-#     if isinstance(val, float):
-#         if val == 0.0:
-#             return "0."
-#         elif abs(val) < 1e-2 or abs(val) >= 1e4:
-#             return f"{val:.6E}".replace("E+00", "E0")
-#     return str(val)
 
 
-# def _format_float_list(lst: list) -> str:
-#     """Format a list of values for .in file."""
-#     return " ".join(_format_value(x) for x in lst)
-
-
-# Subclassing BaseModel creates something that behaves similarly to (but isn't) a dataclass
 class RomsSection(BaseModel):
-    # typing sth as a ClassVar tells pydantic it's not supposed to be serialized,
-    # and is for internal use.
-    # This is the base class, so everything here is a ClassVar. Subclasses define
-    # specific attributes /kv pairs
     section_name: ClassVar[str]
     multi_line: ClassVar[bool] = False
     key_order: ClassVar[list[str]]
 
-    # Shouldn't normally need to define __init__ for a BaseModel (~dataclass)
-    # This allows positional args instead of kwargs, e.g.
-    # TimeStepping(1000, 30, 10, 50) instead of TimeStepping(ntimes=1000, dt=30, ndtfast=10, ninfo=50)
-    # which we don't really desire anyway, so this can probs get shitcanned
     def __init__(self, *args, **kwargs):
         if args:
             super().__init__(**{k: args[i] for i, k in enumerate(self.key_order)})
         else:
             super().__init__(**kwargs)
 
-    # This was previously in `write_section`. If `multi_line` (e.g. forcing) the joiner contains `\n`
-    # if single line (e.g. time-stepping) it just separates by 4 spaces
     @property
     def value_joiner(self):
         return "\n    " if self.multi_line else "    "
-
-    ################################################################################
-    # SERIALIZERS
-    ################################################################################
-    # Functions used to convert complex structures to Python-native types like str
-    # or dict.
-    #
-    # Typically we don't need to define custom serializers, as pydantic
-    # has encoders for int, float, str, list, dict, datetime, Path, Enum, etc.
-    # so any class we make which combines these types can cascade down into a
-    # standard serialization.
-    #
-    # Here we have different encoding strategies for different sections, rather than
-    # different source types:
-    ################################################################################
-    # NOTE:
-    # SE says this probably isn't needed: only `_kv_serializer` (default) is used
-    # with the exception of `_list_serializer` for the ForcingBlock subclass.
-    # We could instead just define @model_serializer as `_kv_serializer` in the base
-    # class and then override it for the ForcingBlock subclass
-    ################################################################################
 
     @model_serializer
     def default_serializer(self) -> str:
         # Make a dictionary out of the attributes:
         data = {k: getattr(self, k) for k in self.key_order}
 
-        # # Make a line for keys
-        # section_header = " ".join(data.keys())
-
-        # Initialize empty list to hold values
-        # str_formatted_values_as_list = []
         section_values_as_list_of_str = []
-
         # Check formatting of values
         for value in data.values():
             match value:
@@ -200,116 +151,92 @@ class RomsSection(BaseModel):
 
         return cls(**kwargs)
 
-    ################################################################################
-
 
 ################################################################################
 ## ROMS SECTION SUBCLASSES
 ################################################################################
 
 
-class Title(RomsSection):
+class SingleEntryRomsSection(RomsSection):
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        # Get all annotated instance fields (ignore ClassVars like section_name)
+        field_names = [
+            name
+            for name, vartype in cls.__annotations__.items()
+            if get_origin(vartype) != ClassVar
+        ]
+
+        if len(field_names) != 1:
+            raise TypeError(
+                f"{cls.__name__} must declare exactly one field, found: {field_names}"
+            )
+
+        # Set key_order to the sole field
+        cls.key_order = field_names
+
+        # Set section_name = <field name> if not explicitly provided
+        if not hasattr(cls, "section_name"):
+            cls.section_name = field_names[0]
+
+    def __repr__(self):
+        return repr(getattr(self, self.key_order[0]))
+
+    def __str__(self):
+        return str(getattr(self, self.key_order[0]))
+
+
+class Title(SingleEntryRomsSection):
     title: str
-    section_name = "title"
-    key_order = [
-        "title",
-    ]
 
 
-class OutputRootName(RomsSection):
+class OutputRootName(SingleEntryRomsSection):
     output_root_name: str
-    section_name = "output_root_name"
-    key_order = [
-        "output_root_name",
-    ]
 
 
-class Rho0(RomsSection):
+class Rho0(SingleEntryRomsSection):
     rho0: float
-    section_name = "rho0"
-    key_order = [
-        "rho0",
-    ]
 
 
-class Gamma2(RomsSection):
+class Gamma2(SingleEntryRomsSection):
     gamma2: float
-    section_name = "gamma2"
-    key_order = [
-        "gamma2",
-    ]
 
 
-class LateralVisc(RomsSection):
+class LateralVisc(SingleEntryRomsSection):
     lateral_visc: float
-    section_name = "lateral_visc"
-    key_order = [
-        "lateral_visc",
-    ]
 
 
-class TracerDiff2(RomsSection):
+class TracerDiff2(SingleEntryRomsSection):
     tracer_diff2: list[float]
-    section_name = "tracer_diff2"
-    key_order = [
-        "tracer_diff2",
-    ]
 
 
-class MYBakMixing(RomsSection):
+class MYBakMixing(SingleEntryRomsSection):
     my_bak_mixing: list[float]
-    section_name = "my_bak_mixing"
-    key_order = [
-        "my_bak_mixing",
-    ]
 
 
-class SSSCorrection(RomsSection):
+class SSSCorrection(SingleEntryRomsSection):
     sss_correction: float
-    section_name = "sss_correction"
-    key_order = [
-        "sss_correction",
-    ]
 
 
-class SSTCorrection(RomsSection):
+class SSTCorrection(SingleEntryRomsSection):
     sst_correction: float
-    section_name = "sst_correction"
-    key_order = [
-        "sst_correction",
-    ]
 
 
-class UBind(RomsSection):
+class UBind(SingleEntryRomsSection):
     ubind: float
-    section_name = "ubind"
-    key_order = [
-        "ubind",
-    ]
 
 
-class VSponge(RomsSection):
+class VSponge(SingleEntryRomsSection):
     v_sponge: float
-    section_name = "v_sponge"
-    key_order = [
-        "v_sponge",
-    ]
 
 
-class Grid(RomsSection):
+class Grid(SingleEntryRomsSection):
     grid: Path
-    section_name = "grid"
-    key_order = [
-        "grid",
-    ]
 
 
-class Climatology(RomsSection):
+class Climatology(SingleEntryRomsSection):
     climatology: Path
-    section_name = "climatology"
-    key_order = [
-        "climatology",
-    ]
 
 
 class TimeStepping(RomsSection):
@@ -396,88 +323,31 @@ class LinRhoEos(RomsSection):
 
 
 ################################################################################
-## THE MAIN BEAST
-################################################################################
+## Class to hold all sections:
 
 
 class ROMSRuntimeSettings(BaseModel):
-    # title: str
     title: Title
     time_stepping: TimeStepping
     bottom_drag: BottomDrag
     initial: InitialBlock
     forcing: ForcingBlock
-    # output_root_name: str
     output_root_name: OutputRootName
-    # rho0: float
     rho0: Rho0
     marbl_biogeochemistry: Optional[MarblBGC]
     s_coord: Optional[SCoord]
     lin_rho_eos: Optional[LinRhoEos]
-    # lateral_visc: Optional[float]
     lateral_visc: Optional[LateralVisc]
-    # gamma2: Optional[float]
     gamma2: Optional[Gamma2]
-    # tracer_diff2: Optional[list[float]]
     tracer_diff2: Optional[TracerDiff2]
     vertical_mixing: Optional[VerticalMixing]
-    # my_bak_mixing: Optional[list[float]]
     my_bak_mixing: Optional[MYBakMixing]
-    # sss_correction: Optional[float]
     sss_correction: Optional[SSSCorrection]
-    # sst_correction: Optional[float]
     sst_correction: Optional[SSTCorrection]
-    # ubind: Optional[float]
     ubind: Optional[UBind]
-    # v_sponge: Optional[float]
     v_sponge: Optional[VSponge]
-    # grid: Optional[Path]
     grid: Optional[Grid]
-    # climatology: Optional[str]
     climatology: Optional[Climatology]
-
-    # This line says that types which aren't typically encodable with pydantic
-    # (e.g. ndarray, tuple[float, np.ndarray]). Currently these mess up in `to_file`
-    # model_config = {"arbitrary_types_allowed": True}
-
-    # file_serializers can be applied to specific fields, e.g. @field_serializer("title","rho0")
-    # here, "*" says 'apply to all' and then overrides any ROMSSection instance, on which
-    # (see above) individual serializers are defined
-
-    # Define a serializer for any single-entry section that isn't covered by a RomsSection instance:
-
-    # single_entry_sections: ClassVar[list] = [
-    #     # "title",
-    #     # "output_root_name",
-    #     # "rho0",
-    #     # "lateral_visc",
-    #     # "gamma2",
-    #     # "tracer_diff2",
-    #     # "my_bak_mixing",
-    #     # "sss_correction",
-    #     # "sst_correction",
-    #     # "ubind",
-    #     # "v_sponge",
-    #     # "grid",
-    #     # "climatology",
-    # ]
-
-    # @field_serializer(*single_entry_sections)
-    # def single_entry_serializer(
-    #     self, data: str | float, info: FieldSerializationInfo
-    # ) -> str:
-    #     name = info.field_name
-
-    #     # list of values:
-    #     if isinstance(data, (list, np.ndarray)):
-    #         values = "    " + _format_list_of_floats(data) + "\n"
-    #         return f"{name}:\n{values}\n"
-
-    #     # single value
-    #     string = f"{name}:\n"
-    #     string += f"    {_format_value(data)}\n"
-    #     string += "\n"
-    #     return string
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -584,37 +454,9 @@ class ROMSRuntimeSettings(BaseModel):
            ROMS-compatible `.in` file
         """
 
-        # def _single_line_section_to_list(
-        #     section_name: str, expected_type: Any
-        # ) -> Optional[list]:
-        #     if (section_name not in sections.keys()) or (
-        #         len(sections[section_name]) == 0
-        #     ):
-        #         return None
-
-        #     section = sections[section_name][0].split()
-        #     if expected_type == float:
-        #         section = [x.upper().replace("D", "E") for x in section]
-        #     section = [expected_type(x) for x in section]
-
-        #     return section
-
-        # def _single_line_section_to_scalar(
-        #     section_name: str, expected_type: Any
-        # ) -> Optional[Any]:
-        #     lst = _single_line_section_to_list(section_name, expected_type)
-        #     return lst[0] if lst else None
-
         # Read file
         filepath = Path(filepath)
         sections = cls._load_raw_sections(filepath)
-
-        # Non-optional
-        # One-line sections:
-        # title = sections["title"][0]
-        # time_stepping = _single_line_section_to_list("time_stepping", int) or []
-        # bottom_drag = _single_line_section_to_list("bottom_drag", float) or []
-        # output_root_name = sections["output_root_name"][0]
 
         if not all(
             key in sections.keys()
@@ -628,95 +470,29 @@ class ROMSRuntimeSettings(BaseModel):
                 "\n- output_root_name"
             )
 
-        # Multi-line sections:
-        # nrrec = int(sections["initial"][0])
-        # ini_path = (
-        #     Path(sections["initial"][1]) if len(sections["initial"]) > 1 else None
-        # )
-        # initial = (nrrec, ini_path)
-        # forcing: list[Path | str] = [Path(f) for f in sections["forcing"]]
-
-        # Optional
-        # One-line sections:
-        # s_coord = _single_line_section_to_list("S-coord", float)
-        # rho0 = _single_line_section_to_scalar("rho0", float)
-        # lin_rho_eos = _single_line_section_to_list("lin_rho_eos", float)
-        # lateral_visc = _single_line_section_to_scalar("lateral_visc", float)
-        # gamma2 = _single_line_section_to_scalar("gamma2", float)
-
-        # tracer_diff2 = _single_line_section_to_list("tracer_diff2", float)
-        # tracer_diff2_list = _single_line_section_to_list("tracer_diff2", float)
-        # tracer_diff2 = np.array(tracer_diff2_list) if tracer_diff2_list else None
-
-        # my_bak_mixing = _single_line_section_to_list("MY_bak_mixing", float)
-
-        # vertical_mixing = _single_line_section_to_list("vertical_mixing", float)
-
-        # sss_correction = _single_line_section_to_scalar("SSS_correction", float)
-        # sst_correction = _single_line_section_to_scalar("SST_correction", float)
-        # ubind = _single_line_section_to_scalar("ubind", float)
-        # v_sponge = _single_line_section_to_scalar("v_sponge", float)
-        # grid = _single_line_section_to_scalar("grid", Path)
-        # climatology = _single_line_section_to_scalar("climatology", Path)
-
-        # Multi-line sections:
-        # marbl_biogeochemistry: Optional[list[Path | str]] = (
-        #     [Path(x) for x in sections["MARBL_biogeochemistry"]]
-        #     if "MARBL_biogeochemistry" in sections
-        #     else None
-        # )
-
         return cls(
-            # title=title,
-            # title = sections.get("title")[0],
             title=Title.from_lines(sections["title"]),
-            # time_stepping=TimeStepping(*time_stepping),
             time_stepping=TimeStepping.from_lines(sections["time_stepping"]),
-            # marbl_biogeochemistry=MarblBGC(*marbl_biogeochemistry),
             marbl_biogeochemistry=MarblBGC.from_lines(
                 sections["MARBL_biogeochemistry"]
             ),
-            # s_coord=None if s_coord is None else SCoord(*s_coord),
             s_coord=SCoord.from_lines(sections.get("S-coord")),
-            # rho0=rho0,
-            # rho0 = float(sections.get("rho0")[0].split()[0].replace("D","E")),
             rho0=Rho0.from_lines(sections.get("rho0")),
-            # lin_rho_eos=None if lin_rho_eos is None else LinRhoEos(*lin_rho_eos),
             lin_rho_eos=LinRhoEos.from_lines(sections.get("lin_rho_eos")),
-            # lateral_visc=lateral_visc,
-            # lateral_visc = float(sections.get("lateral_visc")[0].split()[0].replace("D","E")),
             lateral_visc=LateralVisc.from_lines(sections.get("lateral_visc")),
-            # gamma2=gamma2
             gamma2=Gamma2.from_lines(sections.get("gamma2")),
-            # gamma2 = float(sections.get("gamma2")[0].split()[0].replace("D","E")),
-            # tracer_diff2=tracer_diff2,
             tracer_diff2=TracerDiff2.from_lines(sections.get("tracer_diff2")),
-            # bottom_drag=BottomDrag(*bottom_drag),
             bottom_drag=BottomDrag.from_lines(sections.get("bottom_drag")),
-            # vertical_mixing=VerticalMixing(
-            #     Akv_bak=vertical_mixing[0], Akt_bak=vertical_mixing[1:]
-            # ),
             vertical_mixing=VerticalMixing.from_lines(sections.get("vertical_mixing")),
-            # my_bak_mixing=my_bak_mixing,
             my_bak_mixing=MYBakMixing.from_lines(sections.get("my_bak_mixing")),
-            # sss_correction=sss_correction,
             sss_correction=SSSCorrection.from_lines(sections.get("sss_correction")),
-            # sst_correction=sst_correction,
             sst_correction=SSTCorrection.from_lines(sections.get("sst_correction")),
-            # ubind=ubind,
             ubind=UBind.from_lines(sections.get("ubind")),
-            # v_sponge=v_sponge,
             v_sponge=VSponge.from_lines(sections.get("v_sponge")),
-            # grid=grid,
             grid=Grid.from_lines(sections.get("grid")),
-            # initial=None if initial is None else InitialBlock(*initial),
             initial=InitialBlock.from_lines(sections.get("initial")),
-            # forcing=None if forcing is None else ForcingBlock(forcing),
             forcing=ForcingBlock.from_lines(sections.get("forcing")),
-            # climatology=climatology,
             climatology=Climatology.from_lines(sections.get("climatology")),
-            # output_root_name=output_root_name,
-            # output_root_name = sections.get("output_root_name")[0]
             output_root_name=OutputRootName.from_lines(
                 sections.get("output_root_name")
             ),
@@ -945,6 +721,5 @@ class ROMSRuntimeSettings(BaseModel):
 if __name__ == "__main__":
     ff = "/Users/dafyddstephenson/Code/my_ucla_roms/Examples/Wales/roms.in"
     ri = ROMSRuntimeSettings.from_file(filepath=ff)
-    # print(ri)
     ri.model_dump(serialize_as_any=True)
     ri.to_file("out.in")
