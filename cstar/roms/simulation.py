@@ -79,8 +79,6 @@ class ROMSSimulation(Simulation):
         List of forcing correction datasets.
     exe_path : Path
         Path to the compiled ROMS executable.
-    partitioned_files : List[Path]
-        Paths to partitioned input files for distributed ROMS runs.
     _execution_handler : ExecutionHandler
         Object handling execution status and control.
 
@@ -227,6 +225,7 @@ class ROMSSimulation(Simulation):
             self.forcing_corrections, ROMSForcingCorrections
         )
 
+        self._check_inputdataset_partitioning()
         self._check_inputdataset_dates()
 
         if marbl_codebase is None:
@@ -243,7 +242,6 @@ class ROMSSimulation(Simulation):
         # roms-specific
         self.exe_path: Optional[Path] = None
         self._exe_hash: Optional[str] = None
-        self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
 
@@ -255,6 +253,24 @@ class ROMSSimulation(Simulation):
             raise TypeError(
                 f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
             )
+
+    def _check_inputdataset_partitioning(self) -> None:
+        """If a ROMSInputDataset's source is already partitioned, confirm that the
+        partitioning matches the processor distribution of the simulation and raise a
+        ValueError if not."""
+
+        for inp in self.input_datasets:
+            if inp.source_partitioning:
+                if (inp.source_np_xi != self.discretization.n_procs_x) or (
+                    inp.source_np_eta != self.discretization.n_procs_y
+                ):
+                    raise ValueError(
+                        f"Cannot instantiate ROMSSimulation with "
+                        f"n_procs_x={self.discretization.n_procs_x}, "
+                        f"n_procs_y={self.discretization.n_procs_y} "
+                        "when {inp.__class__.__name__} has partitioning "
+                        f"({inp.source_np_xi},{inp.source_np_eta}) at source."
+                    )
 
     def _check_inputdataset_dates(self) -> None:
         """For ROMSInputDatasets whose source type is `yaml`, ensure that any set
@@ -883,7 +899,7 @@ class ROMSSimulation(Simulation):
 
             unique_paths = {
                 str(Path(f).parent / (Path(Path(f).stem).stem + ".nc"))
-                for f in input_dataset.partitioned_files
+                for f in input_dataset.partitioning.files
             }
             return "\n     ".join(sorted(list(unique_paths)))
 
@@ -910,7 +926,7 @@ class ROMSSimulation(Simulation):
 
         # Grid file entry
         if self.model_grid is not None:
-            if len(self.model_grid.partitioned_files) == 0:
+            if not self.model_grid.partitioning:
                 raise ValueError(
                     "could not find a local path to a partitioned "
                     + "ROMS grid file. Run ROMSSimulation.pre_run() to partition "
@@ -922,8 +938,8 @@ class ROMSSimulation(Simulation):
             )
 
         # Initial conditions entry
-        if self.initial_conditions is not None:
-            if len(self.initial_conditions.partitioned_files) == 0:
+        if self.initial_conditions:
+            if not self.initial_conditions.partitioning:
                 raise ValueError(
                     "could not find a local path to a partitioned "
                     + "ROMS initial file. Run ROMSSimulation.pre_run() to partition "
@@ -937,17 +953,17 @@ class ROMSSimulation(Simulation):
         # Forcing files entry
         runtime_code_forcing_str = ""
         for sf in self.surface_forcing:
-            if len(sf.partitioned_files) > 0:
+            if sf.partitioning:
                 runtime_code_forcing_str += (
                     "\n     " + partitioned_files_to_runtime_code_string(sf)
                 )
         for bf in self.boundary_forcing:
-            if len(bf.partitioned_files) > 0:
+            if bf.partitioning:
                 runtime_code_forcing_str += (
                     "\n     " + partitioned_files_to_runtime_code_string(bf)
                 )
-        if self.tidal_forcing is not None:
-            if len(self.tidal_forcing.partitioned_files) == 0:
+        if self.tidal_forcing:
+            if not self.tidal_forcing.partitioning:
                 raise ValueError(
                     "ROMSSimulation has tidal_forcing attribute "
                     + "but could not find a local path to a partitioned ROMS "
@@ -958,8 +974,8 @@ class ROMSSimulation(Simulation):
                 "\n     " + partitioned_files_to_runtime_code_string(self.tidal_forcing)
             )
 
-        if self.river_forcing is not None:
-            if len(self.river_forcing.partitioned_files) == 0:
+        if self.river_forcing:
+            if not self.river_forcing.partitioning:
                 raise ValueError(
                     "ROMSSimulation has river_forcing attribute "
                     + "but could not find a local path to a partitioned ROMS "
@@ -970,7 +986,7 @@ class ROMSSimulation(Simulation):
                 "\n     " + partitioned_files_to_runtime_code_string(self.river_forcing)
             )
         for fc in self.forcing_corrections:
-            if len(fc.partitioned_files) > 0:
+            if fc.partitioning:
                 runtime_code_forcing_str += (
                     "\n     " + partitioned_files_to_runtime_code_string(fc)
                 )
@@ -1275,13 +1291,18 @@ class ROMSSimulation(Simulation):
 
         self.persist()
 
-    def pre_run(self) -> None:
+    def pre_run(self, overwrite_existing_files=False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
         This method partitions any required input datasets according to
         the computational domain decomposition specified in the discretization
         settings. Each dataset is divided into smaller files so that they
         can be processed in parallel by ROMS during execution.
+
+        Parameters
+        ----------
+        overwrite_existing_files (bool, default False)
+            If True, any existing partitioned files will be overwritten
 
         Raises
         ------
@@ -1306,11 +1327,11 @@ class ROMSSimulation(Simulation):
             [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
         ):
             datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
-
             for f in datasets_to_partition:
                 f.partition(
                     np_xi=self.discretization.n_procs_x,
                     np_eta=self.discretization.n_procs_y,
+                    overwrite_existing_files=overwrite_existing_files,
                 )
 
         self.persist()

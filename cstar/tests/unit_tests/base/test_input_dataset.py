@@ -760,9 +760,7 @@ class TestInputDatasetGet:
         self.mock_exists.return_value = False
         self.mock_resolve.return_value = self.target_dir
         expected_message = (
-            "InputDataset.source.source_type is 'url' "
-            + "but no InputDataset.source.file_hash is not defined. "
-            + "Cannot proceed."
+            "Source type is URL but no file hash was not provided. Cannot proceed."
         )
 
         with pytest.raises(ValueError) as exception_info:
@@ -820,7 +818,7 @@ class TestLocalHash:
 
     def test_local_hash_single_file(self, local_input_dataset, log: logging.Logger):
         """Test `local_hash` calculation for a single file."""
-        local_input_dataset._local_file_hash_cache = None
+        local_input_dataset._local_file_hash_cache = {}
         local_input_dataset.working_path = Path("/some/local/path")
 
         # Ensure the resolve method is invoked
@@ -853,13 +851,13 @@ class TestLocalHash:
         result = local_input_dataset.local_hash
 
         assert (
-            result is None
-        ), "Expected local_hash to be None when working_path is not set."
+            result == {}
+        ), "Expected local_hash to be empty when working_path is not set."
         self.mock_get_hash.assert_not_called()
 
     def test_local_hash_multiple_files(self, local_input_dataset):
         """Test `local_hash` calculation for multiple files."""
-        local_input_dataset._local_file_hash_cache = None
+        local_input_dataset._local_file_hash_cache = {}
         local_input_dataset.working_path = [
             Path("/some/local/path1"),
             Path("/some/local/path2"),
