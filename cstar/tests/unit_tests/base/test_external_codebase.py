@@ -285,7 +285,7 @@ class TestExternalCodeBaseConfigHandling:
             new_callable=mock.PropertyMock,
             return_value=mock.Mock(
                 environment_variables={"TEST_ROOT": "/path/to/repo"},
-                package_root=Path("/mock/package/root"),
+                package_root=Path("./mock/package/root"),
             ),
         )
         self.mock_environment = self.patch_environment.start()
