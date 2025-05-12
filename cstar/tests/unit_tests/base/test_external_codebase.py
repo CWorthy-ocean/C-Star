@@ -14,9 +14,10 @@ class MockExternalCodeBase(ExternalCodeBase):
     """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
     purposes."""
 
-    def __init__(self, log: logging.Logger):
+    def __init__(self, log: logging.Logger, interactive: bool = True):
         super().__init__(None, None)
         self._log = log
+        self._interactive = interactive
 
     @property
     def expected_env_var(self):
@@ -441,7 +442,10 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_no_env_var_user_invalid(
-        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
+        self,
+        mock_input,
+        generic_codebase,
+        capsys: pytest.CaptureFixture,
     ):
         self.mock_local_config_status.return_value = 3
 
