@@ -239,7 +239,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
                 return
             case 1:
                 env_var_repo_remote = _get_repo_remote(local_root)
-                # if not env_var_repo_remote.strip():
 
                 raise EnvironmentError(
                     (
