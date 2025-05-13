@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
@@ -57,7 +58,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
         self,
         source_repo: Optional[str] = None,
         checkout_target: Optional[str] = None,
-        interactive: bool = True,
     ):
         """Initialize a ExternalCodeBase object manually from a source repository and
         checkout target.
@@ -78,7 +78,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
         # TODO: Type check here
         self._source_repo = source_repo
         self._checkout_target = checkout_target
-        self.interactive = interactive
 
     def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
@@ -231,6 +230,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
             )
         )
 
+        interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
+
         match self.local_config_status:
             case 0:
                 self.log.info(
@@ -266,7 +267,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                 )
                 while True:
                     yn = "y"
-                    if self.interactive:
+                    if interactive:
                         yn = input("Would you like to checkout this target now?")
 
                     if yn.casefold() in ["y", "yes"]:
@@ -307,7 +308,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         ext_dir.mkdir(parents=True)
 
                     yn = "y"
-                    if self.interactive:
+                    if interactive:
                         yn = input(
                             (
                                 "Would you like to do this now? "

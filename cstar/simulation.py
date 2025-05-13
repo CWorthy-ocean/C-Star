@@ -1,4 +1,5 @@
 import copy
+import os
 import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -79,7 +80,6 @@ class Simulation(ABC, LoggingMixin):
         end_date: Optional[str | datetime] = None,
         valid_start_date: Optional[str | datetime] = None,
         valid_end_date: Optional[str | datetime] = None,
-        interactive: bool = True,
     ):
         """Initialize a Simulation object with a given name, directory, codebase, and
         configuration parameters.
@@ -148,7 +148,7 @@ class Simulation(ABC, LoggingMixin):
         self.runtime_code = runtime_code or None
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization
-        self.interactive = interactive
+        self.interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
 
     def _validate_simulation_directory(self, directory: str | Path) -> Path:
         """Validates and resolves the simulation directory.

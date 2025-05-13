@@ -1,3 +1,4 @@
+import os
 import time
 from abc import ABC, abstractmethod
 from enum import Enum, auto
@@ -103,7 +104,6 @@ class ExecutionHandler(ABC, LoggingMixin):
     def updates(
         self,
         seconds: float = 10,
-        interactive: bool = True,
     ):
         """Stream live updates from the task's output file.
 
@@ -119,10 +119,6 @@ class ExecutionHandler(ABC, LoggingMixin):
             The duration (in seconds) for which updates should be streamed.
             If set to 0, updates will be streamed indefinitely until
             interrupted by the user.
-        interactive: bool, optional, default = True
-            If 'seconds' is set to 0, the user will be prompted to confirm
-            whether they want to continue with an indefinite update stream
-            if interactive is set to True
         Notes
         -----
         - This method moves to the end of the output file and streams only
@@ -147,6 +143,7 @@ class ExecutionHandler(ABC, LoggingMixin):
             self.log.warning(error_msg)
             return
 
+        interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
         if interactive and seconds == 0:
             # Confirm indefinite tailing
             confirmation = (

@@ -14,10 +14,9 @@ class MockExternalCodeBase(ExternalCodeBase):
     """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
     purposes."""
 
-    def __init__(self, log: logging.Logger, interactive: bool = True):
+    def __init__(self, log: logging.Logger):
         super().__init__(None, None)
         self._log = log
-        self._interactive = interactive
 
     @property
     def expected_env_var(self):

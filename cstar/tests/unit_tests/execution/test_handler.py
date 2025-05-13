@@ -1,7 +1,9 @@
 import logging
+import os
 import threading
 import time
 from pathlib import Path
+from unittest import mock
 from unittest.mock import PropertyMock, patch
 
 import pytest
@@ -269,7 +271,8 @@ class TestExecutionHandlerUpdates:
         updater_thread.start()
 
         # Run the `updates` method
-        handler.updates(seconds=0, interactive=False)
+        with mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}):
+            handler.updates(seconds=0)
 
         # Verify that only lines from `running_updates` were printed
         printed_calls = caplog.text

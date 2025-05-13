@@ -1103,11 +1103,10 @@ class ROMSSimulation(Simulation):
         runtime_code_dir = self.directory / "ROMS/runtime_code"
         input_datasets_dir = self.directory / "ROMS/input_datasets"
 
-        self.log.info(f"🛠️  Configuring {self.__class__.__name__}")
+        self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
         for codebase in self.codebases:
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
-            codebase.interactive = self.interactive
             codebase.handle_config_status()
 
         # Compile-time code
