@@ -443,7 +443,7 @@ class TestExternalCodeBaseConfigHandling:
     def test_handle_config_status_no_env_var_user_invalid(
         self,
         mock_input,
-        generic_codebase,
+        generic_codebase: ExternalCodeBase,
         capsys: pytest.CaptureFixture,
     ):
         self.mock_local_config_status.return_value = 3

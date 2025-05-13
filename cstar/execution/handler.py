@@ -101,10 +101,7 @@ class ExecutionHandler(ABC, LoggingMixin):
 
         pass
 
-    def updates(
-        self,
-        seconds: float = 10,
-    ):
+    def updates(self, seconds: float = 10):
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the

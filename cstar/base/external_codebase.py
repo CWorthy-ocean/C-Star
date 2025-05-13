@@ -55,9 +55,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
     """
 
     def __init__(
-        self,
-        source_repo: Optional[str] = None,
-        checkout_target: Optional[str] = None,
+        self, source_repo: Optional[str] = None, checkout_target: Optional[str] = None
     ):
         """Initialize a ExternalCodeBase object manually from a source repository and
         checkout target.
