@@ -3,10 +3,10 @@ from typing import ClassVar, Optional, get_args, get_origin
 
 from pydantic import (
     BaseModel,
+    Field,
+    ModelWrapValidatorHandler,
     model_serializer,
     model_validator,
-    ModelWrapValidatorHandler,
-    Field,
 )
 
 from cstar.base.utils import _list_to_concise_str
@@ -63,7 +63,7 @@ class RomsSection(BaseModel):
         else:
             super().__init__(**kwargs)
 
-    @model_validator(mode='wrap')
+    @model_validator(mode="wrap")
     @classmethod
     def validate_from_lines(cls, data, handler: ModelWrapValidatorHandler):
         # if the class gets a list of strings as it's init, assume it's coming in as a line
@@ -72,7 +72,7 @@ class RomsSection(BaseModel):
         if isinstance(data, list) and all([isinstance(v, str) for v in data]):
             try:
                 return cls.from_lines(data)
-            except:
+            except Exception:
                 pass
         return handler(data)
 
@@ -133,10 +133,10 @@ class RomsSection(BaseModel):
 
         Examples
         --------
-        # >>> LinRhoEos.from_lines(["0.2 1.0 0.822 1.0"])
+        >>> LinRhoEos.from_lines(["0.2 1.0 0.822 1.0"])
             LinRhoEos(Tcoef=0.2, T0=1.0, Scoef=0.822, S0=1.0)
 
-        # >>> InitialBlock.from_lines(["1", "input_datasets/roms_ini.nc"])
+        >>> InitialBlock.from_lines(["1", "input_datasets/roms_ini.nc"])
             InitialBlock(nrrec=1, ininame=Path("input_datasets/roms_ini.nc"))
         """
         if lines is None:
@@ -350,7 +350,9 @@ class ROMSRuntimeSettings(BaseModel):
     forcing: ForcingBlock
     output_root_name: OutputRootName
     rho0: Rho0
-    marbl_biogeochemistry: Optional[MarblBGC] = Field(alias="MARBL_biogeochemistry", default=None)
+    marbl_biogeochemistry: Optional[MarblBGC] = Field(
+        alias="MARBL_biogeochemistry", default=None
+    )
     s_coord: Optional[SCoord] = Field(alias="S-Coord", default=None)
     lin_rho_eos: Optional[LinRhoEos] = None
     lateral_visc: Optional[LateralVisc] = None
@@ -488,7 +490,6 @@ class ROMSRuntimeSettings(BaseModel):
             )
 
         return cls(**sections)
-
 
     def __str__(self) -> str:
         """Returns a string representation of the input settings.
@@ -711,7 +712,7 @@ class ROMSRuntimeSettings(BaseModel):
 
 
 if __name__ == "__main__":
-    ff = "/Users/eilerman/Downloads/pacmed12km_Y2000.in"
+    ff = "/Users/dafyddstephenson/Code/my_ucla_roms/Examples/Wales/roms.in"
     ri = ROMSRuntimeSettings.from_file(filepath=ff)
     ri.model_dump(serialize_as_any=True)
     ri.to_file("out.in")
