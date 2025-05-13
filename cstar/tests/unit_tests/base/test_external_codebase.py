@@ -285,7 +285,6 @@ class TestExternalCodeBaseConfigHandling:
         self.patch_local_config_status.stop()
         self.patch_get_repo_head_hash.stop()
         self.patch_get_repo_remote.stop()
-        self.patch_environment.stop()
 
     def test_handle_config_status_valid(
         self, generic_codebase, caplog: pytest.LogCaptureFixture
