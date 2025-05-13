@@ -3,7 +3,10 @@ from typing import ClassVar, Optional, get_args, get_origin
 
 from pydantic import (
     BaseModel,
+    Field,
+    ModelWrapValidatorHandler,
     model_serializer,
+    model_validator,
 )
 
 from cstar.base.utils import _list_to_concise_str
@@ -59,6 +62,19 @@ class RomsSection(BaseModel):
             super().__init__(**{k: args[i] for i, k in enumerate(self.key_order)})
         else:
             super().__init__(**kwargs)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def validate_from_lines(cls, data, handler: ModelWrapValidatorHandler):
+        # if the class gets a list of strings as it's init, assume it's coming in as a line
+        # from the roms.in file, and try to parse it as such. if that fails, or if it's not a list
+        # when it comes in, do the usual init process.
+        if isinstance(data, list) and all([isinstance(v, str) for v in data]):
+            try:
+                return cls.from_lines(data)
+            except Exception:
+                pass
+        return handler(data)
 
     @property
     def value_joiner(self):
@@ -138,7 +154,7 @@ class RomsSection(BaseModel):
             if get_origin(expected_type) is not list:
                 # This doesn't reformat e.g. 5.0D0 -> 5.0
                 if expected_type is float:
-                    kwargs[key] = expected_type(flat[i].replace("D", "E"))
+                    kwargs[key] = expected_type(flat[i].upper().replace("D", "E"))
                 else:
                     kwargs[key] = expected_type(flat[i])
                 i += 1
@@ -334,20 +350,22 @@ class ROMSRuntimeSettings(BaseModel):
     forcing: ForcingBlock
     output_root_name: OutputRootName
     rho0: Rho0
-    marbl_biogeochemistry: Optional[MarblBGC]
-    s_coord: Optional[SCoord]
-    lin_rho_eos: Optional[LinRhoEos]
-    lateral_visc: Optional[LateralVisc]
-    gamma2: Optional[Gamma2]
-    tracer_diff2: Optional[TracerDiff2]
-    vertical_mixing: Optional[VerticalMixing]
-    my_bak_mixing: Optional[MYBakMixing]
-    sss_correction: Optional[SSSCorrection]
-    sst_correction: Optional[SSTCorrection]
-    ubind: Optional[UBind]
-    v_sponge: Optional[VSponge]
-    grid: Optional[Grid]
-    climatology: Optional[Climatology]
+    marbl_biogeochemistry: Optional[MarblBGC] = Field(
+        alias="MARBL_biogeochemistry", default=None
+    )
+    s_coord: Optional[SCoord] = Field(alias="S-Coord", default=None)
+    lin_rho_eos: Optional[LinRhoEos] = None
+    lateral_visc: Optional[LateralVisc] = None
+    gamma2: Optional[Gamma2] = None
+    tracer_diff2: Optional[TracerDiff2] = None
+    vertical_mixing: Optional[VerticalMixing] = None
+    my_bak_mixing: Optional[MYBakMixing] = None
+    sss_correction: Optional[SSSCorrection] = None
+    sst_correction: Optional[SSTCorrection] = None
+    ubind: Optional[UBind] = None
+    v_sponge: Optional[VSponge] = None
+    grid: Optional[Grid] = None
+    climatology: Optional[Climatology] = None
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -404,6 +422,7 @@ class ROMSRuntimeSettings(BaseModel):
         Climatology file path.
     """
 
+    @staticmethod
     def _load_raw_sections(filepath: Path) -> dict:
         filepath = Path(filepath)
         if not filepath.exists():
@@ -470,33 +489,7 @@ class ROMSRuntimeSettings(BaseModel):
                 "\n- output_root_name"
             )
 
-        return cls(
-            title=Title.from_lines(sections["title"]),
-            time_stepping=TimeStepping.from_lines(sections["time_stepping"]),
-            marbl_biogeochemistry=MarblBGC.from_lines(
-                sections["MARBL_biogeochemistry"]
-            ),
-            s_coord=SCoord.from_lines(sections.get("S-coord")),
-            rho0=Rho0.from_lines(sections.get("rho0")),
-            lin_rho_eos=LinRhoEos.from_lines(sections.get("lin_rho_eos")),
-            lateral_visc=LateralVisc.from_lines(sections.get("lateral_visc")),
-            gamma2=Gamma2.from_lines(sections.get("gamma2")),
-            tracer_diff2=TracerDiff2.from_lines(sections.get("tracer_diff2")),
-            bottom_drag=BottomDrag.from_lines(sections.get("bottom_drag")),
-            vertical_mixing=VerticalMixing.from_lines(sections.get("vertical_mixing")),
-            my_bak_mixing=MYBakMixing.from_lines(sections.get("my_bak_mixing")),
-            sss_correction=SSSCorrection.from_lines(sections.get("sss_correction")),
-            sst_correction=SSTCorrection.from_lines(sections.get("sst_correction")),
-            ubind=UBind.from_lines(sections.get("ubind")),
-            v_sponge=VSponge.from_lines(sections.get("v_sponge")),
-            grid=Grid.from_lines(sections.get("grid")),
-            initial=InitialBlock.from_lines(sections.get("initial")),
-            forcing=ForcingBlock.from_lines(sections.get("forcing")),
-            climatology=Climatology.from_lines(sections.get("climatology")),
-            output_root_name=OutputRootName.from_lines(
-                sections.get("output_root_name")
-            ),
-        )
+        return cls(**sections)
 
     def __str__(self) -> str:
         """Returns a string representation of the input settings.
