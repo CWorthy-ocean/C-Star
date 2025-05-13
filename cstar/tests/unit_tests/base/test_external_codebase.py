@@ -279,16 +279,6 @@ class TestExternalCodeBaseConfigHandling:
         self.patch_subprocess_run = mock.patch("subprocess.run")
         self.mock_subprocess_run = self.patch_subprocess_run.start()
 
-        self.patch_environment = mock.patch(
-            "cstar.system.manager.CStarSystemManager.environment",
-            new_callable=mock.PropertyMock,
-            return_value=mock.Mock(
-                environment_variables={"TEST_ROOT": "/path/to/repo"},
-                package_root=Path("./mock/package/root"),
-            ),
-        )
-        self.mock_environment = self.patch_environment.start()
-
     def teardown_method(self):
         self.patch_local_config_status.stop()
         self.patch_subprocess_run.stop()
@@ -374,7 +364,11 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["y"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_y(
-        self, mock_input, generic_codebase, capsys: pytest.CaptureFixture
+        self,
+        mock_input,
+        generic_codebase,
+        capsys: pytest.CaptureFixture,
+        tmp_path: Path,
     ):
         """Test handling when local_config_status == 2 (right remote, wrong hash) and
         user agrees to checkout."""
@@ -384,8 +378,16 @@ class TestExternalCodeBaseConfigHandling:
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
-        # Call the method to trigger the flow
-        generic_codebase.handle_config_status()
+        with mock.patch(
+            "cstar.system.manager.CStarSystemManager.environment",
+            new_callable=mock.PropertyMock,
+            return_value=mock.Mock(
+                environment_variables={"TEST_ROOT": "/path/to/repo"},
+                package_root=tmp_path,
+            ),
+        ):
+            # Call the method to trigger the flow
+            generic_codebase.handle_config_status()
 
         ## Assert that subprocess.run was called with the correct git checkout command
         self.mock_subprocess_run.assert_called_with(
