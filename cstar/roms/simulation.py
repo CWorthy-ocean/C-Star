@@ -1,4 +1,3 @@
-from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, cast
@@ -613,19 +612,31 @@ class ROMSSimulation(Simulation):
 
         # Previous modifications
         # Time step entry
-        runtime_settings.time_stepping["dt"] = self.discretization.time_step
+        # runtime_settings.time_stepping["dt"] = self.discretization.time_step
+        runtime_settings.time_stepping.dt = self.discretization.time_step
+
         # ntimesteps entry:
-        runtime_settings.time_stepping["ntimes"] = self._n_time_steps
+        # runtime_settings.time_stepping["ntimes"] = self._n_time_steps
+        runtime_settings.time_stepping.ntimes = self._n_time_steps
         # Grid entry:
-        runtime_settings.grid = (
+        # runtime_settings.grid = (
+        #     self.model_grid.working_path if self.model_grid else None
+        # )
+        runtime_settings.grid.grid = (
             self.model_grid.working_path if self.model_grid else None
         )
+
         # Initial conditions
-        runtime_settings.initial["ininame"] = (
+        # runtime_settings.initial["ininame"] = (
+        #     self.initial_conditions.working_path if self.initial_conditions else None
+        # )
+        runtime_settings.initial.ininame = (
             self.initial_conditions.working_path if self.initial_conditions else None
         )
+
         # Forcing
-        runtime_settings.forcing = self._forcing_paths
+        # runtime_settings.forcing = self._forcing_paths
+        runtime_settings.forcing.filenames = self._forcing_paths
         # MARBL settings:
 
         if all(
@@ -636,26 +647,37 @@ class ROMSSimulation(Simulation):
                 "marbl_diagnostic_output_list",
             ]
         ):
-            marbl_input_files = OrderedDict(
-                [
-                    (
-                        "marbl_namelist_fname",
-                        self.runtime_code.working_path / "marbl_in",
-                    ),
-                    (
-                        "marbl_tracer_list_fname",
-                        self.runtime_code.working_path / "marbl_tracer_output_list",
-                    ),
-                    (
-                        "marbl_diag_list_fname",
-                        self.runtime_code.working_path / "marbl_diagnostic_output_list",
-                    ),
-                ]
+            runtime_settings.marbl_biogeochemistry.marbl_namelist_fname = (
+                self.runtime_code.working_path / "marbl_in"
             )
-        else:
-            marbl_input_files = None
+            runtime_settings.marbl_biogeochemistry.marbl_tracer_list_fname = (
+                self.runtime_code.working_path / "marbl_tracer_output_list"
+            )
+            runtime_settings.marbl_biogeochemistry.marbl_diag_list_fname = (
+                self.runtime_code.working_path / "marbl_diagnostic_output_list"
+            )
 
-        runtime_settings.marbl_biogeochemistry = marbl_input_files
+            # marbl_input_files = OrderedDict(
+            #     [
+            #         (
+            #             "marbl_namelist_fname",
+            #             self.runtime_code.working_path / "marbl_in",
+            #         ),
+            #         (
+            #             "marbl_tracer_list_fname",
+            #             self.runtime_code.working_path / "marbl_tracer_output_list",
+            #         ),
+            #         (
+            #             "marbl_diag_list_fname",
+            #             self.runtime_code.working_path / "marbl_diagnostic_output_list",
+            #         ),
+            #     ]
+            # )
+        else:
+            runtime_settings.marbl_biogeochemistry = None
+            # marbl_input_files = None
+
+        # runtime_settings.marbl_biogeochemistry = marbl_input_files
 
         return runtime_settings
 
