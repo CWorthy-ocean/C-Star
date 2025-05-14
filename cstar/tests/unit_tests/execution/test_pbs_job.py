@@ -249,7 +249,7 @@ class TestPBSJob:
             **self.common_job_params,
             run_path=tmp_path,
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = "12345"  # Manually set the job ID
 
         # Cancel the job
         job.cancel()
@@ -302,7 +302,7 @@ class TestPBSJob:
             **self.common_job_params,
             run_path=tmp_path,
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = "12345"  # Manually set the job ID
 
         # Get the logger from the job instance
         caplog.set_level(logging.INFO, logger=job.log.name)
@@ -353,7 +353,7 @@ class TestPBSJob:
             **self.common_job_params,
             run_path=tmp_path,
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = "12345"  # Manually set the job ID
 
         # Expect an error when qdel fails
         with pytest.raises(
@@ -507,7 +507,7 @@ class TestPBSJob:
 
         # Create a PBSJob with a set job ID
         job = PBSJob(**self.common_job_params)
-        job._id = 12345  # Manually set the job ID
+        job._id = "12345"  # Manually set the job ID
 
         # Check the expected outcome
         if should_raise:
@@ -547,7 +547,7 @@ class TestPBSJob:
 
         # Create a PBSJob with a set job ID
         job = PBSJob(**self.common_job_params)
-        job._id = 12345  # Manually set the job ID
+        job._id = "12345"  # Manually set the job ID
 
         # Check for JSONDecodeError handling
         with pytest.raises(
