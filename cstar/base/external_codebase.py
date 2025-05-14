@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
@@ -227,6 +228,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
             )
         )
 
+        interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
+
         match self.local_config_status:
             case 0:
                 self.log.info(
@@ -235,28 +238,36 @@ class ExternalCodeBase(ABC, LoggingMixin):
                 return
             case 1:
                 env_var_repo_remote = _get_repo_remote(local_root)
+
                 raise EnvironmentError(
-                    "System environment variable "
-                    + f"'{self.expected_env_var}' points to "
-                    + "a github repository whose "
-                    + f"remote: \n '{env_var_repo_remote}' \n"
-                    + "does not match that expected by C-Star: \n"
-                    + f"{self.source_repo}."
-                    + "Your environment may be misconfigured."
+                    (
+                        "System environment variable "
+                        f"'{self.expected_env_var}' points to "
+                        "a github repository whose "
+                        f"remote: \n '{env_var_repo_remote}' \n"
+                        "does not match that expected by C-Star: \n"
+                        f"{self.source_repo}."
+                        "Your environment may be misconfigured."
+                    )
                 )
             case 2:
                 head_hash = _get_repo_head_hash(local_root)
                 print(
-                    "############################################################\n"
-                    + f"C-STAR: {self.expected_env_var} points to the correct repo "
-                    + f"{self.source_repo} but HEAD is at: \n"
-                    + f"{head_hash}, rather than the hash associated with "
-                    + f"checkout_target {self.checkout_target}:\n"
-                    + f"{self.checkout_hash}"
-                    + "\n############################################################"
+                    (
+                        "############################################################\n"
+                        f"C-STAR: {self.expected_env_var} points to the correct repo "
+                        f"{self.source_repo} but HEAD is at: \n"
+                        f"{head_hash}, rather than the hash associated with "
+                        f"checkout_target {self.checkout_target}:\n"
+                        f"{self.checkout_hash}"
+                        "\n############################################################"
+                    )
                 )
                 while True:
-                    yn = input("Would you like to checkout this target now?")
+                    yn = "y"
+                    if interactive:
+                        yn = input("Would you like to checkout this target now?")
+
                     if yn.casefold() in ["y", "yes"]:
                         try:
                             _checkout(
@@ -277,22 +288,31 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     / f"externals/{self.repo_basename}"
                 )
                 print(
-                    "#######################################################\n"
-                    + f"C-STAR: {self.expected_env_var}"
-                    + " not found in current cstar_sysmgr.environment. \n"
-                    + "if this is your first time running C-Star with "
-                    + f"an instance of {self.__class__.__name__}, "
-                    + "you will need to set it up.\n"
-                    + "It is recommended that you install this external codebase in \n"
-                    + f"{ext_dir}"
-                    + "\nThis will also modify your `~/.cstar.env` file."
-                    + "\n#######################################################"
+                    (
+                        "#######################################################\n"
+                        f"C-STAR: {self.expected_env_var}"
+                        " not found in current cstar_sysmgr.environment. \n"
+                        "if this is your first time running C-Star with "
+                        f"an instance of {self.__class__.__name__}, "
+                        "you will need to set it up.\n"
+                        "It is recommended that you install this external codebase in \n"
+                        f"{ext_dir}"
+                        f"\nThis will also modify your `~/.cstar.env` file."
+                        "\n#######################################################"
+                    )
                 )
                 while True:
-                    yn = input(
-                        "Would you like to do this now? "
-                        + "('y', 'n', or 'custom' to install at a custom path)\n"
-                    )
+                    if not ext_dir.exists():
+                        ext_dir.mkdir(parents=True)
+
+                    yn = "y"
+                    if interactive:
+                        yn = input(
+                            (
+                                "Would you like to do this now? "
+                                "('y', 'n', or 'custom' to install at a custom path)\n"
+                            )
+                        )
                     if yn.casefold() in ["y", "yes", "ok"]:
                         self.get(ext_dir)
                         break

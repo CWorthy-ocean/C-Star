@@ -10,6 +10,7 @@ import yaml
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.datasource import DataSource
+from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -423,7 +424,7 @@ class ROMSSimulation(Simulation):
         return ROMSExternalCodeBase()
 
     @property
-    def codebases(self) -> list:
+    def codebases(self) -> list[ExternalCodeBase]:
         """Returns a list of external codebases associated with this ROMS simulation.
 
         This property includes both the primary ROMS external codebase and the
@@ -1103,15 +1104,11 @@ class ROMSSimulation(Simulation):
         runtime_code_dir = self.directory / "ROMS/runtime_code"
         input_datasets_dir = self.directory / "ROMS/input_datasets"
 
-        self.log.info(f"🛠️  Configuring {self.__class__.__name__}")
-        self.log.info(f"🔧 Setting up {self.codebase.__class__.__name__}...")
+        self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
-        # Setup ExternalCodeBase
-        self.codebase.handle_config_status()
-
-        if self.marbl_codebase is not None:
-            self.log.info(f"🔧 Setting up {self.marbl_codebase.__class__.__name__}...")
-            self.marbl_codebase.handle_config_status()
+        for codebase in filter(lambda x: x is not None, self.codebases):
+            self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
+            codebase.handle_config_status()
 
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")

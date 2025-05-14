@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -20,7 +21,7 @@ class TestCStar:
     )
     def test_cstar(
         self,
-        tmpdir,
+        tmp_path: Path,
         mock_user_input,
         modify_template_blueprint,
         fetch_roms_tools_source_data,
@@ -32,7 +33,7 @@ class TestCStar:
 
         Parameters:
         -----------
-        tmpdir:
+        tmp_path:
            Built-in pytest fixture to create temporary directories
         mock_user_input:
            Fixture to simulate user-supplied input
@@ -57,8 +58,8 @@ class TestCStar:
             Logger instance for logging messages during test execution.
         """
 
-        dotenv_path = tmpdir / ".cstar.env"
-        ext_root = tmpdir / "externals"
+        dotenv_path = tmp_path / ".cstar.env"
+        ext_root = tmp_path / "externals"
 
         with (
             mock.patch(
@@ -85,14 +86,14 @@ class TestCStar:
             template_blueprint = config.get("template_blueprint_path")
             strs_to_replace = config.get("strs_to_replace")
 
-            log.info(f"Creating ROMSSimulation in {tmpdir / 'cstar_test_simulation'}")
+            log.info(f"Creating ROMSSimulation in {tmp_path / 'cstar_test_simulation'}")
             modified_blueprint = modify_template_blueprint(
                 template_blueprint_path=template_blueprint,
                 strs_to_replace=strs_to_replace,
             )
             cstar_test_case = ROMSSimulation.from_blueprint(
                 modified_blueprint,
-                directory=tmpdir / "cstar_test_simulation",
+                directory=tmp_path / "cstar_test_simulation",
                 start_date="20120101 12:00:00",
                 end_date="20120101 12:10:00",
             )
@@ -100,9 +101,10 @@ class TestCStar:
             with mock_user_input("y"):
                 cstar_test_case.setup()
 
-            cstar_test_case.to_blueprint(tmpdir / "test_blueprint_export.yaml")
+            cstar_test_case.to_blueprint(tmp_path / "test_blueprint_export.yaml")
             cstar_test_case.build()
             cstar_test_case.pre_run()
             test_process = cstar_test_case.run()
-            test_process.updates(seconds=0, confirm_indefinite=False)
+            with mock_user_input("y"):
+                test_process.updates(seconds=0)
             cstar_test_case.post_run()
