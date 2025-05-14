@@ -281,7 +281,12 @@ class TestStrAndReprMethods:
     - test_repr_method: Confirms accurate representation of state in __repr__.
     """
 
-    def test_str_method(self):
+    @patch.object(
+        cstar.system.environment.CStarEnvironment,
+        "uses_lmod",
+        new_callable=PropertyMock(return_value=False),
+    )
+    def test_str_method(self, _mock_uses_lmod):
         """Tests that __str__ produces a formatted, readable summary.
 
         Mocks
@@ -316,7 +321,12 @@ class TestStrAndReprMethods:
 
             assert str(env) == expected_str
 
-    def test_repr_method(self):
+    @patch.object(
+        cstar.system.environment.CStarEnvironment,
+        "uses_lmod",
+        new_callable=PropertyMock(return_value=False),
+    )
+    def test_repr_method(self, _mock_uses_lmod):
         """Tests that __repr__ produces a detailed, state-reflective representation.
 
         Mocks
