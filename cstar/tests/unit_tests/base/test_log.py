@@ -92,7 +92,7 @@ def test_loglevel_fh(
 
             # confirm all messages >= level are in the file
             if msg_level in list(gt_eq_levels):
-                expected_log_entry = f"[{logging._levelToName[msg_level]}] {msg}"
+                expected_log_entry = f"[{logging.getLevelName(msg_level)}] {msg}"
                 assert expected_log_entry in log_content
 
             # confirm messages < level are not in file
