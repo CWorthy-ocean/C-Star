@@ -70,7 +70,7 @@ def get_logger(
         existing_fh = [
             h
             for h in logger.handlers
-            if isinstance(h, logging.FileHandler) and h.baseFilename == filename
+            if isinstance(h, logging.FileHandler) and Path(h.baseFilename).resolve() == Path(filename).resolve()
         ]
         if not existing_fh:
             file_handler = logging.FileHandler(filename)
