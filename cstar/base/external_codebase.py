@@ -10,6 +10,7 @@ from cstar.base.gitutils import (
     _get_repo_remote,
 )
 from cstar.base.log import LoggingMixin
+from cstar.system.environment import CSTAR_USER_ENV_PATH
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -259,8 +260,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         f"{self.source_repo} but HEAD is at: \n"
                         f"{head_hash}, rather than the hash associated with "
                         f"checkout_target {self.checkout_target}:\n"
-                        f"{self.checkout_hash}"
-                        "\n############################################################"
+                        f"{self.checkout_hash}\n"
+                        "############################################################"
                     )
                 )
                 while True:
@@ -296,9 +297,9 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         f"an instance of {self.__class__.__name__}, "
                         "you will need to set it up.\n"
                         "It is recommended that you install this external codebase in \n"
-                        f"{ext_dir}"
-                        f"\nThis will also modify your `~/.cstar.env` file."
-                        "\n#######################################################"
+                        f"{ext_dir}\n"
+                        f"This will also modify your `{CSTAR_USER_ENV_PATH}` file.\n"
+                        "#######################################################"
                     )
                 )
                 while True:
