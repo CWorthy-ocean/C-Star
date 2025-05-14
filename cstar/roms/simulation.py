@@ -5,6 +5,7 @@ from typing import Any, List, Optional, cast
 import requests
 import yaml
 
+import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.datasource import DataSource
@@ -29,7 +30,7 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.read_inp import ROMSRuntimeSettings
+from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -606,37 +607,33 @@ class ROMSSimulation(Simulation):
                 + "ROMSSimulation.runtime_code.get() and try again."
             )
 
-        runtime_settings = ROMSRuntimeSettings.from_file(
+        simulation_runtime_settings = ROMSRuntimeSettings.from_file(
             self.runtime_code.working_path / self._in_file
         )
 
         # Previous modifications
         # Time step entry
-        # runtime_settings.time_stepping["dt"] = self.discretization.time_step
-        runtime_settings.time_stepping.dt = self.discretization.time_step
+        simulation_runtime_settings.time_stepping.dt = self.discretization.time_step
 
         # ntimesteps entry:
-        # runtime_settings.time_stepping["ntimes"] = self._n_time_steps
-        runtime_settings.time_stepping.ntimes = self._n_time_steps
-        # Grid entry:
-        # runtime_settings.grid = (
-        #     self.model_grid.working_path if self.model_grid else None
-        # )
-        runtime_settings.grid.grid = (
-            self.model_grid.working_path if self.model_grid else None
-        )
+        simulation_runtime_settings.time_stepping.ntimes = self._n_time_steps
 
-        # Initial conditions
-        # runtime_settings.initial["ininame"] = (
-        #     self.initial_conditions.working_path if self.initial_conditions else None
-        # )
-        runtime_settings.initial.ininame = (
-            self.initial_conditions.working_path if self.initial_conditions else None
-        )
+        # Initial conditions entry
+        if self.initial_conditions:
+            simulation_runtime_settings.initial.ininame = (
+                self.initial_conditions.working_path
+            )
+
+        # Grid entry
+        if self.model_grid:
+            simulation_runtime_settings.grid = cstar.roms.runtime_settings.Grid(
+                grid=self.model_grid.working_path
+            )
+        else:
+            simulation_runtime_settings.grid = None
 
         # Forcing
-        # runtime_settings.forcing = self._forcing_paths
-        runtime_settings.forcing.filenames = self._forcing_paths
+        simulation_runtime_settings.forcing.filenames = self._forcing_paths
         # MARBL settings:
 
         if all(
@@ -647,39 +644,19 @@ class ROMSSimulation(Simulation):
                 "marbl_diagnostic_output_list",
             ]
         ):
-            runtime_settings.marbl_biogeochemistry.marbl_namelist_fname = (
-                self.runtime_code.working_path / "marbl_in"
+            simulation_runtime_settings.marbl_biogeochemistry = (
+                cstar.roms.runtime_settings.MARBLBiogeochemistry(
+                    marbl_namelist_fname=self.runtime_code.working_path / "marbl_in",
+                    marbl_tracer_list_fname=self.runtime_code.working_path
+                    / "marbl_tracer_output_list",
+                    marbl_diag_list_fname=self.runtime_code.working_path
+                    / "marbl_diagnostic_output_list",
+                )
             )
-            runtime_settings.marbl_biogeochemistry.marbl_tracer_list_fname = (
-                self.runtime_code.working_path / "marbl_tracer_output_list"
-            )
-            runtime_settings.marbl_biogeochemistry.marbl_diag_list_fname = (
-                self.runtime_code.working_path / "marbl_diagnostic_output_list"
-            )
-
-            # marbl_input_files = OrderedDict(
-            #     [
-            #         (
-            #             "marbl_namelist_fname",
-            #             self.runtime_code.working_path / "marbl_in",
-            #         ),
-            #         (
-            #             "marbl_tracer_list_fname",
-            #             self.runtime_code.working_path / "marbl_tracer_output_list",
-            #         ),
-            #         (
-            #             "marbl_diag_list_fname",
-            #             self.runtime_code.working_path / "marbl_diagnostic_output_list",
-            #         ),
-            #     ]
-            # )
         else:
-            runtime_settings.marbl_biogeochemistry = None
-            # marbl_input_files = None
+            simulation_runtime_settings.marbl_biogeochemistry = None
 
-        # runtime_settings.marbl_biogeochemistry = marbl_input_files
-
-        return runtime_settings
+        return simulation_runtime_settings
 
     @property
     def input_datasets(self) -> list:

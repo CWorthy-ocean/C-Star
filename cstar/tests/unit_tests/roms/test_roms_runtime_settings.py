@@ -24,36 +24,46 @@ def example_runtime_settings():
     """
 
     yield ROMSRuntimeSettings(
-        title="Example runtime settings",
-        time_stepping=[360, 60, 60, 1],
-        bottom_drag=[0.0e-4, 1e-3, 1e-2, 1e-4, 1e-2],
-        initial=[1, Path("input_datasets/roms_ini.nc")],
-        forcing=[
-            Path("input_datasets/roms_frc.nc"),
-            Path("input_datasets/roms_frc_bgc.nc"),
-            Path("input_datasets/roms_bry.nc"),
-            Path("input_datasets/roms_bry_bgc.nc"),
-        ],
-        output_root_name="ROMS_test",
-        s_coord=[5.0, 2.0, 300.0],
-        rho0=1000.0,
-        lin_rho_eos=[0.2, 1.0, 0.822, 1.0],
-        marbl_biogeochemistry=[
-            Path("marbl_in"),
-            Path("marbl_tracer_output_list"),
-            Path("marbl_diagnostic_output_list"),
-        ],
-        lateral_visc=0.0,
-        gamma2=1.0,
-        tracer_diff2=np.zeros(38),
-        vertical_mixing=[0, np.zeros(37)],
-        my_bak_mixing=[1.0e-5, 0.0, 0.0],
-        sss_correction=7.777,
-        sst_correction=10.0,
-        ubind=0.1,
-        v_sponge=0.0,
-        grid=Path("input_datasets/roms_grd.nc"),
-        climatology=Path("climfile2.nc"),
+        title={
+            "title": "Example runtime settings"
+        },  # TODO : SingleEntryROMSRuntimeSettingsSection should have simpler init
+        time_stepping={"ntimes": 360, "dt": 60, "ndtfast": 60, "ninfo": 1},
+        bottom_drag={
+            "rdrg": 0.0e-4,
+            "rdrg2": 1e-3,
+            "zob": 1e-2,
+            "cdb_min": 1e-4,
+            "cdb_max": 1e-2,
+        },
+        initial={"nrrec": 1, "ininame": Path("input_datasets/roms_ini.nc")},
+        forcing={
+            "filenames": [
+                Path("input_datasets/roms_frc.nc"),
+                Path("input_datasets/roms_frc_bgc.nc"),
+                Path("input_datasets/roms_bry.nc"),
+                Path("input_datasets/roms_bry_bgc.nc"),
+            ]
+        },
+        output_root_name={"output_root_name": "ROMS_test"},
+        s_coord={"theta_s": 5.0, "theta_b": 2.0, "tcline": 300.0},
+        rho0={"rho0": 1000.0},
+        lin_rho_eos={"Tcoef": 0.2, "T0": 1.0, "Scoef": 0.822, "S0": 1.0},
+        marbl_biogeochemistry={
+            "marbl_namelist_fname": Path("marbl_in"),
+            "marbl_tracer_list_fname": Path("marbl_tracer_list_fname"),
+            "marbl_diag_list_fname": Path("marbl_diagnostic_output_list"),
+        },
+        lateral_visc={"lateral_visc": 0.0},
+        gamma2={"gamma2": 1.0},
+        tracer_diff2={"tracer_diff2": np.zeros(38)},
+        vertical_mixing={"Akv_bak": 0, "Akt_bak": np.zeros(37)},
+        my_bak_mixing={"Akq_bak": 1.0e-5, "q2nu2": 0.0, "q2nu4": 0.0},
+        sss_correction={"sss_correction": 7.777},
+        sst_correction={"sst_correction": 10.0},
+        ubind={"ubind": 0.1},
+        v_sponge={"v_sponge": 0.0},
+        grid={"grid": Path("input_datasets/roms_grd.nc")},
+        climatology={"climatology": Path("climfile2.nc")},
     )
 
 
@@ -91,7 +101,7 @@ class TestROMSRuntimeSettings:
                 line for line in ref_f.readlines() if not line.strip().startswith("!")
             ]
             out = out_f.readlines()
-            assert ref == out
+            assert ref == out, f"Expected \n{ref}\n,got\n{out}"
 
     def test_from_file(self, example_runtime_settings):
         """Test the ROMSRuntimeSettings.from_file method.
@@ -137,19 +147,8 @@ class TestROMSRuntimeSettings:
         assert tested_settings.v_sponge == expected_settings.v_sponge
         assert tested_settings.grid == expected_settings.grid
         assert tested_settings.climatology == expected_settings.climatology
-        assert np.array_equal(
-            tested_settings.tracer_diff2, expected_settings.tracer_diff2
-        )
-
-        # Slightly more complicated equality check for dictionary with
-        # numpy array entry:
-        assert {
-            k: (v.tolist() if isinstance(v, np.ndarray) else v)
-            for k, v in tested_settings.vertical_mixing.items()
-        } == {
-            k: (v.tolist() if isinstance(v, np.ndarray) else v)
-            for k, v in expected_settings.vertical_mixing.items()
-        }
+        assert tested_settings.tracer_diff2 == expected_settings.tracer_diff2
+        assert tested_settings.vertical_mixing == expected_settings.vertical_mixing
 
     def test_from_file_with_missing_optional_sections(self, tmp_path):
         """Confirms that ROMSRuntimeSettings.from_file sets the attributes corresponding
@@ -230,17 +229,8 @@ class TestROMSRuntimeSettings:
         assert tested_settings.v_sponge == expected_settings.v_sponge
         assert tested_settings.grid == expected_settings.grid
         assert tested_settings.climatology == expected_settings.climatology
-        assert np.array_equal(
-            tested_settings.tracer_diff2, expected_settings.tracer_diff2
-        )
-
-        assert {
-            k: (v.tolist() if isinstance(v, np.ndarray) else v)
-            for k, v in tested_settings.vertical_mixing.items()
-        } == {
-            k: (v.tolist() if isinstance(v, np.ndarray) else v)
-            for k, v in expected_settings.vertical_mixing.items()
-        }
+        assert tested_settings.tracer_diff2 == expected_settings.tracer_diff2
+        assert tested_settings.vertical_mixing == expected_settings.vertical_mixing
 
 
 class TestStrAndRepr:
@@ -257,7 +247,6 @@ class TestStrAndRepr:
         -------
         - str(example_runtime_settings) matches an expected reference string
         """
-
         expected_str = """ROMSRuntimeSettings
 -------------------
 Title (`ROMSRuntimeSettings.title`): Example runtime settings
@@ -277,27 +266,18 @@ Forcing file(s): [PosixPath('input_datasets/roms_frc.nc'),
           PosixPath('input_datasets/roms_frc_bgc.nc'),
           PosixPath('input_datasets/roms_bry.nc'),
           PosixPath('input_datasets/roms_bry_bgc.nc')]
-S-coordinate parameters (`ROMSRuntimeSettings.s_coord`):
-Surface stretching parameter (`theta_s`) = 5.0,
-Bottom stretching parameter (`theta_b`) = 2.0,
-Critical depth (`hc` or `tcline`, m) = 300.0
 Boussinesq reference density (`rho0`, kg/m3) = 1000.0
 Linear equation of state parameters (`ROMSRuntimeSettings.lin_rho_eos`):
 - Thermal expansion coefficient, ⍺ (`Tcoef`, kg/m3/K) = 0.2,
 - Reference temperature (`T0`, °C) = 1.0,
 - Haline contraction coefficient, β (`Scoef`, kg/m3/PSU) = 0.822,
 - Reference salinity (`S0`, psu) = 1.0
-MARBL input (`ROMSRuntimeSettings.marbl_biogeochemistry`):
-- MARBL runtime settings file: marbl_in,
-- MARBL output tracer list: marbl_tracer_output_list,
-- MARBL output diagnostics list: marbl_diagnostic_output_list
 Horizontal Laplacian kinematic viscosity (`ROMSRuntimeSettings.lateral_visc`, m2/s) = 0.0
 Boundary slipperiness parameter (`ROMSRuntimeSettings.gamma2`, free-slip=+1, no-slip=-1) = 1.0
 Horizontal Laplacian mixing coefficients for tracers (`ROMSRuntimeSettings.tracer_diff2`, m2/s) = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 Vertical mixing parameters (`ROMSRuntimeSettings.vertical_mixing`):
-- Background vertical viscosity (`Akv_bak`, m2/s) = 0,
-- Background vertical mixing for tracers (`Akt_bak`, m2/s) = [0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
- 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.],
+- Background vertical viscosity (`Akv_bak`, m2/s) = 0.0,
+- Background vertical mixing for tracers (`Akt_bak`, m2/s) = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
 Mellor-Yamada Level 2.5 turbulent closure parameters (`ROMSRuntimeSettings.my_bak_mixing`):
 - Backround vertical TKE mixing [`Akq_bak`, m2/s] = 1e-05,
 - Horizontal Laplacian TKE mixing [`q2nu2`, m2/s] = 0.0,
@@ -308,7 +288,9 @@ Open boundary binding velocity (`ROMSRuntimeSettings.ubind`, m/s) = 0.1
 Maximum sponge layer viscosity (`ROMSRuntimeSettings.v_sponge`, m2/s) = 0.0
 Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
 
-        assert str(example_runtime_settings) == expected_str
+        assert (
+            str(example_runtime_settings) == expected_str
+        ), f"expected \n{expected_str}\n, got\n{str(example_runtime_settings)}"
 
     def test_repr(self, example_runtime_settings):
         """Test that the __repr__ function of ROMSRuntimeSettings matches an expected
@@ -323,9 +305,8 @@ Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
         -------
         - repr(example_runtime_settings) matches an expected reference string
         """
+        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
 
-        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=['input_datasets/roms_frc.nc', 'input_datasets/roms_frc_bgc.nc', 'input_datasets/roms_bry.nc', 'input_datasets/roms_bry_bgc.nc'], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_output_list'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0, 'Akt_bak': array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-       0., 0., 0.])}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
-
-        assert expected_repr == repr(example_runtime_settings)
+        assert expected_repr == repr(
+            example_runtime_settings
+        ), f"expected \n{expected_repr}\n, got\n{repr(example_runtime_settings)}"

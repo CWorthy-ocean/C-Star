@@ -52,7 +52,7 @@ def _format_other(other: str | int) -> str:
 ################################################################################
 
 
-class RomsSection(BaseModel):
+class ROMSRuntimeSettingsSection(BaseModel):
     section_name: ClassVar[str]
     multi_line: ClassVar[bool] = False
     key_order: ClassVar[list[str]]
@@ -116,11 +116,13 @@ class RomsSection(BaseModel):
         return string
 
     @classmethod
-    def from_lines(cls, lines: Optional[list[str]]) -> Optional["RomsSection"]:
+    def from_lines(
+        cls, lines: Optional[list[str]]
+    ) -> Optional["ROMSRuntimeSettingsSection"]:
         """This takes a list of lines as would be found under the section header of a
-        roms.in file and returns a RomsSection instance.
+        roms.in file and returns a ROMSRuntimeSettingsSection instance.
 
-        It uses the typehints of the RomsSection subclass under consideration to map
+        It uses the typehints of the ROMSRuntimeSettingsSection subclass under consideration to map
         values from entries in the lines to correctly typed values.
 
         If the type of an entry is "list", this is either the sole or final entry,
@@ -136,10 +138,10 @@ class RomsSection(BaseModel):
         >>> LinRhoEos.from_lines(["0.2 1.0 0.822 1.0"])
             LinRhoEos(Tcoef=0.2, T0=1.0, Scoef=0.822, S0=1.0)
 
-        >>> InitialBlock.from_lines(["1", "input_datasets/roms_ini.nc"])
-            InitialBlock(nrrec=1, ininame=Path("input_datasets/roms_ini.nc"))
+        >>> InitialConditions.from_lines(["1", "input_datasets/roms_ini.nc"])
+            InitialConditions(nrrec=1, ininame=Path("input_datasets/roms_ini.nc"))
         """
-        if lines is None:
+        if (lines is None) or (len(lines) == 0):
             return None
 
         annotations = cls.__annotations__
@@ -155,6 +157,8 @@ class RomsSection(BaseModel):
                 # This doesn't reformat e.g. 5.0D0 -> 5.0
                 if expected_type is float:
                     kwargs[key] = expected_type(flat[i].upper().replace("D", "E"))
+                elif (expected_type is str) and (len(cls.key_order) == 1):
+                    kwargs[key] = " ".join(flat)
                 else:
                     kwargs[key] = expected_type(flat[i])
                 i += 1
@@ -173,7 +177,7 @@ class RomsSection(BaseModel):
 ################################################################################
 
 
-class SingleEntryRomsSection(RomsSection):
+class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
@@ -203,59 +207,55 @@ class SingleEntryRomsSection(RomsSection):
         return str(getattr(self, self.key_order[0]))
 
 
-class Title(SingleEntryRomsSection):
+class Title(SingleEntryROMSRuntimeSettingsSection):
     title: str
 
 
-class OutputRootName(SingleEntryRomsSection):
+class OutputRootName(SingleEntryROMSRuntimeSettingsSection):
     output_root_name: str
 
 
-class Rho0(SingleEntryRomsSection):
+class Rho0(SingleEntryROMSRuntimeSettingsSection):
     rho0: float
 
 
-class Gamma2(SingleEntryRomsSection):
+class Gamma2(SingleEntryROMSRuntimeSettingsSection):
     gamma2: float
 
 
-class LateralVisc(SingleEntryRomsSection):
+class LateralVisc(SingleEntryROMSRuntimeSettingsSection):
     lateral_visc: float
 
 
-class TracerDiff2(SingleEntryRomsSection):
+class TracerDiff2(SingleEntryROMSRuntimeSettingsSection):
     tracer_diff2: list[float]
 
 
-class MYBakMixing(SingleEntryRomsSection):
-    my_bak_mixing: list[float]
-
-
-class SSSCorrection(SingleEntryRomsSection):
+class SSSCorrection(SingleEntryROMSRuntimeSettingsSection):
     sss_correction: float
 
 
-class SSTCorrection(SingleEntryRomsSection):
+class SSTCorrection(SingleEntryROMSRuntimeSettingsSection):
     sst_correction: float
 
 
-class UBind(SingleEntryRomsSection):
+class UBind(SingleEntryROMSRuntimeSettingsSection):
     ubind: float
 
 
-class VSponge(SingleEntryRomsSection):
+class VSponge(SingleEntryROMSRuntimeSettingsSection):
     v_sponge: float
 
 
-class Grid(SingleEntryRomsSection):
+class Grid(SingleEntryROMSRuntimeSettingsSection):
     grid: Path
 
 
-class Climatology(SingleEntryRomsSection):
+class Climatology(SingleEntryROMSRuntimeSettingsSection):
     climatology: Path
 
 
-class TimeStepping(RomsSection):
+class TimeStepping(ROMSRuntimeSettingsSection):
     ntimes: int
     dt: int
     ndtfast: int
@@ -265,18 +265,16 @@ class TimeStepping(RomsSection):
     key_order = ["ntimes", "dt", "ndtfast", "ninfo"]
 
 
-class BottomDrag(RomsSection):
+class BottomDrag(ROMSRuntimeSettingsSection):
     rdrg: float
     rdrg2: float
     zob: float
-    Cdb_min: float | None = None
-    Cdb_max: float | None = None
 
     section_name = "bottom_drag"
     key_order = ["rdrg", "rdrg2", "zob"]
 
 
-class InitialBlock(RomsSection):
+class InitialConditions(ROMSRuntimeSettingsSection):
     nrrec: int
     ininame: Path
 
@@ -285,7 +283,7 @@ class InitialBlock(RomsSection):
     key_order = ["nrrec", "ininame"]
 
 
-class ForcingBlock(RomsSection):
+class Forcing(ROMSRuntimeSettingsSection):
     filenames: list[Path]
 
     section_name = "forcing"
@@ -293,14 +291,14 @@ class ForcingBlock(RomsSection):
     key_order = ["filenames"]
 
 
-class VerticalMixing(RomsSection):
+class VerticalMixing(ROMSRuntimeSettingsSection):
     Akv_bak: float
     Akt_bak: list[float]
     section_name = "vertical_mixing"
     key_order = ["Akv_bak", "Akt_bak"]
 
 
-class MarblBGC(RomsSection):
+class MARBLBiogeochemistry(ROMSRuntimeSettingsSection):
     marbl_namelist_fname: Path
     marbl_tracer_list_fname: Path
     marbl_diag_list_fname: Path
@@ -314,7 +312,7 @@ class MarblBGC(RomsSection):
     ]
 
 
-class SCoord(RomsSection):
+class SCoord(ROMSRuntimeSettingsSection):
     theta_s: float
     theta_b: float
     tcline: float
@@ -323,7 +321,7 @@ class SCoord(RomsSection):
     key_order = ["theta_s", "theta_b", "tcline"]
 
 
-class LinRhoEos(RomsSection):
+class LinRhoEos(ROMSRuntimeSettingsSection):
     Tcoef: float
     T0: float
     Scoef: float
@@ -338,19 +336,29 @@ class LinRhoEos(RomsSection):
     ]
 
 
+class MYBakMixing(ROMSRuntimeSettingsSection):
+    Akq_bak: float
+    q2nu2: float
+    q2nu4: float
+    section_name = "MY_bak_mixing"
+    key_order = ["Akq_bak", "q2nu2", "q2nu4"]
+
+
 ################################################################################
 ## Class to hold all sections:
 
 
 class ROMSRuntimeSettings(BaseModel):
+    # Non-optional:
     title: Title
     time_stepping: TimeStepping
     bottom_drag: BottomDrag
-    initial: InitialBlock
-    forcing: ForcingBlock
+    initial: InitialConditions
+    forcing: Forcing
     output_root_name: OutputRootName
-    rho0: Rho0
-    marbl_biogeochemistry: Optional[MarblBGC] = Field(
+    # Optional:
+    rho0: Optional[Rho0] = None
+    marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = Field(
         alias="MARBL_biogeochemistry", default=None
     )
     s_coord: Optional[SCoord] = Field(alias="S-Coord", default=None)
@@ -476,6 +484,8 @@ class ROMSRuntimeSettings(BaseModel):
         # Read file
         filepath = Path(filepath)
         sections = cls._load_raw_sections(filepath)
+        # Ensure consistent case as Fortran is case-insensitive:
+        sections = {k.lower(): v for k, v in sections.items()}
 
         if not all(
             key in sections.keys()
@@ -488,7 +498,6 @@ class ROMSRuntimeSettings(BaseModel):
                 "\n- bottom_drag"
                 "\n- output_root_name"
             )
-
         return cls(**sections)
 
     def __str__(self) -> str:

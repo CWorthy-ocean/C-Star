@@ -1,7 +1,6 @@
 import logging
 import pickle
 import re
-from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Generator, Tuple, cast
@@ -556,38 +555,36 @@ class TestROMSSimulationInitialization:
         mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
 
         mock_settings = ROMSRuntimeSettings(
-            title="test_settings",
-            time_stepping=[100, 0, 1, 1],
-            bottom_drag=[100, 10, 1],
-            initial=(2, "fake_ini.nc"),
-            forcing=["forcing1.nc", "forcing2.nc"],
-            output_root_name="TEST",
+            title={"title": "test_settings"},
+            time_stepping={"ntimes": 100, "dt": 0, "ndtfast": 1, "ninfo": 1},
+            bottom_drag={"rdrg": 100, "rdrg2": 10, "zob": 1},
+            initial={"nrrec": 2, "ininame": Path("fake_ini.nc")},
+            forcing={"filenames": [Path("forcing1.nc"), Path("forcing2.nc")]},
+            output_root_name={"output_root_name": "TEST"},
         )
 
         mock_from_file.return_value = mock_settings
 
         tested_settings = sim.roms_runtime_settings
 
-        assert tested_settings.title == "test_settings"
-        assert tested_settings.time_stepping["dt"] == sim.discretization.time_step
-        assert tested_settings.time_stepping["ntimes"] == sim._n_time_steps
-        assert tested_settings.grid == sim.model_grid.working_path
-        assert tested_settings.initial == OrderedDict(
-            [("nrrec", 2), ("ininame", sim.initial_conditions.working_path)]
+        assert tested_settings.title.title == "test_settings"
+        assert tested_settings.time_stepping.dt == sim.discretization.time_step
+        assert tested_settings.time_stepping.ntimes == sim._n_time_steps
+        assert tested_settings.grid.grid == sim.model_grid.working_path
+        assert tested_settings.initial.nrrec == 2
+        assert tested_settings.initial.ininame == sim.initial_conditions.working_path
+        assert tested_settings.forcing.filenames == sim._forcing_paths
+        assert (
+            tested_settings.marbl_biogeochemistry.marbl_namelist_fname
+            == sim.runtime_code.working_path / "marbl_in"
         )
-        assert tested_settings.forcing == sim._forcing_paths
-        assert tested_settings.marbl_biogeochemistry == OrderedDict(
-            [
-                ("marbl_namelist_fname", sim.runtime_code.working_path / "marbl_in"),
-                (
-                    "marbl_tracer_list_fname",
-                    sim.runtime_code.working_path / "marbl_tracer_output_list",
-                ),
-                (
-                    "marbl_diag_list_fname",
-                    sim.runtime_code.working_path / "marbl_diagnostic_output_list",
-                ),
-            ]
+        assert (
+            tested_settings.marbl_biogeochemistry.marbl_tracer_list_fname
+            == sim.runtime_code.working_path / "marbl_tracer_output_list"
+        )
+        assert (
+            tested_settings.marbl_biogeochemistry.marbl_diag_list_fname
+            == sim.runtime_code.working_path / "marbl_diagnostic_output_list"
         )
 
         # Test with no MARBL files:
@@ -855,12 +852,12 @@ class TestStrAndRepr:
         sim, directory = example_roms_simulation
 
         mock_settings = ROMSRuntimeSettings(
-            title="test_settings",
-            time_stepping=[100, 0, 1, 1],
-            bottom_drag=[100, 10, 1],
-            initial=(2, "fake_ini.nc"),
-            forcing=["forcing1.nc", "forcing2.nc"],
-            output_root_name="TEST",
+            title={"title": "test_settings"},
+            time_stepping={"ntimes": 100, "dt": 0, "ndtfast": 1, "ninfo": 1},
+            bottom_drag={"rdrg": 100, "rdrg2": 10, "zob": 1},
+            initial={"nrrec": 2, "ininame": Path("fake_ini.nc")},
+            forcing={"filenames": [Path("forcing1.nc"), Path("forcing2.nc")]},
+            output_root_name={"output_root_name": "TEST"},
         )
 
         mock_runtime_settings.return_value = mock_settings
