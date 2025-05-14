@@ -590,12 +590,12 @@ def test_run_cmd_error_reporting(
 def test_run_cmd_error_reporting_on_raise(
     mock_run: mock.MagicMock, capsys: pytest.CaptureFixture
 ):
-    """Verify that any errors encountered while running an external process are
-    displayed directly to the user when `_run_cmd` throws an exception.
+    """Verify that any errors encountered while running an external process are not
+    displayed repeatedly to the user when `_run_cmd` throws an exception.
 
     Asserts
     -------
-    - Ensure errors will not be written twice when an exception is thrown.
+    - Ensure error is not written to stdout when an exception is thrown
     """
 
     mock_output = "mock stdout"
