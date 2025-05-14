@@ -15,6 +15,7 @@ from cstar.base.utils import (
     _get_sha256_hash,
     _list_to_concise_str,
     _replace_text_in_file,
+    _run_cmd,
 )
 
 
@@ -557,3 +558,55 @@ class TestDictToTree:
             "        └── leaf6\n"
         )
         assert result == expected_output
+
+
+@mock.patch("subprocess.run")
+def test_run_cmd_error_reporting(
+    mock_run: mock.MagicMock, capsys: pytest.CaptureFixture
+):
+    """Verify that any errors encountered while running an external process are
+    displayed directly to the user when `_run_cmd` does not throw an exception.
+
+    Asserts
+    -------
+    - Ensure stdout is displayed to user, as expected.
+    - Ensure errors in `subprocess.run` are displayed in stdout of parent process.
+    """
+
+    mock_output = "mock stdout"
+    mock_err_output = "mock failure occurrence"
+
+    mock_run.return_value = mock.Mock(
+        returncode=1, stdout=mock_output, stderr=mock_err_output
+    )
+
+    stdout = _run_cmd("echo foo")
+
+    assert len(stdout) > 0
+    assert mock_err_output in capsys.readouterr().out
+
+
+@mock.patch("subprocess.run")
+def test_run_cmd_error_reporting_on_raise(
+    mock_run: mock.MagicMock, capsys: pytest.CaptureFixture
+):
+    """Verify that any errors encountered while running an external process are
+    displayed directly to the user when `_run_cmd` throws an exception.
+
+    Asserts
+    -------
+    - Ensure errors will not be written twice when an exception is thrown.
+    """
+
+    mock_output = "mock stdout"
+    mock_err_output = "mock failure occurrence"
+
+    mock_run.return_value = mock.Mock(
+        returncode=1, stdout=mock_output, stderr=mock_err_output
+    )
+
+    with pytest.raises(RuntimeError) as ex:
+        _run_cmd("echo foo", raise_on_error=True)
+
+    assert mock_err_output not in capsys.readouterr().out
+    assert mock_err_output in " ".join(str(s) for s in ex.value.args)
