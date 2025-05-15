@@ -1,3 +1,4 @@
+import os
 import time
 from abc import ABC, abstractmethod
 from enum import Enum, auto
@@ -119,6 +120,7 @@ class ExecutionHandler(ABC, LoggingMixin):
             If 'seconds' is set to 0, the user will be prompted to confirm
             whether they want to continue with an indefinite update stream
             if confirm_indefinite is set to True
+
         Notes
         -----
         - This method moves to the end of the output file and streams only
@@ -143,7 +145,8 @@ class ExecutionHandler(ABC, LoggingMixin):
             self.log.warning(error_msg)
             return
 
-        if (seconds == 0) and (confirm_indefinite):
+        interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
+        if seconds == 0 and confirm_indefinite and interactive:
             # Confirm indefinite tailing
             confirmation = (
                 input(

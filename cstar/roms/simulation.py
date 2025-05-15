@@ -9,6 +9,7 @@ import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.datasource import DataSource
+from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -237,6 +238,7 @@ class ROMSSimulation(Simulation):
             self.forcing_corrections, ROMSForcingCorrections
         )
 
+        self._check_inputdataset_partitioning()
         self._check_inputdataset_dates()
 
         if marbl_codebase is None:
@@ -257,7 +259,6 @@ class ROMSSimulation(Simulation):
         # roms-specific
         self.exe_path: Optional[Path] = None
         self._exe_hash: Optional[str] = None
-        self.partitioned_files: List[Path] | None = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
 
@@ -308,6 +309,24 @@ class ROMSSimulation(Simulation):
             raise TypeError(
                 f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
             )
+
+    def _check_inputdataset_partitioning(self) -> None:
+        """If a ROMSInputDataset's source is already partitioned, confirm that the
+        partitioning matches the processor distribution of the simulation and raise a
+        ValueError if not."""
+
+        for inp in self.input_datasets:
+            if inp.source_partitioning:
+                if (inp.source_np_xi != self.discretization.n_procs_x) or (
+                    inp.source_np_eta != self.discretization.n_procs_y
+                ):
+                    raise ValueError(
+                        f"Cannot instantiate ROMSSimulation with "
+                        f"n_procs_x={self.discretization.n_procs_x}, "
+                        f"n_procs_y={self.discretization.n_procs_y} "
+                        "when {inp.__class__.__name__} has partitioning "
+                        f"({inp.source_np_xi},{inp.source_np_eta}) at source."
+                    )
 
     def _check_inputdataset_dates(self) -> None:
         """Ensure input dataset date ranges align with the simulation date range.
@@ -480,7 +499,7 @@ class ROMSSimulation(Simulation):
         return ROMSExternalCodeBase()
 
     @property
-    def codebases(self) -> list:
+    def codebases(self) -> list[ExternalCodeBase]:
         """Returns a list of external codebases associated with this ROMS simulation.
 
         This property includes both the primary ROMS external codebase and the
@@ -1069,15 +1088,11 @@ class ROMSSimulation(Simulation):
         runtime_code_dir = self.directory / "ROMS/runtime_code"
         input_datasets_dir = self.directory / "ROMS/input_datasets"
 
-        self.log.info(f"🛠️  Configuring {self.__class__.__name__}")
-        self.log.info(f"🔧 Setting up {self.codebase.__class__.__name__}...")
+        self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
-        # Setup ExternalCodeBase
-        self.codebase.handle_config_status()
-
-        if self.marbl_codebase is not None:
-            self.log.info(f"🔧 Setting up {self.marbl_codebase.__class__.__name__}...")
-            self.marbl_codebase.handle_config_status()
+        for codebase in filter(lambda x: x is not None, self.codebases):
+            self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
+            codebase.handle_config_status()
 
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")
@@ -1257,13 +1272,18 @@ class ROMSSimulation(Simulation):
 
         self.persist()
 
-    def pre_run(self) -> None:
+    def pre_run(self, overwrite_existing_files=False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
         This method partitions any required input datasets according to
         the computational domain decomposition specified in the discretization
         settings. Each dataset is divided into smaller files so that they
         can be processed in parallel by ROMS during execution.
+
+        Parameters
+        ----------
+        overwrite_existing_files (bool, default False)
+            If True, any existing partitioned files will be overwritten
 
         Raises
         ------
@@ -1288,11 +1308,11 @@ class ROMSSimulation(Simulation):
             [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
         ):
             datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
-
             for f in datasets_to_partition:
                 f.partition(
                     np_xi=self.discretization.n_procs_x,
                     np_eta=self.discretization.n_procs_y,
+                    overwrite_existing_files=overwrite_existing_files,
                 )
 
         self.persist()

@@ -27,6 +27,7 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
 )
 from cstar.roms.simulation import ROMSSimulation
+from cstar.system.environment import CStarEnvironment
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -218,7 +219,6 @@ class TestROMSSimulationInitialization:
         # Uninitialized at outset/private
         assert sim.exe_path is None
         assert sim._exe_hash is None
-        assert sim.partitioned_files is None
         assert sim._execution_handler is None
 
     def test_init_raises_if_no_discretization(self, tmp_path):
@@ -1827,7 +1827,7 @@ class TestProcessingAndExecution:
 
             # Ensure early exit exception was triggered
             expected_msg = (
-                f"ROMS has already been built at {build_dir/"roms"}, and "
+                f"ROMS has already been built at {build_dir / 'roms'}, and "
                 "the source code appears not to have changed. "
                 "If you would like to recompile, call "
                 "ROMSSimulation.build(rebuild = True)"
@@ -1974,9 +1974,13 @@ class TestProcessingAndExecution:
             sim.pre_run()
 
             # Assert that partition() was called only on datasets that exist locally
-            dataset_1.partition.assert_called_once_with(np_xi=2, np_eta=3)
+            dataset_1.partition.assert_called_once_with(
+                np_xi=2, np_eta=3, overwrite_existing_files=False
+            )
             dataset_2.partition.assert_not_called()  # Does not exist → shouldn't be partitioned
-            dataset_3.partition.assert_called_once_with(np_xi=2, np_eta=3)
+            dataset_3.partition.assert_called_once_with(
+                np_xi=2, np_eta=3, overwrite_existing_files=False
+            )
 
     def test_run_raises_if_no_runtime_code_working_path(self, example_roms_simulation):
         """Confirm that ROMSSimulation.run() raises a FileNotFoundError if
@@ -2089,8 +2093,25 @@ class TestProcessingAndExecution:
             # Ensure execution handler was set correctly
             assert execution_handler == mock_process_instance
 
+    @pytest.mark.parametrize(
+        "mock_system_name,exp_mpi_prefix",
+        [
+            ["darwin_arm64", "mpirun"],
+            ["derecho", "mpirun"],
+            ["expanse", "srun --mpi=pmi2"],
+            ["perlmutter", "srun"],
+        ],
+    )
+    # @patch("cstar.roms.simulation._replace_text_in_file")  # Mock text replacement
     @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
-    def test_run_with_scheduler(self, mock_runtime_settings, example_roms_simulation):
+    def test_run_with_scheduler(
+        self,
+        mock_runtime_settings,
+        # mock_replace_text,
+        example_roms_simulation,
+        mock_system_name: str,
+        exp_mpi_prefix: str,
+    ):
         """Tests that `run` correctly submits a job to a scheduler when available.
 
         This test verifies that if a scheduler is present, `run` creates a scheduler job
@@ -2123,6 +2144,24 @@ class TestProcessingAndExecution:
         with (
             patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
             patch(
+                "cstar.system.environment.CStarEnvironment.uses_lmod",
+                new_callable=PropertyMock,
+                return_value=False,
+            ),
+            patch(
+                "cstar.system.manager.CStarSystemManager.name",
+                new_callable=PropertyMock,
+                return_value=mock_system_name,
+            ),
+            patch(
+                "cstar.system.manager.CStarSystemManager.environment",
+                CStarEnvironment(
+                    system_name=mock_system_name,
+                    mpi_exec_prefix=exp_mpi_prefix,
+                    compiler="mock-compiler",
+                ),
+            ),
+            patch(
                 "cstar.system.manager.CStarSystemManager.scheduler",
                 new_callable=PropertyMock,
                 return_value=mock_scheduler,
@@ -2134,9 +2173,9 @@ class TestProcessingAndExecution:
 
             # Call `run()` without explicitly passing `queue_name` and `walltime`
             execution_handler = sim.run(account_key="some_key")
-
+            print("HERES YA ARGS", mock_create_job.call_args_list)
             mock_create_job.assert_called_once_with(
-                commands=f'mpirun -n 6 {build_dir/"roms"} {sim.runtime_code.working_path}/ROMSTest.in',
+                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {sim.runtime_code.working_path}/ROMSTest.in",
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
@@ -2535,7 +2574,7 @@ class TestROMSSimulationRestart:
 
         # Call method
         with pytest.raises(
-            FileNotFoundError, match=f"No files in {directory/'output'} match"
+            FileNotFoundError, match=f"No files in {directory / 'output'} match"
         ):
             sim.restart(new_end_date=new_end_date)
 
