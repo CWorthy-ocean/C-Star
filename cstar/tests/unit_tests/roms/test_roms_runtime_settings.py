@@ -24,9 +24,7 @@ def example_runtime_settings():
     """
 
     yield ROMSRuntimeSettings(
-        title={
-            "title": "Example runtime settings"
-        },  # TODO : SingleEntryROMSRuntimeSettingsSection should have simpler init
+        title = "Example runtime settings",
         time_stepping={"ntimes": 360, "dt": 60, "ndtfast": 60, "ninfo": 1},
         bottom_drag={
             "rdrg": 0.0e-4,
@@ -44,26 +42,26 @@ def example_runtime_settings():
                 Path("input_datasets/roms_bry_bgc.nc"),
             ]
         },
-        output_root_name={"output_root_name": "ROMS_test"},
+        output_root_name = "ROMS_test",
         s_coord={"theta_s": 5.0, "theta_b": 2.0, "tcline": 300.0},
-        rho0={"rho0": 1000.0},
+        rho0=1000.0,
         lin_rho_eos={"Tcoef": 0.2, "T0": 1.0, "Scoef": 0.822, "S0": 1.0},
         marbl_biogeochemistry={
             "marbl_namelist_fname": Path("marbl_in"),
             "marbl_tracer_list_fname": Path("marbl_tracer_list_fname"),
             "marbl_diag_list_fname": Path("marbl_diagnostic_output_list"),
         },
-        lateral_visc={"lateral_visc": 0.0},
-        gamma2={"gamma2": 1.0},
-        tracer_diff2={"tracer_diff2": np.zeros(38)},
+        lateral_visc = 0.0,
+        gamma2 = 1.0,
+        tracer_diff2 = [0.,]*38,
         vertical_mixing={"Akv_bak": 0, "Akt_bak": np.zeros(37)},
         my_bak_mixing={"Akq_bak": 1.0e-5, "q2nu2": 0.0, "q2nu4": 0.0},
-        sss_correction={"sss_correction": 7.777},
-        sst_correction={"sst_correction": 10.0},
-        ubind={"ubind": 0.1},
-        v_sponge={"v_sponge": 0.0},
-        grid={"grid": Path("input_datasets/roms_grd.nc")},
-        climatology={"climatology": Path("climfile2.nc")},
+        sss_correction = 7.777,
+        sst_correction = 10.0,
+        ubind = 0.1,
+        v_sponge = 0.0,
+        grid = Path("input_datasets/roms_grd.nc"),
+        climatology = Path("climfile2.nc"),
     )
 
 
@@ -279,7 +277,7 @@ Vertical mixing parameters (`ROMSRuntimeSettings.vertical_mixing`):
 - Background vertical viscosity (`Akv_bak`, m2/s) = 0.0,
 - Background vertical mixing for tracers (`Akt_bak`, m2/s) = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
 Mellor-Yamada Level 2.5 turbulent closure parameters (`ROMSRuntimeSettings.my_bak_mixing`):
-- Backround vertical TKE mixing [`Akq_bak`, m2/s] = 1e-05,
+- Background vertical TKE mixing [`Akq_bak`, m2/s] = 1e-05,
 - Horizontal Laplacian TKE mixing [`q2nu2`, m2/s] = 0.0,
 - Horizontal biharmonic TKE mixing [`q2nu4`, m4/s] = 0.0,
 SSS correction (`ROMSRuntimeSettings.sss_correction`): 7.777

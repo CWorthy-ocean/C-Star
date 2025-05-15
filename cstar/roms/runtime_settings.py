@@ -178,7 +178,27 @@ class ROMSRuntimeSettingsSection(BaseModel):
 
 
 class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
+    @model_validator(mode="wrap")
+    @classmethod
+    def cast_to_obj(cls, data, handler: ModelWrapValidatorHandler):
+        """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized
+        with just the value of the single entry, instead of with a dict or
+        kwargs.
+        """
+        annotation = cls.__annotations__[cls.key_order[0]]
+        expected_type = get_origin(annotation) or annotation
+        if isinstance(data,expected_type):
+            try:
+                return cls(**{cls.section_name: data})
+            except Exception:
+                pass
+        return handler(data)
+
     def __init_subclass__(cls, **kwargs):
+        """Overrides default __init_subclass__ to allow definition of
+        SingleEntryROMSRuntimeSettingsSection without explicitly
+        defining redundant key_order or section_name attrs"""
+        
         super().__init_subclass__(**kwargs)
 
         # Get all annotated instance fields (ignore ClassVars like section_name)
@@ -381,53 +401,68 @@ class ROMSRuntimeSettings(BaseModel):
     It supports loading settings from disk via `from_file()`, editing or inspecting
     values via named attributes, and writing a valid ROMS `.in` file via `to_file()`.
 
+    Each attribute corresponds to a section in the `.in` file, and is an instance of a
+    `ROMSRuntimeSettingsSection` subclass corresponding to that section.
+
     Attributes
     ----------
-    title : str
+    title : Title
         Description of the ROMS run.
-    time_stepping : OrderedDict
+    time_stepping : TimeStepping
         Time integration parameters: ntimes, dt, ndtfast, ninfo.
-    bottom_drag : OrderedDict
+    bottom_drag : BottomDrag
         Bottom drag coefficients: rdrg, rdrg2, zob.
-    initial : OrderedDict
+    initial : InitialConditions
         Initial condition parameters: nrrec and ininame.
-    forcing : list of Path
+    forcing : Forcing
         List of forcing NetCDF files.
-    output_root_name : str
+    output_root_name : OutputRootName
         Base name for output NetCDF files.
 
     Optional Attributes (depending on CPP flags)
     --------------------------------------------
-    s_coord : OrderedDict or None
-        S-coordinate transformation parameters.
-    rho0 : float or None
-        Boussinesq reference density.
-    lin_rho_eos : OrderedDict or None
-        Linear equation of state parameters.
-    marbl_biogeochemistry : OrderedDict or None
-        Filenames for MARBL namelist and diagnostics.
-    lateral_visc : float or None
-        Horizontal viscosity coefficient.
-    gamma2 : float or None
-        Lateral boundary slipperiness coefficient.
-    tracer_diff2 : np.ndarray or None
-        Horizontal tracer diffusivities.
-    vertical_mixing : OrderedDict or None
-        Vertical mixing parameters: Akv_bak and Akt_bak.
-    my_bak_mixing : np.ndarray or None
-        Background vertical mixing for MY2.5.
-    sss_correction : float or None
+    s_coord : Optional[SCoord]
+        S-coordinate transformation parameters:
+        - theta_s (surface stretching parameter)
+        - theta_b (bottom stretching parameter)
+    rho0 : Rho0, optional, default None
+        Boussinesq reference density (rho0, kg/m3)
+    lin_rho_eos : LinRhoEos, optional, default None
+        Linear equation of state parameters:
+        - Tcoef (thermal expansion coefficient, kg/m3/K)
+        - Scoef (haline contraction coefficient, kg/m3/PSU)
+    marbl_biogeochemistry : MARBLBiogeochemistry, optional, default None
+        Filenames for MARBL namelist and diagnostics:
+        - marbl_namelist_fname
+        - marbl_tracer_list_fname
+        - marbl_diag_list_fname
+    lateral_visc : LateralVisc, optional, default None
+        Horizontal Laplacian kinematic viscosity (m2/s)
+    gamma2 : Gamma2, optional, default None
+        Lateral boundary slipperiness coefficient (free-slip=+1,no-slip=-1)
+    tracer_diff2 : TracerDiff2, optional, default None
+        Horizontal Laplacian mixing coefficients (one per tracer, m2/s)
+    vertical_mixing : VerticalMixing, optional, default None
+        Vertical mixing parameters:
+        - akv_bak (background vertical viscosity, m2/s)
+        - akt_bak (background vertical mixing for tracers, m2/s)
+    my_bak_mixing : MYBakMixing, optional, default None
+        Background vertical mixing for MY2.5 scheme parameters:
+        - akq_bak (background vertical TKE mixing, m2/s)
+        - q2nu2 (horizontal Laplacian TKE mixing, m2/s)
+        - q2nu4 (horizontal biharmonic TKE mixing, m4/s)
+    sss_correction : SSSCorrection, optional, default None
         Surface salinity correction factor.
-    sst_correction : float or None
+    sst_correction : SSTCorrection, optional, default None
         Surface temperature correction factor.
-    ubind : float or None
-        Boundary binding velocity scale.
-    v_sponge : float or None
-        Maximum sponge layer viscosity.
-    grid : Path or None
-        Grid file path.
-    climatology : Path or None
-        Climatology file path.
+    ubind : UBind, optional, default None
+        Open boundary binding velocity (m/s)
+    v_sponge : VSponge, optional, default None
+        Maximum sponge layer viscosity (m2/s)
+    grid : Grid, optional, default None
+        Grid file path
+    climatology : Climatology, optional, default None
+        Climatology file path
     """
 
     @staticmethod
@@ -460,7 +495,7 @@ class ROMSRuntimeSettings(BaseModel):
         return sections
 
     @classmethod
-    def from_file(cls, filepath: Path | str):
+    def from_file(cls, filepath: Path | str) -> "ROMSRuntimeSettings":
         """Read ROMS runtime settings from a `.in` file.
 
         ROMS runtime settings are specified via a `.in` file with sections corresponding
@@ -605,7 +640,7 @@ class ROMSRuntimeSettings(BaseModel):
                 "Mellor-Yamada Level 2.5 turbulent closure parameters (`ROMSRuntimeSettings.my_bak_mixing`):"
             )
             lines.append(
-                f"- Backround vertical TKE mixing [`Akq_bak`, m2/s] = {self.my_bak_mixing.Akq_bak},"
+                f"- Background vertical TKE mixing [`Akq_bak`, m2/s] = {self.my_bak_mixing.Akq_bak},"
             )
             lines.append(
                 f"- Horizontal Laplacian TKE mixing [`q2nu2`, m2/s] = {self.my_bak_mixing.q2nu2},"

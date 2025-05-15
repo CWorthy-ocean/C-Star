@@ -639,6 +639,8 @@ class ROMSSimulation(Simulation):
 
         # Initial conditions entry
         if self.initial_conditions:
+            # TODO what if this is a list? or None? Partitioned source?
+            # need a `self.initial_conditions._path_for_in_file` to deal with this and return Path
             simulation_runtime_settings.initial.ininame = (
                 self.initial_conditions.working_path
             )

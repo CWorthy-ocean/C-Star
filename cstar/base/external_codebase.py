@@ -74,7 +74,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
             An initialized ExternalCodeBase object
         """
 
-        # TODO: Type check here
         self._source_repo = source_repo
         self._checkout_target = checkout_target
 
