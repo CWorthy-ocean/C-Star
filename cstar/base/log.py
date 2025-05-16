@@ -1,23 +1,29 @@
 import logging
 import sys
+from pathlib import Path
 
 DEFAULT_LOG_LEVEL = logging.INFO
 DEFAULT_LOG_FORMAT = "[%(levelname)s] %(message)s"
 
 
 def get_logger(
-    name: str | None = None, level: int = DEFAULT_LOG_LEVEL, fmt: str | None = None
+    name: str | None = None,
+    level: int = DEFAULT_LOG_LEVEL,
+    fmt: str | None = None,
+    filename: str | None | Path = None,
 ) -> logging.Logger:
     """Get a logger instance with the specified name.
 
     Parameters
     ----------
-    name : str
+    name: str
         The name of the logger.
     level: int
         The minimum log level to write.
-    fmt : str
+    fmt: str
         The log format string.
+    filename: str | None
+        A file path where logs will be written.
 
     Returns
     -------
@@ -56,6 +62,22 @@ def get_logger(
         stdout_handler.setFormatter(formatter)
 
         logger.addHandler(stdout_handler)
+
+    if filename:
+        if isinstance(filename, Path):
+            filename = str(filename)
+
+        existing_fh = [
+            h
+            for h in logger.handlers
+            if isinstance(h, logging.FileHandler)
+            and Path(h.baseFilename).resolve() == Path(filename).resolve()
+        ]
+        if not existing_fh:
+            file_handler = logging.FileHandler(filename)
+            file_handler.setLevel(level)
+            file_handler.setFormatter(logging.Formatter(fmt=fmt))
+            logger.addHandler(file_handler)
 
     # Re-enable propagation on final logger
     logger.propagate = True
