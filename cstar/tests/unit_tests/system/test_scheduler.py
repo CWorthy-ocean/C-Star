@@ -1,8 +1,13 @@
 import logging
+import textwrap
+import unittest
+from typing import Optional
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from cstar.execution.handler import ExecutionStatus
+from cstar.execution.scheduler_job import SlurmJobStatus, query_status
 from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
@@ -423,6 +428,692 @@ class TestScheduler:
                 text=True,
                 capture_output=True,
             )
+
+
+class TestJobStatus:
+    """Unit tests for SlurmJobStatus class.
+
+    Tests
+    -----
+    test_is_terminated
+        Verify that the class correctly identifies states that indicate a
+        job has completed processing.
+    test_is_running
+        Verify that the class correctly identifies states that indicate a
+        job has not completed processing.
+    test_invalid_mapping
+        Verify that an invalid source causes an appropriate exception to occur.
+    test_mapping
+        Verify that mapping of a source state str to an ExecutionStatus
+        correctly converts known inputs.
+
+    Fixtures
+    --------
+    n/a
+    """
+
+    @pytest.mark.parametrize(
+        "input_state,expected_result",
+        [
+            ("completed", True),
+            ("cancelled", True),
+            ("failed", True),
+            ("pending", False),
+            ("running", False),
+            ("COMPLETED", True),
+            ("CANCELLED", True),
+            ("FAILED", True),
+            ("PENDING", False),
+            ("RUNNING", False),
+        ],
+    )
+    def test_is_terminated(self, input_state: str, expected_result: bool) -> None:
+        """Verify that the class correctly identifies states that indicate a job has
+        completed processing."""
+        job_status = SlurmJobStatus.from_raw(input_state)
+        assert job_status.is_terminated == expected_result
+
+    @pytest.mark.parametrize(
+        "input_state,expected_result",
+        [
+            ("completed", False),
+            ("cancelled", False),
+            ("failed", False),
+            ("pending", True),
+            ("running", True),
+            ("COMPLETED", False),
+            ("CANCELLED", False),
+            ("FAILED", False),
+            ("PENDING", True),
+            ("RUNNING", True),
+        ],
+    )
+    def test_is_running(self, input_state: str, expected_result: bool) -> None:
+        """Verify that the class correctly identifies states that indicate a job has not
+        completed processing."""
+        job_status = SlurmJobStatus.from_raw(input_state)
+        assert job_status.is_running == expected_result
+
+    @pytest.mark.parametrize("input_state", [" ", "", None])
+    def test_invalid_mapping(self, input_state: Optional[str]) -> None:
+        """Verify that an invalid source causes an appropriate exception to occur."""
+        with pytest.raises(ValueError):
+            SlurmJobStatus.from_raw(input_state)  # type: ignore
+
+    @pytest.mark.parametrize(
+        "input_state,expected_state",
+        [
+            ("pending", ExecutionStatus.PENDING),
+            ("running", ExecutionStatus.RUNNING),
+            ("completed", ExecutionStatus.COMPLETED),
+            ("cancelled", ExecutionStatus.CANCELLED),
+            ("failed", ExecutionStatus.FAILED),
+            ("xyz", ExecutionStatus.UNKNOWN),
+            ("PENDING", ExecutionStatus.PENDING),
+            ("RUNNING", ExecutionStatus.RUNNING),
+            ("COMPLETED", ExecutionStatus.COMPLETED),
+            ("CANCELLED", ExecutionStatus.CANCELLED),
+            ("FAILED", ExecutionStatus.FAILED),
+            ("XYZ", ExecutionStatus.UNKNOWN),
+        ],
+    )
+    def test_mapping(self, input_state: Optional[str], expected_state) -> None:
+        """Verify that mapping of a source state str to an ExecutionStatus correctly
+        converts known inputs."""
+        job_status = SlurmJobStatus.from_raw(input_state)  # type: ignore
+        assert job_status.state == expected_state
+
+
+class TestQueryStatus:
+    """Unit tests for `query_status` method.
+
+    Tests
+    -----
+    test_invalid_job_id
+        Verify that query_status fails as expected when a job ID
+        is not provided.
+    test_job_not_found
+        Verify that an unsubmitted job is properly handled when slurm
+        returns no results.
+    test_job_unsubmitted
+        Verify that an unsubmitted job is properly handled when
+        slurm returns existing results for the parent job.
+    test_job_found
+        Verify that the correct output is returned for a known Job ID.
+    test_task_found
+       Verify that the correct output is returned for a known task ID.
+    test_task_name_found
+        Verify that the correct output is returned for a known task name.
+    test_task_not_found
+        Verify that a valid job ID with unknown task ID returns
+        the correct result.
+
+    Fixtures
+    --------
+    mock_subprocess_run : MagicMock
+        Mocks `subprocess.run` to simulate `make` commands and other shell operations.
+    mock_query_output: str
+        A mock query result containing multiple tasks with a parent task and two
+        subtasks. 1 subtask is pending and another has failed.
+    """
+
+    @pytest.fixture
+    def mock_subprocess_run(self):
+        """Mock subprocess.run for testing system command execution.
+
+        This fixture ensures that subprocess.run calls are intercepted,
+        allowing tests to simulate their outputs or errors without running
+        actual commands.
+
+        Yields
+        ------
+        mock_run : unittest.mock.MagicMock
+            A mock object for subprocess.run.
+        """
+        with patch("subprocess.run") as mock_run:
+            yield mock_run
+
+    @pytest.fixture
+    def mock_job_id(self) -> str:
+        """Return a known job ID included in mock query output."""
+        return "12345"
+
+    @pytest.fixture
+    def mock_job_name(self) -> str:
+        """Return a known job name included in mock query output."""
+        return "TheMockJob"
+
+    @pytest.fixture
+    def mock_task_id(self, mock_job_id: str) -> str:
+        """Return a known task ID included in mock query output."""
+        return f"{mock_job_id}.1"
+
+    @pytest.fixture
+    def mock_task_name(self) -> str:
+        """Return a known task name included in mock query output."""
+        return "MockTaskInJob"
+
+    @pytest.fixture
+    def mock_task_status(self) -> str:
+        """Return a known task status included in mock query output."""
+        return "pending"
+
+    @pytest.fixture
+    def mock_failed_task_id(self, mock_job_id: str) -> str:
+        """Return a known task ID included in mock query output."""
+        return f"{mock_job_id}.2"
+
+    @pytest.fixture
+    def mock_failed_task_name(self) -> str:
+        """Return a known task name included in mock query output."""
+        return "FailingTask!"
+
+    @pytest.fixture
+    def mock_job_status(self) -> str:
+        """Return the status of the job returned in the `mock_query_output`"""
+        return "running"
+
+    @pytest.fixture
+    def mock_query_output(
+        self,
+        mock_job_id: str,
+        mock_job_name: str,
+        mock_task_name: str,
+        mock_task_id: str,
+        mock_task_status: str,
+        mock_job_status: str,
+        mock_failed_task_id: str,
+        mock_failed_task_name: str,
+    ) -> str:
+        """Return a well-formatted query result containing a parent task and 2
+        subtasks."""
+        return textwrap.dedent(
+            f"""
+                {mock_job_id},{mock_job_status},{mock_job_name}
+                {mock_task_id},{mock_task_status},{mock_task_name}
+                {mock_failed_task_id},failed,{mock_failed_task_name}
+            """
+        )
+
+    @pytest.mark.parametrize(
+        "slurm_job_id",
+        [
+            None,
+            "",
+            " ",
+        ],
+    )
+    def test_invalid_job_id(
+        self, slurm_job_id: Optional[str], log: logging.Logger
+    ) -> None:
+        """Verify that query_status fails as expected when a job ID is not provided."""
+
+        with pytest.raises(ValueError) as ex:
+            query_status(slurm_job_id, log=log)  # type: ignore
+
+        ex_args = "".join(str(arg) for arg in ex.value.args)
+        assert "slurm_job_id" in ex_args
+
+    def test_job_not_found(
+        self,
+        log: logging.Logger,
+        mock_subprocess_run: unittest.mock.MagicMock,
+    ) -> None:
+        """Verify that an unsubmitted job is properly handled when slurm returns no
+        results."""
+
+        mock_subprocess_run.return_value = MagicMock(
+            returncode=0,
+            stdout="",  # returns an empty string (no query results for job id)
+        )
+
+        job_id, job_status, job_name = query_status(
+            "not-submitted",
+            log=log,
+        )
+
+        assert job_status == "unsubmitted"
+        assert job_id == ""
+        assert job_name == ""
+
+    def test_job_unsubmitted(
+        self,
+        log: logging.Logger,
+        mock_subprocess_run: unittest.mock.MagicMock,
+        mock_query_output: str,
+    ) -> None:
+        """Verify that an unsubmitted job is properly handled when slurm returns
+        existing results for the parent job."""
+
+        mock_subprocess_run.return_value = MagicMock(
+            returncode=0,
+            stdout=mock_query_output,
+        )
+
+        job_id, job_status, job_name = query_status(
+            "not-submitted",
+            log=log,
+        )
+
+        assert job_status == "unsubmitted"
+        assert job_id == ""
+        assert job_name == ""
+
+    def test_job_found(
+        self,
+        log: logging.Logger,
+        mock_subprocess_run: unittest.mock.MagicMock,
+        mock_query_output: str,
+        mock_job_id: str,
+        mock_job_status: str,
+        mock_job_name: str,
+    ) -> None:
+        """Verify that the correct output is returned for a known Job ID."""
+
+        mock_subprocess_run.return_value = MagicMock(
+            returncode=0,
+            stdout=mock_query_output,
+        )
+
+        job_id, job_status, job_name = query_status(
+            mock_job_id,
+            log=log,
+        )
+
+        assert job_status == mock_job_status
+        assert job_id == mock_job_id
+        assert job_name == mock_job_name
+
+    def test_task_found(
+        self,
+        log: logging.Logger,
+        mock_subprocess_run: unittest.mock.MagicMock,
+        mock_query_output: str,
+        mock_job_id: str,
+        mock_job_status: str,
+        mock_task_id: str,
+        mock_task_status: str,
+        mock_task_name: str,
+    ) -> None:
+        """Verify that the correct output is returned for a known task ID."""
+
+        mock_subprocess_run.return_value = MagicMock(
+            returncode=0,
+            stdout=mock_query_output,
+        )
+
+        job_id, job_status, job_name = query_status(
+            mock_job_id,
+            log=log,
+            # include task id in query
+            task_id=mock_task_id,
+        )
+
+        assert job_id == mock_task_id
+        assert job_status == mock_task_status
+        assert job_name == mock_task_name
+
+        # confirm we didn't grab the job instead of the task
+        assert job_status != mock_job_status
+
+    def test_task_name_found(
+        self,
+        log: logging.Logger,
+        mock_subprocess_run: unittest.mock.MagicMock,
+        mock_query_output: str,
+        mock_job_id: str,
+        mock_job_status: str,
+        mock_task_id: str,
+        mock_task_name: str,
+        mock_task_status: str,
+    ) -> None:
+        """Verify that the correct output is returned for a known task name."""
+
+        mock_subprocess_run.return_value = MagicMock(
+            returncode=0,
+            stdout=mock_query_output,
+        )
+
+        job_id, job_status, job_name = query_status(
+            mock_job_id,
+            log=log,
+            # include task name in query
+            task_name=mock_task_name,
+        )
+
+        assert job_id == mock_task_id
+        assert job_status == mock_task_status
+        assert job_name == mock_task_name
+
+        # status shouldn't match the parent job
+        assert job_status != mock_job_status
+
+    def test_task_not_found(
+        self,
+        log: logging.Logger,
+        mock_subprocess_run: unittest.mock.MagicMock,
+        mock_query_output: str,
+        mock_job_id: str,
+        mock_task_id: str,
+    ) -> None:
+        """Verify that a valid job ID with unknown task ID returns the correct
+        result."""
+
+        mock_subprocess_run.return_value = MagicMock(
+            returncode=0,
+            stdout=mock_query_output,
+        )
+
+        job_id, job_status, job_name = query_status(
+            mock_job_id,
+            log=log,
+            # include unknown task id in query
+            task_id=mock_task_id + "000",
+        )
+
+        assert job_status == "unsubmitted"
+        assert job_id == ""
+        assert job_name == ""
+
+
+class TestSlurmInteractiveScheduler:
+    """Unit tests for SlurmInteractiveJob class.
+
+    Tests
+    -----
+    test_scheduler_initialization
+        Verify initialization of a Scheduler instance from a list of queues
+    test_scheduler_get_queue
+        Ensure that queues can be retrieved by name, and missing queues raise a ValueError.
+    test_slurmscheduler_global_max_cpus_per_node_success
+        Confirm SlurmScheduler queries and sets the maximum CPUs per node successfully.
+    test_slurmscheduler_global_max_cpus_per_node_failure
+        Validate SlurmScheduler handles subprocess failures when querying CPUs.
+    test_slurmscheduler_global_max_mem_per_node_gb_success
+        Confirm SlurmScheduler queries and sets maximum memory per node in GB successfully.
+    test_slurmscheduler_global_max_mem_per_node_gb_failure
+        Validate SlurmScheduler handles subprocess failures when querying memory.
+    test_pbsscheduler_global_max_cpus_per_node_success
+        Confirm PBSScheduler rqueries and sets the maximum CPUs per node successfully.
+    test_pbsscheduler_global_max_cpus_per_node_failure
+        Validate PBSScheduler handles subprocess failures when querying CPUs.
+    test_pbsscheduler_global_max_mem_per_node_gb
+        Parameterized test for PBSScheduler.global_max_mem_per_node_gb, covering
+        various memory formats (kb, mb, gb) and invalid cases.
+    test_pbsscheduler_global_max_mem_per_node_gb_failure
+        Validate PBSScheduler handles subprocess failures when querying memory.
+
+    Fixtures
+    --------
+    mock_subprocess_run
+        Mocks subprocess.run to simulate system commands without actual execution.
+    """
+
+    @pytest.fixture
+    def mock_subprocess_run(self):
+        """Mock subprocess.run for testing system command execution.
+
+        This fixture ensures that subprocess.run calls are intercepted,
+        allowing tests to simulate their outputs or errors without running
+        actual commands.
+
+        Yields
+        ------
+        mock_run : unittest.mock.MagicMock
+            A mock object for subprocess.run.
+        """
+        with patch("subprocess.run") as mock_run:
+            yield mock_run
+
+    # def test_scheduler_initialization(self):
+    #     """Verify initialization of a Scheduler instance from a list of queues."""
+    #     queue1 = MockQueue(name="general")
+    #     queue2 = MockQueue(name="batch")
+    #     scheduler = SlurmScheduler(
+    #         queues=[queue1, queue2], primary_queue_name="general"
+    #     )
+
+    #     assert scheduler.queues == [queue1, queue2]
+    #     assert scheduler.primary_queue_name == "general"
+    #     assert scheduler.queue_names == ["general", "batch"]
+    #     assert scheduler.other_scheduler_directives == {}
+
+    # def test_scheduler_get_queue(self):
+    #     """Ensure that queues can be retrieved by name, and missing queues raise a
+    #     ValueError."""
+    #     queue1 = MockQueue(name="general")
+    #     queue2 = MockQueue(name="batch")
+    #     scheduler = SlurmScheduler(
+    #         queues=[queue1, queue2], primary_queue_name="general"
+    #     )
+
+    #     result = scheduler.get_queue("batch")
+    #     assert result == queue2
+
+    #     with pytest.raises(ValueError, match="not found in list of queues"):
+    #         scheduler.get_queue("nonexistent")
+
+    # def test_slurmscheduler_global_max_cpus_per_node_success(self, mock_subprocess_run):
+    #     """Confirm SlurmScheduler queries and sets the maximum CPUs per node
+    #     successfully.
+
+    #     Uses mock_subprocess_run to simulate a successful system command output.
+    #     """
+    #     mock_subprocess_run.return_value = MagicMock(
+    #         returncode=0, stdout="128", stderr=""
+    #     )
+    #     scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
+
+    #     result = scheduler.global_max_cpus_per_node
+    #     assert result == 128
+
+    #     mock_subprocess_run.assert_called_once_with(
+    #         'scontrol show nodes | grep -o "cpu=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
+    #         shell=True,
+    #         text=True,
+    #         capture_output=True,
+    #     )
+
+    # def test_slurmscheduler_global_max_cpus_per_node_failure(
+    #     self, mock_subprocess_run, caplog: pytest.CaptureFixture
+    # ):
+    #     """Validate SlurmScheduler handles subprocess failures when querying CPUs.
+
+    #     Captures printed error messages to ensure the failure is logged correctly.
+
+    #     Mocks and Fixtures
+    #     ------------------
+    #     caplog (pytest.LogCaptureFixture)
+    #         Builtin fixture to capture log messages
+
+    #     Asserts
+    #     -------
+    #     - Appropriate error messages are logged
+    #     """
+    #     caplog.set_level(logging.INFO, logger="cstar.utils.log")
+
+    #     mock_subprocess_run.return_value = MagicMock(
+    #         returncode=2, stdout="", stderr="Error querying CPUs"
+    #     )
+    #     scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
+
+    #     result = scheduler.global_max_cpus_per_node
+    #     assert result is None
+
+    #     captured = caplog.text
+    #     assert "Error querying node property." in captured
+    #     assert "STDERR:\nError querying CPUs" in captured
+
+    # def test_slurmscheduler_global_max_mem_per_node_gb_success(
+    #     self, mock_subprocess_run
+    # ):
+    #     """Confirm SlurmScheduler queries and sets maximum memory per node in GB
+    #     successfully.
+
+    #     Uses mock_subprocess_run to simulate a successful system command output.
+    #     """
+    #     mock_subprocess_run.return_value = MagicMock(
+    #         returncode=0, stdout="131072", stderr=""
+    #     )
+    #     scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
+
+    #     result = scheduler.global_max_mem_per_node_gb
+    #     assert result == 128.0  # 131072 MB -> 128 GB
+
+    #     mock_subprocess_run.assert_called_once_with(
+    #         'scontrol show nodes | grep -o "RealMemory=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
+    #         shell=True,
+    #         text=True,
+    #         capture_output=True,
+    #     )
+
+    # def test_slurmscheduler_global_max_mem_per_node_gb_failure(
+    #     self, mock_subprocess_run, caplog: pytest.CaptureFixture
+    # ):
+    #     """Validate SlurmScheduler handles subprocess failures when querying memory.
+
+    #     Captures printed error messages to ensure the failure is logged correctly.
+
+    #     Mocks and Fixtures
+    #     ------------------
+    #     caplog (pytest.LogCaptureFixture)
+    #         captures log messages
+
+    #     Asserts
+    #     -------
+    #     - Appropriate error messages are logged
+    #     """
+    #     caplog.set_level(logging.DEBUG, logger="cstar.base.utils.log")
+
+    #     mock_subprocess_run.return_value = MagicMock(
+    #         returncode=1, stdout="", stderr="Error querying memory"
+    #     )
+    #     scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
+
+    #     result = scheduler.global_max_mem_per_node_gb
+    #     assert result is None
+
+    #     captured = caplog.text
+    #     assert "Error querying node property." in captured
+    #     assert "STDERR:\nError querying memory" in captured
+
+    # def test_pbsscheduler_global_max_cpus_per_node_success(self, mock_subprocess_run):
+    #     """Confirm PBSScheduler queries and sets the maximum CPUs per node successfully.
+
+    #     Uses mock_subprocess_run to simulate a successful system command output.
+    #     """
+    #     mock_subprocess_run.return_value = MagicMock(
+    #         returncode=0, stdout="128", stderr=""
+    #     )
+    #     scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
+
+    #     result = scheduler.global_max_cpus_per_node
+    #     assert result == 128
+
+    #     mock_subprocess_run.assert_called_once_with(
+    #         'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
+    #         shell=True,
+    #         text=True,
+    #         capture_output=True,
+    #     )
+
+    # def test_pbsscheduler_global_max_cpus_per_node_failure(
+    #     self, mock_subprocess_run, caplog: pytest.CaptureFixture
+    # ):
+    #     """Validate PBSScheduler handles subprocess failures when querying CPUs.
+
+    #     Captures printed error messages to ensure the failure is logged correctly.
+
+    #     Mocks and Fixtures
+    #     ------------------
+    #     caplog (pytest.LogCaptureFixture)
+    #         captures log messages
+    #     mock_subprocess_run (unittest.mock.MagicMock)
+    #         Mocks the subprocess.run method
+
+    #     Asserts
+    #     -------
+    #     - An appropriate error message is logged
+    #     """
+
+    #     caplog.set_level(logging.DEBUG, logger="cstar.base.utils.log")
+
+    #     mock_subprocess_run.return_value = MagicMock(
+    #         returncode=1, stdout="", stderr="Error querying CPUs"
+    #     )
+    #     scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
+
+    #     result = scheduler.global_max_cpus_per_node
+    #     assert result is None
+
+    #     captured = caplog.text
+    #     assert "Error querying node property." in captured
+    #     assert "STDERR:\nError querying CPUs" in captured
+
+    # def test_pbsscheduler_global_max_mem_per_node_gb_failure(
+    #     self, mock_subprocess_run, caplog: pytest.CaptureFixture
+    # ):
+    #     """Validate PBSScheduler handles subprocess failures when querying memory.
+
+    #     Captures printed error messages to ensure the failure is logged correctly.
+
+    #     Mocks and Fixtures
+    #     ------------------
+    #     caplog (pytest.LogCaptureFixture)
+    #         captures log messages
+    #     mock_subprocess_run (unittest.mock.MagicMock)
+    #         Mocks the subprocess.run method
+
+    #     Asserts
+    #     -------
+    #     - An appropriate error message is logged
+    #     """
+
+    #     caplog.set_level(logging.DEBUG, logger="cstar.base.utils.log")
+
+    #     mock_subprocess_run.return_value = MagicMock(
+    #         returncode=1, stdout="", stderr="Error querying memory"
+    #     )
+    #     scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
+
+    #     result = scheduler.global_max_mem_per_node_gb
+    #     assert result is None
+
+    #     captured = caplog.text
+    #     assert "Error querying node property." in captured
+    #     assert "STDERR:\nError querying memory" in captured
+
+    # @pytest.mark.parametrize(
+    #     "stdout,expected",
+    #     [
+    #         ("1048576kb", 1.0),  # Kilobytes to gigabytes
+    #         ("1024mb", 1.0),  # Megabytes to gigabytes
+    #         ("2gb", 2.0),  # Already in gigabytes
+    #         ("1234tb", None),  # Invalid format
+    #         ("", None),  # Empty output
+    #     ],
+    # )
+    # def test_pbsscheduler_global_max_mem_per_node_gb(self, stdout, expected):
+    #     """Parameterized test for PBSScheduler.global_max_mem_per_node_gb.
+
+    #     Tests various memory formats (kb, mb, gb) and ensures correct conversions or
+    #     handling of invalid formats.
+    #     """
+    #     with patch("subprocess.run") as mock_subprocess_run:
+    #         mock_subprocess_run.return_value = MagicMock(
+    #             returncode=0, stdout=stdout, stderr=""
+    #         )
+    #         scheduler = PBSScheduler(queues=[], primary_queue_name="batch")
+
+    #         result = scheduler.global_max_mem_per_node_gb
+    #         assert result == expected
+
+    #         mock_subprocess_run.assert_called_once_with(
+    #             'pbsnodes -a | grep "resources_available.mem" | cut -d== -f2 | sort -nr | head -1',
+    #             shell=True,
+    #             text=True,
+    #             capture_output=True,
+    #         )
 
 
 class TestStrAndRepr:
