@@ -69,6 +69,7 @@ class ROMSRuntimeSettingsSection(BaseModel):
         # if the class gets a list of strings as it's init, assume it's coming in as a line
         # from the roms.in file, and try to parse it as such. if that fails, or if it's not a list
         # when it comes in, do the usual init process.
+
         if isinstance(data, list) and all([isinstance(v, str) for v in data]):
             try:
                 return cls.from_lines(data)
@@ -335,7 +336,7 @@ class SCoord(ROMSRuntimeSettingsSection):
     theta_b: float
     tcline: float
 
-    section_name = "S-coord"
+    section_name = "s-coord"
     key_order = ["theta_s", "theta_b", "tcline"]
 
 
@@ -379,7 +380,7 @@ class ROMSRuntimeSettings(BaseModel):
     marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = Field(
         alias="MARBL_biogeochemistry", default=None
     )
-    s_coord: Optional[SCoord] = Field(alias="S-Coord", default=None)
+    s_coord: Optional[SCoord] = Field(alias="s-coord", default=None)
     lin_rho_eos: Optional[LinRhoEos] = None
     lateral_visc: Optional[LateralVisc] = None
     gamma2: Optional[Gamma2] = None
@@ -463,6 +464,8 @@ class ROMSRuntimeSettings(BaseModel):
         Climatology file path
     """
 
+    model_config = {"populate_by_name": True}
+
     @staticmethod
     def _load_raw_sections(filepath: Path) -> dict:
         filepath = Path(filepath)
@@ -519,7 +522,6 @@ class ROMSRuntimeSettings(BaseModel):
         sections = cls._load_raw_sections(filepath)
         # Ensure consistent case as Fortran is case-insensitive:
         sections = {k.lower(): v for k, v in sections.items()}
-
         if not all(
             key in sections.keys()
             for key in ["title", "time_stepping", "bottom_drag", "output_root_name"]
@@ -577,13 +579,13 @@ class ROMSRuntimeSettings(BaseModel):
         if self.s_coord is not None:
             lines.append("S-coordinate parameters (`ROMSRuntimeSettings.s_coord`):")
             lines.append(
-                f"Surface stretching parameter (`theta_s`) = {self.s_coord.theta_s},"
+                f"- Surface stretching parameter (`theta_s`) = {self.s_coord.theta_s},"
             )
             lines.append(
-                f"Bottom stretching parameter (`theta_b`) = {self.s_coord.theta_b},"
+                f"- Bottom stretching parameter (`theta_b`) = {self.s_coord.theta_b},"
             )
             lines.append(
-                f"Critical depth (`hc` or `tcline`, m) = {self.s_coord.tcline}"
+                f"- Critical depth (`hc` or `tcline`, m) = {self.s_coord.tcline}"
             )
         if self.rho0 is not None:
             lines.append(f"Boussinesq reference density (`rho0`, kg/m3) = {self.rho0}")
@@ -750,11 +752,12 @@ class ROMSRuntimeSettings(BaseModel):
             for field in output_order:
                 if getattr(self, field) is None:
                     continue
-                f.write(self.model_dump()[field])
+                fieldname = self.model_fields[field].alias or field
+                f.write(self.model_dump(by_alias=True)[fieldname])
 
 
-if __name__ == "__main__":
-    ff = "/Users/dafyddstephenson/Code/my_ucla_roms/Examples/Wales/roms.in"
-    ri = ROMSRuntimeSettings.from_file(filepath=ff)
-    ri.model_dump(serialize_as_any=True)
-    ri.to_file("out.in")
+# if __name__ == "__main__":
+#     ff = "/Users/dafyddstephenson/Code/my_ucla_roms/Examples/Wales/roms.in"
+#     ri = ROMSRuntimeSettings.from_file(filepath=ff)
+#     ri.model_dump(serialize_as_any=True)
+#     ri.to_file("out.in")

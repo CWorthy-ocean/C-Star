@@ -610,6 +610,10 @@ class TestROMSSimulationInitialization:
         sim.runtime_code.working_path = Path("my_code/")
         assert sim.roms_runtime_settings.marbl_biogeochemistry is None
 
+        # Test with no grid:
+        sim.model_grid = None
+        assert sim.roms_runtime_settings.grid is None
+
     def test_roms_runtime_settings_raises_if_no_runtime_code_working_path(
         self, example_roms_simulation
     ):
@@ -811,6 +815,18 @@ class TestROMSSimulationInitialization:
         sim._check_inputdataset_dates()
         assert "does not match ROMSSimulation.end_date" in caplog.text
         assert sim.river_forcing.end_date == sim.end_date
+
+    @patch(
+        "cstar.roms.simulation.ROMSInputDataset.source_partitioning",
+        new_callable=PropertyMock,
+    )
+    def test_check_inputdataset_partitioning(
+        self, mock_source_partitioning, example_roms_simulation
+    ):
+        mock_source_partitioning.return_value = (120, 360)
+        with pytest.raises(ValueError, match="Cannot instantiate ROMSSimulation"):
+            sim, _ = example_roms_simulation
+            sim._check_inputdataset_partitioning()
 
 
 class TestStrAndRepr:

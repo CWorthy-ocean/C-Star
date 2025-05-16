@@ -20,8 +20,16 @@ forcing: filenames
 output_root_name: output_root_name
     ROMS_test
 
+s-coord: theta_s theta_b tcline
+    5.0    2.0    300.0
+
 grid: grid
     input_datasets/roms_grd.nc
+
+MARBL_biogeochemistry: marbl_namelist_fname marbl_tracer_list_fname marbl_diag_list_fname
+    marbl_in
+    marbl_tracer_list_fname
+    marbl_diagnostic_output_list
 
 lateral_visc: lateral_visc
     0.

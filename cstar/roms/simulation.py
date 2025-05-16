@@ -237,7 +237,6 @@ class ROMSSimulation(Simulation):
         self._check_forcing_collection_types(
             self.forcing_corrections, ROMSForcingCorrections
         )
-
         self._check_inputdataset_partitioning()
         self._check_inputdataset_dates()
 

@@ -89,7 +89,9 @@ class TestROMSRuntimeSettings:
         -------
         - The lines in the written file match those in the reference file
         """
-
+        example_runtime_settings.to_file(
+            Path(__file__).parent / "fixtures/example_runtime_settings.in"
+        )
         example_runtime_settings.to_file(tmp_path / "test.in")
 
         with (
@@ -267,12 +269,20 @@ Forcing file(s): [PosixPath('input_datasets/roms_frc.nc'),
           PosixPath('input_datasets/roms_frc_bgc.nc'),
           PosixPath('input_datasets/roms_bry.nc'),
           PosixPath('input_datasets/roms_bry_bgc.nc')]
+S-coordinate parameters (`ROMSRuntimeSettings.s_coord`):
+- Surface stretching parameter (`theta_s`) = 5.0,
+- Bottom stretching parameter (`theta_b`) = 2.0,
+- Critical depth (`hc` or `tcline`, m) = 300.0
 Boussinesq reference density (`rho0`, kg/m3) = 1000.0
 Linear equation of state parameters (`ROMSRuntimeSettings.lin_rho_eos`):
 - Thermal expansion coefficient, ⍺ (`Tcoef`, kg/m3/K) = 0.2,
 - Reference temperature (`T0`, °C) = 1.0,
 - Haline contraction coefficient, β (`Scoef`, kg/m3/PSU) = 0.822,
 - Reference salinity (`S0`, psu) = 1.0
+MARBL input (`ROMSRuntimeSettings.marbl_biogeochemistry`):
+- MARBL runtime settings file: marbl_in,
+- MARBL output tracer list: marbl_tracer_list_fname,
+- MARBL output diagnostics list: marbl_diagnostic_output_list
 Horizontal Laplacian kinematic viscosity (`ROMSRuntimeSettings.lateral_visc`, m2/s) = 0.0
 Boundary slipperiness parameter (`ROMSRuntimeSettings.gamma2`, free-slip=+1, no-slip=-1) = 1.0
 Horizontal Laplacian mixing coefficients for tracers (`ROMSRuntimeSettings.tracer_diff2`, m2/s) = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -306,8 +316,7 @@ Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
         -------
         - repr(example_runtime_settings) matches an expected reference string
         """
-        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
-
+        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_list_fname'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
         assert expected_repr == repr(
             example_runtime_settings
         ), f"expected \n{expected_repr}\n, got\n{repr(example_runtime_settings)}"
