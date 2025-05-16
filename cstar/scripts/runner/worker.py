@@ -320,7 +320,7 @@ async def main() -> int:
 
     try:
         # ensure no human interaction is required
-        os.environ.get("CSTAR_INTERACTIVE", "0")
+        os.environ["CSTAR_INTERACTIVE"] = "0"
 
         worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
         await worker.execute()
