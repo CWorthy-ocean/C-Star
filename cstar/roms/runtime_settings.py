@@ -181,13 +181,11 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
     @model_validator(mode="wrap")
     @classmethod
     def cast_to_obj(cls, data, handler: ModelWrapValidatorHandler):
-        """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized
-        with just the value of the single entry, instead of with a dict or
-        kwargs.
-        """
+        """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized with just
+        the value of the single entry, instead of with a dict or kwargs."""
         annotation = cls.__annotations__[cls.key_order[0]]
         expected_type = get_origin(annotation) or annotation
-        if isinstance(data,expected_type):
+        if isinstance(data, expected_type):
             try:
                 return cls(**{cls.section_name: data})
             except Exception:
@@ -196,9 +194,9 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
 
     def __init_subclass__(cls, **kwargs):
         """Overrides default __init_subclass__ to allow definition of
-        SingleEntryROMSRuntimeSettingsSection without explicitly
-        defining redundant key_order or section_name attrs"""
-        
+        SingleEntryROMSRuntimeSettingsSection without explicitly defining redundant
+        key_order or section_name attrs."""
+
         super().__init_subclass__(**kwargs)
 
         # Get all annotated instance fields (ignore ClassVars like section_name)

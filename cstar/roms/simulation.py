@@ -642,13 +642,13 @@ class ROMSSimulation(Simulation):
             # TODO what if this is a list? or None? Partitioned source?
             # need a `self.initial_conditions._path_for_in_file` to deal with this and return Path
             simulation_runtime_settings.initial.ininame = (
-                self.initial_conditions.working_path
-            )
+                self.initial_conditions.path_for_roms[0]
+            )  # type : ignore
 
         # Grid entry
         if self.model_grid:
             simulation_runtime_settings.grid = cstar.roms.runtime_settings.Grid(
-                grid=self.model_grid.working_path
+                grid=self.model_grid.path_for_roms[0]
             )
         else:
             simulation_runtime_settings.grid = None

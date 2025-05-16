@@ -516,8 +516,15 @@ class TestROMSSimulationInitialization:
 
     @patch("cstar.roms.simulation.ROMSRuntimeSettings.from_file")
     @patch.object(ROMSSimulation, "_forcing_paths", new_callable=PropertyMock)
+    @patch.object(ROMSInitialConditions, "path_for_roms", new_callable=PropertyMock)
+    @patch.object(ROMSModelGrid, "path_for_roms", new_callable=PropertyMock)
     def test_roms_runtime_settings(
-        self, mock_forcing_paths, mock_from_file, example_roms_simulation
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_from_file,
+        example_roms_simulation,
     ):
         """Test that the ROMSSimulation.runtime_settings property correctly returns a
         modified ROMSRuntimeSettings instance containing a combination of parameters
@@ -550,8 +557,17 @@ class TestROMSSimulationInitialization:
 
         # Stop complaints about missing local paths:
         sim.runtime_code.working_path = Path("my_code/")
-        sim.model_grid.working_path = Path("grid.nc")
-        sim.initial_conditions.working_path = Path("ini.nc")
+        # sim.model_grid.working_path = Path("grid.nc")
+        # sim.initial_conditions.working_path = Path("ini.nc")
+
+        # mock_roms_path.side_effect = [[Path("grid.nc"),],[Path("ini.nc"),]]
+        mock_grid_path.return_value = [
+            Path("grid.nc"),
+        ]
+        mock_ini_path.return_value = [
+            Path("fake_ini.nc"),
+        ]
+
         mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
 
         mock_settings = ROMSRuntimeSettings(
@@ -570,9 +586,11 @@ class TestROMSSimulationInitialization:
         assert tested_settings.title.title == "test_settings"
         assert tested_settings.time_stepping.dt == sim.discretization.time_step
         assert tested_settings.time_stepping.ntimes == sim._n_time_steps
-        assert tested_settings.grid.grid == sim.model_grid.working_path
+        assert tested_settings.grid.grid == sim.model_grid.path_for_roms[0]
         assert tested_settings.initial.nrrec == 2
-        assert tested_settings.initial.ininame == sim.initial_conditions.working_path
+        assert (
+            tested_settings.initial.ininame == sim.initial_conditions.path_for_roms[0]
+        )
         assert tested_settings.forcing.filenames == sim._forcing_paths
         assert (
             tested_settings.marbl_biogeochemistry.marbl_namelist_fname

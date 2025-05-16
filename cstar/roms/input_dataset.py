@@ -432,6 +432,34 @@ class ROMSInputDataset(InputDataset, ABC):
             path: path.stat() for path in parted_files
         }
 
+    @property
+    def path_for_roms(self) -> list[Path]:
+        """Returns a list of Paths corresponding to this ROMSInputDataset that can be
+        read by ROMS.
+
+        Useful in the case of partitioned
+        source files, where the `working_path` is a list of partitioned files
+        e.g., `my_grid.0.nc`, `my_grid.1.nc`, etc., but ROMS
+        expects to see `my_grid.nc`
+        """
+        if self.working_path is None:
+            raise FileNotFoundError(
+                "Local path to this ROMSInputDataset required - call "
+                "ROMSInputDataset.get() or ROMSSimulation.setup() and try again"
+            )
+        if self.partitioning is not None:
+            ndigits = len(str(self.partitioning.np_xi * self.partitioning.np_eta))
+            zero_str = "." + "0" * ndigits + ".nc"
+            zero_files = [f for f in self.partitioning.files if zero_str in str(f)]
+            return [Path(str(f).replace(zero_str, ".nc")) for f in zero_files]
+
+        else:
+            raise FileNotFoundError(
+                "ROMS requires files to be partitioned for use"
+                "call ROMSInputDataset.partition() or ROMSSimulation.pre_run() "
+                "and try again"
+            )
+
 
 class ROMSModelGrid(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model grid files."""
