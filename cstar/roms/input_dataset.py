@@ -442,11 +442,6 @@ class ROMSInputDataset(InputDataset, ABC):
         e.g., `my_grid.0.nc`, `my_grid.1.nc`, etc., but ROMS
         expects to see `my_grid.nc`
         """
-        if self.working_path is None:
-            raise FileNotFoundError(
-                "Local path to this ROMSInputDataset required - call "
-                "ROMSInputDataset.get() or ROMSSimulation.setup() and try again"
-            )
         if self.partitioning is not None:
             ndigits = len(str(self.partitioning.np_xi * self.partitioning.np_eta))
             zero_str = "." + "0" * ndigits + ".nc"

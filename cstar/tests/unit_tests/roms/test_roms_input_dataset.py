@@ -1348,6 +1348,16 @@ class TestROMSInputDatasetPartition:
             )
             assert str(exception_info.value) == expected_message
 
+    def test_path_for_roms(self):
+        """Test the `path_for_roms` property."""
+        pass
+
+    def test_path_for_roms_raises_if_no_working_path(self):
+        pass
+
+    def test_path_for_roms_raises_if_no_partitioning(self):
+        pass
+
 
 def test_correction_cannot_be_yaml():
     """Checks that the `validate()` method correctly raises a TypeError if
