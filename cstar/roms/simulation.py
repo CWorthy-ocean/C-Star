@@ -1012,7 +1012,7 @@ class ROMSSimulation(Simulation):
         └─── ROMS
              ├── runtime_code
              │   ├── namelist_file.in
-             │   └──  another_file.in
+             │   └──  marbl_in
              ├── compile_time_code
              │   └── some_source_file.F90
              └──  input_datasets

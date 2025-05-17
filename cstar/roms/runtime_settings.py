@@ -142,7 +142,7 @@ class ROMSRuntimeSettingsSection(BaseModel):
         >>> InitialConditions.from_lines(["1", "input_datasets/roms_ini.nc"])
             InitialConditions(nrrec=1, ininame=Path("input_datasets/roms_ini.nc"))
         """
-        if (lines is None) or (len(lines) == 0):
+        if not lines:
             return None
 
         annotations = cls.__annotations__
