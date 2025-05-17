@@ -1,11 +1,17 @@
 import shutil
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
+import cstar.roms.runtime_settings as rrs
 from cstar.base.utils import _replace_text_in_file
 from cstar.roms import ROMSRuntimeSettings
+from cstar.roms.runtime_settings import (
+    ROMSRuntimeSettingsSection,
+    SingleEntryROMSRuntimeSettingsSection,
+)
 
 
 @pytest.fixture
@@ -68,7 +74,254 @@ def example_runtime_settings():
     )
 
 
+class MockSection(ROMSRuntimeSettingsSection):
+    section_name = "test_section"
+    key_order = [
+        "floats",  # list[float]
+        "paths",  # list[Path]
+        "others",  # list[str|int]
+        "floatval",  # float
+        "pathval",  # Path
+        "otherval",  # str (fallback case)
+    ]
+
+    floats: list[float]
+    paths: list[Path]
+    others: list[str | int]
+    floatval: float
+    pathval: Path
+    otherval: str
+
+
+class TestFormattingMethods:
+    @pytest.mark.parametrize(
+        "fl,st",
+        [(0, "0."), (1e-1, "0.1"), (1e-4, "1.000000E-04"), (1e5, "1.000000E+05")],
+    )
+    def test_format_float(self, fl, st):
+        assert rrs._format_float(fl) == st
+
+    def test_format_list_of_floats(self):
+        lf = rrs._format_list_of_floats([1e-3, 0.0, 2])
+        assert lf == "1.000000E-03 0. 2"
+
+    def test_format_path(self):
+        p = rrs._format_path(Path("mypath.nc"))
+        assert p == "mypath.nc"
+
+    def test_format_list_of_paths(self):
+        lp = rrs._format_list_of_paths([Path("path1.nc"), Path("path2.nc")])
+        assert lp == "path1.nc path2.nc"
+
+    @pytest.mark.parametrize("o,st", [(5, "5"), ("helloworld", "helloworld")])
+    def test_format_other(self, o, st):
+        assert rrs._format_other(o) == st
+
+    def test_format_list_of_other(self):
+        o = rrs._format_list_of_other([5, "foo"])
+        assert o == "5 foo"
+
+
+class TestROMSRuntimeSettingsSection:
+    def test_init_with_args(self):
+        class TestSection(ROMSRuntimeSettingsSection):
+            section_name = "test_section"
+            key_order = ["val1", "val2"]
+            val1: float
+            val2: str
+
+        section = TestSection(5.0, "hello")
+        assert section.val1 == 5
+        assert section.val2 == "hello"
+
+    def test_validate_from_lines_calls_from_lines(self):
+        mock_handler = MagicMock()
+        test_lines = ["1", "2.0"]
+
+        with patch.object(
+            MockSection, "from_lines", return_value="parsed"
+        ) as mock_from_lines:
+            result = MockSection.validate_from_lines(test_lines, mock_handler)
+
+        mock_from_lines.assert_called_once_with(test_lines)
+        mock_handler.assert_not_called()
+        assert result == "parsed"
+
+    def test_validate_from_lines_falls_back_to_handler(self):
+        mock_handler = MagicMock(return_value="fallback")
+        test_data = {"a": 1, "b": 2.0}
+
+        with patch.object(MockSection, "from_lines") as mock_from_lines:
+            result = MockSection.validate_from_lines(test_data, mock_handler)
+
+        mock_from_lines.assert_not_called()
+        mock_handler.assert_called_once_with(test_data)
+        assert result == "fallback"
+
+    def test_validate_from_lines_uses_handler_on_exception(self):
+        mock_handler = MagicMock(return_value="handled")
+        test_lines = ["bad", "data"]
+
+        with patch.object(
+            MockSection, "from_lines", side_effect=ValueError("fail")
+        ) as mock_from_lines:
+            result = MockSection.validate_from_lines(test_lines, mock_handler)
+
+        mock_from_lines.assert_called_once_with(test_lines)
+        mock_handler.assert_called_once_with(test_lines)
+        assert result == "handled"
+
+    def test_default_serializer(self):
+        obj = MockSection(
+            floats=[0.0, 1e-5, 123.4],
+            paths=[Path("a.nc"), Path("b.nc")],
+            others=["x", 42],
+            floatval=1e5,
+            pathval=Path("grid.nc"),
+            otherval="done",
+        )
+
+        expected = "test_section: floats paths others floatval pathval otherval\n    0. 1.000000E-05 123.4    a.nc b.nc    x 42    1.000000E+05    grid.nc    done\n\n"
+
+        assert obj.model_dump() == expected
+
+    def test_from_lines_returns_none_if_no_lines(self):
+        assert MockSection.from_lines([]) is None
+
+    def test_from_lines_float_section_with_D_formatting(self):
+        class FloatSection(ROMSRuntimeSettingsSection):
+            section_name = "float_section"
+            key_order = ["val"]
+            val: float
+
+        section = FloatSection.from_lines(["5.0D0"])
+        assert section.val == 5.0
+
+    def test_from_lines_multiple_nonlist_fields(self):
+        class MixedSection(ROMSRuntimeSettingsSection):
+            section_name = "mixed"
+            key_order = ["count", "name"]
+            count: int
+            name: str
+
+        section = MixedSection.from_lines(["7 example_name"])
+        assert section.count == 7
+        assert section.name == "example_name"
+
+    def test_from_lines_list_field_at_end(self):
+        class ListAtEnd(ROMSRuntimeSettingsSection):
+            section_name = "list_end"
+            key_order = ["prefix", "items"]
+            prefix: str
+            items: list[int]
+
+        section = ListAtEnd.from_lines(["prefix 1 2 3"])
+        assert section.prefix == "prefix"
+        assert section.items == [1, 2, 3]
+
+    def test_from_lines_list_field_only(self):
+        class OnlyList(ROMSRuntimeSettingsSection):
+            section_name = "only_list"
+            key_order = ["entries"]
+            entries: list[str]
+
+        section = OnlyList.from_lines(["a b c"])
+        assert section.entries == ["a", "b", "c"]
+
+    def test_from_lines_multiline_flag(self):
+        class MultiLinePaths(ROMSRuntimeSettingsSection):
+            section_name = "files"
+            multi_line = True
+            key_order = ["paths"]
+            paths: list[Path]
+
+        section = MultiLinePaths.from_lines(["a.nc", "b.nc", "c.nc"])
+        assert section.paths == [Path("a.nc"), Path("b.nc"), Path("c.nc")]
+
+
+class TestSingleEntryROMSRuntimeSettingsSection:
+    class MockSingleEntrySection(SingleEntryROMSRuntimeSettingsSection):
+        value: float
+
+    def test_init_subclass_sets_attrs(self):
+        assert self.MockSingleEntrySection.section_name == "value"
+        assert self.MockSingleEntrySection.key_order == ["value"]
+
+    def test_cast_to_obj_returns_cls_when_type_matches(self):
+        handler = MagicMock()
+        result = self.MockSingleEntrySection.cast_to_obj(3.14, handler)
+
+        assert isinstance(
+            result, TestSingleEntryROMSRuntimeSettingsSection.MockSingleEntrySection
+        )
+        assert result.value == 3.14
+        handler.assert_not_called()
+
+    def test_cast_to_obj_calls_handler_when_type_does_not_match(self):
+        handler = MagicMock(return_value="fallback")
+        result = self.MockSingleEntrySection.cast_to_obj("not a float", handler)
+
+        handler.assert_called_once_with("not a float")
+        assert result == "fallback"
+
+    def test_str_and_repr_return_value(self):
+        section = self.MockSingleEntrySection(1.0)
+        assert str(section) == "1.0"
+        assert repr(section) == "1.0"
+
+    def test_single_entry_section_raises_if_multiple_fields(self):
+        with pytest.raises(TypeError, match="must declare exactly one field"):
+
+            class InvalidSection(SingleEntryROMSRuntimeSettingsSection):
+                a: int
+                b: float
+
+
 class TestROMSRuntimeSettings:
+    def test_load_raw_sections_parses_multiple_sections(self, tmp_path):
+        file = tmp_path / "test.in"
+        file.write_text(
+            """
+            first line is garbage
+            title: title
+                This is a test run
+
+            time_stepping: ntimes dt ndtfast ninfo
+                360 60 60 1
+
+            ! this is a comment
+            bottom_drag: rdrg rdrg2 zob
+                0.0 1.0E-3 1.0E-2
+            """
+        )
+
+        result = ROMSRuntimeSettings._load_raw_sections(file)
+
+        assert result == {
+            "title": ["This is a test run"],
+            "time_stepping": ["360 60 60 1"],
+            "bottom_drag": ["0.0 1.0E-3 1.0E-2"],
+        }
+
+    def test_load_raw_sections_skips_blank_and_comment_lines(self, tmp_path):
+        file = tmp_path / "test.in"
+        file.write_text(
+            """
+            title: title
+                This is a test
+
+            ! ignored comment
+                ! another one
+        """
+        )
+
+        result = ROMSRuntimeSettings._load_raw_sections(file)
+        assert result == {"title": ["This is a test"]}
+
+    def test_load_raw_sections_raises_on_missing_file(self):
+        with pytest.raises(FileNotFoundError, match="does not exist"):
+            ROMSRuntimeSettings._load_raw_sections(Path("not_a_file.in"))
+
     def test_to_file(self, example_runtime_settings, tmp_path):
         """Test the ROMSRuntimeSettings.to_file method.
 
@@ -105,6 +358,14 @@ class TestROMSRuntimeSettings:
             ]
             out = out_f.readlines()
             assert ref == out, f"Expected \n{ref}\n,got\n{out}"
+
+    def test_to_file_skips_missing_section(self, example_runtime_settings, tmp_path):
+        example_runtime_settings.climatology = None
+
+        example_runtime_settings.to_file(tmp_path / "tmp.in")
+        with open(tmp_path / "tmp.in") as f:
+            lns = f.readlines()
+        assert all(["climatology" not in s for s in lns])
 
     def test_from_file(self, example_runtime_settings):
         """Test the ROMSRuntimeSettings.from_file method.
@@ -182,11 +443,16 @@ class TestROMSRuntimeSettings:
         tested_settings = ROMSRuntimeSettings.from_file(modified_file)
         assert tested_settings.climatology is None
 
-    def test_from_file_raises_if_nonexistent(self):
-        """Test that ROMSRuntimeSettings.from_file raises a FileNotFoundError if the
-        supplied file does not exist."""
-        with pytest.raises(FileNotFoundError, match="does not exist"):
-            ROMSRuntimeSettings.from_file("nonexistentfile.in")
+    def test_from_file_raises_if_missing_section(self, tmp_path):
+        modified_file = tmp_path / "modified_example_settings.in"
+        shutil.copy2(
+            Path(__file__).parent / "fixtures/example_runtime_settings.in",
+            modified_file,
+        )
+        _replace_text_in_file(modified_file, "title: title", "")
+        _replace_text_in_file(modified_file, "Example runtime settings", "")
+        with pytest.raises(ValueError, match="Required field missing from file."):
+            ROMSRuntimeSettings.from_file(modified_file)
 
     def test_file_roundtrip(self, example_runtime_settings, tmp_path):
         """Tests that the `to_file`/`from_file` roundtrip results in a functionally

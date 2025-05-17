@@ -754,10 +754,3 @@ class ROMSRuntimeSettings(BaseModel):
                     continue
                 fieldname = self.model_fields[field].alias or field
                 f.write(self.model_dump(by_alias=True)[fieldname])
-
-
-# if __name__ == "__main__":
-#     ff = "/Users/dafyddstephenson/Code/my_ucla_roms/Examples/Wales/roms.in"
-#     ri = ROMSRuntimeSettings.from_file(filepath=ff)
-#     ri.model_dump(serialize_as_any=True)
-#     ri.to_file("out.in")
