@@ -45,11 +45,11 @@ def get_logger(
     root = logging.getLogger()
 
     if not root.hasHandlers():
-        logging.basicConfig(level=logging.WARNING, format=DEFAULT_LOG_FORMAT)
+        logging.basicConfig(level=logging.DEBUG, format=DEFAULT_LOG_FORMAT)
 
     # Ensure root handlers only handle WARNING and higher
     for handler in root.handlers:
-        handler.setLevel(logging.WARNING)
+        handler.setLevel(logging.DEBUG)
 
     # Create specific STDOUT handler for INFO and lower:
     if not logger.hasHandlers():
@@ -58,7 +58,7 @@ def get_logger(
         stdout_handler.setLevel(logging.DEBUG)
 
         # Filter out any WARNING or higher (goes to STDERR):
-        stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+        # stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
         stdout_handler.setFormatter(formatter)
 
         logger.addHandler(stdout_handler)
