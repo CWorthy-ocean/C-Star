@@ -1266,11 +1266,14 @@ class ROMSSimulation(Simulation):
             )
             return
 
+        stdout = _run_cmd("env")
+        print(stdout)
+
         if (build_dir / "Compile").is_dir():
             _run_cmd(
                 "make compile_clean",
                 cwd=build_dir,
-                msg_err="Error when compiling ROMS.",
+                msg_err="Error when cleaning ROMS.",
                 raise_on_error=True,
             )
 
