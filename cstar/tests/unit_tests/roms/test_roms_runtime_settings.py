@@ -75,6 +75,8 @@ def example_runtime_settings():
 
 
 class MockSection(ROMSRuntimeSettingsSection):
+    """A simple ROMSRuntimeSettingsSection subclass for testing."""
+
     section_name = "test_section"
     key_order = [
         "floats",  # list[float]
@@ -94,6 +96,9 @@ class MockSection(ROMSRuntimeSettingsSection):
 
 
 class TestFormattingMethods:
+    """Test module-level non-public methods for formatting various types for use in
+    serializers."""
+
     @pytest.mark.parametrize(
         "fl,st",
         [(0, "0."), (1e-1, "0.1"), (1e-4, "1.000000E-04"), (1e5, "1.000000E+05")],
@@ -123,7 +128,47 @@ class TestFormattingMethods:
 
 
 class TestROMSRuntimeSettingsSection:
+    """Test class for the ROMSRuntimeSettingsSection class and its methods.
+
+    Tests
+    -----
+    test_init_with_args
+       Test ROMSRuntimeSettingsSection.__init__ with *args instead of **kwargs
+    test_validate_from_lines_calls_from_lines
+       Test ROMSRuntimeSettingsSection.validate_from_lines calls `from_lines`
+       if given a list of strings
+    test_validate_from_lines_falls_back_to_handler
+       Test ROMSRuntimeSettingsSection.validate_from_lines falls back to
+       handler if not given a list of strings
+    test_validate_from_lines_uses_handler_on_exception
+       Test ROMSRuntimeSettingsSection.validate_from_lines falls back to
+       handler if from_lines fails
+    test_default_serializer
+       Test the `ROMSRuntimeSettingsSection.default_serializer` returns
+       an expected string from a range of attributes
+    test_from_lines_returns_none_if_no_lines
+       Test the `ROMSRuntimeSettingsSection.from_lines` method returns None
+       if given an empty list
+    test_from_lines_on_float_section_with_D_formatting
+       Test a ROMSRuntimeSettingsSection subclass with a single float entry
+       is correctly returned by `from_lines` with fortran-style formatting
+    test_from_lines_multiple_fields
+       Test a ROMSRuntimeSettingsSection with more than one entry is correctly
+       returned by `from_lines`
+    test_from_lines_list_field_at_end
+       Test that ROMSRuntimeSettingsSection.from_lines correctly handles lines
+       where the final entry is a list (using all remaining values to populate it)
+    test_from_lines_list_field_only
+       Test that ROMSRuntimeSettingsSection.from_lines correctly returns
+       a valid instance when the only entry is a list
+    test_from_lines_multiline_flag
+       Test that ROMSRuntimeSettingsSection.from_lines correctly handles the case
+       where entries are on different lines.
+    """
+
     def test_init_with_args(self):
+        """Test ROMSRuntimeSettingsSection.__init__ with *args instead of **kwargs."""
+
         class TestSection(ROMSRuntimeSettingsSection):
             section_name = "test_section"
             key_order = ["val1", "val2"]
@@ -135,6 +180,8 @@ class TestROMSRuntimeSettingsSection:
         assert section.val2 == "hello"
 
     def test_validate_from_lines_calls_from_lines(self):
+        """Test ROMSRuntimeSettingsSection.validate_from_lines calls `from_lines` if
+        given a list of strings."""
         mock_handler = MagicMock()
         test_lines = ["1", "2.0"]
 
@@ -148,6 +195,8 @@ class TestROMSRuntimeSettingsSection:
         assert result == "parsed"
 
     def test_validate_from_lines_falls_back_to_handler(self):
+        """Test ROMSRuntimeSettingsSection.validate_from_lines falls back to handler if
+        not given a list of strings."""
         mock_handler = MagicMock(return_value="fallback")
         test_data = {"a": 1, "b": 2.0}
 
@@ -159,6 +208,8 @@ class TestROMSRuntimeSettingsSection:
         assert result == "fallback"
 
     def test_validate_from_lines_uses_handler_on_exception(self):
+        """Test ROMSRuntimeSettingsSection.validate_from_lines falls back to handler if
+        from_lines fails."""
         mock_handler = MagicMock(return_value="handled")
         test_lines = ["bad", "data"]
 
@@ -172,6 +223,8 @@ class TestROMSRuntimeSettingsSection:
         assert result == "handled"
 
     def test_default_serializer(self):
+        """Test the `ROMSRuntimeSettingsSection.default_serializer` returns an expected
+        string from a range of attributes."""
         obj = MockSection(
             floats=[0.0, 1e-5, 123.4],
             paths=[Path("a.nc"), Path("b.nc")],
@@ -186,9 +239,14 @@ class TestROMSRuntimeSettingsSection:
         assert obj.model_dump() == expected
 
     def test_from_lines_returns_none_if_no_lines(self):
+        """Test the `ROMSRuntimeSettingsSection.from_lines` method returns None if given
+        an empty list."""
         assert MockSection.from_lines([]) is None
 
-    def test_from_lines_float_section_with_D_formatting(self):
+    def test_from_lines_on_float_section_with_D_formatting(self):
+        """Test a ROMSRuntimeSettingsSection subclass with a single float entry is
+        correctly returned by `from_lines` with fortran-style formatting."""
+
         class FloatSection(ROMSRuntimeSettingsSection):
             section_name = "float_section"
             key_order = ["val"]
@@ -197,7 +255,10 @@ class TestROMSRuntimeSettingsSection:
         section = FloatSection.from_lines(["5.0D0"])
         assert section.val == 5.0
 
-    def test_from_lines_multiple_nonlist_fields(self):
+    def test_from_lines_multiple_fields(self):
+        """Test a ROMSRuntimeSettingsSection with more than one entry is correctly
+        returned by `from_lines`"""
+
         class MixedSection(ROMSRuntimeSettingsSection):
             section_name = "mixed"
             key_order = ["count", "name"]
@@ -209,6 +270,9 @@ class TestROMSRuntimeSettingsSection:
         assert section.name == "example_name"
 
     def test_from_lines_list_field_at_end(self):
+        """Test that ROMSRuntimeSettingsSection.from_lines correctly handles lines where
+        the final entry is a list (using all remaining values to populate it)"""
+
         class ListAtEnd(ROMSRuntimeSettingsSection):
             section_name = "list_end"
             key_order = ["prefix", "items"]
@@ -220,6 +284,9 @@ class TestROMSRuntimeSettingsSection:
         assert section.items == [1, 2, 3]
 
     def test_from_lines_list_field_only(self):
+        """Test that ROMSRuntimeSettingsSection.from_lines correctly returns a valid
+        instance when the only entry is a list."""
+
         class OnlyList(ROMSRuntimeSettingsSection):
             section_name = "only_list"
             key_order = ["entries"]
@@ -229,6 +296,9 @@ class TestROMSRuntimeSettingsSection:
         assert section.entries == ["a", "b", "c"]
 
     def test_from_lines_multiline_flag(self):
+        """Test that ROMSRuntimeSettingsSection.from_lines correctly handles the case
+        where entries are on different lines."""
+
         class MultiLinePaths(ROMSRuntimeSettingsSection):
             section_name = "files"
             multi_line = True
@@ -240,14 +310,39 @@ class TestROMSRuntimeSettingsSection:
 
 
 class TestSingleEntryROMSRuntimeSettingsSection:
+    """Test class for the SingleEntryROMSRuntimeSettingsSection class and its methods.
+
+    Tests
+    -----
+    test_init_subclass_sets_attrs
+       Tests that SingleEntryROMSRuntimeSettingsSection.__init_subclass__ correctly
+       sets the section_name and key_order attributes
+    test_cast_to_obj_returns_cls_when_type_matches
+       Tests that the `cast_to_obj` method passes a correctly typed value to cls()
+       without requiring a dict or kwargs for initialization
+    test_cast_to_obj_calls_handler_when_type_does_not_match
+       Tests that `cast_to_obj` falls back to the handler if the value supplied to
+       __init__ is not of the expected type
+    test_str_and_repr_return_value
+       Tests that the `str` and `repr` functions for SingleEntryROMSRuntimeSettingsSection
+       simply return a string of the single entry's value
+    test_single_entry_section_raises_if_multiple_fields
+       Tests that attempting to initialize a SingleEntryROMSRuntimeSettingsSection
+       with multiple entries raises a TypeError
+    """
+
     class MockSingleEntrySection(SingleEntryROMSRuntimeSettingsSection):
         value: float
 
     def test_init_subclass_sets_attrs(self):
+        """Tests that SingleEntryROMSRuntimeSettingsSection.__init_subclass__ correctly
+        sets the section_name and key_order attributes."""
         assert self.MockSingleEntrySection.section_name == "value"
         assert self.MockSingleEntrySection.key_order == ["value"]
 
     def test_cast_to_obj_returns_cls_when_type_matches(self):
+        """Tests that the `cast_to_obj` method passes a correctly typed value to cls()
+        without requiring a dict or kwargs for initialization."""
         handler = MagicMock()
         result = self.MockSingleEntrySection.cast_to_obj(3.14, handler)
 
@@ -258,6 +353,8 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         handler.assert_not_called()
 
     def test_cast_to_obj_calls_handler_when_type_does_not_match(self):
+        """Tests that `cast_to_obj` falls back to the handler if the value supplied to
+        __init__ is not of the expected type."""
         handler = MagicMock(return_value="fallback")
         result = self.MockSingleEntrySection.cast_to_obj("not a float", handler)
 
@@ -265,11 +362,16 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         assert result == "fallback"
 
     def test_str_and_repr_return_value(self):
+        """Tests that the `str` and `repr` functions for
+        SingleEntryROMSRuntimeSettingsSection simply return a string of the single
+        entry's value."""
         section = self.MockSingleEntrySection(1.0)
         assert str(section) == "1.0"
         assert repr(section) == "1.0"
 
     def test_single_entry_section_raises_if_multiple_fields(self):
+        """Tests that attempting to initialize a SingleEntryROMSRuntimeSettingsSection
+        with multiple entries raises a TypeError."""
         with pytest.raises(TypeError, match="must declare exactly one field"):
 
             class InvalidSection(SingleEntryROMSRuntimeSettingsSection):
@@ -278,6 +380,37 @@ class TestSingleEntryROMSRuntimeSettingsSection:
 
 
 class TestROMSRuntimeSettings:
+    """Test class for the ROMSRuntimeSettings and its methods.
+
+    Tests
+    -----
+    test_load_raw_sections_parses_multiple_sections
+       Tests that the load_raw_sections method correctly parses a multi-section
+       file to a multi-key dictionary
+    test_load_raw_sections_skips_blank_and_comment_lines
+       Tests that the load_raw_sections method skips lines beginning with "!" or
+       with no value
+    test_load_raw_sections_raises_on_missing_file
+       Tests that the load_raw_sections method raises a FileNotFoundError if
+       the supplied file does not exist
+    test_to_file
+       Tests against a reference file the writing of example_runtime_settings
+    test_to_file_skips_missing_section
+       Tests to_file does not attempt to write a section that is None
+       in the ROMSRuntimeSettings instance
+    test_from_file
+       Tests the reading of a reference file against example_runtime_settings
+    test_from_file_with_missing_optional_sections
+       Tests that `from_file` sets as None any ROMSRuntimeSettings attributes
+       corresponding to missing optional sections
+    test_from_file_raises_if_missing_section
+       Tests that `from_file` raises a ValueError if any missing non-optional
+       sections
+    test_file_roundtrip
+       Tests that the example_runtime_settings instance written to_file is
+       functionally identical with the one subsequently read back with from_file
+    """
+
     def test_load_raw_sections_parses_multiple_sections(self, tmp_path):
         file = tmp_path / "test.in"
         file.write_text(
@@ -503,6 +636,9 @@ class TestROMSRuntimeSettings:
 
 
 class TestStrAndRepr:
+    """Test that the __str__ and __repr__ functions of the ROMSRuntimeSettings class
+    behave as expected."""
+
     def test_str(self, example_runtime_settings):
         """Test that the __str__ function of ROMSRuntimeSettings matches an expected
         string for the example instance.
