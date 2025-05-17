@@ -1276,9 +1276,6 @@ class ROMSSimulation(Simulation):
                 msg_err="Error when cleaning ROMS.",
                 raise_on_error=True,
             )
-            
-        stdout = _run_cmd("env")
-        print(stdout)
 
         _run_cmd(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
