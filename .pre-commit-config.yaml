@@ -8,7 +8,9 @@ repos:
     
     hooks:
       - id: trailing-whitespace
+        exclude: \.in$
       - id: end-of-file-fixer
+        exclude: \.in$
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=100']

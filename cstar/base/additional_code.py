@@ -80,11 +80,6 @@ class AdditionalCode(LoggingMixin):
         self.working_path: Optional[Path] = None
         self._local_file_hash_cache: Dict = {}
 
-        # If there are namelists, make a parallel attribute to keep track of the ones we are editing
-        # AdditionalCode.get() determines which namelists are editable templates and updates this list
-        if self.files:
-            self.modified_files: list = [None] * len(self.files)
-
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
@@ -101,8 +96,6 @@ class AdditionalCode(LoggingMixin):
             base_str += "\nFiles:"
             for filename in self.files:
                 base_str += f"\n    {filename}"
-                if filename[-9:] == "_TEMPLATE":
-                    base_str += f"      ({filename[:-9]} will be used by C-Star based on this template)"
         return base_str
 
     def __repr__(self) -> str:
@@ -218,13 +211,7 @@ class AdditionalCode(LoggingMixin):
 
                 else:
                     raise FileNotFoundError(f"Error: {src_file_path} does not exist.")
-                # Special case for template namelists:
-                if str(src_file_path)[-9:] == "_TEMPLATE":
-                    self.log.info(
-                        f"Copying template file {tgt_file_path} to editable version {str(tgt_file_path)[:-9]}"
-                    )
-                    shutil.copy(tgt_file_path, Path(str(tgt_file_path)[:-9]))
-                    self.modified_files[i] = f[:-9]
+
             self.log.info("✅ All files copied successfully")
             self.working_path = local_dir
         finally:

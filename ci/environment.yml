@@ -10,6 +10,7 @@ dependencies:
   - mpich
   - xarray
   - netCDF4
+  - pydantic
   # tests
   - pytest
   - pip
