@@ -286,7 +286,7 @@ def create_scheduler_job(
         if not os.environ.get("SLURM_JOB_ID", None):
             job_type = SlurmJob
         else:
-            job_type = SlurmInteractiveJob
+            job_type = SlurmJob
     elif isinstance(cstar_sysmgr.scheduler, PBSScheduler):
         job_type = PBSJob
     else:
