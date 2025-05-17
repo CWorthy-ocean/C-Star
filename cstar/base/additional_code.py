@@ -164,7 +164,7 @@ class AdditionalCode(LoggingMixin):
 
         local_dir = Path(local_dir).expanduser().resolve()
         try:
-            tmp_dir = None  # initialise the tmp_dir variable in case we need it later
+            tmp_dir = Path("~/").expanduser().resolve()  # initialise the tmp_dir variable in case we need it later
             # CASE 1: Additional code is in a remote repository:
             if (self.source.location_type == "url") and (
                 self.source.source_type == "repository"
