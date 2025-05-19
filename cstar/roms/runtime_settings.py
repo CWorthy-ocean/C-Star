@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import ClassVar, Optional, get_args, get_origin
+from typing import ClassVar, Optional, Union, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -102,6 +102,8 @@ class ROMSRuntimeSettingsSection(BaseModel):
                     section_values_as_list_of_str.append(_format_float(value))
                 case Path():
                     section_values_as_list_of_str.append(_format_path(value))
+                case None:
+                    continue
                 case _:
                     section_values_as_list_of_str.append(_format_other(value))
         section_values_as_single_str = self.value_joiner.join(
@@ -153,7 +155,21 @@ class ROMSRuntimeSettingsSection(BaseModel):
 
         i = 0  # index of the entry
         for key in cls.key_order:
-            expected_type = annotations[key]
+            annotation = annotations[key]
+            annotation_origin = get_origin(annotation)
+
+            # if, e.g. Optional[list[Path]] we just want list[Path]
+            if annotation_origin is Union:
+                annotation_args = get_args(annotation)
+                if (
+                    type(None) in annotation_args and len(annotation_args) == 2
+                ):  # then Optional
+                    expected_type = [t for t in annotation_args if t is not None][0]
+                else:
+                    expected_type = annotation
+            else:
+                expected_type = annotation
+
             if get_origin(expected_type) is not list:
                 # This doesn't reformat e.g. 5.0D0 -> 5.0
                 if expected_type is float:
@@ -295,19 +311,43 @@ class BottomDrag(ROMSRuntimeSettingsSection):
 
 class InitialConditions(ROMSRuntimeSettingsSection):
     nrrec: int
-    ininame: Path
+    ininame: Optional[Path]
 
     section_name = "initial"
     multi_line = True
     key_order = ["nrrec", "ininame"]
 
+    @classmethod
+    def from_lines(cls, lines: Optional[list[str]]) -> "InitialConditions":
+        """Bespoke `from_lines` for the InitialConditions section, which may have a
+        single '0' line, as in, e.g. `$ROMS_ROOT/Examples/Rivers_ana/river_ana.in`
+
+        In this case, set nrrec to 0 and ininame to None
+        """
+        if (not lines) or (len(lines) == 1) and int(lines[0]) == 0:
+            return cls(nrrec=0, ininame=None)
+        else:
+            return super(InitialConditions, cls).from_lines(lines)
+
 
 class Forcing(ROMSRuntimeSettingsSection):
-    filenames: list[Path]
+    filenames: Optional[list[Path]]
 
     section_name = "forcing"
     multi_line = True
     key_order = ["filenames"]
+
+    @classmethod
+    def from_lines(cls, lines: Optional[list[str]]) -> "Forcing":
+        """Bespoke `from_lines` for the Forcing section, which must exist in ROMS but
+        may be empty, as in, e.g. `$ROMS_ROOT/Examples/Rivers_ana/river_ana.in`
+
+        In this case, set nrrec to 0 and ininame to None
+        """
+        if (not lines) or (len(lines) == 0):
+            return cls(filenames=None)
+        else:
+            return super(Forcing, cls).from_lines(lines)
 
 
 class VerticalMixing(ROMSRuntimeSettingsSection):
@@ -336,7 +376,7 @@ class SCoord(ROMSRuntimeSettingsSection):
     theta_b: float
     tcline: float
 
-    section_name = "s-coord"
+    section_name = "S-coord"
     key_order = ["theta_s", "theta_b", "tcline"]
 
 
@@ -380,7 +420,7 @@ class ROMSRuntimeSettings(BaseModel):
     marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = Field(
         alias="MARBL_biogeochemistry", default=None
     )
-    s_coord: Optional[SCoord] = Field(alias="s-coord", default=None)
+    s_coord: Optional[SCoord] = Field(alias="S-coord", default=None)
     lin_rho_eos: Optional[LinRhoEos] = None
     lateral_visc: Optional[LateralVisc] = None
     gamma2: Optional[Gamma2] = None
@@ -520,8 +560,6 @@ class ROMSRuntimeSettings(BaseModel):
         # Read file
         filepath = Path(filepath)
         sections = cls._load_raw_sections(filepath)
-        # Ensure consistent case as Fortran is case-insensitive:
-        sections = {k.lower(): v for k, v in sections.items()}
         if not all(
             key in sections.keys()
             for key in ["title", "time_stepping", "bottom_drag", "output_root_name"]
