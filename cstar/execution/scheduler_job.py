@@ -157,19 +157,15 @@ def retrieve_status(
         raise_on_error=True,
     )
 
-    status_lines: list[tuple[str, str, str]] = []
-    for line in stdout.split("\n"):
-        split_line = line.strip().split(",", 2)
-        if len(split_line) < 3:
-            log.warning(f"Unknown output format encountered: {line}")
-            continue
+    # remove empties and filter to lines containing job-id, status, job-name triplet
+    status_lines = (x.strip().split(",") for x in stdout.split("\n") if x.strip())
+    status_data = filter(lambda x: len(x) == 3, status_lines)
+    status_tuples = list(map(lambda x: (x[0], x[1], x[2]), status_data))
 
-        status_lines.append((split_line[0], split_line[1], split_line[2]))
-
-    if not status_lines:
+    if not status_tuples:
         log.debug(f"No status results for job {slurm_job_id} found")
 
-    return status_lines
+    return status_tuples
 
 
 def query_status(
