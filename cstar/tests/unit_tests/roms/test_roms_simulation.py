@@ -2061,7 +2061,7 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
+        with pytest.raises(RuntimeError, match="Error when cleaning ROMS compilation."):
             sim.build()
         assert mock_subprocess.call_count == 1
         mock_subprocess.assert_any_call(
