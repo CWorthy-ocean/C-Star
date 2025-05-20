@@ -112,11 +112,11 @@ class ROMSRuntimeSettingsSection(BaseModel):
 
         section_header = f"{self.section_name}: {' '.join(data.keys())}\n"
         # Build the serialized string
-        string = ""
-        string += section_header
-        string += f"    {section_values_as_single_str}\n"
-        string += "\n"
-        return string
+        serialized = ""
+        serialized += section_header
+        serialized += f"    {section_values_as_single_str}\n"
+        serialized += "\n"
+        return serialized
 
     @classmethod
     def from_lines(
