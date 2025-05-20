@@ -339,11 +339,11 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     test_init_subclass_sets_attrs
        Tests that SingleEntryROMSRuntimeSettingsSection.__init_subclass__ correctly
        sets the section_name and key_order attributes
-    test_cast_to_obj_returns_cls_when_type_matches
-       Tests that the `cast_to_obj` method passes a correctly typed value to cls()
+    test_single_entry_validator_returns_cls_when_type_matches
+       Tests that the `single_entry_validator` method passes a correctly typed value to cls()
        without requiring a dict or kwargs for initialization
-    test_cast_to_obj_calls_handler_when_type_does_not_match
-       Tests that `cast_to_obj` falls back to the handler if the value supplied to
+    test_single_entry_validator_calls_handler_when_type_does_not_match
+       Tests that `single_entry_validator` falls back to the handler if the value supplied to
        __init__ is not of the expected type
     test_str_and_repr_return_value
        Tests that the `str` and `repr` functions for SingleEntryROMSRuntimeSettingsSection
@@ -362,11 +362,11 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         assert self.MockSingleEntrySection.section_name == "value"
         assert self.MockSingleEntrySection.key_order == ["value"]
 
-    def test_cast_to_obj_returns_cls_when_type_matches(self):
-        """Tests that the `cast_to_obj` method passes a correctly typed value to cls()
-        without requiring a dict or kwargs for initialization."""
+    def test_single_entry_validator_returns_cls_when_type_matches(self):
+        """Tests that the `single_entry_validator` method passes a correctly typed value
+        to cls() without requiring a dict or kwargs for initialization."""
         handler = MagicMock()
-        result = self.MockSingleEntrySection.cast_to_obj(3.14, handler)
+        result = self.MockSingleEntrySection.single_entry_validator(3.14, handler)
 
         assert isinstance(
             result, TestSingleEntryROMSRuntimeSettingsSection.MockSingleEntrySection
@@ -374,11 +374,13 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         assert result.value == 3.14
         handler.assert_not_called()
 
-    def test_cast_to_obj_calls_handler_when_type_does_not_match(self):
-        """Tests that `cast_to_obj` falls back to the handler if the value supplied to
-        __init__ is not of the expected type."""
+    def test_single_entry_validator_calls_handler_when_type_does_not_match(self):
+        """Tests that `single_entry_validator` falls back to the handler if the value
+        supplied to __init__ is not of the expected type."""
         handler = MagicMock(return_value="fallback")
-        result = self.MockSingleEntrySection.cast_to_obj("not a float", handler)
+        result = self.MockSingleEntrySection.single_entry_validator(
+            "not a float", handler
+        )
 
         handler.assert_called_once_with("not a float")
         assert result == "fallback"
