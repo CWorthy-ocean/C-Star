@@ -10,7 +10,10 @@ from pydantic import (
     model_validator,
 )
 
+from cstar.base.log import get_logger
 from cstar.base.utils import _list_to_concise_str
+
+log = get_logger(__name__)
 
 ################################################################################
 # Formatting methods for serializer:
@@ -74,8 +77,10 @@ class ROMSRuntimeSettingsSection(BaseModel):
         if isinstance(data, list) and all(isinstance(v, str) for v in data):
             try:
                 return cls.from_lines(data)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(
+                    f"{cls.__name__}.validate_from_lines: failed to parse from lines: {data!r} – {e}"
+                )
         return handler(data)
 
     @property
@@ -206,8 +211,10 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
         if isinstance(data, expected_type):
             try:
                 return cls(**{cls.section_name: data})
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(
+                    f"single_entry_validator: failed to cast {data!r} to {expected_type} for {cls.__name__}: {e}"
+                )
         return handler(data)
 
     def __init_subclass__(cls, **kwargs):
