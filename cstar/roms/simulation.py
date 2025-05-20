@@ -1400,7 +1400,7 @@ class ROMSSimulation(Simulation):
 
         if self.runtime_code.working_path is None:
             raise FileNotFoundError(
-                "local copy of ROMSSimulation.runtime_code does not exist. "
+                "Local copy of ROMSSimulation.runtime_code does not exist. "
                 + "Call ROMSSimulation.setup() or ROMSSimulation.runtime_code.get() "
                 + "and try again"
             )
