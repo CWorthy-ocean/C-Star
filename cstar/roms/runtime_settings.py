@@ -561,14 +561,13 @@ class ROMSRuntimeSettings(BaseModel):
         # Read file
         filepath = Path(filepath)
         sections = cls._load_raw_sections(filepath)
-        if not all(
-            key in sections.keys()
-            for key in ["title", "time_stepping", "bottom_drag", "output_root_name"]
-        ):
+        required_fields = {"title", "time_stepping", "bottom_drag", "output_root_name"}
+        missing_required_fields = required_fields - sections.keys()
+        if missing_required_fields:
             raise ValueError(
                 "Required field missing from file. Required fields: "
                 "\n- title"
-                "\n- time_steppings"
+                "\n- time_stepping"
                 "\n- bottom_drag"
                 "\n- output_root_name"
             )
