@@ -515,31 +515,37 @@ class ROMSRuntimeSettings(BaseModel):
     """
 
     @staticmethod
-    def _load_raw_sections(filepath: Path) -> dict:
+    def _load_raw_sections(filepath: Path) -> dict[str, list[str]]:
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist.")
 
-        sections = {}
         with filepath.open() as f:
             lines = list(f)
 
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            if ":" in line and not line.startswith("!"):
-                section_name = line.split(":")[0].strip()
-                i += 1
+        sections = {}
+        current_section = None
+        section_lines: list[str] = []
+
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("!"):
+                continue
+
+            if ":" in line:
+                # save the previous section if one was open
+                if current_section is not None:
+                    sections[current_section] = section_lines
+
+                # start a new section
+                current_section = line.split(":", 1)[0].strip()
                 section_lines = []
-
-                while i < len(lines) and ":" not in lines[i]:
-                    line = lines[i].strip()
-                    if line and not line.startswith("!"):
-                        section_lines.append(line)
-                    i += 1
-
-                sections[section_name] = section_lines
             else:
-                i += 1
+                section_lines.append(line)
+
+        # save the last section
+        if current_section is not None:
+            sections[current_section] = section_lines
+
         return sections
 
     @classmethod
