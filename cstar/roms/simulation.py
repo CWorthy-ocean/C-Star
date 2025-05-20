@@ -276,7 +276,7 @@ class ROMSSimulation(Simulation):
 
         in_files = [f for f in self.runtime_code.files if f.endswith(".in")]
         if len(in_files) != 1:
-            raise ValueError(
+            raise RuntimeError(
                 "ROMS requires exactly one runtime settings "
                 + "file (with a `.in` extension), e.g. `roms.in`. "
                 + "Supplied files: \n"

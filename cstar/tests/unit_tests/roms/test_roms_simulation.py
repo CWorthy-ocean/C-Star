@@ -385,7 +385,7 @@ class TestROMSSimulationInitialization:
             location="some/dir", files=["no", "dotin.files", "here"]
         )
         with pytest.raises(
-            ValueError, match="ROMS requires exactly one runtime settings file"
+            RuntimeError, match="ROMS requires exactly one runtime settings file"
         ):
             sim._find_dotin_file()
 
