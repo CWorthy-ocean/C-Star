@@ -70,7 +70,7 @@ class ROMSRuntimeSettingsSection(BaseModel):
         # from the roms.in file, and try to parse it as such. if that fails, or if it's not a list
         # when it comes in, do the usual init process.
 
-        if isinstance(data, list) and all([isinstance(v, str) for v in data]):
+        if isinstance(data, list) and all(isinstance(v, str) for v in data):
             try:
                 return cls.from_lines(data)
             except Exception:
