@@ -433,6 +433,8 @@ class ROMSRuntimeSettings(BaseModel):
     v_sponge: Optional[VSponge] = None
     grid: Optional[Grid] = None
     climatology: Optional[Climatology] = None
+    # Pydantic model configuration
+    model_config = {"populate_by_name": True}
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -503,8 +505,6 @@ class ROMSRuntimeSettings(BaseModel):
     climatology : Climatology, optional, default None
         Climatology file path
     """
-
-    model_config = {"populate_by_name": True}
 
     @staticmethod
     def _load_raw_sections(filepath: Path) -> dict:
