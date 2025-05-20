@@ -321,6 +321,7 @@ async def main() -> int:
     try:
         # ensure no human interaction is required
         os.environ["CSTAR_INTERACTIVE"] = "0"
+        os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
 
         worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
         await worker.execute()
