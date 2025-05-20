@@ -9,6 +9,8 @@ import cstar.roms.runtime_settings as rrs
 from cstar.base.utils import _replace_text_in_file
 from cstar.roms import ROMSRuntimeSettings
 from cstar.roms.runtime_settings import (
+    Forcing,
+    InitialConditions,
     ROMSRuntimeSettingsSection,
     SingleEntryROMSRuntimeSettingsSection,
 )
@@ -307,6 +309,26 @@ class TestROMSRuntimeSettingsSection:
 
         section = MultiLinePaths.from_lines(["a.nc", "b.nc", "c.nc"])
         assert section.paths == [Path("a.nc"), Path("b.nc"), Path("c.nc")]
+
+    def test_from_lines_on_initial_conditions_with_nrrec_0(self):
+        """Test the bespoke InitialConditions.from_lines() method handles the situation
+        where nrrec is 0 and ininame is empty."""
+        lines = [
+            "0",
+        ]
+        ic = InitialConditions.from_lines(lines)
+
+        assert ic.nrrec == 0
+        assert ic.ininame is None
+        assert ic.model_dump() == "initial: nrrec ininame\n    0\n\n"
+
+    def test_from_lines_on_forcing_with_filenames_empty(self):
+        """Test the bespoke Forcing.from_lines() method handles the situation where
+        filenames is empty."""
+        lines = []
+        fr = Forcing.from_lines(lines)
+        assert fr.filenames is None
+        assert fr.model_dump() == "forcing: filenames\n    \n\n"
 
 
 class TestSingleEntryROMSRuntimeSettingsSection:

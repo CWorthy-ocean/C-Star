@@ -426,7 +426,7 @@ class ROMSRuntimeSettings(BaseModel):
     gamma2: Optional[Gamma2] = None
     tracer_diff2: Optional[TracerDiff2] = None
     vertical_mixing: Optional[VerticalMixing] = None
-    my_bak_mixing: Optional[MYBakMixing] = None
+    my_bak_mixing: Optional[MYBakMixing] = Field(alias="MY_bak_mixing", default=None)
     sss_correction: Optional[SSSCorrection] = None
     sst_correction: Optional[SSTCorrection] = None
     ubind: Optional[UBind] = None
