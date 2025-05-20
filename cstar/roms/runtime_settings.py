@@ -1,3 +1,4 @@
+from os import PathLike
 from pathlib import Path
 from typing import ClassVar, Optional, Union, get_args, get_origin
 
@@ -536,7 +537,7 @@ class ROMSRuntimeSettings(BaseModel):
         return sections
 
     @classmethod
-    def from_file(cls, filepath: Path | str) -> "ROMSRuntimeSettings":
+    def from_file(cls, filepath: PathLike[str]) -> "ROMSRuntimeSettings":
         """Read ROMS runtime settings from a `.in` file.
 
         ROMS runtime settings are specified via a `.in` file with sections corresponding
@@ -751,7 +752,7 @@ class ROMSRuntimeSettings(BaseModel):
         inner = ", ".join(f"{k}={repr(v)}" for k, v in attrs.items() if v is not None)
         return f"{self.__class__.__name__}({inner})"
 
-    def to_file(self, filepath: Path | str) -> None:
+    def to_file(self, filepath: PathLike[str]) -> None:
         """Write the current settings to a ROMS-compatible `.in` file.
 
         Parameters
