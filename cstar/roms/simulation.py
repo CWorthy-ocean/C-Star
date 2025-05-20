@@ -1270,7 +1270,7 @@ class ROMSSimulation(Simulation):
             _run_cmd(
                 "make compile_clean",
                 cwd=build_dir,
-                msg_err="Error when cleaning ROMS compilation.",
+                msg_err="Error when cleaning existing ROMS compilation.",
                 raise_on_error=True,
             )
 
