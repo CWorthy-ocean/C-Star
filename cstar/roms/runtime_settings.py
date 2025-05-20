@@ -198,7 +198,7 @@ class ROMSRuntimeSettingsSection(BaseModel):
 class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
     @model_validator(mode="wrap")
     @classmethod
-    def cast_to_obj(cls, data, handler: ModelWrapValidatorHandler):
+    def single_entry_validator(cls, data, handler: ModelWrapValidatorHandler):
         """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized with just
         the value of the single entry, instead of with a dict or kwargs."""
         annotation = cls.__annotations__[cls.key_order[0]]
