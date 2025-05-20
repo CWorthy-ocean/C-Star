@@ -14,7 +14,7 @@ RUN apt-get install software-properties-common wget git-all build-essential rsyn
 RUN groupadd -r cstar-group && \
     useradd -r -g cstar-group cstar-user
 
-# RUN mkdir -p /home/root 
+RUN mkdir -p "${USER_HOME}"
 # RUN mkdir -p /home/cstar-user && \
 #     chown cstar-user /home/cstar-user
 # USER cstar-user
@@ -23,7 +23,7 @@ RUN groupadd -r cstar-group && \
 WORKDIR $USER_HOME
 RUN mkdir -p app config source data
 
-VOLUME ./data
+# VOLUME ./data
 
 RUN git clone $CSTAR_REPO "${USER_HOME}/source/c-star" && \
     git -C "${USER_HOME}/source/c-star" checkout $CSTAR_HASH
@@ -54,25 +54,21 @@ RUN conda init --all && \
 RUN . "${USER_HOME}/.bashrc" && \
     # conda init --all && \
     # conda activate cstar && \
-    pip uninstall cstar-ocean && \
+    # pip uninstall cstar-ocean && \
     pip install "${USER_HOME}/source/c-star"
 
+# RUN cp "${USER_HOME}/.bashrc" "${USER_HOME}/.bash_profile"
 # RUN conda init --all && \
 #     . ~/.bashrc && \
 #     conda activate base && \
 #     pip install ~/source/c-star
 
+ENV BASH_ENV="${USER_HOME}/.bashrc"
 WORKDIR "${USER_HOME}/app"
-# RUN ls -la && pwd
-# COPY entrypoint.py ./entrypoint.py
+COPY run.sh ./run.sh
 
 
-# CMD [".", "${USER_HOME}/.bashrc", "&&", "which", "python"]
-CMD ["echo", "'sup"]
-# CMD ["--log-level", "DEBUG", "--blueprint-uri", "/blueprints/blueprint.yml", "--output-dir", "/output"]
-# ENTRYPOINT ["source", "~/.bashrc", "&&", "conda", "activate", "cstar", "&&" "python", "-m", "cstar.scripts.runner.worker"]
-# ENTRYPOINT ["conda", "activate", "cstar", "&&" "python", "-m", "cstar.scripts.runner.worker"]
-# ENTRYPOINT ["python", "-m", "cstar.scripts.runner.worker"]
-# ENTRYPOINT ["/usr/bin/bash"]
-
+# CMD ["python", "-m", "cstar.scripts.runner.worker", "--log-level", "DEBUG", "--blueprint-uri", "/blueprints/blueprint.yml", "--output-dir", "/output/workeroutput"]
+CMD ["--log-level", "DEBUG", "--blueprint-uri", "/blueprints/blueprint.yml", "--output-dir", "/output/workeroutput"]
+ENTRYPOINT ["bash", "./run.sh"]
 
