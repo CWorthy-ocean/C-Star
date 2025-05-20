@@ -449,8 +449,8 @@ class ROMSInputDataset(InputDataset, ABC):
             return [Path(str(f).replace(zero_str, ".nc")) for f in zero_files]
 
         raise FileNotFoundError(
-            "ROMS requires files to be partitioned for use"
-            "call ROMSInputDataset.partition() or ROMSSimulation.pre_run() "
+            "ROMS requires files to be partitioned for use. "
+            "Call ROMSInputDataset.partition() or ROMSSimulation.pre_run() "
             "and try again"
         )
 
