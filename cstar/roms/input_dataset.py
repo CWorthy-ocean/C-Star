@@ -448,12 +448,11 @@ class ROMSInputDataset(InputDataset, ABC):
             zero_files = [f for f in self.partitioning.files if zero_str in str(f)]
             return [Path(str(f).replace(zero_str, ".nc")) for f in zero_files]
 
-        else:
-            raise FileNotFoundError(
-                "ROMS requires files to be partitioned for use"
-                "call ROMSInputDataset.partition() or ROMSSimulation.pre_run() "
-                "and try again"
-            )
+        raise FileNotFoundError(
+            "ROMS requires files to be partitioned for use"
+            "call ROMSInputDataset.partition() or ROMSSimulation.pre_run() "
+            "and try again"
+        )
 
 
 class ROMSModelGrid(ROMSInputDataset):
