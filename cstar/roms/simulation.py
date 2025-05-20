@@ -1,4 +1,5 @@
 from datetime import datetime
+from itertools import chain
 from pathlib import Path
 from typing import Any, List, Optional, cast
 
@@ -538,19 +539,16 @@ class ROMSSimulation(Simulation):
         - This property is used to populate `runtime_settings.forcing`.
         """
 
-        forcing_sources: list[Optional[ROMSInputDataset]] = [
-            self.tidal_forcing,
-            self.river_forcing,
-        ]
-        forcing_sources.extend(self.surface_forcing)
-        forcing_sources.extend(self.boundary_forcing)
-        forcing_sources.extend(self.forcing_corrections)
+        forcing_sources = chain(
+            [self.tidal_forcing, self.river_forcing],
+            self.surface_forcing,
+            self.boundary_forcing,
+            self.forcing_corrections,
+        )
 
         forcing_paths: list[Path] = []
 
-        for source in forcing_sources:
-            if source is None:
-                continue
+        for source in filter(None, forcing_sources):
             paths = source.working_path
             if paths is None:
                 raise ValueError(

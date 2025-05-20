@@ -2024,7 +2024,7 @@ class TestProcessingAndExecution:
         sim.exe_path = Path("madeup.exe")
         with pytest.raises(
             FileNotFoundError,
-            match="local copy of ROMSSimulation.runtime_code does not exist.",
+            match="Local copy of ROMSSimulation.runtime_code does not exist.",
         ):
             sim.run()
 
