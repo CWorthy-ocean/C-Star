@@ -516,7 +516,6 @@ class ROMSRuntimeSettings(BaseModel):
 
     @staticmethod
     def _load_raw_sections(filepath: Path) -> dict:
-        filepath = Path(filepath)
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist.")
 
