@@ -13,7 +13,6 @@ RUN apt-get update -y && \
 WORKDIR "${HOME}"
 RUN mkdir -p "${HOME}/app" "${HOME}/source"
 
-RUN echo "bar"
 RUN git clone $CSTAR_REPO "${HOME}/source/cstar" && \
     git -C "${HOME}/source/cstar" checkout $CSTAR_HASH
 
