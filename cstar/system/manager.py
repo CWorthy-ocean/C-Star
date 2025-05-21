@@ -168,9 +168,9 @@ class CStarSystemManager:
                 mpi_exec_prefix = "mpirun"
                 compiler = "intel"
             case (
-                SystemName.DARWIN_ARM64,
-                SystemName.LINUX_X86_64,
-                SystemName.LINUX_ARM64,
+                SystemName.DARWIN_ARM64
+                | SystemName.LINUX_X86_64
+                | SystemName.LINUX_ARM64
             ):
                 mpi_exec_prefix = "mpirun"
                 compiler = "gnu"
