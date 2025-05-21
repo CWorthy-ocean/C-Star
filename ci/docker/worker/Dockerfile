@@ -20,11 +20,11 @@ RUN git clone $CSTAR_REPO "${HOME}/source/cstar" && \
 RUN conda init --all && \
     conda env create --name cstar --file "${HOME}/source/cstar/ci/environment.yml" && \
     echo "conda activate cstar" >> "${HOME}/.profile" && \
-    conda env create --name cstar --file ~/source/cstar/ci/environment.yml && \
-    echo "conda activate cstar" >> ~/.profile && \
-    conda clean -afy
+    conda clean -afy && \
+    conda install -y gdal 
+    ## needed for roms-tools when building image on macos...
 
-RUN pip install ~/source/cstar
+RUN pip install --no-cache-dir ~/source/cstar
 
 WORKDIR "${HOME}/app"
 COPY run.sh ./run.sh
