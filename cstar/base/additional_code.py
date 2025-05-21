@@ -1,5 +1,4 @@
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -164,10 +163,12 @@ class AdditionalCode(LoggingMixin):
 
         local_dir = Path(local_dir).expanduser().resolve()
         try:
-            tmp_dir = Path("~/holding").expanduser().resolve()  # initialise the tmp_dir variable in case we need it later
+            tmp_dir = (
+                Path("~/holding").expanduser().resolve()
+            )  # initialise the tmp_dir variable in case we need it later
             if tmp_dir.exists():
                 shutil.rmtree(tmp_dir)
-            
+
             # CASE 1: Additional code is in a remote repository:
             if (self.source.location_type == "url") and (
                 self.source.source_type == "repository"
