@@ -19,14 +19,13 @@ ENV PATH=$PATH:$ROMS_PATH
 
 WORKDIR $INSTALL_BASE_DIR
 RUN bash -c "source /opt/intel/oneapi/setvars.sh && \
-    wget ${REPO_ROMS} && \
+    wget $REPO_ROMS && \
     tar xvf update_makefiles.tar.gz && \
-    mv ucla-roms-update_makefiles ${ROMS_ROOT} && \
-    cd ${ROMS_ROOT}/Work && \
+    mv ucla-roms-update_makefiles $ROMS_ROOT && \
+    cd $ROMS_ROOT/Work && \
     make nhmg COMPILER=intel && \
-    cd ${ROMS_ROOT}/Tools-Roms && \
+    cd $ROMS_PATH && \
     make COMPILER=intel"
-
 
 FROM cstar-ifx-pb:1 as stage_marbl
 ARG INSTALL_BASE_DIR
@@ -44,19 +43,20 @@ COPY --from=stage_roms $ROMS_ROOT $ROMS_ROOT
 # (Makefile doesn't define ifx option but setting I_MPI_F90 to ifx above should fix this)
 WORKDIR $INSTALL_BASE_DIR
 RUN bash -c "source /opt/intel/oneapi/setvars.sh && \
-    wget ${REPO_MARBL} && \
+    wget $REPO_MARBL && \
     tar xvf marbl0.45.0.tar.gz && \
-    mv MARBL-marbl0.45.0 ${MARBL_ROOT} && \
-    cd ${MARBL_ROOT}/src && \
+    mv MARBL-marbl0.45.0 $MARBL_ROOT && \
+    cd $MARBL_ROOT/src && \
     make intel USEMPI=TRUE"
 
 
-FROM docker.io/continuumio/miniconda3:14513208bcb2 as stage_conda
+FROM continuumio/miniconda3@sha256:14513208bcb22341302f7886482391f337f2532477e2f7ffee48c06353b2e96e as stage_conda
 ARG ROMS_ROOT
 ARG ROMS_PATH
 ARG MARBL_ROOT
 ARG REPO_CSTAR
 ARG REPO_CSTAR_HASH
+ARG CSTAR_LOG_LEVEL
 
 ENV ROMS_ROOT=$ROMS_ROOT
 ENV MARBL_ROOT=$MARBL_ROOT
@@ -69,7 +69,8 @@ ENV REPO_CSTAR_PATH="${HOME}/source/cstar"
 
 RUN apt-get update -y && \
     apt-get upgrade -y && \
-    apt-get install software-properties-common=0.99.49.2 wget=1.21.4-1ubuntu4.1 git-all=1:2.43.0-1ubuntu7.2 build-essential=12.10ubuntu1 rsync=3.2.7-1ubuntu1 neovim=0.9.5-6ubuntu2 -y --no-install-recommends && \
+    apt-get install -y --no-install-recommends \
+        software-properties-common wget git-all build-essential rsync neovim && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -80,12 +81,12 @@ RUN mkdir -p "${HOME}/app" "${HOME}/source"
 WORKDIR "${HOME}"
 
 RUN bash -c "conda init --all && \
-    git clone ${REPO_CSTAR} ${REPO_CSTAR_PATH} && \
-    git -C ${REPO_CSTAR_PATH} checkout ${REPO_CSTAR_HASH} && \
+    git clone $REPO_CSTAR $REPO_CSTAR_PATH && \
+    git -C $REPO_CSTAR_PATH checkout $REPO_CSTAR_HASH && \
     echo \"conda activate base\" >> ${HOME}/.profile && \
-    conda env update --name base --file ${REPO_CSTAR_PATH}/ci/environment.yml && \
-    pip install --no-cache-dir ${REPO_CSTAR_PATH} && \
-    rm -rf ${REPO_CSTAR_PATH} && \
+    conda env update --name base --file $REPO_CSTAR_PATH/ci/environment.yml && \
+    pip install --no-cache-dir $REPO_CSTAR_PATH && \
+    rm -rf $REPO_CSTAR_PATH && \
     conda clean -afy"
 
 # RUN conda install -y gdal
@@ -94,6 +95,6 @@ RUN bash -c "conda init --all && \
 WORKDIR "${HOME}/app"
 COPY run.sh ./run.sh
 
-CMD ["--log-level", "${CSTAR_LOG_LEVEL}"]
+CMD ["--log-level", "$CSTAR_LOG_LEVEL"]
 ENTRYPOINT ["bash", "./run.sh", "--output-dir", "/output/worker", "--blueprint-uri", "/blueprints/blueprint.yml"]
 
