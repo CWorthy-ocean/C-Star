@@ -8,7 +8,7 @@ ARG REPO_CSTAR="https://github.com/ankona/C-Star"
 ARG REPO_CSTAR_HASH="CW-799"
 ARG CSTAR_LOG_LEVEL="DEBUG"
 
-FROM cstar-ifx-pb:latest as stage_roms
+FROM cstar-ifx-pb:1 as stage_roms
 ARG INSTALL_BASE_DIR
 ARG ROMS_ROOT
 ARG ROMS_PATH
@@ -28,7 +28,7 @@ RUN bash -c "source /opt/intel/oneapi/setvars.sh && \
     make COMPILER=intel"
 
 
-FROM cstar-ifx-pb:latest as stage_marbl
+FROM cstar-ifx-pb:1 as stage_marbl
 ARG INSTALL_BASE_DIR
 ARG ROMS_ROOT
 ARG ROMS_PATH
@@ -51,7 +51,7 @@ RUN bash -c "source /opt/intel/oneapi/setvars.sh && \
     make intel USEMPI=TRUE"
 
 
-FROM docker.io/continuumio/miniconda3:latest as stage_conda
+FROM docker.io/continuumio/miniconda3:14513208bcb2 as stage_conda
 ARG ROMS_ROOT
 ARG ROMS_PATH
 ARG MARBL_ROOT
@@ -69,13 +69,15 @@ ENV REPO_CSTAR_PATH="${HOME}/source/cstar"
 
 RUN apt-get update -y && \
     apt-get upgrade -y && \
-    apt-get install software-properties-common wget git-all build-essential rsync neovim -y
+    apt-get install software-properties-common=0.99.49.2 wget=1.21.4-1ubuntu4.1 git-all=1:2.43.0-1ubuntu7.2 build-essential=12.10ubuntu1 rsync=3.2.7-1ubuntu1 neovim=0.9.5-6ubuntu2 -y --no-install-recommends && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=stage_roms $ROMS_ROOT $ROMS_ROOT
 COPY --from=stage_marbl $MARBL_ROOT $MARBL_ROOT
 
-WORKDIR "${HOME}"
 RUN mkdir -p "${HOME}/app" "${HOME}/source"
+WORKDIR "${HOME}"
 
 RUN bash -c "conda init --all && \
     git clone ${REPO_CSTAR} ${REPO_CSTAR_PATH} && \
