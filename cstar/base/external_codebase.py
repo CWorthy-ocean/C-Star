@@ -203,7 +203,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def is_setup(self) -> bool:
-        return True if self.local_config_status == 0 else False
+        return self.local_config_status == 0
 
     def handle_config_status(self) -> None:
         """Perform actions depending on the output of

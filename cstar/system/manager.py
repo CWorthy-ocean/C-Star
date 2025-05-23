@@ -39,6 +39,7 @@ class SystemName(Enum):
     DERECHO = "derecho"
     DARWIN_ARM64 = "darwin_arm64"
     LINUX_X86_64 = "linux_x86_64"
+    LINUX_AARCH64 = "linux_aarch64"
 
 
 class CStarSystemManager:
@@ -166,7 +167,11 @@ class CStarSystemManager:
             case SystemName.DERECHO:
                 mpi_exec_prefix = "mpirun"
                 compiler = "intel"
-            case SystemName.DARWIN_ARM64 | SystemName.LINUX_X86_64:
+            case (
+                SystemName.DARWIN_ARM64
+                | SystemName.LINUX_X86_64
+                | SystemName.LINUX_AARCH64
+            ):
                 mpi_exec_prefix = "mpirun"
                 compiler = "gnu"
 

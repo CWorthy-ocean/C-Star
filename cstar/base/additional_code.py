@@ -1,5 +1,4 @@
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -164,7 +163,12 @@ class AdditionalCode(LoggingMixin):
 
         local_dir = Path(local_dir).expanduser().resolve()
         try:
-            tmp_dir = None  # initialise the tmp_dir variable in case we need it later
+            tmp_dir = (
+                Path("~/holding").expanduser().resolve()
+            )  # initialise the tmp_dir variable in case we need it later
+            if tmp_dir.exists():
+                shutil.rmtree(tmp_dir)
+
             # CASE 1: Additional code is in a remote repository:
             if (self.source.location_type == "url") and (
                 self.source.source_type == "repository"
@@ -177,7 +181,7 @@ class AdditionalCode(LoggingMixin):
                     assert isinstance(
                         self.checkout_target, str
                     ), "We have just verified checkout_target is not None"
-                tmp_dir = tempfile.mkdtemp()
+                # tmp_dir = tempfile.mkdtemp()
                 _clone_and_checkout(
                     source_repo=self.source.location,
                     local_path=tmp_dir,
@@ -229,4 +233,5 @@ class AdditionalCode(LoggingMixin):
             self.working_path = local_dir
         finally:
             if tmp_dir:
-                shutil.rmtree(tmp_dir)
+                # shutil.rmtree(tmp_dir)
+                ...
