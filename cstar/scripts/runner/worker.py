@@ -15,6 +15,7 @@ from cstar.base.log import get_logger
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
 from cstar.scripts.service import Service, ServiceConfiguration
+from cstar.system.manager import cstar_sysmgr
 
 CSTAR_USER_ENV_PATH = pathlib.Path("~/.cstar.env").expanduser()
 CSTAR_EXTERNALS_ROOT = "~/code/cstar/cstar/externals"
@@ -322,6 +323,12 @@ async def main() -> int:
         # ensure no human interaction is required
         os.environ["CSTAR_INTERACTIVE"] = "0"
         os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
+
+        if os.environ.get("CSTAR_ROMS_PREBUILT", None):
+            cstar_sysmgr.environment.set_env_var("ROMS_ROOT", os.environ["ROMS_ROOT"])
+
+        if os.environ.get("CSTAR_MARBL_PREBUILT", None):
+            cstar_sysmgr.environment.set_env_var("MARBL_ROOT", os.environ["MARBL_ROOT"])
 
         worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
         await worker.execute()
