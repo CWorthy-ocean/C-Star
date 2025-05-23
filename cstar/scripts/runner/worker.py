@@ -298,6 +298,24 @@ def config_from_args(args: argparse.Namespace) -> BlueprintRequest:
     )
 
 
+def configure_environment() -> None:
+    """Configure the environment variables required by the worker.
+
+    NOTE: The worker checks for CSTAR_ROMS_PREBUILT and CSTAR_MARBL_PREBUILT
+    to indicate that pre-built modeling binaries should be used."""
+    # ensure no human interaction is required
+    os.environ["CSTAR_INTERACTIVE"] = "0"
+    os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
+
+    # TODO: consider modifying the cstar_sysmgr to look
+    # at environment variables on the first write.
+    if os.environ.get("CSTAR_ROMS_PREBUILT", None):
+        cstar_sysmgr.environment.set_env_var("ROMS_ROOT", os.environ["ROMS_ROOT"])
+
+    if os.environ.get("CSTAR_MARBL_PREBUILT", None):
+        cstar_sysmgr.environment.set_env_var("MARBL_ROOT", os.environ["MARBL_ROOT"])
+
+
 async def main() -> int:
     """Main entry point for the c-star worker script.
 
@@ -320,16 +338,7 @@ async def main() -> int:
     log = get_logger(__name__, level=service_cfg.log_level)
 
     try:
-        # ensure no human interaction is required
-        os.environ["CSTAR_INTERACTIVE"] = "0"
-        os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
-
-        if os.environ.get("CSTAR_ROMS_PREBUILT", None):
-            cstar_sysmgr.environment.set_env_var("ROMS_ROOT", os.environ["ROMS_ROOT"])
-
-        if os.environ.get("CSTAR_MARBL_PREBUILT", None):
-            cstar_sysmgr.environment.set_env_var("MARBL_ROOT", os.environ["MARBL_ROOT"])
-
+        configure_environment()
         worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
         await worker.execute()
     except CstarException:
