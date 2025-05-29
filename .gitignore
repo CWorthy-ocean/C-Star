@@ -134,7 +134,7 @@ dask-worker-space/
 # Vscode
 .vscode/
 
-#PyCharm
+# PyCharm
 .idea/
 
 # C-Star specific
