@@ -1,3 +1,5 @@
+import re
+import tempfile
 from os import PathLike
 from pathlib import Path
 from typing import ClassVar, Optional, Union, get_args, get_origin
@@ -53,19 +55,36 @@ def _format_other(other: str | int) -> str:
     return str(other)
 
 
+def _pascal_case_to_snake(pascal: str) -> str:
+
+    return re.sub(r"([a-z])([A-Z])", r"\1_\2", pascal).lower()
+
 ################################################################################
 
+class ROMSSectionMeta(type(BaseModel)):
+    def __new__(cls, *args, **kwargs):
+        new_cls = super().__new__(cls, *args, **kwargs)
+        new_cls.key_order = list(new_cls.__pydantic_fields__.keys())
+        new_cls.section_name = new_cls._section_name or _pascal_case_to_snake(new_cls.__name__)
+        return new_cls
 
-class ROMSRuntimeSettingsSection(BaseModel):
-    section_name: ClassVar[str]
+class ROMSRuntimeSettingsSection(BaseModel, metaclass=ROMSSectionMeta):
+    _section_name: ClassVar[str] = None
     multi_line: ClassVar[bool] = False
-    key_order: ClassVar[list[str]]
 
     def __init__(self, *args, **kwargs):
         if args:
             super().__init__(**{k: args[i] for i, k in enumerate(self.key_order)})
         else:
             super().__init__(**kwargs)
+
+    # def __init_subclass__(cls, **kwargs):
+    #     super().__init_subclass__(**kwargs)
+    #
+    #     cls.key_order = list(cls.__pydantic_fields__.keys())
+    #     if cls.section_name is None:
+    #         cls.section_name = _pascal_case_to_snake(cls.__name__)
+
 
     @model_validator(mode="wrap")
     @classmethod
@@ -201,12 +220,14 @@ class ROMSRuntimeSettingsSection(BaseModel):
 
 
 class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
+
+
     @model_validator(mode="wrap")
     @classmethod
     def single_entry_validator(cls, data, handler: ModelWrapValidatorHandler):
         """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized with just
         the value of the single entry, instead of with a dict or kwargs."""
-        annotation = cls.__annotations__[cls.key_order[0]]
+        annotation = list(cls.__annotations__.values())[0]
         expected_type = get_origin(annotation) or annotation
         if isinstance(data, expected_type):
             try:
@@ -216,32 +237,32 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
                     f"single_entry_validator: failed to cast {data!r} to {expected_type} for {cls.__name__}: {e}"
                 )
         return handler(data)
-
-    def __init_subclass__(cls, **kwargs):
-        """Overrides default __init_subclass__ to allow definition of
-        SingleEntryROMSRuntimeSettingsSection without explicitly defining redundant
-        key_order or section_name attrs."""
-
-        super().__init_subclass__(**kwargs)
-
-        # Get all annotated instance fields (ignore ClassVars like section_name)
-        field_names = [
-            name
-            for name, vartype in cls.__annotations__.items()
-            if get_origin(vartype) != ClassVar
-        ]
-
-        if len(field_names) != 1:
-            raise TypeError(
-                f"{cls.__name__} must declare exactly one field, found: {field_names}"
-            )
-
-        # Set key_order to the sole field
-        cls.key_order = field_names
-
-        # Set section_name = <field name> if not explicitly provided
-        if not hasattr(cls, "section_name"):
-            cls.section_name = field_names[0]
+    #
+    # def __init_subclass__(cls, **kwargs):
+    #     """Overrides default __init_subclass__ to allow definition of
+    #     SingleEntryROMSRuntimeSettingsSection without explicitly defining redundant
+    #     key_order or section_name attrs."""
+    #
+    #     super().__init_subclass__(**kwargs)
+    #
+    #     # Get all annotated instance fields (ignore ClassVars like section_name)
+    #     field_names = [
+    #         name
+    #         for name, vartype in cls.__annotations__.items()
+    #         if get_origin(vartype) != ClassVar
+    #     ]
+    #
+    #     if len(field_names) != 1:
+    #         raise TypeError(
+    #             f"{cls.__name__} must declare exactly one field, found: {field_names}"
+    #         )
+    #
+    #     # Set key_order to the sole field
+    #     cls.key_order = field_names
+    #
+    #     # Set section_name = <field name> if not explicitly provided
+    #     if not hasattr(cls, "section_name"):
+    #         cls.section_name = field_names[0]
 
     def __repr__(self):
         return repr(getattr(self, self.key_order[0]))
@@ -276,11 +297,11 @@ class TracerDiff2(SingleEntryROMSRuntimeSettingsSection):
 
 class SSSCorrection(SingleEntryROMSRuntimeSettingsSection):
     sss_correction: float
-
+    _section_name = "sss_correction"
 
 class SSTCorrection(SingleEntryROMSRuntimeSettingsSection):
     sst_correction: float
-
+    _section_name = "sst_correction"
 
 class UBind(SingleEntryROMSRuntimeSettingsSection):
     ubind: float
@@ -288,7 +309,7 @@ class UBind(SingleEntryROMSRuntimeSettingsSection):
 
 class VSponge(SingleEntryROMSRuntimeSettingsSection):
     v_sponge: float
-
+    _section_name = "v_sponge"
 
 class Grid(SingleEntryROMSRuntimeSettingsSection):
     grid: Path
@@ -304,8 +325,7 @@ class TimeStepping(ROMSRuntimeSettingsSection):
     ndtfast: int
     ninfo: int
 
-    section_name = "time_stepping"
-    key_order = ["ntimes", "dt", "ndtfast", "ninfo"]
+
 
 
 class BottomDrag(ROMSRuntimeSettingsSection):
@@ -313,17 +333,15 @@ class BottomDrag(ROMSRuntimeSettingsSection):
     rdrg2: float
     zob: float
 
-    section_name = "bottom_drag"
-    key_order = ["rdrg", "rdrg2", "zob"]
 
 
 class InitialConditions(ROMSRuntimeSettingsSection):
     nrrec: int
     ininame: Optional[Path]
 
-    section_name = "initial"
+    _section_name = "initial"
     multi_line = True
-    key_order = ["nrrec", "ininame"]
+
 
     @classmethod
     def from_lines(cls, lines: Optional[list[str]]) -> "InitialConditions":
@@ -341,9 +359,7 @@ class InitialConditions(ROMSRuntimeSettingsSection):
 class Forcing(ROMSRuntimeSettingsSection):
     filenames: Optional[list[Path]]
 
-    section_name = "forcing"
     multi_line = True
-    key_order = ["filenames"]
 
     @classmethod
     def from_lines(cls, lines: Optional[list[str]]) -> "Forcing":
@@ -361,8 +377,7 @@ class Forcing(ROMSRuntimeSettingsSection):
 class VerticalMixing(ROMSRuntimeSettingsSection):
     Akv_bak: float
     Akt_bak: list[float]
-    section_name = "vertical_mixing"
-    key_order = ["Akv_bak", "Akt_bak"]
+
 
 
 class MARBLBiogeochemistry(ROMSRuntimeSettingsSection):
@@ -370,13 +385,9 @@ class MARBLBiogeochemistry(ROMSRuntimeSettingsSection):
     marbl_tracer_list_fname: Path
     marbl_diag_list_fname: Path
 
-    section_name = "MARBL_biogeochemistry"
+    _section_name = "MARBL_biogeochemistry"
     multi_line = True
-    key_order = [
-        "marbl_namelist_fname",
-        "marbl_tracer_list_fname",
-        "marbl_diag_list_fname",
-    ]
+
 
 
 class SCoord(ROMSRuntimeSettingsSection):
@@ -384,8 +395,7 @@ class SCoord(ROMSRuntimeSettingsSection):
     theta_b: float
     tcline: float
 
-    section_name = "S-coord"
-    key_order = ["theta_s", "theta_b", "tcline"]
+    _section_name = "S-coord"
 
 
 class LinRhoEos(ROMSRuntimeSettingsSection):
@@ -394,21 +404,14 @@ class LinRhoEos(ROMSRuntimeSettingsSection):
     Scoef: float
     S0: float
 
-    section_name = "lin_rho_eos"
-    key_order = [
-        "Tcoef",
-        "T0",
-        "Scoef",
-        "S0",
-    ]
+
 
 
 class MYBakMixing(ROMSRuntimeSettingsSection):
     Akq_bak: float
     q2nu2: float
     q2nu4: float
-    section_name = "MY_bak_mixing"
-    key_order = ["Akq_bak", "q2nu2", "q2nu4"]
+    _section_name = "MY_bak_mixing"
 
 
 ################################################################################
@@ -804,3 +807,19 @@ class ROMSRuntimeSettings(BaseModel):
                     continue
                 fieldname = self.model_fields[field].alias or field
                 f.write(self.model_dump(by_alias=True)[fieldname])
+
+if __name__ == "__main__":
+    orig = "/Users/eilerman/Downloads/sje_pacmed12km_Y2000.in"
+    r = ROMSRuntimeSettings.from_file(orig)
+    # print(r)
+    new = "./new.in"
+    r.to_file(new)
+
+    with open(new, "r") as f:
+        lines_new = f.readlines()
+    with open(orig, "r") as f:
+        lines_orig = f.readlines()
+
+    r2 = ROMSRuntimeSettings.from_file(new)
+    assert r == r2
+    # assert lines_orig == lines_new
