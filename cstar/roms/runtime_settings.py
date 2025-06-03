@@ -1,15 +1,23 @@
 import re
 from os import PathLike
 from pathlib import Path
-from typing import ClassVar, Optional, Self, Union, get_args, get_origin
+from typing import (
+    ClassVar,
+    Iterable,
+    Optional,
+    Self,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import (
     BaseModel,
-    Field,
     ModelWrapValidatorHandler,
     model_serializer,
     model_validator,
 )
+from pydantic.alias_generators import to_snake
 
 from cstar.base.log import get_logger
 from cstar.base.utils import _list_to_concise_str
@@ -18,6 +26,13 @@ log = get_logger(__name__)
 
 ################################################################################
 # Formatting methods for serializer:
+
+CUSTOM_ALIAS_LOOKUP = {
+    "marbl_biogeochemistry": "MARBL_biogeochemistry",
+    "s_coord": "S-coord",
+    "my_bak_mixing": "MY_bak_mixing",
+    "initial_conditions": "initial",
+}
 
 
 def _format_list_of_floats(float_list: list[float]) -> str:
@@ -58,7 +73,12 @@ def _pascal_to_snake(pascal: str) -> str:
     return re.sub(r"([a-z])([A-Z])", r"\1_\2", pascal).lower()
 
 
-class ROMSRuntimeSettingsSection(BaseModel):  # , metaclass=ROMSSectionMeta):
+def get_alias(field_name: str) -> str:
+    field_name = to_snake(field_name)
+    return CUSTOM_ALIAS_LOOKUP.get(field_name, to_snake(field_name))
+
+
+class ROMSRuntimeSettingsSection(BaseModel):
     multi_line: ClassVar[bool] = False
     _custom_section_name: ClassVar[str | None] = None
 
@@ -68,9 +88,9 @@ class ROMSRuntimeSettingsSection(BaseModel):  # , metaclass=ROMSSectionMeta):
         else:
             super().__init__(**kwargs)
 
-    @property
-    def section_name(self):
-        return self._custom_section_name or _pascal_to_snake(type(self).__name__)
+    # @property
+    # def section_name(self):
+    #     return self._custom_section_name or _pascal_to_snake(type(self).__name__)
 
     @property
     def key_order(self):
@@ -84,13 +104,8 @@ class ROMSRuntimeSettingsSection(BaseModel):  # , metaclass=ROMSSectionMeta):
         # when it comes in, do the usual init process.
 
         if isinstance(data, list) and all(isinstance(v, str) for v in data):
-            try:
-                return cls.from_lines(data)
-            except Exception as e:
-                log.debug(
-                    f"{cls.__name__}.validate_from_lines: failed to parse from lines: {data!r} – {e}"
-                )
-                raise
+            return cls.from_lines(data)
+
         return handler(data)
 
     @property
@@ -126,7 +141,12 @@ class ROMSRuntimeSettingsSection(BaseModel):  # , metaclass=ROMSSectionMeta):
             section_values_as_list_of_str
         )
 
-        section_header = f"{self.section_name}: {' '.join(data.keys())}\n"
+        if isinstance(self, SingleEntryROMSRuntimeSettingsSection):
+            section_name = list(self.__pydantic_fields__.keys())[0]
+        else:
+            section_name = get_alias(type(self).__name__)
+
+        section_header = f"{section_name}: {' '.join(data.keys())}\n"
         # Build the serialized string
         serialized = ""
         serialized += section_header
@@ -135,7 +155,7 @@ class ROMSRuntimeSettingsSection(BaseModel):  # , metaclass=ROMSSectionMeta):
         return serialized
 
     @classmethod
-    def from_lines(cls, lines: Optional[list[str]]) -> Optional[Self]:
+    def from_lines(cls, lines: list[str]) -> Self:
         """This takes a list of lines as would be found under the section header of a
         roms.in file and returns a ROMSRuntimeSettingsSection instance.
 
@@ -158,8 +178,6 @@ class ROMSRuntimeSettingsSection(BaseModel):  # , metaclass=ROMSSectionMeta):
         >>> InitialConditions.from_lines(["1", "input_datasets/roms_ini.nc"])
             InitialConditions(nrrec=1, ininame=Path("input_datasets/roms_ini.nc"))
         """
-        if not lines:
-            return None
 
         annotations = cls.__annotations__
         kwargs = {}
@@ -209,25 +227,44 @@ class ROMSRuntimeSettingsSection(BaseModel):  # , metaclass=ROMSSectionMeta):
 ################################################################################
 
 
+def _matches_type_hint(obj, annotation) -> bool:
+    expected_type = get_origin(annotation) or annotation
+
+    if not isinstance(obj, expected_type):
+        return False
+    generic = get_args(annotation)
+
+    if not generic:
+        return True
+
+    if not isinstance(obj, Iterable):
+        raise NotImplementedError("Don't know how to check non-iterable generics")
+
+    if all([isinstance(x, generic) for x in obj]):
+        return True
+    else:
+        return False
+
+
 class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
-    @property
-    def section_name(self):
-        return self._custom_section_name or list(self.__pydantic_fields__.keys())[0]
+    @model_validator(mode="after")
+    def check_exactly_one_field(self):
+        if n_args := len(self.__pydantic_fields__.keys()) != 1:
+            raise TypeError(
+                f"{type(self)} should only have one pydantic field, but it had {n_args}"
+            )
+        return self
 
     @model_validator(mode="wrap")
     @classmethod
     def single_entry_validator(cls, data, handler: ModelWrapValidatorHandler):
         """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized with just
         the value of the single entry, instead of with a dict or kwargs."""
+        if not data:
+            return None
         field_name, annotation = list(cls.__annotations__.items())[0]
-        expected_type = get_origin(annotation) or annotation
-        if isinstance(data, expected_type):
-            try:
-                return cls.__init__(**{field_name: data})
-            except Exception as e:
-                log.debug(
-                    f"single_entry_validator: failed to cast {data!r} to {expected_type} for {cls.__name__}: {e}"
-                )
+        if _matches_type_hint(data, annotation):
+            return cls.__call__(**{field_name: data})
         return handler(data)
 
     def __repr__(self):
@@ -302,7 +339,6 @@ class InitialConditions(ROMSRuntimeSettingsSection):
     nrrec: int
     ininame: Optional[Path]
 
-    _custom_section_name = "initial"
     multi_line = True
 
     @classmethod
@@ -346,7 +382,6 @@ class MARBLBiogeochemistry(ROMSRuntimeSettingsSection):
     marbl_tracer_list_fname: Path
     marbl_diag_list_fname: Path
 
-    _custom_section_name = "MARBL_biogeochemistry"
     multi_line = True
 
 
@@ -354,8 +389,6 @@ class SCoord(ROMSRuntimeSettingsSection):
     theta_s: float
     theta_b: float
     tcline: float
-
-    _custom_section_name = "S-coord"
 
 
 class LinRhoEos(ROMSRuntimeSettingsSection):
@@ -369,7 +402,6 @@ class MYBakMixing(ROMSRuntimeSettingsSection):
     Akq_bak: float
     q2nu2: float
     q2nu4: float
-    _custom_section_name = "MY_bak_mixing"
 
 
 ################################################################################
@@ -386,16 +418,14 @@ class ROMSRuntimeSettings(BaseModel):
     output_root_name: OutputRootName
     # Optional:
     rho0: Optional[Rho0] = None
-    marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = Field(
-        alias="MARBL_biogeochemistry", default=None
-    )
-    s_coord: Optional[SCoord] = Field(alias="S-coord", default=None)
+    marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = None
+    s_coord: Optional[SCoord] = None
     lin_rho_eos: Optional[LinRhoEos] = None
     lateral_visc: Optional[LateralVisc] = None
     gamma2: Optional[Gamma2] = None
     tracer_diff2: Optional[TracerDiff2] = None
     vertical_mixing: Optional[VerticalMixing] = None
-    my_bak_mixing: Optional[MYBakMixing] = Field(alias="MY_bak_mixing", default=None)
+    my_bak_mixing: Optional[MYBakMixing] = None
     sss_correction: Optional[SSSCorrection] = None
     sst_correction: Optional[SSTCorrection] = None
     ubind: Optional[UBind] = None
@@ -403,7 +433,7 @@ class ROMSRuntimeSettings(BaseModel):
     grid: Optional[Grid] = None
     climatology: Optional[Climatology] = None
     # Pydantic model configuration
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "alias_generator": get_alias}
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -773,7 +803,7 @@ if __name__ == "__main__":
     r = ROMSRuntimeSettings.from_file(orig)
     # print(r)
     new = "./new.in"
-    r.to_file(new)
+    r.to_file(new)  # noqa
 
     with open(new, "r") as f:
         lines_new = f.readlines()

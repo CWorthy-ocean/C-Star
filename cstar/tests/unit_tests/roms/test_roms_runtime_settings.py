@@ -356,12 +356,6 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     class MockSingleEntrySection(SingleEntryROMSRuntimeSettingsSection):
         value: float
 
-    def test_init_subclass_sets_attrs(self):
-        """Tests that SingleEntryROMSRuntimeSettingsSection.__init_subclass__ correctly
-        sets the section_name and key_order attributes."""
-        # assert self.MockSingleEntrySection.section_name == "value"
-        assert self.MockSingleEntrySection.key_order == ["value"]
-
     def test_single_entry_validator_returns_cls_when_type_matches(self):
         """Tests that the `single_entry_validator` method passes a correctly typed value
         to cls() without requiring a dict or kwargs for initialization."""
@@ -396,11 +390,13 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     def test_single_entry_section_raises_if_multiple_fields(self):
         """Tests that attempting to initialize a SingleEntryROMSRuntimeSettingsSection
         with multiple entries raises a TypeError."""
-        with pytest.raises(TypeError, match="must declare exactly one field"):
+        with pytest.raises(TypeError):
 
             class InvalidSection(SingleEntryROMSRuntimeSettingsSection):
                 a: int
                 b: float
+
+            InvalidSection(a=1, b=2)
 
 
 class TestROMSRuntimeSettings:

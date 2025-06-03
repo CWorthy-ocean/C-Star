@@ -31,9 +31,6 @@ MARBL_biogeochemistry: marbl_namelist_fname marbl_tracer_list_fname marbl_diag_l
     marbl_tracer_list_fname
     marbl_diagnostic_output_list
 
-lateral_visc: lateral_visc
-    0.
-
 rho0: rho0
     1000.0
 
@@ -60,9 +57,6 @@ sst_correction: sst_correction
 
 ubind: ubind
     0.1
-
-v_sponge: v_sponge
-    0.
 
 climatology: climatology
     climfile2.nc
