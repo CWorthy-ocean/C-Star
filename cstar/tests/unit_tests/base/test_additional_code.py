@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from textwrap import dedent
+from typing import Optional
 from unittest import mock
 
 import pytest
@@ -619,7 +620,7 @@ class TestAdditionalCodeGet:
         # Ensure the repository is cloned and checked out
         self.mock_clone.assert_called_once_with(
             source_repo=remote_additional_code.source.location,
-            local_path="/mock/tmp/dir",
+            local_path=Path("/mock/tmp/dir"),
             checkout_target=remote_additional_code.checkout_target,
         )
 
@@ -642,7 +643,7 @@ class TestAdditionalCodeGet:
             )
 
         # Ensure the temporary directory is cleaned up after use
-        self.mock_rmtree.assert_called_once_with("/mock/tmp/dir")
+        self.mock_rmtree.assert_called_once_with(Path("/mock/tmp/dir"))
 
         # Ensure that the working_path is set correctly
         assert remote_additional_code.working_path == Path("/mock/local/dir")
@@ -830,7 +831,42 @@ class TestAdditionalCodeGet:
         self.mock_resolve.return_value = Path("/mock/local/dir")
 
         # Call get method
-        remote_additional_code.get("/mock/local/dir")
+        remote_additional_code.get(Path("/mock/local/dir"))
 
         # Ensure the temporary directory is cleaned up after use
-        self.mock_rmtree.assert_called_once_with("/mock/tmp/dir")
+        self.mock_rmtree.assert_called_once_with(Path("/mock/tmp/dir"))
+
+    @pytest.mark.parametrize(
+        "is_local",
+        [True, False],
+    )
+    def test_is_setup(
+        self, remote_additional_code: AdditionalCode, is_local: bool
+    ) -> None:
+        """Verify that the AdditionalCode class reports itself as set up when it finds a
+        local copy of the additional code files, and reports itself as not set up when
+        it does not find a local copy."""
+
+        with mock.patch(
+            "cstar.base.additional_code.AdditionalCode.exists_locally",
+            new_callable=mock.PropertyMock,
+            return_value=is_local,
+        ):
+            assert remote_additional_code.is_setup == is_local
+
+    @pytest.mark.parametrize("files", [None, []])
+    def test_is_setup_file_checks(
+        self, remote_additional_code: AdditionalCode, files: Optional[list[str]]
+    ) -> None:
+        """Verify that the AdditionalCode class reports itself as not set up when it has
+        no files or a null files value."""
+
+        with (
+            mock.patch(
+                "cstar.base.additional_code.AdditionalCode.exists_locally",
+                new_callable=mock.PropertyMock,
+                return_value=True,
+            ),
+            mock.patch("cstar.base.additional_code.AdditionalCode", "files", files),
+        ):
+            assert remote_additional_code.is_setup

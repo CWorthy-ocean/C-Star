@@ -1,5 +1,6 @@
 import os
 import pathlib
+from typing import Any
 from unittest import mock
 
 import dotenv
@@ -10,7 +11,7 @@ from cstar.system.manager import cstar_sysmgr
 
 
 @pytest.fixture
-def roms_codebase():
+def codebase():
     """Fixture providing a configured instance of `ROMSExternalCodeBase` for testing."""
     source_repo = "https://github.com/CESR-lab/ucla-roms.git"
     checkout_target = "246c11fa537145ba5868f2256dfb4964aeb09a25"
@@ -19,21 +20,19 @@ def roms_codebase():
     )
 
 
-def test_default_source_repo(roms_codebase):
+def test_default_source_repo(codebase):
     """Test if the default source repo is set correctly."""
-    assert (
-        roms_codebase.default_source_repo == "https://github.com/CESR-lab/ucla-roms.git"
-    )
+    assert codebase.default_source_repo == "https://github.com/CESR-lab/ucla-roms.git"
 
 
-def test_default_checkout_target(roms_codebase):
+def test_default_checkout_target(codebase):
     """Test if the default checkout target is set correctly."""
-    assert roms_codebase.default_checkout_target == "main"
+    assert codebase.default_checkout_target == "main"
 
 
-def test_expected_env_var(roms_codebase):
+def test_expected_env_var(codebase):
     """Test if the expected environment variable is set correctly."""
-    assert roms_codebase.expected_env_var == "ROMS_ROOT"
+    assert codebase.expected_env_var == "ROMS_ROOT"
 
 
 def test_defaults_are_set():
@@ -111,20 +110,21 @@ class TestROMSExternalCodeBaseGet:
         self,
         dotenv_path: pathlib.Path,
         roms_path: pathlib.Path,
-        roms_codebase: ROMSExternalCodeBase,
+        codebase: ROMSExternalCodeBase,
     ):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
         with mock.patch(
-            "cstar.system.environment.CSTAR_USER_ENV_PATH",
-            dotenv_path,
+            "cstar.system.environment.CStarEnvironment.user_env_path",
+            new_callable=mock.PropertyMock,
+            return_value=dotenv_path,
         ):
             ## Mock success of calls to subprocess.run:
             self.mock_subprocess_run.return_value.returncode = 0
 
             # Test
             ## Call the get method
-            roms_codebase.get(target=roms_path)
+            codebase.get(target=roms_path)
 
             # Assertions:
             ## Check environment variables
@@ -133,17 +133,17 @@ class TestROMSExternalCodeBaseGet:
             exp_roms_value = str(roms_path)
             exp_roms_tools_value = f":{roms_path / 'Tools-Roms'}"
 
-            assert os.environ[roms_codebase.expected_env_var] == exp_roms_value
+            assert os.environ[codebase.expected_env_var] == exp_roms_value
             assert exp_roms_tools_value in os.environ["PATH"]
 
             ## Check that _clone_and_checkout was (mock) called correctly
             self.mock_clone_and_checkout.assert_called_once_with(
-                source_repo=roms_codebase.source_repo,
+                source_repo=codebase.source_repo,
                 local_path=roms_path,
-                checkout_target=roms_codebase.checkout_target,
+                checkout_target=codebase.checkout_target,
             )
 
-            k0, v0 = roms_codebase.expected_env_var, str(roms_path)
+            k0, v0 = codebase.expected_env_var, str(roms_path)
             k1, v1 = "PATH", f"${{PATH}}{exp_roms_tools_value}"
 
             cfg = dotenv.dotenv_values(dotenv_path)
@@ -153,6 +153,7 @@ class TestROMSExternalCodeBaseGet:
             assert v0 == actual_value
 
             actual_value = cfg[k1]
+            assert actual_value is not None
             assert v1.split(":")[1] in actual_value
 
             self.mock_subprocess_run.assert_any_call(
@@ -171,7 +172,85 @@ class TestROMSExternalCodeBaseGet:
                 shell=True,
             )
 
-    def test_make_nhmg_failure(self, roms_codebase, tmp_path):
+    def test_get_prebuilt(
+        self,
+        dotenv_path: pathlib.Path,
+        roms_path: pathlib.Path,
+        codebase: ROMSExternalCodeBase,
+    ):
+        """Test that the get method succeeds when a prebuilt ROMS codebase is
+        configured."""
+
+        env_copy = os.environ.copy()
+        env_copy[codebase.expected_env_var] = str(roms_path)
+        env_copy[codebase.prebuilt_env_var] = "1"
+
+        with (
+            mock.patch(
+                "cstar.system.environment.CStarEnvironment.user_env_path",
+                new_callable=mock.PropertyMock,
+                return_value=dotenv_path,
+            ),
+            mock.patch.dict(os.environ, env_copy),
+        ):
+            ## Mock subprocess.run calls to appear successful
+            self.mock_subprocess_run.return_value.returncode = 0
+
+            # Test
+            codebase.get(target=roms_path)
+
+            ## Assertions:
+            # Confirm that the codebase ignores the prebuilt environment variable
+            self.mock_clone_and_checkout.assert_called()
+
+    def test_local_config_status_with_prebuilt_and_root(
+        self,
+        dotenv_path: pathlib.Path,
+        codebase: ROMSExternalCodeBase,
+        custom_user_env: Any,
+    ):
+        """Test that the `local_config_status` method return an appropriate return code
+        when a prebuilt ROMS codebase is configured."""
+
+        mock_path = "/any/path/it/is/not/verified"
+        custom_user_env(
+            {
+                codebase.prebuilt_env_var: "1",
+                codebase.expected_env_var: mock_path,
+            }
+        )
+        assert os.environ[codebase.prebuilt_env_var] == "1"
+        assert os.environ[codebase.expected_env_var] == mock_path
+
+        # Test
+        status_code = codebase.local_config_status
+
+        ## Assertions:
+        # Confirm that the status is 0 when prebuilt & expected var are set
+        assert status_code == 0
+
+    def test_local_config_status_with_prebuilt_and_no_root(
+        self,
+        codebase: ROMSExternalCodeBase,
+        custom_user_env: Any,
+    ):
+        """Test that the `local_config_status` method returns an appropriate return code
+        when a prebuilt ROMS codebase is configured but the expected environment
+        variable is not set."""
+
+        # Do NOT set `xxx_codebase.expected_env_var`, only prebuilt_env_var
+        custom_user_env({codebase.prebuilt_env_var: "1"})
+        assert os.environ[codebase.prebuilt_env_var] == "1"
+        assert codebase.expected_env_var not in os.environ
+
+        # Test
+        status_code = codebase.local_config_status
+
+        ## Assertions:
+        # Confirm that the status is 4 due to missing XXX_ROOT
+        assert status_code == 4
+
+    def test_make_nhmg_failure(self, codebase, tmp_path):
         """Test that the get method raises an error when 'make nhmg' fails."""
 
         ## There are two subprocess calls, we'd like one fail, one pass:
@@ -190,17 +269,18 @@ class TestROMSExternalCodeBaseGet:
                 match="Error when compiling ROMS' NHMG library. Return Code: `1`. STDERR:\nCompiling NHMG library failed successfully",
             ),
             mock.patch(
-                "cstar.system.environment.CSTAR_USER_ENV_PATH",
-                dotenv_path,
+                "cstar.system.environment.CStarEnvironment.user_env_path",
+                new_callable=mock.PropertyMock,
+                return_value=dotenv_path,
             ),
         ):
-            roms_codebase.get(target=tmp_path)
+            codebase.get(target=tmp_path)
 
         # Assertions:
         ## Check that subprocess.run was called only once due to failure
         assert self.mock_subprocess_run.call_count == 1
 
-    def test_make_tools_roms_failure(self, roms_codebase, tmp_path):
+    def test_make_tools_roms_failure(self, codebase, tmp_path):
         """Test that the get method raises an error when 'make Tools-Roms' fails."""
 
         # Simulate success for `make nhmg` and failure for `make Tools-Roms`
@@ -215,7 +295,12 @@ class TestROMSExternalCodeBaseGet:
         with pytest.raises(
             RuntimeError, match="Compiling Tools-Roms failed successfully"
         ):
-            roms_codebase.get(target=tmp_path)
+            codebase.get(target=tmp_path)
 
         # Check that subprocess.run was called twice
         assert self.mock_subprocess_run.call_count == 2
+
+    def test_prebuilt_env_var(self):
+        """Verify that the value of the prebuilt_env_var is set correctly."""
+        roms_codebase = ROMSExternalCodeBase()
+        assert roms_codebase.prebuilt_env_var == "CSTAR_ROMS_PREBUILT"

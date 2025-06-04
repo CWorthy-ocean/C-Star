@@ -10,7 +10,6 @@ from cstar.base.gitutils import (
     _get_repo_remote,
 )
 from cstar.base.log import LoggingMixin
-from cstar.system.environment import CSTAR_USER_ENV_PATH
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -45,11 +44,11 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     Methods
     -------
-    get_local_config_status()
+    local_config_status()
         Perform a series of checks to determine how the external codebase is configured on this machine
         relative to this ExternalCodeBase instance.
     handle_local_config_status()
-        Perform actions depending on the output of get_local_config_status()
+        Perform actions depending on the output of local_config_status()
     get()
         Obtain and configure the external codebase on this machine if it is not already.
         handle_local_config_status() prompts the user to run get() if the model cannot be found.
@@ -155,6 +154,17 @@ class ExternalCodeBase(ABC, LoggingMixin):
         MARBL_ROOT."""
 
     @property
+    @abstractmethod
+    def prebuilt_env_var(self) -> str:
+        """Environment variable indicating that this codebase is already built.
+
+        Returns:
+        -------
+        prebuilt_env_var: str
+            The name of the environment variable.
+        """
+
+    @property
     def local_config_status(self) -> int:
         """Perform a series of checks to ensure that the external codebase is properly
         configured on this machine.
@@ -172,44 +182,66 @@ class ExternalCodeBase(ABC, LoggingMixin):
            1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
            2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
            3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
+           4: The expected environment variable is not present, but the prebuilt flag is set to 1
         """
 
         # check 1: X_ROOT variable is in user's env
-        env_var_exists = (
-            self.expected_env_var
-            in cstar_sysmgr.environment.environment_variables.keys()
-        )
+        root_value = os.environ.get(self.expected_env_var, None)
 
         # check 2: X_ROOT points to the correct repository
-        if env_var_exists:
-            local_root = Path(
-                cstar_sysmgr.environment.environment_variables[self.expected_env_var]
-            )
-            env_var_repo_remote = _get_repo_remote(local_root)
-            env_var_matches_repo = self.source_repo == env_var_repo_remote
-            if not env_var_matches_repo:
-                return 1
-            else:
-                # check 3: local codebase repo HEAD matches correct checkout hash:
-                head_hash = _get_repo_head_hash(local_root)
-                head_hash_matches_checkout_hash = head_hash == self.checkout_hash
-                if head_hash_matches_checkout_hash:
-                    return 0
-                else:
-                    return 2
+        prebuilt_flag = os.environ.get(self.prebuilt_env_var, "0")
 
-        else:  # env_var_exists False (e.g. ROMS_ROOT not defined)
+        if prebuilt_flag == "1" and root_value:
+            self.log.info(f"Using pre-built {self.expected_env_var} in {root_value}.")
+            return 0
+        elif not root_value and prebuilt_flag == "1":
+            self.log.info(
+                f"Environment variable {self.expected_env_var} expected "
+                "for using a prebuilt external codebase."
+            )
+            return 4
+        elif not root_value:
+            self.log.info(f"Environment variable {self.expected_env_var} not found.")
             return 3
+
+        local_root = Path(root_value)
+        env_var_repo_remote = _get_repo_remote(local_root)
+        head_hash = _get_repo_head_hash(local_root)
+
+        if self.source_repo != env_var_repo_remote:
+            self.log.info(
+                "Codebase remote and local repository do not match "
+                f"({self.source_repo} != {env_var_repo_remote})."
+            )
+            return 1
+
+        # check 3: local codebase repo HEAD does not match correct checkout hash:
+        if head_hash != self.checkout_hash:
+            self.log.info(
+                "Local codebase does not match expected checkout hash "
+                f"({head_hash} != {self.checkout_hash})."
+            )
+            return 2
+
+        self.log.debug("Found local codebase matching expected checkout hash.")
+        return 0
 
     @property
     def is_setup(self) -> bool:
-        return True if self.local_config_status == 0 else False
+        """Return True if the code is available locally, False otherwise.
+
+        Returns:
+        -------
+        is_setup: bool
+            True if the code is available locally, False otherwise.
+        """
+        return self.local_config_status == 0
 
     def handle_config_status(self) -> None:
         """Perform actions depending on the output of
-        ExternalCodeBase.get_local_config_status()
+        ExternalCodeBase.local_config_status.
 
-        The config_status attribute should be set by the get_local_config_status method
+        The config_status attribute should be set by the local_config_status method
 
         The method then proceeds as follows:
         config_status =
@@ -223,11 +255,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
            - 3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
                -> prompt installation of the external codebase
         """
-        local_root = Path(
-            cstar_sysmgr.environment.environment_variables.get(
-                self.expected_env_var, ""
-            )
-        )
+        local_root = Path(os.environ.get(self.expected_env_var, ""))
 
         interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
 
@@ -288,6 +316,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     cstar_sysmgr.environment.package_root
                     / f"externals/{self.repo_basename}"
                 )
+                user_env_path = cstar_sysmgr.environment.user_env_path
                 print(
                     (
                         "#######################################################\n"
@@ -298,7 +327,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         "you will need to set it up.\n"
                         "It is recommended that you install this external codebase in \n"
                         f"{ext_dir}\n"
-                        f"This will also modify your `{CSTAR_USER_ENV_PATH}` file.\n"
+                        f"This will also modify your `{user_env_path}` file.\n"
                         "#######################################################"
                     )
                 )

@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -21,6 +22,12 @@ class MockExternalCodeBase(ExternalCodeBase):
     @property
     def expected_env_var(self):
         return "TEST_ROOT"
+
+    @property
+    def prebuilt_env_var(self):
+        """Returns the environment variable that indicates a prebuilt codebase will be
+        used."""
+        return "TEST_PREBUILT"
 
     @property
     def default_source_repo(self):
@@ -162,15 +169,6 @@ class TestExternalCodeBaseConfig:
     """
 
     def setup_method(self):
-        self.patch_environment = mock.patch(
-            "cstar.system.manager.CStarSystemManager.environment",
-            new_callable=mock.PropertyMock,
-            return_value=mock.Mock(
-                environment_variables={"TEST_ROOT": "/path/to/repo"}
-            ),
-        )
-        self.mock_environment = self.patch_environment.start()
-
         self.patch_get_repo_remote = mock.patch(
             "cstar.base.external_codebase._get_repo_remote"
         )
@@ -182,12 +180,17 @@ class TestExternalCodeBaseConfig:
         self.mock_get_repo_head_hash = self.patch_get_repo_head_hash.start()
 
     def teardown_method(self):
-        self.patch_environment.stop()
         self.patch_get_repo_remote.stop()
         self.patch_get_repo_head_hash.stop()
 
-    def test_local_config_status_valid(self, generic_codebase):
-        # Set return values for other mocks
+    def test_local_config_status_valid(
+        self,
+        generic_codebase: ExternalCodeBase,
+        default_user_env: Any,
+    ):
+        """Verify that local_config_status is 0 when the codebase has a valid repo url
+        and hash."""
+
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "test123"
 
@@ -195,21 +198,39 @@ class TestExternalCodeBaseConfig:
         assert generic_codebase.local_config_status == 0
         assert generic_codebase.is_setup
 
-    def test_local_config_status_wrong_remote(self, generic_codebase):
+    def test_local_config_status_wrong_remote(
+        self,
+        generic_codebase: ExternalCodeBase,
+        default_user_env: Any,
+    ):
+        """Verify the local_config_status is 1 when the codebase has a mismatch between
+        the repo URL and the directory on disk."""
         self.mock_get_repo_remote.return_value = (
             "https://github.com/test/wrong_repo.git"
         )
 
         assert generic_codebase.local_config_status == 1
 
-    def test_local_config_status_wrong_checkout(self, generic_codebase):
+    def test_local_config_status_wrong_checkout(
+        self,
+        generic_codebase: ExternalCodeBase,
+        default_user_env: Any,
+    ):
+        """Verify that local_config_status is 2 when the codebase has a valid repo URL
+        but the checkout hash does not match the desired hash."""
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
         assert generic_codebase.local_config_status == 2
 
-    def test_local_config_status_no_env_var(self, generic_codebase):
-        self.mock_environment.return_value.environment_variables = {}
+    def test_local_config_status_no_env_var(
+        self,
+        generic_codebase: ExternalCodeBase,
+        empty_user_env: Any,
+    ):
+        """Verify that local_config_status is 3 when no XXX_ROOT environment variable is
+        set."""
+
         assert generic_codebase.local_config_status == 3
 
 
@@ -368,6 +389,7 @@ class TestExternalCodeBaseConfigHandling:
         generic_codebase,
         capsys: pytest.CaptureFixture,
         tmp_path: Path,
+        default_user_env: Any,
     ):
         """Test handling when local_config_status == 2 (right remote, wrong hash) and
         user agrees to checkout."""
