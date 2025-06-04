@@ -813,20 +813,3 @@ class ROMSRuntimeSettings(BaseModel):
 
         with Path(filepath).open("w") as f:
             f.write(self.model_dump())
-
-
-if __name__ == "__main__":
-    orig = "/Users/eilerman/Downloads/sje_pacmed12km_Y2000.in"
-    r = ROMSRuntimeSettings.from_file(orig)
-    # print(r)
-    new = "./new.in"
-    r.to_file(new)  # noqa
-
-    with open(new, "r") as f:
-        lines_new = f.readlines()
-    with open(orig, "r") as f:
-        lines_orig = f.readlines()
-
-    r2 = ROMSRuntimeSettings.from_file(new)
-    assert r == r2
-    # assert lines_orig == lines_new
