@@ -1442,8 +1442,8 @@ class ROMSSimulation(Simulation):
         else:  # cstar_sysmgr.scheduler is None
             romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
             self._execution_handler = romsprocess
-            romsprocess.start()
             self.persist()
+            romsprocess.start()
             return romsprocess
 
     def post_run(self) -> None:
