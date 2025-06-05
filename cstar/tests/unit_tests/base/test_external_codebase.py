@@ -113,21 +113,20 @@ def test_codebase_str(generic_codebase):
         )
 
 
-@mock.patch(
-    "cstar.system.environment.CStarEnvironment",
-    "environment_variables",
-    new_callable=mock.PropertyMock(return_value={}),
-)
-def test_codebase_repr(generic_codebase: ExternalCodeBase):
+def test_codebase_repr(generic_codebase: MockExternalCodeBase):
     """Test the repr representation of the `ExternalCodeBase` class."""
+
+    lcs = generic_codebase.local_config_status
+    tgt = generic_codebase.checkout_target
+    url = generic_codebase.source_repo
 
     result_repr = repr(generic_codebase)
     expected_repr = (
         "MockExternalCodeBase("
-        + "\nsource_repo = 'https://github.com/test/repo.git',"
-        + "\ncheckout_target = 'test_target'"
+        + f"\nsource_repo = '{url}',"
+        + f"\ncheckout_target = '{tgt}'"
         + "\n)"
-        + "\nState: <local_config_status = 3>"
+        + f"\nState: <local_config_status = {lcs}>"
     )
 
     assert result_repr == expected_repr
