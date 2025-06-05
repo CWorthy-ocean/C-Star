@@ -249,6 +249,9 @@ def _run_cmd(
     if env:
         kwargs["env"] = env
 
+    print("#" * 80)
+    print(f"Running Command: {cmd} in dir: {cwd}")
+
     result: subprocess.CompletedProcess[str] = fn(**kwargs)
     stdout = str(result.stdout).strip() if result.stdout is not None else ""
 

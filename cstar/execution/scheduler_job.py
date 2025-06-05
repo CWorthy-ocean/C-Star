@@ -1,11 +1,16 @@
+import abc
+import dataclasses
 import json
+import logging
 import os
 import re
+import uuid
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, override
 
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
@@ -18,6 +23,196 @@ from cstar.system.scheduler import (
     SlurmQOS,
     SlurmScheduler,
 )
+
+
+@dataclasses.dataclass
+class JobStatus(abc.ABC):
+    state: ExecutionStatus
+
+    @property
+    @abstractmethod
+    def is_terminated(self) -> bool: ...
+
+    @property
+    @abstractmethod
+    def is_running(self) -> bool: ...
+
+    @staticmethod
+    @abstractmethod
+    def map_status(state: str) -> ExecutionStatus: ...
+
+    @staticmethod
+    @abstractmethod
+    def from_raw(state: str) -> "JobStatus": ...
+
+
+@dataclasses.dataclass
+class SlurmJobStatus(JobStatus):
+    state: ExecutionStatus
+
+    @override
+    @property
+    def is_terminated(self) -> bool:
+        """Returns `True` if the job has completed."""
+        return self.state in {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.FAILED,
+        }
+
+    @override
+    @property
+    def is_running(self) -> bool:
+        """Returns `True` if the job has not yet completed."""
+        return self.state in {
+            ExecutionStatus.PENDING,
+            ExecutionStatus.RUNNING,
+        }
+
+    @override
+    @staticmethod
+    def map_status(raw_status: str) -> ExecutionStatus:
+        """Map raw output from sacct to the ExecutionStatus enum.
+
+        Return ExecutionStatus.UNKNOWN if state cannot be mapped.
+
+        Raises
+        ------
+        ValueError
+            If an empty `raw_state` is provided
+        """
+        if not raw_status or not raw_status.strip():
+            raise ValueError("Unable to map an empty raw status")
+
+        sacct_status_map: dict[str, ExecutionStatus] = defaultdict(
+            lambda: ExecutionStatus.UNKNOWN
+        )
+        sacct_status_map.update(
+            {
+                "PENDING": ExecutionStatus.PENDING,
+                "RUNNING": ExecutionStatus.RUNNING,
+                "COMPLETED": ExecutionStatus.COMPLETED,
+                "CANCELLED": ExecutionStatus.CANCELLED,
+                "FAILED": ExecutionStatus.FAILED,
+            }
+        )
+        key = raw_status.upper()
+        return sacct_status_map[key]
+
+    @override
+    @staticmethod
+    def from_raw(raw_state: str) -> "SlurmJobStatus":
+        """Convert the raw output of a call to `sacct` into a `SlurmJobStatus` instance.
+
+        Raises
+        ------
+        ValueError
+            If an empty `raw_state` is provided
+        """
+        if not raw_state or not raw_state.strip():
+            raise ValueError("Unable to convert empty raw state")
+
+        status = SlurmJobStatus.map_status(raw_state)
+        return SlurmJobStatus(status)
+
+
+def retrieve_status(
+    slurm_job_id: str,
+    *,
+    log: logging.Logger,
+    task_id: Optional[str] = None,
+    task_name: Optional[str] = None,
+) -> list[tuple[str, str, str]]:
+    """Query SLURM for the status of a job or task.
+
+    Parameters
+    ----------
+    slurm_job_id : str
+        The ID of the main job
+
+    Returns
+    -------
+    status_lines: list[tuple[str, str, str]]
+        Output of the query; tuples containing [job-id, job-status, job-name]
+
+    Raises
+    ------
+    ValueError
+        If an invalid `slurm_job_id` is provided
+    """
+    if not slurm_job_id or not slurm_job_id.strip():
+        raise ValueError("Invalid slurm_job_id provided")
+
+    slurm_job_id = slurm_job_id.strip() if slurm_job_id else ""
+    task_id = task_id.strip() if task_id else ""
+    task_name = task_name.strip() if task_name else ""
+
+    sacct_cmd = (
+        f"sacct -j {slurm_job_id} "
+        "--format=JobID,State,JobName --noheader -P --delimiter=,"
+    )
+    stdout = _run_cmd(
+        sacct_cmd,
+        msg_err=f"Failed to retrieve job status using {sacct_cmd}.",
+        raise_on_error=True,
+    )
+
+    # remove empties and filter to lines containing job-id, status, job-name triplet
+    status_lines = (x.strip().split(",") for x in stdout.split("\n") if x.strip())
+    status_data = filter(lambda x: len(x) == 3, status_lines)
+    status_tuples = list(map(lambda x: (x[0], x[1], x[2]), status_data))
+
+    if not status_tuples:
+        log.debug(f"No status results for job {slurm_job_id} found")
+
+    return status_tuples
+
+
+def query_status(
+    slurm_job_id: str,
+    *,
+    log: logging.Logger,
+    task_id: Optional[str] = None,
+    task_name: Optional[str] = None,
+) -> tuple[str, str, str]:
+    """Parse output from SLURM for the status of a job or task, looking for a specific
+    job or task.
+
+    Parameters
+    ----------
+    stdout : str
+        The raw output of the call to `sacct` by `SLURM`
+
+    Returns
+    -------
+    details: tuple[str, str, str]
+        A tuple containing the job id, job status, and job name
+    """
+
+    status_lines = retrieve_status(
+        slurm_job_id, log=log, task_id=task_id, task_name=task_name
+    )
+
+    result: Optional[tuple[str, str, str]] = None
+    if status_lines:
+        # Batch job will have JobID == slurm_job_id, srun has slurm_job_id.<StepID>
+        if task_id:
+            result = next(
+                (atom for atom in status_lines if atom[0] == str(task_id)), None
+            )
+        elif task_name:
+            result = next(
+                (atom for atom in status_lines if atom[2] == str(task_name)), None
+            )
+        else:
+            result = next(
+                (atom for atom in status_lines if atom[0] == str(slurm_job_id)), None
+            )
+
+    if not result:
+        return "", str(ExecutionStatus.UNSUBMITTED).lower(), ""
+
+    return result
 
 
 def create_scheduler_job(
@@ -81,10 +276,13 @@ def create_scheduler_job(
     """
 
     # mypy assigns type based on first condition, assigning explicitly:
-    job_type: type[SlurmJob] | type[PBSJob]
+    job_type: type[SlurmJob] | type[PBSJob] | type[SlurmInteractiveJob]
 
     if isinstance(cstar_sysmgr.scheduler, SlurmScheduler):
-        job_type = SlurmJob
+        if not os.environ.get("SLURM_JOB_ID", None):
+            job_type = SlurmJob
+        else:
+            job_type = SlurmJob
     elif isinstance(cstar_sysmgr.scheduler, PBSScheduler):
         job_type = PBSJob
     else:
@@ -338,7 +536,8 @@ class SchedulerJob(ExecutionHandler, ABC):
             self._nodes = nodes
 
         self._account_key = account_key
-        self._id: Optional[int] = None
+        self._id: Optional[str] = None
+        self._job_status: Optional[JobStatus] = None
 
     @property
     def output_file(self) -> Path:
@@ -404,7 +603,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         return self._commands
 
     @property
-    def id(self) -> Optional[int]:
+    def id(self) -> Optional[str]:
         """Retrieve the unique job ID assigned by the scheduler.
 
         The job ID is assigned when the job is successfully submitted to the scheduler.
@@ -413,7 +612,7 @@ class SchedulerJob(ExecutionHandler, ABC):
 
         Returns
         -------
-        id: int or None
+        id: str or None
             The unique job ID assigned by the scheduler, or `None` if the job has not
             been submitted.
         """
@@ -589,28 +788,21 @@ class SlurmJob(SchedulerJob):
         RuntimeError
             If the command to retrieve the job status fails or returns an unexpected result.
         """
+        if self._job_status is not None:
+            return self._job_status.state
 
         if self.id is None:
             return ExecutionStatus.UNSUBMITTED
-        else:
-            sacct_cmd = f"sacct -j {self.id} --format=State%20 --noheader"
-            msg_err = f"Failed to retrieve job status using {sacct_cmd}."
-            stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
 
-        # Map sacct states to ExecutionStatus enum
-        sacct_status_map = {
-            "PENDING": ExecutionStatus.PENDING,
-            "RUNNING": ExecutionStatus.RUNNING,
-            "COMPLETED": ExecutionStatus.COMPLETED,
-            "CANCELLED": ExecutionStatus.CANCELLED,
-            "FAILED": ExecutionStatus.FAILED,
-        }
-        for state, status in sacct_status_map.items():
-            if state in stdout:
-                return status
+        job_id, job_status, job_name = query_status(self.id, log=self.log)
+        self.log.debug(f"Retrieved status {job_status} for job: {self.id}")
 
-        # Fallback if no known state is found
-        return ExecutionStatus.UNKNOWN
+        result = SlurmJobStatus.from_raw(job_status)
+        if result.is_terminated:
+            # cache the result to avoid additional, unnecessary status retrievals.
+            self._job_status: SlurmJobStatus = result
+
+        return result.state
 
     @property
     def script(self) -> str:
@@ -650,7 +842,7 @@ class SlurmJob(SchedulerJob):
         scheduler_script += f"\n\n{self.commands}"
         return scheduler_script
 
-    def submit(self) -> Optional[int]:
+    def submit(self) -> Optional[str]:
         """Submit the job to the SLURM scheduler.
 
         This method saves the job script to the specified `script_path` and submits it
@@ -659,7 +851,7 @@ class SlurmJob(SchedulerJob):
 
         Returns
         -------
-        job_id : int
+        job_id : str
             The unique job ID assigned by the SLURM scheduler.
 
         Raises
@@ -691,7 +883,7 @@ class SlurmJob(SchedulerJob):
         # Extract the job ID from the output
         matches = re.search(r"Submitted batch job (\d+)", stdout)
         if matches:
-            self._id = int(matches.group(1))
+            self._id = matches.group(1)
             return self._id
         else:
             raise RuntimeError(f"Failed to parse job ID from sbatch output: {stdout}")
@@ -711,6 +903,183 @@ class SlurmJob(SchedulerJob):
         """
 
         if self.status not in {ExecutionStatus.RUNNING, ExecutionStatus.PENDING}:
+            self.log.info(f"Cannot cancel job with status '{self.status}'")
+            return
+
+        _run_cmd(
+            f"scancel {self.id}",
+            cwd=self.run_path,
+            raise_on_error=True,
+            msg_post=f"Job {self.id} cancelled",
+            msg_err="Non-zero exit code when cancelling job.",
+        )
+
+
+class SlurmInteractiveJob(SchedulerJob):
+    """Represents a job submitted to the SLURM scheduler.
+
+    This class extends `SchedulerJob` to handle SLURM-specific functionality for
+    job submission, status retrieval, and script generation.
+
+    Attributes
+    ----------
+    scheduler : SlurmScheduler
+        The SLURM scheduler managing this job.
+    commands : str
+        The commands to execute within the job script.
+    account_key : str
+        The account key associated with the job for resource tracking.
+    cpus : int
+        The total number of CPUs required for the job.
+    nodes : int or None
+        The number of nodes to request.
+        If not provided and a specific nodes x CPUs distribution is required,
+        C-Star will attempt to calculate an appropriate number of nodes.
+    cpus_per_node : int or None
+        The number of CPUs per node to request.
+        If not provided and a specific nodes x CPUs distribution is required,
+        C-Star will attempt to calculate an appropriate number of CPUs per node.
+    script_path : Path
+        The file path where the job script will be saved.
+    run_path : Path
+        The directory where the job will be executed.
+    job_name : str
+        The name of the job.
+    output_file : Path
+        The file path for job output.
+    queue_name : str
+        The name of the SLURM queue (partition or QOS) to which the job will be submitted.
+    walltime : str
+        The maximum walltime for the job, in the format "HH:MM:SS".
+    id : int or None
+        The unique job ID assigned by the SLURM scheduler. None if the job has not been submitted.
+    status : ExecutionStatus
+        The current status of the job, retrieved from SLURM.
+    script : str
+        The SLURM-specific job script, including directives and commands.
+
+    Methods
+    -------
+    submit()
+        Submit the job to the SLURM scheduler.
+    cancel()
+        Cancel the job using the SLURM `scancel` command.
+    """
+
+    @property
+    def status(self) -> ExecutionStatus:
+        """Retrieve the current status of the job from the SLURM scheduler.
+
+        This property queries SLURM using the `sacct` command to determine the job's
+        state and maps it to a corresponding `ExecutionStatus` enumeration.
+
+        Returns
+        -------
+        status: ExecutionStatus
+            The current status of the job. Possible values include:
+            - `ExecutionStatus.PENDING`: The job has been submitted but is waiting to start.
+            - `ExecutionStatus.RUNNING`: The job is currently executing.
+            - `ExecutionStatus.COMPLETED`: The job finished successfully.
+            - `ExecutionStatus.CANCELLED`: The job was cancelled before completion.
+            - `ExecutionStatus.FAILED`: The job finished unsuccessfully.
+            - `ExecutionStatus.UNKNOWN`: The job state could not be determined.
+
+        Raises
+        ------
+        RuntimeError
+            If the command to retrieve the job status fails or returns an unexpected result.
+        """
+
+        if self._job_status is not None:
+            return self._job_status.state  # type: ignore
+
+        _, job_status, _ = query_status(
+            self._slurm_job_id, log=self.log, task_id=self._id
+        )
+        self.log.debug(f"Retrieved status {job_status} for job: {self.id}")
+
+        result = SlurmJobStatus.from_raw(job_status)
+        if result.is_terminated:
+            # cache the result to avoid additional, unnecessary status retrievals.
+            self._job_status = result
+
+        return result.state
+
+    @property
+    def script(self) -> str:
+        """Generate the SLURM-specific job script to be submitted to the scheduler.
+        Includes standard Slurm scheduler directives as well as scheduler-specific
+        directives specified by the scheduler.other_scheduler_directives attribute.
+
+        Returns
+        -------
+        scheduler_script: str
+            The complete SLURM job script as a string, ready for submission.
+        """
+
+        scheduler_script = "#!/bin/bash"
+
+        # Add roms command to scheduler script
+        scheduler_script += f"\n\n{self.commands}"
+        return scheduler_script
+
+    def submit(self) -> Optional[str]:
+        """Submit the job to the SLURM scheduler.
+
+        This method saves the job script to the specified `script_path` and submits it
+        to the SLURM scheduler using the `sbatch` command. It extracts and stores the
+        job ID assigned by SLURM to the 'id' attribute.
+
+        Returns
+        -------
+        job_id : str
+            The unique job ID assigned by the SLURM scheduler.
+
+        Raises
+        ------
+        RuntimeError
+            If the `srun` command fails or if the job ID cannot be extracted from the
+            submission output.
+        """
+
+        if slurm_job_id := os.environ.get("SLURM_JOB_ID", None):
+            # generate a unique identifier for this task
+            self._id = str(uuid.uuid4()).split("-")[0]
+            self._slurm_job_id = slurm_job_id
+            self._commands = self._commands.replace("srun", f"srun -J {self._id}")
+
+        self.save_script()
+
+        # Execute the step immediately in a blocking manner
+        stdout = _run_cmd(
+            self.commands,
+            cwd=self.run_path,
+            msg_err="Non-zero exit code when submitting job.",
+            raise_on_error=True,
+        )
+
+        print(stdout)
+
+        _, job_status, _ = query_status(
+            self._slurm_job_id, log=self.log, task_id=self.id
+        )
+
+        return self.id
+
+    def cancel(self):
+        """Cancel the job in the SLURM scheduler.
+
+        This method cancels the job using the SLURM `scancel` command and provides
+        feedback about the cancellation process.
+
+        It can only be used on jobs with RUNNING or PENDING status.
+
+        Raises
+        ------
+        RuntimeError
+            If the `scancel` command fails or returns a non-zero exit code.
+        """
+        if self.status.is_running:
             self.log.info(f"Cannot cancel job with status '{self.status}'")
             return
 
@@ -873,7 +1242,7 @@ class PBSJob(SchedulerJob):
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse JSON from qstat output: {e}")
 
-    def submit(self) -> Optional[int]:
+    def submit(self) -> Optional[str]:
         """Submit the job to the PBS scheduler.
 
         This method saves the job script to the specified `script_path` and submits it
@@ -882,7 +1251,7 @@ class PBSJob(SchedulerJob):
 
         Returns
         -------
-        job_id : int
+        job_id : str
             The unique job ID assigned by the PBS scheduler.
 
         Raises
@@ -907,7 +1276,7 @@ class PBSJob(SchedulerJob):
             raise RuntimeError(f"Unexpected job ID format from qsub: {job_id_full}")
 
         # Extract the job ID from the output
-        self._id = int(job_id_full.split(".")[0])
+        self._id = job_id_full.split(".")[0]
         return self._id
 
     def cancel(self):

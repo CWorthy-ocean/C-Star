@@ -271,7 +271,7 @@ class TestSlurmJob:
         )
 
         # Check that the job ID was set
-        assert job.id == 12345
+        assert job.id == "12345"
 
     @pytest.mark.parametrize(
         "subprocess_stdout, subprocess_returncode, expected_exception_message",
@@ -382,7 +382,7 @@ class TestSlurmJob:
             **self.common_job_params,
             run_path=run_path,
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = "12345"  # Manually set the job ID
 
         # Call cancel
         job.cancel()
@@ -464,24 +464,42 @@ class TestSlurmJob:
         "job_id, sacct_output, return_code, expected_status, should_raise",
         [
             (None, "", 0, ExecutionStatus.UNSUBMITTED, False),  # Unsubmitted job
-            (12345, "PENDING\n", 0, ExecutionStatus.PENDING, False),  # Pending job
-            (12345, "RUNNING\n", 0, ExecutionStatus.RUNNING, False),  # Running job
             (
-                12345,
-                "COMPLETED\n",
+                "12345",
+                "12345,PENDING,TheJobName\n",
+                0,
+                ExecutionStatus.PENDING,
+                False,
+            ),  # Pending job
+            (
+                "12345",
+                "12345,RUNNING,TheJobName\n",
+                0,
+                ExecutionStatus.RUNNING,
+                False,
+            ),  # Running job
+            (
+                "12345",
+                "12345,COMPLETED,TheJobName\n",
                 0,
                 ExecutionStatus.COMPLETED,
                 False,
             ),  # Completed job
             (
-                12345,
-                "CANCELLED\n",
+                "12345",
+                "12345,CANCELLED,TheJobName\n",
                 0,
                 ExecutionStatus.CANCELLED,
                 False,
             ),  # Cancelled job
-            (12345, "FAILED\n", 0, ExecutionStatus.FAILED, False),  # Failed job
-            (12345, "", 1, None, True),  # sacct command failure
+            (
+                "12345",
+                "12345,FAILED,TheJobName\n",
+                0,
+                ExecutionStatus.FAILED,
+                False,
+            ),  # Failed job
+            ("12345", "", 1, None, True),  # sacct command failure
         ],
     )
     def test_status(

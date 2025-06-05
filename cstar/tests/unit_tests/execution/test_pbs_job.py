@@ -302,7 +302,7 @@ class TestPBSJob:
             **self.common_job_params,
             run_path=tmp_path,
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = "12345"  # Manually set the job ID
 
         # Get the logger from the job instance
         caplog.set_level(logging.INFO, logger=job.log.name)
