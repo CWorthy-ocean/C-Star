@@ -445,11 +445,12 @@ class ROMSRuntimeSettings(BaseModel):
     forcing: Forcing
     output_root_name: OutputRootName
 
-    rho0: Optional[Rho0] = None
-    marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = None
     s_coord: Optional[SCoord] = None
-    lin_rho_eos: Optional[LinRhoEos] = None
+    grid: Optional[Grid] = None
+    marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = None
     lateral_visc: Optional[LateralVisc] = None
+    rho0: Optional[Rho0] = None
+    lin_rho_eos: Optional[LinRhoEos] = None
     gamma2: Optional[Gamma2] = None
     tracer_diff2: Optional[TracerDiff2] = None
     vertical_mixing: Optional[VerticalMixing] = None
@@ -458,7 +459,6 @@ class ROMSRuntimeSettings(BaseModel):
     sst_correction: Optional[SSTCorrection] = None
     ubind: Optional[UBind] = None
     v_sponge: Optional[VSponge] = None
-    grid: Optional[Grid] = None
     climatology: Optional[Climatology] = None
 
     # Pydantic model configuration
@@ -799,7 +799,7 @@ class ROMSRuntimeSettings(BaseModel):
             if section is None:
                 continue
             output += section.model_dump()
-            output += "\n"
+
         return output
 
     def to_file(self, filepath: str | Path) -> None:
