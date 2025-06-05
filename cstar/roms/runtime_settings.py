@@ -34,24 +34,9 @@ CUSTOM_ALIAS_LOOKUP = {
     "initial_conditions": "initial",
 }
 
-# def _format_list_of_floats(float_list: list[float]) -> str:
-#     delimiter = " "
-#     return delimiter.join(_format_float(x) for x in float_list)
-#
-#
-# def _format_list_of_paths(
-#     path_list: list[Path], multi_line: Optional[bool] = False
-# ) -> str:
-#     delimiter = "\n    " if multi_line else " "
-#     return delimiter.join(_format_path(x) for x in path_list)
-#
-#
-# def _format_list_of_other(other_list: list[str | int]) -> str:
-#     delimiter = " "
-#     return delimiter.join(_format_other(x) for x in other_list)
-
 
 def _format_float(val: float) -> str:
+    """Apply special float formatting for 0 and scientific notation."""
     if val == 0.0:
         return "0."
 
@@ -62,6 +47,8 @@ def _format_float(val: float) -> str:
 
 
 def _format_value(val: Any) -> str:
+    """Format floats using _format_float, otherwise just return the string of the
+    value."""
     if isinstance(val, float):
         return _format_float(val)
     return str(val)
@@ -140,6 +127,8 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
 
     @property
     def key_order(self):
+        """Return the pydantic fields (no class vars or properties) in the order they
+        are specified."""
         return list(self.__pydantic_fields__.keys())
 
     @model_validator(mode="wrap")
@@ -384,7 +373,7 @@ class InitialConditions(ROMSRuntimeSettingsSection):
         if (not lines) or (len(lines) == 1) and int(lines[0]) == 0:
             return cls(nrrec=0, ininame=None)
         else:
-            return super(InitialConditions, cls).from_lines(lines)
+            return super().from_lines(lines)
 
 
 class Forcing(ROMSRuntimeSettingsSection):
