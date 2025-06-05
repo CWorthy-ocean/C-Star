@@ -113,7 +113,12 @@ def test_codebase_str(generic_codebase):
         )
 
 
-def test_codebase_repr(generic_codebase):
+@mock.patch(
+    "cstar.system.environment.CStarEnvironment",
+    "environment_variables",
+    new_callable=mock.PropertyMock(return_value={}),
+)
+def test_codebase_repr(generic_codebase: ExternalCodeBase):
     """Test the repr representation of the `ExternalCodeBase` class."""
 
     result_repr = repr(generic_codebase)
@@ -126,7 +131,6 @@ def test_codebase_repr(generic_codebase):
     )
 
     assert result_repr == expected_repr
-    pass
 
 
 class TestExternalCodeBaseConfig:

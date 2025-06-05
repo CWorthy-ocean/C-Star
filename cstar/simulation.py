@@ -335,9 +335,9 @@ class Simulation(ABC, LoggingMixin):
             NN = len(self.compile_time_code.files)
             base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
 
-        if hasattr(self, "exe_path") and self.exe_path is not None:
+        if exe_path := getattr(self, "exe_path", None):
             base_str += "\nIs compiled: True"
-            base_str += "\nExecutable path: " + str(self.exe_path)
+            base_str += "\nExecutable path: " + str(exe_path)
 
         return base_str
 
