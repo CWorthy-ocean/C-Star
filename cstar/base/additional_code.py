@@ -1,4 +1,5 @@
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -41,8 +42,6 @@ class AdditionalCode(LoggingMixin):
        Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
     """
 
-    files: list[str]
-
     def __init__(
         self,
         location: str,
@@ -74,7 +73,7 @@ class AdditionalCode(LoggingMixin):
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
         self._checkout_target = checkout_target
-        self.files: Optional[list[str]] = [] if files is None else files
+        self.files: list[str] = [] if files is None else files
         # Initialize object state
         self.working_path: Optional[Path] = None
         self._local_file_hash_cache: Dict = {}
@@ -156,19 +155,15 @@ class AdditionalCode(LoggingMixin):
         local_dir: str | Path
             The local directory (typically `Case.caseroot`) in which to fetch the additional code.
         """
-        if len(self.files) == 0:
+        if not self.files:
             raise ValueError(
                 "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
             )
 
         local_dir = Path(local_dir).expanduser().resolve()
-        try:
-            tmp_dir = (
-                Path("~/holding").expanduser().resolve()
-            )  # initialise the tmp_dir variable in case we need it later
-            if tmp_dir.exists():
-                shutil.rmtree(tmp_dir)
+        tmp_dir: Optional[Path] = None
 
+        try:
             # CASE 1: Additional code is in a remote repository:
             if (self.source.location_type == "url") and (
                 self.source.source_type == "repository"
@@ -181,7 +176,7 @@ class AdditionalCode(LoggingMixin):
                     assert isinstance(
                         self.checkout_target, str
                     ), "We have just verified checkout_target is not None"
-                # tmp_dir = tempfile.mkdtemp()
+                tmp_dir = Path(tempfile.mkdtemp())
                 _clone_and_checkout(
                     source_repo=self.source.location,
                     local_path=tmp_dir,
@@ -207,7 +202,7 @@ class AdditionalCode(LoggingMixin):
 
             # Now go through the file and copy them to local_dir
             local_dir.mkdir(parents=True, exist_ok=True)
-            for i, f in enumerate(self.files):
+            for i, f in enumerate(self.files or []):
                 src_file_path = source_dir / f
                 tgt_file_path = local_dir / Path(f).name
 
@@ -233,5 +228,4 @@ class AdditionalCode(LoggingMixin):
             self.working_path = local_dir
         finally:
             if tmp_dir:
-                # shutil.rmtree(tmp_dir)
-                ...
+                shutil.rmtree(tmp_dir)

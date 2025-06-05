@@ -609,17 +609,21 @@ class TestAdditionalCodeGet:
         - The `working_path` is set to the target directory path after the operation.
         """
         # Set specific return values for this test
+        local_path = Path("/mock/local/dir")
+        temp_path = Path("/mock/tmp/dir")
+
         self.mock_location_type.return_value = "url"
         self.mock_source_type.return_value = "repository"
-        self.mock_resolve.return_value = Path("/mock/local/dir")
+        self.mock_resolve.return_value = local_path
         self.mock_hash.return_value = "mock_hash_value"
         # Call get method
-        remote_additional_code.get("/mock/local/dir")
+
+        remote_additional_code.get(local_path)
 
         # Ensure the repository is cloned and checked out
         self.mock_clone.assert_called_once_with(
             source_repo=remote_additional_code.source.location,
-            local_path="/mock/tmp/dir",
+            local_path=temp_path,
             checkout_target=remote_additional_code.checkout_target,
         )
 
@@ -627,25 +631,26 @@ class TestAdditionalCodeGet:
         self.mock_mkdtemp.assert_called_once()
 
         # Ensure that all files are copied
+
         assert self.mock_copy.call_count == len(remote_additional_code.files)
         for f in remote_additional_code.files:
-            src_file_path = Path(f"/mock/tmp/dir/{remote_additional_code.subdir}") / f
-            tgt_file_path = Path("/mock/local/dir") / Path(f).name
+            src_file_path = temp_path / remote_additional_code.subdir / f
+            tgt_file_path = local_path / Path(f).name
             self.mock_copy.assert_any_call(src_file_path, tgt_file_path)
 
         # Ensure that `_local_file_hash_cache` is updated correctly
         for f in remote_additional_code.files:
-            tgt_file_path = Path("/mock/local/dir") / Path(f).name
+            tgt_file_path = local_path / Path(f).name
             assert (
                 remote_additional_code._local_file_hash_cache[tgt_file_path]
                 == "mock_hash_value"
             )
 
         # Ensure the temporary directory is cleaned up after use
-        self.mock_rmtree.assert_called_once_with("/mock/tmp/dir")
+        self.mock_rmtree.assert_called_once_with(temp_path)
 
         # Ensure that the working_path is set correctly
-        assert remote_additional_code.working_path == Path("/mock/local/dir")
+        assert remote_additional_code.working_path == local_path
 
     # Test failures:
 
@@ -833,4 +838,4 @@ class TestAdditionalCodeGet:
         remote_additional_code.get("/mock/local/dir")
 
         # Ensure the temporary directory is cleaned up after use
-        self.mock_rmtree.assert_called_once_with("/mock/tmp/dir")
+        self.mock_rmtree.assert_called_once_with(Path("/mock/tmp/dir"))
