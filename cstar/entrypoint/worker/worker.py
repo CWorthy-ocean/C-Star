@@ -193,7 +193,7 @@ class SimulationRunner(Service):
                 self._handler = self._simulation.run(**run_params)
             else:
                 self._handler.updates(1.0)
-                self._send_hc_update({"status": str(self._handler.status)})
+                self._send_update_to_hc({"status": str(self._handler.status)})
         except Exception:
             logging.exception("An error occurred while running the simulation")
 
@@ -233,6 +233,9 @@ def create_parser() -> argparse.ArgumentParser:
     """Creates a parser for command line arguments expected by the c-star Worker."""
     parser = argparse.ArgumentParser(
         description="Run a c-star simulation.",
+        # prefix_chars="--",
+        # allow_abbrev=True,
+        exit_on_error=True,
     )
     parser.add_argument(
         "--blueprint-uri",
@@ -286,8 +289,8 @@ def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
     )
 
 
-def config_from_args(args: argparse.Namespace) -> BlueprintRequest:
-    """Creates a WorkerConfig instance from CLI arguments."""
+def get_request(args: argparse.Namespace) -> BlueprintRequest:
+    """Creates a BlueprintRequest instance from CLI arguments."""
 
     return BlueprintRequest(
         blueprint_uri=args.blueprint_uri,
@@ -336,7 +339,7 @@ async def main() -> int:
         return 1
     else:
         service_cfg = get_service_config(args)
-        blueprint_req = config_from_args(args)
+        blueprint_req = get_request(args)
         job_cfg = JobConfig()  # TODO: parameterize... env vars? use defaults for now...
 
     log_file = (
