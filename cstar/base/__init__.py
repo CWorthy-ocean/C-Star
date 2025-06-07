@@ -1,3 +1,4 @@
+from cstar.base import exceptions
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
 from cstar.base.external_codebase import ExternalCodeBase
@@ -9,4 +10,5 @@ __all__ = [
     "AdditionalCode",
     "InputDataset",
     "Discretization",
+    "exceptions",
 ]

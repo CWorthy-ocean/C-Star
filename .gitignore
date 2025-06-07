@@ -133,3 +133,9 @@ dask-worker-space/
 
 # Vscode
 .vscode/
+
+# PyCharm
+.idea/
+
+# C-Star specific
+cstar/externals/
