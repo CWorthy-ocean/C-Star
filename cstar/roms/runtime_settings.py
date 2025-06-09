@@ -108,7 +108,7 @@ def _get_alias(field_name: str) -> str:
     alias for serialization/deserialization
     """
     field_name = to_snake(field_name)
-    return CUSTOM_ALIAS_LOOKUP.get(field_name, to_snake(field_name))
+    return CUSTOM_ALIAS_LOOKUP.get(field_name, field_name)
 
 
 class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
@@ -164,32 +164,39 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
     def _formatted_joiner(self, *args):
         """Formats any number of args corresponding to a single value, and joins them as
         appropriate."""
+
+        # if args is a single, non-list item, just format it (no join needed)
         if len(args) == 1 and not isinstance(args[0], list):
             return _format_value(args[0])
+
+        # otherwise, format each value in args and join them.
         return self._intravalue_delimiter.join(map(_format_value, *args))
 
     @model_serializer
     def default_serializer(self) -> str:
         """Serializes the object as a string containing the section header and values
         for the roms.in specification."""
-        # Make a dictionary out of the attributes:
+        # Make a dictionary out of the pydantic attributes:
         data = {k: getattr(self, k) for k in self.key_order}
 
         section_values = []
-        # Check formatting of values
-        for value in filter(lambda x: x is not None, data.values()):
+
+        # for each non-None k/v, format and join the values
+        for value in [x for x in data.values() if x is not None]:
             section_values.append(self._formatted_joiner(value))
 
+        # combine all the values in this section into a single string
         section_values_as_single_str = self._intervalue_delimiter.join(section_values)
 
+        # single entry sections use the one and only field as the section name
+        # multi-value sections use their alias
         if isinstance(self, SingleEntryROMSRuntimeSettingsSection):
             section_name = list(self.__pydantic_fields__.keys())[0]
         else:
             section_name = _get_alias(type(self).__name__)
 
-        section_header = f"{section_name}: {' '.join(data.keys())}\n"
-
         # Build the serialized string
+        section_header = f"{section_name}: {' '.join(data.keys())}\n"
         serialized = ""
         serialized += section_header
         serialized += f"    {section_values_as_single_str}\n"
@@ -282,11 +289,18 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
         """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized with just
         the value of the single entry, instead of with a dict or kwargs."""
 
-        if data in [None, [], ""]:  # explicitly let 0 through
+        # If no data is provided (None, empty list, etc.), set the whole section to None.
+        # We do need to explicitly let 0 through as a valid value, though.
+        if data in [None, [], ""]:
             return None
+
+        # If the data passed in is a single value that matches the annotation, initialize the class as if it had been
+        # called with the appropriate Class(key=value) syntax
         field_name, annotation = list(cls.__annotations__.items())[0]
         if _matches_type_hint(data, annotation):
             return cls.__call__(**{field_name: data})
+
+        # Fall back to pydantic handler for dictionaries, objects, etc., including re-calls from the previous lines
         return handler(data)
 
     def __repr__(self):
