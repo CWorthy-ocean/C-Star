@@ -80,6 +80,7 @@ ignore = [
     "G004",    # logging-f-string
     "EM102",   # f-string-in-exception
     "UP024",   # os-error-alias
+    "D413",    # missing-blank-line-after-last-section
 ]
 
 
