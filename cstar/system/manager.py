@@ -13,6 +13,12 @@ from cstar.system.scheduler import (
     SlurmScheduler,
 )
 
+NERSC_DOC_URL = "https://docs.nersc.gov/systems/perlmutter/architecture/"
+DERECHO_DOC_URL = (
+    "https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/"
+)
+EXPANSE_DOC_URL = "https://www.sdsc.edu/support/user_guides/expanse.html"
+
 
 class SystemName(Enum):
     """Enum for representing the names of supported systems.
@@ -42,51 +48,31 @@ class SystemName(Enum):
 
 
 class CStarSystemManager:
-    _environment: Optional[CStarEnvironment] = None
-    _scheduler: Optional[Scheduler] = None
+    """Manage system-specific configuration and resources."""
+
+    def __init__(self) -> None:
+        """Initialize the CStarSystemManager.
+
+        Initialize the system manager by determining the system name and initializing
+        the environment and scheduler based on that name.
+        """
+        self._name = SystemName(self._get_system_name())
+        self._environment = self._create_environment_manager()
+        self._scheduler = self._create_scheduler()
 
     @property
-    def name(self) -> str:
-        """Determines the system name based on environment variables or platform
-        details.
+    def name(self) -> SystemName:
+        """Returns the name of the system.
 
-        Checks for Lmod-specific variables (`LMOD_SYSHOST` or `LMOD_SYSTEM_NAME`).
-        Otherwise, constructs a system name using `platform.system()` and
-        `platform.machine()`.
+        The system name is determined using environment variables or platform
+        details.
 
         Returns
         -------
         str
-            The system's name in lowercase.
-
-        Raises
-        ------
-        EnvironmentError
-            If the system name cannot be determined from environment variables or platform information.
+            The name of the current system.
         """
-
-        sysname = os.environ.get("LMOD_SYSHOST", default="") or os.environ.get(
-            "LMOD_SYSTEM_NAME"
-        )
-        if sysname:
-            pass
-        elif (platform.system() is not None) and (platform.machine() is not None):
-            sysname = platform.system() + "_" + platform.machine()
-        else:
-            raise EnvironmentError(
-                f"C-Star cannot determine your system name. Diagnostics: "
-                f"LMOD_SYSHOST={os.environ.get('LMOD_SYSHOST')}, "
-                f"LMOD_SYSTEM_NAME={os.environ.get('LMOD_SYSTEM_NAME')}, "
-                f"platform.system()={platform.system()}, "
-                f"platform.machine()={platform.machine()}"
-            )
-            # raise EnvironmentError("C-Star cannot determine your system name")
-
-        return sysname.casefold()
-
-    def _system_name_enum(self) -> SystemName:
-        """Converts the system name string to a validated SystemName enum."""
-        return SystemName(self.name)
+        return self._name
 
     @property
     def scheduler(self) -> Optional[Scheduler]:
@@ -98,26 +84,31 @@ class CStarSystemManager:
         Returns
         -------
         Optional[Scheduler]
-            A `Scheduler` instance configured for the detected system, or `None` if the
+            A configured `Scheduler` instance or `None` if the
             system is not supported or does not use a job scheduler.
         """
+        return self._scheduler
 
-        if self._scheduler is not None:
-            return self._scheduler
+    @property
+    def environment(self) -> CStarEnvironment:
+        """Returns a CStarEnvironment instance corresponding to this system."""
+        return self._environment
 
-        match self._system_name_enum():
+    def _create_scheduler(self) -> Optional[Scheduler]:
+        """Create a Scheduler instance based on the system name."""
+        match self.name:
             case SystemName.PERLMUTTER:
                 # regular -> regular_1 for < 124 nodes, regular_0 for >124 nodes
                 per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
                 per_shared_q = SlurmQOS(name="shared")
                 per_debug_q = SlurmQOS(name="debug")
 
-                self._scheduler = SlurmScheduler(
+                return SlurmScheduler(
                     queues=[per_regular_q, per_shared_q, per_debug_q],
                     primary_queue_name="regular",
                     other_scheduler_directives={"-C": "cpu"},
                     requires_task_distribution=False,
-                    documentation="https://docs.nersc.gov/systems/perlmutter/architecture/",
+                    documentation=NERSC_DOC_URL,
                 )
             case SystemName.DERECHO:
                 # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
@@ -125,37 +116,70 @@ class CStarSystemManager:
                 der_preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
                 der_develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
 
-                self._scheduler = PBSScheduler(
+                return PBSScheduler(
                     queues=[der_main_q, der_preempt_q, der_develop_q],
                     primary_queue_name="main",
                     requires_task_distribution=True,
-                    documentation="https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/",
+                    documentation=DERECHO_DOC_URL,
                 )
             case SystemName.EXPANSE:
                 exp_compute_q = SlurmPartition(name="compute")
                 exp_debug_q = SlurmPartition(name="debug")
-                self._scheduler = SlurmScheduler(
+                return SlurmScheduler(
                     queues=[exp_compute_q, exp_debug_q],
                     primary_queue_name="compute",
                     requires_task_distribution=True,
-                    documentation="https://www.sdsc.edu/support/user_guides/expanse.html",
+                    documentation=EXPANSE_DOC_URL,
                 )
-            case _:
-                self._scheduler = None
 
-        return self._scheduler
+        return None
 
-    @property
-    def environment(self) -> CStarEnvironment:
-        """Returns a CStarEnvironment class instance corresponding to this system.
+    def _get_system_name(self) -> str:
+        """Determine the system name.
 
-        The instance is created when the property is first accessed and cached for
-        future queries.
+        Makes use of environment variables or platform details to identify the
+        system name. Uses Lmod-specific variables (`LMOD_SYSHOST` or
+        `LMOD_SYSTEM_NAME`) if available. Otherwise, constructs a system name
+        using `platform.system()` and `platform.machine()`.
+
+        Returns
+        -------
+        str
+            The system's name in lowercase.
+
+        Raises
+        ------
+        EnvironmentError
+            If the system name cannot be determined from available information.
+        ValueError
+            If the determined system name is not supported.
         """
-        if self._environment is not None:
-            return self._environment
+        sysname = os.environ.get("LMOD_SYSHOST", default="") or os.environ.get(
+            "LMOD_SYSTEM_NAME"
+        )
+        if sysname:
+            pass
+        elif platform.system() is not None and platform.machine() is not None:
+            sysname = f"{platform.system()}_{platform.machine()}"
+        else:
+            msg = (
+                f"C-Star cannot determine your system name. Diagnostics: "
+                f"LMOD_SYSHOST={os.environ.get('LMOD_SYSHOST')}, "
+                f"LMOD_SYSTEM_NAME={os.environ.get('LMOD_SYSTEM_NAME')}, "
+                f"platform.system()={platform.system()}, "
+                f"platform.machine()={platform.machine()}"
+            )
+            raise EnvironmentError(msg)
 
-        match self._system_name_enum():
+        return sysname.casefold()
+
+    def _create_environment_manager(self) -> CStarEnvironment:
+        """Initialize the CStarEnvironment based on the system name.
+
+        This method creates an instance of `CStarEnvironment` configured for
+        the detected system.
+        """
+        match self.name:
             case SystemName.EXPANSE:
                 mpi_exec_prefix = "srun --mpi=pmi2"
                 compiler = "intel"
@@ -171,7 +195,9 @@ class CStarSystemManager:
                 compiler = "gnu"
 
         self._environment = CStarEnvironment(
-            system_name=self.name, mpi_exec_prefix=mpi_exec_prefix, compiler=compiler
+            system_name=self.name.value,
+            mpi_exec_prefix=mpi_exec_prefix,
+            compiler=compiler,
         )
         return self._environment
 

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Optional
 
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import _run_cmd
@@ -255,9 +255,9 @@ class Scheduler(ABC, LoggingMixin):
 
     Attributes
     ----------
-    queues : List[Queue]
+    queues : list[Queue]
         A list of queues managed by the scheduler.
-    queue_names : List[str]
+    queue_names : list[str]
         The names of all queues managed by the scheduler.
     primary_queue_name : str
         The name of the primary queue used for scheduling jobs.
@@ -280,9 +280,9 @@ class Scheduler(ABC, LoggingMixin):
 
     def __init__(
         self,
-        queues: List["Queue"],
+        queues: list["Queue"],
         primary_queue_name: str,
-        other_scheduler_directives: Optional[Dict[str, str]] = None,
+        other_scheduler_directives: Optional[dict[str, str]] = None,
         requires_task_distribution: Optional[bool] = True,
         documentation: Optional[str] = None,
     ):
@@ -290,7 +290,7 @@ class Scheduler(ABC, LoggingMixin):
 
         Parameters
         ----------
-        queues : List[Queue]
+        queues : list[Queue]
             A list of Queue instances managed by the scheduler.
         primary_queue_name : str
             The name of the primary queue used by C-Star for scheduling jobs.
@@ -393,9 +393,9 @@ class SlurmScheduler(Scheduler):
 
     Attributes
     ----------
-    queues : List[Queue]
+    queues : list[Queue]
         A list of queues managed by the SLURM scheduler.
-    queue_names : List[str]
+    queue_names : list[str]
         The names of all queues managed by the scheduler.
     primary_queue_name : str
         The name of the primary queue used by C-Star for scheduling jobs.
@@ -481,9 +481,9 @@ class PBSScheduler(Scheduler):
 
     Attributes
     ----------
-    queues : List[Queue]
+    queues : list[Queue]
         A list of queues managed by the PBS scheduler.
-    queue_names : List[str]
+    queue_names : list[str]
         The names of all queues managed by the scheduler.
     primary_queue_name : str
         The name of the primary queue used for scheduling jobs.

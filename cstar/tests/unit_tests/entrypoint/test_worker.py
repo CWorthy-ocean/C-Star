@@ -12,6 +12,9 @@ from cstar.entrypoint.worker.worker import (
     get_service_config,
 )
 
+DEFAULT_LOOP_DELAY = 5
+DEFAULT_HEALTH_CHECK_FREQUENCY = 10
+
 
 @pytest.fixture
 def valid_args() -> dict[str, str]:
@@ -30,14 +33,15 @@ def test_create_parser_help() -> None:
     parser = create_parser()
 
     # no help argument present
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError):  # noqa: PT011
         _ = parser.parse_args(["--help"])
 
 
-def test_create_parser_happy_path(valid_args: dict[str, str]) -> None:
+def test_create_parser_happy_path() -> None:
     """Verify that a help argument is present in the parser."""
     parser = create_parser()
 
+    # ruff: noqa: SLF001
     assert "--blueprint-uri" in parser._option_string_actions
     assert "--output-dir" in parser._option_string_actions
     assert "--log-level" in parser._option_string_actions
@@ -46,7 +50,7 @@ def test_create_parser_happy_path(valid_args: dict[str, str]) -> None:
 
 
 @pytest.mark.parametrize(
-    "log_level, expected_level",
+    ("log_level", "expected_level"),
     [
         ("DEBUG", logging.DEBUG),
         ("INFO", logging.INFO),
@@ -58,7 +62,6 @@ def test_parser_good_log_level(
     valid_args: dict[str, str], log_level: str, expected_level: int
 ) -> None:
     """Verify that a log level is parsed correctly."""
-
     valid_args = valid_args.copy()
     valid_args["--log-level"] = log_level
 
@@ -74,7 +77,7 @@ def test_parser_good_log_level(
 
 
 @pytest.mark.parametrize(
-    "log_level, expected_level",
+    ("log_level", "expected_level"),
     [
         ("debug", logging.DEBUG),
         ("info", logging.INFO),
@@ -84,28 +87,31 @@ def test_parser_good_log_level(
     ],
 )
 def test_parser_lowercase_log_level(
-    valid_args: dict[str, str], log_level: str, expected_level: int
+    valid_args: dict[str, str],
+    log_level: str,
+    expected_level: int,
 ) -> None:
     """Verify that lower-case log levels are parsed correctly."""
-
     valid_args = valid_args.copy()
+    valid_args["--log-level"] = log_level
 
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
 
     parser = create_parser()
-    parsed_args = parser.parse_args(args)
 
-    assert "log_level" in parsed_args
+    # unable to parse the lower-case log levels
+    with pytest.raises(SystemExit):
+        parser.parse_args(args)
 
 
 def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
     """Verify that a bad log level fails to parse."""
-
     valid_args = valid_args.copy()
     valid_args["--log-level"] = "INVALID"
 
-    args = list(itertools.chain.from_iterable((k, v) for k, v in valid_args.items()))
+    valid_args_tuples = ((k, v) for k, v in valid_args.items())
+    args = list(itertools.chain.from_iterable(valid_args_tuples))
 
     parser = create_parser()
 
@@ -114,16 +120,35 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
 
 
 @pytest.mark.parametrize(
-    "blueprint_uri,output_dir, start_date,end_date",
+    ("blueprint_uri", "output_dir", "start_date", "end_date"),
     [
-        ("blueprint1.yaml", "output1", "2012-01-01 12:00:00", "2012-02-04 12:00:00"),
-        ("blueprint2.yaml", "output2", "2020-02-01 00:00:00", "2020-03-02 00:00:00"),
-        ("blueprint3.yaml", "output3", "2021-03-01 08:30:00", "2021-04-16 09:30:00"),
+        (
+            "blueprint1.yaml",
+            "output1",
+            "2012-01-01 12:00:00",
+            "2012-02-04 12:00:00",
+        ),
+        (
+            "blueprint2.yaml",
+            "output2",
+            "2020-02-01 00:00:00",
+            "2020-03-02 00:00:00",
+        ),
+        (
+            "blueprint3.yaml",
+            "output3",
+            "2021-03-01 08:30:00",
+            "2021-04-16 09:30:00",
+        ),
     ],
 )
-def test_get_service_config(blueprint_uri, output_dir, start_date, end_date) -> None:
+def test_get_service_config(
+    blueprint_uri: str,
+    output_dir: str,
+    start_date: str,
+    end_date: str,
+) -> None:
     """Verify that the expected values are set on the service config."""
-
     parser = create_parser()
     parsed_args = parser.parse_args(
         [
@@ -144,24 +169,43 @@ def test_get_service_config(blueprint_uri, output_dir, start_date, end_date) -> 
 
     # some values are currently hardcoded for the worker service
     assert config.as_service
-    assert config.loop_delay == 5
-    assert config.health_check_frequency == 10
+    assert config.loop_delay == DEFAULT_LOOP_DELAY
+    assert config.health_check_frequency == DEFAULT_HEALTH_CHECK_FREQUENCY
 
     # log level is dynamic. verify.
     assert logging._levelToName[config.log_level] == parsed_args.log_level
 
 
 @pytest.mark.parametrize(
-    "blueprint_uri,output_dir, start_date,end_date",
+    ("blueprint_uri", "output_dir", "start_date", "end_date"),
     [
-        ("blueprint1.yaml", "output1", "2012-01-01 12:00:00", "2012-02-04 12:00:00"),
-        ("blueprint2.yaml", "output2", "2020-02-01 00:00:00", "2020-03-02 00:00:00"),
-        ("blueprint3.yaml", "output3", "2021-03-01 08:30:00", "2021-04-16 09:30:00"),
+        (
+            "blueprint1.yaml",
+            "output1",
+            "2012-01-01 12:00:00",
+            "2012-02-04 12:00:00",
+        ),
+        (
+            "blueprint2.yaml",
+            "output2",
+            "2020-02-01 00:00:00",
+            "2020-03-02 00:00:00",
+        ),
+        (
+            "blueprint3.yaml",
+            "output3",
+            "2021-03-01 08:30:00",
+            "2021-04-16 09:30:00",
+        ),
     ],
 )
-def test_get_request(blueprint_uri, output_dir, start_date, end_date) -> None:
+def test_get_request(
+    blueprint_uri: str,
+    output_dir: str,
+    start_date: str,
+    end_date: str,
+) -> None:
     """Verify that the expected values are set on the blueprint request."""
-
     parser = create_parser()
     parsed_args = parser.parse_args(
         [
@@ -206,10 +250,9 @@ def test_configure_environment() -> None:
 
 
 def test_configure_environment_prebuilt() -> None:
-    """Verify the environment side-effects are as expected when the prebuilt environment
-    is used.
+    """Verify the environment side-effects when in a prebuilt environment.
 
-    There should be no changes.
+    There shouldn't be behavioral changes compared to non-prebuilt environment.
     """
     log = logging.getLogger()
     logging.basicConfig(level=logging.DEBUG)

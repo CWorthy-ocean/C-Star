@@ -7,19 +7,29 @@ import pathlib
 import shutil
 import sys
 from datetime import datetime, timezone
-from typing import override
+from typing import TYPE_CHECKING, override
 
-from cstar import Simulation
-from cstar.base.exceptions import BlueprintError, CstarException
+from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
+from cstar.system.environment import CSTAR_USER_ENV_PATH
+from cstar.system.manager import cstar_sysmgr
 
-CSTAR_USER_ENV_PATH = pathlib.Path("~/.cstar.env").expanduser()
-CSTAR_EXTERNALS_ROOT = "~/code/cstar/cstar/externals"
+if TYPE_CHECKING:
+    from cstar import Simulation
+
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL = "cstar-worker.{0}.log"
+JOBFILE_DATE_FORMAT = "%Y%m%d_%H%M%S"
+
+
+def _generate_job_name() -> str:
+    """Generate a unique job name based on the current date and time."""
+    now_utc = datetime.now(timezone.utc)
+    formatted_now_utc = now_utc.strftime(JOBFILE_DATE_FORMAT)
+    return f"cstar_worker_{formatted_now_utc}"
 
 
 @dc.dataclass
@@ -38,12 +48,13 @@ class BlueprintRequest:
 
 @dc.dataclass
 class JobConfig:
-    # TODO: does this already exist?
+    """Configuration required to submit HPC jobs."""
+
     account_id: str = "m4746"
     """HPC account used for billing."""
     walltime: str = "01:00:00"
     """Maximum walltime allowed for job."""
-    job_name: str = f"cstar_worker_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
+    job_name: str = _generate_job_name()
     """User-friendly job name."""
     priority: str = "regular"
     """"""
@@ -57,25 +68,27 @@ class SimulationRunner(Service):
         request: BlueprintRequest,
         service_cfg: ServiceConfiguration,
         job_cfg: JobConfig,
-    ):
-        """Initialize the worker with a request."""
+    ) -> None:
+        """Initialize the SimulationRunner with the supplied configuration."""
         super().__init__(service_cfg)
 
         self._blueprint_uri = request.blueprint_uri
+        """The URI of the blueprint to run."""
         self._output_root = request.output_dir.expanduser()
+        """The root directory where simulation outputs will be written."""
         self._output_dir = self._get_unique_path(self._output_root)
+        """A unique directory for this simulation run to write outputs."""
         self._simulation: Simulation = ROMSSimulation.from_blueprint(
             blueprint=self._blueprint_uri,
             directory=self._output_dir,
             start_date=request.start_date,
             end_date=request.end_date,
         )
+        """The simulation instance created from the blueprint."""
         self._handler: ExecutionHandler | None = None
-        # TODO: get this from the cstar env
-        self._user_env_path = pathlib.Path(CSTAR_USER_ENV_PATH).expanduser()
-        # TODO: get this from the cstar env
-        self._externals_path = pathlib.Path(CSTAR_EXTERNALS_ROOT).expanduser()
+        """The execution handler for the simulation."""
         self._job_config = job_cfg
+        """Configuration for submitting jobs to an HPC."""
 
     @staticmethod
     def _get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
@@ -84,27 +97,27 @@ class SimulationRunner(Service):
         return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
 
     def _prepare_file_system(self) -> None:
-        """Clean up old directories to avoid collisions and create new locations for the
-        new run.
+        """Ensure fresh directories exist for the simulation outputs.
 
-        NOTE: this may be unnecessary if the worker starts
-        up a new container w/fresh directories every time.
+        Removes any pre-existing directories and creates empty directories to avoid
+        collisions.
         """
-        # a leftover .cstar.env cause empty repo/compilation errors; remove it.
-        if self._user_env_path.exists():
-            self.log.debug(f"Removing existing user env: {self._user_env_path}")
-            self._user_env_path.unlink()
+        # a leftover .cstar.env cause empty repo/compilation errors; remove.
+        if CSTAR_USER_ENV_PATH.exists():
+            self.log.debug(f"Removing existing user env: {CSTAR_USER_ENV_PATH}")
+            CSTAR_USER_ENV_PATH.unlink()
 
-        # a leftover root_dir may have files in it, breaking download; remove it.
+        # a leftover root_dir may have files in it, breaking download; remove.
         if self._output_root.exists():
             self.log.debug(f"Removing existing output dir: {self._output_root}")
             shutil.rmtree(self._output_root)
 
-        # leftover external code folder causes non-empty repo errors; remove it.
-        if self._externals_path.exists():
-            self.log.debug(f"Removing existing externals dir: {self._externals_path}")
-            shutil.rmtree(self._externals_path)
-        self._externals_path.mkdir(parents=True, exist_ok=False)
+        # leftover external code folder causes non-empty repo errors; remove.
+        externals_path = cstar_sysmgr.environment.external_root
+        if externals_path.exists():
+            self.log.debug(f"Removing existing externals dir: {externals_path}")
+            shutil.rmtree(externals_path)
+        externals_path.mkdir(parents=True, exist_ok=False)
 
         # create a clean location to write outputs.
         if not self._output_dir.exists():
@@ -112,7 +125,7 @@ class SimulationRunner(Service):
             self._output_dir.mkdir(parents=True, exist_ok=True)
 
     def _log_disposition(self) -> None:
-        """Helper method to log the status of the simulation at time of shutdown."""
+        """Log the status of the simulation at shutdown time."""
         disposition: ExecutionStatus = (
             self._handler.status if self._handler else ExecutionStatus.UNKNOWN
         )
@@ -129,9 +142,11 @@ class SimulationRunner(Service):
 
     @override
     def _on_start(self) -> None:
-        """Prepare the simulation for execution by verifying the simulation loaded
-        properly, configuring the file system, retrieving remote resources, and building
-        third-party codebases."""
+        """Prepare the simulation for execution.
+
+        Verifyies the simulation loaded properly, configuring the file system,
+        retrieving remote resources, and building third-party codebases.
+        """
         self._prepare_file_system()
 
         if self._blueprint_uri is None:
@@ -150,14 +165,17 @@ class SimulationRunner(Service):
             self.log.debug("Executing simulation pre-run")
             self._simulation.pre_run()
         except RuntimeError as ex:
-            raise CstarException("Failed to build simulation") from ex
+            raise CstarError("Failed to build simulation") from ex
         except ValueError as ex:
-            raise CstarException("Failed to prepare simulation") from ex
+            raise CstarError("Failed to prepare simulation") from ex
 
     @override
     def _on_shutdown(self) -> None:
-        """Perform shutdown of the worker service and log the final disposition of the
-        simulation."""
+        """Perform activities required for clean shutdown.
+
+        Execute simulation post-run behavior and log the final disposition of the
+        simulation.
+        """
         if not self._simulation:
             self.log.warning("No simulation available at shutdown")
             return
@@ -170,19 +188,17 @@ class SimulationRunner(Service):
         else:
             self.log.debug("Skipping simulation post-run.")
 
-        # Ensure simulation status has been logged (handler updates may be suppressed)
+        # ensure simulation status is reliably logged if/when self._handler
+        # updates are suppressed.
         self._log_disposition()
 
     @override
     def _on_iteration(self) -> None:
         """Execute the c-star simulation."""
-
         try:
             if not self._handler:
                 self.log.debug("Running simulation.")
 
-                ## TODO: WARNING - more intelligent job config required.
-                # run_params = {}
                 # if os.environ.get("SLURM_JOB_ID", True):
                 run_params = {
                     "account_key": self._job_config.account_id,
@@ -195,7 +211,7 @@ class SimulationRunner(Service):
                 self._handler.updates(1.0)
                 self._send_update_to_hc({"status": str(self._handler.status)})
         except Exception:
-            logging.exception("An error occurred while running the simulation")
+            self.log.exception("An error occurred while running the simulation")
 
     def _is_status_complete(self) -> bool:
         if self._handler is None:
@@ -221,16 +237,14 @@ class SimulationRunner(Service):
 
         status = self._handler.status
         if self._is_status_complete():
-            self.log.info(
-                f"Simulation is no longer running ({status}). Allowing shutdown."
-            )
+            self.log.info(f"Simulation is not running ({status}). Allowing shutdown.")
             return True
 
         return False
 
 
 def create_parser() -> argparse.ArgumentParser:
-    """Creates a parser for command line arguments expected by the c-star Worker."""
+    """Create a parser for CLI arguments expected by a SimulationRunner."""
     parser = argparse.ArgumentParser(
         description="Run a c-star simulation.",
         # prefix_chars="--",
@@ -250,8 +264,13 @@ def create_parser() -> argparse.ArgumentParser:
         required=False,
         help="Logging level for the simulation.",
         choices=[
-            logging._levelToName[i]
-            for i in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
+            logging.getLevelName(i)
+            for i in [
+                logging.DEBUG,
+                logging.INFO,
+                logging.WARNING,
+                logging.ERROR,
+            ]
         ],
     )
     parser.add_argument(
@@ -266,14 +285,14 @@ def create_parser() -> argparse.ArgumentParser:
         default="2012-01-03 12:00:00",
         type=str,
         required=False,
-        help=f"The date on which to begin the simulation, formatted as `{DATE_FORMAT}`",
+        help=(f"The simulation start date, formatted `{DATE_FORMAT}`"),
     )
     parser.add_argument(
         "--end-date",
         default="2012-01-04 12:00:00",
         type=str,
         required=False,
-        help=f"The date on which to end the simulation, formatted as `{DATE_FORMAT}`",
+        help=(f"The simulation end date, formatted `{DATE_FORMAT}`"),
     )
     return parser
 
@@ -284,19 +303,33 @@ def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
         as_service=True,
         loop_delay=5,
         health_check_frequency=10,
-        log_level=logging._nameToLevel[args.log_level],
+        log_level=logging.getLevelNamesMapping()[args.log_level],
         name="SimulationRunner",
     )
 
 
-def get_request(args: argparse.Namespace) -> BlueprintRequest:
-    """Creates a BlueprintRequest instance from CLI arguments."""
+def _format_date(date_str: str) -> datetime:
+    """Convert a date string to a datetime object using the default format.
 
+    Args:
+        date_str (str): The date string to convert.
+
+    Returns:
+        datetime: The converted datetime.
+    """
+    return datetime.strptime(  # noqa: DTZ007
+        date_str,
+        DATE_FORMAT,
+    )
+
+
+def get_request(args: argparse.Namespace) -> BlueprintRequest:
+    """Create a BlueprintRequest instance from CLI arguments."""
     return BlueprintRequest(
         blueprint_uri=args.blueprint_uri,
         output_dir=pathlib.Path(args.output_dir),
-        start_date=datetime.strptime(args.start_date, DATE_FORMAT),
-        end_date=datetime.strptime(args.end_date, DATE_FORMAT),
+        start_date=_format_date(args.start_date),
+        end_date=_format_date(args.end_date),
     )
 
 
@@ -310,27 +343,24 @@ def configure_environment(log: logging.Logger) -> None:
     os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
 
-    # TODO: consider modifying the cstar_sysmgr to look
-    # at environment variables on the first write.
-    vars = os.environ
+    is_roms_prebuilt = os.environ.get("CSTAR_ROMS_PREBUILT", None) == "1"
+    is_marbl_prebuilt = os.environ.get("CSTAR_MARBL_PREBUILT", None) == "1"
 
-    if os.environ.get("CSTAR_ROMS_PREBUILT", None):
-        # cstar_sysmgr.environment.set_env_var("ROMS_ROOT", os.environ["ROMS_ROOT"])
-        ext_root = vars.get("ROMS_ROOT", None)
-        log.debug(f"Using prebuilt ROMS at: {ext_root}")
+    if is_roms_prebuilt:
+        ext_root = os.environ.get("ROMS_ROOT", None)
+        log.debug("Using prebuilt ROMS at: %s", ext_root)
 
-    if os.environ.get("CSTAR_MARBL_PREBUILT", None):
-        ext_root = vars.get("MARBL_ROOT", None)
-        log.debug(f"Using prebuilt MARBL at: {ext_root}")
+    if is_marbl_prebuilt:
+        ext_root = os.environ.get("MARBL_ROOT", None)
+        log.debug("Using prebuilt MARBL at: %s", ext_root)
 
 
 async def main() -> int:
-    """Main entry point for the c-star worker script.
+    """Run the c-star worker script.
 
-    Triggers the `Service` lifecycle of a Worker and runs a blueprint
-    from parameters.
+    Triggers the `Service` lifecycle of a Worker and runs a blueprint based on
+    any supplied parameters.
     """
-
     try:
         parser = create_parser()
         args = parser.parse_args()
@@ -340,7 +370,7 @@ async def main() -> int:
     else:
         service_cfg = get_service_config(args)
         blueprint_req = get_request(args)
-        job_cfg = JobConfig()  # TODO: parameterize... env vars? use defaults for now...
+        job_cfg = JobConfig()  # use default HPC config
 
     log_file = (
         blueprint_req.output_dir
@@ -353,7 +383,7 @@ async def main() -> int:
         configure_environment(log)
         worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
         await worker.execute()
-    except CstarException:
+    except CstarError:
         log.exception("An error occurred during the simulation")
         return 1
     except Exception:

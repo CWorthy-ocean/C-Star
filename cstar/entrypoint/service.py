@@ -15,16 +15,18 @@ from cstar.base.log import LoggingMixin
 
 @dc.dataclass
 class ServiceConfiguration:
+    """Configuration options for a Service."""
+
     as_service: bool = False
     """Determines lifetime of the service.
 
-    When `True`, calling `execute`
-    on the service will run continuously until shutdown criteria are met.
-    Otherwise, `execute` performs a single pass through the service lifecycle
-    and automatically exits (regardless of the result of `_can_shutdown`).
+    When `True`, calling `execute` on the service will run continuously until
+    shutdown criteria are met. When `False`, the service completes a single
+    pass through the service lifecycle and automatically exits.
     """
     loop_delay: float = 0
-    """Duration (in seconds) of a forced delay between iterations of the event loop."""
+    """Duration (in seconds) of a forced delay between iterations of the main event
+    loop."""
     health_check_frequency: float = 0
     """Time (in seconds) between calls to a health check handler.
 
@@ -39,8 +41,8 @@ class ServiceConfiguration:
 class Service(ABC, LoggingMixin):
     """Core API for standalone entrypoint scripts.
 
-    Makes use of overridable hook methods to modify behaviors (event loop, automatic
-    shutdown, cooldown) as well as simple hooks for status changes
+    Provides overridable hook methods to modify behaviors in the main event loop, during
+    health checks, and for specifying shutdown criteria.
     """
 
     def __init__(
@@ -49,13 +51,10 @@ class Service(ABC, LoggingMixin):
     ) -> None:
         """Initialize the Service.
 
-        :param as_service: Determines lifetime of the service. When `True`, calling
-        execute on the service will run continuously until shutdown criteria are met.
-        Otherwise, `execute` performs a single pass through the service lifecycle and
-        automatically exits (regardless of the result of `_can_shutdown`).
-        :param cooldown: Period of time (in seconds) to allow the service to run
-        after a shutdown is permitted. Enables the service to avoid restarting if
-        new work is discovered. A value of 0 disables the cooldown.
+        :param as_service: Determines lifetime of the service. When `True`,
+        calling execute on the service will run continuously until shutdown
+        criteria are met. Otherwise, `execute` performs a single pass through
+        the service lifecycle and automatically exits.
         :param loop_delay: Duration (in seconds) of a forced delay between
         iterations of the event loop
         :param health_check_frequency: Time (in seconds) between calls to a
@@ -72,32 +71,39 @@ class Service(ABC, LoggingMixin):
 
         self._register_signal_handlers()
 
+    @property
+    def _service_type(self) -> str:
+        """Return the type name of the instance for logging."""
+        return self.__class__.__name__
+
     @abstractmethod
     def _on_iteration(self) -> None:
-        """The user-defined event handler.
+        """Contains the main logic into of the service event loop.
 
-        Executed repeatedly until shutdown conditions are satisfied and cooldown is
-        elapsed.
+        It is executed continuously until shutdown conditions are satisfied.
         """
-        self.log.debug(f"Performing main iteration of {self.__class__.__name__}")
+        self.log.debug(f"Performing main iteration of {self._service_type}")
 
     def _on_iteration_complete(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called in main event loop after `_on_iteration` is invoked.
         """
-        self.log.debug(f"Performing post-iteration tasks of {self.__class__.__name__}")
+        self.log.debug(f"Performing post-iteration tasks of {self._service_type}")
 
     @abstractmethod
     def _can_shutdown(self) -> bool:
-        """Return true when the criteria to shut down the service are met."""
+        """Empty hook method for use by subclasses.
+
+        Return `True` when the criteria to shut down the service are met.
+        """
 
     @property
     def can_shutdown(self) -> bool:
-        """A property to check if the service can shutdown.
+        """Returns `True` if the service is ready to shut down.
 
-        This wraps the `_can_shutdown` method and combines the result with
-        the service/task mode.
+        User-defined shutdown criteria will not be evaluated when the service is
+        instantiated as a task (e.g. with `as_service=False`).
         """
         if not self._config.as_service:
             return True
@@ -113,36 +119,46 @@ class Service(ABC, LoggingMixin):
 
         return False
 
+    @property
+    def is_healthcheck_running(self) -> bool:
+        """Returns `True` if the healthcheck thread is running."""
+        return self._hc_thread is not None and self._hc_thread.is_alive()
+
+    @property
+    def is_healthcheck_queue_ready(self) -> bool:
+        """Returns `True` if the healthcheck queue is available."""
+        return self._hc_queue is not None
+
     def _on_start(self) -> None:
         """Empty hook method for use by subclasses.
 
-        Called on initial entry into Service `execute` event loop before
-        `_on_iteration` is invoked.
+        Called on initial entry into Service lifecycle before the main service logic
+        begins execution. Allows for subclasses to perform any required initialization
+        logic.
         """
-        self.log.debug(f"Starting {self.__class__.__name__}")
+        self.log.debug(f"Starting {self._service_type}")
 
     def _on_shutdown(self) -> None:
         """Empty hook method for use by subclasses.
 
-        Called immediately after exiting the main event loop during automatic shutdown.
+        Called immediately after exiting the main event loop.
         """
-        self.log.debug(f"Shutting down {self.__class__.__name__}")
+        self.log.debug(f"Shutting down {self._service_type}")
 
     def _on_health_check(self) -> None:
         """Empty hook method for use by subclasses.
 
-        Invoked based on the
-        value of `self._health_check_frequency`.
+        Called by the health check thread at the configured frequency.
         """
-        self.log.debug(f"Performing health check for {self.__class__.__name__}")
+        self.log.debug(f"Performing health check for {self._service_type}")
 
     def _on_delay(self) -> None:
         """Empty hook method for use by subclasses.
 
-        Called on every event loop iteration immediately before executing a delay before
-        the next iteration
+        Called at the completion of every event loop iteration when a user-defined delay
+        is configured.
         """
-        self.log.debug(f"Service iteration waiting for {self.__class__.__name__}s")
+        self.log.debug(f"Service delay for {self._service_type}")
 
     def _create_hc_update(self, content: dict[str, str]) -> dict[str, str]:
         update_base = {"ts": datetime.now(tz=timezone.utc).isoformat()}
@@ -160,54 +176,66 @@ class Service(ABC, LoggingMixin):
         self.log.debug("Terminating healthcheck")
         self._send_update_to_hc({"cmd": "quit", "reason": reason})
 
-    def _healthcheck(self, config: ServiceConfiguration, msg_queue: Queue) -> None:
+    def _healthcheck(
+        self,
+        config: ServiceConfiguration,
+        msg_queue: Queue,
+    ) -> None:
         """Health-check event loop.
 
         This method runs in a separate thread to ensure that the main event loop cannot
         block health check updates. The health check waits for messages from the main
         thread and publishes a health check update at the specified interval. If the
-        main thread fails to send a message, it will log a warning.
+        main thread fails to send a message, it logs a warning.
         """
-        if config.health_check_frequency >= 0:
-            last_health_check = time.time()  # timestamp of the latest health check
-            running = True
-            update_delay = 0.0
-            hc_elapsed = 0.0
+        if config.health_check_frequency < 0:
+            self.log.debug("Health check disabled with a negative frequency.")
+            return
 
-            while running:
-                try:
-                    hc_elapsed = time.time() - last_health_check
-                    remaining_wait = max(config.health_check_frequency - hc_elapsed, 0)
+        last_health_check = time.time()  # timestamp of last health check
+        running = True
+        update_delay = 0.0
+        hc_elapsed = 0.0
 
-                    # report large gaps between updates.
-                    if hc_elapsed > 3 * config.health_check_frequency:
-                        self.log.warning(
-                            f"No health update in last {update_delay:.2f} seconds."
+        while running:
+            try:
+                hc_elapsed = time.time() - last_health_check
+                hcf_remaining = config.health_check_frequency - hc_elapsed
+                remaining_wait = max(hcf_remaining, 0)
+
+                # report large gaps between updates.
+                if hc_elapsed > 3 * config.health_check_frequency:
+                    self.log.warning(
+                        f"No health update in last {update_delay:.2f} seconds."
+                    )
+
+                if msg := msg_queue.get_nowait():
+                    if hc_elapsed >= config.health_check_frequency:
+                        self._on_health_check()
+                        last_health_check = time.time()
+
+                    command = msg.get("cmd", None)
+                    if not command:
+                        self.log.info(
+                            f"Healthcheck thread received message: {msg}",
                         )
+                    elif command == "quit":
+                        running = False
+                else:
+                    time.sleep(remaining_wait)
 
-                    if msg := msg_queue.get_nowait():
-                        if hc_elapsed >= config.health_check_frequency:
-                            self._on_health_check()
-                            last_health_check = time.time()
-
-                        if "cmd" not in msg:
-                            self.log.info(f"Healthcheck thread received message: {msg}")
-                        else:
-                            if cmd := msg.get("cmd", None):
-                                if cmd == "quit":
-                                    running = False
-                    else:
-                        time.sleep(remaining_wait)
-
-                except Empty:
-                    ...  # ignore empty queue; just wait for shutdown msg
-                except Exception:
-                    # queue was shutdown on other side.
-                    running = False
+            except Empty:  # noqa: PERF203
+                ...  # ignore empty queue; just wait for shutdown msg
+            except Exception:  # noqa: BLE001
+                # queue was shutdown on other side. ignore and exit.
+                running = False
 
     def _start_healthcheck(self) -> None:
-        """Create a thread for health check updates that is not blocked by the main
-        thread when service operations are blocking."""
+        """Create a thread for health check updates.
+
+        The health check thread is not blocked by the main thread when service
+        operations are blocking.
+        """
         if self._config.health_check_frequency >= 0:
             self.log.debug(
                 "Starting healthcheck thread w/frequency: %s.",
@@ -223,13 +251,18 @@ class Service(ABC, LoggingMixin):
                 self._hc_thread = Thread(
                     target=self._healthcheck,
                     name=thread_name,
-                    kwargs={"config": self._config, "msg_queue": self._hc_queue},
+                    kwargs={
+                        "config": self._config,
+                        "msg_queue": self._hc_queue,
+                    },
                 )
                 self._hc_thread.start()
 
     def _terminate_hc(self, reason: str) -> None:
-        """Send a termination message to the healthcheck thread and wait for it to
-        complete."""
+        """Send a termination message to the healthcheck thread.
+
+        After sending signal, waits for the thread to complete prior to returning.
+        """
         self._send_terminate_to_hc(reason=reason)
         if self._hc_thread and self._hc_thread.is_alive():
             self._hc_thread.join()
@@ -237,8 +270,8 @@ class Service(ABC, LoggingMixin):
     def _shutdown(self) -> None:
         """Perform a clean shutdown of the service.
 
-        This method is called when the service is ready to shut down, either because it
-        has completed its work or because it has received a signal to terminate.
+        This method is called when the service is ready to shut down, either the service
+        has completed its work, or it has received a term signal.
         """
         self.log.debug("Shutting down service.")
 
@@ -249,13 +282,12 @@ class Service(ABC, LoggingMixin):
             self.log.exception("Service shutdown may not have completed.")
 
     async def execute(self) -> None:
-        """The main event loop of a service.
+        """Execute the complete service lifecycle.
 
         Completes the full service life-cycle. Responsible for executing calls
         to subclass implementation of`_on_iteration`. Evaluates shutdown
         conditions to trigger automatic service termination.
         """
-
         try:
             running = True
             self._start_healthcheck()
@@ -292,7 +324,9 @@ class Service(ABC, LoggingMixin):
                     await asyncio.sleep(max(self._config.loop_delay, 0))
                 except Exception:
                     running = False
-                    self.log.exception("Terminating service due to failure in delay.")
+                    self.log.exception(
+                        "Terminating service due to failure in _on_delay."
+                    )
 
             self._send_update_to_hc({"cmd": "heartbeat"})
 
@@ -300,17 +334,20 @@ class Service(ABC, LoggingMixin):
 
     def _handle_signal(self, sig_num: int, _frame: FrameType | None) -> None:
         """Handle OS signals requesting process shutdown."""
-        signal_msg = f"Received signal: {sig_num}"
-        self.log.info(signal_msg)
+        self.log.info(f"Received signal: {sig_num}")
 
         try:
             # perform sub-class specific clean-up
             self._shutdown()
         except Exception:
-            self.log.exception("Unable to perform a clean shutdown in signal handler.")
+            self.log.exception(
+                "Unable to perform a clean shutdown for signal.",
+            )
 
     def _register_signal_handlers(self) -> None:
-        """Register handlers for SIGTERM and SIGINT to shutdown the simulation cleanly
-        when interrupted."""
+        """Register termination signal handlers for the service.
+
+        Attempts to shutdown the simulation cleanly when interrupted.
+        """
         for sig_num in [signal.SIGINT, signal.SIGTERM]:
             signal.signal(sig_num, self._handle_signal)
