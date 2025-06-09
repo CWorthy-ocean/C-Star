@@ -77,19 +77,18 @@ def test_parser_good_log_level(
 
 
 @pytest.mark.parametrize(
-    ("log_level", "expected_level"),
+    "log_level",
     [
-        ("debug", logging.DEBUG),
-        ("info", logging.INFO),
-        ("warning", logging.WARNING),
-        ("error", logging.ERROR),
-        ("critical", logging.CRITICAL),
+        ("debug",),
+        ("info",),
+        ("warning",),
+        ("error",),
+        ("critical",),
     ],
 )
 def test_parser_lowercase_log_level(
     valid_args: dict[str, str],
     log_level: str,
-    expected_level: int,
 ) -> None:
     """Verify that lower-case log levels are parsed correctly."""
     valid_args = valid_args.copy()
