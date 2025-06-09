@@ -148,8 +148,17 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
 
     @property
     def _intervalue_delimiter(self) -> str:
-        """Delimiter that goes between different values in a section Either a newline +
-        spaces for multiline sections, or several spaces."""
+        """Delimiter that goes between different values in a section. Either a newline +
+        spaces for multiline sections, or several spaces.
+
+        For example, TimeStepping is not multi-line, so it's four values will get delimited as:
+        ```1    2    3    4```
+        whereas InitialConditions is multiline, and will output it's two values as
+        ```
+            1
+            /path/to/ini/file.nc
+        ```
+        """
         return "\n    " if self.multi_line else "    "
 
     @property
@@ -157,11 +166,18 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
         """Delimiter that goes between multiple parts of a single "value", e.g. multiple
         floats in a list of floats.
 
-        Either a newline + spaces for multiline sections, or a single space
+        Either a newline + spaces for multiline sections, or a single space.
+
+        Multi-line variations are typically for lists of filenames, e.g. forcing files.
+        There is one key-value pair, but each value in the list needs its own line.
+
+        Classes that use this with multi_line=False are arrays of numbers, like
+        TracerDiff2, and we use single spaces here to create a visual distinction from
+        multiple values (like the TimeStepping example in _intervalue_delimiter).
         """
         return "\n    " if self.multi_line else " "
 
-    def _formatted_joiner(self, *args):
+    def _format_and_join_values(self, *args):
         """Formats any number of args corresponding to a single value, and joins them as
         appropriate."""
 
@@ -175,7 +191,15 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
     @model_serializer
     def default_serializer(self) -> str:
         """Serializes the object as a string containing the section header and values
-        for the roms.in specification."""
+        for the roms.in specification.
+
+        Examples
+        --------
+        >>> t = TimeStepping(1, 2, 3, 4)
+        >>> t.model_dump()
+        time_stepping: ntimes dt ndtfast ninfo
+             1    2    3    4
+        """
         # Make a dictionary out of the pydantic attributes:
         data = {k: getattr(self, k) for k in self.key_order}
 
@@ -183,7 +207,7 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
 
         # for each non-None k/v, format and join the values
         for value in [x for x in data.values() if x is not None]:
-            section_values.append(self._formatted_joiner(value))
+            section_values.append(self._format_and_join_values(value))
 
         # combine all the values in this section into a single string
         section_values_as_single_str = self._intervalue_delimiter.join(section_values)
@@ -287,7 +311,13 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
     @classmethod
     def single_entry_validator(cls, data, handler: ModelWrapValidatorHandler):
         """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized with just
-        the value of the single entry, instead of with a dict or kwargs."""
+        the value of the single entry, instead of only with a dict or kwargs.
+
+        This method verifies that the value passed in at initialization matches the
+        expected type for the SingleEntryROMSRuntimeSettings subclass being instantiated
+        using _matches_type_hint, falling back to the pydantic handler if, e.g., a
+        dictionary is supplied
+        """
 
         # If no data is provided (None, empty list, etc.), set the whole section to None.
         # We do need to explicitly let 0 through as a valid value, though.
@@ -541,7 +571,7 @@ class ROMSRuntimeSettings(BaseModel):
     def _load_raw_sections(filepath: str | Path) -> dict[str, list[str]]:
         """Read a roms.in text file and parse into a dictionary of sections.
 
-        The keys are teh section names and the values are a list of strings that hold
+        The keys are the section names and the values are a list of strings that hold
         data for that section (to be further parsed by the pydantic models for each
         section).
         """
@@ -795,7 +825,8 @@ class ROMSRuntimeSettings(BaseModel):
 
     @model_serializer()
     def serialize_to_string(self) -> str:
-        """Serialize the model to a single string containing all non-null sections."""
+        """Serialize the model (excluding null sections) to a single string as would be
+        found in a ROMS-compatible `.in` file."""
         output = ""
         for field_name, field_info in type(self).model_fields.items():
             section = getattr(self, field_name)
@@ -816,3 +847,20 @@ class ROMSRuntimeSettings(BaseModel):
 
         with Path(filepath).open("w") as f:
             f.write(self.model_dump())
+
+
+if __name__ == "__main__":
+    orig = "/Users/eilerman/Downloads/sje_pacmed12km_Y2000.in"
+    r = ROMSRuntimeSettings.from_file(orig)
+    # print(r)
+    new = "./new.in"
+    r.to_file(new)  # noqa
+
+    with open(new, "r") as f:
+        lines_new = f.readlines()
+    with open(orig, "r") as f:
+        lines_orig = f.readlines()
+
+    r2 = ROMSRuntimeSettings.from_file(new)
+    assert r == r2
+    # assert lines_orig == lines_new

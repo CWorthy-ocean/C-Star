@@ -206,23 +206,25 @@ class TestROMSRuntimeSettingsSection:
         assert section.val2 == "hello"
 
     def test_format_list_of_floats(self):
-        lf = EmptySection()._formatted_joiner([1e-3, 0.0, 2])
+        lf = EmptySection()._format_and_join_values([1e-3, 0.0, 2])
         assert lf == "1.000000E-03 0. 2"
 
     def test_format_path(self):
-        p = EmptySection()._formatted_joiner(Path("mypath.nc"))
+        p = EmptySection()._format_and_join_values(Path("mypath.nc"))
         assert p == "mypath.nc"
 
     def test_format_list_of_paths(self):
-        lp = EmptySection()._formatted_joiner([Path("path1.nc"), Path("path2.nc")])
+        lp = EmptySection()._format_and_join_values(
+            [Path("path1.nc"), Path("path2.nc")]
+        )
         assert lp == "path1.nc path2.nc"
 
     @pytest.mark.parametrize("o,st", [(5, "5"), ("helloworld", "helloworld")])
     def test_format_other(self, o, st):
-        assert EmptySection()._formatted_joiner(o) == st
+        assert EmptySection()._format_and_join_values(o) == st
 
     def test_format_list_of_other(self):
-        o = EmptySection()._formatted_joiner([5, "foo"])
+        o = EmptySection()._format_and_join_values([5, "foo"])
         assert o == "5 foo"
 
     def test_validate_from_lines_calls_from_lines(self):
