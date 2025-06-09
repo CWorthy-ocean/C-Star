@@ -30,7 +30,6 @@ def get_logger(
     logging.Logger
         A logger instance with the specified name.
     """
-
     fmt = fmt or DEFAULT_LOG_FORMAT
 
     logger = logging.getLogger(name)
@@ -85,10 +84,11 @@ def get_logger(
 
 
 class LoggingMixin:
-    """A mixin class that provides a logger instance for use in other classes."""
+    """A mixin class that provides a logger for use in other classes."""
 
     @property
     def log(self) -> logging.Logger:
+        """Get a logger instance for the class."""
         if not hasattr(self, "_log"):
             name = f"{self.__class__.__module__}.{self.__class__.__name__}"
             self._log = get_logger(name)

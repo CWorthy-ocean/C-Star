@@ -2,6 +2,7 @@ import importlib.util
 import os
 import platform
 from pathlib import Path
+from typing import Optional
 
 from dotenv import dotenv_values, load_dotenv, set_key
 
@@ -65,6 +66,7 @@ class CStarEnvironment:
         self._system_name = system_name
         self._mpi_exec_prefix = mpi_exec_prefix
         self._compiler = compiler
+        self._package_root: Optional[Path] = None
 
         if self.uses_lmod:
             self.load_lmod_modules(
@@ -119,6 +121,7 @@ class CStarEnvironment:
 
     @property
     def environment_variables(self) -> dict:
+        """Returns a dictionary of custom environent variables loaded by C-Star."""
         env_vars = dotenv_values(
             self.package_root / f"additional_files/env_files/{self._system_name}.env"
         )
@@ -143,13 +146,21 @@ class CStarEnvironment:
         ImportError
             If the top-level package cannot be located.
         """
+        if self._package_root is not None:
+            return self._package_root
 
         top_level_package_name = __name__.split(".")[0]
         spec = importlib.util.find_spec(top_level_package_name)
-        if spec is not None:
-            if isinstance(spec.submodule_search_locations, list):
-                return Path(spec.submodule_search_locations[0])
+        if spec is not None and isinstance(spec.submodule_search_locations, list):
+            self._package_root = Path(spec.submodule_search_locations[0])
+            return self._package_root
+
         raise ImportError(f"Top-level package '{top_level_package_name}' not found.")
+
+    @property
+    def external_root(self) -> Path:
+        """Get the root directory where external codebases will be stored."""
+        return self.package_root / "externals"
 
     # Environment management related
     @property

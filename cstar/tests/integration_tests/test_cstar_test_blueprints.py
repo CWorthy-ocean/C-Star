@@ -10,6 +10,8 @@ from cstar.tests.integration_tests.config import TEST_CONFIG
 
 
 class TestCStar:
+    """Test harness for end-to-end simulations started from blueprints."""
+
     @pytest.mark.parametrize(
         "test_config_key",
         [

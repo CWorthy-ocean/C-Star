@@ -18,7 +18,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
     """Abstract base class to manage external non-python dependencies of C-Star.
 
     Attributes
-    -----------
+    ----------
     source_repo: str
         URL pointing to a git-controlled repository containing the source code
     checkout_target: str
@@ -62,7 +62,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
         checkout target.
 
         Parameters:
-        -----------
+        ----------
         source_repo: str
             URL pointing to a git-controlled repository containing the external codebase source code
         checkout_target: str
@@ -73,7 +73,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
         ExternalCodeBase
             An initialized ExternalCodeBase object
         """
-
         # TODO: Type check here
         self._source_repo = source_repo
         self._checkout_target = checkout_target
@@ -94,17 +93,18 @@ class ExternalCodeBase(ABC, LoggingMixin):
         base_str += f"\nlocal_config_status: {self.local_config_status} "
         match self.local_config_status:
             case 0:
-                base_str += f"(Environment variable {self.expected_env_var} is present, points to the correct repository remote, and is checked out at the correct hash)"
+                base_str += f"(Environment variable {self.expected_env_var} is present, points to the correct repository remote, and is checked out at the correct hash)"  # noqa: E501
             case 1:
-                base_str += f"(Environment variable {self.expected_env_var} is present but does not point to the correct repository remote [unresolvable])"
+                base_str += f"(Environment variable {self.expected_env_var} is present but does not point to the correct repository remote [unresolvable])"  # noqa: E501
             case 2:
-                base_str += f"(Environment variable {self.expected_env_var} is present, points to the correct repository remote, but is checked out at the wrong hash)"
+                base_str += f"(Environment variable {self.expected_env_var} is present, points to the correct repository remote, but is checked out at the wrong hash)"  # noqa: E501
             case 3:
-                base_str += f"(Environment variable {self.expected_env_var} is not present and it is assumed the external codebase is not installed locally)"
+                base_str += f"(Environment variable {self.expected_env_var} is not present and it is assumed the external codebase is not installed locally)"  # noqa: E501
 
         return base_str
 
     def __repr__(self) -> str:
+        """Provide a structured representation of the instance."""
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nsource_repo = {self.source_repo!r},"
         repr_str += f"\ncheckout_target = {self.checkout_target!r}"
@@ -115,6 +115,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def source_repo(self) -> str:
+        """Get the URL of the source repository for the external codebase."""
         return (
             self._source_repo
             if self._source_repo is not None
@@ -123,6 +124,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def checkout_target(self) -> str:
+        """Get the checkout target for the external codebase."""
         return (
             self._checkout_target
             if self._checkout_target is not None
@@ -131,6 +133,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def repo_basename(self) -> str:
+        """Get the basename of the source repository."""
         return Path(self.source_repo).name.replace(".git", "")
 
     @property
@@ -141,7 +144,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
     @property
     @abstractmethod
     def default_source_repo(self) -> str:
-        """Default source repository, defined in subclasses, e.g. https://github.com/marbl-ecosys/MARBL.git"""
+        """SDefault source repository, defined in subclasses, e.g. https://github.com/marbl-ecosys/MARBL.git"""
 
     @property
     @abstractmethod
@@ -173,11 +176,9 @@ class ExternalCodeBase(ABC, LoggingMixin):
            2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
            3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
         """
-
         # check 1: X_ROOT variable is in user's env
         env_var_exists = (
-            self.expected_env_var
-            in cstar_sysmgr.environment.environment_variables.keys()
+            self.expected_env_var in cstar_sysmgr.environment.environment_variables
         )
 
         # check 2: X_ROOT points to the correct repository
@@ -203,6 +204,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def is_setup(self) -> bool:
+        """Return True if the external codebase is set up correctly on this machine."""
         return self.local_config_status == 0
 
     def handle_config_status(self) -> None:
@@ -284,10 +286,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     else:
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
-                ext_dir = (
-                    cstar_sysmgr.environment.package_root
-                    / f"externals/{self.repo_basename}"
-                )
+                ext_dir = cstar_sysmgr.environment.external_root / self.repo_basename
+
                 print(
                     (
                         "#######################################################\n"

@@ -1,12 +1,20 @@
-class CstarException(Exception):
+class CstarError(Exception):
     """Base class for all Cstar exceptions."""
 
-    pass
 
-
-class BlueprintError(CstarException):
+class BlueprintError(CstarError):
     """Exception raised for errors in blueprint processing."""
 
-    def __init__(self, message: str):
+    def __init__(self, message: str) -> None:
+        """Initialize BlueprintError with a message."""
+        super().__init__(message)
+        self.message = message
+
+
+class SimulationError(CstarError):
+    """Exception raised for errors in simulation processing."""
+
+    def __init__(self, message: str) -> None:
+        """Initialize SimulationError with a message."""
         super().__init__(message)
         self.message = message
