@@ -69,7 +69,20 @@ class SimulationRunner(Service):
         service_cfg: ServiceConfiguration,
         job_cfg: JobConfig,
     ) -> None:
-        """Initialize the SimulationRunner with the supplied configuration."""
+        """Initialize the SimulationRunner with the supplied configuration.
+
+        Parameters
+        ----------
+        request: BlueprintRequest
+            A request containing information about the simulation to run
+
+        service_cfg: ServiceConfiguration
+            Configuration for modifying behavior of the service process.
+
+        job_cfg: JobConfig
+            Configuration for submitting jobs to an HPC, such as account ID,
+            walltime, job name, and priority.
+        """
         super().__init__(service_cfg)
 
         self._blueprint_uri = request.blueprint_uri
@@ -92,7 +105,18 @@ class SimulationRunner(Service):
 
     @staticmethod
     def _get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
-        """Create a unique path name to avoid collisions."""
+        """Create a unique path name to avoid collisions.
+
+        Parameters
+        ----------
+        root_path: pathlib.Path
+            The parent directory where the unique directory will be created.
+
+        Returns
+        -------
+        pathlib.Path
+            A unique path based on the current date and time.
+        """
         current_time = datetime.now(timezone.utc)
         return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
 
@@ -214,6 +238,13 @@ class SimulationRunner(Service):
             self.log.exception("An error occurred while running the simulation")
 
     def _is_status_complete(self) -> bool:
+        """Determine if the simulation has completed.
+
+        Returns
+        -------
+        bool
+            `True` if the simulation is in a completed state, `False` otherwise.
+        """
         if self._handler is None:
             return True
 
@@ -226,7 +257,13 @@ class SimulationRunner(Service):
 
     @override
     def _can_shutdown(self) -> bool:
-        """Determine if the service can shutdown."""
+        """Determine if the service can shutdown.
+
+        Returns
+        -------
+        bool
+            `True` if the service can shutdown, `False` otherwise.
+        """
         if self._simulation is None:
             self.log.error("Simulation is not set. Allowing shutdown.")
             return True
@@ -244,7 +281,14 @@ class SimulationRunner(Service):
 
 
 def create_parser() -> argparse.ArgumentParser:
-    """Create a parser for CLI arguments expected by a SimulationRunner."""
+    """Create a parser for CLI arguments expected by a SimulationRunner.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        An argument parser configured with the expected arguments for the
+        SimulationRunner service.
+    """
     parser = argparse.ArgumentParser(
         description="Run a c-star simulation.",
         # prefix_chars="--",
@@ -298,7 +342,18 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
-    """Create a ServiceConfiguration instance using CLI arguments."""
+    """Create a ServiceConfiguration instance using CLI arguments.
+
+    Parameters
+    ----------
+    args: argparse.Namespace
+        The arguments parsed from the command line, including log level and
+
+    Returns
+    -------
+    ServiceConfiguration
+        The configuration for a service.
+    """
     return ServiceConfiguration(
         as_service=True,
         loop_delay=5,
@@ -311,11 +366,15 @@ def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
 def _format_date(date_str: str) -> datetime:
     """Convert a date string to a datetime object using the default format.
 
-    Args:
-        date_str (str): The date string to convert.
+    Parameters
+    ----------
+    date_str : str
+        The date string to convert.
 
-    Returns:
-        datetime: The converted datetime.
+    Returns
+    -------
+    datetime
+        The converted datetime.
     """
     return datetime.strptime(  # noqa: DTZ007
         date_str,
@@ -324,7 +383,18 @@ def _format_date(date_str: str) -> datetime:
 
 
 def get_request(args: argparse.Namespace) -> BlueprintRequest:
-    """Create a BlueprintRequest instance from CLI arguments."""
+    """Create a BlueprintRequest instance from CLI arguments.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        The arguments parsed from the command line.
+
+    Returns
+    -------
+    BlueprintRequest
+        A request configured to run a c-star simulation via a blueprint.
+    """
     return BlueprintRequest(
         blueprint_uri=args.blueprint_uri,
         output_dir=pathlib.Path(args.output_dir),
@@ -338,6 +408,15 @@ def configure_environment(log: logging.Logger) -> None:
 
     NOTE: The worker checks for CSTAR_ROMS_PREBUILT and CSTAR_MARBL_PREBUILT
     to indicate that pre-built modeling binaries should be used.
+
+    Parameters
+    ----------
+    log : logging.Logger
+        A logger to log configuration details.
+
+    Returns
+    -------
+    None
     """
     # ensure no human interaction is required
     os.environ["CSTAR_INTERACTIVE"] = "0"
@@ -360,6 +439,11 @@ async def main() -> int:
 
     Triggers the `Service` lifecycle of a Worker and runs a blueprint based on
     any supplied parameters.
+
+    Returns
+    -------
+    int
+        The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
     try:
         parser = create_parser()

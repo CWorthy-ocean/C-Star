@@ -51,15 +51,14 @@ class Service(ABC, LoggingMixin):
     ) -> None:
         """Initialize the Service.
 
-        :param as_service: Determines lifetime of the service. When `True`,
-        calling execute on the service will run continuously until shutdown
-        criteria are met. Otherwise, `execute` performs a single pass through
-        the service lifecycle and automatically exits.
-        :param loop_delay: Duration (in seconds) of a forced delay between
-        iterations of the event loop
-        :param health_check_frequency: Time (in seconds) between calls to a
-        health check handler. A value of 0 triggers the health check on every
-        iteration.
+        Parameters
+        ----------
+        config: ServiceConfiguration
+            Configuration to modify the behavior of the service.
+
+        Returns
+        -------
+        None
         """
         self._config = config
         """Runtime configuration of the `Service`"""
@@ -73,7 +72,13 @@ class Service(ABC, LoggingMixin):
 
     @property
     def _service_type(self) -> str:
-        """Return the type name of the instance for logging."""
+        """Determine the name of the running service class.
+
+        Returns
+        -------
+        str
+            The name of the class, used for logging purposes.
+        """
         return self.__class__.__name__
 
     @abstractmethod
@@ -100,7 +105,7 @@ class Service(ABC, LoggingMixin):
 
     @property
     def can_shutdown(self) -> bool:
-        """Returns `True` if the service is ready to shut down.
+        """Determine if the service is ready to shut down.
 
         User-defined shutdown criteria will not be evaluated when the service is
         instantiated as a task (e.g. with `as_service=False`).
@@ -121,12 +126,24 @@ class Service(ABC, LoggingMixin):
 
     @property
     def is_healthcheck_running(self) -> bool:
-        """Returns `True` if the healthcheck thread is running."""
+        """Determine if the healthcheck thread is running.
+
+        Returns
+        -------
+        bool
+            `True` if the healthcheck thread is alive, `False` otherwise.
+        """
         return self._hc_thread is not None and self._hc_thread.is_alive()
 
     @property
     def is_healthcheck_queue_ready(self) -> bool:
-        """Returns `True` if the healthcheck queue is available."""
+        """Determine if the healthcheck queue is available.
+
+        Returns
+        -------
+        bool
+            `True` if the healthcheck queue is initialized, `False` otherwise.
+        """
         return self._hc_queue is not None
 
     def _on_start(self) -> None:
@@ -161,11 +178,34 @@ class Service(ABC, LoggingMixin):
         self.log.debug(f"Service delay for {self._service_type}")
 
     def _create_hc_update(self, content: dict[str, str]) -> dict[str, str]:
+        """Create a health check update message.
+
+        Parameters
+        ----------
+        content: dict[str, str]
+            Key-value mapping of content to include in the health check update.
+
+        Returns
+        -------
+        dict[str, str]
+            The complete content of a health check update ready to be sent.
+        """
         update_base = {"ts": datetime.now(tz=timezone.utc).isoformat()}
         update_base.update(content)
         return update_base
 
     def _send_update_to_hc(self, content: dict[str, str]) -> None:
+        """Send an update to the health check thread.
+
+        Parameters
+        ----------
+        content: dict[str, str]
+            Key-value mapping of content to include in the health check update.
+
+        Returns
+        -------
+        None
+        """
         if self._hc_queue:
             msg = self._create_hc_update(content)
             self._hc_queue.put_nowait(msg)
@@ -173,6 +213,17 @@ class Service(ABC, LoggingMixin):
             self.log.debug("No healthcheck queue available")
 
     def _send_terminate_to_hc(self, reason: str) -> None:
+        """Send a termination message to the health check thread.
+
+        Parameters
+        ----------
+        reason: str
+            A string describing the reason for termination.
+
+        Returns
+        -------
+        None
+        """
         self.log.debug("Terminating healthcheck")
         self._send_update_to_hc({"cmd": "quit", "reason": reason})
 
@@ -181,12 +232,24 @@ class Service(ABC, LoggingMixin):
         config: ServiceConfiguration,
         msg_queue: Queue,
     ) -> None:
-        """Health-check event loop.
+        """Run the health-check event loop.
 
         This method runs in a separate thread to ensure that the main event loop cannot
         block health check updates. The health check waits for messages from the main
         thread and publishes a health check update at the specified interval. If the
         main thread fails to send a message, it logs a warning.
+
+        Parameters
+        ----------
+        config: ServiceConfiguration
+            The configuration settings for the service.
+
+        msg_queue: Queue
+            A queue for receiving messages from the main thread.
+
+        Returns
+        -------
+        None
         """
         if config.health_check_frequency < 0:
             self.log.debug("Health check disabled with a negative frequency.")
@@ -262,6 +325,15 @@ class Service(ABC, LoggingMixin):
         """Send a termination message to the healthcheck thread.
 
         After sending signal, waits for the thread to complete prior to returning.
+
+        Parameters
+        ----------
+        reason: str
+            A string describing the reason for termination.
+
+        Returns
+        -------
+        None
         """
         self._send_terminate_to_hc(reason=reason)
         if self._hc_thread and self._hc_thread.is_alive():
@@ -333,7 +405,20 @@ class Service(ABC, LoggingMixin):
         self._shutdown()
 
     def _handle_signal(self, sig_num: int, _frame: FrameType | None) -> None:
-        """Handle OS signals requesting process shutdown."""
+        """Handle OS signals requesting process shutdown.
+
+        Parameters
+        ----------
+        sig_num: int
+            A string describing the reason for termination.
+
+        _frame: FrameType | None
+            The current stack frame (unused).
+
+        Returns
+        -------
+        None
+        """
         self.log.info(f"Received signal: {sig_num}")
 
         try:
