@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import (
     Any,
     ClassVar,
-    Iterable,
     Optional,
     Self,
     Union,
@@ -14,6 +13,8 @@ from typing import (
 from pydantic import (
     BaseModel,
     ModelWrapValidatorHandler,
+    TypeAdapter,
+    ValidationError,
     model_serializer,
     model_validator,
 )
@@ -52,47 +53,6 @@ def _format_value(val: Any) -> str:
     if isinstance(val, float):
         return _format_float(val)
     return str(val)
-
-
-def _matches_type_hint(obj: Any, annotation: Any) -> bool:
-    """Checks an object's type against a given annotation.
-
-    This function DOES NOT cover all possible annotations and generics, only what is needed for this
-    module. Namely, it can check a "plain" type annotation (no generics or collections), or it can check an
-    iterable containing a generic (e.g. list[str]). Unsupported annotations should raise a NotImplementedError,
-    but thorough unit testing of new usages is highly recommended.
-
-    Parameters
-    ----------
-    obj: any object to check
-    annotation: annotation for the object to check against
-
-    Returns
-    -------
-    True if the object matches the annotation, False if not.
-    """
-
-    expected_type = get_origin(annotation) or annotation
-
-    if not isinstance(obj, expected_type):
-        return False
-
-    generic = get_args(annotation)
-
-    # if there are no generics for the annotation, we've already passed the check
-    if not generic:
-        return True
-
-    if not isinstance(obj, Iterable):
-        raise NotImplementedError("Don't know how to check non-iterable generics")
-
-    if len(generic) > 1:
-        raise NotImplementedError("Don't know how to check multi-argument generics")
-
-    if all([isinstance(x, generic) for x in obj]):
-        return True
-    else:
-        return False
 
 
 def _get_alias(field_name: str) -> str:
@@ -315,8 +275,9 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
 
         This method verifies that the value passed in at initialization matches the
         expected type for the SingleEntryROMSRuntimeSettings subclass being instantiated
-        using _matches_type_hint, falling back to the pydantic handler if, e.g., a
-        dictionary is supplied
+        using a pydantic TypeAdapter, falling back to the pydantic handler (and raising
+        a relevant ValidationError) if the type does not strictly match and can't be
+        validated as a dict/object either.
         """
 
         # If no data is provided (None, empty list, etc.), set the whole section to None.
@@ -327,11 +288,22 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
         # If the data passed in is a single value that matches the annotation, initialize the class as if it had been
         # called with the appropriate Class(key=value) syntax
         field_name, annotation = list(cls.__annotations__.items())[0]
-        if _matches_type_hint(data, annotation):
-            return cls.__call__(**{field_name: data})
 
-        # Fall back to pydantic handler for dictionaries, objects, etc., including re-calls from the previous lines
-        return handler(data)
+        try:
+            # TypeAdapter allows you to check annotations or annotated classes against arbitrary objects.
+            # Here, we use strict=True because we only want to allow this shortcut syntax if the type
+            # matches exactly; we don't allow coercion.
+            TypeAdapter(annotation).validate_python(data, strict=True)
+            return handler({field_name: data})
+
+        except ValidationError:
+            log.debug(
+                "Assigning the value to the single-entry field raised a validation error; using regular pydantic handler"
+            )
+
+            # Fall back to pydantic handler for dictionaries, objects, etc.
+            # This will raise any further ValidationErrors, including the traceback to the above attempt.
+            return handler(data)
 
     def __repr__(self):
         return repr(getattr(self, self.key_order[0]))

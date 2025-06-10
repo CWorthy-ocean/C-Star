@@ -1,11 +1,12 @@
 import shutil
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import TypeVar
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 import cstar.roms.runtime_settings as rrs
 from cstar.base.utils import _replace_text_in_file
@@ -106,39 +107,6 @@ class TestHelperMethods:
     )
     def test_format_float(self, fl, st):
         assert rrs._format_float(fl) == st
-
-    class NonIterableGeneric(Generic[T]):
-        pass
-
-    @pytest.mark.parametrize(
-        "obj,annotation,result,context",
-        [
-            ("abc", str, True, nullcontext()),
-            (123, str, False, nullcontext()),
-            ("abc", list, False, nullcontext()),
-            (["abc"], list, True, nullcontext()),
-            (["abc"], list[str], True, nullcontext()),
-            (["abc"], list[int], False, nullcontext()),
-            ({"a", "b"}, set[str], True, nullcontext()),
-            ({"a": 1, "b": 2}, dict[str], True, nullcontext()),  # type: ignore
-            (Path.cwd(), Path, True, nullcontext()),
-            (
-                {"a": 1, "b": 2},
-                dict[str, int],
-                True,
-                pytest.raises(NotImplementedError),
-            ),
-            (
-                NonIterableGeneric(),
-                NonIterableGeneric[str],
-                True,
-                pytest.raises(NotImplementedError),
-            ),
-        ],
-    )
-    def test_matches_type_hint(self, obj, annotation, result, context):
-        with context:
-            assert rrs._matches_type_hint(obj, annotation) is result
 
     @pytest.mark.parametrize(
         "field,result",
@@ -408,14 +376,13 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     def test_single_entry_validator_returns_cls_when_type_matches(self):
         """Tests that the `single_entry_validator` method passes a correctly typed value
         to cls() without requiring a dict or kwargs for initialization."""
-        handler = MagicMock()
-        result = self.MockSingleEntrySection.single_entry_validator(3.14, handler)
+
+        result = self.MockSingleEntrySection(3.14)
 
         assert isinstance(
             result, TestSingleEntryROMSRuntimeSettingsSection.MockSingleEntrySection
         )
         assert result.value == 3.14
-        handler.assert_not_called()
 
     def test_single_entry_validator_calls_handler_when_type_does_not_match(self):
         """Tests that `single_entry_validator` falls back to the handler if the value
@@ -427,6 +394,29 @@ class TestSingleEntryROMSRuntimeSettingsSection:
 
         handler.assert_called_once_with("not a float")
         assert result == "fallback"
+
+    @pytest.mark.parametrize(
+        "obj,annotation,context",
+        [
+            ("abc", str, nullcontext()),
+            (123, str, pytest.raises(ValidationError)),
+            ("abc", list, pytest.raises(ValidationError)),
+            (["abc"], list, nullcontext()),
+            (["abc"], list[str], nullcontext()),
+            (["abc"], list[int], pytest.raises(ValidationError)),
+            ({"a", "b"}, set[str], nullcontext()),
+            ({"a": 1, "b": 2}, dict[str, int], nullcontext()),  # type: ignore
+            ({"a": 1, "b": 2}, dict[str, float], nullcontext()),  # type: ignore
+            ({"a": 1, "b": 2}, dict[str, str], pytest.raises(ValidationError)),  # type: ignore
+            (Path.cwd(), Path, nullcontext()),
+        ],
+    )
+    def test_strict_validation_for_single_entries(self, obj, annotation, context):
+        class MyTestClass(SingleEntryROMSRuntimeSettingsSection):
+            value: annotation
+
+        with context:
+            assert MyTestClass(obj).value == obj
 
     def test_str_and_repr_return_value(self):
         """Tests that the `str` and `repr` functions for
