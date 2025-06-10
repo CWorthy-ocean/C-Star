@@ -1,65 +1,83 @@
-from os import PathLike
+import abc
 from pathlib import Path
-from typing import ClassVar, Optional, Union, get_args, get_origin
+from typing import (
+    Any,
+    ClassVar,
+    Optional,
+    Self,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import (
     BaseModel,
-    Field,
     ModelWrapValidatorHandler,
+    TypeAdapter,
+    ValidationError,
     model_serializer,
     model_validator,
 )
+from pydantic.alias_generators import to_snake
 
 from cstar.base.log import get_logger
 from cstar.base.utils import _list_to_concise_str
 
 log = get_logger(__name__)
 
-################################################################################
-# Formatting methods for serializer:
+
+# This lookup is for roms.in sections that have specialized names that are not simply the snake case
+# of the class/field name
+CUSTOM_ALIAS_LOOKUP = {
+    "marbl_biogeochemistry": "MARBL_biogeochemistry",
+    "s_coord": "S-coord",
+    "my_bak_mixing": "MY_bak_mixing",
+    "initial_conditions": "initial",
+}
 
 
-def _format_list_of_floats(float_list: list[float]) -> str:
-    joiner = " "
-    return joiner.join(_format_float(x) for x in float_list)
-
-
-def _format_list_of_paths(
-    path_list: list[Path], multi_line: Optional[bool] = False
-) -> str:
-    joiner = "\n    " if multi_line else " "
-    return joiner.join(_format_path(x) for x in path_list)
-
-
-def _format_list_of_other(other_list: list[str | int]) -> str:
-    joiner = " "
-    return joiner.join(_format_other(x) for x in other_list)
-
-
-def _format_float(val) -> str:
+def _format_float(val: float) -> str:
+    """Apply special float formatting for 0 and scientific notation."""
     if val == 0.0:
         return "0."
-    elif abs(val) < 1e-2 or abs(val) >= 1e4:
+
+    if abs(val) < 1e-2 or abs(val) >= 1e4:
         return f"{val:.6E}".replace("E+00", "E0")
-    else:
-        return str(val)
+
+    return str(val)
 
 
-def _format_path(path: Path) -> str:
-    return str(path)
+def _format_value(val: Any) -> str:
+    """Format floats using _format_float, otherwise just return the string of the
+    value."""
+    if isinstance(val, float):
+        return _format_float(val)
+    return str(val)
 
 
-def _format_other(other: str | int) -> str:
-    return str(other)
+def _get_alias(field_name: str) -> str:
+    """Get the alias for a given field, checking the custom mappings first, otherwise
+    returning the snake_case version of the field name.
+
+    Parameters
+    ----------
+    field_name: field name to get alias for
+
+    Returns
+    -------
+    alias for serialization/deserialization
+    """
+    field_name = to_snake(field_name)
+    return CUSTOM_ALIAS_LOOKUP.get(field_name, field_name)
 
 
-################################################################################
+class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
+    """Base class containing common serialization/deserialization methods used by
+    subsections of the ROMS runtime input file."""
 
-
-class ROMSRuntimeSettingsSection(BaseModel):
-    section_name: ClassVar[str]
     multi_line: ClassVar[bool] = False
-    key_order: ClassVar[list[str]]
+    """If true, multiple values are split across multiple lines in the inputs file; if
+    false, they are space-delimited."""
 
     def __init__(self, *args, **kwargs):
         if args:
@@ -67,57 +85,102 @@ class ROMSRuntimeSettingsSection(BaseModel):
         else:
             super().__init__(**kwargs)
 
+    @property
+    def key_order(self):
+        """Return the pydantic fields (no class vars or properties) in the order they
+        are specified."""
+        return list(self.__pydantic_fields__.keys())
+
     @model_validator(mode="wrap")
     @classmethod
-    def validate_from_lines(cls, data, handler: ModelWrapValidatorHandler):
-        # if the class gets a list of strings as it's init, assume it's coming in as a line
-        # from the roms.in file, and try to parse it as such. if that fails, or if it's not a list
-        # when it comes in, do the usual init process.
+    def validate_from_lines(cls, data: Any, handler: ModelWrapValidatorHandler) -> Self:
+        """This adapter allows class instantiation from a dict / kwargs, or from lines
+        read from a ROMS input file.
 
+        If data is a list of strings, assume it's coming in as raw lines, and create an
+        object from the from_lines method. Otherwise, pass to the pydantic handler to
+        validate per usual.
+        """
         if isinstance(data, list) and all(isinstance(v, str) for v in data):
-            try:
-                return cls.from_lines(data)
-            except Exception as e:
-                log.debug(
-                    f"{cls.__name__}.validate_from_lines: failed to parse from lines: {data!r} – {e}"
-                )
+            return cls.from_lines(data)
+
         return handler(data)
 
     @property
-    def value_joiner(self):
+    def _intervalue_delimiter(self) -> str:
+        """Delimiter that goes between different values in a section. Either a newline +
+        spaces for multiline sections, or several spaces.
+
+        For example, TimeStepping is not multi-line, so it's four values will get delimited as:
+        ```1    2    3    4```
+        whereas InitialConditions is multiline, and will output it's two values as
+        ```
+            1
+            /path/to/ini/file.nc
+        ```
+        """
         return "\n    " if self.multi_line else "    "
+
+    @property
+    def _intravalue_delimiter(self) -> str:
+        """Delimiter that goes between multiple parts of a single "value", e.g. multiple
+        floats in a list of floats.
+
+        Either a newline + spaces for multiline sections, or a single space.
+
+        Multi-line variations are typically for lists of filenames, e.g. forcing files.
+        There is one key-value pair, but each value in the list needs its own line.
+
+        Classes that use this with multi_line=False are arrays of numbers, like
+        TracerDiff2, and we use single spaces here to create a visual distinction from
+        multiple values (like the TimeStepping example in _intervalue_delimiter).
+        """
+        return "\n    " if self.multi_line else " "
+
+    def _format_and_join_values(self, *args):
+        """Formats any number of args corresponding to a single value, and joins them as
+        appropriate."""
+
+        # if args is a single, non-list item, just format it (no join needed)
+        if len(args) == 1 and not isinstance(args[0], list):
+            return _format_value(args[0])
+
+        # otherwise, format each value in args and join them.
+        return self._intravalue_delimiter.join(map(_format_value, *args))
 
     @model_serializer
     def default_serializer(self) -> str:
-        # Make a dictionary out of the attributes:
+        """Serializes the object as a string containing the section header and values
+        for the roms.in specification.
+
+        Examples
+        --------
+        >>> t = TimeStepping(1, 2, 3, 4)
+        >>> t.model_dump()
+        time_stepping: ntimes dt ndtfast ninfo
+             1    2    3    4
+        """
+        # Make a dictionary out of the pydantic attributes:
         data = {k: getattr(self, k) for k in self.key_order}
 
-        section_values_as_list_of_str = []
-        # Check formatting of values
-        for value in data.values():
-            match value:
-                case list() if all(isinstance(v, float) for v in value):
-                    section_values_as_list_of_str.append(_format_list_of_floats(value))
-                case list() if all(isinstance(v, Path) for v in value):
-                    section_values_as_list_of_str.append(
-                        _format_list_of_paths(value, multi_line=self.multi_line)
-                    )
-                case list():
-                    section_values_as_list_of_str.append(_format_list_of_other(value))
-                case float():
-                    section_values_as_list_of_str.append(_format_float(value))
-                case Path():
-                    section_values_as_list_of_str.append(_format_path(value))
-                case None:
-                    continue
-                case _:
-                    section_values_as_list_of_str.append(_format_other(value))
-        section_values_as_single_str = self.value_joiner.join(
-            section_values_as_list_of_str
-        )
+        section_values = []
 
-        section_header = f"{self.section_name}: {' '.join(data.keys())}\n"
+        # for each non-None k/v, format and join the values
+        for value in [x for x in data.values() if x is not None]:
+            section_values.append(self._format_and_join_values(value))
+
+        # combine all the values in this section into a single string
+        section_values_as_single_str = self._intervalue_delimiter.join(section_values)
+
+        # single entry sections use the one and only field as the section name
+        # multi-value sections use their alias
+        if isinstance(self, SingleEntryROMSRuntimeSettingsSection):
+            section_name = list(self.__pydantic_fields__.keys())[0]
+        else:
+            section_name = _get_alias(type(self).__name__)
+
         # Build the serialized string
+        section_header = f"{section_name}: {' '.join(data.keys())}\n"
         serialized = ""
         serialized += section_header
         serialized += f"    {section_values_as_single_str}\n"
@@ -125,9 +188,7 @@ class ROMSRuntimeSettingsSection(BaseModel):
         return serialized
 
     @classmethod
-    def from_lines(
-        cls, lines: Optional[list[str]]
-    ) -> Optional["ROMSRuntimeSettingsSection"]:
+    def from_lines(cls, lines: list[str]) -> Self:
         """This takes a list of lines as would be found under the section header of a
         roms.in file and returns a ROMSRuntimeSettingsSection instance.
 
@@ -150,8 +211,9 @@ class ROMSRuntimeSettingsSection(BaseModel):
         >>> InitialConditions.from_lines(["1", "input_datasets/roms_ini.nc"])
             InitialConditions(nrrec=1, ininame=Path("input_datasets/roms_ini.nc"))
         """
+
         if not lines:
-            return None
+            raise ValueError("Received empty input.")
 
         annotations = cls.__annotations__
         kwargs = {}
@@ -160,7 +222,8 @@ class ROMSRuntimeSettingsSection(BaseModel):
         flat = lines if cls.multi_line else lines[0].split()
 
         i = 0  # index of the entry
-        for key in cls.key_order:
+        key_order = list(cls.__pydantic_fields__.keys())
+        for key in key_order:
             annotation = annotations[key]
             annotation_origin = get_origin(annotation)
 
@@ -180,7 +243,7 @@ class ROMSRuntimeSettingsSection(BaseModel):
                 # This doesn't reformat e.g. 5.0D0 -> 5.0
                 if expected_type is float:
                     kwargs[key] = expected_type(flat[i].upper().replace("D", "E"))
-                elif (expected_type is str) and (len(cls.key_order) == 1):
+                elif (expected_type is str) and (len(key_order) == 1):
                     kwargs[key] = " ".join(flat)
                 else:
                     kwargs[key] = expected_type(flat[i])
@@ -195,53 +258,52 @@ class ROMSRuntimeSettingsSection(BaseModel):
         return cls(**kwargs)
 
 
-################################################################################
-## ROMS SECTION SUBCLASSES
-################################################################################
-
-
 class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
+    @model_validator(mode="after")
+    def check_exactly_one_field(self):
+        if n_args := len(self.__pydantic_fields__.keys()) != 1:
+            raise TypeError(
+                f"{type(self)} should only have one pydantic field, but it had {n_args}"
+            )
+        return self
+
     @model_validator(mode="wrap")
     @classmethod
     def single_entry_validator(cls, data, handler: ModelWrapValidatorHandler):
         """Allows a SingleEntryROMSRuntimeSettingsSection to be initialized with just
-        the value of the single entry, instead of with a dict or kwargs."""
-        annotation = cls.__annotations__[cls.key_order[0]]
-        expected_type = get_origin(annotation) or annotation
-        if isinstance(data, expected_type):
-            try:
-                return cls(**{cls.section_name: data})
-            except Exception as e:
-                log.debug(
-                    f"single_entry_validator: failed to cast {data!r} to {expected_type} for {cls.__name__}: {e}"
-                )
-        return handler(data)
+        the value of the single entry, instead of only with a dict or kwargs.
 
-    def __init_subclass__(cls, **kwargs):
-        """Overrides default __init_subclass__ to allow definition of
-        SingleEntryROMSRuntimeSettingsSection without explicitly defining redundant
-        key_order or section_name attrs."""
+        This method verifies that the value passed in at initialization matches the
+        expected type for the SingleEntryROMSRuntimeSettings subclass being instantiated
+        using a pydantic TypeAdapter, falling back to the pydantic handler (and raising
+        a relevant ValidationError) if the type does not strictly match and can't be
+        validated as a dict/object either.
+        """
 
-        super().__init_subclass__(**kwargs)
+        # If no data is provided (None, empty list, etc.), set the whole section to None.
+        # We do need to explicitly let 0 through as a valid value, though.
+        if data in [None, [], ""]:
+            return None
 
-        # Get all annotated instance fields (ignore ClassVars like section_name)
-        field_names = [
-            name
-            for name, vartype in cls.__annotations__.items()
-            if get_origin(vartype) != ClassVar
-        ]
+        # If the data passed in is a single value that matches the annotation, initialize the class as if it had been
+        # called with the appropriate Class(key=value) syntax
+        field_name, annotation = list(cls.__annotations__.items())[0]
 
-        if len(field_names) != 1:
-            raise TypeError(
-                f"{cls.__name__} must declare exactly one field, found: {field_names}"
+        try:
+            # TypeAdapter allows you to check annotations or annotated classes against arbitrary objects.
+            # Here, we use strict=True because we only want to allow this shortcut syntax if the type
+            # matches exactly; we don't allow coercion.
+            TypeAdapter(annotation).validate_python(data, strict=True)
+            return handler({field_name: data})
+
+        except ValidationError:
+            log.debug(
+                "Assigning the value to the single-entry field raised a validation error; using regular pydantic handler"
             )
 
-        # Set key_order to the sole field
-        cls.key_order = field_names
-
-        # Set section_name = <field name> if not explicitly provided
-        if not hasattr(cls, "section_name"):
-            cls.section_name = field_names[0]
+            # Fall back to pydantic handler for dictionaries, objects, etc.
+            # This will raise any further ValidationErrors, including the traceback to the above attempt.
+            return handler(data)
 
     def __repr__(self):
         return repr(getattr(self, self.key_order[0]))
@@ -304,29 +366,21 @@ class TimeStepping(ROMSRuntimeSettingsSection):
     ndtfast: int
     ninfo: int
 
-    section_name = "time_stepping"
-    key_order = ["ntimes", "dt", "ndtfast", "ninfo"]
-
 
 class BottomDrag(ROMSRuntimeSettingsSection):
     rdrg: float
     rdrg2: float
     zob: float
 
-    section_name = "bottom_drag"
-    key_order = ["rdrg", "rdrg2", "zob"]
-
 
 class InitialConditions(ROMSRuntimeSettingsSection):
     nrrec: int
     ininame: Optional[Path]
 
-    section_name = "initial"
     multi_line = True
-    key_order = ["nrrec", "ininame"]
 
     @classmethod
-    def from_lines(cls, lines: Optional[list[str]]) -> "InitialConditions":
+    def from_lines(cls, lines: Optional[list[str]]) -> Self:
         """Bespoke `from_lines` for the InitialConditions section, which may have a
         single '0' line, as in, e.g. `$ROMS_ROOT/Examples/Rivers_ana/river_ana.in`
 
@@ -335,34 +389,30 @@ class InitialConditions(ROMSRuntimeSettingsSection):
         if (not lines) or (len(lines) == 1) and int(lines[0]) == 0:
             return cls(nrrec=0, ininame=None)
         else:
-            return super(InitialConditions, cls).from_lines(lines)
+            return super().from_lines(lines)
 
 
 class Forcing(ROMSRuntimeSettingsSection):
     filenames: Optional[list[Path]]
 
-    section_name = "forcing"
     multi_line = True
-    key_order = ["filenames"]
 
     @classmethod
-    def from_lines(cls, lines: Optional[list[str]]) -> "Forcing":
+    def from_lines(cls, lines: Optional[list[str]]) -> Self:
         """Bespoke `from_lines` for the Forcing section, which must exist in ROMS but
         may be empty, as in, e.g. `$ROMS_ROOT/Examples/Rivers_ana/river_ana.in`
 
-        In this case, set nrrec to 0 and ininame to None
+        In this case, set filenames to None
         """
         if (not lines) or (len(lines) == 0):
             return cls(filenames=None)
         else:
-            return super(Forcing, cls).from_lines(lines)
+            return super().from_lines(lines)
 
 
 class VerticalMixing(ROMSRuntimeSettingsSection):
     Akv_bak: float
     Akt_bak: list[float]
-    section_name = "vertical_mixing"
-    key_order = ["Akv_bak", "Akt_bak"]
 
 
 class MARBLBiogeochemistry(ROMSRuntimeSettingsSection):
@@ -370,22 +420,13 @@ class MARBLBiogeochemistry(ROMSRuntimeSettingsSection):
     marbl_tracer_list_fname: Path
     marbl_diag_list_fname: Path
 
-    section_name = "MARBL_biogeochemistry"
     multi_line = True
-    key_order = [
-        "marbl_namelist_fname",
-        "marbl_tracer_list_fname",
-        "marbl_diag_list_fname",
-    ]
 
 
 class SCoord(ROMSRuntimeSettingsSection):
     theta_s: float
     theta_b: float
     tcline: float
-
-    section_name = "S-coord"
-    key_order = ["theta_s", "theta_b", "tcline"]
 
 
 class LinRhoEos(ROMSRuntimeSettingsSection):
@@ -394,55 +435,39 @@ class LinRhoEos(ROMSRuntimeSettingsSection):
     Scoef: float
     S0: float
 
-    section_name = "lin_rho_eos"
-    key_order = [
-        "Tcoef",
-        "T0",
-        "Scoef",
-        "S0",
-    ]
-
 
 class MYBakMixing(ROMSRuntimeSettingsSection):
     Akq_bak: float
     q2nu2: float
     q2nu4: float
-    section_name = "MY_bak_mixing"
-    key_order = ["Akq_bak", "q2nu2", "q2nu4"]
-
-
-################################################################################
-## Class to hold all sections:
 
 
 class ROMSRuntimeSettings(BaseModel):
-    # Non-optional:
     title: Title
     time_stepping: TimeStepping
     bottom_drag: BottomDrag
     initial: InitialConditions
     forcing: Forcing
     output_root_name: OutputRootName
-    # Optional:
-    rho0: Optional[Rho0] = None
-    marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = Field(
-        alias="MARBL_biogeochemistry", default=None
-    )
-    s_coord: Optional[SCoord] = Field(alias="S-coord", default=None)
-    lin_rho_eos: Optional[LinRhoEos] = None
+
+    s_coord: Optional[SCoord] = None
+    grid: Optional[Grid] = None
+    marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = None
     lateral_visc: Optional[LateralVisc] = None
+    rho0: Optional[Rho0] = None
+    lin_rho_eos: Optional[LinRhoEos] = None
     gamma2: Optional[Gamma2] = None
     tracer_diff2: Optional[TracerDiff2] = None
     vertical_mixing: Optional[VerticalMixing] = None
-    my_bak_mixing: Optional[MYBakMixing] = Field(alias="MY_bak_mixing", default=None)
+    my_bak_mixing: Optional[MYBakMixing] = None
     sss_correction: Optional[SSSCorrection] = None
     sst_correction: Optional[SSTCorrection] = None
     ubind: Optional[UBind] = None
     v_sponge: Optional[VSponge] = None
-    grid: Optional[Grid] = None
     climatology: Optional[Climatology] = None
+
     # Pydantic model configuration
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "alias_generator": _get_alias}
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -515,7 +540,15 @@ class ROMSRuntimeSettings(BaseModel):
     """
 
     @staticmethod
-    def _load_raw_sections(filepath: Path) -> dict[str, list[str]]:
+    def _load_raw_sections(filepath: str | Path) -> dict[str, list[str]]:
+        """Read a roms.in text file and parse into a dictionary of sections.
+
+        The keys are the section names and the values are a list of strings that hold
+        data for that section (to be further parsed by the pydantic models for each
+        section).
+        """
+        filepath = Path(filepath)
+
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist.")
 
@@ -549,7 +582,7 @@ class ROMSRuntimeSettings(BaseModel):
         return sections
 
     @classmethod
-    def from_file(cls, filepath: PathLike[str]) -> "ROMSRuntimeSettings":
+    def from_file(cls, filepath: str | Path) -> "ROMSRuntimeSettings":
         """Read ROMS runtime settings from a `.in` file.
 
         ROMS runtime settings are specified via a `.in` file with sections corresponding
@@ -571,7 +604,6 @@ class ROMSRuntimeSettings(BaseModel):
         """
 
         # Read file
-        filepath = Path(filepath)
         sections = cls._load_raw_sections(filepath)
         required_fields = {"title", "time_stepping", "bottom_drag", "output_root_name"}
         missing_required_fields = required_fields - sections.keys()
@@ -763,7 +795,20 @@ class ROMSRuntimeSettings(BaseModel):
         inner = ", ".join(f"{k}={repr(v)}" for k, v in attrs.items() if v is not None)
         return f"{self.__class__.__name__}({inner})"
 
-    def to_file(self, filepath: PathLike[str]) -> None:
+    @model_serializer()
+    def serialize_to_string(self) -> str:
+        """Serialize the model (excluding null sections) to a single string as would be
+        found in a ROMS-compatible `.in` file."""
+        output = ""
+        for field_name, field_info in type(self).model_fields.items():
+            section = getattr(self, field_name)
+            if section is None:
+                continue
+            output += section.model_dump()
+
+        return output
+
+    def to_file(self, filepath: str | Path) -> None:
         """Write the current settings to a ROMS-compatible `.in` file.
 
         Parameters
@@ -772,35 +817,5 @@ class ROMSRuntimeSettings(BaseModel):
             Path where the output file will be written.
         """
 
-        filepath = Path(filepath)
-
-        output_order = [
-            "title",
-            "time_stepping",
-            "bottom_drag",
-            "initial",
-            "forcing",
-            "output_root_name",
-            "s_coord",
-            "grid",
-            "marbl_biogeochemistry",
-            "lateral_visc",
-            "rho0",
-            "lin_rho_eos",
-            "gamma2",
-            "tracer_diff2",
-            "vertical_mixing",
-            "my_bak_mixing",
-            "sss_correction",
-            "sst_correction",
-            "ubind",
-            "v_sponge",
-            "climatology",
-        ]
-
-        with filepath.open("w") as f:
-            for field in output_order:
-                if getattr(self, field) is None:
-                    continue
-                fieldname = self.model_fields[field].alias or field
-                f.write(self.model_dump(by_alias=True)[fieldname])
+        with Path(filepath).open("w") as f:
+            f.write(self.model_dump())

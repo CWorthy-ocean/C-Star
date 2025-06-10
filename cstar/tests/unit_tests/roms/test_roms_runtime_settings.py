@@ -1,9 +1,12 @@
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
+from typing import TypeVar
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 import cstar.roms.runtime_settings as rrs
 from cstar.base.utils import _replace_text_in_file
@@ -14,6 +17,8 @@ from cstar.roms.runtime_settings import (
     ROMSRuntimeSettingsSection,
     SingleEntryROMSRuntimeSettingsSection,
 )
+
+T = TypeVar("T")
 
 
 @pytest.fixture
@@ -79,16 +84,6 @@ def example_runtime_settings():
 class MockSection(ROMSRuntimeSettingsSection):
     """A simple ROMSRuntimeSettingsSection subclass for testing."""
 
-    section_name = "test_section"
-    key_order = [
-        "floats",  # list[float]
-        "paths",  # list[Path]
-        "others",  # list[str|int]
-        "floatval",  # float
-        "pathval",  # Path
-        "otherval",  # str (fallback case)
-    ]
-
     floats: list[float]
     paths: list[Path]
     others: list[str | int]
@@ -97,7 +92,12 @@ class MockSection(ROMSRuntimeSettingsSection):
     otherval: str
 
 
-class TestFormattingMethods:
+class EmptySection(ROMSRuntimeSettingsSection):
+    """No actual values defined, just used to test some of the formatting/joining
+    functions."""
+
+
+class TestHelperMethods:
     """Test module-level non-public methods for formatting various types for use in
     serializers."""
 
@@ -108,25 +108,19 @@ class TestFormattingMethods:
     def test_format_float(self, fl, st):
         assert rrs._format_float(fl) == st
 
-    def test_format_list_of_floats(self):
-        lf = rrs._format_list_of_floats([1e-3, 0.0, 2])
-        assert lf == "1.000000E-03 0. 2"
-
-    def test_format_path(self):
-        p = rrs._format_path(Path("mypath.nc"))
-        assert p == "mypath.nc"
-
-    def test_format_list_of_paths(self):
-        lp = rrs._format_list_of_paths([Path("path1.nc"), Path("path2.nc")])
-        assert lp == "path1.nc path2.nc"
-
-    @pytest.mark.parametrize("o,st", [(5, "5"), ("helloworld", "helloworld")])
-    def test_format_other(self, o, st):
-        assert rrs._format_other(o) == st
-
-    def test_format_list_of_other(self):
-        o = rrs._format_list_of_other([5, "foo"])
-        assert o == "5 foo"
+    @pytest.mark.parametrize(
+        "field,result",
+        [
+            ("MARBLBiogeochemistry", "MARBL_biogeochemistry"),
+            ("SCoord", "S-coord"),
+            ("MYBakMixing", "MY_bak_mixing"),
+            ("InitialConditions", "initial"),
+            ("BottomDrag", "bottom_drag"),
+            ("Forcing", "forcing"),
+        ],
+    )
+    def test_get_alias(self, field, result):
+        assert rrs._get_alias(field) == result
 
 
 class TestROMSRuntimeSettingsSection:
@@ -172,14 +166,34 @@ class TestROMSRuntimeSettingsSection:
         """Test ROMSRuntimeSettingsSection.__init__ with *args instead of **kwargs."""
 
         class TestSection(ROMSRuntimeSettingsSection):
-            section_name = "test_section"
-            key_order = ["val1", "val2"]
             val1: float
             val2: str
 
         section = TestSection(5.0, "hello")
         assert section.val1 == 5
         assert section.val2 == "hello"
+
+    def test_format_list_of_floats(self):
+        lf = EmptySection()._format_and_join_values([1e-3, 0.0, 2])
+        assert lf == "1.000000E-03 0. 2"
+
+    def test_format_path(self):
+        p = EmptySection()._format_and_join_values(Path("mypath.nc"))
+        assert p == "mypath.nc"
+
+    def test_format_list_of_paths(self):
+        lp = EmptySection()._format_and_join_values(
+            [Path("path1.nc"), Path("path2.nc")]
+        )
+        assert lp == "path1.nc path2.nc"
+
+    @pytest.mark.parametrize("o,st", [(5, "5"), ("helloworld", "helloworld")])
+    def test_format_other(self, o, st):
+        assert EmptySection()._format_and_join_values(o) == st
+
+    def test_format_list_of_other(self):
+        o = EmptySection()._format_and_join_values([5, "foo"])
+        assert o == "5 foo"
 
     def test_validate_from_lines_calls_from_lines(self):
         """Test ROMSRuntimeSettingsSection.validate_from_lines calls `from_lines` if
@@ -209,20 +223,14 @@ class TestROMSRuntimeSettingsSection:
         mock_handler.assert_called_once_with(test_data)
         assert result == "fallback"
 
-    def test_validate_from_lines_uses_handler_on_exception(self):
+    def test_validate_from_lines_raises_on_exception(self):
         """Test ROMSRuntimeSettingsSection.validate_from_lines falls back to handler if
         from_lines fails."""
         mock_handler = MagicMock(return_value="handled")
         test_lines = ["bad", "data"]
 
-        with patch.object(
-            MockSection, "from_lines", side_effect=ValueError("fail")
-        ) as mock_from_lines:
-            result = MockSection.validate_from_lines(test_lines, mock_handler)
-
-        mock_from_lines.assert_called_once_with(test_lines)
-        mock_handler.assert_called_once_with(test_lines)
-        assert result == "handled"
+        with pytest.raises(ValueError):
+            MockSection.validate_from_lines(test_lines, mock_handler)
 
     def test_default_serializer(self):
         """Test the `ROMSRuntimeSettingsSection.default_serializer` returns an expected
@@ -236,22 +244,39 @@ class TestROMSRuntimeSettingsSection:
             otherval="done",
         )
 
-        expected = "test_section: floats paths others floatval pathval otherval\n    0. 1.000000E-05 123.4    a.nc b.nc    x 42    1.000000E+05    grid.nc    done\n\n"
+        expected = "mock_section: floats paths others floatval pathval otherval\n    0. 1.000000E-05 123.4    a.nc b.nc    x 42    1.000000E+05    grid.nc    done\n\n"
 
         assert obj.model_dump() == expected
 
-    def test_from_lines_returns_none_if_no_lines(self):
+    def test_key_order_property(self):
+        obj = MockSection(
+            floats=[0.0, 1e-5, 123.4],
+            paths=[Path("a.nc"), Path("b.nc")],
+            others=["x", 42],
+            floatval=1e5,
+            pathval=Path("grid.nc"),
+            otherval="done",
+        )
+        assert obj.key_order == [
+            "floats",
+            "paths",
+            "others",
+            "floatval",
+            "pathval",
+            "otherval",
+        ]
+
+    def test_from_lines_raises_if_no_lines(self):
         """Test the `ROMSRuntimeSettingsSection.from_lines` method returns None if given
         an empty list."""
-        assert MockSection.from_lines([]) is None
+        with pytest.raises(ValueError):
+            MockSection.from_lines([])
 
     def test_from_lines_on_float_section_with_D_formatting(self):
         """Test a ROMSRuntimeSettingsSection subclass with a single float entry is
         correctly returned by `from_lines` with fortran-style formatting."""
 
         class FloatSection(ROMSRuntimeSettingsSection):
-            section_name = "float_section"
-            key_order = ["val"]
             val: float
 
         section = FloatSection.from_lines(["5.0D0"])
@@ -262,8 +287,6 @@ class TestROMSRuntimeSettingsSection:
         returned by `from_lines`"""
 
         class MixedSection(ROMSRuntimeSettingsSection):
-            section_name = "mixed"
-            key_order = ["count", "name"]
             count: int
             name: str
 
@@ -276,8 +299,6 @@ class TestROMSRuntimeSettingsSection:
         the final entry is a list (using all remaining values to populate it)"""
 
         class ListAtEnd(ROMSRuntimeSettingsSection):
-            section_name = "list_end"
-            key_order = ["prefix", "items"]
             prefix: str
             items: list[int]
 
@@ -290,8 +311,6 @@ class TestROMSRuntimeSettingsSection:
         instance when the only entry is a list."""
 
         class OnlyList(ROMSRuntimeSettingsSection):
-            section_name = "only_list"
-            key_order = ["entries"]
             entries: list[str]
 
         section = OnlyList.from_lines(["a b c"])
@@ -302,9 +321,7 @@ class TestROMSRuntimeSettingsSection:
         where entries are on different lines."""
 
         class MultiLinePaths(ROMSRuntimeSettingsSection):
-            section_name = "files"
             multi_line = True
-            key_order = ["paths"]
             paths: list[Path]
 
         section = MultiLinePaths.from_lines(["a.nc", "b.nc", "c.nc"])
@@ -356,23 +373,16 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     class MockSingleEntrySection(SingleEntryROMSRuntimeSettingsSection):
         value: float
 
-    def test_init_subclass_sets_attrs(self):
-        """Tests that SingleEntryROMSRuntimeSettingsSection.__init_subclass__ correctly
-        sets the section_name and key_order attributes."""
-        assert self.MockSingleEntrySection.section_name == "value"
-        assert self.MockSingleEntrySection.key_order == ["value"]
-
     def test_single_entry_validator_returns_cls_when_type_matches(self):
         """Tests that the `single_entry_validator` method passes a correctly typed value
         to cls() without requiring a dict or kwargs for initialization."""
-        handler = MagicMock()
-        result = self.MockSingleEntrySection.single_entry_validator(3.14, handler)
+
+        result = self.MockSingleEntrySection(3.14)
 
         assert isinstance(
             result, TestSingleEntryROMSRuntimeSettingsSection.MockSingleEntrySection
         )
         assert result.value == 3.14
-        handler.assert_not_called()
 
     def test_single_entry_validator_calls_handler_when_type_does_not_match(self):
         """Tests that `single_entry_validator` falls back to the handler if the value
@@ -385,6 +395,29 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         handler.assert_called_once_with("not a float")
         assert result == "fallback"
 
+    @pytest.mark.parametrize(
+        "obj,annotation,context",
+        [
+            ("abc", str, nullcontext()),
+            (123, str, pytest.raises(ValidationError)),
+            ("abc", list, pytest.raises(ValidationError)),
+            (["abc"], list, nullcontext()),
+            (["abc"], list[str], nullcontext()),
+            (["abc"], list[int], pytest.raises(ValidationError)),
+            ({"a", "b"}, set[str], nullcontext()),
+            ({"a": 1, "b": 2}, dict[str, int], nullcontext()),  # type: ignore
+            ({"a": 1, "b": 2}, dict[str, float], nullcontext()),  # type: ignore
+            ({"a": 1, "b": 2}, dict[str, str], pytest.raises(ValidationError)),  # type: ignore
+            (Path.cwd(), Path, nullcontext()),
+        ],
+    )
+    def test_strict_validation_for_single_entries(self, obj, annotation, context):
+        class MyTestClass(SingleEntryROMSRuntimeSettingsSection):
+            value: annotation
+
+        with context:
+            assert MyTestClass(obj).value == obj
+
     def test_str_and_repr_return_value(self):
         """Tests that the `str` and `repr` functions for
         SingleEntryROMSRuntimeSettingsSection simply return a string of the single
@@ -396,11 +429,13 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     def test_single_entry_section_raises_if_multiple_fields(self):
         """Tests that attempting to initialize a SingleEntryROMSRuntimeSettingsSection
         with multiple entries raises a TypeError."""
-        with pytest.raises(TypeError, match="must declare exactly one field"):
+        with pytest.raises(TypeError):
 
             class InvalidSection(SingleEntryROMSRuntimeSettingsSection):
                 a: int
                 b: float
+
+            InvalidSection(a=1, b=2)
 
 
 class TestROMSRuntimeSettings:

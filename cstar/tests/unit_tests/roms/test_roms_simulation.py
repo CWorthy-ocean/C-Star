@@ -384,9 +384,7 @@ class TestROMSSimulationInitialization:
         sim.runtime_code = AdditionalCode(
             location="some/dir", files=["no", "dotin.files", "here"]
         )
-        with pytest.raises(
-            RuntimeError, match="ROMS requires exactly one runtime settings file"
-        ):
+        with pytest.raises(RuntimeError):
             sim._find_dotin_file()
 
     @pytest.mark.parametrize(
@@ -2075,8 +2073,11 @@ class TestProcessingAndExecution:
             ):
                 sim.run()
 
+    @patch("cstar.roms.ROMSSimulation.persist")
     @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
-    def test_run_local_execution(self, mock_runtime_settings, example_roms_simulation):
+    def test_run_local_execution(
+        self, mock_runtime_settings, mock_persist, example_roms_simulation
+    ):
         """Tests that `run` correctly starts a local process when no scheduler is
         available.
 
@@ -2127,6 +2128,8 @@ class TestProcessingAndExecution:
             # Ensure execution handler was set correctly
             assert execution_handler == mock_process_instance
 
+            mock_persist.assert_called_once()
+
     @pytest.mark.parametrize(
         "mock_system_name,exp_mpi_prefix",
         [
@@ -2136,12 +2139,12 @@ class TestProcessingAndExecution:
             ["perlmutter", "srun"],
         ],
     )
-    # @patch("cstar.roms.simulation._replace_text_in_file")  # Mock text replacement
+    @patch("cstar.roms.ROMSSimulation.persist")
     @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
     def test_run_with_scheduler(
         self,
         mock_runtime_settings,
-        # mock_replace_text,
+        mock_persist,
         example_roms_simulation,
         mock_system_name: str,
         exp_mpi_prefix: str,
@@ -2221,6 +2224,8 @@ class TestProcessingAndExecution:
             mock_job_instance.submit.assert_called_once()
 
             assert execution_handler == mock_job_instance
+
+            mock_persist.assert_called_once()
 
     @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
     def test_run_with_scheduler_raises_if_no_account_key(

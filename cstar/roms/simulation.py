@@ -276,16 +276,16 @@ class ROMSSimulation(Simulation):
         """
 
         in_files = [f for f in self.runtime_code.files if f.endswith(".in")]
-        if len(in_files) != 1:
-            raise RuntimeError(
-                "ROMS requires exactly one runtime settings "
-                + "file (with a `.in` extension), e.g. `roms.in`. "
-                + "Supplied files: \n"
-                + "\n".join(self.runtime_code.files)
-            )
+
+        if not in_files:
+            raise RuntimeError("No .in file was provided")
+
+        if len(in_files) > 1:
+            raise RuntimeError(f"Only 1 .in file is allowed. Got: {in_files}")
+
         self._in_file = in_files[0]
 
-    def _check_forcing_collection_types(self, collection, expected_class):
+    def _check_forcing_collection_types(self, collection: list, expected_class: type):
         """Validate the types of input datasets in a forcing collection.
 
         For forcing types that may correspond to multiple ROMSInputDataset instances
@@ -627,20 +627,15 @@ class ROMSSimulation(Simulation):
             self.runtime_code.working_path / self._in_file
         )
 
-        # Previous modifications
-        # Time step entry
+        # Modify each relevant section in the runtime settings object based on blueprint values
         simulation_runtime_settings.time_stepping.dt = self.discretization.time_step
-
-        # ntimesteps entry:
         simulation_runtime_settings.time_stepping.ntimes = self._n_time_steps
 
-        # Initial conditions entry
         if self.initial_conditions:
             simulation_runtime_settings.initial.ininame = (
                 self.initial_conditions.path_for_roms[0]
             )
 
-        # Grid entry
         if self.model_grid:
             simulation_runtime_settings.grid = cstar.roms.runtime_settings.Grid(
                 grid=self.model_grid.path_for_roms[0]
@@ -648,10 +643,9 @@ class ROMSSimulation(Simulation):
         else:
             simulation_runtime_settings.grid = None
 
-        # Forcing
         simulation_runtime_settings.forcing.filenames = self._forcing_paths
-        # MARBL settings:
 
+        # all MARBL files must be present to enable MARBL
         if all(
             f in self.runtime_code.files
             for f in [
@@ -1385,22 +1379,22 @@ class ROMSSimulation(Simulation):
         if self.exe_path is None:
             raise ValueError(
                 "C-STAR: ROMSSimulation.exe_path is None; unable to find ROMS executable."
-                + "\nRun Simulation.build() first. "
-                + "\n If you have already run Simulation.build(), either run it again or "
-                + " add the executable path manually using Simulation.exe_path='YOUR/PATH'."
+                "\nRun Simulation.build() first. "
+                "\n If you have already run Simulation.build(), either run it again or "
+                " add the executable path manually using Simulation.exe_path='YOUR/PATH'."
             )
 
         if self.discretization.n_procs_tot is None:
             raise ValueError(
                 "Unable to calculate node distribution for this Simulation. "
-                + "Simulation.n_procs_tot is not set"
+                "Simulation.n_procs_tot is not set"
             )
 
         if self.runtime_code.working_path is None:
             raise FileNotFoundError(
                 "Local copy of ROMSSimulation.runtime_code does not exist. "
-                + "Call ROMSSimulation.setup() or ROMSSimulation.runtime_code.get() "
-                + "and try again"
+                "Call ROMSSimulation.setup() or ROMSSimulation.runtime_code.get() "
+                "and try again"
             )
 
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
@@ -1408,23 +1402,20 @@ class ROMSSimulation(Simulation):
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
-        output_dir = self.directory / "output"
-
-        # Set run path to output dir for clarity: we are running in the output dir but
-        # these are conceptually different:
-        run_path = output_dir
+        # we run ROMS in the output dir
+        run_path = self.directory / "output"
 
         final_runtime_settings_file = (
             self.runtime_code.working_path.resolve() / f"{self.name}.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        run_path.mkdir(parents=True, exist_ok=True)
 
         ## 2: RUN ROMS
 
         roms_exec_cmd = (
             f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
-            + f"{final_runtime_settings_file}"
+            f"{final_runtime_settings_file}"
         )
 
         if cstar_sysmgr.scheduler is not None:
@@ -1445,15 +1436,15 @@ class ROMSSimulation(Simulation):
 
             job_instance.submit()
             self._execution_handler = job_instance
+            self.persist()
             return job_instance
 
         else:  # cstar_sysmgr.scheduler is None
             romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
             self._execution_handler = romsprocess
+            self.persist()
             romsprocess.start()
             return romsprocess
-
-        self.persist()
 
     def post_run(self) -> None:
         """Perform post-processing steps after the ROMS simulation run.
