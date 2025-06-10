@@ -2,6 +2,7 @@ import copy
 import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
+from os import PathLike
 from pathlib import Path
 from typing import Any, Optional
 
@@ -524,7 +525,7 @@ class Simulation(ABC, LoggingMixin):
         pass
 
     @abstractmethod
-    def to_blueprint(self, filename: str) -> None:
+    def to_blueprint(self, filename: PathLike) -> None:
         """Abstract method to save the Simulation instance as a YAML blueprint file.
 
         This method should be implemented in subclasses to serialize the Simulation
