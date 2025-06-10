@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 from textwrap import dedent
 from unittest import mock
@@ -121,8 +120,6 @@ class TestStrAndRepr:
         Verifies that the `__repr__` method includes additional state information when `working_path` is set.
     test_str_remote
         Verifies that the `__str__` method returns the correct string for a remote AdditionalCode instance.
-    test_str_with_template_file
-        Verifies that the `__str__` method correctly processes filenames with the `_TEMPLATE` suffix.
     test_str_local
         Verifies that the `__str__` method returns the correct string for a local AdditionalCode instance.
 
@@ -203,17 +200,6 @@ class TestStrAndRepr:
         assert (
             str(remote_additional_code) == expected_str
         ), f"expected \n{str(remote_additional_code)}\n, got \n{expected_str}"
-
-    def test_str_with_template_file(self, local_additional_code):
-        """Test that the __str__ method contains the correct substring when an
-        additional code filename has the '_TEMPLATE' suffix."""
-        # Simulate template files with "_TEMPLATE"
-        local_additional_code.files = ["file1_TEMPLATE", "file2"]
-        local_additional_code.working_path = Path("/mock/local/dir")
-
-        assert "      (file1 will be used by C-Star based on this template)" in str(
-            local_additional_code
-        )
 
     def test_str_local(self, local_additional_code):
         """Test that the __str__ method returns the correct string for the example local
@@ -467,7 +453,6 @@ class TestAdditionalCodeGet:
     - test_get_raises_if_checkout_target_none
     - test_get_raises_if_source_incompatible
     - test_get_raises_if_missing_files
-    - test_get_with_template_files
     - test_get_with_empty_file_list
     - test_cleanup_temp_directory
     """
@@ -745,45 +730,6 @@ class TestAdditionalCodeGet:
         # Ensure the first two files were checked for existence and copying was attempted
         assert self.mock_exists.call_count == 3
         assert self.mock_copy.call_count == 2  # Only the first two files were copied
-
-    def test_get_with_template_files(self, local_additional_code, log: logging.Logger):
-        """Test that `get` correctly handles files with the '_TEMPLATE' filename suffix.
-
-        Fixtures:
-        ---------
-        - local_additional_code: An example AdditionalCode instance representing local code.
-        - mock_location_type: Mocks AdditionalCode.source.location_type as "path".
-        - mock_source_type: Mocks AdditionalCode.source.source_type as "directory".
-        - mock_resolve: Mocks resolving the target directory.
-        - mock_copy: Mocks the copying of template files and renaming them.
-
-        Asserts:
-        --------
-        - `mock_copy` is called the correct number of times (2 original files + 2 renamed files).
-        - Each template file is copied and renamed (from "fileX_TEMPLATE" to "fileX").
-        - The `modified_files` attribute is correctly updated with the renamed files.
-        """
-        self.mock_location_type.return_value = "path"
-        self.mock_source_type.return_value = "directory"
-        self.mock_resolve.return_value = Path("/mock/local/dir")
-
-        # Simulate template files with "_TEMPLATE"
-        local_additional_code.files = ["file1_TEMPLATE", "file2_TEMPLATE"]
-        local_additional_code.modified_files = [None, None]
-        local_additional_code.working_path = Path("/mock/local/dir")
-
-        # Call get method
-        local_additional_code.get("/mock/local/dir")
-
-        # Ensure that the template files were copied and renamed
-        assert self.mock_copy.call_count == 4  # 2 original files + 2 template renames
-        self.mock_copy.assert_any_call(
-            Path("/mock/local/dir/file1_TEMPLATE"), Path("/mock/local/dir/file1")
-        )
-        self.mock_copy.assert_any_call(
-            Path("/mock/local/dir/file2_TEMPLATE"), Path("/mock/local/dir/file2")
-        )
-        assert local_additional_code.modified_files == ["file1", "file2"]
 
     def test_get_with_empty_file_list(self, local_additional_code):
         """Test that `get` raises a `ValueError` when the `files` attribute is empty in

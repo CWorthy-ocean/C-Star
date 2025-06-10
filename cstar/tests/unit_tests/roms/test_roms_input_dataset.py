@@ -1348,6 +1348,25 @@ class TestROMSInputDatasetPartition:
             )
             assert str(exception_info.value) == expected_message
 
+    def test_path_for_roms(self, local_roms_netcdf_dataset):
+        """Test the `path_for_roms` property."""
+        existing_files = [
+            Path("/some/dir/local_file.0.nc"),
+            Path("/some/dir/local_file.1.nc"),
+        ]
+        local_roms_netcdf_dataset.partitioning = ROMSPartitioning(
+            np_xi=1, np_eta=2, files=existing_files
+        )
+        assert local_roms_netcdf_dataset.path_for_roms == [
+            Path("/some/dir/local_file.nc"),
+        ]
+
+    def test_path_for_roms_raises_if_no_partitioning(self, local_roms_netcdf_dataset):
+        with pytest.raises(
+            FileNotFoundError, match="ROMS requires files to be partitioned for use"
+        ):
+            local_roms_netcdf_dataset.path_for_roms
+
 
 def test_correction_cannot_be_yaml():
     """Checks that the `validate()` method correctly raises a TypeError if

@@ -1,12 +1,12 @@
-import shutil
-import warnings
 from datetime import datetime
+from itertools import chain
 from pathlib import Path
 from typing import Any, List, Optional, cast
 
 import requests
 import yaml
 
+import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.datasource import DataSource
@@ -14,7 +14,6 @@ from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
-    _replace_text_in_file,
     _run_cmd,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
@@ -33,6 +32,7 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
+from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -64,6 +64,9 @@ class ROMSSimulation(Simulation):
         The repository containing the base source code for MARBL (Marine Biogeochemistry Library).
     runtime_code : AdditionalCode
         Additional code needed by ROMS at runtime (e.g. a `.in` file)
+    roms_runtime_settings : ROMSRuntimeSettings
+        A structured representation of the `.in` file found in runtime_code, available
+        after the code has been fetched with ROMSSimulation.runtime_code.get() or ROMSSimulation.setup()
     compile_time_code : AdditionalCode
         Additional ROMS source code to be included at compile time (e.g. `.opt` files)
     model_grid : ROMSModelGrid
@@ -72,6 +75,8 @@ class ROMSSimulation(Simulation):
         Initial conditions for the simulation.
     tidal_forcing : ROMSTidalForcing
         Tidal forcing data used in the simulation.
+    river_forcing : ROMSRiverForcing
+        River inflow data specifying locations and fluxes.
     surface_forcing : list[ROMSSurfaceForcing]
         List of surface forcing datasets.
     boundary_forcing : list[ROMSBoundaryForcing]
@@ -80,8 +85,15 @@ class ROMSSimulation(Simulation):
         List of forcing correction datasets.
     exe_path : Path
         Path to the compiled ROMS executable.
-    _execution_handler : ExecutionHandler
-        Object handling execution status and control.
+    partitioned_files : List[Path]
+        Paths to partitioned input files for distributed ROMS runs.
+    input_datasets : list[ROMSInputDataset]
+        A flat list of all input datasets attached to this simulation.
+    codebases : list
+        List of all external codebases in use (e.g., ROMS, MARBL).
+    is_setup : bool
+        True if all required components have been retrieved and configured locally.
+
 
     Methods
     -------
@@ -104,13 +116,14 @@ class ROMSSimulation(Simulation):
     """
 
     discretization: ROMSDiscretization
+    runtime_code: AdditionalCode
 
     def __init__(
         self,
         name: str,
         directory: str | Path,
         discretization: "ROMSDiscretization",
-        runtime_code: Optional["AdditionalCode"] = None,
+        runtime_code: "AdditionalCode",
         compile_time_code: Optional["AdditionalCode"] = None,
         codebase: Optional["ROMSExternalCodeBase"] = None,
         start_date: Optional[str | datetime] = None,
@@ -225,7 +238,6 @@ class ROMSSimulation(Simulation):
         self._check_forcing_collection_types(
             self.forcing_corrections, ROMSForcingCorrections
         )
-
         self._check_inputdataset_partitioning()
         self._check_inputdataset_dates()
 
@@ -240,16 +252,59 @@ class ROMSSimulation(Simulation):
         else:
             self.marbl_codebase = marbl_codebase
 
+        # Determine which runtime_code file corresponds to the `.in` runtime settings
+        # And set the in_file attribute to be used internally
+        self._find_dotin_file()
+
         # roms-specific
         self.exe_path: Optional[Path] = None
         self._exe_hash: Optional[str] = None
 
         self._execution_handler: Optional["ExecutionHandler"] = None
 
-    def _check_forcing_collection_types(self, collection, expected_class):
-        """For forcing types that may correspond to multiple InputDataset instances
+    def _find_dotin_file(self) -> None:
+        """Identify the runtime settings (.in) file from runtime code.
+
+        This internal method checks the `ROMSSimulation.runtime_code.files`
+        list for exactly one file ending in `.in`, which is required to
+        configure ROMS runtime settings.
+
+        Raises
+        ------
+        ValueError
+            If no `.in` file or more than one is found in the runtime code files.
+        """
+
+        in_files = [f for f in self.runtime_code.files if f.endswith(".in")]
+
+        if not in_files:
+            raise RuntimeError("No .in file was provided")
+
+        if len(in_files) > 1:
+            raise RuntimeError(f"Only 1 .in file is allowed. Got: {in_files}")
+
+        self._in_file = in_files[0]
+
+    def _check_forcing_collection_types(self, collection: list, expected_class: type):
+        """Validate the types of input datasets in a forcing collection.
+
+        For forcing types that may correspond to multiple ROMSInputDataset instances
         (ROMSSurfaceForcing, ROMSBoundaryForcing, ROMSForcingCorrections), ensure that
-        the corresponding attribute is a list of instances of the correct type."""
+        the corresponding attribute is a list of instances of the correct type.
+
+        Parameters
+        ----------
+        collection : list
+            A list of dataset objects to validate.
+        expected_class : type
+            The expected class (e.g., `ROMSSurfaceForcing`).
+
+        Raises
+        ------
+        TypeError
+            If any item in the list is not an instance of `expected_class`.
+        """
+
         if not all([isinstance(ind, expected_class) for ind in collection]):
             raise TypeError(
                 f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
@@ -274,10 +329,26 @@ class ROMSSimulation(Simulation):
                     )
 
     def _check_inputdataset_dates(self) -> None:
-        """For ROMSInputDatasets whose source type is `yaml`, ensure that any set
-        'start_date' and/or 'end_date' attributes of the ROMSInputDataset match the
-        'start_date' and 'end_date' of the ROMSSimulation, and override them, warning
-        the user, if not."""
+        """Ensure input dataset date ranges align with the simulation date range.
+
+        For each input dataset with `source_type='yaml'`, this method verifies that
+        its `start_date` and `end_date` match the simulation’s `start_date` and
+        `end_date`. If they do not match, a warning is issued and the dataset's
+        dates are overwritten to enforce alignment.
+
+        Raises
+        ------
+        AttributeError
+            If any dataset is missing expected date attributes.
+        Warning
+            A warning is issued (not raised) when mismatched dates are corrected.
+
+        Notes
+        -----
+        - Only datasets with a `source_type` of `"yaml"` are modified.
+        - `ROMSInitialConditions` datasets only have their `start_date` checked;
+          `end_date` is not required or enforced for initial conditions.
+        """
 
         for inp in [
             self.initial_conditions,
@@ -324,6 +395,10 @@ class ROMSSimulation(Simulation):
 
         class_name = self.__class__.__name__
         base_str = super().__str__()
+
+        # ROMS runtime settings
+        if self.runtime_code.exists_locally:
+            base_str += f"\nRuntime Settings: {self.roms_runtime_settings.__class__.__name__} instance (query using {class_name}.roms_runtime_settings)\n"
 
         # MARBL Codebase
         if self.marbl_codebase is not None:
@@ -439,57 +514,159 @@ class ROMSSimulation(Simulation):
         return [self.codebase, self.marbl_codebase]
 
     @property
-    def in_file(self) -> Path:
-        """Retrieves the ROMS runtime input file (.in) associated with this simulation.
+    def _forcing_paths(self) -> list[Path]:
+        """Collect and return all local paths to ROMS forcing input datasets.
 
-        ROMS requires a text file containing runtime options to run. This file is
-        typically called `roms.in`, but variations occur. This property finds the
-        appropriate `.in` or `.in_TEMPLATE` file in the `runtime_code` files and
-        returns its path.
+        This internal property gathers the `working_path` attributes of all forcing-related
+        datasets attached to the simulation — including tidal, river, surface, boundary, and
+        correction datasets — and returns a flat list of resolved file paths.
 
         Returns
         -------
-        Path
-            The path to the ROMS runtime input file.
+        list of pathlib.Path
+            A list of paths to all local forcing input files required by ROMS.
 
         Raises
         ------
         ValueError
-            - If `runtime_code` is not set.
-            - If multiple `.in` files are found, making the selection ambiguous.
-            - If no `.in` file is found in `runtime_code.files`.
+            If any required forcing dataset does not have a `working_path` set,
+            indicating it has not been retrieved or prepared.
+
+        Notes
+        -----
+        - If any `working_path` is a list of files (e.g., multiple NetCDFs), each path
+          is included individually.
+        - This property is used to populate `runtime_settings.forcing`.
         """
 
-        in_files = []
-        if self.runtime_code is None:
+        forcing_sources = chain(
+            [self.tidal_forcing, self.river_forcing],
+            self.surface_forcing,
+            self.boundary_forcing,
+            self.forcing_corrections,
+        )
+
+        forcing_paths: list[Path] = []
+
+        for source in filter(None, forcing_sources):
+            paths = source.working_path
+            if paths is None:
+                raise ValueError(
+                    f"{source.__class__.__name__} does not have "
+                    + "a local working_path. Call ROMSSimulation.setup() or "
+                    + f"{source.__class__.__name__}.get() and try again."
+                )
+
+            elif isinstance(paths, list):
+                forcing_paths.extend(paths)
+            else:
+                forcing_paths.append(paths)
+
+        return forcing_paths
+
+    @property
+    def _n_time_steps(self) -> int:
+        """Calculate the total number of time steps for the simulation.
+
+        This internal property determines the number of time steps based on the
+        start and end dates of the simulation and the time step size specified in
+        `discretization`.
+
+        Returns
+        -------
+        int
+            The total number of model time steps between `start_date` and `end_date`.
+
+        Raises
+        ------
+        AttributeError
+            If `start_date`, `end_date`, or `discretization.time_step` is not set.
+        """
+
+        run_length_seconds = int((self.end_date - self.start_date).total_seconds())
+        return run_length_seconds // self.discretization.time_step
+
+    @property
+    def roms_runtime_settings(self) -> ROMSRuntimeSettings:
+        """Generate and return a ROMSRuntimeSettings object for the simulation.
+
+        This property constructs a `ROMSRuntimeSettings` instance from the ROMS `.in`
+        file found in the `runtime_code`, and updates key runtime values based on the
+        current simulation configuration. These include the time step, number of time
+        steps, grid path, initial conditions, forcing datasets, and optionally, MARBL
+        input files.
+
+        Returns
+        -------
+        ROMSRuntimeSettings
+            A fully-populated runtime settings object representing the current state
+            of the ROMS simulation configuration.
+
+        Raises
+        ------
+        ValueError
+            If the runtime `.in` file has not been retrieved locally via `setup()` or
+            `runtime_code.get()`.
+
+        Notes
+        -----
+        - This method overrides runtime settings using values from `self.discretization`,
+          `self.model_grid`, `self.initial_conditions`, and all forcing datasets.
+        - If MARBL configuration files are present in `runtime_code.files`, their paths
+          are also included.
+        """
+
+        if self.runtime_code.working_path is None:
             raise ValueError(
-                "ROMSSimulation.runtime_code not set."
-                + " ROMS requires a runtime options file "
-                + "(typically roms.in)"
+                "Cannot access runtime settings without local "
+                + "`.in` file. Call ROMSSimulation.setup() or "
+                + "ROMSSimulation.runtime_code.get() and try again."
             )
 
-        in_files = [
-            fname.replace(".in_TEMPLATE", ".in")
-            for fname in self.runtime_code.files
-            if (fname.endswith(".in") or fname.endswith(".in_TEMPLATE"))
-        ]
-        if len(in_files) > 1:
-            raise ValueError(
-                "Multiple '.in' files found:"
-                + "\n{in_files}"
-                + "\nROMS runtime file choice ambiguous"
+        simulation_runtime_settings = ROMSRuntimeSettings.from_file(
+            self.runtime_code.working_path / self._in_file
+        )
+
+        # Modify each relevant section in the runtime settings object based on blueprint values
+        simulation_runtime_settings.time_stepping.dt = self.discretization.time_step
+        simulation_runtime_settings.time_stepping.ntimes = self._n_time_steps
+
+        if self.initial_conditions:
+            simulation_runtime_settings.initial.ininame = (
+                self.initial_conditions.path_for_roms[0]
             )
-        elif len(in_files) == 0:
-            raise ValueError(
-                "No '.in' file found in ROMSSimulation.runtime_code."
-                + "ROMS expects a runtime options file with the '.in'"
-                + "extension, e.g. roms.in"
+
+        if self.model_grid:
+            simulation_runtime_settings.grid = cstar.roms.runtime_settings.Grid(
+                grid=self.model_grid.path_for_roms[0]
             )
         else:
-            if self.runtime_code.working_path is not None:
-                return self.runtime_code.working_path / in_files[0]
-            else:
-                return Path(in_files[0])
+            simulation_runtime_settings.grid = None
+
+        simulation_runtime_settings.forcing.filenames = self._forcing_paths
+
+        # all MARBL files must be present to enable MARBL
+        if all(
+            f in self.runtime_code.files
+            for f in [
+                "marbl_in",
+                "marbl_tracer_output_list",
+                "marbl_diagnostic_output_list",
+            ]
+        ):
+            simulation_runtime_settings.marbl_biogeochemistry = (
+                cstar.roms.runtime_settings.MARBLBiogeochemistry(
+                    marbl_namelist_fname=self.runtime_code.working_path / "marbl_in",
+                    marbl_tracer_list_fname=self.runtime_code.working_path
+                    / "marbl_tracer_output_list",
+                    marbl_diag_list_fname=self.runtime_code.working_path
+                    / "marbl_diagnostic_output_list",
+                )
+            )
+        else:
+            simulation_runtime_settings.marbl_biogeochemistry = None
+
+        return simulation_runtime_settings
 
     @property
     def input_datasets(self) -> list:
@@ -812,208 +989,6 @@ class ROMSSimulation(Simulation):
                 self.to_dict(), yaml_file, default_flow_style=False, sort_keys=False
             )
 
-    def update_runtime_code(self):
-        """Update the runtime code files for the ROMS simulation.
-
-        This method modifies the runtime code files by replacing template placeholders
-        with the corresponding values based on the current state of the `ROMSSimulation`
-        instance. If no template files are found, a warning is issued.
-
-        Returns
-        -------
-        None
-
-        Raises
-        ------
-        ValueError
-            If `runtime_code` is not set or does not have a `working_path`.
-
-        Warnings
-        --------
-        UserWarning
-            If no template runtime code files (`*_TEMPLATE`) are found, indicating
-            that runtime parameters may not be applied.
-        """
-
-        no_template_found = True
-        for nl_idx, nl_fname in enumerate(self.runtime_code.files):
-            nl_path = self.runtime_code.working_path / nl_fname
-            if str(nl_fname)[-9:] == "_TEMPLATE":
-                no_template_found = False
-                mod_nl_path = Path(str(nl_path)[:-9])
-                shutil.copy(nl_path, mod_nl_path)
-                for placeholder, replacement in self._runtime_code_modifications[
-                    nl_idx
-                ].items():
-                    _replace_text_in_file(mod_nl_path, placeholder, str(replacement))
-                self.runtime_code.modified_files[nl_idx] = mod_nl_path
-
-        if no_template_found:
-            warnings.warn(
-                "WARNING: No editable runtime code found to set ROMS runtime parameters. "
-                + "Expected to find a template in ROMSSimulation.runtime_code"
-                + " with the suffix '_TEMPLATE' on which to base the file."
-                + "\n********************************************************"
-                + "\nANY MODEL PARAMETERS SET IN C-STAR WILL NOT BE APPLIED."
-                + "\n********************************************************"
-            )
-
-    @property
-    def _runtime_code_modifications(self) -> list[dict]:
-        """Generate a list of modifications to be applied to runtime code template
-        files.
-
-        This method constructs a list of dictionaries (one per file), where each
-        dictionary contains placeholder keys and their corresponding replacement values.
-        The placeholders are replaced based on the current state of this `ROMSSimulation`.
-
-        Returns
-        -------
-        list of dict
-            A list of dictionaries, each containing placeholder keys and replacement values
-            for runtime code modifications.
-
-        Raises
-        ------
-        ValueError
-            If `runtime_code` is not set, or if required input files (e.g., `roms.in_TEMPLATE`)
-            are missing.
-
-        See Also
-        --------
-        update_runtime_code : Uses this method to apply modifications to the runtime code.
-        """
-        self.runtime_code = cast(AdditionalCode, self.runtime_code)
-
-        if self.runtime_code.working_path is None:
-            raise ValueError(
-                "ROMSSimulation.runtime_code does not have a "
-                + "'working_path' attribute. "
-                + "Run ROMSSimulation.runtime_code.get() and try again"
-            )
-
-        # Helper function for formatting:
-        def partitioned_files_to_runtime_code_string(input_dataset):
-            """Take a ROMSInputDataset that has been partitioned and return a ROMS in-
-            file-compatible string pointing to it e.g. path/to/roms_file.232.nc -> '
-            path/to/roms_file.nc'."""
-
-            unique_paths = {
-                str(Path(f).parent / (Path(Path(f).stem).stem + ".nc"))
-                for f in input_dataset.partitioning.files
-            }
-            return "\n     ".join(sorted(list(unique_paths)))
-
-        runtime_code_modifications: list[dict] = [{} for f in self.runtime_code.files]
-
-        ################################################################################
-        # 'roms.in' file modifications (the only file to modify as of 2024-10-01):
-        ################################################################################
-
-        # First figure out which namelist is the one to modify
-        nl_template = self.in_file.name + "_TEMPLATE"
-        if nl_template in self.runtime_code.files:
-            nl_idx = self.runtime_code.files.index(nl_template)
-        else:
-            raise ValueError(
-                "could not find expected template namelist file "
-                + "roms.in_TEMPLATE to modify. "
-                + "ROMS requires a namelist file to run."
-            )
-
-        # Time step entry
-        formatting = runtime_code_modifications[nl_idx]
-        formatting["__TIMESTEP_PLACEHOLDER__"] = self.discretization.time_step
-
-        # Grid file entry
-        if self.model_grid is not None:
-            if not self.model_grid.partitioning:
-                raise ValueError(
-                    "could not find a local path to a partitioned "
-                    + "ROMS grid file. Run ROMSSimulation.pre_run() to partition "
-                    + "ROMS input datasets and try again."
-                )
-
-            runtime_code_modifications[nl_idx]["__GRID_FILE_PLACEHOLDER__"] = (
-                partitioned_files_to_runtime_code_string(self.model_grid)
-            )
-
-        # Initial conditions entry
-        if self.initial_conditions:
-            if not self.initial_conditions.partitioning:
-                raise ValueError(
-                    "could not find a local path to a partitioned "
-                    + "ROMS initial file. Run ROMSSimulation.pre_run() to partition "
-                    + "ROMS input datasets and try again."
-                )
-
-            runtime_code_modifications[nl_idx][
-                "__INITIAL_CONDITION_FILE_PLACEHOLDER__"
-            ] = partitioned_files_to_runtime_code_string(self.initial_conditions)
-
-        # Forcing files entry
-        runtime_code_forcing_str = ""
-        for sf in self.surface_forcing:
-            if sf.partitioning:
-                runtime_code_forcing_str += (
-                    "\n     " + partitioned_files_to_runtime_code_string(sf)
-                )
-        for bf in self.boundary_forcing:
-            if bf.partitioning:
-                runtime_code_forcing_str += (
-                    "\n     " + partitioned_files_to_runtime_code_string(bf)
-                )
-        if self.tidal_forcing:
-            if not self.tidal_forcing.partitioning:
-                raise ValueError(
-                    "ROMSSimulation has tidal_forcing attribute "
-                    + "but could not find a local path to a partitioned ROMS "
-                    + "tidal forcing file. Run ROMSSimulation.pre_run() "
-                    + " to partition ROMS input datasets and try again."
-                )
-            runtime_code_forcing_str += (
-                "\n     " + partitioned_files_to_runtime_code_string(self.tidal_forcing)
-            )
-
-        if self.river_forcing:
-            if not self.river_forcing.partitioning:
-                raise ValueError(
-                    "ROMSSimulation has river_forcing attribute "
-                    + "but could not find a local path to a partitioned ROMS "
-                    + "river forcing file. Run ROMSSimulation.pre_run() "
-                    + " to partition ROMS input datasets and try again."
-                )
-            runtime_code_forcing_str += (
-                "\n     " + partitioned_files_to_runtime_code_string(self.river_forcing)
-            )
-        for fc in self.forcing_corrections:
-            if fc.partitioning:
-                runtime_code_forcing_str += (
-                    "\n     " + partitioned_files_to_runtime_code_string(fc)
-                )
-
-        formatting = runtime_code_modifications[nl_idx]
-        formatting["__FORCING_FILES_PLACEHOLDER__"] = runtime_code_forcing_str.lstrip()
-
-        # MARBL settings filepaths entries
-        ## NOTE: WANT TO RAISE IF PLACEHOLDER IS IN NAMELIST BUT not Path(marbl_file.exists())
-        if "marbl_in" in self.runtime_code.files:
-            runtime_code_modifications[nl_idx][
-                "__MARBL_SETTINGS_FILE_PLACEHOLDER__"
-            ] = str(self.runtime_code.working_path / "marbl_in")
-
-        if "marbl_tracer_output_list" in self.runtime_code.files:
-            runtime_code_modifications[nl_idx][
-                "__MARBL_TRACER_LIST_FILE_PLACEHOLDER__"
-            ] = str(self.runtime_code.working_path / "marbl_tracer_output_list")
-
-        if "marbl_diagnostic_output_list" in self.runtime_code.files:
-            runtime_code_modifications[nl_idx][
-                "__MARBL_DIAG_LIST_FILE_PLACEHOLDER__"
-            ] = str(self.runtime_code.working_path / "marbl_diagnostic_output_list")
-
-        return runtime_code_modifications
-
     def tree(self):
         """Display a tree-style representation of the ROMS simulation structure.
 
@@ -1026,15 +1001,15 @@ class ROMSSimulation(Simulation):
         --------
         >>> simulation.tree()
         /path/to/simulation
-        ├── ROMS
-        │   ├── runtime_code
-        │   │   ├── namelist_file.in
-        │   │   ├── another_file.in
-        │   ├── compile_time_code
-        │   │   ├── some_source_file.F90
-        │   ├── input_datasets
-        │   │   ├── grid_file.nc
-        │   │   ├── forcing_file.nc
+        └─── ROMS
+             ├── runtime_code
+             │   ├── namelist_file.in
+             │   └──  marbl_in
+             ├── compile_time_code
+             │   └── some_source_file.F90
+             └──  input_datasets
+                  ├── grid_file.nc
+                  └──  forcing_file.nc
 
         Notes
         -----
@@ -1404,51 +1379,43 @@ class ROMSSimulation(Simulation):
         if self.exe_path is None:
             raise ValueError(
                 "C-STAR: ROMSSimulation.exe_path is None; unable to find ROMS executable."
-                + "\nRun Simulation.build() first. "
-                + "\n If you have already run Simulation.build(), either run it again or "
-                + " add the executable path manually using Simulation.exe_path='YOUR/PATH'."
+                "\nRun Simulation.build() first. "
+                "\n If you have already run Simulation.build(), either run it again or "
+                " add the executable path manually using Simulation.exe_path='YOUR/PATH'."
             )
+
         if self.discretization.n_procs_tot is None:
             raise ValueError(
                 "Unable to calculate node distribution for this Simulation. "
-                + "Simulation.n_procs_tot is not set"
+                "Simulation.n_procs_tot is not set"
             )
 
-        run_length_seconds = int((self.end_date - self.start_date).total_seconds())
-        n_time_steps = run_length_seconds // self.discretization.time_step
+        if self.runtime_code.working_path is None:
+            raise FileNotFoundError(
+                "Local copy of ROMSSimulation.runtime_code does not exist. "
+                "Call ROMSSimulation.setup() or ROMSSimulation.runtime_code.get() "
+                "and try again"
+            )
 
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
             queue_name = cstar_sysmgr.scheduler.primary_queue_name
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
-        output_dir = self.directory / "output"
+        # we run ROMS in the output dir
+        run_path = self.directory / "output"
 
-        # Set run path to output dir for clarity: we are running in the output dir but
-        # these are conceptually different:
-        run_path = output_dir
-
-        # 1. MODIFY NAMELIST
-        # Copy template namelist and add all current known information
-        # from this Simulation instance:
-        self.update_runtime_code()
-
-        # Now need to manually update number of time steps as it is unknown
-        # outside of the context of this function:
-
-        _replace_text_in_file(
-            self.in_file,
-            "__NTIMES_PLACEHOLDER__",
-            str(n_time_steps),
+        final_runtime_settings_file = (
+            self.runtime_code.working_path.resolve() / f"{self.name}.in"
         )
-
-        output_dir.mkdir(parents=True, exist_ok=True)
+        self.roms_runtime_settings.to_file(final_runtime_settings_file)
+        run_path.mkdir(parents=True, exist_ok=True)
 
         ## 2: RUN ROMS
 
         roms_exec_cmd = (
             f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
-            + f"{self.in_file}"
+            f"{final_runtime_settings_file}"
         )
 
         if cstar_sysmgr.scheduler is not None:
@@ -1469,15 +1436,15 @@ class ROMSSimulation(Simulation):
 
             job_instance.submit()
             self._execution_handler = job_instance
+            self.persist()
             return job_instance
 
         else:  # cstar_sysmgr.scheduler is None
             romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
             self._execution_handler = romsprocess
+            self.persist()
             romsprocess.start()
             return romsprocess
-
-        self.persist()
 
     def post_run(self) -> None:
         """Perform post-processing steps after the ROMS simulation run.
