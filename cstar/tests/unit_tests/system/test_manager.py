@@ -1,15 +1,18 @@
 import os
-from unittest.mock import PropertyMock, patch
+from collections.abc import Generator
+from typing import Optional
+from unittest import mock
+from unittest.mock import patch
 
 import pytest
 
 from cstar.system.environment import CStarEnvironment
-from cstar.system.manager import CStarSystemManager
+from cstar.system.manager import CStarSystemManager, SystemName
 from cstar.system.scheduler import PBSScheduler, SlurmScheduler
 
 
 @pytest.fixture
-def mock_environment_vars():
+def mock_environment_vars() -> Generator[None, None, None]:
     """Fixture to mock environment variables."""
     with patch.dict(os.environ, {}, clear=True):
         yield
@@ -32,24 +35,24 @@ class TestSystemName:
     """
 
     @pytest.mark.parametrize(
-        "env_vars, platform_values, expected_sysname",
+        ("env_vars", "platform_values", "expected_sysname"),
         [
-            ({"LMOD_SYSHOST": "expanse"}, None, "expanse"),
-            ({"LMOD_SYSTEM_NAME": "perlmutter"}, None, "perlmutter"),
-            ({}, ("Linux", "x86_64"), "linux_x86_64"),
+            ({"LMOD_SYSHOST": "expanse"}, None, SystemName.EXPANSE),
+            ({"LMOD_SYSTEM_NAME": "perlmutter"}, None, SystemName.PERLMUTTER),
+            ({}, ("Linux", "x86_64"), SystemName.LINUX_X86_64),
         ],
     )
     @patch("platform.system", return_value=None)  # Default mock for platform.system
     @patch("platform.machine", return_value=None)  # Default mock for platform.machine
-    def test_system_name(
+    def test_system_name(  # noqa: PLR0913
         self,
         mock_machine,
         mock_system,
-        env_vars,
-        platform_values,
-        expected_sysname,
-        mock_environment_vars,
-    ):
+        env_vars: dict[str, str],
+        platform_values: Optional[tuple[str, str]],
+        expected_sysname: SystemName,
+        mock_environment_vars: dict[str, str],  # noqa: ARG002
+    ) -> None:
         """Validates that the system name is correctly determined based on environment
         variables and platform properties.
 
@@ -79,7 +82,7 @@ class TestSystemName:
         with patch.dict(os.environ, env_vars):
             # Instantiate the system and compute the name
             system = CStarSystemManager()
-            assert system.name == expected_sysname
+            assert system.name == SystemName(expected_sysname)
 
     @patch("platform.system", return_value=None)
     @patch("platform.machine", return_value=None)
@@ -88,22 +91,22 @@ class TestSystemName:
         with pytest.raises(
             EnvironmentError, match="C-Star cannot determine your system name"
         ):
-            system = CStarSystemManager()
-            _ = system.name
+            CStarSystemManager()
 
-    def test_unsupported_name(self, mock_environment_vars):
+    def test_unsupported_name(self, mock_environment_vars) -> None:
         """Test that an unsupported system name raises a ValueError."""
-        with patch.object(
-            CStarSystemManager,
-            "name",
-            new_callable=PropertyMock,
-            return_value="unsupported_name",
-        ):
-            with pytest.raises(
+        with (
+            patch.object(
+                CStarSystemManager,
+                "_get_system_name",
+                new_callable=mock.MagicMock,
+                return_value="unsupported_name",
+            ),
+            pytest.raises(
                 ValueError, match="'unsupported_name' is not a valid SystemName"
-            ):
-                system = CStarSystemManager()
-                _ = system.environment
+            ),
+        ):
+            CStarSystemManager()
 
 
 class TestEnvironmentProperty:
@@ -117,45 +120,55 @@ class TestEnvironmentProperty:
     """
 
     @pytest.mark.parametrize(
-        "system_name, expected_attributes",
+        ("system_name", "expected_attributes"),
         [
             (
-                "expanse",
+                SystemName.EXPANSE.value,
                 {
                     "mpi_exec_prefix": "srun --mpi=pmi2",
                     "compiler": "intel",
                 },
             ),
             (
-                "perlmutter",
+                SystemName.PERLMUTTER.value,
                 {
                     "mpi_exec_prefix": "srun",
                     "compiler": "gnu",
                 },
             ),
             (
-                "derecho",
+                SystemName.DERECHO.value,
                 {
                     "mpi_exec_prefix": "mpirun",
                     "compiler": "intel",
                 },
             ),
+            (
+                SystemName.DARWIN_ARM64.value,
+                {
+                    "mpi_exec_prefix": "mpirun",
+                    "compiler": "gnu",
+                },
+            ),
         ],
     )
     def test_environment_initialization(
-        self, system_name, expected_attributes, mock_environment_vars
-    ):
-        """Test that the environment is initialized with the correct attributes."""
+        self,
+        system_name: str,
+        expected_attributes: dict[str, str],
+        mock_environment_vars: dict[str, str],  # noqa: ARG002
+    ) -> None:
+        """Verify that environment attributes are correctly initialized."""
         with patch.object(
             CStarSystemManager,
-            "name",
-            new_callable=PropertyMock,
+            "_get_system_name",
+            new_callable=mock.MagicMock,
             return_value=system_name,
         ):
             system = CStarSystemManager()
             environment = system.environment
 
-            # Verify that the environment object matches the expected attributes
+            # Compare the actual and expected attributes of the environment.
             assert isinstance(environment, CStarEnvironment)
             for attr, value in expected_attributes.items():
                 assert getattr(environment, attr) == value
@@ -179,27 +192,27 @@ class TestSchedulerProperty:
     """
 
     @pytest.mark.parametrize(
-        "system_name, expected_scheduler_type, expected_queue_names",
+        ("system_name", "expected_scheduler_type", "expected_queue_names"),
         [
             (
                 "perlmutter",
                 SlurmScheduler,
-                ["regular", "shared", "debug"],
+                {"regular", "shared", "debug"},
             ),
             (
                 "derecho",
                 PBSScheduler,
-                ["main", "preempt", "develop"],
+                {"main", "preempt", "develop"},
             ),
         ],
     )
     def test_scheduler_initialization(
         self,
-        system_name,
-        expected_scheduler_type,
-        expected_queue_names,
-        mock_environment_vars,
-    ):
+        system_name: str,
+        expected_scheduler_type: type,
+        expected_queue_names: set[str],
+        mock_environment_vars: dict[str, str],  # noqa: ARG002
+    ) -> None:
         """Validates that the scheduler is initialized with the correct type and queue
         names based on the system name.
 
@@ -218,11 +231,10 @@ class TestSchedulerProperty:
         - That the scheduler is an instance of the expected type.
         - That the queue names of the scheduler match the expected names.
         """
-
         with patch.object(
             CStarSystemManager,
-            "name",
-            new_callable=PropertyMock,
+            "_get_system_name",
+            new_callable=mock.MagicMock,
             return_value=system_name,
         ):
             system = CStarSystemManager()
@@ -232,25 +244,33 @@ class TestSchedulerProperty:
             assert isinstance(scheduler, expected_scheduler_type)
 
             # Verify that the queue names match
-            assert set(q.name for q in scheduler.queues) == set(expected_queue_names)
+            assert hasattr(scheduler, "queues")
+            actual_queue_names = {q.name for q in scheduler.queues}
+            assert actual_queue_names == expected_queue_names
 
-    def test_no_scheduler(self, mock_environment_vars):
-        """Asserts that a supported system without a scheduler returns 'None'."""
+    def test_no_scheduler(
+        self,
+        mock_environment_vars: dict[str, str],  # noqa: ARG002
+    ) -> None:
+        """Verify that a supported system without a scheduler returns 'None'."""
         with patch.object(
             CStarSystemManager,
-            "name",
-            new_callable=PropertyMock,
+            "_get_system_name",
+            new_callable=mock.MagicMock,
             return_value="darwin_arm64",
         ):
             system = CStarSystemManager()
             assert system.scheduler is None
 
-    def test_scheduler_caching(self, mock_environment_vars):
-        """Asserts that the scheduler property is cached after first access."""
+    def test_scheduler_caching(
+        self,
+        mock_environment_vars: dict[str, str],  # noqa: ARG002
+    ) -> None:
+        """Verify that the scheduler property is cached after first access."""
         with patch.object(
             CStarSystemManager,
-            "name",
-            new_callable=PropertyMock,
+            "_get_system_name",
+            new_callable=mock.MagicMock,
             return_value="perlmutter",
         ):
             system = CStarSystemManager()

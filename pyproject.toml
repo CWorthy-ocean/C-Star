@@ -58,9 +58,31 @@ exclude = "properties|asv_bench|docs"
 # Configuration for ruff linter and formatter
 [tool.ruff]
 fix = true
+line-length = 88
+exclude = [
+    "cstar/externals/**",
+    "examples/**.py",
+    ".tox",
+    ".git",
+    "__pycache__",
+]
 
 [tool.ruff.lint]
 extend-select = ["I"]
+ignore = [
+    "COM812",  # missing-trailing-comma (enforced in formatter)
+    "D100",    # undocumented-public-module
+    "INP001",  # implicit-namespace-package
+    "S101",    # assert-in-tests
+    "UP007",   # non-pep604-annotation-union
+    "TRY003",  # raise-vanilla-args
+    "EM101",   # raw-string-in-exception
+    "G004",    # logging-f-string
+    "EM102",   # f-string-in-exception
+    "UP024",   # os-error-alias
+    "D413",    # missing-blank-line-after-last-section
+]
+
 
 [tool.pre-commit]
 config = ".pre-commit-config.yaml"

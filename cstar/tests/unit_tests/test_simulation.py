@@ -1,6 +1,7 @@
 import logging
 import pickle
 from datetime import datetime
+from os import PathLike
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -96,7 +97,7 @@ class MockSimulation(Simulation):
     def from_blueprint(cls, blueprint, directory):
         pass
 
-    def to_blueprint(self, filename):
+    def to_blueprint(self, filename: PathLike) -> None:
         pass
 
     def setup(self):
