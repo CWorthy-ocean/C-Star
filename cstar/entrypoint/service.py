@@ -357,7 +357,7 @@ class Service(ABC, LoggingMixin):
         """Execute the complete service lifecycle.
 
         Completes the full service life-cycle. Responsible for executing calls
-        to subclass implementation of`_on_iteration`. Evaluates shutdown
+        to subclass implementation of `_on_iteration`. Evaluates shutdown
         conditions to trigger automatic service termination.
         """
         try:

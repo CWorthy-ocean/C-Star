@@ -434,7 +434,7 @@ def configure_environment(log: logging.Logger) -> None:
         log.debug("Using prebuilt MARBL at: %s", ext_root)
 
 
-async def main() -> int:
+async def main(raw_args: list[str]) -> int:
     """Run the c-star worker script.
 
     Triggers the `Service` lifecycle of a Worker and runs a blueprint based on
@@ -447,36 +447,37 @@ async def main() -> int:
     """
     try:
         parser = create_parser()
-        args = parser.parse_args()
+        args = parser.parse_args(raw_args)
     except SystemExit:
-        # If the argument parsing fails, we exit with a non-zero status
         return 1
     else:
         service_cfg = get_service_config(args)
         blueprint_req = get_request(args)
         job_cfg = JobConfig()  # use default HPC config
 
-    log_file = (
-        blueprint_req.output_dir
-        / "logs"
-        / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
-    )
-    log = get_logger(__name__, level=service_cfg.log_level, filename=log_file)
+    # log_file = (
+    #     blueprint_req.output_dir
+    #     / "logs"
+    #     / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
+    # )
+    log = get_logger(__name__, level=service_cfg.log_level)  # , filename=log_file)
 
     try:
         configure_environment(log)
         worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
         await worker.execute()
-    except CstarError:
-        log.exception("An error occurred during the simulation")
+    except CstarError as ex:
+        log.exception("An error occurred during the simulation", exc_info=ex)
         return 1
-    except Exception:
-        log.exception("An unexpected exception occurred during the simulation")
+    except Exception as ex:
+        log.exception(
+            "An unexpected exception occurred during the simulation", exc_info=ex
+        )
         return 1
 
     return 0
 
 
 if __name__ == "__main__":
-    rc = asyncio.run(main())
+    rc = asyncio.run(main(sys.argv))
     sys.exit(rc)

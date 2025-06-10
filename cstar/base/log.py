@@ -64,16 +64,21 @@ def get_logger(
 
     if filename:
         if isinstance(filename, Path):
+            file_path = filename
+            filename.parent.mkdir(parents=True, exist_ok=True)
             filename = str(filename)
+        elif isinstance(filename, str):
+            file_path = Path(filename)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
 
         existing_fh = [
             h
             for h in logger.handlers
             if isinstance(h, logging.FileHandler)
-            and Path(h.baseFilename).resolve() == Path(filename).resolve()
+            and Path(h.baseFilename).resolve() == file_path.resolve()
         ]
         if not existing_fh:
-            file_handler = logging.FileHandler(filename)
+            file_handler = logging.FileHandler(file_path)
             file_handler.setLevel(level)
             file_handler.setFormatter(logging.Formatter(fmt=fmt))
             logger.addHandler(file_handler)

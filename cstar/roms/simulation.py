@@ -1,6 +1,7 @@
 import shutil
 import warnings
 from datetime import datetime
+from os import PathLike
 from pathlib import Path
 from typing import Any, List, Optional, cast
 
@@ -785,7 +786,7 @@ class ROMSSimulation(Simulation):
             bp_dict, directory=directory, start_date=start_date, end_date=end_date
         )
 
-    def to_blueprint(self, filename: str) -> None:
+    def to_blueprint(self, filename: PathLike) -> None:
         """Save the `ROMSSimulation` instance as a YAML blueprint.
 
         This method converts the simulation instance into a dictionary representation
