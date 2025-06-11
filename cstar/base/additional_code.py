@@ -1,7 +1,7 @@
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 from cstar.base.datasource import DataSource
 from cstar.base.gitutils import _clone_and_checkout
@@ -75,7 +75,7 @@ class AdditionalCode(LoggingMixin):
         self.files: list[str] = [] if files is None else files
         # Initialize object state
         self.working_path: Optional[Path] = None
-        self._local_file_hash_cache: Dict = {}
+        self._local_file_hash_cache: dict = {}
 
         # If there are namelists, make a parallel attribute to keep track of the ones we are editing
         # AdditionalCode.get() determines which namelists are editable templates and updates this list
