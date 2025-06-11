@@ -14,16 +14,19 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 class MockExecutionHandler(ExecutionHandler):
     """Mock implementation of `ExecutionHandler` for testing purposes."""
 
-    def __init__(self, status, output_file):
+    def __init__(self, status: ExecutionStatus, output_file: Path) -> None:
+        """Initialize the mock instance."""
         self._status = status
         self._output_file = Path(output_file)
 
     @property
-    def status(self):
+    def status(self) -> ExecutionStatus:
+        """Get the current (mock) status of the process."""
         return self._status
 
     @property
-    def output_file(self):
+    def output_file(self) -> Path:
+        """Get the output file that will be monitored for updates."""
         return self._output_file
 
 
@@ -40,7 +43,9 @@ class TestExecutionHandlerUpdates:
         Confirms that `updates()` runs indefinitely when `seconds=0` and allows termination via user interruption.
     """
 
-    def test_updates_non_running_job(self, tmp_path, caplog: pytest.LogCaptureFixture):
+    def test_updates_non_running_job(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Validates that `updates()` provides appropriate feedback when the job is not
         running.
 
@@ -79,8 +84,8 @@ class TestExecutionHandlerUpdates:
         assert f"See {handler.output_file.resolve()} for job output" in captured
 
     def test_updates_running_job_with_tmp_file(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
-    ):
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Verifies that `updates()` streams live updates from the job's output file
         when the job is running.
 
@@ -144,8 +149,8 @@ class TestExecutionHandlerUpdates:
         updater_thread.join()
 
     def test_updates_indefinite_with_seconds_param_0(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
-    ):
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Confirms that `updates()` runs indefinitely when `seconds=0` and allows
         termination via user interruption.
 
@@ -191,6 +196,7 @@ class TestExecutionHandlerUpdates:
 
         # Mock the `status` property to return "running"
         with (
+            patch.dict(os.environ, {"CSTAR_INTERACTIVE": "1"}),
             patch.object(
                 MockExecutionHandler, "status", new_callable=PropertyMock
             ) as mock_status,
@@ -210,7 +216,8 @@ class TestExecutionHandlerUpdates:
 
                 # Verify that the prompt was displayed to the user
                 mock_input.assert_called_once_with(
-                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
+                    "This will provide indefinite updates to your job. You can "
+                    "stop it anytime using Ctrl+C. "
                     "Do you want to continue? (y/n): "
                 )
             # Patch input to simulate the confirmation prompt
@@ -220,8 +227,8 @@ class TestExecutionHandlerUpdates:
                     mock_open.assert_not_called()
 
     def test_updates_stops_when_status_changes(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
-    ):
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Verifies that `updates()` stops execution when `status` changes to non-
         RUNNING.
 
@@ -249,7 +256,7 @@ class TestExecutionHandlerUpdates:
         caplog.set_level(logging.INFO, logger=handler.log.name)
 
         # Function to simulate appending live updates and changing status
-        def append_updates_and_change_status():
+        def append_updates_and_change_status() -> None:
             with output_file.open("a") as f:
                 for line in running_updates:
                     time.sleep(0.1)  # Ensure updates() is actively reading
@@ -258,7 +265,7 @@ class TestExecutionHandlerUpdates:
 
                 # Change the status to `COMPLETED` after writing running updates
                 time.sleep(0.2)
-                handler._status = ExecutionStatus.COMPLETED
+                handler._status = ExecutionStatus.COMPLETED  # noqa: SLF001
                 for line in completed_updates:
                     time.sleep(0.1)
                     f.write(line)

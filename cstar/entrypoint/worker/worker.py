@@ -479,5 +479,5 @@ async def main(raw_args: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    rc = asyncio.run(main(sys.argv))
+    rc = asyncio.run(main(sys.argv[1:]))
     sys.exit(rc)

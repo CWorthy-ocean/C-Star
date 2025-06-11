@@ -101,7 +101,7 @@ class ExecutionHandler(ABC, LoggingMixin):
 
         pass
 
-    def updates(self, seconds: float = 10, confirm_indefinite: bool = True):
+    def updates(self, seconds: float = 10, confirm_indefinite: bool = True) -> None:
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
@@ -145,12 +145,13 @@ class ExecutionHandler(ABC, LoggingMixin):
             self.log.warning(error_msg)
             return
 
-        interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
+        interactive = os.environ.get("CSTAR_INTERACTIVE", "1") == "1"
         if seconds == 0 and confirm_indefinite and interactive:
             # Confirm indefinite tailing
             confirmation = (
                 input(
-                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
+                    "This will provide indefinite updates to your job. You can "
+                    "stop it anytime using Ctrl+C. "
                     "Do you want to continue? (y/n): "
                 )
                 .strip()
@@ -160,14 +161,14 @@ class ExecutionHandler(ABC, LoggingMixin):
                 return
 
         try:
-            with open(self.output_file, "r") as f:
+            with self.output_file.open() as f:
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):
-                    line = f.readline()
                     if self.status != ExecutionStatus.RUNNING:
                         return
-                    elif line:
+
+                    if line := f.readline():
                         self.log.info(line)
                     else:
                         time.sleep(0.1)  # 100ms delay between updates

@@ -1118,8 +1118,9 @@ async def test_worker_main(tmp_path: Path) -> None:
         "2024-02-01 00:00:00",
     ]
 
-    # don't let it perform any real work
-    return_code = await main(args)
+    with mock.patch.dict(os.environ, {}):
+        # don't let it perform any real work
+        return_code = await main(args)
 
     # Confirm an error code is returned
     assert return_code > 0

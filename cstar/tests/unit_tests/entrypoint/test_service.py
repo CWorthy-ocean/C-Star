@@ -439,7 +439,7 @@ async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
         await asyncio.sleep(1)
 
         term_at = time.time()
-        process.terminate()  # Simulate a signal to terminate the service
+        process.terminate()  # Send a signal to terminate the service
         time_complete = time.time()
 
         expected_time_to_terminate = 2.0
