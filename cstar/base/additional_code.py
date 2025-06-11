@@ -15,8 +15,8 @@ class AdditionalCode(LoggingMixin):
     Additional code is assumed to be kept in a single directory or
     subdirectory of a repository (described by the `source` attribute).
 
-    Attributes:
-    -----------
+    Attributes
+    ----------
     source: DataSource
         Describes the location and type of source data (e.g. repository,directory)
     subdir: str
@@ -31,8 +31,8 @@ class AdditionalCode(LoggingMixin):
     working_path: Path, default None
         The local path to the additional code. Set when `get()` method is called.
 
-    Methods:
-    --------
+    Methods
+    -------
     get(local_dir):
        Fetch the directory containing this additional code and copy it to `local_dir`.
        If source.source_type is 'repository', and source.location_type is 'url',
@@ -48,12 +48,11 @@ class AdditionalCode(LoggingMixin):
         subdir: str = "",
         checkout_target: Optional[str] = None,
         files: Optional[list[str]] = None,
-    ):
-        """Initialize an AdditionalCode object from a DataSource  and a list of code
-        files.
+    ) -> None:
+        """Initialize the AdditionalCode object.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         location: str
             url or path pointing to the additional code directory or repository, used to set `source` attribute
         subdir: str
@@ -65,8 +64,8 @@ class AdditionalCode(LoggingMixin):
             Path(s) relative to the subdirectory `subdir` of `source.location`
             to the additional code files
 
-        Returns:
-        --------
+        Returns
+        -------
         AdditionalCode
             An initialized AdditionalCode object
         """
@@ -84,6 +83,7 @@ class AdditionalCode(LoggingMixin):
             self.modified_files: list = [None] * len(self.files)
 
     def __str__(self) -> str:
+        """Return a human-readable string representation of the AdditionalCode."""
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nLocation: {self.source.location}"
@@ -104,6 +104,7 @@ class AdditionalCode(LoggingMixin):
         return base_str
 
     def __repr__(self) -> str:
+        """Return a repr-string representation of the AdditionalCode."""
         # Constructor-style section:
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nlocation = {self.source.location!r},"
@@ -124,12 +125,12 @@ class AdditionalCode(LoggingMixin):
 
     @property
     def checkout_target(self) -> Optional[str]:
+        """Return the target hash to checkout."""
         return self._checkout_target
 
     @property
-    def exists_locally(self):
-        """Determine whether a local working copy of the AdditionalCode exists at
-        self.working_path (bool)"""
+    def exists_locally(self) -> bool:
+        """Determine if a copy of the AdditionalCode exists at self.working_path."""
         if (self.working_path is None) or (self._local_file_hash_cache is None):
             return False
 
@@ -145,13 +146,13 @@ class AdditionalCode(LoggingMixin):
         return True
 
     def get(self, local_dir: str | Path) -> None:
-        """Copy the required AdditionalCode files to `local_dir`
+        """Copy the required AdditionalCode files to `local_dir`.
 
         If AdditionalCode.source describes a remote repository,
         this is cloned into a temporary directory first.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         local_dir: str | Path
             The local directory (typically `Case.caseroot`) in which to fetch the additional code.
         """
