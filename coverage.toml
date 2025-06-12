@@ -1,7 +1,8 @@
 [tool.coverage.run]
 source = ["cstar"]
 omit = [
-    "tests/*",
+    "**/tests/*",
     "**/__init__.py",
     "setup.py",
+    "**/contracts.py",
 ]

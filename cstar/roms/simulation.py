@@ -460,7 +460,6 @@ class ROMSSimulation(Simulation):
             - If no `.in` file is found in `runtime_code.files`.
         """
 
-        in_files = []
         if self.runtime_code is None:
             raise ValueError(
                 "ROMSSimulation.runtime_code not set."
@@ -492,7 +491,7 @@ class ROMSSimulation(Simulation):
                 return Path(in_files[0])
 
     @property
-    def input_datasets(self) -> list:
+    def input_datasets(self) -> list[ROMSInputDataset]:
         """Retrieves all input datasets associated with this ROMS simulation.
 
         This property compiles a list of `ROMSInputDataset` instances that are used
@@ -735,7 +734,7 @@ class ROMSSimulation(Simulation):
         directory: str | Path,
         start_date: Optional[str | datetime] = None,
         end_date: Optional[str | datetime] = None,
-    ):
+    ) -> "Simulation":
         """Create a `ROMSSimulation` instance from a YAML blueprint.
 
         This method reads a YAML blueprint file, extracts the relevant configuration
@@ -1168,34 +1167,39 @@ class ROMSSimulation(Simulation):
         setup : Fetches and organizes necessary files for the simulation.
         """
 
-        if self.codebase.local_config_status != 0:
+        if not self.codebase.is_setup:
+            self.log.debug("ROMS codebase is not set up.")
             return False
-        if self.marbl_codebase.local_config_status != 0:
+        if not self.marbl_codebase.is_setup:
+            self.log.debug("MARBL codebase is not set up.")
             return False
-        if (self.runtime_code is not None) and (not self.runtime_code.exists_locally):
+        if self.runtime_code and not self.runtime_code.is_setup:
+            self.log.debug("Run-time code is not set up.")
             return False
-        if (self.compile_time_code is not None) and (
-            not self.compile_time_code.exists_locally
-        ):
+        if self.compile_time_code and not self.compile_time_code.is_setup:
+            self.log.debug("Compile-time code is not set up.")
             return False
-        for inp in self.input_datasets:
-            if not (inp.exists_locally):
-                # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
-                # If no start or end date, it should be found locally:
-                if (not isinstance(inp.start_date, datetime)) or (
-                    not isinstance(inp.end_date, datetime)
-                ):
-                    return False
-                # If no start or end date for case, all files should be found locally:
-                elif (not isinstance(self.start_date, datetime)) or (
-                    not isinstance(self.end_date, datetime)
-                ):
-                    return False
-                # If inp and case start and end dates overlap, should be found locally:
-                elif (inp.start_date <= self.end_date) and (
-                    inp.end_date >= self.start_date
-                ):
-                    return False
+
+        sim_has_start = isinstance(self.start_date, datetime)
+        sim_has_end = isinstance(self.end_date, datetime)
+        nonlocal_datasets = [x for x in self.input_datasets if not x.exists_locally]
+
+        # Compare the dataset and simulation date ranges
+        for ds in nonlocal_datasets:
+            if not isinstance(ds.start_date, datetime):
+                self.log.debug(f"Dataset {ds.source.location} start date is not set.")
+                return False
+            elif not isinstance(ds.end_date, datetime):
+                self.log.debug(f"Dataset {ds.source.location} end date is not set.")
+                return False
+            elif not sim_has_start or not sim_has_end:
+                self.log.debug("Simulation is missing start or end date.")
+                return False
+            elif (ds.start_date <= self.end_date) and (ds.end_date >= self.start_date):
+                self.log.debug(
+                    f"Simulation and dataset {ds.source.location} dates do not overlap."
+                )
+                return False
         return True
 
     def build(self, rebuild: bool = False) -> None:
@@ -1626,8 +1630,8 @@ class ROMSSimulation(Simulation):
 
         # Reset cached data for input datasets
         for inp in new_sim.input_datasets:
-            inp._local_file_hash_cache = None
-            inp._local_file_stat_cache = None
+            inp._local_file_hash_cache.clear()
+            inp._local_file_stat_cache.clear()
             inp.working_path = None
 
         return new_sim

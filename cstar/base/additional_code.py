@@ -42,8 +42,6 @@ class AdditionalCode(LoggingMixin):
        Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
     """
 
-    files: list[str]
-
     def __init__(
         self,
         location: str,
@@ -75,8 +73,7 @@ class AdditionalCode(LoggingMixin):
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
         self._checkout_target = checkout_target
-        self.files: Optional[list[str]] = [] if files is None else files
-        # Initialize object state
+        self.files: list[str] = files or []
         self.working_path: Optional[Path] = None
         self._local_file_hash_cache: Dict = {}
 
@@ -135,6 +132,9 @@ class AdditionalCode(LoggingMixin):
         if (self.working_path is None) or (self._local_file_hash_cache is None):
             return False
 
+        if not self.files:
+            return False
+
         for f in self.files:
             path = self.working_path / f
             if not path.exists():
@@ -157,14 +157,15 @@ class AdditionalCode(LoggingMixin):
         local_dir: str | Path
             The local directory (typically `Case.caseroot`) in which to fetch the additional code.
         """
-        if len(self.files) == 0:
+        if not self.files:
             raise ValueError(
                 "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
             )
 
         local_dir = Path(local_dir).expanduser().resolve()
+        tmp_dir: Optional[Path] = None
+
         try:
-            tmp_dir = None  # initialise the tmp_dir variable in case we need it later
             # CASE 1: Additional code is in a remote repository:
             if (self.source.location_type == "url") and (
                 self.source.source_type == "repository"
@@ -177,13 +178,13 @@ class AdditionalCode(LoggingMixin):
                     assert isinstance(
                         self.checkout_target, str
                     ), "We have just verified checkout_target is not None"
-                tmp_dir = tempfile.mkdtemp()
+                tmp_dir = Path(tempfile.mkdtemp())
                 _clone_and_checkout(
                     source_repo=self.source.location,
                     local_path=tmp_dir,
                     checkout_target=self.checkout_target,
                 )
-                source_dir = Path(f"{tmp_dir}/{self.subdir}")
+                source_dir = tmp_dir / self.subdir
             # CASE 2: Additional code is in a local directory/repository
             elif (self.source.location_type == "path") and (
                 (self.source.source_type == "directory")
@@ -230,3 +231,14 @@ class AdditionalCode(LoggingMixin):
         finally:
             if tmp_dir:
                 shutil.rmtree(tmp_dir)
+
+    @property
+    def is_setup(self) -> bool:
+        """Return True if the code is available locally, False otherwise.
+
+        Returns:
+        -------
+        is_setup: bool
+            True if the code is available locally, False otherwise.
+        """
+        return self.exists_locally

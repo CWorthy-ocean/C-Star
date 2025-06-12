@@ -31,6 +31,17 @@ class MARBLExternalCodeBase(ExternalCodeBase):
     def expected_env_var(self) -> str:
         return "MARBL_ROOT"
 
+    @property
+    def prebuilt_env_var(self) -> str:
+        """Environment variable indicating that this codebase is already built.
+
+        Returns:
+        -------
+        prebuilt_env_var: str
+            The name of the environment variable.
+        """
+        return "CSTAR_MARBL_PREBUILT"
+
     def get(self, target: str | Path) -> None:
         """Clone MARBL code to local machine, set environment, compile libraries.
 

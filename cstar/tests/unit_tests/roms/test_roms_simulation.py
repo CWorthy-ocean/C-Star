@@ -1,6 +1,7 @@
 import logging
 import pickle
 import re
+import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Generator, Tuple, cast
@@ -897,27 +898,34 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
         """
 
         sim, directory = example_roms_simulation
-        expected_tree = f"""\
-{directory}
-└── ROMS
-    ├── input_datasets
-    │   ├── grid.nc
-    │   ├── initial.nc
-    │   ├── tidal.nc
-    │   ├── river.nc
-    │   ├── boundary.nc
-    │   ├── surface.nc
-    │   └── sw_corr.nc
-    ├── runtime_code
-    │   ├── file1
-    │   ├── file2.in_TEMPLATE
-    │   ├── marbl_in
-    │   ├── marbl_tracer_output_list
-    │   └── marbl_diagnostic_output_list
-    └── compile_time_code
-        ├── file1.h
-        └── file2.opt
-"""
+        expected_tree = textwrap.dedent(f"""\
+            {directory}
+            └── ROMS
+                ├── input_datasets
+                │   ├── grid.nc
+                │   ├── initial.nc
+                │   ├── tidal.nc
+                │   ├── river.nc
+                │   ├── boundary.nc
+                │   ├── surface.nc
+                │   └── sw_corr.nc
+                ├── runtime_code
+                │   ├── file1
+                │   ├── file2.in_TEMPLATE
+                │   ├── marbl_in
+                │   ├── marbl_tracer_output_list
+                │   └── marbl_diagnostic_output_list
+                └── compile_time_code
+                    ├── file1.h
+                    └── file2.opt
+            """)
+
+        tree_lines = filter(lambda x: x.strip(), sim.tree().split("\n"))
+        exp_lines = filter(lambda x: x.strip(), expected_tree.split("\n"))
+
+        # Perform line by line comparison to quickly identify location of a problem
+        for actual, expected in zip(tree_lines, exp_lines):
+            assert actual == expected
 
         assert sim.tree() == expected_tree
 
@@ -1826,6 +1834,38 @@ class TestProcessingAndExecution:
                 False,
                 datetime(2025, 1, 1),
                 datetime(2025, 12, 31),
+                datetime(2025, 1, 2),
+                None,
+                False,
+            ),
+            (
+                False,
+                datetime(2025, 1, 1),
+                datetime(2025, 12, 31),
+                None,
+                datetime(2025, 1, 2),
+                False,
+            ),
+            (
+                False,
+                datetime(2025, 1, 1),
+                datetime(2025, 12, 31),
+                datetime(2025, 1, 2),
+                "2025-01-02",
+                False,
+            ),
+            (
+                False,
+                datetime(2025, 1, 1),
+                datetime(2025, 12, 31),
+                "2025-01-02",
+                datetime(2025, 2, 2),
+                False,
+            ),
+            (
+                False,
+                datetime(2025, 1, 1),
+                datetime(2025, 12, 31),
                 datetime(2025, 6, 1),
                 datetime(2025, 6, 30),
                 False,
@@ -2719,9 +2759,12 @@ class TestROMSSimulationRestart:
         new_sim = sim.restart(new_end_date=new_end_date)
 
         # Verify restart logic
+        initial_conditions = new_sim.initial_conditions
+
         mock_glob.assert_called_once_with("*_rst.20251231000000.nc")
-        assert isinstance(new_sim.initial_conditions, ROMSInitialConditions)
-        assert new_sim.initial_conditions.source.location == str(restart_file.resolve())
+        assert isinstance(initial_conditions, ROMSInitialConditions)
+        assert initial_conditions.source.location == str(restart_file.resolve())
+        assert not initial_conditions._local_file_hash_cache  # Ensure cache is cleared
 
     @patch.object(Path, "glob")  # Mock file search
     @patch.object(Path, "exists", return_value=True)

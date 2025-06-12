@@ -38,17 +38,50 @@ class MockExternalCodeBase(ExternalCodeBase):
 
     @property
     def default_source_repo(self) -> str:
+        """A mock source repo to use.
+
+        Returns:
+        -------
+        target: str
+            The repo URL
+        """
         return "https://github.com/test/repo.git"
 
     @property
     def default_checkout_target(self) -> str:
+        """A mock tag name to use for the checkout target.
+
+        Returns:
+        -------
+        target: str
+            The tag name.
+        """
         return "test-tag"
 
     @property
     def expected_env_var(self) -> str:
+        """Key for the environment variable containing the codebase root path.
+
+        Returns:
+        -------
+        expected_env_var: str
+            The name of the environment variable.
+        """
         return "TEST_CODEBASE_ROOT"
 
+    @property
+    def prebuilt_env_var(self) -> str:
+        """Key for the environment variable indicating a prebuilt codebase.
+
+        Returns:
+        -------
+        prebuilt_env_var: str
+            The name of the environment variable.
+        """
+        return "TEST_CODEBASE_PREBUILT"
+
     def get(self, target: str | Path) -> None:
+        """A no-op to avoid retrieving a codebase during tests."""
         pass
 
 
