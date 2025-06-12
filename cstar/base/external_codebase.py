@@ -100,6 +100,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
                 base_str += f"(Environment variable {self.expected_env_var} is present, points to the correct repository remote, but is checked out at the wrong hash)"
             case 3:
                 base_str += f"(Environment variable {self.expected_env_var} is not present and it is assumed the external codebase is not installed locally)"
+            case 4:
+                base_str += f"(Environment variable {self.expected_env_var} is not present when a prebuilt library is expected)"
 
         return base_str
 
