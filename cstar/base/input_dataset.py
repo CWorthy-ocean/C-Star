@@ -1,7 +1,6 @@
 import datetime as dt
 from abc import ABC
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
 from urllib.parse import urljoin
 
 import dateutil.parser
@@ -11,25 +10,21 @@ from cstar.base.datasource import DataSource
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import _get_sha256_hash
 
-if TYPE_CHECKING:
-    import logging
-
 
 class InputDataset(ABC, LoggingMixin):
-    """Describes spatiotemporal data needed to run a unique instance of a model
-    simulation.
+    """Spatiotemporal data needed to run a unique instance of a model simulation.
 
-    Attributes:
-    -----------
-    source: DataSource
+    Attributes
+    ----------
+    source : DataSource
         Describes the location and type of the source data
-    file_hash: str, default None
+    file_hash : str, default None
         The 256 bit SHA sum associated with a (remote) file for verifying downloads
-    working_path: Path or list of Paths, default None
+    working_path : Path or list of Paths, default None
         The path(s) where the input dataset is being worked with locally, set when `get()` is called.
 
-    Methods:
-    --------
+    Methods
+    -------
     get(local_dir)
         Fetch the file containing this input dataset and save it to `local_dir`
     """
@@ -37,22 +32,24 @@ class InputDataset(ABC, LoggingMixin):
     def __init__(
         self,
         location: str,
-        file_hash: Optional[str] = None,
-        start_date: Optional[str | dt.datetime] = None,
-        end_date: Optional[str | dt.datetime] = None,
-    ):
-        """Initialize an InputDataset object associated with a model simulation using a
-        source URL and file hash.
+        file_hash: str | None = None,
+        start_date: str | dt.datetime | None = None,
+        end_date: str | dt.datetime | None = None,
+    ) -> None:
+        """Initialize an InputDataset from the supplied source URL and file hash.
 
-        Parameters:
-        -----------
-        location: str
-            URL or path pointing to a file either containing this dataset or instructions for creating it.
-            Used to set the `source` attribute.
-        file_hash: str, optional
+        Parameters
+        ----------
+        location : str
+            URL or path pointing to a file that contains a dataset or instructions
+            for creating it. Used to set the `source` attribute.
+        file_hash : str, optional
             The 256 bit SHA sum associated with the file for verification if remote
+        start_date : str | datetime | None
+            The first date of the data in the dataset
+        end_date : str | datetime | None
+            The last date of the data in the dataset
         """
-
         self.source: DataSource = DataSource(location=location, file_hash=file_hash)
         if (
             (self.source.location_type == "url")
@@ -61,8 +58,10 @@ class InputDataset(ABC, LoggingMixin):
         ):
             raise ValueError(
                 f"Cannot create InputDataset for \n {self.source.location}:\n "
-                + "InputDataset.source.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
-                + "A file hash is required to verify non-plaintext files downloaded from remote sources."
+                "InputDataset.source.file_hash cannot be None if "
+                "InputDataset.source.location_type is 'url'.\n"
+                "A file hash is required to verify non-plaintext files downloaded "
+                "from remote sources."
             )
         if isinstance(start_date, str):
             start_date = dateutil.parser.parse(start_date)
@@ -74,15 +73,16 @@ class InputDataset(ABC, LoggingMixin):
         assert self.end_date is None or isinstance(self.end_date, dt.datetime)
 
         # Initialize object state:
-        self.working_path: Optional[Path | List[Path]] = None
-        self._local_file_hash_cache: Dict = {}
-        self._local_file_stat_cache: Dict = {}
+        self.working_path: Path | list[Path] | None = None
+        self._local_file_hash_cache: dict = {}
+        self._local_file_stat_cache: dict = {}
+        self.partitioned_files: list[Path] = []
 
         # Subclass-specific  confirmation that everything is set up correctly:
         self.validate()
 
-    def validate(self):
-        pass
+    def validate(self) -> None:
+        """Validate the dataset properties."""
 
     @property
     def exists_locally(self) -> bool:
@@ -94,13 +94,14 @@ class InputDataset(ABC, LoggingMixin):
         3. If the size matches but the modification time does not, the file's SHA-256 hash
            is computed and compared against a value cached by `InputDataset.get()`
 
-        Returns:
-        --------
-        exists_locally (bool): True if all files pass the existence, size, modification
+        Returns
+        -------
+        exists_locally : bool
+            True if all files pass the existence, size, modification
             time, and (if necessary) hash checks. Returns False otherwise.
 
-        Notes:
-        ------
+        Notes
+        -----
             If C-Star cannot access cached file statistics, it is impossible to verify
             whether the InputDataset is correct, and so `False` is returned.
         """
@@ -140,7 +141,7 @@ class InputDataset(ABC, LoggingMixin):
         return True
 
     @property
-    def local_hash(self) -> Optional[Dict]:
+    def local_hash(self) -> dict | None:
         """Compute or retrieve the cached SHA-256 hash of the local dataset.
 
         This property calculates the SHA-256 hash for the dataset located at `working_path`.
@@ -153,12 +154,11 @@ class InputDataset(ABC, LoggingMixin):
 
         Returns
         -------
-        local_hash (dict or None)
+        local_hash : dict or None
             - A dictionary where the keys are `Path` objects representing file paths
               and the values are their respective SHA-256 hashes.
             - `None` if `working_path` is not set or no files exist locally.
         """
-
         if self._local_file_hash_cache:
             return self._local_file_hash_cache
 
@@ -175,6 +175,7 @@ class InputDataset(ABC, LoggingMixin):
         return local_hash
 
     def __str__(self) -> str:
+        """Return a human-readable string representation."""
         name = self.__class__.__name__
         base_str = f"{name}"
         base_str = "-" * len(name) + "\n" + base_str
@@ -198,7 +199,7 @@ class InputDataset(ABC, LoggingMixin):
         return base_str
 
     def __repr__(self) -> str:
-        # Constructor-style section:
+        """Return a constructor-style representation string."""
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nlocation = {self.source.location!r},"
         repr_str += f"\nfile_hash = {self.source.file_hash!r},"
@@ -222,9 +223,9 @@ class InputDataset(ABC, LoggingMixin):
     def to_dict(self) -> dict:
         """Represent this InputDataset object as a dictionary of kwargs.
 
-        Returns:
-        --------
-        input_dataset_dict (dict):
+        Returns
+        -------
+        input_dataset_dict : dict
            A dictionary of kwargs that can be used to initialize the
            InputDataset object.
         """
@@ -240,7 +241,7 @@ class InputDataset(ABC, LoggingMixin):
         return input_dataset_dict
 
     def get(self, local_dir: str | Path) -> None:
-        """Make the file containing this input dataset available in `local_dir`
+        """Make the file containing this input dataset available in `local_dir`.
 
         If InputDataset.source.location_type is...
            - ...a local path: create a symbolic link to the file in `local_dir`.
@@ -249,9 +250,9 @@ class InputDataset(ABC, LoggingMixin):
         This method updates the `InputDataset.working_path` attribute with the new location,
         and caches file metadata and checksum values.
 
-        Parameters:
-        -----------
-        local_dir: str
+        Parameters
+        ----------
+        local_dir : str
             The local directory in which this input dataset will be saved.
         """
         Path(local_dir).expanduser().mkdir(parents=True, exist_ok=True)
@@ -266,7 +267,6 @@ class InputDataset(ABC, LoggingMixin):
             location_type=self.source.location_type,
             expected_file_hash=self.source.file_hash,
             target_path=target_path,
-            logger=self.log,
         )
 
         self.working_path = target_path
@@ -279,7 +279,6 @@ class InputDataset(ABC, LoggingMixin):
         location_type: str,
         expected_file_hash: str | None,
         target_path: Path,
-        logger: "logging.Logger",
     ) -> str:
         if location_type == "path":
             source_location = Path(source_location).expanduser().resolve()
@@ -313,8 +312,7 @@ class InputDataset(ABC, LoggingMixin):
 
             else:
                 raise ValueError(
-                    "Source type is URL "
-                    + "but no file hash was not provided. "
-                    + "Cannot proceed."
+                    "Source type is URL but no file hash was not provided. "
+                    "Cannot proceed."
                 )
         return computed_file_hash

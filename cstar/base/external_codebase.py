@@ -1,7 +1,6 @@
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
 
 from cstar.base.gitutils import (
     _checkout,
@@ -18,16 +17,16 @@ class ExternalCodeBase(ABC, LoggingMixin):
     """Abstract base class to manage external non-python dependencies of C-Star.
 
     Attributes
-    -----------
-    source_repo: str
+    ----------
+    source_repo : str
         URL pointing to a git-controlled repository containing the source code
-    checkout_target: str
+    checkout_target : str
         A tag, git hash, or other target to check out the source repo at the correct point in its history
-    checkout_hash: str
+    checkout_hash : str
         The git hash associated with `checkout_target`
-    repo_basename: str
+    repo_basename : str
         The basename of the repository, e.g. "repo" for "https://github.com/dev-team/repo.git
-    local_config_status: int
+    local_config_status : int
         A value corresponding to how the external codebase has been configured on the local machine
         The value of local_config_status may be interpreted as follows.
 
@@ -35,11 +34,11 @@ class ExternalCodeBase(ABC, LoggingMixin):
             - 1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
             - 2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
             - 3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
-    default_source_repo: str
+    default_source_repo : str
         The default value of `source_repo`
-    default_checkout_target: str
+    default_checkout_target : str
         The default value of `checkout_target`
-    expected_env_var: str
+    expected_env_var : str
         Environment variable pointing to the root of the external codebase
         indicating that the external codebase has been installed and configured on the local machine.
 
@@ -56,36 +55,34 @@ class ExternalCodeBase(ABC, LoggingMixin):
     """
 
     def __init__(
-        self, source_repo: Optional[str] = None, checkout_target: Optional[str] = None
-    ):
-        """Initialize a ExternalCodeBase object manually from a source repository and
-        checkout target.
+        self, source_repo: str | None = None, checkout_target: str | None = None
+    ) -> None:
+        """Initialize an instance from a source repository and checkout target.
 
-        Parameters:
-        -----------
-        source_repo: str
+        Parameters
+        ----------
+        source_repo : str
             URL pointing to a git-controlled repository containing the external codebase source code
-        checkout_target: str
+        checkout_target : str
             A tag, git hash, or other target to check out the source repo at the correct point in its history
 
-        Returns:
+        Returns
         -------
         ExternalCodeBase
             An initialized ExternalCodeBase object
         """
-
-        # TODO: Type check here
         self._source_repo = source_repo
         self._checkout_target = checkout_target
 
     def __str__(self) -> str:
+        """Return a human-readable string representation."""
         base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
-        base_str += f"\nsource_repo : {self.source_repo}"
+        base_str += f"\nsource_repo: {self.source_repo}"
         if self.source_repo == self.default_source_repo:
             base_str += " (default)"
 
-        base_str += f"\ncheckout_target : {self.checkout_target}"
+        base_str += f"\ncheckout_target: {self.checkout_target}"
         if self.checkout_target != self.checkout_hash:
             base_str += f" (corresponding to hash {self.checkout_hash})"
         if self.checkout_target == self.default_checkout_target:
@@ -105,6 +102,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
         return base_str
 
     def __repr__(self) -> str:
+        """Return a constructor-style string representation."""
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nsource_repo = {self.source_repo!r},"
         repr_str += f"\ncheckout_target = {self.checkout_target!r}"
@@ -115,6 +113,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def source_repo(self) -> str:
+        """Return the source repo for this codebase."""
         return (
             self._source_repo
             if self._source_repo is not None
@@ -123,6 +122,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def checkout_target(self) -> str:
+        """Return the checkout target for this codebase."""
         return (
             self._checkout_target
             if self._checkout_target is not None
@@ -131,6 +131,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def repo_basename(self) -> str:
+        """Return the base name of the source repository."""
         return Path(self.source_repo).name.replace(".git", "")
 
     @property
@@ -141,43 +142,51 @@ class ExternalCodeBase(ABC, LoggingMixin):
     @property
     @abstractmethod
     def default_source_repo(self) -> str:
-        """Default source repository, defined in subclasses, e.g. https://github.com/marbl-ecosys/MARBL.git"""
+        """Return the default source repository for this codebase.
+
+        This method must be overridden in subclasses. An example
+        default repository for MARBL is: https://github.com/marbl-ecosys/MARBL.git.
+        """
 
     @property
     @abstractmethod
     def default_checkout_target(self) -> str:
-        """Default checkout target, defined in subclasses, e.g. marblv0.45.0."""
+        """Return the default checkout target for this codebase.
+
+        This method must be overridden in subclasses. An example
+        default checkout target for MARBL is: marblv0.45.0.
+        """
 
     @property
     @abstractmethod
     def expected_env_var(self) -> str:
-        """Environment variable associated with the external codebase, e.g.
-        MARBL_ROOT."""
+        """Return the environment variable name specifying the codebase location.
+
+        This method must be overridden in subclasses. An example
+        environment variable name for MARBL is: MARBL_ROOT.
+        """
 
     @property
     def local_config_status(self) -> int:
-        """Perform a series of checks to ensure that the external codebase is properly
-        configured on this machine.
+        """Verify the proper configuration of the codebase on the local machine.
 
         The method proceeds as follows:
         1. Check `ExternalCodeBase.expected_env_var` is present in the environment
         2. Check `ExternalCodeBase.expected_env_var` points to the correct remote repository
         3. Check the repository is checked out to the correct target
 
-        Returns:
+        Returns
         -------
-        local_config_status: int
+        local_config_status : int
            The value of local_config_status may be interpreted as follows.
            0: The expected environment variable is present, points to the correct repository remote, and is checked out at the correct hash
            1: The expected environment variable is present but does not point to the correct repository remote (unresolvable)
            2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
            3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
         """
-
         # check 1: X_ROOT variable is in user's env
         env_var_exists = (
-            self.expected_env_var
-            in cstar_sysmgr.environment.environment_variables.keys()
+            self.expected_env_var in cstar_sysmgr.environment.environment_variables
         )
 
         # check 2: X_ROOT points to the correct repository
@@ -189,25 +198,24 @@ class ExternalCodeBase(ABC, LoggingMixin):
             env_var_matches_repo = self.source_repo == env_var_repo_remote
             if not env_var_matches_repo:
                 return 1
-            else:
-                # check 3: local codebase repo HEAD matches correct checkout hash:
-                head_hash = _get_repo_head_hash(local_root)
-                head_hash_matches_checkout_hash = head_hash == self.checkout_hash
-                if head_hash_matches_checkout_hash:
-                    return 0
-                else:
-                    return 2
 
-        else:  # env_var_exists False (e.g. ROMS_ROOT not defined)
-            return 3
+            # check 3: local codebase repo HEAD matches correct checkout hash:
+            head_hash = _get_repo_head_hash(local_root)
+            head_hash_matches_checkout_hash = head_hash == self.checkout_hash
+            if head_hash_matches_checkout_hash:
+                return 0
+            return 2
+
+        # env_var_exists False (e.g. ROMS_ROOT not defined)
+        return 3
 
     @property
     def is_setup(self) -> bool:
-        return True if self.local_config_status == 0 else False
+        """Return True if the codebase is configured locally."""
+        return self.local_config_status == 0
 
-    def handle_config_status(self) -> None:
-        """Perform actions depending on the output of
-        ExternalCodeBase.get_local_config_status()
+    def handle_config_status(self) -> None:  # noqa: C901, PLR0912
+        """Perform any required actions for the current `config_status`.
 
         The config_status attribute should be set by the get_local_config_status method
 
@@ -240,29 +248,22 @@ class ExternalCodeBase(ABC, LoggingMixin):
             case 1:
                 env_var_repo_remote = _get_repo_remote(local_root)
 
-                raise EnvironmentError(
-                    (
-                        "System environment variable "
-                        f"'{self.expected_env_var}' points to "
-                        "a github repository whose "
-                        f"remote: \n '{env_var_repo_remote}' \n"
-                        "does not match that expected by C-Star: \n"
-                        f"{self.source_repo}."
-                        "Your environment may be misconfigured."
-                    )
+                raise OSError(
+                    f"System environment variable '{self.expected_env_var}' points to "
+                    f"a github repository whose remote: \n '{env_var_repo_remote}' \n"
+                    f"does not match that expected by C-Star: \n{self.source_repo}."
+                    "Your environment may be misconfigured."
                 )
             case 2:
                 head_hash = _get_repo_head_hash(local_root)
                 print(
-                    (
-                        "############################################################\n"
-                        f"C-STAR: {self.expected_env_var} points to the correct repo "
-                        f"{self.source_repo} but HEAD is at: \n"
-                        f"{head_hash}, rather than the hash associated with "
-                        f"checkout_target {self.checkout_target}:\n"
-                        f"{self.checkout_hash}\n"
-                        "############################################################"
-                    )
+                    "############################################################\n"
+                    f"C-STAR: {self.expected_env_var} points to the correct repo "
+                    f"{self.source_repo} but HEAD is at: \n"
+                    f"{head_hash}, rather than the hash associated with "
+                    f"checkout_target {self.checkout_target}:\n"
+                    f"{self.checkout_hash}\n"
+                    "############################################################"
                 )
                 while True:
                     yn = "y"
@@ -274,33 +275,32 @@ class ExternalCodeBase(ABC, LoggingMixin):
                             _checkout(
                                 self.source_repo, local_root, self.checkout_target
                             )
-                        except Exception as ex:
+                        except Exception as ex:  # noqa: BLE001
                             print(ex)
                         else:
                             self._codebase_adjustments()
                         return
-                    elif yn.casefold() in ["n", "no"]:
-                        raise EnvironmentError()
-                    else:
-                        print("invalid selection; enter 'y' or 'n'")
+
+                    if yn.casefold() in ["n", "no"]:
+                        raise OSError
+
+                    print("invalid selection; enter 'y' or 'n'")
             case 3:
                 ext_dir = (
                     cstar_sysmgr.environment.package_root
                     / f"externals/{self.repo_basename}"
                 )
                 print(
-                    (
-                        "#######################################################\n"
-                        f"C-STAR: {self.expected_env_var}"
-                        " not found in current cstar_sysmgr.environment. \n"
-                        "if this is your first time running C-Star with "
-                        f"an instance of {self.__class__.__name__}, "
-                        "you will need to set it up.\n"
-                        "It is recommended that you install this external codebase in \n"
-                        f"{ext_dir}\n"
-                        f"This will also modify your `{CSTAR_USER_ENV_PATH}` file.\n"
-                        "#######################################################"
-                    )
+                    "#######################################################\n"
+                    f"C-STAR: {self.expected_env_var}"
+                    " not found in current cstar_sysmgr.environment. \n"
+                    "if this is your first time running C-Star with "
+                    f"an instance of {self.__class__.__name__}, "
+                    "you will need to set it up.\n"
+                    "It is recommended that you install this external codebase in \n"
+                    f"{ext_dir}\n"
+                    f"This will also modify your `{CSTAR_USER_ENV_PATH}` file.\n"
+                    "#######################################################"
                 )
                 while True:
                     if not ext_dir.exists():
@@ -309,28 +309,30 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     yn = "y"
                     if interactive:
                         yn = input(
-                            (
-                                "Would you like to do this now? "
-                                "('y', 'n', or 'custom' to install at a custom path)\n"
-                            )
+                            "Would you like to do this now? "
+                            "('y', 'n', or 'custom' to install at a custom path)\n"
                         )
                     if yn.casefold() in ["y", "yes", "ok"]:
                         self.get(ext_dir)
                         break
-                    elif yn.casefold() in ["n", "no"]:
-                        raise EnvironmentError()
-                    elif yn.casefold() == "custom":
+
+                    if yn.casefold() in ["n", "no"]:
+                        raise OSError
+
+                    if yn.casefold() == "custom":
                         custom_path = input("Enter custom path for install:\n")
                         self.get(Path(custom_path).resolve())
                         break
-                    else:
-                        print("invalid selection; enter 'y','n',or 'custom'")
+
+                    print("invalid selection; enter 'y','n',or 'custom'")
 
     @abstractmethod
     def get(self, target: str | Path) -> None:
         """Clone the external codebase to your local machine."""
 
     def _codebase_adjustments(self) -> None:
-        """Perform any C-Star specific adjustments to the external codebase that would
-        be needed after a clean checkout."""
-        pass
+        """Perform adjustments to the codebase after checkout.
+
+        Used to perform C-Star specific adjustments to the external codebase that are
+        needed after a clean checkout.
+        """

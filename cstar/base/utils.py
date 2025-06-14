@@ -1,10 +1,13 @@
 import functools
 import hashlib
 import subprocess
-from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from cstar.base.log import get_logger
+
+if TYPE_CHECKING:
+    from os import PathLike
 
 log = get_logger(__name__)
 
@@ -14,19 +17,18 @@ def _get_sha256_hash(file_path: str | Path) -> str:
 
     Parameters
     ----------
-    file_path: Path
+    file_path : Path
        Path to the file whose checksum is to be calculated
 
     Returns
     -------
-    file_hash: str
+    file_hash : str
        The SHA-256 checksum of the file at file_path
     """
-
     file_path = Path(file_path)
     if not file_path.is_file():
         raise FileNotFoundError(
-            f"Error when calculating file hash: {file_path} is not a valid file"
+            f"Error when calculating file hash: {file_path} is not a valid file",
         )
 
     sha256_hash = hashlib.sha256()
@@ -34,8 +36,7 @@ def _get_sha256_hash(file_path: str | Path) -> str:
         for chunk in iter(lambda: file.read(4096), b""):
             sha256_hash.update(chunk)
 
-    file_hash = sha256_hash.hexdigest()
-    return file_hash
+    return sha256_hash.hexdigest()
 
 
 def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -> bool:
@@ -44,25 +45,28 @@ def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -
     This function creates a temporary file where the changes are written, then
     overwrites the original file.
 
-    Parameters:
-    -----------
-    file_path: str | Path
+    Parameters
+    ----------
+    file_path : str | Path
         The local path to the text file
-    old_text: str
+    old_text : str
         The text to be replaced
-    new_text: str
+    new_text : str
         The text that will replace `old_text`
 
-    Returns:
-    --------
-    text_replaced: bool
+    Returns
+    -------
+    text_replaced : bool
        True if text was found and replaced, False if not found
     """
     text_replaced = False
     file_path = Path(file_path).resolve()
     temp_file_path = Path(str(file_path) + ".tmp")
 
-    with open(file_path, "r") as read_file, open(temp_file_path, "w") as write_file:
+    with (
+        open(file_path) as read_file,  # noqa: PTH123
+        open(temp_file_path, "w") as write_file,  # noqa: PTH123
+    ):
         for line in read_file:
             if old_text in line:
                 text_replaced = True
@@ -75,29 +79,33 @@ def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -
 
 
 def _list_to_concise_str(
-    input_list, item_threshold=4, pad=16, items_are_strs=True, show_item_count=True
-):
+    input_list: list[str],
+    item_threshold: int = 4,
+    pad: int = 16,
+    items_are_strs: bool = True,
+    show_item_count: bool = True,
+) -> str:
     """Take a list and return a concise string representation of it.
 
-    Parameters:
-    -----------
-    input_list (list of str):
+    Parameters
+    ----------
+    input_list : list of str
        The list of to be represented
-    item_threshold (int, default = 4):
+    item_threshold : int, default = 4
        The number of items beyond which to truncate the str to item0,...itemN
-    pad (int, default = 16):
+    pad : int, default = 16
        The number of whitespace characters to prepend newlines with
-    items_are_strs (bool, default = True):
+    items_are_strs : bool, default = True
        Will use repr formatting ([item1,item2]->['item1','item2']) for lists of strings
-    show_item_count (bool, default = True):
+    show_item_count : bool, default = True
        Will add <N items> to the end of a truncated representation
 
-    Returns:
+    Returns
     -------
-    list_str: str
+    list_str : str
        The string representation of the list
 
-    Examples:
+    Examples
     --------
     In: print("my_list: "+_list_to_concise_str(["myitem0","myitem1",
                              "myitem2","myitem3","myitem4"],pad=11))
@@ -108,10 +116,8 @@ def _list_to_concise_str(
     """
     list_str = ""
     pad_str = " " * pad
-    if show_item_count:
-        count_str = f"<{len(input_list)} items>"
-    else:
-        count_str = ""
+    count_str = f"<{len(input_list)} items>" if show_item_count else ""
+
     if len(input_list) > item_threshold:
         list_str += f"[{repr(input_list[0]) if items_are_strs else input_list[0]},"
         list_str += (
@@ -131,21 +137,21 @@ def _list_to_concise_str(
 def _dict_to_tree(input_dict: dict, prefix: str = "") -> str:
     """Recursively converts a dictionary into a tree-like string representation.
 
-    Parameters:
-    -----------
-     input_dict (dict):
+    Parameters
+    ----------
+    input_dict : dict
         The dictionary to convert. Takes the form of nested dictionaries with a list
         at the lowest level
-    prefix (str, default=""):
+    prefix : str, default = ""
         Used for internal recursion to maintain current branch position
 
-    Returns:
-    --------
-    tree_str:
+    Returns
+    -------
+    str
        A string representing the tree structure.
 
-    Examples:
-    ---------
+    Examples
+    --------
     print(_dict_to_tree({'branch1': {'branch1a': ['twig1ai','twig1aii']},
                          'branch2': {'branch2a': ['twig2ai','twig2aii'],
                                      'branch2b': ['twig2bi',]}
@@ -195,30 +201,30 @@ def _run_cmd(
 ) -> str:
     """Execute a subprocess using default configuration, blocking until it completes.
 
-    Parameters:
-    -----------
-    cmd (str):
+    Parameters
+    ----------
+    cmd : str
        The command to be executed as a separate process.
-    cwd (Path, default = None):
+    cwd : Path or None, default = None
        The working directory for the command. If None, use current working directory.
-    env (Dict[str, str], default = None):
+    env : dict[str, str], default = None
        A dictionary of environment variables to be passed to the command.
-    msg_pre (str  | None), default = None):
+    msg_pre : str  | None, default = None
        An overridden message logged before the command is executed.
-    msg_post (str | None), default = None):
+    msg_post : str | None, default = None
         An overridden message logged after the command is successfully executed.
-    msg_err (str | None), default = None):
+    msg_err : str | None, default = None
         An overridden message logged when a command returns a non-zero code. Logs
         will automatically append the stderr output of the command.
-    raise_on_error (bool, default = False):
+    raise_on_error : bool, default = False
         If True, raises a RuntimeError if the command returns a non-zero code.
 
-    Returns:
+    Returns
     -------
-    stdout: str
+    stdout : str
        The captured standard output of the process.
 
-    Examples:
+    Examples
     --------
     In: _run_cmd("python foo.py", msg_pre="Running script", msg_post="Script completed")
     Out: Running script

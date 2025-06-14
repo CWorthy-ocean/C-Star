@@ -4,17 +4,14 @@
 
 from importlib.metadata import version as _version
 
-# from cstar.case import Case
 from cstar.simulation import Simulation
 
-__all__ = [
-    "Simulation",
-]
+__all__ = ["Simulation"]
 
 
 try:
     __version__ = _version("cstar-ocean")
-except Exception:
+except Exception:  # noqa: BLE001
     # Local copy or not installed with setuptools.
     # Disable minimum version checks on downstream libraries.
     __version__ = "9999"

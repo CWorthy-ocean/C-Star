@@ -1,5 +1,6 @@
 import logging
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
@@ -10,7 +11,8 @@ from cstar.execution.local_process import ExecutionStatus, LocalProcess
 
 
 @pytest.fixture
-def mock_local_process(tmp_path):
+def mock_local_process(tmp_path: Path) -> LocalProcess:
+    """Return a mock local process."""
     return LocalProcess(
         commands="echo 'Hello, World'",
         run_path=tmp_path,
@@ -46,8 +48,8 @@ class TestLocalProcess:
         Validates that `cancel` does not attempt to terminate or kill a non-running process and provides feedback.
     """
 
-    def setup_method(self, method):
-        """Sets up reusable parameters and paths for tests in `TestLocalProcess`.
+    def setup_method(self, method: Callable) -> None:  # noqa: ARG002
+        """Set up reusable parameters and paths for tests in `TestLocalProcess`.
 
         This method initializes common attributes for creating a `LocalProcess`
         instance, including the commands to execute, the output file path, and
@@ -64,7 +66,6 @@ class TestLocalProcess:
         - commands : str
             The shell command(s) to execute.
         """
-
         self.patcher = patch("subprocess.Popen")
         self.mock_popen = self.patcher.start()
 
@@ -72,7 +73,7 @@ class TestLocalProcess:
         self.mock_subprocess = MagicMock()
         self.mock_popen.return_value = self.mock_subprocess
 
-    def test_initialization_defaults(self, tmp_path):
+    def test_initialization_defaults(self) -> None:
         """Ensures that default attributes are correctly applied during initialization.
 
         This test verifies that if `run_path` and `output_file` are not explicitly
@@ -91,7 +92,8 @@ class TestLocalProcess:
         assert mock_local_process.output_file.name.startswith("cstar_process_")
         assert mock_local_process.status == ExecutionStatus.UNSUBMITTED
 
-    def test_str(self):
+    def test_str(self) -> None:
+        """Verify the expected string representation is produced."""
         mock_local_process = LocalProcess(
             commands='echo "Hello, World"',
             run_path="test/path",
@@ -109,7 +111,8 @@ class TestLocalProcess:
 
         assert mock_local_process.__str__() == test_str
 
-    def test_repr(self):
+    def test_repr(self) -> None:
+        """Verify the expected repr representation is produced."""
         mock_local_process = LocalProcess(
             commands='echo "Hello, World"',
             run_path="test/path",
@@ -129,7 +132,9 @@ class TestLocalProcess:
             mock_local_process.__repr__() == test_repr
         ), f"expected \n{test_repr}\n, got \n{mock_local_process.__repr__()}\n"
 
-    def test_start_success(self, tmp_path, mock_local_process):
+    def test_start_success(
+        self, tmp_path: Path, mock_local_process: LocalProcess
+    ) -> None:
         """Verifies that the subprocess starts successfully with valid commands.
 
         This test ensures that the `start` method:
@@ -154,7 +159,6 @@ class TestLocalProcess:
         - That the subprocess is called with the correct arguments.
         - That the `status` property reflects the `RUNNING` state after startup.
         """
-        # mock_popen.return_value.poll.return_value = None  # Simulate running process
         self.mock_subprocess.poll.return_value = None  # Simulate running process
 
         with patch("builtins.open", MagicMock()) as mock_open:
@@ -170,7 +174,7 @@ class TestLocalProcess:
         )
         assert mock_local_process.status == ExecutionStatus.RUNNING
 
-    def test_status(self, tmp_path, mock_local_process):
+    def test_status(self, mock_local_process: LocalProcess) -> None:
         """Tests that the `status` property reflects the subprocess lifecycle.
 
         This test covers the following states:
@@ -197,14 +201,13 @@ class TestLocalProcess:
         - That the `status` property reflects the correct `ExecutionStatus` for
           each stage of the process lifecycle.
         """
-
         assert mock_local_process.status == ExecutionStatus.UNSUBMITTED
 
         # After starting: RUNNING
         self.mock_subprocess.poll.return_value = None  # Simulate running process
         mock_local_process.start()
         assert mock_local_process.status == ExecutionStatus.RUNNING
-        assert mock_local_process._process is not None
+        assert mock_local_process._process is not None  # noqa: SLF001
 
         # After completion: COMPLETED
         self.mock_subprocess.poll.return_value = 0  # Simulate successful termination
@@ -212,7 +215,7 @@ class TestLocalProcess:
 
         mock_local_process.start()
         assert mock_local_process.status == ExecutionStatus.COMPLETED
-        assert mock_local_process._process is None
+        assert mock_local_process._process is None  # noqa: SLF001
 
         # After failure: FAILED
         self.mock_subprocess.poll.return_value = 1  # Simulate unsuccessful termination
@@ -221,7 +224,7 @@ class TestLocalProcess:
         mock_local_process.start()
         assert mock_local_process.status == ExecutionStatus.FAILED
 
-    def test_drop_process(self, tmp_path, mock_local_process):
+    def test_drop_process(self, mock_local_process: LocalProcess) -> None:
         """Tests the behavior of the private _drop_process method.
 
         This test checks behavior in three situations:
@@ -248,31 +251,33 @@ class TestLocalProcess:
         - _process is un-set if _process is set to a complete subprocess
         - RuntimeError raised if _process is set to a running subprocess
         """
-
         # no process (return early):
-        mock_local_process._process = None
-        mock_local_process._drop_process()
-        assert mock_local_process._returncode is None
+        mock_local_process._process = None  # noqa: SLF001
+        mock_local_process._drop_process()  # noqa: SLF001
+        assert mock_local_process._returncode is None  # noqa: SLF001
         self.mock_subprocess.poll.assert_not_called()
 
         # valid process (set _returncode, clear _process):
         self.mock_subprocess.returncode = 0
-        mock_local_process._process = self.mock_subprocess
-        mock_local_process._drop_process()
-        assert mock_local_process._returncode == 0
-        assert mock_local_process._process is None
+        mock_local_process._process = self.mock_subprocess  # noqa: SLF001
+        mock_local_process._drop_process()  # noqa: SLF001
+        assert mock_local_process._returncode == 0  # noqa: SLF001
+        assert mock_local_process._process is None  # noqa: SLF001
 
         # running process (raise)
         self.mock_subprocess.poll.return_value = None
-        mock_local_process._process = self.mock_subprocess
+        mock_local_process._process = self.mock_subprocess  # noqa: SLF001
         with pytest.raises(RuntimeError) as err_msg:
-            mock_local_process._drop_process()
-            assert str(err_msg.value) == (
-                "LocalProcess._drop_process() called on still-active process. "
-                "Await completion or use LocalProcess.cancel()"
-            )
+            mock_local_process._drop_process()  # noqa: SLF001
 
-    def test_cancel_graceful_termination(self, tmp_path, mock_local_process):
+        assert str(err_msg.value) == (
+            "LocalProcess._drop_process() called on still-active process. "
+            "Await completion or use LocalProcess.cancel()"
+        )
+
+    def test_cancel_graceful_termination(
+        self, mock_local_process: LocalProcess
+    ) -> None:
         """Ensures that the `cancel` method gracefully terminates a running process.
 
         This test verifies:
@@ -298,7 +303,6 @@ class TestLocalProcess:
         - That `kill()` is not called if `terminate()` succeeds.
         - That the `status` property reflects the `CANCELLED` state after cancellation.
         """
-
         # Simulate a running process
         self.mock_subprocess.poll.return_value = None  # Process is active
         mock_local_process.start()
@@ -306,7 +310,7 @@ class TestLocalProcess:
         # Verify the process has started
         assert mock_local_process.status == ExecutionStatus.RUNNING
         assert (
-            mock_local_process._process is self.mock_subprocess
+            mock_local_process._process is self.mock_subprocess  # noqa: SLF001
         )  # Ensure the process was assigned
 
         # cancel() call will call process.poll() internally twice;
@@ -318,7 +322,9 @@ class TestLocalProcess:
         self.mock_subprocess.kill.assert_not_called()  # kill() should not be called if terminate succeeds
         assert mock_local_process.status == ExecutionStatus.CANCELLED
 
-    def test_cancel_forceful_termination(self, tmp_path, mock_local_process):
+    def test_cancel_forceful_termination(
+        self, mock_local_process: LocalProcess
+    ) -> None:
         """Ensures that the `cancel` method forcefully terminates a process if needed.
 
         This test verifies:
@@ -344,7 +350,6 @@ class TestLocalProcess:
         - That `kill()` is called if `terminate()` fails.
         - That the `status` property reflects the `CANCELLED` state after cancellation.
         """
-
         # Simulate a running process
         self.mock_subprocess.poll.return_value = None  # Process is active
         self.mock_subprocess.terminate.side_effect = subprocess.TimeoutExpired(
@@ -356,7 +361,7 @@ class TestLocalProcess:
         # Verify the process has started
         assert mock_local_process.status == ExecutionStatus.RUNNING
         assert (
-            mock_local_process._process is self.mock_subprocess
+            mock_local_process._process is self.mock_subprocess  # noqa: SLF001
         )  # Ensure the process was assigned
 
         # cancel() call will call process.poll() internally twice;
@@ -372,8 +377,8 @@ class TestLocalProcess:
         assert mock_local_process.status == ExecutionStatus.CANCELLED
 
     def test_cancel_non_running_process(
-        self, tmp_path, mock_local_process, caplog: pytest.LogCaptureFixture
-    ):
+        self, mock_local_process: LocalProcess, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Ensures that `cancel` does not attempt to terminate a non-running process.
 
         This test verifies:
@@ -399,11 +404,10 @@ class TestLocalProcess:
         - That the correct message is logged
         - That neither `terminate` nor `kill` is called.
         """
-
         # Simulate a completed process
         self.mock_subprocess.poll.return_value = 0  # Process has completed
 
-        mock_local_process._process = (
+        mock_local_process._process = (  # noqa: SLF001
             self.mock_subprocess
         )  # Directly assign the mock process
 
@@ -419,7 +423,7 @@ class TestLocalProcess:
         self.mock_subprocess.terminate.assert_not_called()
         self.mock_subprocess.kill.assert_not_called()
 
-    def test_wait_running_process(self, tmp_path, mock_local_process):
+    def test_wait_running_process(self, mock_local_process: LocalProcess) -> None:
         """Ensures that `wait` correctly waits for a running process to complete.
 
         This test verifies:
@@ -443,19 +447,20 @@ class TestLocalProcess:
         - subprocess.Popen.wait() is called once
         - Information message is not printed
         """
-
         # Simulate a running process
         self.mock_subprocess.poll.return_value = None  # Process is active
-        mock_local_process._process = self.mock_subprocess  # Assign mock process
-        mock_local_process._cancelled = False
+        mock_local_process._process = (  # noqa: SLF001
+            self.mock_subprocess
+        )  # Assign mock process
+        mock_local_process._cancelled = False  # noqa: SLF001
 
         # Test wait on a running process
         mock_local_process.wait()
         self.mock_subprocess.wait.assert_called_once()  # Ensure `wait` was called on the process
 
     def test_wait_non_running_process(
-        self, tmp_path, mock_local_process, caplog: pytest.LogCaptureFixture
-    ):
+        self, mock_local_process: LocalProcess, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Ensures that `wait` does not perform actions for non-running processes.
 
         This test verifies:
@@ -481,9 +486,8 @@ class TestLocalProcess:
         - An information message is logged
         - subprocess.Popen.wait is not called
         """
-
-        mock_local_process._process = None  # Assign mock process
-        mock_local_process._cancelled = True
+        mock_local_process._process = None  # Assign mock process  # noqa: SLF001
+        mock_local_process._cancelled = True  # noqa: SLF001
         caplog.set_level(logging.INFO, logger=mock_local_process.log.name)
 
         mock_local_process.wait()

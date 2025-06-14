@@ -43,6 +43,7 @@ class ExecutionStatus(Enum):
     UNKNOWN = auto()
 
     def __str__(self) -> str:
+        """Return a human-readable string representation."""
         return self.name.lower()  # Convert enum name to lowercase for display
 
 
@@ -86,8 +87,6 @@ class ExecutionHandler(ABC, LoggingMixin):
         system to determine the task's status.
         """
 
-        pass
-
     @property
     @abstractmethod
     def output_file(self) -> Path:
@@ -99,9 +98,7 @@ class ExecutionHandler(ABC, LoggingMixin):
             Path to the file in which stdout and stderr will be written.
         """
 
-        pass
-
-    def updates(self, seconds: float = 10, confirm_indefinite: bool = True):
+    def updates(self, seconds: float = 10, confirm_indefinite: bool = True) -> None:
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
@@ -116,7 +113,7 @@ class ExecutionHandler(ABC, LoggingMixin):
             The duration (in seconds) for which updates should be streamed.
             If set to 0, updates will be streamed indefinitely until
             interrupted by the user.
-        confirm_indefinite: bool, optional, default = True
+        confirm_indefinite : bool, optional, default = True
             If 'seconds' is set to 0, the user will be prompted to confirm
             whether they want to continue with an indefinite update stream
             if confirm_indefinite is set to True
@@ -128,7 +125,6 @@ class ExecutionHandler(ABC, LoggingMixin):
         - When streaming indefinitely (`seconds=0`), user confirmation is
           required before proceeding.
         """
-
         if self.status != ExecutionStatus.RUNNING:
             error_msg = f"This job is currently not running ({self.status}). Live updates cannot be provided."
             is_complete = self.status in {
@@ -160,14 +156,15 @@ class ExecutionHandler(ABC, LoggingMixin):
                 return
 
         try:
-            with open(self.output_file, "r") as f:
+            with open(self.output_file) as f:  # noqa: PTH123
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):
                     line = f.readline()
                     if self.status != ExecutionStatus.RUNNING:
                         return
-                    elif line:
+
+                    if line:
                         self.log.info(line)
                     else:
                         time.sleep(0.1)  # 100ms delay between updates

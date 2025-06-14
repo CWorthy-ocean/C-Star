@@ -1,14 +1,13 @@
 import json
 import logging
-from unittest.mock import MagicMock, PropertyMock, patch
+from collections.abc import Callable
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
-from cstar.execution.scheduler_job import (
-    ExecutionStatus,
-    PBSJob,
-)
-from cstar.system.scheduler import PBSQueue, PBSScheduler
+from cstar.execution.scheduler_job import ExecutionStatus, PBSJob
+from cstar.system.scheduler import PBSQueue, PBSScheduler, Scheduler
 
 
 class TestPBSJob:
@@ -37,8 +36,8 @@ class TestPBSJob:
         Confirms that a `RuntimeError` is raised when the `qstat` output cannot be parsed as JSON.
     """
 
-    def setup_method(self, method):
-        """Sets up the common parameters and objects needed for tests in `TestPBSJob`.
+    def setup_method(self, method: Callable) -> None:  # noqa: ARG002
+        """Set up the common parameters and objects needed for tests in `TestPBSJob`.
 
         This method initializes a mocked PBS queue and scheduler, along with a set of
         common job parameters to be used across multiple test cases.
@@ -57,7 +56,6 @@ class TestPBSJob:
           including `scheduler`, `commands`, `account_key`, `cpus`, `nodes`, `walltime`,
           `job_name`, `output_file`, and `queue_name`.
         """
-
         # Create PBSQueue with specified max_walltime
         self.mock_queue = PBSQueue(name="test_queue", max_walltime="02:00:00")
 
@@ -69,7 +67,7 @@ class TestPBSJob:
         )
 
         # Define common job parameters
-        self.common_job_params = {
+        self.common_job_params: dict[str, str | int | Path | Scheduler] = {
             "scheduler": self.scheduler,
             "commands": "echo Hello, World",
             "account_key": "test_account",
@@ -81,7 +79,7 @@ class TestPBSJob:
             "queue_name": "test_queue",
         }
 
-    def test_script(self):  # , mock_scheduler):
+    def test_script(self) -> None:
         """Verifies that the PBS job script is correctly generated with all directives.
 
         This test checks that the `script` property of `PBSJob` produces the expected
@@ -94,9 +92,8 @@ class TestPBSJob:
           - Custom scheduler directives provided in `other_scheduler_directives`.
           - Commands to execute in the job script (`echo Hello, World`).
         """
-
         # Initialize a PBSJob
-        job = PBSJob(**self.common_job_params)
+        job = PBSJob(**self.common_job_params)  # type: ignore[arg-type]
 
         expected_script = (
             "#PBS -S /bin/bash\n"
@@ -119,7 +116,7 @@ class TestPBSJob:
         ), f"Script mismatch!\nExpected:\n{expected_script}\n\nGot:\n{job.script}"
 
     @patch("subprocess.run")
-    def test_submit(self, mock_subprocess, tmp_path):
+    def test_submit(self, mock_subprocess: Mock, tmp_path: Path) -> None:
         """Ensures that the `submit` method properly submits a PBS job and extracts the
         job ID.
 
@@ -139,7 +136,6 @@ class TestPBSJob:
         - That the script file is created in the specified path.
         - That the `qsub` command is executed with the correct arguments.
         """
-
         # Mock subprocess.run for qsub
         mock_subprocess.return_value = MagicMock(
             returncode=0, stdout="12345.mockserver\n", stderr=""
@@ -151,7 +147,7 @@ class TestPBSJob:
 
         # Initialize a PBSJob
         job = PBSJob(
-            **self.common_job_params,
+            **self.common_job_params,  # type: ignore[arg-type]
             script_path=script_path,
             run_path=run_path,
         )
@@ -160,7 +156,7 @@ class TestPBSJob:
         job.submit()
 
     @pytest.mark.parametrize(
-        "returncode, stdout, stderr, match_message",
+        ("returncode", "stdout", "stderr", "match_message"),
         [
             (1, "", "Error submitting job", "Non-zero exit code when submitting job"),
             (0, "InvalidJobIDFormat", "", "Unexpected job ID format from qsub"),
@@ -169,13 +165,13 @@ class TestPBSJob:
     @patch("subprocess.run")
     def test_submit_raises(
         self,
-        mock_subprocess,
-        returncode,
-        stdout,
-        stderr,
-        match_message,
-        tmp_path,
-    ):
+        mock_subprocess: Mock,
+        returncode: int,
+        stdout: str,
+        stderr: str,
+        match_message: str,
+        tmp_path: Path,
+    ) -> None:
         """Confirms that `submit` raises a `RuntimeError` for invalid `qsub` responses
         or errors.
 
@@ -196,7 +192,6 @@ class TestPBSJob:
         -------
         - That a `RuntimeError` is raised with the expected error message when submission fails.
         """
-
         # Mock subprocess.run for qsub
         mock_subprocess.return_value = MagicMock(
             returncode=returncode, stdout=stdout, stderr=stderr
@@ -208,7 +203,7 @@ class TestPBSJob:
 
         # Initialize a PBSJob
         job = PBSJob(
-            **self.common_job_params,
+            **self.common_job_params,  # type: ignore[arg-type]
             script_path=script_path,
             run_path=run_path,
         )
@@ -219,7 +214,9 @@ class TestPBSJob:
 
     @patch("subprocess.run")
     @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
-    def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
+    def test_cancel_running_job(
+        self, mock_status: PropertyMock, mock_subprocess: Mock, tmp_path: Path
+    ) -> None:
         """Tests that the `cancel` method successfully cancels a running PBS job.
 
         This test ensures that when the job status is `RUNNING`, the `cancel` method
@@ -237,7 +234,6 @@ class TestPBSJob:
         - That the `qdel` command is called with the correct job ID and parameters.
         - That no exceptions are raised during the cancellation process.
         """
-
         # Mock the status to "running"
         mock_status.return_value = ExecutionStatus.RUNNING
 
@@ -246,34 +242,29 @@ class TestPBSJob:
 
         # Create a PBSJob with a set job ID
         job = PBSJob(
-            **self.common_job_params,
+            **self.common_job_params,  # type: ignore[arg-type]
             run_path=tmp_path,
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = 12345  # Manually set the job ID  # noqa: SLF001
 
         # Cancel the job
         job.cancel()
 
         # Verify qdel was called correctly
         mock_subprocess.assert_called_once_with(
-            "qdel 12345",
-            shell=True,
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
+            "qdel 12345", shell=True, cwd=tmp_path, capture_output=True, text=True
         )
 
     @patch("subprocess.run")
     @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
     def test_cancel_completed_job(
         self,
-        mock_status,
-        mock_subprocess,
-        tmp_path,
+        mock_status: PropertyMock,
+        mock_subprocess: Mock,
+        tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
-    ):
-        """Verifies that the `cancel` method does not proceed if the job is already
-        completed.
+    ) -> None:
+        """Verifies that `cancel` does not proceed if the job is already completed.
 
         This test ensures that calling `cancel` on a job with a `COMPLETED` status does not
         invoke the `qdel` command and instead informs the user.
@@ -299,10 +290,10 @@ class TestPBSJob:
 
         # Create a PBSJob with a set job ID
         job = PBSJob(
-            **self.common_job_params,
-            run_path=tmp_path,
+            **self.common_job_params,  # type: ignore[arg-type]
+            run_path=tmp_path,  # type: ignore[arg-type]
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = 12345  # Manually set the job ID  # noqa: SLF001
 
         # Get the logger from the job instance
         caplog.set_level(logging.INFO, logger=job.log.name)
@@ -320,7 +311,9 @@ class TestPBSJob:
     ##
     @patch("subprocess.run")
     @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
-    def test_cancel_failure(self, mock_status, mock_subprocess, tmp_path):
+    def test_cancel_failure(
+        self, mock_status: MagicMock, mock_subprocess: MagicMock, tmp_path: Path
+    ) -> None:
         """Ensures that a `RuntimeError` is raised if the `qdel` command fails to cancel
         a job.
 
@@ -350,10 +343,10 @@ class TestPBSJob:
 
         # Create a PBSJob with a set job ID
         job = PBSJob(
-            **self.common_job_params,
+            **self.common_job_params,  # type: ignore[arg-type]
             run_path=tmp_path,
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = 12345  # Manually set the job ID  # noqa: SLF001
 
         # Expect an error when qdel fails
         with pytest.raises(
@@ -363,7 +356,14 @@ class TestPBSJob:
 
     ##
     @pytest.mark.parametrize(
-        "qstat_output, exit_status, expected_status, should_raise, expected_exception, expected_message",
+        (
+            "qstat_output",
+            "exit_status",
+            "expected_status",
+            "should_raise",
+            "expected_exception",
+            "expected_message",
+        ),
         [
             (
                 {"Jobs": {"12345": {"job_state": "Q"}}},
@@ -458,14 +458,14 @@ class TestPBSJob:
     @patch("subprocess.run")
     def test_status(
         self,
-        mock_subprocess,
-        qstat_output,
-        exit_status,
-        expected_status,
-        should_raise,
-        expected_exception,
-        expected_message,
-    ):
+        mock_subprocess: Mock,
+        qstat_output: str,
+        exit_status: int,  # noqa: ARG002
+        expected_status: int,
+        should_raise: bool,
+        expected_exception: type[Exception],
+        expected_message: str,
+    ) -> None:
         """Validates the job status retrieval logic for various job states and `qstat`
         outputs.
 
@@ -489,7 +489,6 @@ class TestPBSJob:
         - That the job status is correctly determined for valid `qstat` outputs.
         - That appropriate exceptions are raised for invalid or error scenarios.
         """
-
         # Mock qstat command output
         if qstat_output is not None:
             if qstat_output == "invalid_json":
@@ -506,13 +505,13 @@ class TestPBSJob:
             )
 
         # Create a PBSJob with a set job ID
-        job = PBSJob(**self.common_job_params)
-        job._id = 12345  # Manually set the job ID
+        job = PBSJob(**self.common_job_params)  # type: ignore[arg-type]
+        job._id = 12345  # Manually set the job ID  # noqa: SLF001
 
         # Check the expected outcome
         if should_raise:
             with pytest.raises(expected_exception, match=expected_message):
-                job.status
+                _ = job.status
         else:
             assert (
                 job.status == expected_status
@@ -520,7 +519,11 @@ class TestPBSJob:
 
     @patch("json.loads", side_effect=json.JSONDecodeError("Expecting value", "", 0))
     @patch("subprocess.run")
-    def test_status_json_decode_error(self, mock_subprocess, mock_json_loads):
+    def test_status_json_decode_error(
+        self,
+        mock_subprocess: Mock,
+        mock_json_loads: Mock,  # noqa: ARG002
+    ) -> None:
         """Confirms that a `RuntimeError` is raised when the `qstat` output cannot be
         parsed as JSON.
 
@@ -546,11 +549,11 @@ class TestPBSJob:
         )
 
         # Create a PBSJob with a set job ID
-        job = PBSJob(**self.common_job_params)
-        job._id = 12345  # Manually set the job ID
+        job = PBSJob(**self.common_job_params)  # type: ignore[arg-type]
+        job._id = 12345  # Manually set the job ID  # noqa: SLF001
 
         # Check for JSONDecodeError handling
         with pytest.raises(
             RuntimeError, match="Failed to parse JSON from qstat output"
         ):
-            job.status
+            _ = job.status

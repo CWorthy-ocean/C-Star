@@ -4,9 +4,9 @@ from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.input_dataset import InputDataset
 
 __all__ = [
-    "Component",
-    "ExternalCodeBase",
     "AdditionalCode",
-    "InputDataset",
+    "Component",
     "Discretization",
+    "ExternalCodeBase",
+    "InputDataset",
 ]

@@ -16,15 +16,14 @@ from pooch import os_cache
 ## Common paths used in tests
 
 
-def _get_test_directory():
+def _get_test_directory() -> Path:
     from importlib.util import find_spec
     from pathlib import Path
 
     spec = find_spec("cstar")
-    if spec is not None:
+    if spec is not None and spec.origin:
         return Path(spec.origin).parent / "tests"
-    else:
-        raise RuntimeError("Cannot determine the package location of cstar")
+    raise RuntimeError("Cannot determine the package location of cstar")
 
 
 TEST_DIRECTORY = _get_test_directory()

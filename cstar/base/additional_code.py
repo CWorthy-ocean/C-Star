@@ -1,7 +1,6 @@
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
 
 from cstar.base.datasource import DataSource
 from cstar.base.gitutils import _clone_and_checkout
@@ -15,24 +14,24 @@ class AdditionalCode(LoggingMixin):
     Additional code is assumed to be kept in a single directory or
     subdirectory of a repository (described by the `source` attribute).
 
-    Attributes:
-    -----------
-    source: DataSource
+    Attributes
+    ----------
+    source  DataSource
         Describes the location and type of source data (e.g. repository,directory)
-    subdir: str
+    subdir : str
         Subdirectory of source.location in which the additional code is kept
         (used if, e.g., source.location is a remote repository)
-    checkout_target: Optional, str
+    checkout_target : str, optional
         Used if source.source_type is 'repository'.
         A tag, git hash, or other target to check out.
-    files: Optional, list of strs
+    files : list of str, optional
         Path(s) relative to the subdirectory `subdir` of `source.location`
         to the additional code files
-    working_path: Path, default None
+    working_path : Path, default None
         The local path to the additional code. Set when `get()` method is called.
 
-    Methods:
-    --------
+    Methods
+    -------
     get(local_dir):
        Fetch the directory containing this additional code and copy it to `local_dir`.
        If source.source_type is 'repository', and source.location_type is 'url',
@@ -48,37 +47,36 @@ class AdditionalCode(LoggingMixin):
         self,
         location: str,
         subdir: str = "",
-        checkout_target: Optional[str] = None,
-        files: Optional[list[str]] = None,
-    ):
-        """Initialize an AdditionalCode object from a DataSource  and a list of code
-        files.
+        checkout_target: str | None = None,
+        files: list[str] | None = None,
+    ) -> None:
+        """Initialize an instance from a DataSource and a list of code files.
 
-        Parameters:
-        -----------
-        location: str
+        Parameters
+        ----------
+        location : str
             url or path pointing to the additional code directory or repository, used to set `source` attribute
-        subdir: str
+        subdir : str
            Subdirectory of `location` in which to look for files
            (e.g. if `location` points to a remote repository)
-        checkout_target: Optional, str
+        checkout_target : str, optional
             Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
-        files: Optional, list of strs
+        files : list of str
             Path(s) relative to the subdirectory `subdir` of `source.location`
             to the additional code files
 
-        Returns:
-        --------
+        Returns
+        -------
         AdditionalCode
             An initialized AdditionalCode object
         """
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
         self._checkout_target = checkout_target
-        self.files: Optional[list[str]] = [] if files is None else files
+        self.files: list[str] = [] if files is None else files
         # Initialize object state
-        self.working_path: Optional[Path] = None
-        self._local_file_hash_cache: Dict = {}
+        self.working_path: Path | None = None
+        self._local_file_hash_cache: dict = {}
 
         # If there are namelists, make a parallel attribute to keep track of the ones we are editing
         # AdditionalCode.get() determines which namelists are editable templates and updates this list
@@ -86,6 +84,7 @@ class AdditionalCode(LoggingMixin):
             self.modified_files: list = [None] * len(self.files)
 
     def __str__(self) -> str:
+        """Create a human-readable string representation."""
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nLocation: {self.source.location}"
@@ -106,7 +105,7 @@ class AdditionalCode(LoggingMixin):
         return base_str
 
     def __repr__(self) -> str:
-        # Constructor-style section:
+        """Constructor-style stringification."""
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nlocation = {self.source.location!r},"
         repr_str += f"\nsubdir = {self.subdir!r}"
@@ -125,14 +124,15 @@ class AdditionalCode(LoggingMixin):
         return repr_str
 
     @property
-    def checkout_target(self) -> Optional[str]:
+    def checkout_target(self) -> str | None:
+        """Retrieve the checkout target."""
         return self._checkout_target
 
     @property
-    def exists_locally(self):
+    def exists_locally(self) -> bool:
         """Determine whether a local working copy of the AdditionalCode exists at
-        self.working_path (bool)"""
-        if (self.working_path is None) or (self._local_file_hash_cache is None):
+        self.working_path (bool)."""
+        if not self.working_path or not self._local_file_hash_cache:
             return False
 
         for f in self.files:
@@ -147,20 +147,19 @@ class AdditionalCode(LoggingMixin):
         return True
 
     def get(self, local_dir: str | Path) -> None:
-        """Copy the required AdditionalCode files to `local_dir`
+        """Copy the required AdditionalCode files to `local_dir`.
 
         If AdditionalCode.source describes a remote repository,
         this is cloned into a temporary directory first.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         local_dir: str | Path
             The local directory (typically `Case.caseroot`) in which to fetch the additional code.
         """
         if len(self.files) == 0:
-            raise ValueError(
-                "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
-            )
+            msg = "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
+            raise ValueError(msg)
 
         local_dir = Path(local_dir).expanduser().resolve()
         try:
@@ -171,12 +170,12 @@ class AdditionalCode(LoggingMixin):
             ):
                 if self.checkout_target is None:
                     raise ValueError(
-                        "AdditionalCode.source points to a repository but AdditionalCode.checkout_target is None"
+                        "AdditionalCode.source points to a repository "
+                        "but AdditionalCode.checkout_target is None"
                     )
-                else:
-                    assert isinstance(
-                        self.checkout_target, str
-                    ), "We have just verified checkout_target is not None"
+                assert isinstance(
+                    self.checkout_target, str
+                ), "We have just verified checkout_target is not None"
                 tmp_dir = tempfile.mkdtemp()
                 _clone_and_checkout(
                     source_repo=self.source.location,
@@ -186,19 +185,18 @@ class AdditionalCode(LoggingMixin):
                 source_dir = Path(f"{tmp_dir}/{self.subdir}")
             # CASE 2: Additional code is in a local directory/repository
             elif (self.source.location_type == "path") and (
-                (self.source.source_type == "directory")
-                or (self.source.source_type == "repository")
+                self.source.source_type in {"directory", "repository"}
             ):
                 source_dir = Path(self.source.location).expanduser() / self.subdir
 
             else:
                 raise ValueError(
                     "Invalid source for AdditionalCode. "
-                    + "AdditionalCode.source.location_type and "
-                    + "AdditionalCode.source.source_type should be "
-                    + "'url' and 'repository', or 'path' and 'repository', or"
-                    + "'path' and 'directory', not"
-                    + f"'{self.source.location_type}' and '{self.source.source_type}'"
+                    "AdditionalCode.source.location_type and "
+                    "AdditionalCode.source.source_type should be "
+                    "'url' and 'repository', or 'path' and 'repository', or"
+                    "'path' and 'directory', not"
+                    f"'{self.source.location_type}' and '{self.source.source_type}'"
                 )
 
             # Now go through the file and copy them to local_dir

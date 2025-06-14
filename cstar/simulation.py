@@ -3,7 +3,7 @@ import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import dateutil
 
@@ -75,11 +75,11 @@ class Simulation(ABC, LoggingMixin):
         runtime_code: Optional["AdditionalCode"] = None,
         compile_time_code: Optional["AdditionalCode"] = None,
         codebase: Optional["ExternalCodeBase"] = None,
-        start_date: Optional[str | datetime] = None,
-        end_date: Optional[str | datetime] = None,
-        valid_start_date: Optional[str | datetime] = None,
-        valid_end_date: Optional[str | datetime] = None,
-    ):
+        start_date: str | datetime | None = None,
+        end_date: str | datetime | None = None,
+        valid_start_date: str | datetime | None = None,
+        valid_end_date: str | datetime | None = None,
+    ) -> None:
         """Initialize a Simulation object with a given name, directory, codebase, and
         configuration parameters.
 
@@ -106,7 +106,6 @@ class Simulation(ABC, LoggingMixin):
         valid_end_date : str or datetime, optional
             The latest allowed end date, based on, e.g., the availability of input data.
         """
-
         self.directory: Path = self._validate_simulation_directory(directory)
         self.name = name
 
@@ -119,7 +118,8 @@ class Simulation(ABC, LoggingMixin):
         )
         if self.valid_start_date is None or self.valid_end_date is None:
             self.log.warning(
-                "Cannot enforce date range validation: Missing `valid_start_date` or `valid_end_date`.",
+                "Cannot enforce date range validation: Missing `valid_start_date` "
+                "or `valid_end_date`."
             )
 
         # Set start and end dates, using defaults where needed
@@ -149,7 +149,7 @@ class Simulation(ABC, LoggingMixin):
         self.discretization = discretization
 
     def _validate_simulation_directory(self, directory: str | Path) -> Path:
-        """Validates and resolves the simulation directory.
+        """Validate and resolves the simulation directory.
 
         This method ensures that the provided directory is valid and resolves its absolute path.
         If the directory already exists and is not empty, an error is raised.
@@ -183,9 +183,9 @@ class Simulation(ABC, LoggingMixin):
         return resolved_directory
 
     def _parse_date(
-        self, date: Optional[str | datetime], field_name: str
-    ) -> Optional[datetime]:
-        """Converts a date string to a datetime object if it's not None.
+        self, date: str | datetime | None, field_name: str
+    ) -> datetime | None:
+        """Convert a date string to a datetime object if it's not None.
 
         If the input is a string, it attempts to parse it into a `datetime` object.
         If the input is already a `datetime` object, it is returned as is.
@@ -211,16 +211,15 @@ class Simulation(ABC, LoggingMixin):
             validation of simulation dates may be incomplete.
         """
         if date is None:
+            self.log.warning(f"The field {field_name} could not be parsed.")
             return None
+
         return date if isinstance(date, datetime) else dateutil.parser.parse(date)
 
     def _get_date_or_fallback(
-        self,
-        date: Optional[str | datetime],
-        fallback: Optional[datetime],
-        field_name: str,
+        self, date: str | datetime | None, fallback: datetime | None, field_name: str
     ) -> datetime:
-        """Ensures a date is set, using a fallback if needed.
+        """Ensure a date is set, using a fallback if needed.
 
         If a valid date is provided, it is parsed and returned. If `date` is `None`,
         the fallback is used instead. If both `date` and `fallback` are `None`,
@@ -262,8 +261,8 @@ class Simulation(ABC, LoggingMixin):
 
         return parsed_date  # Always returns a valid datetime
 
-    def _validate_date_range(self):
-        """Checks that `start_date` and `end_date` fall within the valid date range.
+    def _validate_date_range(self) -> None:
+        """Check that `start_date` and `end_date` fall within the valid date range.
 
         Ensures that the simulation's `start_date` is not earlier than `valid_start_date`,
         and that `end_date` is not later than `valid_end_date`. Also checks that `start_date`
@@ -278,14 +277,15 @@ class Simulation(ABC, LoggingMixin):
         ValueError
             If `start_date` is later than `end_date`.
         """
-
         if self.valid_start_date and self.start_date < self.valid_start_date:
             raise ValueError(
-                f"start_date {self.start_date} is before the earliest valid start date {self.valid_start_date}."
+                f"start_date {self.start_date} is before the earliest valid "
+                f"start date {self.valid_start_date}."
             )
         if self.valid_end_date and self.end_date > self.valid_end_date:
             raise ValueError(
-                f"end_date {self.end_date} is after the latest valid end date {self.valid_end_date}."
+                f"end_date {self.end_date} is after the latest valid end date "
+                f"{self.valid_end_date}."
             )
         if self.start_date > self.end_date:
             raise ValueError(
@@ -293,7 +293,7 @@ class Simulation(ABC, LoggingMixin):
             )
 
     def __str__(self) -> str:
-        """Returns a string representation of the simulation.
+        """Return a string representation of the simulation.
 
         The representation includes the simulation's name, directory,
         start and end dates, valid date range, discretization settings,
@@ -304,7 +304,6 @@ class Simulation(ABC, LoggingMixin):
         str
             A formatted string summarizing the simulation's attributes.
         """
-
         class_name = self.__class__.__name__
         base_str = f"{class_name}\n" + ("-" * len(class_name)) + "\n"
 
@@ -327,12 +326,12 @@ class Simulation(ABC, LoggingMixin):
 
         # Runtime code:
         if self.runtime_code is not None:
-            NN = len(self.runtime_code.files)
+            NN = len(self.runtime_code.files)  # noqa: N806
             base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
 
         # Compile-time code:
         if self.compile_time_code is not None:
-            NN = len(self.compile_time_code.files)
+            NN = len(self.compile_time_code.files)  # noqa: N806
             base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
 
         if hasattr(self, "exe_path") and self.exe_path is not None:
@@ -342,7 +341,7 @@ class Simulation(ABC, LoggingMixin):
         return base_str
 
     def __repr__(self) -> str:
-        """Returns a detailed string representation of the simulation.
+        """Return a detailed string representation of the simulation.
 
         The representation includes all relevant attributes, such as
         name, directory, start and end dates, valid date range,
@@ -353,7 +352,6 @@ class Simulation(ABC, LoggingMixin):
         str
             A string representation of the simulation suitable for debugging.
         """
-
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nname = {self.name},"
         repr_str += f"\ndirectory = {self.directory},"
@@ -368,12 +366,12 @@ class Simulation(ABC, LoggingMixin):
         if self.runtime_code is not None:
             repr_str += (
                 "\nruntime_code = "
-                + f"<{self.runtime_code.__class__.__name__} instance>,"
+                f"<{self.runtime_code.__class__.__name__} instance>,"
             )
         if self.compile_time_code is not None:
             repr_str += (
                 "\ncompile_time_code = "
-                + f"<{self.compile_time_code.__class__.__name__} instance>,"
+                f"<{self.compile_time_code.__class__.__name__} instance>,"
             )
         repr_str = repr_str.rstrip(",")
         repr_str += ")"
@@ -383,22 +381,21 @@ class Simulation(ABC, LoggingMixin):
     @property
     @abstractmethod
     def default_codebase(self) -> ExternalCodeBase:
-        """Abstract property that must be implemented by subclasses to provide a default
-        codebase.
+        """Return the default codebase for a simulation.
 
-        This property ensures that each subclass of `Simulation` defines a default
-        `ExternalCodeBase` instance to be used when no specific codebase is provided.
+        This abstract property must be implemented by subclasses. It is used to
+        ensure that each subclass defines a default `ExternalCodeBase` instance
+        to be used when no specific codebase is provided.
 
         Returns
         -------
         ExternalCodeBase
             The default codebase instance for the simulation.
         """
-        pass
 
     @classmethod
     @abstractmethod
-    def from_dict(self, simulation_dict: dict, directory: str | Path):
+    def from_dict(cls, simulation_dict: dict, directory: str | Path) -> "Simulation":
         """Abstract method to create a Simulation instance from a dictionary.
 
         This method must be implemented by subclasses to construct a simulation
@@ -422,8 +419,6 @@ class Simulation(ABC, LoggingMixin):
         from_blueprint: Reads an equivalent representation from a yaml file.
         """
 
-        pass
-
     def to_dict(self) -> dict:
         """Convert the Simulation instance into a dictionary representation.
 
@@ -441,7 +436,6 @@ class Simulation(ABC, LoggingMixin):
         from_dict : Constructs a Simulation instance from a dictionary.
         to_blueprint: Writes an equivalent representation to a yaml file.
         """
-
         simulation_dict: dict[Any, Any] = {}
 
         # Top-level information
@@ -459,9 +453,9 @@ class Simulation(ABC, LoggingMixin):
         simulation_dict["discretization"] = self.discretization.__dict__
 
         # runtime code
-        runtime_code = getattr(self, "runtime_code")
+        runtime_code = self.runtime_code
         if runtime_code is not None:
-            runtime_code_info = {}
+            runtime_code_info: dict[str, str | list[str]] = {}
             runtime_code_info["location"] = runtime_code.source.location
             if runtime_code.subdir is not None:
                 runtime_code_info["subdir"] = runtime_code.subdir
@@ -473,9 +467,9 @@ class Simulation(ABC, LoggingMixin):
             simulation_dict["runtime_code"] = runtime_code_info
 
         # compile-time code
-        compile_time_code = getattr(self, "compile_time_code")
+        compile_time_code = self.compile_time_code
         if compile_time_code is not None:
-            compile_time_code_info = {}
+            compile_time_code_info: dict[str, str | list[str]] = {}
             compile_time_code_info["location"] = compile_time_code.source.location
             if compile_time_code.subdir is not None:
                 compile_time_code_info["subdir"] = compile_time_code.subdir
@@ -492,11 +486,7 @@ class Simulation(ABC, LoggingMixin):
 
     @classmethod
     @abstractmethod
-    def from_blueprint(
-        cls,
-        blueprint: str,
-        directory: str | Path,
-    ):
+    def from_blueprint(cls, blueprint: str, directory: str | Path) -> "Simulation":
         """Abstract method to create a Simulation instance from a blueprint file.
 
         This method should be implemented in subclasses to read a YAML file containing
@@ -521,8 +511,6 @@ class Simulation(ABC, LoggingMixin):
         from_dict : Creates a Simulation instance from a dictionary.
         """
 
-        pass
-
     @abstractmethod
     def to_blueprint(self, filename: str) -> None:
         """Abstract method to save the Simulation instance as a YAML blueprint file.
@@ -541,7 +529,6 @@ class Simulation(ABC, LoggingMixin):
         from_blueprint : Loads a Simulation instance from a YAML blueprint file.
         to_dict : Converts the Simulation instance into a dictionary.
         """
-        pass
 
     @abstractmethod
     def setup(self) -> None:
@@ -555,7 +542,6 @@ class Simulation(ABC, LoggingMixin):
         --------
         run : Executes the simulation.
         """
-        pass
 
     def persist(self) -> None:
         """Save the current state of the simulation to a file.
@@ -589,7 +575,9 @@ class Simulation(ABC, LoggingMixin):
         if hasattr(self, "_log"):
             del self._log
 
-        with open(f"{self.directory}/simulation_state.pkl", "wb") as state_file:
+        with open(  # noqa: PTH123
+            f"{self.directory}/simulation_state.pkl", "wb"
+        ) as state_file:
             pickle.dump(self, state_file)
 
     @classmethod
@@ -621,12 +609,13 @@ class Simulation(ABC, LoggingMixin):
         persist : Saves the current simulation state.
         """
         directory = Path(directory)
-        with open(f"{directory}/simulation_state.pkl", "rb") as state_file:
-            simulation_instance = pickle.load(state_file)
-        return simulation_instance
+        with open(  # noqa: PTH123
+            f"{directory}/simulation_state.pkl", "rb"
+        ) as state_file:
+            return cast("Simulation", pickle.load(state_file))  # noqa: S301
 
     @abstractmethod
-    def build(self, rebuild=False) -> None:
+    def build(self, rebuild: bool = False) -> None:
         """Abstract method to compile any necessary code for this simulation.
 
         This method should be implemented by subclasses to handle steps
@@ -643,12 +632,10 @@ class Simulation(ABC, LoggingMixin):
         setup : Prepares the Simulation locally.
         run : Executes the Simulation.
         """
-        pass
 
     @abstractmethod
     def pre_run(self) -> None:
-        """Abstract method to perform any necessary pre-processing steps before running
-        the simulation.
+        """Perform any necessary pre-processing steps before running the simulation.
 
         This method should be implemented by subclasses to handle setup tasks such as
         preparing input datasets or configuration files.
@@ -664,7 +651,6 @@ class Simulation(ABC, LoggingMixin):
         run : Executes the simulation.
         post_run : Handles post-processing steps after execution.
         """
-        pass
 
     @abstractmethod
     def run(self) -> "ExecutionHandler":
@@ -690,7 +676,6 @@ class Simulation(ABC, LoggingMixin):
         pre_run : Prepares the simulation before execution.
         post_run : Handles post-processing steps after execution.
         """
-        pass
 
     @abstractmethod
     def post_run(self) -> None:
@@ -705,11 +690,9 @@ class Simulation(ABC, LoggingMixin):
         run : Executes the simulation.
         pre_run : Performs preprocessing before execution.
         """
-        pass
 
     def restart(self, new_end_date: str | datetime) -> "Simulation":
-        """Create a new Simulation instance starting from the end date of the current
-        simulation.
+        """Start a new Simulation instance at the end date of the current simulation.
 
         This method generates a deep copy of the current simulation and updates its
         start date to match the current simulation's end date. The new simulation
@@ -748,8 +731,9 @@ class Simulation(ABC, LoggingMixin):
         elif isinstance(new_end_date, datetime):
             new_sim.end_date = new_end_date
         else:
-            raise ValueError(
+            msg = (
                 f"Expected str or datetime for `new_end_date`, got {type(new_end_date)}"
             )
+            raise ValueError(msg)  # noqa: TRY004
 
         return new_sim

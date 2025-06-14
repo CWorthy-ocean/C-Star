@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 from textwrap import dedent
 from unittest import mock
@@ -11,7 +10,7 @@ from cstar.base.datasource import DataSource
 
 # Set up fixtures
 @pytest.fixture
-def remote_additional_code():
+def remote_additional_code() -> AdditionalCode:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     a remote repository.
 
@@ -26,8 +25,8 @@ def remote_additional_code():
     This fixture can be used in tests that involve handling or manipulating code
     fetched from a remote Git repository.
 
-    Returns:
-        AdditionalCode: An instance of the AdditionalCode class with preset
+    Returns
+        AdditionalCode : An instance of the AdditionalCode class with preset
         remote repository details.
     """
     return AdditionalCode(
@@ -39,7 +38,7 @@ def remote_additional_code():
 
 
 @pytest.fixture
-def local_additional_code():
+def local_additional_code() -> AdditionalCode:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     code located on the local filesystem.
 
@@ -53,8 +52,8 @@ def local_additional_code():
     This fixture can be used in tests that involve handling or manipulating
     code that resides on the local filesystem.
 
-    Returns:
-        AdditionalCode: An instance of the AdditionalCode class with preset
+    Returns
+        AdditionalCode : An instance of the AdditionalCode class with preset
         local directory details.
     """
     return AdditionalCode(
@@ -80,7 +79,7 @@ class TestInit:
         when optional attributes are not provided.
     """
 
-    def test_init(self, remote_additional_code):
+    def test_init(self, remote_additional_code: AdditionalCode) -> None:
         """Test that an AdditionalCode object is initialized with the correct
         attributes."""
         assert (
@@ -94,7 +93,7 @@ class TestInit:
             "test_file_3.opt",
         ]
 
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         """Test that a minimal AdditionalCode object is initialized with correct default
         values."""
         additional_code = AdditionalCode(location="test/location")
@@ -132,10 +131,11 @@ class TestStrAndRepr:
         Patches the `exists_locally` property to simulate the existence or non-existence of files.
     """
 
-    def test_repr_remote(self, remote_additional_code):
+    def test_repr_remote(self, remote_additional_code: AdditionalCode) -> None:
         """Test that the __repr__ method returns the correct string for the example
         remote AdditionalCode instance defined in the above fixture."""
-        expected_repr = dedent("""\
+        expected_repr = dedent(
+            """\
         AdditionalCode(
         location = 'https://github.com/test/repo.git',
         subdir = 'test/subdir'
@@ -143,16 +143,17 @@ class TestStrAndRepr:
         files = ['test_file_1.F',
                  'test_file_2.py',
                  'test_file_3.opt']
-        )""")
+        )"""
+        )
         assert (
             repr(remote_additional_code) == expected_repr
-        ), f"expected \n{repr(remote_additional_code)}\n, got \n{expected_repr}"
+        ), f"expected \n{remote_additional_code!r}\n, got \n{expected_repr}"
 
-    def test_repr_local(self, local_additional_code):
+    def test_repr_local(self, local_additional_code: AdditionalCode) -> None:
         """Test that the __repr__ method returns the correct string for the example
         local AdditionalCode instance defined in the above fixture."""
-
-        expected_repr = dedent("""\
+        expected_repr = dedent(
+            """\
         AdditionalCode(
         location = '/some/local/directory',
         subdir = 'some/subdirectory'
@@ -160,7 +161,8 @@ class TestStrAndRepr:
         files = ['test_file_1.F',
                  'test_file_2.py',
                  'test_file_3.opt']
-        )""")
+        )"""
+        )
         assert repr(local_additional_code) == expected_repr
 
     @mock.patch(
@@ -168,7 +170,11 @@ class TestStrAndRepr:
         new_callable=mock.PropertyMock,
         return_value=True,
     )
-    def test_repr_with_working_path(self, mock_exists_locally, local_additional_code):
+    def test_repr_with_working_path(
+        self,
+        mock_exists_locally: mock.PropertyMock,  # noqa: ARG002
+        local_additional_code: AdditionalCode,
+    ) -> None:
         """Test that the __repr__ method contains the correct substring when
         working_path attr is defined.
 
@@ -177,17 +183,16 @@ class TestStrAndRepr:
         - mock_exists: Patches Path.exists() to ensure exists_locally property used in __repr__ returns True.
         - local_additional_code: An example AdditionalCode instance representing local code
         """
-
         local_additional_code.working_path = Path("/mock/local/dir")
         assert "State: <working_path = /mock/local/dir,exists_locally = True>" in repr(
             local_additional_code
         )
 
-    def test_str_remote(self, remote_additional_code):
+    def test_str_remote(self, remote_additional_code: AdditionalCode) -> None:
         """Test that the __str__ method returns the correct string for the example
         remote AdditionalCode instance defined in the above fixture."""
-
-        expected_str = dedent("""\
+        expected_str = dedent(
+            """\
         AdditionalCode
         --------------
         Location: https://github.com/test/repo.git
@@ -198,13 +203,16 @@ class TestStrAndRepr:
         Files:
             test_file_1.F
             test_file_2.py
-            test_file_3.opt""")
+            test_file_3.opt"""
+        )
 
         assert (
             str(remote_additional_code) == expected_str
-        ), f"expected \n{str(remote_additional_code)}\n, got \n{expected_str}"
+        ), f"expected \n{remote_additional_code!s}\n, got \n{expected_str}"
 
-    def test_str_with_template_file(self, local_additional_code):
+    def test_str_with_template_file(
+        self, local_additional_code: AdditionalCode
+    ) -> None:
         """Test that the __str__ method contains the correct substring when an
         additional code filename has the '_TEMPLATE' suffix."""
         # Simulate template files with "_TEMPLATE"
@@ -215,11 +223,11 @@ class TestStrAndRepr:
             local_additional_code
         )
 
-    def test_str_local(self, local_additional_code):
+    def test_str_local(self, local_additional_code: AdditionalCode) -> None:
         """Test that the __str__ method returns the correct string for the example local
         AdditionalCode instance defined in the above fixture."""
-
-        expected_str = dedent("""\
+        expected_str = dedent(
+            """\
         AdditionalCode
         --------------
         Location: /some/local/directory
@@ -229,11 +237,12 @@ class TestStrAndRepr:
         Files:
             test_file_1.F
             test_file_2.py
-            test_file_3.opt""")
+            test_file_3.opt"""
+        )
 
         assert (
             str(local_additional_code) == expected_str
-        ), f"expected \n{str(local_additional_code)}\n, got \n{expected_str}"
+        ), f"expected \n{local_additional_code!s}\n, got \n{expected_str}"
 
 
 class TestExistsLocally:
@@ -263,7 +272,7 @@ class TestExistsLocally:
         Patches the `Path.exists` property to handle a variety of situations regarding file existings
     """
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up common mocks before each test."""
         self.patch_get_sha256_hash = mock.patch(
             "cstar.base.additional_code._get_sha256_hash"
@@ -273,11 +282,11 @@ class TestExistsLocally:
         self.patch_exists = mock.patch("pathlib.Path.exists")
         self.mock_exists = self.patch_exists.start()
 
-    def teardown_method(self):
+    def teardown_method(self) -> None:
         """Stop all mocks after each test."""
         mock.patch.stopall()
 
-    def test_all_files_exist_and_hashes_match(self):
+    def test_all_files_exist_and_hashes_match(self) -> None:
         """Verifies that `exists_locally` returns True when all files exist and their
         hashes match the cache.
 
@@ -307,7 +316,7 @@ class TestExistsLocally:
         additional_code.working_path = Path("/mock/local/dir")
 
         # Simulate correct hash cache
-        additional_code._local_file_hash_cache = {
+        additional_code._local_file_hash_cache = {  # noqa: SLF001
             Path(f"/mock/local/dir/{file}"): f"mock_hash_{file}"
             for file in additional_code.files
         }
@@ -319,7 +328,7 @@ class TestExistsLocally:
         assert self.mock_exists.call_count == len(additional_code.files)
         assert self.mock_get_sha256_hash.call_count == len(additional_code.files)
 
-    def test_some_files_missing(self):
+    def test_some_files_missing(self) -> None:
         """Verifies that `exists_locally` returns False when some files are missing.
 
         This test ensures that the `exists_locally` property correctly identifies when
@@ -347,7 +356,7 @@ class TestExistsLocally:
         )
         additional_code.working_path = Path("/mock/local/dir")
 
-        additional_code._local_file_hash_cache = {
+        additional_code._local_file_hash_cache = {  # noqa: SLF001
             Path(f"/mock/local/dir/{file}"): f"mock_hash_{file}"
             for file in additional_code.files
         }
@@ -360,7 +369,7 @@ class TestExistsLocally:
             self.mock_get_sha256_hash.call_count == 2
         )  # Stops checking when a file is missing.
 
-    def test_hash_mismatch(self):
+    def test_hash_mismatch(self) -> None:
         """Verifies that `exists_locally` returns False when a file's hash does not
         match the cached value.
 
@@ -378,7 +387,6 @@ class TestExistsLocally:
         - `exists_locally` is False when a hash mismatch occurs for any file.
         - `Path.exists` and `_get_sha256_hash` are only called up to the first mismatch.
         """
-
         self.mock_exists.return_value = True
 
         additional_code = AdditionalCode(
@@ -389,7 +397,7 @@ class TestExistsLocally:
         additional_code.working_path = Path("/mock/local/dir")
 
         # Simulate incorrect hash cache
-        additional_code._local_file_hash_cache = {
+        additional_code._local_file_hash_cache = {  # noqa: SLF001
             Path(f"/mock/local/dir/{file}"): f"wrong_hash_{file}"
             for file in additional_code.files
         }
@@ -408,7 +416,7 @@ class TestExistsLocally:
         assert self.mock_exists.call_count == 1
         assert self.mock_get_sha256_hash.call_count == 1
 
-    def test_no_working_path(self):
+    def test_no_working_path(self) -> None:
         """Verifies that `exists_locally` returns False when the `working_path`
         attribute is None.
 
@@ -420,7 +428,6 @@ class TestExistsLocally:
         - `exists_locally` is False when `working_path` is None.
         - `_get_sha256_hash` is not called, as no files are checked.
         """
-
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
@@ -431,7 +438,7 @@ class TestExistsLocally:
         assert additional_code.exists_locally is False
         self.mock_get_sha256_hash.assert_not_called()
 
-    def test_no_cached_hashes(self):
+    def test_no_cached_hashes(self) -> None:
         """Verifies that `exists_locally` returns False when the hash cache
         (`_local_file_hash_cache`) is None.
 
@@ -443,22 +450,23 @@ class TestExistsLocally:
         - `exists_locally` is False when `_local_file_hash_cache` is None.
         - `_get_sha256_hash` is not called, as no hashes are available for comparison.
         """
-
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
             files=["file1.F", "file2.py", "file3.opt"],
         )
         additional_code.working_path = Path("/mock/local/dir")
-        additional_code._local_file_hash_cache = None
+        additional_code._local_file_hash_cache = {}  # noqa: SLF001
 
         assert additional_code.exists_locally is False
         self.mock_get_sha256_hash.assert_not_called()
 
 
 class TestAdditionalCodeGet:
-    """Test class for the `AdditionalCode.get()` method, which handles fetching and
-    copying code from both local directories and remote repositories.
+    """Test behavior of `AdditionalCode.get()`.
+
+    The method under test handles fetching and copying code from both local
+    directories and remote repositories.
 
     Tests:
     ------
@@ -472,7 +480,7 @@ class TestAdditionalCodeGet:
     - test_cleanup_temp_directory
     """
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up common mocks and start patching before each test case.
 
         Mocks initialized:
@@ -524,16 +532,17 @@ class TestAdditionalCodeGet:
         self.patch_hash = mock.patch("cstar.base.additional_code._get_sha256_hash")
         self.mock_hash = self.patch_hash.start()
 
-    def teardown_method(self):
+    def teardown_method(self) -> None:
         """Stop all the patches after each test to clean up the mock environment."""
         mock.patch.stopall()
 
-    def test_get_from_local_directory(self, local_additional_code):
-        """Test the `get` method when fetching additional code from elsewhere on the
-        current filesystem.
+    def test_get_from_local_directory(
+        self, local_additional_code: AdditionalCode
+    ) -> None:
+        """Test behavior of the `get` method when code is fetched from local files.
 
-        Fixtures:
-        ---------
+        Fixtures
+        --------
         - local_additional_code: An example AdditionalCode instance representing local code.
         - mock_location_type: Mocks AdditionalCode.source.location_type as "path"
         - mock_source_type: Mocks AdditionalCode.source.source_type as "directory"
@@ -541,8 +550,8 @@ class TestAdditionalCodeGet:
         - mock_mkdir: Mocks the creation of the target directory if it doesn’t exist.
         - mock_copy: Mocks the copying of files from the source to the target directory.
 
-        Asserts:
-        --------
+        Asserts
+        -------
         - The target directory is created (mock_mkdir is called once with correct parameters).
         - The correct number of files are copied (mock_copy is called for each file).
         - Each file is copied from the correct source path to the correct target path.
@@ -574,19 +583,23 @@ class TestAdditionalCodeGet:
         for f in local_additional_code.files:
             tgt_file_path = Path("/mock/local/dir") / Path(f).name
             assert (
-                local_additional_code._local_file_hash_cache[tgt_file_path]
+                local_additional_code._local_file_hash_cache[  # noqa: SLF001
+                    tgt_file_path
+                ]
                 == "mock_hash_value"
             )
 
         # Ensure that the working_path is set correctly
         assert local_additional_code.working_path == Path("/mock/local/dir")
 
-    def test_get_from_remote_repository(self, remote_additional_code):
+    def test_get_from_remote_repository(
+        self, remote_additional_code: AdditionalCode
+    ) -> None:
         """Test the `get` method when fetching additional code from a remote Git
         repository.
 
-        Fixtures:
-        ---------
+        Fixtures
+        --------
         - remote_additional_code: An example AdditionalCode instance representing code in a remote repo
         - mock_location_type: Mocks AdditionalCode.source.location_type as "url"
         - mock_source_type: Mocks AdditionalCode.source.source_type  as "repository"
@@ -597,8 +610,8 @@ class TestAdditionalCodeGet:
         - mock_copy: Mocks the copying of files from the temporary clone to the target directory.
         - mock_rmtree: Mocks the cleanup (removal) of the temporary directory.
 
-        Asserts:
-        --------
+        Asserts
+        -------
         - The repository is cloned and checked out at the correct target.
         - The temporary directory is created (mock_mkdtemp is called once).
         - The target directory is created (mock_mkdir is called once with the correct parameters).
@@ -637,7 +650,9 @@ class TestAdditionalCodeGet:
         for f in remote_additional_code.files:
             tgt_file_path = Path("/mock/local/dir") / Path(f).name
             assert (
-                remote_additional_code._local_file_hash_cache[tgt_file_path]
+                remote_additional_code._local_file_hash_cache[  # noqa: SLF001
+                    tgt_file_path
+                ]
                 == "mock_hash_value"
             )
 
@@ -649,25 +664,28 @@ class TestAdditionalCodeGet:
 
     # Test failures:
 
-    def test_get_raises_if_checkout_target_none(self, remote_additional_code):
+    def test_get_raises_if_checkout_target_none(
+        self, remote_additional_code: AdditionalCode
+    ) -> None:
         """Test that `get` raises a `ValueError` when no checkout_target provided for a
         remote repo.
 
-        Fixtures:
-        ---------
+        Fixtures
+        --------
         - remote_additional_code: An example AdditionalCode instance representing code in a remote repo
         - mock_location_type: Mocks AdditionalCode.source.location_type as "url"
         - mock_source_type: Mocks AdditionalCode.source.source_type as "repository"
 
-        Asserts:
-        --------
+        Asserts
+        -------
         - A `ValueError` is raised with the correct message when `checkout_target` is `None`.
         - The repository is not cloned (mock_clone is not called).
         - No files are copied (mock_copy is not called).
         """
-
         # Simulate a remote repository source but without checkout_target
-        remote_additional_code._checkout_target = None  # This should raise a ValueError
+        remote_additional_code._checkout_target = (  # noqa: SLF001
+            None  # This should raise a ValueError
+        )
         self.mock_location_type.return_value = "url"
         self.mock_source_type.return_value = "repository"
 
@@ -679,45 +697,48 @@ class TestAdditionalCodeGet:
         self.mock_clone.assert_not_called()
         self.mock_copy.assert_not_called()
 
-    def test_get_raises_if_source_incompatible(self, remote_additional_code):
+    def test_get_raises_if_source_incompatible(
+        self, remote_additional_code: AdditionalCode
+    ) -> None:
         """Test that `get` raises a `ValueError` when the source location and type are
         incompatible.
 
-        Fixtures:
-        ---------
+        Fixtures
+        --------
         - remote_additional_code: An example AdditionalCode instance representing code in a remote repo
         - mock_location_type: Mocks AdditionalCode.source.location_type as "url"
         - mock_source_type: Mocks AdditionalCode.source.source_type as "directory"
 
-        Asserts:
-        --------
+        Asserts
+        -------
         - A `ValueError` is raised with the correct message when AdditionalCode.source.source_type is "directory" and AdditionalCode.source.location_type is "url"
         - No files are copied (mock_copy is not called).
         """
-
         self.mock_location_type.return_value = "url"
         self.mock_source_type.return_value = "directory"
 
-        with pytest.raises(ValueError) as exception_info:
+        with pytest.raises(ValueError) as exception_info:  # noqa: PT011
             remote_additional_code.get("/mock/local/dir")
 
         expected_message = (
             "Invalid source for AdditionalCode. "
-            + "AdditionalCode.source.location_type and "
-            + "AdditionalCode.source.source_type should be "
-            + "'url' and 'repository', or 'path' and 'repository', or"
-            + "'path' and 'directory', not"
-            + "'url' and 'directory'"
+            "AdditionalCode.source.location_type and "
+            "AdditionalCode.source.source_type should be "
+            "'url' and 'repository', or 'path' and 'repository', or"
+            "'path' and 'directory', not"
+            "'url' and 'directory'"
         )
 
         assert str(exception_info.value) == expected_message
 
-    def test_get_raises_if_missing_files(self, local_additional_code):
+    def test_get_raises_if_missing_files(
+        self, local_additional_code: AdditionalCode
+    ) -> None:
         """Test that `get` raises a `FileNotFoundError` when a file is missing in a
         local directory.
 
-        Fixtures:
-        ---------
+        Fixtures
+        --------
         - local_additional_code: An example AdditionalCode instance representing local code.
         - mock_location_type: Mocks AdditionalCode.source.location_type as "path".
         - mock_source_type: Mocks AdditionalCode.source.source_type as "directory".
@@ -725,8 +746,8 @@ class TestAdditionalCodeGet:
         - mock_exists: Mocks file existence checks, simulating the third file as missing.
         - mock_copy: Mocks the copying of files to the target directory.
 
-        Asserts:
-        --------
+        Asserts
+        -------
         - A `FileNotFoundError` is raised with the correct message when a file does not exist.
         - `mock_exists` is called for each file to check its existence (3 calls in this case).
         - Only existing files are copied (2 calls to `mock_copy` for the first two files).
@@ -746,19 +767,21 @@ class TestAdditionalCodeGet:
         assert self.mock_exists.call_count == 3
         assert self.mock_copy.call_count == 2  # Only the first two files were copied
 
-    def test_get_with_template_files(self, local_additional_code, log: logging.Logger):
+    def test_get_with_template_files(
+        self, local_additional_code: AdditionalCode
+    ) -> None:
         """Test that `get` correctly handles files with the '_TEMPLATE' filename suffix.
 
-        Fixtures:
-        ---------
+        Fixtures
+        --------
         - local_additional_code: An example AdditionalCode instance representing local code.
         - mock_location_type: Mocks AdditionalCode.source.location_type as "path".
         - mock_source_type: Mocks AdditionalCode.source.source_type as "directory".
         - mock_resolve: Mocks resolving the target directory.
         - mock_copy: Mocks the copying of template files and renaming them.
 
-        Asserts:
-        --------
+        Asserts
+        -------
         - `mock_copy` is called the correct number of times (2 original files + 2 renamed files).
         - Each template file is copied and renamed (from "fileX_TEMPLATE" to "fileX").
         - The `modified_files` attribute is correctly updated with the renamed files.
@@ -785,16 +808,18 @@ class TestAdditionalCodeGet:
         )
         assert local_additional_code.modified_files == ["file1", "file2"]
 
-    def test_get_with_empty_file_list(self, local_additional_code):
+    def test_get_with_empty_file_list(
+        self, local_additional_code: AdditionalCode
+    ) -> None:
         """Test that `get` raises a `ValueError` when the `files` attribute is empty in
         AdditionalCode.
 
-        Fixtures:
-        ---------
+        Fixtures
+        --------
         - local_additional_code: An example AdditionalCode instance representing local code.
 
-        Asserts:
-        --------
+        Asserts
+        -------
         - A `ValueError` is raised with the correct message when `files` is an empty list.
         """
         expected_message = (
@@ -802,17 +827,19 @@ class TestAdditionalCodeGet:
         )
         local_additional_code.files = []
 
-        with pytest.raises(ValueError) as exception_info:
+        with pytest.raises(ValueError) as exception_info:  # noqa: PT011
             local_additional_code.get("/mock/local/dir")
 
         assert str(exception_info.value) == expected_message
 
-    def test_cleanup_temp_directory(self, remote_additional_code):
+    def test_cleanup_temp_directory(
+        self, remote_additional_code: AdditionalCode
+    ) -> None:
         """Test that the temporary directory is cleaned up (deleted) after fetching
         remote additional code.
 
-        Fixtures:
-        ---------
+        Fixtures
+        --------
         - remote_additional_code: An example AdditionalCode instance representing code in a remote repo
         - mock_location_type: Mocks AdditionalCode.source.location_type as "url".
         - mock_source_type: Mocks AdditionalCode.source.source_type as "repository".
@@ -821,8 +848,8 @@ class TestAdditionalCodeGet:
         - mock_mkdtemp: Mocks the creation of a temporary directory for cloning the repo.
         - mock_rmtree: Mocks the cleanup (removal) of the temporary directory.
 
-        Asserts:
-        --------
+        Asserts
+        -------
         - The temporary directory is cleaned up (mock_rmtree is called once with the correct path).
         """
         self.mock_location_type.return_value = "url"

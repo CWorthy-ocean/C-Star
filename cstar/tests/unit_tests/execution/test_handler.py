@@ -14,16 +14,19 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 class MockExecutionHandler(ExecutionHandler):
     """Mock implementation of `ExecutionHandler` for testing purposes."""
 
-    def __init__(self, status, output_file):
+    def __init__(self, status: ExecutionStatus, output_file: Path) -> None:
+        """Initialize the instance."""
         self._status = status
         self._output_file = Path(output_file)
 
     @property
-    def status(self):
+    def status(self) -> ExecutionStatus:
+        """Return the current status."""
         return self._status
 
     @property
-    def output_file(self):
+    def output_file(self) -> Path:
+        """Return the output file."""
         return self._output_file
 
 
@@ -40,9 +43,10 @@ class TestExecutionHandlerUpdates:
         Confirms that `updates()` runs indefinitely when `seconds=0` and allows termination via user interruption.
     """
 
-    def test_updates_non_running_job(self, tmp_path, caplog: pytest.LogCaptureFixture):
-        """Validates that `updates()` provides appropriate feedback when the job is not
-        running.
+    def test_updates_non_running_job(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify correct feedback from `updates()` when the job is not running.
 
         This test ensures that if the job status is not `RUNNING`, the method informs
         the user and provides instructions for viewing the job output if applicable.
@@ -63,7 +67,6 @@ class TestExecutionHandlerUpdates:
         - That instructions for viewing the job output are provided if the job status
           is `COMPLETED` or similar.
         """
-
         caplog.set_level(logging.WARNING)
         handler = MockExecutionHandler(
             ExecutionStatus.COMPLETED, tmp_path / "mock_output.log"
@@ -79,8 +82,8 @@ class TestExecutionHandlerUpdates:
         assert f"See {handler.output_file.resolve()} for job output" in captured
 
     def test_updates_running_job_with_tmp_file(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
-    ):
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Verifies that `updates()` streams live updates from the job's output file
         when the job is running.
 
@@ -96,8 +99,8 @@ class TestExecutionHandlerUpdates:
 
         Fixtures
         --------
-        tmp_path (pathlib.Path): builtin fixture creating a temporary pathlib.Path object
-        caplog (pytest.LogCaptureFixture): Builtin fixture to capture log outputs
+        tmp_path (pathlib.Path) : builtin fixture creating a temporary pathlib.Path object
+        caplog (pytest.LogCaptureFixture) : Builtin fixture to capture log outputs
 
         Asserts
         -------
@@ -105,7 +108,6 @@ class TestExecutionHandlerUpdates:
         - That previously existing content in the file is also logged.
         - That the method properly interacts with the output file in real-time.
         """
-
         # Create a temporary output file
         output_file = tmp_path / "output.log"
         initial_content = ["First line\n"]
@@ -121,7 +123,7 @@ class TestExecutionHandlerUpdates:
         caplog.set_level(logging.INFO, logger=handler.log.name)
 
         # Function to simulate appending live updates to the file
-        def append_live_updates():
+        def append_live_updates() -> None:
             with output_file.open("a") as f:
                 for line in live_updates:
                     time.sleep(0.01)  # Ensure `updates()` is actively reading
@@ -144,9 +146,11 @@ class TestExecutionHandlerUpdates:
         updater_thread.join()
 
     def test_updates_indefinite_with_seconds_param_0(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
-    ):
-        """Confirms that `updates()` runs indefinitely when `seconds=0` and allows
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Confirms user-termination of an indefinite update loop.
+
+        Ensures that `updates()` runs indefinitely when `seconds=0` and allows
         termination via user interruption.
 
         This test creates a temporary output file and pre-populates it with content.
@@ -210,18 +214,20 @@ class TestExecutionHandlerUpdates:
 
                 # Verify that the prompt was displayed to the user
                 mock_input.assert_called_once_with(
-                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
-                    "Do you want to continue? (y/n): "
+                    "This will provide indefinite updates to your job. You can stop "
+                    "it anytime using Ctrl+C. Do you want to continue? (y/n): "
                 )
             # Patch input to simulate the confirmation prompt
-            with patch("builtins.input", side_effect=["n"]) as mock_input:
-                with patch("builtins.open", create=True) as mock_open:
-                    handler.updates(seconds=0)
-                    mock_open.assert_not_called()
+            with (
+                patch("builtins.input", side_effect=["n"]) as mock_input,
+                patch("builtins.open", create=True) as mock_open,
+            ):
+                handler.updates(seconds=0)
+                mock_open.assert_not_called()
 
     def test_updates_stops_when_status_changes(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
-    ):
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Verifies that `updates()` stops execution when `status` changes to non-
         RUNNING.
 
@@ -234,7 +240,6 @@ class TestExecutionHandlerUpdates:
         caplog (pytest.LogCaptureFixture)
             Builtin fixture to capture log outputs
         """
-
         # Create a temporary output file
         output_file = tmp_path / "output.log"
         initial_content = ["First line\n"]
@@ -249,7 +254,7 @@ class TestExecutionHandlerUpdates:
         caplog.set_level(logging.INFO, logger=handler.log.name)
 
         # Function to simulate appending live updates and changing status
-        def append_updates_and_change_status():
+        def append_updates_and_change_status() -> None:
             with output_file.open("a") as f:
                 for line in running_updates:
                     time.sleep(0.1)  # Ensure updates() is actively reading
@@ -258,7 +263,7 @@ class TestExecutionHandlerUpdates:
 
                 # Change the status to `COMPLETED` after writing running updates
                 time.sleep(0.2)
-                handler._status = ExecutionStatus.COMPLETED
+                handler._status = ExecutionStatus.COMPLETED  # noqa: SLF001
                 for line in completed_updates:
                     time.sleep(0.1)
                     f.write(line)

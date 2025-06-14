@@ -11,6 +11,7 @@ from cstar.base.log import get_logger
 
 @pytest.fixture
 def all_levels() -> list[int]:
+    """Return all logging levels."""
     return [
         logging.DEBUG,
         logging.INFO,
@@ -21,26 +22,27 @@ def all_levels() -> list[int]:
 
 
 @pytest.fixture
-def levels_fn(
-    all_levels: list[int],
-) -> t.Callable[[int], t.Tuple[list[int], list[int]]]:
-    """Return a function that returns a tuple of lists containing all log levels below
-    and above the specified log level.
+def levels_fn(all_levels: list[int]) -> t.Callable[[int], tuple[list[int], list[int]]]:
+    """Return a factory for creating a split of log levels above/below a fixed level.
 
-    Returns:
-        t.Callable[list[int], list[int]]: the function
+    Returns
+        fn : t.Callable[list[int], list[int]]
     """
 
-    def _inner(level: int) -> t.Tuple[list[int], list[int]]:
-        """Return a tuple containing:
+    def _inner(level: int) -> tuple[list[int], list[int]]:
+        """Return a tuple containing lists of the levels below and above a level.
+
         1. list of levels less than the supplied level
         2. list of levels greater than or equal to the supplied level
 
-        Args:
-            level (int): the target log level
+        Parameters
+        ----------
+        level : int
+            The log level to split above/below on.
 
-        Returns:
-            tuple[list[int], list[int]]: the lists of log levels
+        Returns
+        -------
+            tuple[list[int], list[int]] : the lists of log levels
         """
         lt, gte = [], []
 
@@ -57,36 +59,32 @@ def levels_fn(
 
 @pytest.mark.parametrize(
     "level",
-    [
-        logging.DEBUG,
-        logging.INFO,
-        logging.WARNING,
-        logging.ERROR,
-        logging.CRITICAL,
-    ],
+    [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL],
 )
 def test_loglevel_fh(
     request: pytest.FixtureRequest,
-    level: int,
+    level: int,  # noqa: ARG001
     levels_fn: t.Callable[[int], tuple[list[int], list[int]]],
     all_levels: list[int],
     tmp_path: pathlib.Path,
 ) -> None:
-    """Verify the loggers are configured properly to output the desired log levels when
-    the optional file handler is requested."""
+    """Verify logger behavior when the optional file handler is requested.
 
-    for level in all_levels:
-        logger_name = f"{request.function.__name__}-{level}"
+    Tests that the loggers are configured properly to output the desired log levels to
+    the file.
+    """
+    for level_ in all_levels:
+        logger_name = f"{request.function.__name__}-{level_}"
         filename = tmp_path / f"{logger_name}.log"
 
-        log = get_logger(logger_name, level, filename=str(filename))
+        log = get_logger(logger_name, level_, filename=str(filename))
 
-        lt_levels, gt_eq_levels = levels_fn(level)
+        lt_levels, gt_eq_levels = levels_fn(level_)
 
         msg = str(uuid.uuid4())
         funcs = [log.debug, log.info, log.warning, log.error, log.critical]
 
-        for msg_level, log_fn in zip(all_levels, funcs):
+        for msg_level, log_fn in zip(all_levels, funcs, strict=False):
             log_fn(msg)
             log_content = filename.read_text()
 
@@ -101,12 +99,13 @@ def test_loglevel_fh(
 
 
 def test_filehandler_no_dupes(
-    request: pytest.FixtureRequest,
-    tmp_path: pathlib.Path,
+    request: pytest.FixtureRequest, tmp_path: pathlib.Path
 ) -> None:
-    """Verify the loggers are configured properly to output the desired log levels when
-    the optional file handler is requested."""
+    """Verify the loggers are configured properly.
 
+    Ensure loggers output messages at the desired log levels when the optional file
+    handler is requested.
+    """
     level = logging.INFO
     logger_name = f"{request.function.__name__}-{level}"
     filename = tmp_path / f"{logger_name}.log"
@@ -121,7 +120,7 @@ def test_filehandler_no_dupes(
     log.info(msg)
 
     log_content = filename.read_text()
-    expected_log_entry = f"[{logging._levelToName[level]}] {msg}"
+    expected_log_entry = f"[{logging.getLevelName(level)}] {msg}"
 
     # confirm entry is found...
     found_at = log_content.find(expected_log_entry)

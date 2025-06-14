@@ -1,5 +1,6 @@
 """Test suite to test fixtures defined in conftest.py and fixtures.py files."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -12,23 +13,20 @@ from cstar.tests.integration_tests.config import (
 )
 
 
-def test_mock_input_fixture(mock_user_input):
-    # Mocked input behavior
-    with mock_user_input("yes"):
-        assert input("Enter your choice: ") == "yes"
+def test_modify_template_blueprint(
+    modify_template_blueprint: Callable[..., Path],
+) -> None:
+    """Ensure the modify_template_blueprint works as expected.
 
-
-def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
-    """This test verifies that the modify_template_blueprint fixture correctly reads a
-    specified blueprint, performs string replacements, and returns a Simulation instance
-    with the correct parameters corresponding to the string replacements.
+    This test verifies that the modify_template_blueprint fixture correctly
+    reads a specified blueprint, performs string replacements, and returns a
+    Simulation instance with the correct parameters corresponding to the string
+    replacements.
 
     Parameters
     ----------
     modify_template_blueprint : Callable
         A fixture that modifies a template blueprint with specific string replacements.
-    tmpdir : Path
-        Built-in pytest fixture for creating a temporary directory during the test
 
     Asserts
     -------
@@ -46,7 +44,7 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
     assert isinstance(
         test_blueprint, LocalPath
     ), f"Expected type LocalPath, but got {type(test_blueprint)}"
-    with open(test_blueprint, "r") as bpfile:
+    with open(test_blueprint) as bpfile:  # noqa: PTH123
         bpyaml = yaml.safe_load(bpfile)
 
     assert (
@@ -56,14 +54,12 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
 
 
 class TestFetchData:
-    """Test class for testing data-fetching fixtures defined in the roms/fixtures.py
-    file."""
+    """Tests for data-fetching fixtures defined in the roms/fixtures.py file."""
 
     def test_fetch_roms_tools_source_data(
-        self, request, tmpdir, fetch_roms_tools_source_data
-    ):
-        """Test the fetch_roms_tools_source_data fixture by validating data fetching and
-        symlink creation.
+        self, tmpdir: Path, fetch_roms_tools_source_data: Callable[[str | Path], None]
+    ) -> None:
+        """Ensure the fetch_roms_tools_source_data fixture works as expected.
 
         This test checks that the fetch_roms_tools_source_data fixture correctly fetches the
         expected data files, creates a symlink to the data directory, and ensures all expected
@@ -84,7 +80,6 @@ class TestFetchData:
         - The symlink exists and is valid
         - All expected data files are present in the symlinked directory
         """
-
         test_data_directory = Path(tmpdir / "test_data_directory")
         fetch_roms_tools_source_data(test_data_directory)
 
@@ -107,7 +102,9 @@ class TestFetchData:
         missing_files = [f for f in expected_files if f not in file_list]
         assert not missing_files, f"missing expected files {missing_files}"
 
-    def test_fetch_remote_test_case_data(self, fetch_remote_test_case_data):
+    def test_fetch_remote_test_case_data(
+        self, fetch_remote_test_case_data: Callable[[], None]
+    ) -> None:
         """Test the fetch_remote_test_case_data fixture.
 
         This test verifies that the fetch_remote_test_case_data fixture correctly downloads

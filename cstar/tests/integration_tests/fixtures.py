@@ -1,7 +1,8 @@
+import logging
 import shutil
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pooch
 import pytest
@@ -13,39 +14,43 @@ from cstar.tests.integration_tests.config import (
 
 
 @pytest.fixture
-def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
-    """Fixture that provides a factory function to fetch source data needed by roms-
-    tools.
+def fetch_roms_tools_source_data(
+    request: pytest.FixtureRequest, log: logging.Logger
+) -> Callable[[str | Path], None]:
+    """Return a factory function to fetch source data needed by roms-tools.
 
     This fixture returns a function that fetches necessary data files from a remote
     repository using pooch and creates a symlink to the fetched data directory. A cleanup
     routine removes this symlink when the calling test is complete.
 
-    Parameters:
-    -----
-    request (FixtureRequest):
+    Parameters
+    ----------
+    request : FixtureRequest
        Built-in pytest fixture that provides access to the test request object,
        allowing the addition of finalizers for cleanup.
+    log : logging.Logger
+        A logger instance for use during the test.
 
-    Returns:
-    --------
+    Returns
+    -------
     _fetch_roms_tools_source_data, Callable[[str | Path], None]:
        A factory function that creates (at a specified path) a symlink to the fetched ROMS
        tools data directory, ensuring the data is available during testing.
     """
 
     def _fetch_roms_tools_source_data(symlink_path: str | Path) -> None:
-        """Fetches ROMS tools source data and creates a symlink to the data directory at
-        `symlink_path`.
+        """Fetch ROMS tools source data and create a symlink to `symlink_path`.
 
-        This function downloads the required data files from a specified remote repository
-        to ROMS_TOOLS_DATA_DIRECTORY, specified in tests/config.py. After fetching the files,
-        it creates a symlink to the data directory at the specified `symlink_path`.
+        This function downloads the required data files from a specified remote
+        repository to ROMS_TOOLS_DATA_DIRECTORY, specified in tests/config.py.
+        After fetching the files, it creates a symlink to the data directory at
+        the specified `symlink_path`.
 
-        The symlink is used as the full path to the cached directory will vary from system to system, but
-        calls to roms-tools.ROMSToolsObject.from_yaml accept a yaml file with a predetermined 'path' entry.
-        This entry can be relative, so the calling test can create a symlink at a location corresponding to
-        this path, but pointing to the correct cache directory.
+        The symlink is used as the full path to the cached directory will vary
+        from system to system, but calls to roms-tools.ROMSToolsObject.from_yaml
+        accept a yaml file with a predetermined 'path' entry. This entry can be
+        relative, so the calling test can create a symlink at a location
+        corresponding to this path, but pointing to the correct cache directory.
 
         A cleanup function is registered to remove the symlink after the test completes.
 
@@ -58,11 +63,9 @@ def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
         -------
         None
         """
-
         if isinstance(symlink_path, str):
             symlink_path = Path(symlink_path)
 
-        # cache_dir = Path(pooch.os_cache("roms_tools_datasets_for_cstar_test_case"))
         pup_test_data = pooch.create(
             path=ROMS_TOOLS_DATA_DIRECTORY,
             base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
@@ -88,7 +91,8 @@ def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
 
         symlink_path.symlink_to(ROMS_TOOLS_DATA_DIRECTORY)
 
-        def cleanup():
+        def cleanup() -> None:
+            """Remove files and clean up allocated resources."""
             if symlink_path.is_symlink():
                 log.info(f"Removing {symlink_path}")
                 symlink_path.unlink()
@@ -100,8 +104,7 @@ def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
 
 @pytest.fixture
 def fetch_remote_test_case_data() -> Callable[[], None]:
-    """Fixture that provides a function to fetch remote test case data from a GitHub
-    repository.
+    """Fetch remote test case data from a GitHub repository.
 
     Returns
     -------
@@ -111,11 +114,11 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
     """
 
     def _fetch_remote_test_case_data() -> None:
-        """Downloads and sets up the remote test case data for testing.
+        """Download and set up the remote test case data.
 
-        This function downloads a zip archive of a specific commit of a repo containing test data,
-        extracts the archive into the specified test data directory, and performs cleanup of
-        intermediate files and directories.
+        This function downloads a zip archive of a specific commit of a repo
+        containing test data, extracts the archive into the specified test data
+        directory, and performs cleanup of intermediate files and directories.
 
         Data are saved to the CSTAR_TEST_DATA_DIRECTORY, set in tests/config.py
 
@@ -123,7 +126,6 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
         -------
         None
         """
-
         test_case_repo_url = (
             "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/"
         )

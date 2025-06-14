@@ -1,8 +1,11 @@
 import logging
+from collections.abc import Callable
+from typing import cast
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     PBSJob,
     SchedulerJob,
@@ -12,6 +15,7 @@ from cstar.execution.scheduler_job import (
 from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
+    Queue,
     Scheduler,
     SlurmQOS,
     SlurmScheduler,
@@ -33,14 +37,17 @@ class MockSchedulerJob(SchedulerJob):
     """
 
     @property
-    def status(self):
-        return "mock_status"
+    def status(self) -> ExecutionStatus:
+        """Mock the status."""
+        return ExecutionStatus.RUNNING
 
-    def submit(self):
-        return "mock_submit"
+    def submit(self) -> None:
+        """Mock the submit process."""
 
-    def script(self):
-        pass
+    @property
+    def script(self) -> str:
+        """Mock the script generation process."""
+        return "mock-script"
 
 
 class MockScheduler(Scheduler):
@@ -63,24 +70,26 @@ class MockScheduler(Scheduler):
         The maximum memory per node in GB, mocked as 128.
     """
 
-    def __init__(self):
-        # Initialize with mock values
+    def __init__(self) -> None:
+        """Initialize with mock values."""
         super().__init__(
             queues=[MagicMock(name="default_queue", max_walltime="02:00:00")],
             primary_queue_name="default_queue",
             other_scheduler_directives={"-mock_directive": "mock_value"},
         )
 
-    def get_queue(self, name):
-        # Return a mocked queue with default properties
+    def get_queue(self, name: str) -> Queue:
+        """Return a mocked queue with default properties."""
         return MagicMock(name=name, max_walltime="02:00:00")
 
     @property
-    def global_max_cpus_per_node(self):
-        return 64  # Mocked maximum CPUs per node
+    def global_max_cpus_per_node(self) -> int:
+        """Mock the maximum CPUs per node."""
+        return 64
 
     @property
-    def global_max_mem_per_node_gb(self):
+    def global_max_mem_per_node_gb(self) -> int:
+        """Mock the maximum memory per node."""
         return 128  # Mocked maximum memory in GB
 
 
@@ -113,8 +122,8 @@ class TestSchedulerJobBase:
         Confirms that task distribution is skipped if the scheduler does not require it.
     """
 
-    def setup_method(self, method):
-        """Sets up common job parameters for tests in `TestSchedulerJobBase`.
+    def setup_method(self, method: Callable) -> None:  # noqa: ARG002
+        """Set up common job parameters for tests in `TestSchedulerJobBase`.
 
         This method initializes a dictionary of parameters that are shared across
         multiple test cases to initialize a MockSchedulerJob instance.
@@ -136,9 +145,8 @@ class TestSchedulerJobBase:
         }
 
     @pytest.mark.filterwarnings("ignore:Walltime parameter unspecified")
-    def test_initialization_defaults(self):
-        """Validates that default values are correctly applied during job
-        initialization.
+    def test_initialization_defaults(self) -> None:
+        """Validate that default values are correctly applied during job initialization.
 
         This test checks that when certain parameters (e.g., walltime) are omitted,
         the job uses default values, such as the queue's maximum walltime.
@@ -148,13 +156,12 @@ class TestSchedulerJobBase:
         - This test suppresses warnings about unspecified walltime using
           `@pytest.mark.filterwarnings`.
         """
-
         params = {
             key: value
             for key, value in self.common_job_params.items()
             if key != "walltime"
         }
-        job = MockSchedulerJob(**params)
+        job = MockSchedulerJob(**params)  # type: ignore[arg-type]
 
         assert job.job_name.startswith("cstar_job_")
         assert job.script_path.name.endswith(".sh")
@@ -162,7 +169,7 @@ class TestSchedulerJobBase:
         assert job.walltime == "02:00:00"
         assert job.cpus == 4
 
-    def test_init_no_walltime_and_no_queue_max_walltime(self):
+    def test_init_no_walltime_and_no_queue_max_walltime(self) -> None:
         """Ensures that a `ValueError` is raised when no walltime is provided, and the
         queue's maximum walltime is also unavailable.
 
@@ -191,9 +198,11 @@ class TestSchedulerJobBase:
                 ValueError,
                 match="Cannot create scheduler job: walltime parameter not provided",
             ):
-                MockSchedulerJob(**params)
+                MockSchedulerJob(**params)  # type: ignore[arg-type]
 
-    def test_init_walltime_provided_but_no_queue_max_walltime(self, caplog):
+    def test_init_walltime_provided_but_no_queue_max_walltime(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Verifies that a user-provided walltime is applied when the queue's max
         walltime is unavailable, and a warning is logged that the user walltime cannot
         be checked.
@@ -213,11 +222,10 @@ class TestSchedulerJobBase:
         - That a warning is logged about the missing queue walltime.
         - That the job's walltime matches the user-provided value ("01:00:00").
         """
-
         with patch.object(
             MockScheduler, "get_queue", return_value=MagicMock(max_walltime=None)
         ):
-            job = MockSchedulerJob(**self.common_job_params)
+            job = MockSchedulerJob(**self.common_job_params)  # type: ignore[arg-type]
             caplog.set_level(logging.INFO, job.log.name)
             assert job.walltime == "01:00:00"
             assert (
@@ -225,7 +233,9 @@ class TestSchedulerJobBase:
                 in caplog.text
             )
 
-    def test_init_no_walltime_but_queue_max_walltime_provided(self, caplog):
+    def test_init_no_walltime_but_queue_max_walltime_provided(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Ensures that the queue's max walltime is applied when no walltime is provided
         by the user.
 
@@ -244,7 +254,6 @@ class TestSchedulerJobBase:
         - That a warning is logged about the unspecified walltime.
         - That the job's walltime matches the queue's maximum walltime ("02:00:00").
         """
-
         with patch.object(
             MockScheduler, "get_queue", return_value=MagicMock(max_walltime="02:00:00")
         ):
@@ -253,12 +262,12 @@ class TestSchedulerJobBase:
                 for key, value in self.common_job_params.items()
                 if key != "walltime"
             }
-            job = MockSchedulerJob(**params)
+            job = MockSchedulerJob(**params)  # type: ignore[arg-type]
             caplog.set_level(logging.INFO, logger=job.log.name)
             assert job.walltime == "02:00:00"
             assert "Walltime parameter unspecified" in caplog.text
 
-    def test_init_walltime_exceeds_max_walltime(self):
+    def test_init_walltime_exceeds_max_walltime(self) -> None:
         """Ensures that a `ValueError` is raised if the user-provided walltime exceeds
         the queue's maximum allowed walltime.
 
@@ -270,18 +279,19 @@ class TestSchedulerJobBase:
         - That a `ValueError` is raised with an appropriate error message indicating
           the walltime exceeds the allowed maximum.
         """
+        params = {
+            key: value
+            for key, value in self.common_job_params.items()
+            if key != "walltime"
+        }
+
         with pytest.raises(
             ValueError, match="Selected walltime 04:00:00 exceeds maximum"
         ):
-            params = {
-                key: value
-                for key, value in self.common_job_params.items()
-                if key != "walltime"
-            }
-            MockSchedulerJob(**params, walltime="04:00:00")
+            MockSchedulerJob(**params, walltime="04:00:00")  # type: ignore[arg-type]
 
     ## Cpu distribution tests
-    def test_init_without_nodes_but_with_cpus_per_node(self):
+    def test_init_without_nodes_but_with_cpus_per_node(self) -> None:
         """Tests automatic node calculation when nodes are not specified but
         `cpus_per_node` is provided.
 
@@ -301,13 +311,13 @@ class TestSchedulerJobBase:
             }
         )
 
-        job = MockSchedulerJob(**params)
+        job = MockSchedulerJob(**params)  # type: ignore[arg-type]
 
         # Nodes should be calculated as ceil(cpus / cpus_per_node)
         assert job.nodes == 1  # cpus=4, cpus_per_node=16
         assert job.cpus_per_node == 16
 
-    def test_init_with_nodes_but_without_cpus_per_node(self):
+    def test_init_with_nodes_but_without_cpus_per_node(self) -> None:
         """Verifies automatic `cpus_per_node` calculation when nodes are provided, but
         `cpus_per_node` is not specified.
 
@@ -327,13 +337,15 @@ class TestSchedulerJobBase:
             }
         )
 
-        job = MockSchedulerJob(**params)
+        job = MockSchedulerJob(**params)  # type: ignore[arg-type]
 
         # cpus_per_node should be calculated as cpus / nodes
         assert job.nodes == 2
         assert job.cpus_per_node == 2  # cpus=4, nodes=2
 
-    def test_init_without_nodes_or_cpus_per_node(self, caplog):
+    def test_init_without_nodes_or_cpus_per_node(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Ensures that both `nodes` and `cpus_per_node` are automatically calculated
         when neither is provided.
 
@@ -366,7 +378,7 @@ class TestSchedulerJobBase:
                 "cpus": 128,
             }
         )
-        job = MockSchedulerJob(**params)
+        job = MockSchedulerJob(**params)  # type: ignore[arg-type]
         caplog.set_level(logging.INFO, logger=job.log.name)
         # Check the calculated values from _calculate_node_distribution
         assert job.nodes == 2
@@ -377,7 +389,7 @@ class TestSchedulerJobBase:
         )
 
     @pytest.mark.parametrize(
-        "nodes, cpus_per_node, expected_nodes, expected_cpus_per_node",
+        ("nodes", "cpus_per_node", "expected_nodes", "expected_cpus_per_node"),
         [
             (3, 8, 3, 8),  # Both provided as integers
             (None, 8, None, 8),  # Only cpus_per_node provided
@@ -386,8 +398,12 @@ class TestSchedulerJobBase:
         ],
     )
     def test_init_cpus_without_distribution_requirement(
-        self, nodes, cpus_per_node, expected_nodes, expected_cpus_per_node
-    ):
+        self,
+        nodes: int,
+        cpus_per_node: int,
+        expected_nodes: int,
+        expected_cpus_per_node: int,
+    ) -> None:
         """Confirms that task distribution is skipped when the scheduler does not
         require explicit task distribution.
 
@@ -414,14 +430,10 @@ class TestSchedulerJobBase:
         scheduler = MockScheduler()
         scheduler.requires_task_distribution = False
         params.update(
-            {
-                "scheduler": scheduler,
-                "nodes": nodes,
-                "cpus_per_node": cpus_per_node,
-            }
+            {"scheduler": scheduler, "nodes": nodes, "cpus_per_node": cpus_per_node}
         )
 
-        job = MockSchedulerJob(**params)
+        job = MockSchedulerJob(**params)  # type: ignore[arg-type]
 
         # Ensure nodes and cpus_per_node are correctly assigned
         assert job.nodes == expected_nodes
@@ -459,8 +471,8 @@ class TestCalculateNodeDistribution:
         one core is requested.
     """
 
-    def setup_method(self):
-        # Use the MockScheduler for testing
+    def setup_method(self) -> None:
+        """Use the MockScheduler for testing."""
         self.mock_job = MockSchedulerJob(
             scheduler=MockScheduler(),
             commands="echo Test",
@@ -469,44 +481,44 @@ class TestCalculateNodeDistribution:
             cpus=1,
         )
 
-    def test_exact_division(self):
+    def test_exact_division(self) -> None:
         """Test when `n_cores_required` is an exact multiple of `tot_cores_per_node`."""
         n_cores_required = 256
         tot_cores_per_node = 64
 
-        result = self.mock_job._calculate_node_distribution(
+        result = self.mock_job._calculate_node_distribution(  # noqa: SLF001
             n_cores_required, tot_cores_per_node
         )
         assert result == (4, 64), f"Expected (4, 64), got {result}"
 
-    def test_partial_division(self):
+    def test_partial_division(self) -> None:
         """Test when `n_cores_required` is not an exact multiple of
         `tot_cores_per_node`."""
         n_cores_required = 300
         tot_cores_per_node = 64
 
-        result = self.mock_job._calculate_node_distribution(
+        result = self.mock_job._calculate_node_distribution(  # noqa: SLF001
             n_cores_required, tot_cores_per_node
         )
         assert result == (5, 60), f"Expected (5, 60), got {result}"
 
-    def test_single_node(self):
+    def test_single_node(self) -> None:
         """Test when `n_cores_required` is less than or equal to
         `tot_cores_per_node`."""
         n_cores_required = 50
         tot_cores_per_node = 64
 
-        result = self.mock_job._calculate_node_distribution(
+        result = self.mock_job._calculate_node_distribution(  # noqa: SLF001
             n_cores_required, tot_cores_per_node
         )
         assert result == (1, 50), f"Expected (1, 50), got {result}"
 
-    def test_minimum_cores(self):
+    def test_minimum_cores(self) -> None:
         """Test the edge case where `n_cores_required` is very low, such as 1."""
         n_cores_required = 1
         tot_cores_per_node = 64
 
-        result = self.mock_job._calculate_node_distribution(
+        result = self.mock_job._calculate_node_distribution(  # noqa: SLF001
             n_cores_required, tot_cores_per_node
         )
         assert result == (1, 1), f"Expected (1, 1), got {result}"
@@ -538,7 +550,9 @@ class TestCreateSchedulerJob:
         "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
     )
     @patch("cstar.system.scheduler.SlurmQOS.max_walltime", new_callable=PropertyMock)
-    def test_create_slurm_job(self, mock_max_walltime, mock_scheduler):
+    def test_create_slurm_job(
+        self, mock_max_walltime: PropertyMock, mock_scheduler: SchedulerJob
+    ) -> None:
         """Ensures that a `SlurmJob` is created when a SLURM scheduler is active.
 
         This test verifies that the `create_scheduler_job` function correctly creates a
@@ -562,9 +576,9 @@ class TestCreateSchedulerJob:
 
         # Mock the scheduler to be a SlurmScheduler with a valid queue
         mock_queue = SlurmQOS(name="test_queue", query_name="test_queue")
-        mock_scheduler.return_value = SlurmScheduler(
-            queues=[mock_queue],
-            primary_queue_name="test_queue",
+        mock_scheduler_ = cast("MagicMock", mock_scheduler)
+        mock_scheduler_.return_value = SlurmScheduler(
+            queues=[mock_queue], primary_queue_name="test_queue"
         )
 
         # Explicitly provide `queue_name`
@@ -593,7 +607,9 @@ class TestCreateSchedulerJob:
         "cstar.system.scheduler.PBSScheduler.global_max_cpus_per_node",
         new_callable=PropertyMock,
     )
-    def test_create_pbs_job(self, mock_global_max_cpus, mock_scheduler):
+    def test_create_pbs_job(
+        self, mock_global_max_cpus: PropertyMock, mock_scheduler: SchedulerJob
+    ) -> None:
         """Ensures that a `PBSJob` is created when a PBS scheduler is active.
 
         This test verifies that the `create_scheduler_job` function correctly creates a
@@ -612,15 +628,15 @@ class TestCreateSchedulerJob:
         - That the job's attributes (e.g., commands, CPUs, nodes, walltime) are assigned
           correctly based on the provided parameters.
         """
-
         # Mock global_max_cpus_per_node for the scheduler
         mock_global_max_cpus.return_value = 128
 
         # Mock the scheduler to be a PBSScheduler with a valid queue
         mock_queue = PBSQueue(name="test_queue", max_walltime="02:00:00")
-        mock_scheduler.return_value = PBSScheduler(
-            queues=[mock_queue],
-            primary_queue_name="test_queue",
+
+        mock_scheduler_ = cast("MagicMock", mock_scheduler)
+        mock_scheduler_.return_value = PBSScheduler(
+            queues=[mock_queue], primary_queue_name="test_queue"
         )
 
         # Explicitly provide `queue_name`
@@ -644,7 +660,7 @@ class TestCreateSchedulerJob:
     @patch(
         "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
     )
-    def test_unsupported_scheduler(self, mock_scheduler):
+    def test_unsupported_scheduler(self, mock_scheduler: SchedulerJob) -> None:
         """Confirms that a `TypeError` is raised when calling create_scheduler_job
         without a scheduler.
 
@@ -662,7 +678,8 @@ class TestCreateSchedulerJob:
           scheduler type.
         """
         # Mock an unsupported scheduler type
-        mock_scheduler.return_value = None  # No scheduler set
+        mock_scheduler_ = cast("MagicMock", mock_scheduler)
+        mock_scheduler_.return_value = None  # No scheduler set
 
         with pytest.raises(TypeError, match="Unsupported scheduler type: NoneType"):
             create_scheduler_job(
@@ -672,7 +689,7 @@ class TestCreateSchedulerJob:
                 walltime="01:00:00",
             )
 
-    def test_missing_arguments(self):
+    def test_missing_arguments(self) -> None:
         """Ensures a `TypeError` is raised when required arguments are missing from
         create_scheduler_job.
 
@@ -684,10 +701,7 @@ class TestCreateSchedulerJob:
         - That a `TypeError` is raised with a message indicating the missing
           required arguments.
         """
-
         with pytest.raises(TypeError, match="missing .* required positional argument"):
-            create_scheduler_job(
-                cpus=4,
-                account_key="test_account",
-                walltime="01:00:00",
+            create_scheduler_job(  # type: ignore[call-arg]
+                cpus=4, account_key="test_account", walltime="01:00:00"
             )

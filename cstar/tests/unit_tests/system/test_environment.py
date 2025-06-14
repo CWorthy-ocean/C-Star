@@ -1,7 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
-from unittest.mock import PropertyMock, call, mock_open, patch
+from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
 
@@ -10,16 +10,17 @@ from cstar.system.environment import CStarEnvironment
 
 
 class MockEnvironment(cstar.system.environment.CStarEnvironment):
+    """Mock environment for use in tests."""
+
     def __init__(
         self,
-        system_name="mock_system",
-        mpi_exec_prefix="mock_mpi_prefix",
-        compiler="mock_compiler",
-    ):
+        system_name: str = "mock_system",
+        mpi_exec_prefix: str = "mock_mpi_prefix",
+        compiler: str = "mock_compiler",
+    ) -> None:
+        """Initialize the instance."""
         super().__init__(
-            system_name=system_name,
-            mpi_exec_prefix=mpi_exec_prefix,
-            compiler=compiler,
+            system_name=system_name, mpi_exec_prefix=mpi_exec_prefix, compiler=compiler
         )
 
 
@@ -48,7 +49,12 @@ class TestSetupEnvironmentFromFiles:
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
-    def test_load_lmod_modules(self, mock_uses_lmod, mock_run, lmod_syshost):
+    def test_load_lmod_modules(
+        self,
+        mock_uses_lmod: Mock,  # noqa: ARG002
+        mock_run: Mock,
+        lmod_syshost: PropertyMock,
+    ) -> None:
         """Tests that the load_lmod_modules function correctly interacts with Linux
         Envionment Modules.
 
@@ -67,7 +73,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         - Confirms the correct sequence of subprocess calls for resetting and loading modules.
         """
-
         # Set up the LMOD_SYSHOST environment variable
         with patch.dict(
             "cstar.system.environment.os.environ", {"LMOD_SYSHOST": lmod_syshost}
@@ -92,7 +97,7 @@ class TestSetupEnvironmentFromFiles:
                     capture_output=True,
                     shell=True,
                     text=True,
-                ),
+                )
             ] + [
                 call(
                     f"/mock/lmod python load {mod}",
@@ -105,21 +110,19 @@ class TestSetupEnvironmentFromFiles:
 
             mock_run.assert_has_calls(expected_calls, any_order=False)
 
-    def get_expected_lmod_modules(self, env):
-        """Retrieves the expected list of Lmod modules for a given system from a .lmod
+    def get_expected_lmod_modules(self, env: CStarEnvironment) -> list[str]:
+        """Retrieve the expected list of Lmod modules for a given system from a .lmod
         file.
 
         Returns
         -------
         lmod_list: Module names to be loaded, based on the system's `.lmod` file.
         """
-
         lmod_file_path = (
-            f"{env.package_root}/additional_files/lmod_lists/{env._system_name}.lmod"
+            f"{env.package_root}/additional_files/lmod_lists/{env._system_name}.lmod"  # noqa: SLF001
         )
-        with open(lmod_file_path) as file:
-            lmod_list = file.readlines()
-            return lmod_list
+        with open(lmod_file_path) as file:  # noqa: PTH123
+            return file.readlines()
 
     @patch.dict(
         "os.environ",
@@ -132,11 +135,8 @@ class TestSetupEnvironmentFromFiles:
         clear=True,
     )
     def test_env_file_loading(
-        self,
-        tmp_path: Path,
-        dotenv_path: Path,
-        system_dotenv_path: Path,
-    ):
+        self, tmp_path: Path, dotenv_path: Path, system_dotenv_path: Path
+    ) -> None:
         """Tests that environment variables are loaded and expanded correctly from .env
         files.
 
@@ -149,7 +149,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         - Confirms merged environment variables with expected values after expansion.
         """
-
         # Write simulated system .env content to the appropriate location
         system_dotenv_path.write_text(
             "NETCDFHOME=${NETCDF_FORTRANHOME}/\n"
@@ -197,7 +196,7 @@ class TestSetupEnvironmentFromFiles:
         mock_system_name: str,
         system_dotenv_path: Path,
         tmp_path: Path,
-    ):
+    ) -> None:
         """Tests that environment variables are updated correctly in the user .env file.
 
         Mocks
@@ -209,7 +208,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         - Confirms merged environment variables with expected values after expansion.
         """
-
         # Write simulated system .env content to the appropriate location
         exp_system_env = {
             "NETCDFHOME": "${NETCDF_FORTRANHOME}/",
@@ -286,7 +284,7 @@ class TestStrAndReprMethods:
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
-    def test_str_method(self, _mock_uses_lmod):
+    def test_str_method(self, _mock_uses_lmod: PropertyMock) -> None:  # noqa: PT019
         """Tests that __str__ produces a formatted, readable summary.
 
         Mocks
@@ -299,11 +297,9 @@ class TestStrAndReprMethods:
           like system name, scheduler, compiler, primary queue, and environment variables.
         """
         # Set up our mock environment with some sample properties
-        with (
-            patch.object(
-                MockEnvironment, "environment_variables", new_callable=PropertyMock
-            ) as mock_env_vars,
-        ):
+        with patch.object(
+            MockEnvironment, "environment_variables", new_callable=PropertyMock
+        ) as mock_env_vars:
             mock_env_vars.return_value = {"VAR1": "value1", "VAR2": "value2"}
 
             env = MockEnvironment()
@@ -326,7 +322,7 @@ class TestStrAndReprMethods:
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
-    def test_repr_method(self, _mock_uses_lmod):
+    def test_repr_method(self, _mock_uses_lmod: PropertyMock) -> None:  # noqa: PT019
         """Tests that __repr__ produces a detailed, state-reflective representation.
 
         Mocks
@@ -364,8 +360,8 @@ class TestExceptions:
     - test_cores_per_node_raises_error_when_cpu_count_is_none: Confirms error when cpu_count is None.
     """
 
-    def setup_method(self):
-        """Sets up common patches for subprocess and environment variables.
+    def setup_method(self) -> None:
+        """Set up common patches for subprocess and environment variables.
 
         Mocks
         -----
@@ -373,7 +369,6 @@ class TestExceptions:
         - CStarEnvironment.uses_lmod: Patched to simulate environments that use or don’t use Lmod.
         - os.environ: Cleared and patched with specific values for test isolation.
         """
-
         self.subprocess_patcher = patch(
             "cstar.base.utils.subprocess.run",
             return_value=subprocess.CompletedProcess(args="module reset", returncode=0),
@@ -391,16 +386,17 @@ class TestExceptions:
         )
         self.os_environ_patcher.start()
 
-    def teardown_method(self):
-        """Stops all patches after each test."""
+    def teardown_method(self) -> None:
+        """Stop all patches after each test."""
         self.subprocess_patcher.stop()
         self.uses_lmod_patcher.stop()
         self.os_environ_patcher.stop()
 
     @patch("cstar.system.environment.importlib.util.find_spec", return_value=None)
     def test_package_root_raises_import_error_when_package_not_found(
-        self, mock_find_spec
-    ):
+        self,
+        mock_find_spec: Mock,  # noqa: ARG002
+    ) -> None:
         """Tests that missing package spec raises an ImportError in package_root
         property.
 
@@ -414,9 +410,11 @@ class TestExceptions:
         """
         self.mock_uses_lmod.return_value = False
         with pytest.raises(ImportError, match="Top-level package '.*' not found"):
-            MockEnvironment().package_root
+            _ = MockEnvironment().package_root
 
-    def test_load_lmod_modules_raises_environment_error_when_lmod_not_used(self):
+    def test_load_lmod_modules_raises_environment_error_when_lmod_not_used(
+        self,
+    ) -> None:
         """Tests that load_lmod_modules raises an EnvironmentError if Lmod is not used.
 
         Mocks
@@ -427,12 +425,12 @@ class TestExceptions:
         -------
         - Raises EnvironmentError with a message indicating Lmod modules are not supported on the system.
         """
-
         self.mock_uses_lmod.return_value = False
+        env = MockEnvironment()
+
         with pytest.raises(
             EnvironmentError, match="does not appear to use Linux Environment Modules"
         ):
-            env = MockEnvironment()
             env.load_lmod_modules(lmod_file="/some/file")
 
     @patch.dict(
@@ -440,8 +438,8 @@ class TestExceptions:
     )
     @patch("cstar.base.utils.subprocess.run")
     def test_load_lmod_modules_raises_runtime_error_on_module_reset_failure(
-        self, mock_subprocess
-    ):
+        self, mock_subprocess: Mock
+    ) -> None:
         """Tests that a RuntimeError is raised if `module reset` fails.
 
         Mocks
@@ -454,7 +452,6 @@ class TestExceptions:
         - Raises RuntimeError with a message indicating failure of the "module reset" command.
         - subprocess.run is called with the expected command for `module reset`.
         """
-
         mock_subprocess.return_value.returncode = 1  # Simulate failure
         mock_subprocess.return_value.stderr = "Module reset error"
 
@@ -477,8 +474,9 @@ class TestExceptions:
     )
     @patch("builtins.open", new_callable=mock_open, read_data="module1\nmodule2\n")
     def test_load_lmod_modules_raises_runtime_error_on_module_load_failure(
-        self, mock_open_file
-    ):
+        self,
+        mock_open: Mock,  # noqa: ARG002
+    ) -> None:
         """Tests that a RuntimeError is raised if `module load` fails.
 
         Mocks
@@ -491,7 +489,6 @@ class TestExceptions:
         - Raises RuntimeError with a message indicating failure of the "module load" command.
         - subprocess.run is called with the expected commands `reset` and `load`
         """
-
         # Define side effects for subprocess.run
         side_effects = [
             subprocess.CompletedProcess(

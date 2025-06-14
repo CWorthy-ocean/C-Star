@@ -1,5 +1,7 @@
 import logging
-from unittest.mock import MagicMock, PropertyMock, patch
+from collections.abc import Callable
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -33,8 +35,8 @@ class TestSlurmJob:
         Verifies the status retrieval logic for various job states and scenarios.
     """
 
-    def setup_method(self, method):
-        """Sets up the common parameters and objects needed for tests in `TestSlurmJob`.
+    def setup_method(self, method: Callable) -> None:  # noqa: ARG002
+        """Set up the common parameters and objects needed for tests in `TestSlurmJob`.
 
         This method initializes a mocked SLURM queue and scheduler, along with a set of
         common job parameters and mock environment variables, to be used across multiple tests.
@@ -55,7 +57,6 @@ class TestSlurmJob:
           `scheduler`, `commands`, `account_key`, `cpus`, `walltime`, and more.
         - mock_env_vars: A dictionary simulating environment variables.
         """
-
         # Create a SlurmQOS and patch its max_walltime property
         self.mock_qos = SlurmQOS(name="test_queue", query_name="test_queue")
         self.mock_partition = SlurmPartition(name="test_queue")
@@ -101,17 +102,16 @@ class TestSlurmJob:
             "LD_LIBRARY_PATH": "/mock/lib",
         }
 
-    def teardown_method(self, method):
-        self.patch_qos_properties.stop()  # Stop the patch_queue_properties to restore the original behavior
+    def teardown_method(self, method: Callable) -> None:  # noqa: ARG002
+        """Stop the patch_queue_properties to restore the original behavior."""
+        self.patch_qos_properties.stop()
         self.patch_partition_properties.stop()
 
-    def test_script_task_distribution_not_required(self):
+    def test_script_task_distribution_not_required(self) -> None:
         """Verifies that the correct script is generated when the node x cpu breakdown
         is not required."""
         # Initialize the job
-        job = SlurmJob(
-            **self.common_job_params,
-        )
+        job = SlurmJob(**self.common_job_params)  # type: ignore[arg-type]
 
         expected_script = (
             "#!/bin/bash\n"
@@ -139,9 +139,8 @@ class TestSlurmJob:
         new_callable=PropertyMock,
     )
     def test_script_task_distribution_required(
-        self,
-        mock_global_max_cpus,
-    ):
+        self, mock_global_max_cpus: MagicMock
+    ) -> None:
         """Verifies the job script is correctly generated when the nodes x cpu
         distribution is required by the system.
 
@@ -158,21 +157,16 @@ class TestSlurmJob:
         -------
         - That the generated job script matches a pre-specified expected script
         """
-
         mock_global_max_cpus.return_value = 64
 
         params = self.common_job_params
         new_scheduler = self.scheduler
-        new_scheduler.queues = [
-            self.mock_partition,
-        ]
+        new_scheduler.queues = [self.mock_partition]
         new_scheduler.requires_task_distribution = True
         params.update({"scheduler": new_scheduler})
 
         # Initialize the job
-        job = SlurmJob(
-            **params,
-        )
+        job = SlurmJob(**params)  # type: ignore[arg-type]
 
         expected_script = (
             "#!/bin/bash\n"
@@ -202,7 +196,9 @@ class TestSlurmJob:
         clear=True,
     )
     @patch("subprocess.run")
-    def test_submit(self, mock_subprocess, mock_environment, tmp_path):
+    def test_submit(
+        self, mock_subprocess: Mock, mock_environment: PropertyMock, tmp_path: Path
+    ) -> None:
         """Ensures that the `submit` method properly submits a SLURM job and sets the
         job ID.
 
@@ -226,7 +222,6 @@ class TestSlurmJob:
         - That the `sbatch` command is executed with the correct arguments.
         - That the job ID is correctly extracted and assigned.
         """
-
         # Mock environment
         mock_environment.return_value.environment_variables = self.mock_env_vars
         mock_environment.return_value.uses_lmod = False
@@ -242,7 +237,7 @@ class TestSlurmJob:
 
         # Initialize the job
         job = SlurmJob(
-            **self.common_job_params,
+            **self.common_job_params,  # type: ignore[arg-type]
             script_path=script_path,
             run_path=run_path,
         )
@@ -274,7 +269,7 @@ class TestSlurmJob:
         assert job.id == 12345
 
     @pytest.mark.parametrize(
-        "subprocess_stdout, subprocess_returncode, expected_exception_message",
+        ("subprocess_stdout", "subprocess_returncode", "expected_exception_message"),
         [
             # Case 1: Non-zero return code from subprocess.run
             (
@@ -293,12 +288,12 @@ class TestSlurmJob:
     @patch("subprocess.run")
     def test_submit_raises(
         self,
-        mock_subprocess,
-        tmp_path,
-        subprocess_stdout,
-        subprocess_returncode,
-        expected_exception_message,
-    ):
+        mock_subprocess: Mock,
+        tmp_path: Path,
+        subprocess_stdout: str,
+        subprocess_returncode: int,
+        expected_exception_message: str,
+    ) -> None:
         """Ensures that `submit` raises a `RuntimeError` for invalid `sbatch` responses
         or errors.
 
@@ -319,7 +314,6 @@ class TestSlurmJob:
         -------
         - That a `RuntimeError` is raised with the expected message for each failure scenario.
         """
-
         # Mock the subprocess.run behavior
         mock_subprocess.return_value = MagicMock(
             returncode=subprocess_returncode,
@@ -333,7 +327,7 @@ class TestSlurmJob:
 
         # Initialize the job
         job = SlurmJob(
-            **self.common_job_params,
+            **self.common_job_params,  # type: ignore[arg-type]
             script_path=script_path,
             run_path=run_path,
         )
@@ -344,7 +338,13 @@ class TestSlurmJob:
 
     @patch("subprocess.run")
     @patch("cstar.execution.scheduler_job.SlurmJob.status", new_callable=PropertyMock)
-    def test_cancel(self, mock_status, mock_subprocess, tmp_path, log: logging.Logger):
+    def test_cancel(
+        self,
+        mock_status: Mock,
+        mock_subprocess: Mock,
+        tmp_path: Path,
+        log: logging.Logger,
+    ) -> None:
         """Verifies that the `cancel` method cancels a SLURM job and raises an exception
         if it fails.
 
@@ -367,7 +367,6 @@ class TestSlurmJob:
         - That the job is successfully canceled when `scancel` succeeds.
         - That a `RuntimeError` is raised with an appropriate error message when `scancel` fails.
         """
-
         # Create a temporary directory for the job run path
         run_path = tmp_path
 
@@ -379,10 +378,10 @@ class TestSlurmJob:
 
         # Initialize the job with a set job ID
         job = SlurmJob(
-            **self.common_job_params,
+            **self.common_job_params,  # type: ignore[arg-type]
             run_path=run_path,
         )
-        job._id = 12345  # Manually set the job ID
+        job._id = 12345  # Manually set the job ID  # noqa: SLF001
 
         # Call cancel
         job.cancel()
@@ -422,7 +421,7 @@ class TestSlurmJob:
             text=True,
         )
 
-    def test_save_script(self, tmp_path):
+    def test_save_script(self, tmp_path: Path) -> None:
         """Tests the `save_script` method, creating a temporary job script file and
         checking its content.
 
@@ -435,13 +434,12 @@ class TestSlurmJob:
         - That the job script file is created at the specified path.
         - That the content of the created file matches the expected script.
         """
-
         # Define paths for the script file
         script_path = tmp_path / "test_job.sh"
 
         # Initialize the job
         job = SlurmJob(
-            **self.common_job_params,
+            **self.common_job_params,  # type: ignore[arg-type]
             script_path=script_path,
         )
 
@@ -461,7 +459,7 @@ class TestSlurmJob:
 
     @patch("subprocess.run")
     @pytest.mark.parametrize(
-        "job_id, sacct_output, return_code, expected_status, should_raise",
+        ("job_id", "sacct_output", "return_code", "expected_status", "should_raise"),
         [
             (None, "", 0, ExecutionStatus.UNSUBMITTED, False),  # Unsubmitted job
             (12345, "PENDING\n", 0, ExecutionStatus.PENDING, False),  # Pending job
@@ -486,13 +484,13 @@ class TestSlurmJob:
     )
     def test_status(
         self,
-        mock_subprocess,
-        job_id,
-        sacct_output,
-        return_code,
-        expected_status,
-        should_raise,
-    ):
+        mock_subprocess: Mock,
+        job_id: int,
+        sacct_output: str,
+        return_code: int,
+        expected_status: int,
+        should_raise: bool,
+    ) -> None:
         """Verifies the status retrieval logic for a SLURM job using the `sacct`
         command.
 
@@ -514,13 +512,12 @@ class TestSlurmJob:
         - That the job status matches the expected state for valid `sacct` outputs.
         - That a `RuntimeError` is raised when `sacct` fails or returns invalid data.
         """
-
         # Initialize the job
-        job = SlurmJob(**self.common_job_params)
+        job = SlurmJob(**self.common_job_params)  # type: ignore[arg-type]
 
         # Set the job ID if provided
         if job_id is not None:
-            job._id = job_id
+            job._id = job_id  # noqa: SLF001
 
         # Mock subprocess.run behavior
         mock_subprocess.return_value = MagicMock(
@@ -534,7 +531,7 @@ class TestSlurmJob:
             with pytest.raises(
                 RuntimeError, match="Failed to retrieve job status using sacct"
             ):
-                job.status
+                _ = job.status
         else:
             assert (
                 job.status == expected_status

@@ -1,4 +1,7 @@
 import logging
+import textwrap
+from collections.abc import Generator
+from unittest import mock
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -18,9 +21,10 @@ from cstar.system.scheduler import (
 class MockQueue(Queue):
     """Mock subclass of the Queue ABC used for testing."""
 
-    def max_walltime(self):
+    @property
+    def max_walltime(self) -> str:
         """Mock implementation of the max_walltime abstractmethod for Queue."""
-        pass
+        return "1000"
 
 
 class TestQueue:
@@ -51,7 +55,7 @@ class TestQueue:
     """
 
     @pytest.fixture
-    def mock_subprocess_run(self):
+    def mock_subprocess_run(self) -> Generator[mock.Mock, None, None]:
         """Mock subprocess.run for testing system command execution.
 
         This fixture ensures that subprocess.run calls are intercepted,
@@ -66,19 +70,19 @@ class TestQueue:
         with patch("subprocess.run") as mock_run:
             yield mock_run
 
-    def test_queue_initialization(self):
+    def test_queue_initialization(self) -> None:
         """Verify initialization of a basic Queue object."""
         queue = MockQueue(name="general")
         assert queue.name == "general"
         assert queue.query_name == "general"  # Default to the same name
 
-    def test_queue_initialization_with_query_name(self):
+    def test_queue_initialization_with_query_name(self) -> None:
         """Ensure query_name is correctly set when explicitly provided."""
         queue = MockQueue(name="general", query_name="specific")
         assert queue.name == "general"
         assert queue.query_name == "specific"
 
-    def test_slurmqos_max_walltime(self, mock_subprocess_run):
+    def test_slurmqos_max_walltime(self, mock_subprocess_run: mock.Mock) -> None:
         """Test the max_walltime property of SlurmQOS.
 
         Simulates a successful system command to retrieve the maximum walltime.
@@ -96,7 +100,7 @@ class TestQueue:
             capture_output=True,
         )
 
-    def test_slurmpartition_max_walltime(self, mock_subprocess_run):
+    def test_slurmpartition_max_walltime(self, mock_subprocess_run: mock.Mock) -> None:
         """Test the max_walltime property of SlurmPartition.
 
         Simulates a successful system command to retrieve the maximum walltime.
@@ -114,7 +118,7 @@ class TestQueue:
             capture_output=True,
         )
 
-    def test_pbsqueue_initialization(self):
+    def test_pbsqueue_initialization(self) -> None:
         """Test initialization of a PBSQueue with max_walltime."""
         pbs_queue = PBSQueue(name="batch", max_walltime="72:00:00")
         assert pbs_queue.name == "batch"
@@ -159,7 +163,7 @@ class TestScheduler:
     """
 
     @pytest.fixture
-    def mock_subprocess_run(self):
+    def mock_subprocess_run(self) -> Generator[mock.Mock, None, None]:
         """Mock subprocess.run for testing system command execution.
 
         This fixture ensures that subprocess.run calls are intercepted,
@@ -174,7 +178,7 @@ class TestScheduler:
         with patch("subprocess.run") as mock_run:
             yield mock_run
 
-    def test_scheduler_initialization(self):
+    def test_scheduler_initialization(self) -> None:
         """Verify initialization of a Scheduler instance from a list of queues."""
         queue1 = MockQueue(name="general")
         queue2 = MockQueue(name="batch")
@@ -187,7 +191,7 @@ class TestScheduler:
         assert scheduler.queue_names == ["general", "batch"]
         assert scheduler.other_scheduler_directives == {}
 
-    def test_scheduler_get_queue(self):
+    def test_scheduler_get_queue(self) -> None:
         """Ensure that queues can be retrieved by name, and missing queues raise a
         ValueError."""
         queue1 = MockQueue(name="general")
@@ -202,7 +206,9 @@ class TestScheduler:
         with pytest.raises(ValueError, match="not found in list of queues"):
             scheduler.get_queue("nonexistent")
 
-    def test_slurmscheduler_global_max_cpus_per_node_success(self, mock_subprocess_run):
+    def test_slurmscheduler_global_max_cpus_per_node_success(
+        self, mock_subprocess_run: mock.Mock
+    ) -> None:
         """Confirm SlurmScheduler queries and sets the maximum CPUs per node
         successfully.
 
@@ -224,8 +230,8 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, caplog: pytest.CaptureFixture
-    ):
+        self, mock_subprocess_run: mock.Mock, caplog: pytest.CaptureFixture
+    ) -> None:
         """Validate SlurmScheduler handles subprocess failures when querying CPUs.
 
         Captures printed error messages to ensure the failure is logged correctly.
@@ -254,8 +260,8 @@ class TestScheduler:
         assert "STDERR:\nError querying CPUs" in captured
 
     def test_slurmscheduler_global_max_mem_per_node_gb_success(
-        self, mock_subprocess_run
-    ):
+        self, mock_subprocess_run: mock.Mock
+    ) -> None:
         """Confirm SlurmScheduler queries and sets maximum memory per node in GB
         successfully.
 
@@ -277,8 +283,8 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_mem_per_node_gb_failure(
-        self, mock_subprocess_run, caplog: pytest.CaptureFixture
-    ):
+        self, mock_subprocess_run: mock.Mock, caplog: pytest.CaptureFixture
+    ) -> None:
         """Validate SlurmScheduler handles subprocess failures when querying memory.
 
         Captures printed error messages to ensure the failure is logged correctly.
@@ -306,7 +312,10 @@ class TestScheduler:
         assert "Error querying node property." in captured
         assert "STDERR:\nError querying memory" in captured
 
-    def test_pbsscheduler_global_max_cpus_per_node_success(self, mock_subprocess_run):
+    def test_pbsscheduler_global_max_cpus_per_node_success(
+        self,
+        mock_subprocess_run: mock.Mock,
+    ) -> None:
         """Confirm PBSScheduler queries and sets the maximum CPUs per node successfully.
 
         Uses mock_subprocess_run to simulate a successful system command output.
@@ -327,8 +336,8 @@ class TestScheduler:
         )
 
     def test_pbsscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, caplog: pytest.CaptureFixture
-    ):
+        self, mock_subprocess_run: mock.Mock, caplog: pytest.CaptureFixture
+    ) -> None:
         """Validate PBSScheduler handles subprocess failures when querying CPUs.
 
         Captures printed error messages to ensure the failure is logged correctly.
@@ -344,7 +353,6 @@ class TestScheduler:
         -------
         - An appropriate error message is logged
         """
-
         caplog.set_level(logging.DEBUG, logger="cstar.base.utils.log")
 
         mock_subprocess_run.return_value = MagicMock(
@@ -360,8 +368,8 @@ class TestScheduler:
         assert "STDERR:\nError querying CPUs" in captured
 
     def test_pbsscheduler_global_max_mem_per_node_gb_failure(
-        self, mock_subprocess_run, caplog: pytest.CaptureFixture
-    ):
+        self, mock_subprocess_run: mock.Mock, caplog: pytest.CaptureFixture
+    ) -> None:
         """Validate PBSScheduler handles subprocess failures when querying memory.
 
         Captures printed error messages to ensure the failure is logged correctly.
@@ -377,7 +385,6 @@ class TestScheduler:
         -------
         - An appropriate error message is logged
         """
-
         caplog.set_level(logging.DEBUG, logger="cstar.base.utils.log")
 
         mock_subprocess_run.return_value = MagicMock(
@@ -393,7 +400,7 @@ class TestScheduler:
         assert "STDERR:\nError querying memory" in captured
 
     @pytest.mark.parametrize(
-        "stdout,expected",
+        ("stdout", "expected"),
         [
             ("1048576kb", 1.0),  # Kilobytes to gigabytes
             ("1024mb", 1.0),  # Megabytes to gigabytes
@@ -402,7 +409,9 @@ class TestScheduler:
             ("", None),  # Empty output
         ],
     )
-    def test_pbsscheduler_global_max_mem_per_node_gb(self, stdout, expected):
+    def test_pbsscheduler_global_max_mem_per_node_gb(
+        self, stdout: str, expected: float | None
+    ) -> None:
         """Parameterized test for PBSScheduler.global_max_mem_per_node_gb.
 
         Tests various memory formats (kb, mb, gb) and ensures correct conversions or
@@ -429,7 +438,7 @@ class TestStrAndRepr:
     """Unit tests for the __str__ and __repr__ methods of Queue, Scheduler, and their
     respective subclasses."""
 
-    def test_slurmqos_str(self):
+    def test_slurmqos_str(self) -> None:
         """Test __str__ for SlurmQueue."""
         queue = SlurmQOS(name="main")
         with (
@@ -440,18 +449,24 @@ class TestStrAndRepr:
                 return_value="09:00:00",
             ),
         ):
-            expected = (
-                "SlurmQOS:\n" "--------\n" "name: main\n" "max_walltime: 09:00:00\n"
+            expected = textwrap.dedent(
+                """\
+                SlurmQOS:
+                --------
+                name: main
+                max_walltime: 09:00:00
+                """
             )
+
             assert str(queue) == expected
 
-    def test_slurmqos_repr(self):
+    def test_slurmqos_repr(self) -> None:
         """Test __repr__ for SlurmQOS."""
         queue = SlurmQOS(name="main")
         expected = "SlurmQOS(name='main', query_name='main')"
         assert repr(queue) == expected
 
-    def test_slurmpartition_str(self):
+    def test_slurmpartition_str(self) -> None:
         """Test __str__ for SlurmPartition."""
         queue = SlurmPartition(name="main")
         with (
@@ -470,25 +485,32 @@ class TestStrAndRepr:
             )
             assert str(queue) == expected
 
-    def test_slurmpartition_repr(self):
+    def test_slurmpartition_repr(self) -> None:
         """Test __repr__ for SlurmPartition."""
         queue = SlurmPartition(name="main")
         expected = "SlurmPartition(name='main', query_name='main')"
         assert repr(queue) == expected
 
-    def test_pbsqueue_str(self):
+    def test_pbsqueue_str(self) -> None:
         """Test __str__ for PBSQueue."""
         queue = PBSQueue(name="batch", max_walltime="72:00:00")
-        expected = "PBSQueue:\n" "--------\n" "name: batch\n" "max_walltime: 72:00:00\n"
+        expected = textwrap.dedent(
+            """\
+            PBSQueue:
+            --------
+            name: batch
+            max_walltime: 72:00:00
+            """
+        )
         assert str(queue) == expected
 
-    def test_pbsqueue_repr(self):
+    def test_pbsqueue_repr(self) -> None:
         """Test __repr__ for PBSQueue."""
         queue = PBSQueue(name="batch", max_walltime="72:00:00")
         expected = "PBSQueue(name='batch', query_name='batch', max_walltime='72:00:00')"
         assert repr(queue) == expected
 
-    def test_slurmscheduler_str(self):
+    def test_slurmscheduler_str(self) -> None:
         """Test __str__ for SlurmScheduler."""
         queues = [SlurmQOS(name="main"), SlurmQOS(name="backup")]
         scheduler = SlurmScheduler(
@@ -524,7 +546,7 @@ class TestStrAndRepr:
             )
             assert str(scheduler) == expected
 
-    def test_slurmscheduler_repr(self):
+    def test_slurmscheduler_repr(self) -> None:
         """Test __repr__ for SlurmScheduler."""
         queues = [SlurmQOS(name="main"), SlurmQOS(name="backup")]
         scheduler = SlurmScheduler(
@@ -541,7 +563,7 @@ class TestStrAndRepr:
         )
         assert repr(scheduler) == expected
 
-    def test_pbsscheduler_str(self):
+    def test_pbsscheduler_str(self) -> None:
         """Test __str__ for PBSScheduler."""
         queues = [PBSQueue(name="batch", max_walltime="72:00:00")]
         scheduler = PBSScheduler(
@@ -577,7 +599,7 @@ class TestStrAndRepr:
             )
             assert str(scheduler) == expected
 
-    def test_pbsscheduler_repr(self):
+    def test_pbsscheduler_repr(self) -> None:
         """Test __repr__ for PBSScheduler."""
         queues = [PBSQueue(name="batch", max_walltime="72:00:00")]
         scheduler = PBSScheduler(

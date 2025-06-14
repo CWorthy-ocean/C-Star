@@ -7,28 +7,30 @@ from cstar.system.manager import cstar_sysmgr
 
 
 class MARBLExternalCodeBase(ExternalCodeBase):
-    """An implementation of the ExternalCodeBase class for the Marine Biogeochemistry
-    Library.
+    """An ExternalCodeBase using the Marine Biogeochemistry Library.
 
     This subclass sets unique values for ExternalCodeBase properties specific to MARBL, and overrides
     the get() method to compile MARBL.
 
-    Methods:
-    --------
+    Methods
+    -------
     get()
         overrides ExternalCodeBase.get() to clone the MARBL repository, set environment, and compile library.
     """
 
     @property
     def default_source_repo(self) -> str:
+        """Return the default source repository for this codebase."""
         return "https://github.com/marbl-ecosys/MARBL.git"
 
     @property
     def default_checkout_target(self) -> str:
+        """Return the default checkout target for this codebase."""
         return "marbl0.45.0"
 
     @property
     def expected_env_var(self) -> str:
+        """Return the environment variable name specifying the codebase location."""
         return "MARBL_ROOT"
 
     def get(self, target: str | Path) -> None:
@@ -40,8 +42,8 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         3. Sets environment variable MARBL_ROOT
         4. Compiles MARBL
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         target: str
             The local path where MARBL will be cloned and compiled
         """

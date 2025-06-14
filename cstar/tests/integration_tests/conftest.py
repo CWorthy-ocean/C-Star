@@ -1,21 +1,22 @@
-import builtins
 import logging
-from contextlib import contextmanager
+from collections.abc import Callable, Generator
+from contextlib import _GeneratorContextManager, contextmanager
+from unittest import mock
 
 import pytest
 
 from cstar.base.log import get_logger
 from cstar.tests.integration_tests.blueprints.fixtures import (
-    modify_template_blueprint,  # noqa : F401  # noqa : F401
+    modify_template_blueprint,  # noqa : F401
 )
 from cstar.tests.integration_tests.fixtures import (
-    fetch_remote_test_case_data,  # noqa: F401  # noqa: F401
-    fetch_roms_tools_source_data,  # noqa: F401  # noqa: F401
+    fetch_remote_test_case_data,  # noqa: F401
+    fetch_roms_tools_source_data,  # noqa: F401
 )
 
 
 @pytest.fixture
-def mock_user_input():
+def mock_user_input() -> Callable[[str], _GeneratorContextManager[Callable[..., str]]]:
     """Monkeypatch which will automatically respond to any call for input.
 
     Use it like this:
@@ -28,21 +29,16 @@ def mock_user_input():
     """
 
     @contextmanager
-    def _mock_input(input_string):
-        original_input = builtins.input
-
-        def mock_input_function(_):
-            return input_string
-
-        builtins.input = mock_input_function
-        try:
-            yield
-        finally:
-            builtins.input = original_input
+    def _mock_input(
+        input_string: str,
+    ) -> Generator[_GeneratorContextManager[Callable[..., str]], None, None]:
+        with mock.patch("builtins.input", return_value=input_string) as _:
+            yield _
 
     return _mock_input
 
 
 @pytest.fixture
 def log() -> logging.Logger:
+    """Retrieve a logger instance for logging during tests."""
     return get_logger("cstar.tests.integration_tests")

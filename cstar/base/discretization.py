@@ -1,36 +1,29 @@
-from abc import ABC
-
-
-class Discretization(ABC):
+class Discretization:
     """Holds discretization information about a Component.
 
-    Attributes:
-    -----------
-
+    Attributes
+    ----------
     time_step: int
         The time step with which to run the Component
     """
 
-    def __init__(
-        self,
-        time_step: int,
-    ):
+    def __init__(self, time_step: int) -> None:
         """Initialize a Discretization object from basic discretization parameters.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         time_step: int
             The time step with which to run the Component
 
-        Returns:
-        --------
+        Returns
+        -------
         Discretization:
             An initialized Discretization object
         """
-
         self.time_step: int = time_step
 
     def __str__(self) -> str:
+        """Return a human-readable string representation."""
         # Discretisation
         disc_str = ""
 
@@ -44,6 +37,7 @@ class Discretization(ABC):
         return disc_str
 
     def __repr__(self) -> str:
+        """Return a constructor-style string representation."""
         repr_str = ""
         repr_str = f"{self.__class__.__name__}("
         if hasattr(self, "time_step") and self.time_step is not None:

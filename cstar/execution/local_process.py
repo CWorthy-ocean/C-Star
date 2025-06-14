@@ -1,9 +1,12 @@
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+
+if TYPE_CHECKING:
+    from io import TextIOWrapper
 
 
 class LocalProcess(ExecutionHandler):
@@ -40,9 +43,9 @@ class LocalProcess(ExecutionHandler):
     def __init__(
         self,
         commands: str,
-        output_file: Optional[str | Path] = None,
-        run_path: Optional[str | Path] = None,
-    ):
+        output_file: str | Path | None = None,
+        run_path: str | Path | None = None,
+    ) -> None:
         """Initialize a `LocalProcess` instance.
 
         Parameters
@@ -57,22 +60,21 @@ class LocalProcess(ExecutionHandler):
             The directory from which the subprocess will be executed.
             Defaults to the current working directory.
         """
-
         self.commands = commands
         self.run_path = Path(run_path) if run_path is not None else Path.cwd()
-        self._default_name = (
-            f"cstar_process_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
-        )
+        dt_string = datetime.strftime(datetime.now(), "%Y%m%d_%H%M%S")
+        self._default_name = f"cstar_process_{dt_string}"
         self._output_file = (
             Path(output_file) if output_file is not None else output_file
         )
 
-        self._output_file_handle = None
-        self._process = None
-        self._returncode = None
+        self._output_file_handle: TextIOWrapper | None = None
+        self._process: subprocess.Popen[bytes] | None = None
+        self._returncode: int | None = None
         self._cancelled = False
 
     def __str__(self) -> str:
+        """Return a human-readable string representation."""
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nCommands: {self.commands}"
@@ -83,6 +85,7 @@ class LocalProcess(ExecutionHandler):
         return base_str
 
     def __repr__(self) -> str:
+        """Return a constructor-style string representation."""
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\ncommands = {self.commands!r},"
         repr_str += f"\noutput_file = {self.output_file!r},"
@@ -93,7 +96,7 @@ class LocalProcess(ExecutionHandler):
 
         return repr_str
 
-    def start(self):
+    def start(self) -> None:
         """Start the local process.
 
         This method initiates the execution of the command specified during
@@ -110,17 +113,17 @@ class LocalProcess(ExecutionHandler):
         --------
         cancel : Terminates the running subprocess.
         """
-
         # Open the output file to write to
-        self._output_file_handle = open(self.output_file, "w")
+        self._output_file_handle = open(self.output_file, "w")  # noqa: PTH123, SIM115
         local_process = subprocess.Popen(
             self.commands.split(),
-            # shell=True,
             cwd=self.run_path,
             stdin=subprocess.PIPE,
             stdout=self._output_file_handle,
             stderr=subprocess.STDOUT,
         )
+        if local_process is None:
+            raise RuntimeError(f"Process did not start correctly {self.commands}")
         self._process = local_process
 
     @property
@@ -153,8 +156,8 @@ class LocalProcess(ExecutionHandler):
         if self._process is not None:
             if self._process.poll() is None:
                 return ExecutionStatus.RUNNING
-            else:
-                self._drop_process()
+
+            self._drop_process()
 
         if self._cancelled:
             return ExecutionStatus.CANCELLED
@@ -179,22 +182,23 @@ class LocalProcess(ExecutionHandler):
         If the _process attribute is not set, no action is taken.
         If it is set to a running process, a RuntimeError is raised.
         """
-
         if self._process is None:
             return
-        elif self._process.poll() is not None:
+
+        if self._process.poll() is not None:
             self._returncode = self._process.returncode
             self._process = None
         else:
             raise RuntimeError(
-                "LocalProcess._drop_process() called on still-active process. Await completion or use LocalProcess.cancel()"
+                "LocalProcess._drop_process() called on still-active process. "
+                "Await completion or use LocalProcess.cancel()"
             )
 
         if self._output_file_handle:
             self._output_file_handle.close()
             self._output_file_handle = None
 
-    def cancel(self):
+    def cancel(self) -> None:
         """Cancel the local process.
 
         This method terminates the subprocess if it is currently running.
@@ -213,7 +217,6 @@ class LocalProcess(ExecutionHandler):
         --------
         wait : Wait for the local process to finish
         """
-
         if self._process and self.status == ExecutionStatus.RUNNING:
             try:
                 self._process.terminate()  # Send SIGTERM to allow graceful shutdown
@@ -230,16 +233,16 @@ class LocalProcess(ExecutionHandler):
             self.log.info(f"Cannot cancel job with status '{self.status}'")
             return
 
-    def wait(self):
+    def wait(self) -> None:
         """Wait for the local process to finish.
 
         See Also
         --------
         cancel : end the current process
         """
-
         if self.status == ExecutionStatus.RUNNING:
-            self._process.wait()
+            if self._process is not None:
+                self._process.wait()
         else:
             self.log.info(
                 f"Cannot wait for process with execution status '{self.status}'"

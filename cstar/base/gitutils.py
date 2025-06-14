@@ -6,7 +6,7 @@ from cstar.base.utils import _run_cmd
 
 
 def _clone(source_repo: str, local_path: str | Path) -> None:
-    """Clone `source_repo` to `local_path`"""
+    """Clone `source_repo` to `local_path`."""
     _run_cmd(
         f"git clone {source_repo} {local_path}",
         msg_pre=f"Cloning `{source_repo}`",
@@ -36,8 +36,13 @@ def _clone_and_checkout(
 
 
 def _get_repo_remote(local_path: str | Path) -> str:
-    """Take a local repository path string (local_path) and return as a string the
-    remote URL."""
+    """Return the remote repository for the code located in the supplied path.
+
+    Parameters
+    ----------
+    local_path : str or Path
+        The local path containing a git repository.
+    """
     return _run_cmd(
         f"git -C {local_path} remote get-url origin",
         msg_pre=f"Retrieving URL for remote in repository `{local_path}`.",
@@ -47,8 +52,13 @@ def _get_repo_remote(local_path: str | Path) -> str:
 
 
 def _get_repo_head_hash(local_path: str | Path) -> str:
-    """Take a local repository path string (local_path) and return as a string the
-    commit hash of HEAD."""
+    """Return the commit hash of HEAD for the code located in the supplied path.
+
+    Parameters
+    ----------
+    local_path : str or Path
+        The local path containing a git repository.
+    """
     return _run_cmd(
         f"git -C {local_path} rev-parse HEAD",
         msg_pre=f"Retrieving commit hash for repository `{local_path}`.",
@@ -58,26 +68,27 @@ def _get_repo_head_hash(local_path: str | Path) -> str:
 
 
 def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
-    """Take a git checkout target (any `arg` accepted by `git checkout arg`) and return
+    """Return the commit hash for the supplied repository and checkout target.
+
+    Take a git checkout target (any `arg` accepted by `git checkout arg`) and return
     a commit hash.
 
     This method parses the output of `git ls-remote {repo_url}` to create a dictionary
     of refs and hashes, returning the hash corresponding to `checkout_target` or
     raising an error listing available branches and tags if the target is not found.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     repo_url: str
         URL pointing to a git-controlled repository
     checkout_target: str
         Any valid argument that can be supplied to `git checkout`
 
-    Returns:
-    --------
+    Returns
+    -------
     git_hash: str
         A git commit hash associated with the checkout target
     """
-
     # Get list of targets from git ls-remote
     ls_remote = _run_cmd(
         f"git ls-remote {repo_url}",
@@ -97,10 +108,7 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
 
     # Otherwise, see if it is listed as a branch or tag
     for ref, has in ref_dict.items():
-        if (
-            ref == f"refs/heads/{checkout_target}"
-            or ref == f"refs/tags/{checkout_target}"
-        ):
+        if ref in {f"refs/heads/{checkout_target}", f"refs/tags/{checkout_target}"}:
             return has
 
     # Lastly, if NOTA worked, see if the checkout target is a 7 or 40 digit hexadecimal string
@@ -110,7 +118,9 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
     if is_potential_hash:
         warnings.warn(
             f"C-STAR: The checkout target {checkout_target} appears to be a commit hash, "
-            f"but it is not possible to verify that this hash is a valid checkout target of {repo_url}"
+            "but it is not possible to verify that this hash is a valid checkout target "
+            f"of {repo_url}",
+            stacklevel=2,
         )
 
         return checkout_target

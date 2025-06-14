@@ -1,5 +1,6 @@
 import hashlib
 import warnings
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -18,7 +19,7 @@ from cstar.base.utils import (
 )
 
 
-def test_get_sha256_hash(tmp_path):
+def test_get_sha256_hash(tmp_path: Path) -> None:
     """Test the get_sha256_hash method using the known hash of a temporary file.
 
     Fixtures
@@ -31,12 +32,11 @@ def test_get_sha256_hash(tmp_path):
     - The calculated hash matches the expected hash
     - A FileNotFoundError is raised if the file does not exist
     """
-
     file_path = tmp_path / "test_file.txt"
     file_path.write_text("Test data for hash")
 
     # Compute the expected hash manually
-    expected_hash = hashlib.sha256("Test data for hash".encode()).hexdigest()
+    expected_hash = hashlib.sha256(b"Test data for hash").hexdigest()
 
     # Call _get_sha256_hash and verify
     calculated_hash = _get_sha256_hash(file_path)
@@ -49,8 +49,10 @@ def test_get_sha256_hash(tmp_path):
 
 
 class TestCloneAndCheckout:
-    """Tests for `utils._clone_and_checkout` function, verifying it handles both success
-    and failure cases for git clone and checkout operations.
+    """Tests for `utils._clone_and_checkout` function.
+
+    Verifies the method handles both success and failure cases for
+    git clone and checkout operations.
 
     Mocks
     -----
@@ -58,8 +60,8 @@ class TestCloneAndCheckout:
         Used to simulate success or failure of `git clone` and `git checkout` commands.
     """
 
-    def setup_method(self):
-        """Sets up common parameters and patches subprocess for all tests."""
+    def setup_method(self) -> None:
+        """Set up common parameters and patches subprocess for all tests."""
         self.source_repo = "https://example.com/repo.git"
         self.local_path = "/dummy/path"
         self.checkout_target = "main"
@@ -68,13 +70,14 @@ class TestCloneAndCheckout:
         self.patch_subprocess_run = mock.patch("subprocess.run")
         self.mock_subprocess_run = self.patch_subprocess_run.start()
 
-    def teardown_method(self):
-        """Stops patching subprocess after each test."""
+    def teardown_method(self) -> None:
+        """Stop patching subprocess after each test."""
         self.patch_subprocess_run.stop()
 
-    def test_clone_and_checkout_success(self):
-        """Test that `_clone_and_checkout` runs successfully when both clone and
-        checkout commands succeed.
+    def test_clone_and_checkout_success(self) -> None:
+        """Test that `_clone_and_checkout` runs successfully.
+
+        Verifies behavior when both clone and checkout commands succeed.
 
         Asserts
         -------
@@ -98,14 +101,13 @@ class TestCloneAndCheckout:
             == f"git -C {self.local_path} checkout {self.checkout_target}"
         )
 
-    def test_clone_and_checkout_clone_failure(self):
+    def test_clone_and_checkout_clone_failure(self) -> None:
         """Test `_clone_and_checkout` raises RuntimeError if `git clone` fails.
 
         Asserts
         -------
         - Verifies RuntimeError is raised with an appropriate error message on clone failure.
         """
-
         # Simulate failure in the clone command
         self.mock_subprocess_run.side_effect = [
             mock.Mock(returncode=1, stderr="Error: clone failed."),
@@ -116,7 +118,7 @@ class TestCloneAndCheckout:
         with pytest.raises(RuntimeError, match="Error when cloning"):
             _clone_and_checkout(self.source_repo, self.local_path, self.checkout_target)
 
-    def test_clone_and_checkout_checkout_failure(self):
+    def test_clone_and_checkout_checkout_failure(self) -> None:
         """Test `_clone_and_checkout` raises RuntimeError if `git checkout` fails.
 
         Asserts
@@ -134,9 +136,10 @@ class TestCloneAndCheckout:
             _clone_and_checkout(self.source_repo, self.local_path, self.checkout_target)
 
 
-def test_get_repo_remote():
-    """Test `_get_repo_remote` to confirm it returns the correct remote URL when `git
-    remote get-url origin` succeeds.
+def test_get_repo_remote() -> None:
+    """Test `_get_repo_remote` results when `git remote get-url origin` succeeds.
+
+    Ensures it returns the correct remote URL.
 
     Asserts
     -------
@@ -162,7 +165,7 @@ def test_get_repo_remote():
         )
 
 
-def test_get_repo_head_hash():
+def test_get_repo_head_hash() -> None:
     """Test `_get_repo_head_hash` to confirm it returns the correct commit hash when
     `git rev-parse HEAD` succeeds.
 
@@ -193,8 +196,8 @@ def test_get_repo_head_hash():
 class TestGetHashFromCheckoutTarget:
     """Test class for `_get_hash_from_checkout_target`."""
 
-    def setup_method(self):
-        """Setup method to define common variables and mock data."""
+    def setup_method(self) -> None:
+        """Set up common variables and mock data."""
         self.repo_url = "https://example.com/repo.git"
 
         # Mock the output of `git ls-remote` with a variety of refs
@@ -212,15 +215,15 @@ class TestGetHashFromCheckoutTarget:
             returncode=0, stdout=self.ls_remote_output
         )
 
-    def teardown_method(self):
+    def teardown_method(self) -> None:
         """Teardown method to stop all patches."""
         mock.patch.stopall()
 
     @pytest.mark.parametrize(
-        "checkout_target, expected_hash",
+        ("checkout_target", "expected_hash"),
         [
-            pytest.param(target, hash, id=target)
-            for target, hash in [
+            pytest.param(target, hash_, id=target)
+            for target, hash_ in [
                 # Branches
                 ("main", "abcdef1234567890abcdef1234567890abcdef12"),
                 ("develop", "1234567890abcdef1234567890abcdef12345678"),
@@ -234,7 +237,7 @@ class TestGetHashFromCheckoutTarget:
             ]
         ],
     )
-    def test_valid_targets(self, checkout_target, expected_hash):
+    def test_valid_targets(self, checkout_target: str, expected_hash: str) -> None:
         """Test `_get_hash_from_checkout_target` with valid checkout targets.
 
         Parameters
@@ -250,13 +253,10 @@ class TestGetHashFromCheckoutTarget:
 
         # Verify the subprocess call
         self.mock_run.assert_called_with(
-            f"git ls-remote {self.repo_url}",
-            capture_output=True,
-            shell=True,
-            text=True,
+            f"git ls-remote {self.repo_url}", capture_output=True, shell=True, text=True
         )
 
-    def test_invalid_target(self):
+    def test_invalid_target(self) -> None:
         """Test `_get_hash_from_checkout_target` with an invalid checkout target.
 
         Asserts
@@ -267,7 +267,7 @@ class TestGetHashFromCheckoutTarget:
         checkout_target = "invalid-branch"
 
         # Call the function and expect a ValueError
-        with pytest.raises(ValueError) as exception_info:
+        with pytest.raises(ValueError) as exception_info:  # noqa: PT011
             _get_hash_from_checkout_target(self.repo_url, checkout_target)
 
         # Assert the error message includes the expected content
@@ -281,7 +281,7 @@ class TestGetHashFromCheckoutTarget:
         assert "v1.0.0" in error_message
 
     @pytest.mark.parametrize(
-        "checkout_target, should_warn, should_raise",
+        ("checkout_target", "should_warn", "should_raise"),
         [
             # 7-character hex string (valid short hash)
             ("246c11f", True, False),
@@ -294,11 +294,13 @@ class TestGetHashFromCheckoutTarget:
         ],
     )
     def test_warning_and_error_for_potential_hash(
-        self, checkout_target, should_warn, should_raise
-    ):
-        """Test `_get_hash_from_checkout_target` to ensure a warning or error is raised
-        appropriately when the checkout target appears to be a commit hash but is not in
-        the dictionary of references returned by git ls-remote.
+        self, checkout_target: str, should_warn: bool, should_raise: bool
+    ) -> None:
+        """Test `_get_hash_from_checkout_target` error raising behavior.
+
+        Ensures that a warning or error is raised appropriately when the checkout
+        target appears to be a commit hash but is not in the dictionary of
+        references returned by git ls-remote.
 
         Parameters
         ----------
@@ -313,7 +315,7 @@ class TestGetHashFromCheckoutTarget:
         with warnings.catch_warnings(record=True) as warning_list:
             if should_raise:
                 # Call the function and expect a ValueError
-                with pytest.raises(ValueError):
+                with pytest.raises(ValueError):  # noqa: PT011
                     _get_hash_from_checkout_target(self.repo_url, checkout_target)
 
             else:
@@ -335,17 +337,15 @@ class TestGetHashFromCheckoutTarget:
 
 
 class TestReplaceTextInFile:
-    """Tests for `_replace_text_in_file`, verifying correct behavior for text
-    replacement within a file."""
+    """Tests text replacement behavior of `_replace_text_in_file` method."""
 
-    def setup_method(self):
-        """Common setup for each test, initializing base content that can be modified
-        per test."""
+    def setup_method(self) -> None:
+        """Perform common setup for tests in the test suite."""
         self.base_content = "This is a test file with some old_text to replace."
 
-    def test_replace_text_success(self, tmp_path):
-        """Test that `_replace_text_in_file` successfully replaces the specified text
-        when `old_text` is found in the file.
+    def test_replace_text_success(self, tmp_path: Path) -> None:
+        """Verify successful replacement of the specified text when `old_text` is found
+        in the file.
 
         Asserts
         -------
@@ -364,9 +364,10 @@ class TestReplaceTextInFile:
         assert updated_content == "This is a test file with some new_text to replace."
         assert result is True, "Expected True when replacement occurs."
 
-    def test_replace_text_not_found(self, tmp_path):
-        """Test that `_replace_text_in_file` does not alter the file when `old_text` is
-        not found, and returns False.
+    def test_replace_text_not_found(self, tmp_path: Path) -> None:
+        """Verify that the file is not altered when `old_text` is not found.
+
+        Confirms that the method returns False.
 
         Asserts
         -------
@@ -385,9 +386,8 @@ class TestReplaceTextInFile:
         assert unchanged_content == "This is a test file without the target text."
         assert result is False, "Expected False when no replacement occurs."
 
-    def test_replace_text_multiple_occurrences(self, tmp_path):
-        """Test that `_replace_text_in_file` replaces all occurrences of `old_text` when
-        it appears multiple times in the file.
+    def test_replace_text_multiple_occurrences(self, tmp_path: Path) -> None:
+        """Verify multiple replacements of `old_text` are performed.
 
         Asserts
         -------
@@ -410,10 +410,10 @@ class TestReplaceTextInFile:
 
 
 class TestListToConciseStr:
-    """Tests for `_list_to_concise_str`, verifying correct behavior under different list
-    lengths and parameter configurations."""
+    """Tests for `_list_to_concise_str`, verifies correct behavior under different
+    list."""
 
-    def test_basic_case_no_truncation(self):
+    def test_basic_case_no_truncation(self) -> None:
         """Test `_list_to_concise_str` with a short list that does not exceed
         `item_threshold`.
 
@@ -425,7 +425,7 @@ class TestListToConciseStr:
         result = _list_to_concise_str(input_list, item_threshold=4, pad=0)
         assert result == "['item1',\n'item2',\n'item3']"
 
-    def test_truncation_case(self):
+    def test_truncation_case(self) -> None:
         """Test `_list_to_concise_str` when the list length exceeds `item_threshold`,
         requiring truncation.
 
@@ -437,7 +437,7 @@ class TestListToConciseStr:
         result = _list_to_concise_str(input_list, item_threshold=4, pad=0)
         assert result == "['item1',\n'item2',\n   ...\n'item6'] <6 items>"
 
-    def test_padding_and_item_count_display(self):
+    def test_padding_and_item_count_display(self) -> None:
         """Test `_list_to_concise_str` with custom padding and item count display
         enabled.
 
@@ -452,7 +452,7 @@ class TestListToConciseStr:
         expected_output = "['item1',\n          'item2',\n             ...\n          'item5'] <5 items>"
         assert result == expected_output
 
-    def test_no_item_count_display(self):
+    def test_no_item_count_display(self) -> None:
         """Test `_list_to_concise_str` with `show_item_count=False` to verify that the
         item count is omitted in the truncated representation.
 
@@ -472,7 +472,7 @@ class TestDictToTree:
     """Tests for `_dict_to_tree`, verifying the correct tree-like string representation
     of various dictionary structures."""
 
-    def test_simple_flat_dict(self):
+    def test_simple_flat_dict(self) -> None:
         """Test `_dict_to_tree` with a single-level dictionary.
 
         Asserts
@@ -490,7 +490,7 @@ class TestDictToTree:
         )  # fmt: skip
         assert result == expected_output
 
-    def test_nested_dict(self):
+    def test_nested_dict(self) -> None:
         """Test `_dict_to_tree` with a multi-level nested dictionary.
 
         Asserts
@@ -514,18 +514,18 @@ class TestDictToTree:
         )
         assert result == expected_output
 
-    def test_empty_dict(self):
+    def test_empty_dict(self) -> None:
         """Test `_dict_to_tree` with an empty dictionary.
 
         Asserts
         -------
         - Ensures that an empty dictionary returns an empty string.
         """
-        input_dict = {}
+        input_dict: dict[str, str] = {}
         result = _dict_to_tree(input_dict)
         assert result == "", "Expected empty string for an empty dictionary."
 
-    def test_complex_nested_structure(self):
+    def test_complex_nested_structure(self) -> None:
         """Test `_dict_to_tree` with a complex nested dictionary containing various
         levels and mixed lists and dictionaries.
 

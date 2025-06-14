@@ -1,36 +1,37 @@
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
 
 class DataSource:
     """Holds information on various types of data sources used by C-Star.
 
-    Attributes:
-    -----------
-    location: str
+    Attributes
+    ----------
+    location : str
        The location of the data, e.g. a URL or local path
 
-    Properties:
-    -----------
-    location_type: str (read-only)
+    Properties
+    ----------
+    location_type : str (read-only)
        "url" or "path"
-    source_type: str (read only)
+    source_type : str (read only)
        Typically describes file type (e.g. "netcdf") but can also be "repository"
-    basename: str (read-only)
+    basename : str (read-only)
        The basename of self.location, typically the file name
     """
 
-    def __init__(self, location: str | Path, file_hash: Optional[str] = None):
+    def __init__(self, location: str | Path, file_hash: str | None = None) -> None:
         """Initialize a DataSource from a location string.
 
-        Parameters:
-        -----------
-        location: str or Path
+        Parameters
+        ----------
+        location : str or Path
            The location of the data, e.g. a URL or local path
+        file_hash : str | None
+            The file hash
 
-        Returns:
-        --------
+        Returns
+        -------
         DataSource
             An initialized DataSource
         """
@@ -39,25 +40,38 @@ class DataSource:
 
     @property
     def location(self) -> str:
+        """Return the location of the data."""
         return self._location
 
     @property
-    def file_hash(self) -> Optional[str]:
+    def file_hash(self) -> str | None:
+        """Return the file hash."""
         return self._file_hash
 
     @property
     def location_type(self) -> str:
-        """Get the location type (e.g. "path" or "url") from the "location"
-        attribute."""
+        """Determine the location type based on the value of `location`.
+
+        Valid results include:
+        - path
+        - url
+
+        Raises
+        ------
+        ValueError
+            If the location type cannot be determined.
+        """
         urlparsed_location = urlparse(self.location)
         if all([urlparsed_location.scheme, urlparsed_location.netloc]):
             return "url"
-        elif Path(self.location).expanduser().exists():
+
+        if Path(self.location).expanduser().exists():
             return "path"
-        else:
-            raise ValueError(
-                f"{self.location} is not a recognised URL or local path pointing to an existing file or directory"
-            )
+
+        raise ValueError(
+            f"{self.location} is not a recognised URL or local path pointing "
+            "to an existing file or directory"
+        )
 
     @property
     def source_type(self) -> str:
@@ -65,18 +79,17 @@ class DataSource:
         loc = Path(self.location).expanduser()
 
         if (loc.suffix.lower() == ".git") or ((loc / ".git").is_dir()):
-            # TODO: a remote repository might not have a .git suffix, more advanced handling needed
             return "repository"
-        elif loc.is_dir():
+        if loc.is_dir():
             return "directory"
-        elif loc.suffix.lower() in {".yaml", ".yml"}:
+        if loc.suffix.lower() in {".yaml", ".yml"}:
             return "yaml"
-        elif loc.suffix.lower() == ".nc":
+        if loc.suffix.lower() == ".nc":
             return "netcdf"
-        else:
-            raise ValueError(
-                f"{Path(self.location)} does not exist or is not a supported file type"
-            )
+
+        raise ValueError(
+            f"{Path(self.location)} does not exist or is not a supported file type"
+        )
 
     @property
     def basename(self) -> str:
@@ -84,6 +97,7 @@ class DataSource:
         return Path(self.location).name
 
     def __str__(self) -> str:
+        """Return a human-readable string representation."""
         base_str = f"{self.__class__.__name__}"
         base_str += "\n" + "-" * len(base_str)
         base_str += f"\n location: {self.location}"
@@ -95,6 +109,7 @@ class DataSource:
         return base_str
 
     def __repr__(self) -> str:
+        """Return a constructor-style string representation."""
         repr_str = f"{self.__class__.__name__}(location={self.location!r}"
         if self.file_hash is not None:
             repr_str += f", file_hash={self.file_hash!r}"

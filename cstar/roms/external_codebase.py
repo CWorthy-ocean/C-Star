@@ -8,28 +8,30 @@ from cstar.system.manager import cstar_sysmgr
 
 
 class ROMSExternalCodeBase(ExternalCodeBase):
-    """An implementation of the ExternalCodeBase class for the UCLA Regional Ocean
-    Modeling System.
+    """An ExternalCodeBase tied to the UCLA Regional Ocean Modeling System.
 
     This subclass sets unique values for ExternalCodeBase properties specific to ROMS, and overrides
     the get() method to compile ROMS-specific libraries.
 
-    Methods:
-    --------
+    Methods
+    -------
     get()
         overrides ExternalCodeBase.get() to clone the UCLA ROMS repository, set environment, and compile libraries
     """
 
     @property
     def default_source_repo(self) -> str:
+        """Return the default source code repository URL."""
         return "https://github.com/CESR-lab/ucla-roms.git"
 
     @property
     def default_checkout_target(self) -> str:
+        """Return the default checkout target."""
         return "main"
 
     @property
     def expected_env_var(self) -> str:
+        """Return the environment variable name containing the source directory."""
         return "ROMS_ROOT"
 
     def _codebase_adjustments(self) -> None:
@@ -42,11 +44,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         roms_root = Path(
             cstar_sysmgr.environment.environment_variables[self.expected_env_var]
         )
-        shutil.copytree(
-            roms_root / "ci/ci_makefiles/",
-            roms_root,
-            dirs_exist_ok=True,
-        )
+        shutil.copytree(roms_root / "ci/ci_makefiles/", roms_root, dirs_exist_ok=True)
 
     def get(self, target: str | Path) -> None:
         """Clone ROMS code to local machine, set environment, compile libraries.
@@ -59,13 +57,13 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         5. Compiles the NHMG library
         6. Compiles the Tools-Roms package
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         target: src
             the path where ROMS will be cloned and compiled
         """
         target = Path(target).expanduser()
-        # TODO: Situation where environment variables like ROMS_ROOT are not set...
+        # TODO(Tom Nichols): Situation where environment variables like ROMS_ROOT are not set...
         # ... but repo already exists at local_path results in an error rather than a prompt
         _clone_and_checkout(
             source_repo=self.source_repo,

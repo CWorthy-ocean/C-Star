@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -10,6 +11,8 @@ from cstar.tests.integration_tests.config import TEST_CONFIG
 
 
 class TestCStar:
+    """Test harness for C-Star integration tests that execute a simulation."""
+
     @pytest.mark.parametrize(
         "test_config_key",
         [
@@ -22,18 +25,18 @@ class TestCStar:
     def test_cstar(
         self,
         tmp_path: Path,
-        mock_user_input,
-        modify_template_blueprint,
-        fetch_roms_tools_source_data,
-        fetch_remote_test_case_data,
-        test_config_key,
+        mock_user_input: mock.Mock,
+        modify_template_blueprint: mock.Mock,
+        fetch_roms_tools_source_data: mock.Mock,
+        fetch_remote_test_case_data: Callable[[], None],
+        test_config_key: str,
         log: logging.Logger,
-    ):
+    ) -> None:
         """Run the C-Star minimal test case from a selection of different blueprints.
 
-        Parameters:
-        -----------
-        tmp_path:
+        Parameters
+        ----------
+        tmp_path : Path
            Built-in pytest fixture to create temporary directories
         mock_user_input:
            Fixture to simulate user-supplied input
@@ -51,21 +54,17 @@ class TestCStar:
            code for compiling ROMS, yaml files to supply to roms-tools, etc.
            These are saved to a subdirectory of the system cache specified by
            CSTAR_TEST_DATA_DIRECTORY in the config.py module
-        test_config_key (str):
+        test_config_key : str
            Key determining the specific variation of the test case that is run, as
            defined in the dictionary TEST_CONFIG in the config.py module
-        log (logging.Logger):
+        log : logging.Logger
             Logger instance for logging messages during test execution.
         """
-
         dotenv_path = tmp_path / ".cstar.env"
         ext_root = tmp_path / "externals"
 
         with (
-            mock.patch(
-                "cstar.system.environment.CSTAR_USER_ENV_PATH",
-                dotenv_path,
-            ),
+            mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
             mock.patch.object(
                 cstar.system.environment.CStarEnvironment, "package_root", new=ext_root
             ),
@@ -101,7 +100,7 @@ class TestCStar:
             with mock_user_input("y"):
                 cstar_test_case.setup()
 
-            cstar_test_case.to_blueprint(tmp_path / "test_blueprint_export.yaml")
+            cstar_test_case.to_blueprint(str(tmp_path / "test_blueprint_export.yaml"))
             cstar_test_case.build()
             cstar_test_case.pre_run()
             test_process = cstar_test_case.run()

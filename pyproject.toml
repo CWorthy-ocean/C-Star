@@ -58,9 +58,93 @@ exclude = "properties|asv_bench|docs"
 # Configuration for ruff linter and formatter
 [tool.ruff]
 fix = true
+show-fixes = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
 
 [tool.ruff.lint]
-extend-select = ["I"]
+extend-select = [
+    "I",
+    "D",
+    "A001",
+    "ANN401",
+    "ARG001",
+    "ARG002",
+    "ARG003",
+    "B018",
+    "BLE001",
+    "COM812",
+    "C901",
+#    "D413",
+    "E402",
+    "F401",
+    "RUF100",
+    "N806",
+    "S301",
+    "TRY004",
+    "PLE1205",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PTH123",
+    "PT006",
+    "PT011",
+    "PT012",
+    "PT019",
+    "PT022",
+    "S102",
+    "SIM102",
+    "SIM115",
+    "SLF001",
+    "UP015",
+    "UP034",
+
+]
+
+ignore = [
+    "B005",     # https://docs.astral.sh/ruff/rules/strip-with-multi-characters/
+    "COM812",   # 
+    "DTZ001",   # https://docs.astral.sh/ruff/rules/call-datetime-without-tzinfo/
+    "D100",     # https://docs.astral.sh/ruff/rules/undocumented-public-module/
+    "D104",     # https://docs.astral.sh/ruff/rules/undocumented-public-package/
+    "D205",     # https://docs.astral.sh/ruff/rules/missing-blank-line-after-summary/
+    "D209",     # https://docs.astral.sh/ruff/rules/new-line-after-last-paragraph/
+    "D213",     # https://docs.astral.sh/ruff/rules/multi-line-summary-second-line/
+#   "D413",     # https://docs.astral.sh/ruff/rules/missing-blank-line-after-last-section/
+    "D416",     # https://docs.astral.sh/ruff/rules/missing-section-name-colon/
+    "DTZ005",   # https://docs.astral.sh/ruff/rules/call-datetime-now-without-tzinfo/
+    "E501",     # https://docs.astral.sh/ruff/rules/line-too-long/
+    "EM101",    # https://docs.astral.sh/ruff/rules/raw-string-in-exception/
+    "EM102",    # https://docs.astral.sh/ruff/rules/f-string-in-exception/
+    "FBT001",   # https://docs.astral.sh/ruff/rules/boolean-type-hint-positional-argument/
+    "FBT002",   # https://docs.astral.sh/ruff/rules/boolean-default-value-positional-argument/
+    "INP001",   # https://docs.astral.sh/ruff/rules/implicit-namespace-package/
+    "G004",     # https://docs.astral.sh/ruff/rules/logging-f-string/
+    "FIX002",   # https://docs.astral.sh/ruff/rules/line-contains-todo/
+    "PLR0915",  # https://docs.astral.sh/ruff/rules/too-many-statements/
+    "PLR2004",  # https://docs.astral.sh/ruff/rules/magic-value-comparison/
+    "RUF002",   # https://docs.astral.sh/ruff/rules/ambiguous-unicode-character-docstring/
+    "RUF015",   # https://docs.astral.sh/ruff/rules/unnecessary-iterable-allocation-for-first-element/
+    "S101",     # https://docs.astral.sh/ruff/rules/assert/
+    "S113",     # https://docs.astral.sh/ruff/rules/request-without-timeout/
+    "S603",     # https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true/
+    "S604",     # https://docs.astral.sh/ruff/rules/call-with-shell-equals-true/
+    "T201",     # https://docs.astral.sh/ruff/rules/print/
+    "TD002",    # https://docs.astral.sh/ruff/rules/missing-todo-author/
+    "TD003",    # https://docs.astral.sh/ruff/rules/missing-todo-link/
+    "TRY003",   # https://docs.astral.sh/ruff/rules/raise-vanilla-args/
+    "UP007",    # https://docs.astral.sh/ruff/rules/non-pep604-annotation-union/
+]    
+
+[tool.ruff.lint.pylint]
+max-positional-args = 10
+max-args = 14
+max-branches = 15  # PLR0912, default is 12
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15  # C901, default is 10  
 
 [tool.pre-commit]
 config = ".pre-commit-config.yaml"

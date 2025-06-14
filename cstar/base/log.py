@@ -16,13 +16,13 @@ def get_logger(
 
     Parameters
     ----------
-    name: str
+    name : str
         The name of the logger.
-    level: int
+    level : int
         The minimum log level to write.
-    fmt: str
+    fmt : str
         The log format string.
-    filename: str | None
+    filename : str | None
         A file path where logs will be written.
 
     Returns
@@ -30,7 +30,6 @@ def get_logger(
     logging.Logger
         A logger instance with the specified name.
     """
-
     fmt = fmt or DEFAULT_LOG_FORMAT
 
     logger = logging.getLogger(name)
@@ -89,6 +88,7 @@ class LoggingMixin:
 
     @property
     def log(self) -> logging.Logger:
+        """Return a logger instance."""
         if not hasattr(self, "_log"):
             name = f"{self.__class__.__module__}.{self.__class__.__name__}"
             self._log = get_logger(name)

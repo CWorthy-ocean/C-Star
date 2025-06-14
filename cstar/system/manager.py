@@ -1,7 +1,6 @@
 import os
 import platform
 from enum import Enum
-from typing import Optional
 
 from cstar.system.environment import CStarEnvironment
 from cstar.system.scheduler import (
@@ -42,13 +41,14 @@ class SystemName(Enum):
 
 
 class CStarSystemManager:
-    _environment: Optional[CStarEnvironment] = None
-    _scheduler: Optional[Scheduler] = None
+    """Manages configuration related to the system executing a simulation."""
+
+    _environment: CStarEnvironment | None = None
+    _scheduler: Scheduler | None = None
 
     @property
     def name(self) -> str:
-        """Determines the system name based on environment variables or platform
-        details.
+        """Determine system name using environment variables or platform details.
 
         Checks for Lmod-specific variables (`LMOD_SYSHOST` or `LMOD_SYSTEM_NAME`).
         Otherwise, constructs a system name using `platform.system()` and
@@ -64,7 +64,6 @@ class CStarSystemManager:
         EnvironmentError
             If the system name cannot be determined from environment variables or platform information.
         """
-
         sysname = os.environ.get("LMOD_SYSHOST", default="") or os.environ.get(
             "LMOD_SYSTEM_NAME"
         )
@@ -73,24 +72,23 @@ class CStarSystemManager:
         elif (platform.system() is not None) and (platform.machine() is not None):
             sysname = platform.system() + "_" + platform.machine()
         else:
-            raise EnvironmentError(
+            raise OSError(
                 f"C-Star cannot determine your system name. Diagnostics: "
                 f"LMOD_SYSHOST={os.environ.get('LMOD_SYSHOST')}, "
                 f"LMOD_SYSTEM_NAME={os.environ.get('LMOD_SYSTEM_NAME')}, "
                 f"platform.system()={platform.system()}, "
                 f"platform.machine()={platform.machine()}"
             )
-            # raise EnvironmentError("C-Star cannot determine your system name")
 
         return sysname.casefold()
 
     def _system_name_enum(self) -> SystemName:
-        """Converts the system name string to a validated SystemName enum."""
+        """Convert the system name string to a validated SystemName enum."""
         return SystemName(self.name)
 
     @property
-    def scheduler(self) -> Optional[Scheduler]:
-        """Returns the Scheduler instance corresponding to the system.
+    def scheduler(self) -> Scheduler | None:
+        """Return the Scheduler instance for the system.
 
         The scheduler instance is created based on the detected system name
         and cached for future access.
@@ -101,7 +99,6 @@ class CStarSystemManager:
             A `Scheduler` instance configured for the detected system, or `None` if the
             system is not supported or does not use a job scheduler.
         """
-
         if self._scheduler is not None:
             return self._scheduler
 
