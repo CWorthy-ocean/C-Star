@@ -23,16 +23,16 @@ class MockExternalCodeBase(ExternalCodeBase):
 
     Attributes
     ----------
-        default_source_repo : str
-            The default URL of the source repository.
-        default_checkout_target : str
-            The default branch or tag to checkout from the repository.
-        expected_env_var : str
-            The expected environment variable associated with this external codebase.
+    default_source_repo : str
+        The default URL of the source repository.
+    default_checkout_target : str
+        The default branch or tag to checkout from the repository.
+    expected_env_var : str
+        The expected environment variable associated with this external codebase.
 
     Methods
     -------
-        get(target)
+    get(target)
         A placeholder method that does nothing. In a real implementation, this
         would fetch and store the external codebase at the specified target.
     """
@@ -786,7 +786,7 @@ class TestSimulationPersistence:
         Mocks & Fixtures
         ----------------
         - `example_simulation` : Provides a mock `Simulation` instance.
-        - `MagicMock(spec=LocalProcess)` : Mocks an LocalProcess with a
+        - `MagicMock(spec=LocalProcess)` : Mocks a LocalProcess with a
           running status.
 
         Assertions

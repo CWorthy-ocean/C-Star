@@ -62,8 +62,9 @@ class LocalProcess(ExecutionHandler):
         """
         self.commands = commands
         self.run_path = Path(run_path) if run_path is not None else Path.cwd()
-        dt_string = datetime.strftime(datetime.now(), "%Y%m%d_%H%M%S")
-        self._default_name = f"cstar_process_{dt_string}"
+        self._default_name = (
+            f"cstar_process_{datetime.strftime(datetime.now(), "%Y%m%d_%H%M%S")}"
+        )
         self._output_file = (
             Path(output_file) if output_file is not None else output_file
         )

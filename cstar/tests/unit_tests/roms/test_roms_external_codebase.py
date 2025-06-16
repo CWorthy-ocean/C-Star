@@ -115,7 +115,10 @@ class TestROMSExternalCodeBaseGet:
     ) -> None:
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
-        with mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path):
+        with mock.patch(
+            "cstar.system.environment.CSTAR_USER_ENV_PATH",
+            dotenv_path,
+        ):
             ## Mock success of calls to subprocess.run:
             self.mock_subprocess_run.return_value.returncode = 0
 
@@ -187,7 +190,10 @@ class TestROMSExternalCodeBaseGet:
                 RuntimeError,
                 match="Error when compiling ROMS' NHMG library. Return Code: `1`. STDERR:\nCompiling NHMG library failed successfully",
             ),
-            mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
+            mock.patch(
+                "cstar.system.environment.CSTAR_USER_ENV_PATH",
+                dotenv_path,
+            ),
         ):
             roms_codebase.get(target=tmp_path)
 

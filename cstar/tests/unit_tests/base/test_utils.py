@@ -410,8 +410,8 @@ class TestReplaceTextInFile:
 
 
 class TestListToConciseStr:
-    """Tests for `_list_to_concise_str`, verifies correct behavior under different
-    list."""
+    """Tests for `_list_to_concise_str`, verifies correct behavior under different list
+    lengths and parameter configurations.."""
 
     def test_basic_case_no_truncation(self) -> None:
         """Test `_list_to_concise_str` with a short list that does not exceed

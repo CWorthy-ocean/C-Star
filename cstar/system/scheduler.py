@@ -550,7 +550,7 @@ class PBSScheduler(Scheduler):
             msg_err="Error querying node property.",
         )
         if stdout.endswith("kb"):
-            return int(float(stdout[:-2]) / (1024**2))  # Convert kilobytes to gigabytes
+            return float(stdout[:-2]) / (1024**2)  # Convert kilobytes to gigabytes
         if stdout.endswith("mb"):
             return float(stdout[:-2]) / 1024  # Convert megabytes to gigabytes
         if stdout.endswith("gb"):

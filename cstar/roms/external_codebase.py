@@ -44,7 +44,11 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         roms_root = Path(
             cstar_sysmgr.environment.environment_variables[self.expected_env_var]
         )
-        shutil.copytree(roms_root / "ci/ci_makefiles/", roms_root, dirs_exist_ok=True)
+        shutil.copytree(
+            roms_root / "ci/ci_makefiles/",
+            roms_root,
+            dirs_exist_ok=True,
+        )
 
     def get(self, target: str | Path) -> None:
         """Clone ROMS code to local machine, set environment, compile libraries.

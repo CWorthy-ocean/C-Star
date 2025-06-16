@@ -26,7 +26,9 @@ def levels_fn(all_levels: list[int]) -> t.Callable[[int], tuple[list[int], list[
     """Return a factory for creating a split of log levels above/below a fixed level.
 
     Returns
-        fn : t.Callable[list[int], list[int]]
+    -------
+    t.Callable[list[int], list[int]]
+        A function that will generate the list for the desired split
     """
 
     def _inner(level: int) -> tuple[list[int], list[int]]:
@@ -42,7 +44,8 @@ def levels_fn(all_levels: list[int]) -> t.Callable[[int], tuple[list[int], list[
 
         Returns
         -------
-            tuple[list[int], list[int]] : the lists of log levels
+        lt, gte : tuple[list[int], list[int]]
+            the of levels less than split, the levels greater  or equal to split
         """
         lt, gte = [], []
 

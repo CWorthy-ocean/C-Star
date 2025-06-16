@@ -17,7 +17,12 @@ class ROMSDiscretization(Discretization):
         The value of n_procs_x * n_procs_y
     """
 
-    def __init__(self, time_step: int, n_procs_x: int = 1, n_procs_y: int = 1) -> None:
+    def __init__(
+        self,
+        time_step: int,
+        n_procs_x: int = 1,
+        n_procs_y: int = 1,
+    ) -> None:
         """Initialize a ROMSDiscretization object from basic discretization parameters.
 
         Parameters

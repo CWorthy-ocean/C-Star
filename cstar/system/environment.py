@@ -229,7 +229,7 @@ class CStarEnvironment:
             If any `module load <module_name>` command fails.
         """
         if not self.uses_lmod:
-            raise OSError(
+            raise EnvironmentError(  # noqa: UP024
                 "Your system does not appear to use Linux Environment Modules"
             )
         self._call_lmod("reset")

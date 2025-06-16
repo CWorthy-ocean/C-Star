@@ -64,9 +64,14 @@ class TestCStar:
         ext_root = tmp_path / "externals"
 
         with (
-            mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
+            mock.patch(
+                "cstar.system.environment.CSTAR_USER_ENV_PATH",
+                dotenv_path,
+            ),
             mock.patch.object(
-                cstar.system.environment.CStarEnvironment, "package_root", new=ext_root
+                cstar.system.environment.CStarEnvironment,
+                "package_root",
+                new=ext_root,
             ),
         ):
             # Regardless of remote or local, if yaml_datasets we need roms-tools support data

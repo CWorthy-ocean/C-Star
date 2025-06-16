@@ -16,7 +16,7 @@ class AdditionalCode(LoggingMixin):
 
     Attributes
     ----------
-    source  DataSource
+    source : DataSource
         Describes the location and type of source data (e.g. repository,directory)
     subdir : str
         Subdirectory of source.location in which the additional code is kept

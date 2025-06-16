@@ -264,7 +264,10 @@ class ROMSInputDataset(InputDataset, ABC):  # noqa: D101
             if tempdir_obj:
                 tempdir_obj.cleanup()
 
-    def get(self, local_dir: str | Path) -> None:
+    def get(
+        self,
+        local_dir: str | Path,
+    ) -> None:
         """Ensure this input dataset is available as a NetCDF file in `local_dir`.
 
         If the source is not a YAML file, this method delegates to the base class

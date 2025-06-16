@@ -217,7 +217,10 @@ class Simulation(ABC, LoggingMixin):
         return date if isinstance(date, datetime) else dateutil.parser.parse(date)
 
     def _get_date_or_fallback(
-        self, date: str | datetime | None, fallback: datetime | None, field_name: str
+        self,
+        date: str | datetime | None,
+        fallback: datetime | None,
+        field_name: str,
     ) -> datetime:
         """Ensure a date is set, using a fallback if needed.
 
@@ -486,7 +489,11 @@ class Simulation(ABC, LoggingMixin):
 
     @classmethod
     @abstractmethod
-    def from_blueprint(cls, blueprint: str, directory: str | Path) -> "Simulation":
+    def from_blueprint(
+        cls,
+        blueprint: str,
+        directory: str | Path,
+    ) -> "Simulation":
         """Abstract method to create a Simulation instance from a blueprint file.
 
         This method should be implemented in subclasses to read a YAML file containing
@@ -731,9 +738,8 @@ class Simulation(ABC, LoggingMixin):
         elif isinstance(new_end_date, datetime):
             new_sim.end_date = new_end_date
         else:
-            msg = (
+            raise ValueError(  # noqa: TRY004
                 f"Expected str or datetime for `new_end_date`, got {type(new_end_date)}"
             )
-            raise ValueError(msg)  # noqa: TRY004
 
         return new_sim

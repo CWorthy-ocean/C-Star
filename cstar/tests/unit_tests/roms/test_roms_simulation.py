@@ -92,15 +92,17 @@ def example_roms_simulation(tmp_path: Path) -> tuple[ROMSSimulation, Path]:
             location="http://my.files/river.nc", file_hash="543"
         ),
         boundary_forcing=[
-            ROMSBoundaryForcing(location="http://my.files/boundary.nc", file_hash="456")
+            ROMSBoundaryForcing(
+                location="http://my.files/boundary.nc", file_hash="456"
+            ),
         ],
         surface_forcing=[
-            ROMSSurfaceForcing(location="http://my.files/surface.nc", file_hash="567")
+            ROMSSurfaceForcing(location="http://my.files/surface.nc", file_hash="567"),
         ],
         forcing_corrections=[
             ROMSForcingCorrections(
                 location="http://my.files/sw_corr.nc", file_hash="890"
-            )
+            ),
         ],
     )
 
@@ -1580,8 +1582,7 @@ class TestProcessingAndExecution:
 
         Mocks & Fixtures
         ----------------
-        example_roms_simulation: tuple[ROMSSimulation, Path]
-            Provides a pre-configured `ROMSSimulation` instance.
+        - `example_roms_simulation`: Provides a pre-configured `ROMSSimulation` instance.
 
         Assertions
         ----------

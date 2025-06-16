@@ -307,7 +307,7 @@ class SchedulerJob(ExecutionHandler, ABC):
             and (scheduler.requires_task_distribution)
         ):
             if scheduler.global_max_cpus_per_node is None:
-                raise OSError(
+                raise EnvironmentError(  # noqa: UP024
                     "You attempted to create a scheduler job without 'nodes', and "
                     "'cpus_per_node' parameters, but your scheduler explicitly "
                     "requires a task distribution. C-Star is unable to determine "
@@ -494,10 +494,10 @@ class SchedulerJob(ExecutionHandler, ABC):
 
         Returns
         -------
-            n_nodes_to_request : int
-                The number of nodes to request from the scheduler
-            cores_to_request_per_node : int
-                The number of cores per node to request from the scheduler
+        n_nodes_to_request : int
+            The number of nodes to request from the scheduler
+        cores_to_request_per_node : int
+            The number of cores per node to request from the scheduler
         """
         n_nodes_to_request = ceil(n_cores_required / tot_cores_per_node)
         cores_to_request_per_node = ceil(
@@ -614,7 +614,7 @@ class SlurmJob(SchedulerJob):
 
         Returns
         -------
-        str
+        scheduler_script : str
             The complete SLURM job script as a string, ready for submission.
         """
         scheduler_script = "#!/bin/bash"
@@ -772,7 +772,7 @@ class PBSJob(SchedulerJob):
 
         Returns
         -------
-        str
+        scheduler_script : str
             The complete PBS job script as a string, ready for submission.
         """
         scheduler_script = "#PBS -S /bin/bash"

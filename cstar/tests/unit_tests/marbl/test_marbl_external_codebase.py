@@ -106,7 +106,10 @@ class TestMARBLExternalCodeBaseGet:
         key = marbl_codebase.expected_env_var
         value = str(marbl_path)
 
-        with mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path):
+        with mock.patch(
+            "cstar.system.environment.CSTAR_USER_ENV_PATH",
+            dotenv_path,
+        ):
             # Test
             ## Call the get method
             marbl_codebase.get(target=marbl_path)
@@ -154,6 +157,9 @@ class TestMARBLExternalCodeBaseGet:
                     "Mocked MARBL Compilation Failure"
                 ),
             ),
-            mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
+            mock.patch(
+                "cstar.system.environment.CSTAR_USER_ENV_PATH",
+                dotenv_path,
+            ),
         ):
             marbl_codebase.get(target=tmp_path)

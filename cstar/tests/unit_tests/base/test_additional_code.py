@@ -26,8 +26,8 @@ def remote_additional_code() -> AdditionalCode:
     fetched from a remote Git repository.
 
     Returns
-        AdditionalCode : An instance of the AdditionalCode class with preset
-        remote repository details.
+    -------
+    AdditionalCode : An AdditionalCode instance with pre-set remote repository details.
     """
     return AdditionalCode(
         location="https://github.com/test/repo.git",
@@ -53,8 +53,8 @@ def local_additional_code() -> AdditionalCode:
     code that resides on the local filesystem.
 
     Returns
-        AdditionalCode : An instance of the AdditionalCode class with preset
-        local directory details.
+    -------
+    AdditionalCode : An AdditionalCode instance with pre-set local directory details.
     """
     return AdditionalCode(
         location="/some/local/directory",

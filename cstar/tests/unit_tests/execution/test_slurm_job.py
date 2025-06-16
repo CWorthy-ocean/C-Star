@@ -139,7 +139,8 @@ class TestSlurmJob:
         new_callable=PropertyMock,
     )
     def test_script_task_distribution_required(
-        self, mock_global_max_cpus: MagicMock
+        self,
+        mock_global_max_cpus: MagicMock,
     ) -> None:
         """Verifies the job script is correctly generated when the nodes x cpu
         distribution is required by the system.

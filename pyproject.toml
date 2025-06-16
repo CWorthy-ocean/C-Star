@@ -99,6 +99,7 @@ extend-select = [
     "SIM115",
     "SLF001",
     "UP015",
+    "UP024",
     "UP034",
 
 ]

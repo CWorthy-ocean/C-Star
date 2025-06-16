@@ -72,7 +72,7 @@ class CStarSystemManager:
         elif (platform.system() is not None) and (platform.machine() is not None):
             sysname = platform.system() + "_" + platform.machine()
         else:
-            raise OSError(
+            raise EnvironmentError(  # noqa: UP024
                 f"C-Star cannot determine your system name. Diagnostics: "
                 f"LMOD_SYSHOST={os.environ.get('LMOD_SYSHOST')}, "
                 f"LMOD_SYSTEM_NAME={os.environ.get('LMOD_SYSTEM_NAME')}, "

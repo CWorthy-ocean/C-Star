@@ -248,7 +248,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
             case 1:
                 env_var_repo_remote = _get_repo_remote(local_root)
 
-                raise OSError(
+                raise EnvironmentError(  # noqa: UP024
                     f"System environment variable '{self.expected_env_var}' points to "
                     f"a github repository whose remote: \n '{env_var_repo_remote}' \n"
                     f"does not match that expected by C-Star: \n{self.source_repo}."
@@ -282,7 +282,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         return
 
                     if yn.casefold() in ["n", "no"]:
-                        raise OSError
+                        raise EnvironmentError  # noqa: UP024
 
                     print("invalid selection; enter 'y' or 'n'")
             case 3:
@@ -317,7 +317,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         break
 
                     if yn.casefold() in ["n", "no"]:
-                        raise OSError
+                        raise EnvironmentError  # noqa: UP024
 
                     if yn.casefold() == "custom":
                         custom_path = input("Enter custom path for install:\n")

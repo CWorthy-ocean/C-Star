@@ -97,7 +97,7 @@ class TestSetupEnvironmentFromFiles:
                     capture_output=True,
                     shell=True,
                     text=True,
-                )
+                ),
             ] + [
                 call(
                     f"/mock/lmod python load {mod}",
