@@ -7,8 +7,6 @@ from dotenv import dotenv_values, load_dotenv, set_key
 
 from cstar.base.utils import _run_cmd
 
-CSTAR_USER_ENV_PATH = Path("~/.cstar.env").expanduser()
-
 
 class CStarEnvironment:
     """Encapsulates the configuration and management of a computing environment for a
@@ -65,6 +63,7 @@ class CStarEnvironment:
         self._system_name = system_name
         self._mpi_exec_prefix = mpi_exec_prefix
         self._compiler = compiler
+        self._CSTAR_USER_ENV_PATH = Path("~/.cstar.env").expanduser()
 
         if self.uses_lmod:
             self.load_lmod_modules(
@@ -122,7 +121,7 @@ class CStarEnvironment:
         env_vars = dotenv_values(
             self.package_root / f"additional_files/env_files/{self._system_name}.env"
         )
-        user_env_vars = dotenv_values(CSTAR_USER_ENV_PATH)
+        user_env_vars = dotenv_values(self._CSTAR_USER_ENV_PATH)
         env_vars.update(user_env_vars)
         return env_vars
 
@@ -164,6 +163,17 @@ class CStarEnvironment:
         """
 
         return (platform.system() == "Linux") and ("LMOD_CMD" in list(os.environ))
+
+    @property
+    def user_env_path(self) -> Path:
+        """Identify the expected path to a .env file for the current user.
+
+        Returns
+        -------
+        Path
+            The path to the `.env` file.
+        """
+        return self._CSTAR_USER_ENV_PATH
 
     def _call_lmod(self, *args) -> None:
         """Calls Linux Environment Modules with specified arguments in python mode.
@@ -254,5 +264,5 @@ class CStarEnvironment:
         value : str
             The value to set for the environment variable.
         """
-        set_key(CSTAR_USER_ENV_PATH, key, value)
-        load_dotenv(CSTAR_USER_ENV_PATH, override=True)
+        set_key(self.user_env_path, key, value)
+        load_dotenv(self._CSTAR_USER_ENV_PATH, override=True)

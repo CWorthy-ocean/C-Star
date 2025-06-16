@@ -282,7 +282,7 @@ class TestStrAndReprMethods:
     """
 
     @patch.object(
-        cstar.system.environment.CStarEnvironment,
+        CStarEnvironment,
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
@@ -299,30 +299,28 @@ class TestStrAndReprMethods:
           like system name, scheduler, compiler, primary queue, and environment variables.
         """
         # Set up our mock environment with some sample properties
-        with (
-            patch.object(
-                MockEnvironment, "environment_variables", new_callable=PropertyMock
-            ) as mock_env_vars,
-        ):
-            mock_env_vars.return_value = {"VAR1": "value1", "VAR2": "value2"}
 
-            env = MockEnvironment()
-            # Manually construct the expected string output
-            expected_str = (
-                "MockEnvironment\n"
-                "---------------\n"  # Length of dashes matches "MockEnvironment"
-                "Compiler: mock_compiler\n"
-                "MPI Exec Prefix: mock_mpi_prefix\n"
-                "Uses Lmod: False\n"
-                "Environment Variables:\n"
-                "    VAR1: value1\n"
-                "    VAR2: value2"
-            )
+        vars = {"VAR1": "value1", "VAR2": "value2"}
 
-            assert str(env) == expected_str
+        env = MockEnvironment()
+        env._env_vars = vars
+
+        # Manually construct the expected string output
+        expected_str = (
+            "MockEnvironment\n"
+            "---------------\n"  # Length of dashes matches "MockEnvironment"
+            "Compiler: mock_compiler\n"
+            "MPI Exec Prefix: mock_mpi_prefix\n"
+            "Uses Lmod: False\n"
+            "Environment Variables:\n"
+            "    VAR1: value1\n"
+            "    VAR2: value2"
+        )
+
+        assert str(env) == expected_str
 
     @patch.object(
-        cstar.system.environment.CStarEnvironment,
+        CStarEnvironment,
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
