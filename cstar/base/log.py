@@ -65,6 +65,7 @@ def get_logger(
 
     if filename:
         if isinstance(filename, Path):
+            filename.parent.mkdir(parents=True, exist_ok=True)
             filename = str(filename)
 
         existing_fh = [
