@@ -121,7 +121,7 @@ class CStarEnvironment:
         env_vars = dotenv_values(
             self.package_root / f"additional_files/env_files/{self._system_name}.env"
         )
-        user_env_vars = dotenv_values(self._CSTAR_USER_ENV_PATH)
+        user_env_vars = dotenv_values(self.user_env_path)
         env_vars.update(user_env_vars)
         return env_vars
 
@@ -265,4 +265,4 @@ class CStarEnvironment:
             The value to set for the environment variable.
         """
         set_key(self.user_env_path, key, value)
-        load_dotenv(self._CSTAR_USER_ENV_PATH, override=True)
+        load_dotenv(self.user_env_path, override=True)
