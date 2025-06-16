@@ -1,8 +1,9 @@
 import os
 import subprocess
 from pathlib import Path
+from typing import Callable, Generator
 from unittest import mock
-from unittest.mock import PropertyMock, call, mock_open, patch
+from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
 
@@ -280,6 +281,74 @@ class TestSetupEnvironmentFromFiles:
                 # Confirm the value is persisted to disk
                 assert key in raw_env
 
+    @patch.dict(
+        "os.environ",
+        {
+            "NETCDF_FORTRANHOME": "/mock/netcdf",
+            "MVAPICH2HOME": "/mock/mpi",
+            "LMOD_SYSHOST": "perlmutter",
+            "LMOD_DIR": "/mock/lmod",  # Ensures `uses_lmod` is valid
+        },
+        clear=True,
+    )
+    @pytest.mark.parametrize(
+        "system_name,expected_path",
+        [
+            ["perlmutter", "additional_files/lmod_lists/perlmutter.lmod"],
+            ["derecho", "additional_files/lmod_lists/derecho.lmod"],
+            ["expanse", "additional_files/lmod_lists/expanse.lmod"],
+        ],
+    )
+    def test_lmod_path(
+        self,
+        tmp_path: Path,
+        system_name: str,
+        expected_path: str,
+        custom_system_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
+        custom_user_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
+    ):
+        """Verify that the lmod_path property returns the correct path based on the
+        system name.
+
+        Mocks
+        -----
+        - tmp_path creates temporary, emulated system and user .env files
+        - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
+
+        Asserts
+        -------
+        - Confirms merged environment variables with expected values after expansion.
+        """
+
+        # Write simulated system .env content to the appropriate location
+        custom_system_env(
+            {
+                "NETCDFHOME": "${NETCDF_FORTRANHOME}/",
+                "MPIHOME": "${MVAPICH2HOME}/",
+                "MPIROOT": "${MVAPICH2HOME}/",
+            }
+        )
+
+        # Write simulated user .env content
+        custom_user_env(
+            {
+                "MPIROOT": "/user-overridden/mpi",
+                "CUSTOM_VAR": "custom_value",
+                "EMPTY": "",
+            }
+        )
+
+        # Patch the root path and expanduser to point to our temporary files
+        with patch.object(CStarEnvironment, "package_root", new=tmp_path):
+            # Instantiate the environment to trigger loading the environment variables
+            env = CStarEnvironment(
+                system_name=system_name,
+                mpi_exec_prefix="mpi-prefix",
+                compiler="gnu",
+            )
+
+            assert env.lmod_path == tmp_path / expected_path
+
 
 class TestStrAndReprMethods:
     """Tests for the __str__ and __repr__ methods of CStarEnvironment.
@@ -523,3 +592,5 @@ class TestExceptions:
             ),
         ):
             MockEnvironment()
+
+        assert mock_open_file.called

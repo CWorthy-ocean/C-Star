@@ -1,6 +1,9 @@
+import functools
 import logging
-import pathlib
+from collections.abc import Callable
+from pathlib import Path
 
+import dotenv
 import pytest
 
 from cstar.base.log import get_logger
@@ -12,25 +15,19 @@ def log() -> logging.Logger:
 
 
 @pytest.fixture
-def dotenv_path(tmp_path: pathlib.Path) -> pathlib.Path:
-    # A path to a temporary user environment configuration file
-    return tmp_path / ".cstar.env"
-
-
-@pytest.fixture
-def marbl_path(tmp_path: pathlib.Path) -> pathlib.Path:
+def marbl_path(tmp_path: Path) -> Path:
     # A path to a temporary directory for writing the marbl code
     return tmp_path / "marbl"
 
 
 @pytest.fixture
-def roms_path(tmp_path: pathlib.Path) -> pathlib.Path:
+def roms_path(tmp_path: Path) -> Path:
     # A path to a temporary directory for writing the roms code
     return tmp_path / "roms"
 
 
 @pytest.fixture
-def system_dotenv_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+def system_dotenv_dir(tmp_path: Path) -> Path:
     # A path to a temporary directory for writing system-level
     # environment configuration file
     return tmp_path / "additional_files" / "env_files"
@@ -43,11 +40,132 @@ def mock_system_name() -> str:
 
 
 @pytest.fixture
-def system_dotenv_path(
-    mock_system_name: str, system_dotenv_dir: pathlib.Path
-) -> pathlib.Path:
+def mock_user_env_name() -> str:
+    """Return a unique name for a temporary user .env config file.
+
+    Returns
+    -------
+    str
+        The name of the .env file
+    """
+    return ".mock.env"
+
+
+@pytest.fixture
+def system_dotenv_path(system_dotenv_dir: Path, mock_system_name: str) -> Path:
     # A path to a temporary, system-level environment configuration file
     if not system_dotenv_dir.exists():
         system_dotenv_dir.mkdir(parents=True)
 
     return system_dotenv_dir / f"{mock_system_name}.env"
+
+
+@pytest.fixture
+def dotenv_path(tmp_path: Path, mock_user_env_name: str) -> Path:
+    """Return a complete path to a temporary user .env file.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The path to a temporary location to write the env file
+    mock_user_env_name : str
+        The name of the file that will be written
+
+    Returns
+    -------
+    Path
+        The complete path to the config file
+    """
+    return tmp_path / mock_user_env_name
+
+
+def _write_custom_env(path: Path, variables: dict[str, str]) -> None:
+    """Populate a .env configuration file.
+
+    NOTE: repeated calls will update the file
+
+    Parameters
+    ----------
+    path: Path
+        The complete file path to write to
+    variables : dict[str, str]
+        The key-value pairs to be written to the env file
+    """
+    if not path.parent.exists():
+        path.parent.mkdir(parents=True)
+
+    for k, v in variables.items():
+        dotenv.set_key(path, k, v)
+
+
+@pytest.fixture
+def custom_system_env(
+    system_dotenv_path: Path,
+) -> Callable[[dict[str, str]], None]:
+    """Return a function to populate a mocked system environment config file.
+
+    Parameters
+    ----------
+    system_dotenv_path: Path
+        The path to a temporary location to write the env file
+
+    Returns
+    -------
+    Callable[[dict[str, str]], None]
+        A function that will write a new env config file.
+    """
+    return functools.partial(_write_custom_env, system_dotenv_path)
+
+
+@pytest.fixture
+def custom_user_env(
+    dotenv_path: Path,
+) -> Callable[[dict[str, str]], None]:
+    """Return a function to populate a mocked user environment config file.
+
+    Parameters
+    ----------
+    dotenv_path: Path
+        The path to a temporary location to write the env file
+
+    Returns
+    -------
+    Callable[[dict[str, str]], None]
+        A function that will write a new env config file.
+    """
+    return functools.partial(_write_custom_env, dotenv_path)
+
+
+@pytest.fixture
+def mock_lmod_filename() -> str:
+    """Return a complete path to an empty, temporary .lmod config file for tests.
+
+    Returns
+    -------
+    str
+        The filename
+    """
+    return "mock.lmod"
+
+
+@pytest.fixture
+def mock_lmod_path(tmp_path: Path, mock_lmod_filename: str) -> Path:
+    """Create an empty, temporary .lmod file and return the path.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The path to a temporary location to write the lmod file
+    mock_lmod_filename : str
+        The filename to use for the .lmod file
+
+    Returns
+    -------
+    str
+        The complete path to the file
+    """
+    tmp_path.mkdir(parents=True, exist_ok=True)
+
+    path = tmp_path / mock_lmod_filename
+    path.touch()  # CStarEnvironment expects the file to exist & opens it
+    return path

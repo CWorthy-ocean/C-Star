@@ -66,10 +66,7 @@ class CStarEnvironment:
         self._CSTAR_USER_ENV_PATH = Path("~/.cstar.env").expanduser()
 
         if self.uses_lmod:
-            self.load_lmod_modules(
-                lmod_file=f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
-            )
-        os.environ.update(self.environment_variables)
+            self.load_lmod_modules(lmod_file=self.lmod_path)
 
     @property
     def mpi_exec_prefix(self):
@@ -175,6 +172,18 @@ class CStarEnvironment:
         """
         return self._CSTAR_USER_ENV_PATH
 
+    @property
+    def lmod_path(self) -> Path:
+        """Identify the expected path to a .lmod file for the current system.
+
+        Returns
+        -------
+        Path
+            The complete path to the `.lmod` file.
+        """
+        pkg_relative_path = f"additional_files/lmod_lists/{self._system_name}.lmod"
+        return self.package_root / pkg_relative_path
+
     def _call_lmod(self, *args) -> None:
         """Calls Linux Environment Modules with specified arguments in python mode.
 
@@ -246,12 +255,12 @@ class CStarEnvironment:
                 "Your system does not appear to use Linux Environment Modules"
             )
         self._call_lmod("reset")
-        with open(
-            f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
-        ) as fp:
+
+        with open(self.lmod_path) as fp:
             lmod_list = fp.readlines()
-            for mod in lmod_list:
-                self._call_lmod(f"load {mod}")
+
+        for mod in lmod_list:
+            self._call_lmod(f"load {mod}")
 
     def set_env_var(self, key: str, value: str) -> None:
         """Set value of an environment variable and store it in the user environment
