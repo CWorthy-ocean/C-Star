@@ -1,6 +1,7 @@
 import logging
 import pickle
 import re
+import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Generator, Tuple, cast
@@ -897,27 +898,34 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
         """
 
         sim, directory = example_roms_simulation
-        expected_tree = f"""\
-{directory}
-└── ROMS
-    ├── input_datasets
-    │   ├── grid.nc
-    │   ├── initial.nc
-    │   ├── tidal.nc
-    │   ├── river.nc
-    │   ├── boundary.nc
-    │   ├── surface.nc
-    │   └── sw_corr.nc
-    ├── runtime_code
-    │   ├── file1
-    │   ├── file2.in_TEMPLATE
-    │   ├── marbl_in
-    │   ├── marbl_tracer_output_list
-    │   └── marbl_diagnostic_output_list
-    └── compile_time_code
-        ├── file1.h
-        └── file2.opt
-"""
+        expected_tree = textwrap.dedent(f"""\
+            {directory}
+            └── ROMS
+                ├── input_datasets
+                │   ├── grid.nc
+                │   ├── initial.nc
+                │   ├── tidal.nc
+                │   ├── river.nc
+                │   ├── boundary.nc
+                │   ├── surface.nc
+                │   └── sw_corr.nc
+                ├── runtime_code
+                │   ├── file1
+                │   ├── file2.in_TEMPLATE
+                │   ├── marbl_in
+                │   ├── marbl_tracer_output_list
+                │   └── marbl_diagnostic_output_list
+                └── compile_time_code
+                    ├── file1.h
+                    └── file2.opt
+            """)
+
+        tree_lines = filter(lambda x: x.strip(), sim.tree().split("\n"))
+        exp_lines = filter(lambda x: x.strip(), expected_tree.split("\n"))
+
+        # Perform line by line comparison to quickly identify location of a problem
+        for actual, expected in zip(tree_lines, exp_lines):
+            assert actual == expected
 
         assert sim.tree() == expected_tree
 
