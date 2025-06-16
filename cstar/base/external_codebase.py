@@ -45,11 +45,11 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     Methods
     -------
-    get_local_config_status()
+    local_config_status()
         Perform a series of checks to determine how the external codebase is configured on this machine
         relative to this ExternalCodeBase instance.
     handle_local_config_status()
-        Perform actions depending on the output of get_local_config_status()
+        Perform actions depending on the output of local_config_status()
     get()
         Obtain and configure the external codebase on this machine if it is not already.
         handle_local_config_status() prompts the user to run get() if the model cannot be found.
