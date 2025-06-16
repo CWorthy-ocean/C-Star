@@ -101,7 +101,7 @@ class TestCStar:
             with mock_user_input("y"):
                 cstar_test_case.setup()
 
-            cstar_test_case.to_blueprint(tmp_path / "test_blueprint_export.yaml")
+            cstar_test_case.to_blueprint(str(tmp_path / "test_blueprint_export.yaml"))
             cstar_test_case.build()
             cstar_test_case.pre_run()
             test_process = cstar_test_case.run()
