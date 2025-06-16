@@ -326,12 +326,15 @@ class Simulation(ABC, LoggingMixin):
         base_str += f"\nCodebase: {self.codebase.__class__.__name__} instance (query using {class_name}.codebase)\n"
 
         # Runtime code:
-        if self.runtime_code is not None:
+        if self.runtime_code is not None and self.runtime_code.files is not None:
             NN = len(self.runtime_code.files)
             base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
 
         # Compile-time code:
-        if self.compile_time_code is not None:
+        if (
+            self.compile_time_code is not None
+            and self.compile_time_code.files is not None
+        ):
             NN = len(self.compile_time_code.files)
             base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
 

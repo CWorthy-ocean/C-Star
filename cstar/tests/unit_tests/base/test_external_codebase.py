@@ -122,7 +122,7 @@ def test_codebase_repr(generic_codebase):
         + "\nsource_repo = 'https://github.com/test/repo.git',"
         + "\ncheckout_target = 'test_target'"
         + "\n)"
-        + "\nState: <local_config_status = 3>"
+        + "\nState: <local_config_status = 1>"
     )
 
     assert result_repr == expected_repr

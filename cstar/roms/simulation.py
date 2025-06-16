@@ -470,7 +470,7 @@ class ROMSSimulation(Simulation):
 
         in_files = [
             fname.replace(".in_TEMPLATE", ".in")
-            for fname in self.runtime_code.files
+            for fname in self.runtime_code.files  # type: ignore[union-attr]
             if (fname.endswith(".in") or fname.endswith(".in_TEMPLATE"))
         ]
         if len(in_files) > 1:
@@ -904,7 +904,7 @@ class ROMSSimulation(Simulation):
             }
             return "\n     ".join(sorted(list(unique_paths)))
 
-        runtime_code_modifications: list[dict] = [{} for f in self.runtime_code.files]
+        runtime_code_modifications: list[dict] = [{} for f in self.runtime_code.files]  # type: ignore[union-attr]
 
         ################################################################################
         # 'roms.in' file modifications (the only file to modify as of 2024-10-01):
@@ -912,8 +912,8 @@ class ROMSSimulation(Simulation):
 
         # First figure out which namelist is the one to modify
         nl_template = self.in_file.name + "_TEMPLATE"
-        if nl_template in self.runtime_code.files:
-            nl_idx = self.runtime_code.files.index(nl_template)
+        if nl_template in self.runtime_code.files:  # type: ignore[operator,union-attr]
+            nl_idx = self.runtime_code.files.index(nl_template)  # type: ignore[operator,union-attr]
         else:
             raise ValueError(
                 "could not find expected template namelist file "
@@ -997,17 +997,17 @@ class ROMSSimulation(Simulation):
 
         # MARBL settings filepaths entries
         ## NOTE: WANT TO RAISE IF PLACEHOLDER IS IN NAMELIST BUT not Path(marbl_file.exists())
-        if "marbl_in" in self.runtime_code.files:
+        if "marbl_in" in self.runtime_code.files:  # type: ignore[operator]
             runtime_code_modifications[nl_idx][
                 "__MARBL_SETTINGS_FILE_PLACEHOLDER__"
             ] = str(self.runtime_code.working_path / "marbl_in")
 
-        if "marbl_tracer_output_list" in self.runtime_code.files:
+        if "marbl_tracer_output_list" in self.runtime_code.files:  # type: ignore[operator]
             runtime_code_modifications[nl_idx][
                 "__MARBL_TRACER_LIST_FILE_PLACEHOLDER__"
             ] = str(self.runtime_code.working_path / "marbl_tracer_output_list")
 
-        if "marbl_diagnostic_output_list" in self.runtime_code.files:
+        if "marbl_diagnostic_output_list" in self.runtime_code.files:  # type: ignore[operator]
             runtime_code_modifications[nl_idx][
                 "__MARBL_DIAG_LIST_FILE_PLACEHOLDER__"
             ] = str(self.runtime_code.working_path / "marbl_diagnostic_output_list")

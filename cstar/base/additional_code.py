@@ -42,8 +42,6 @@ class AdditionalCode(LoggingMixin):
        Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
     """
 
-    files: list[str]
-
     def __init__(
         self,
         location: str,
@@ -157,7 +155,7 @@ class AdditionalCode(LoggingMixin):
         local_dir: str | Path
             The local directory (typically `Case.caseroot`) in which to fetch the additional code.
         """
-        if len(self.files) == 0:
+        if self.files is None or len(self.files) == 0:
             raise ValueError(
                 "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
             )
