@@ -207,9 +207,9 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     def handle_config_status(self) -> None:
         """Perform actions depending on the output of
-        ExternalCodeBase.get_local_config_status()
+        ExternalCodeBase.local_config_status()
 
-        The config_status attribute should be set by the get_local_config_status method
+        The config_status attribute should be set by the local_config_status method
 
         The method then proceeds as follows:
         config_status =
