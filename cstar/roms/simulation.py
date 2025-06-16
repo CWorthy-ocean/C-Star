@@ -460,7 +460,6 @@ class ROMSSimulation(Simulation):
             - If no `.in` file is found in `runtime_code.files`.
         """
 
-        in_files = []
         if self.runtime_code is None:
             raise ValueError(
                 "ROMSSimulation.runtime_code not set."
