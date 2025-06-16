@@ -1,6 +1,7 @@
 import builtins
 import logging
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -45,4 +46,19 @@ def mock_user_input():
 
 @pytest.fixture
 def log() -> logging.Logger:
+    """Fixture to provide a logger for the integration tests."""
     return get_logger("cstar.tests.integration_tests")
+
+
+@pytest.fixture
+def mock_lmod_filename() -> str:
+    """Fixture to provide a default .lmod filename for tests."""
+    return "mock.lmod"
+
+
+@pytest.fixture
+def mock_lmod_path(tmp_path: Path, mock_lmod_filename: str) -> Path:
+    """Fixture to mock the existence of an Lmod configuration file."""
+    path = tmp_path / mock_lmod_filename
+    path.touch()  # CStarEnvironment expects the file to exist & opens it
+    return path

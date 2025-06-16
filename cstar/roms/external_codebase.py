@@ -1,3 +1,4 @@
+import os
 import shutil
 from pathlib import Path
 
@@ -39,9 +40,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         versions, allowing C-Star to be used with ROMS across multiple different
         computing systems.
         """
-        roms_root = Path(
-            cstar_sysmgr.environment.environment_variables[self.expected_env_var]
-        )
+        roms_root = Path(os.environ[self.expected_env_var])
         shutil.copytree(
             roms_root / "ci/ci_makefiles/",
             roms_root,

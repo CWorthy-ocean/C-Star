@@ -619,7 +619,7 @@ class TestAdditionalCodeGet:
         # Ensure the repository is cloned and checked out
         self.mock_clone.assert_called_once_with(
             source_repo=remote_additional_code.source.location,
-            local_path="/mock/tmp/dir",
+            local_path=Path("/mock/tmp/dir"),
             checkout_target=remote_additional_code.checkout_target,
         )
 
@@ -642,7 +642,7 @@ class TestAdditionalCodeGet:
             )
 
         # Ensure the temporary directory is cleaned up after use
-        self.mock_rmtree.assert_called_once_with("/mock/tmp/dir")
+        self.mock_rmtree.assert_called_once_with(Path("/mock/tmp/dir"))
 
         # Ensure that the working_path is set correctly
         assert remote_additional_code.working_path == Path("/mock/local/dir")
@@ -830,7 +830,7 @@ class TestAdditionalCodeGet:
         self.mock_resolve.return_value = Path("/mock/local/dir")
 
         # Call get method
-        remote_additional_code.get("/mock/local/dir")
+        remote_additional_code.get(Path("/mock/local/dir"))
 
         # Ensure the temporary directory is cleaned up after use
-        self.mock_rmtree.assert_called_once_with("/mock/tmp/dir")
+        self.mock_rmtree.assert_called_once_with(Path("/mock/tmp/dir"))

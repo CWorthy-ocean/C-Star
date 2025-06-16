@@ -10,7 +10,6 @@ from cstar.base.gitutils import (
     _get_repo_remote,
 )
 from cstar.base.log import LoggingMixin
-from cstar.system.environment import CSTAR_USER_ENV_PATH
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -175,9 +174,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
         """
 
         # check 1: X_ROOT variable is in user's env
-        env_var_exists = (
-            self.expected_env_var
-            in cstar_sysmgr.environment.environment_variables.keys()
+        env_var_exists = cstar_sysmgr.environment.environment_variables.get(
+            self.expected_env_var, None
         )
 
         # check 2: X_ROOT points to the correct repository
@@ -223,11 +221,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
            - 3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
                -> prompt installation of the external codebase
         """
-        local_root = Path(
-            cstar_sysmgr.environment.environment_variables.get(
-                self.expected_env_var, ""
-            )
-        )
+        local_root = Path(os.environ.get(self.expected_env_var, ""))
 
         interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
 
@@ -288,6 +282,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     cstar_sysmgr.environment.package_root
                     / f"externals/{self.repo_basename}"
                 )
+                user_env_path = cstar_sysmgr.environment.user_env_path
                 print(
                     (
                         "#######################################################\n"
@@ -298,7 +293,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         "you will need to set it up.\n"
                         "It is recommended that you install this external codebase in \n"
                         f"{ext_dir}\n"
-                        f"This will also modify your `{CSTAR_USER_ENV_PATH}` file.\n"
+                        f"This will also modify your `{user_env_path}` file.\n"
                         "#######################################################"
                     )
                 )
