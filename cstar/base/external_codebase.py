@@ -173,9 +173,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
         """
 
         # check 1: X_ROOT variable is in user's env
-        env_var_exists = (
-            self.expected_env_var
-            in cstar_sysmgr.environment.environment_variables.keys()
+        env_var_exists = cstar_sysmgr.environment.environment_variables.get(
+            self.expected_env_var, None
         )
 
         # check 2: X_ROOT points to the correct repository
