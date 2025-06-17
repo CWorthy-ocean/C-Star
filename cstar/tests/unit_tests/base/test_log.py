@@ -75,13 +75,13 @@ def test_loglevel_fh(
     """Verify the loggers are configured properly to output the desired log levels when
     the optional file handler is requested."""
 
-    for level in all_levels:
-        logger_name = f"{request.function.__name__}-{level}"
+    for level_ in all_levels:
+        logger_name = f"{request.function.__name__}-{level_}"
         filename = tmp_path / f"{logger_name}.log"
 
-        log = get_logger(logger_name, level, filename=str(filename))
+        log = get_logger(logger_name, level_, filename=str(filename))
 
-        lt_levels, gt_eq_levels = levels_fn(level)
+        lt_levels, gt_eq_levels = levels_fn(level_)
 
         msg = str(uuid.uuid4())
         funcs = [log.debug, log.info, log.warning, log.error, log.critical]
