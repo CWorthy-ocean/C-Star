@@ -128,5 +128,5 @@ def test_filehandler_no_dupes(
     assert found_at > -1
 
     # ... and isn't written more than once
-    found_at = log_content.find(expected_log_entry, len(expected_log_entry))
+    found_at = log_content.find(expected_log_entry, found_at + len(expected_log_entry))
     assert found_at == -1
