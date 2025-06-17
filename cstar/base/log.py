@@ -6,6 +6,73 @@ DEFAULT_LOG_LEVEL = logging.INFO
 DEFAULT_LOG_FORMAT = "[%(levelname)s] %(message)s"
 
 
+def register_file_handler(
+    logger: logging.Logger,
+    level: int,
+    fmt: str,
+    filename: str | Path | None,
+) -> logging.FileHandler:
+    """Register a file handler on the logger.
+
+    Requests to add duplicate file handlers are ignored and the level will
+    not be adjusted for a pre-existing handler.
+
+    Parameters
+    ----------
+    logger : logging.Logger
+        The logger to modify
+    level : int
+        The log level for a new handler
+    fmt : str
+        The log format to apply to the handler.
+    filename : str or Path or None
+        The desired log file path
+
+    Returns
+    -------
+    logging.FileHandler
+        The registered file handler instance or None if unable to find or
+        register a handler.
+
+    Raises
+    ------
+    ValueError
+        If the file handler cannot be registered due to a malformed input
+    """
+    file_path: Path | None = None
+
+    if isinstance(filename, Path):
+        file_path = filename.resolve()
+    elif isinstance(filename, str) and filename.strip():
+        file_path = Path(filename).resolve()
+
+    if not file_path:
+        raise ValueError("No log filehandler was added.")
+
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing_fh = next(
+        (
+            h
+            for h in logger.handlers
+            if isinstance(h, logging.FileHandler)
+            and Path(h.baseFilename).resolve() == file_path
+        ),
+        None,
+    )
+    if not existing_fh:
+        file_handler = logging.FileHandler(file_path)
+        file_handler.setLevel(level)
+        file_handler.setFormatter(logging.Formatter(fmt=fmt))
+        logger.addHandler(file_handler)
+        logger.info(f"FileHandler registered to write to: {file_path}")
+        existing_fh = file_handler
+    elif existing_fh.level != level:
+        logger.debug(f"FileHandler is already set to level: {existing_fh.level}")
+
+    return existing_fh
+
+
 def get_logger(
     name: str | None = None,
     level: int = DEFAULT_LOG_LEVEL,
@@ -64,21 +131,7 @@ def get_logger(
         logger.addHandler(stdout_handler)
 
     if filename:
-        if isinstance(filename, Path):
-            filename.parent.mkdir(parents=True, exist_ok=True)
-            filename = str(filename)
-
-        existing_fh = [
-            h
-            for h in logger.handlers
-            if isinstance(h, logging.FileHandler)
-            and Path(h.baseFilename).resolve() == Path(filename).resolve()
-        ]
-        if not existing_fh:
-            file_handler = logging.FileHandler(filename)
-            file_handler.setLevel(level)
-            file_handler.setFormatter(logging.Formatter(fmt=fmt))
-            logger.addHandler(file_handler)
+        register_file_handler(logger, level, fmt, filename)
 
     # Re-enable propagation on final logger
     logger.propagate = True
