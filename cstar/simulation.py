@@ -533,7 +533,7 @@ class Simulation(ABC, LoggingMixin):
 
         Parameters
         ----------
-        filename : str
+        filename : str or Path
             The path to the YAML file that will be created.
 
         See Also

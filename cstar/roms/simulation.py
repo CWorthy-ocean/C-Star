@@ -793,7 +793,7 @@ class ROMSSimulation(Simulation):
 
         Parameters
         ----------
-        filename : str
+        filename : str or Path
             The name of the YAML file where the blueprint will be saved.
 
         Raises
