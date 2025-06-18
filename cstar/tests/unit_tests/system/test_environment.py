@@ -1,6 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
+from unittest import mock
 from unittest.mock import PropertyMock, call, mock_open, patch
 
 import pytest
@@ -163,7 +164,11 @@ class TestSetupEnvironmentFromFiles:
         )  # fmt: skip
         # Patch the root path and expanduser to point to our temporary files
         with (
-            patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
+            patch(
+                "cstar.system.environment.CStarEnvironment.user_env_path",
+                new_callable=PropertyMock,
+                return_value=dotenv_path,
+            ),
             patch.object(
                 cstar.system.environment.CStarEnvironment, "package_root", new=tmp_path
             ),
@@ -229,7 +234,11 @@ class TestSetupEnvironmentFromFiles:
 
         # Patch the root path and expanduser to point to our temporary files
         with (
-            patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
+            patch(
+                "cstar.system.environment.CStarEnvironment.user_env_path",
+                new_callable=PropertyMock,
+                return_value=dotenv_path,
+            ),
             patch.object(
                 cstar.system.environment.CStarEnvironment, "package_root", new=tmp_path
             ),
@@ -282,7 +291,7 @@ class TestStrAndReprMethods:
     """
 
     @patch.object(
-        cstar.system.environment.CStarEnvironment,
+        CStarEnvironment,
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
@@ -299,30 +308,29 @@ class TestStrAndReprMethods:
           like system name, scheduler, compiler, primary queue, and environment variables.
         """
         # Set up our mock environment with some sample properties
-        with (
-            patch.object(
-                MockEnvironment, "environment_variables", new_callable=PropertyMock
-            ) as mock_env_vars,
+
+        # Manually construct the expected string output
+        expected_str = (
+            "MockEnvironment\n"
+            "---------------\n"  # Length of dashes matches "MockEnvironment"
+            "Compiler: mock_compiler\n"
+            "MPI Exec Prefix: mock_mpi_prefix\n"
+            "Uses Lmod: False\n"
+            "Environment Variables:\n"
+            "    VAR1: value1\n"
+            "    VAR2: value2"
+        )
+
+        with mock.patch(
+            "cstar.system.environment.CStarEnvironment.environment_variables",
+            new_callable=PropertyMock,
+            return_value={"VAR1": "value1", "VAR2": "value2"},
         ):
-            mock_env_vars.return_value = {"VAR1": "value1", "VAR2": "value2"}
-
             env = MockEnvironment()
-            # Manually construct the expected string output
-            expected_str = (
-                "MockEnvironment\n"
-                "---------------\n"  # Length of dashes matches "MockEnvironment"
-                "Compiler: mock_compiler\n"
-                "MPI Exec Prefix: mock_mpi_prefix\n"
-                "Uses Lmod: False\n"
-                "Environment Variables:\n"
-                "    VAR1: value1\n"
-                "    VAR2: value2"
-            )
-
             assert str(env) == expected_str
 
     @patch.object(
-        cstar.system.environment.CStarEnvironment,
+        CStarEnvironment,
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
