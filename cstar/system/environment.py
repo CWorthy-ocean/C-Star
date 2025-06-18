@@ -238,8 +238,8 @@ class CStarEnvironment:
         self._call_lmod("reset")
         with open(
             f"{self.package_root}/additional_files/lmod_lists/{self._system_name}.lmod"
-        ) as F:
-            lmod_list = F.readlines()
+        ) as fp:
+            lmod_list = fp.readlines()
             for mod in lmod_list:
                 self._call_lmod(f"load {mod}")
 
