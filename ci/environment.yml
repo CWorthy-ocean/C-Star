@@ -18,6 +18,7 @@ dependencies:
   - pre-commit==3.8.0
   - coverage
   - pytest
+  - pytest-asyncio
   # docs
   - sphinx
   - nbsphinx
