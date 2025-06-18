@@ -1,8 +1,10 @@
+import functools
 import os
-import platform
-from enum import Enum
-from typing import Optional
+import platform as platform_
+from dataclasses import dataclass, field
+from typing import ClassVar, Protocol
 
+from cstar.base.exceptions import CstarError
 from cstar.system.environment import CStarEnvironment
 from cstar.system.scheduler import (
     PBSQueue,
@@ -14,166 +16,337 @@ from cstar.system.scheduler import (
 )
 
 
-class SystemName(Enum):
-    """Enum for representing the names of supported systems.
+@dataclass(frozen=True)
+class HostNameEvaluator:
+    """Container of host-specific names used to determine the system name that will be
+    used by C-Star."""
 
-    Each member corresponds to a specific system name used in the
-    application, derived from environment variables or platform information.
+    lmod_syshost: str = field(default="", init=False)
+    """The lmod-specific hostname."""
+    lmod_sysname: str = field(default="", init=False)
+    """The lmod-specific system name."""
+    lmod_name: str = field(default="", init=False)
+    """Aggregate of lmod host and lmod name."""
+    platform: str = field(default="", init=False)
+    """The platform name."""
+    machine: str = field(default="", init=False)
+    """The machine name."""
+    platform_name: str = field(default="", init=False)
+    """Aggregate of machine and platform sysname."""
 
-    Members:
-    --------
-        PERLMUTTER: Represents the "perlmutter" system.
-        EXPANSE: Represents the "expanse" system.
-        DERECHO: Represents the "derecho" system.
-        DARWIN_ARM64: Represents a Darwin-based ARM64 system.
-        LINUX_X86_64: Represents a Linux-based x86_64 system.
+    ENV_LMOD_SYSHOST: ClassVar[str] = "LMOD_SYSHOST"
+    ENV_LMOD_SYSNAME: ClassVar[str] = "LMOD_SYSTEM_NAME"
 
-    Usage:
-    ------
-        SystemName.PERLMUTTER          # Accessing a member
-        SystemName("expanse")          # Converting from a string
-    """
+    def __post_init__(self) -> None:
+        """Initialize the non-init and calculated attributes of an instance.
 
-    PERLMUTTER = "perlmutter"
-    EXPANSE = "expanse"
-    DERECHO = "derecho"
-    DARWIN_ARM64 = "darwin_arm64"
-    LINUX_X86_64 = "linux_x86_64"
+        NOTE: make use of setattr because attributes are read-only.
+        """
+        # ruff: noqa: B010
+        setattr_ = object.__setattr__
+        setattr_(self, "lmod_syshost", os.environ.get(self.ENV_LMOD_SYSHOST, ""))
+        setattr_(self, "lmod_sysname", os.environ.get(self.ENV_LMOD_SYSNAME, ""))
+        setattr_(self, "lmod_name", (self.lmod_syshost or self.lmod_sysname).casefold())
+        setattr_(self, "platform", platform_.system())
+        setattr_(self, "machine", platform_.machine())
+        setattr_(
+            self,
+            "platform_name",
+            (
+                f"{self.platform}_{self.machine}"
+                if self.platform and self.machine
+                else ""
+            ).casefold(),
+        )
 
-
-class CStarSystemManager:
-    _environment: Optional[CStarEnvironment] = None
-    _scheduler: Optional[Scheduler] = None
+    @property
+    def _diagnostic(self) -> str:
+        """Return a string useful for diagnosing failures to identify the name."""
+        return (
+            f"{self.lmod_syshost=}, {self.lmod_sysname=}, "
+            f"{self.platform=}, {self.machine=}"
+        )
 
     @property
     def name(self) -> str:
-        """Determines the system name based on environment variables or platform
-        details.
+        """Determine the system name that will be used by C-Star.
 
-        Checks for Lmod-specific variables (`LMOD_SYSHOST` or `LMOD_SYSTEM_NAME`).
-        Otherwise, constructs a system name using `platform.system()` and
-        `platform.machine()`.
-
-        Returns
-        -------
-        str
-            The system's name in lowercase.
+        Makes use of environment variables and platform details. Prioritizes an LMOD-
+        based system name first, then falls back to
 
         Raises
         ------
         EnvironmentError
-            If the system name cannot be determined from environment variables or platform information.
+            If the name cannot be determined.
         """
+        if self.lmod_name:
+            return self.lmod_name
 
-        sysname = os.environ.get("LMOD_SYSHOST", default="") or os.environ.get(
-            "LMOD_SYSTEM_NAME"
+        if self.platform_name:
+            return self.platform_name
+
+        raise EnvironmentError(
+            f"C-Star cannot determine your system name. Diagnostics: {self._diagnostic}"
         )
-        if sysname:
-            pass
-        elif (platform.system() is not None) and (platform.machine() is not None):
-            sysname = platform.system() + "_" + platform.machine()
-        else:
-            raise EnvironmentError(
-                f"C-Star cannot determine your system name. Diagnostics: "
-                f"LMOD_SYSHOST={os.environ.get('LMOD_SYSHOST')}, "
-                f"LMOD_SYSTEM_NAME={os.environ.get('LMOD_SYSTEM_NAME')}, "
-                f"platform.system()={platform.system()}, "
-                f"platform.machine()={platform.machine()}"
-            )
-            # raise EnvironmentError("C-Star cannot determine your system name")
 
-        return sysname.casefold()
 
-    def _system_name_enum(self) -> SystemName:
-        """Converts the system name string to a validated SystemName enum."""
-        return SystemName(self.name)
+class _SystemContext(Protocol):
+    """The contextual dependencies for a given system/platform."""
 
-    @property
-    def scheduler(self) -> Optional[Scheduler]:
-        """Returns the Scheduler instance corresponding to the system.
+    name: ClassVar[str]
+    """The unique name identifying the context."""
+    compiler: ClassVar[str]
+    """The compiler that will be used when building software for a system."""
+    mpi_prefix: ClassVar[str]
+    """The prefix used when executing mpiexec for a system."""
 
-        The scheduler instance is created based on the detected system name
-        and cached for future access.
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Instantiate a scheduler configured for a system."""
+
+
+_registry: dict[str, type[_SystemContext]] = {}
+
+
+def register_sys_context(
+    cls_: type[_SystemContext],
+) -> type[_SystemContext]:
+    """Register the decorated type as an available _SystemContext."""
+    _registry[cls_.name] = cls_
+
+    @functools.wraps(cls_)
+    def _inner() -> type[_SystemContext]:
+        """Return the original type after it is registered.
 
         Returns
         -------
-        Optional[Scheduler]
-            A `Scheduler` instance configured for the detected system, or `None` if the
-            system is not supported or does not use a job scheduler.
+        type[_SystemContext]
+            The decorated type.
         """
+        return cls_
 
-        if self._scheduler is not None:
-            return self._scheduler
+    return _inner()
 
-        match self._system_name_enum():
-            case SystemName.PERLMUTTER:
-                # regular -> regular_1 for < 124 nodes, regular_0 for >124 nodes
-                per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
-                per_shared_q = SlurmQOS(name="shared")
-                per_debug_q = SlurmQOS(name="debug")
 
-                self._scheduler = SlurmScheduler(
-                    queues=[per_regular_q, per_shared_q, per_debug_q],
-                    primary_queue_name="regular",
-                    other_scheduler_directives={"-C": "cpu"},
-                    requires_task_distribution=False,
-                    documentation="https://docs.nersc.gov/systems/perlmutter/architecture/",
-                )
-            case SystemName.DERECHO:
-                # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
-                der_main_q = PBSQueue(name="main", max_walltime="12:00:00")
-                der_preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
-                der_develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
+def _get_system_context(name: str) -> _SystemContext:
+    """Retrieve a system context from the context registry.
 
-                self._scheduler = PBSScheduler(
-                    queues=[der_main_q, der_preempt_q, der_develop_q],
-                    primary_queue_name="main",
-                    requires_task_distribution=True,
-                    documentation="https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/",
-                )
-            case SystemName.EXPANSE:
-                exp_compute_q = SlurmPartition(name="compute")
-                exp_debug_q = SlurmPartition(name="debug")
-                self._scheduler = SlurmScheduler(
-                    queues=[exp_compute_q, exp_debug_q],
-                    primary_queue_name="compute",
-                    requires_task_distribution=True,
-                    documentation="https://www.sdsc.edu/support/user_guides/expanse.html",
-                )
-            case _:
-                self._scheduler = None
+    Parameters
+    ----------
+    name : str
+        The name of the system to retrieve a context for
 
-        return self._scheduler
+    Returns
+    -------
+    _SystemContext
+        The context matching the supplied name.
+
+    Raises
+    ------
+    CStarError
+        If the supplied name has not been registered.
+    """
+    if type_ := _registry.get(name):
+        return type_()
+
+    raise CstarError(f"Unknown system requested: {name}")
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _PerlmutterSystemContext(_SystemContext):
+    """The contextual dependencies for the Perlmutter system."""
+
+    name: ClassVar[str] = "perlmutter"
+    """The unique name identifying the Perlmutter system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Perlmutter."""
+    mpi_prefix: ClassVar[str] = "srun"
+    """The MPI prefix used on Perlmutter."""
+    docs: ClassVar[str] = "https://docs.nersc.gov/systems/perlmutter/architecture/"
+    """URI for documentation of the Perlmutter system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Instantiate a scheduler configured for Perlmutter.
+
+        Returns
+        -------
+        Scheduler
+            A SlurmScheduler instance
+        """
+        per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
+        per_shared_q = SlurmQOS(name="shared")
+        per_debug_q = SlurmQOS(name="debug")
+
+        return SlurmScheduler(
+            queues=[per_regular_q, per_shared_q, per_debug_q],
+            primary_queue_name="regular",
+            other_scheduler_directives={"-C": "cpu"},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+        )
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _DerechoSystemContext(_SystemContext):
+    """The contextual dependencies for the Derecho system."""
+
+    name: ClassVar[str] = "derecho"
+    """The unique name identifying the Derecho system."""
+    compiler: ClassVar[str] = "intel"
+    """The compiler used on Derecho."""
+    mpi_prefix: ClassVar[str] = "mpirun"
+    """The MPI prefix used on Derecho."""
+    docs: ClassVar[str] = (
+        "https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/"
+    )
+    """URI for documentation of the Derecho system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Instantiate a scheduler configured for Perlmutter.
+
+        Returns
+        -------
+        Scheduler
+            A PBSScheduler instance
+        """
+        # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
+        der_main_q = PBSQueue(name="main", max_walltime="12:00:00")
+        der_preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
+        der_develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
+
+        return PBSScheduler(
+            queues=[der_main_q, der_preempt_q, der_develop_q],
+            primary_queue_name="main",
+            requires_task_distribution=True,
+            documentation=cls.docs,
+        )
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _ExpanseSystemContext(_SystemContext):
+    """The contextual dependencies for the Expanse system."""
+
+    name: ClassVar[str] = "expanse"
+    """The unique name identifying the Expanse system."""
+    compiler: ClassVar[str] = "intel"
+    """The compiler used on Expanse."""
+    mpi_prefix: ClassVar[str] = "srun --mpi=pmi2"
+    """The MPI prefix used on Expanse."""
+    docs: ClassVar[str] = "https://www.sdsc.edu/support/user_guides/expanse.html"
+    """URI for documentation of the Expanse system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler:
+        """Instantiate a scheduler configured for Perlmutter.
+
+        Returns
+        -------
+        Scheduler
+            A SlurmScheduler instance
+        """
+        exp_compute_q = SlurmPartition(name="compute")
+        exp_debug_q = SlurmPartition(name="debug")
+        return SlurmScheduler(
+            queues=[exp_compute_q, exp_debug_q],
+            primary_queue_name="compute",
+            requires_task_distribution=True,
+            documentation=cls.docs,
+        )
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _LinuxSystemContext(_SystemContext):
+    """The contextual dependencies for the Linux system on the x86_64 platform."""
+
+    name: ClassVar[str] = "linux_x86_64"
+    """The unique name identifying the Linux system on an X86_64 platform."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Linux."""
+    mpi_prefix: ClassVar[str] = "mpirun"
+    """The MPI prefix used on Linux."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Return None - a scheduler on the Linux system is not supported."""
+        return None
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _MacOSSystemContext(_SystemContext):
+    name: ClassVar[str] = "darwin_arm64"
+    """The unique name identifying the MacOS system on an ARM64 platform."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on MacOS."""
+    mpi_prefix: ClassVar[str] = "mpirun"
+    """The MPI prefix used on MacOS."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Return None - a scheduler on the MacOS system is not supported."""
+        return None
+
+
+class CStarSystemManager:
+    """Manage system-specific configuration and resources."""
+
+    def __init__(self) -> None:
+        """Initialize the CStarSystemManager.
+
+        Initialize the system manager by determining the system name and initializing
+        the environment and scheduler based on that name.
+        """
+        namer = HostNameEvaluator()
+        self._context = _get_system_context(namer.name)
+        """A context object configured for the current system."""
+        self._environment = CStarEnvironment(
+            system_name=self._context.name,
+            mpi_exec_prefix=self._context.mpi_prefix,
+            compiler=self._context.compiler,
+        )
+        """An environment manager configured for the current system."""
+
+        self._scheduler = self._context.create_scheduler()
+        """The scheduler appropriate for this system."""
+
+    @property
+    def name(self) -> str:
+        """Get the name of this system.
+
+        Returns
+        -------
+        str
+            The system name
+        """
+        return self._context.name
 
     @property
     def environment(self) -> CStarEnvironment:
-        """Returns a CStarEnvironment class instance corresponding to this system.
+        """Get the environment manager for this system.
 
-        The instance is created when the property is first accessed and cached for
-        future queries.
+        Returns
+        -------
+        CStarEnvironment
+            The environment manager
         """
-        if self._environment is not None:
-            return self._environment
-
-        match self._system_name_enum():
-            case SystemName.EXPANSE:
-                mpi_exec_prefix = "srun --mpi=pmi2"
-                compiler = "intel"
-
-            case SystemName.PERLMUTTER:
-                mpi_exec_prefix = "srun"
-                compiler = "gnu"
-            case SystemName.DERECHO:
-                mpi_exec_prefix = "mpirun"
-                compiler = "intel"
-            case SystemName.DARWIN_ARM64 | SystemName.LINUX_X86_64:
-                mpi_exec_prefix = "mpirun"
-                compiler = "gnu"
-
-        self._environment = CStarEnvironment(
-            system_name=self.name, mpi_exec_prefix=mpi_exec_prefix, compiler=compiler
-        )
         return self._environment
+
+    @property
+    def scheduler(self) -> Scheduler | None:
+        """Get the scheduler for this system.
+
+        Returns
+        -------
+        Scheduler
+            The system scheduler
+        """
+        return self._scheduler
 
 
 cstar_sysmgr = CStarSystemManager()
