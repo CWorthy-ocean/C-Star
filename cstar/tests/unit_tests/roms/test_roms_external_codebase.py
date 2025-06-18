@@ -153,6 +153,7 @@ class TestROMSExternalCodeBaseGet:
             assert v0 == actual_value
 
             actual_value = cfg[k1]
+            assert actual_value is not None
             assert v1.split(":")[1] in actual_value
 
             self.mock_subprocess_run.assert_any_call(
