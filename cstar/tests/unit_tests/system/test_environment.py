@@ -370,8 +370,6 @@ class TestSetupEnvironmentFromFiles:
         tmp_path: Path,
         package_root: str,
         system_name: str,
-        # custom_system_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
-        # custom_user_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
     ):
         """Verify that the system env property is based on package root and system name.
 
@@ -485,7 +483,6 @@ class TestSetupEnvironmentFromFiles:
         sys_var = "system-var"
         exp_system_env = {sys_var: "system-value"}
 
-        # patch the _load function so we can show loads only occur after updates
         with patch(
             "cstar.system.environment.CStarEnvironment._load_env",
             new_callable=Mock,
