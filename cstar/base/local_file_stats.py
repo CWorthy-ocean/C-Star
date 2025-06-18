@@ -97,8 +97,8 @@ class LocalFileStatistics:
                 raise FileNotFoundError(f"File {f} does not exist locally")
 
             current_stats = f.stat()
-            if (f.stat.st_size != current_stats.st_size) or (
-                f.stat.st_mtime != current_stats.st_mtime
+            if (f.stat().st_size != current_stats.st_size) or (
+                f.stat().st_mtime != current_stats.st_mtime
             ):
                 raise ValueError(f"File statistics for {f} do not match those in cache")
 

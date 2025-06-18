@@ -78,7 +78,6 @@ class AdditionalCode(LoggingMixin):
         self._checkout_target = checkout_target
         self.files: Optional[list[str]] = [] if files is None else files
         # Initialize object state
-        # self.working_path: Optional[Path] = None
         self.local_file_stats: Optional[LocalFileStatistics] = None
 
     def __str__(self) -> str:
@@ -89,8 +88,8 @@ class AdditionalCode(LoggingMixin):
             base_str += f"\nSubdirectory: {self.subdir}"
         if self.checkout_target is not None:
             base_str += f"\nCheckout target: {self.checkout_target}"
-        # base_str += f"\nWorking path: {self.working_path}"
-        # base_str += f"\nExists locally: {self.exists_locally}"
+        base_str += f"\nWorking path: {self.working_path}"
+        base_str += f"\nExists locally: {self.exists_locally}"
         if not self.exists_locally:
             base_str += " (get with AdditionalCode.get())"
         if self.files is not None:
@@ -112,9 +111,9 @@ class AdditionalCode(LoggingMixin):
         # Additional info:
         info_str = ""
 
-        # if self.working_path is not None:
-        #     info_str += f"working_path = {self.working_path},"
-        #     info_str += f"exists_locally = {self.exists_locally}"
+        if self.working_path is not None:
+            info_str += f"working_path = {self.working_path},"
+            info_str += f"exists_locally = {self.exists_locally}"
 
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
@@ -123,6 +122,12 @@ class AdditionalCode(LoggingMixin):
     @property
     def checkout_target(self) -> Optional[str]:
         return self._checkout_target
+
+    @property
+    def working_path(self) -> Optional[Path]:
+        if self.local_file_stats is None:
+            return None
+        return self.local_file_stats.parent_dir
 
     @property
     def exists_locally(self):
