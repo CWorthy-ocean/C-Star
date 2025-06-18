@@ -132,7 +132,7 @@ class AdditionalCode(LoggingMixin):
     @property
     def exists_locally(self):
         if not self.local_file_stats:
-            return None
+            return False
         try:
             self.local_file_stats.validate()
         except (FileNotFoundError, ValueError):

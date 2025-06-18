@@ -513,6 +513,10 @@ class TestROMSSimulationInitialization:
         pass
 
     @patch("cstar.roms.simulation.ROMSRuntimeSettings.from_file")
+    @patch(
+        "cstar.base.additional_code.AdditionalCode.working_path",
+        new_callable=PropertyMock,
+    )
     @patch.object(ROMSSimulation, "_forcing_paths", new_callable=PropertyMock)
     @patch.object(ROMSInitialConditions, "path_for_roms", new_callable=PropertyMock)
     @patch.object(ROMSModelGrid, "path_for_roms", new_callable=PropertyMock)
@@ -521,6 +525,7 @@ class TestROMSSimulationInitialization:
         mock_grid_path,
         mock_ini_path,
         mock_forcing_paths,
+        mock_working_path,
         mock_from_file,
         example_roms_simulation,
     ):
@@ -553,12 +558,8 @@ class TestROMSSimulationInitialization:
 
         sim, _ = example_roms_simulation
 
-        # Stop complaints about missing local paths:
-        sim.runtime_code.working_path = Path("my_code/")
-        # sim.model_grid.working_path = Path("grid.nc")
-        # sim.initial_conditions.working_path = Path("ini.nc")
+        mock_working_path.return_value = Path("my_code/")
 
-        # mock_roms_path.side_effect = [[Path("grid.nc"),],[Path("ini.nc"),]]
         mock_grid_path.return_value = [
             Path("grid.nc"),
         ]
@@ -1755,9 +1756,15 @@ class TestProcessingAndExecution:
                 sim.end_date = sim_end
                 assert sim.is_setup == expected
 
+    @patch(
+        "cstar.base.additional_code.AdditionalCode.working_path",
+        new_callable=PropertyMock,
+    )
     @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @patch("subprocess.run")
-    def test_build(self, mock_subprocess, mock_get_hash, example_roms_simulation):
+    def test_build(
+        self, mock_subprocess, mock_get_hash, mock_working_path, example_roms_simulation
+    ):
         """Tests that `build` correctly compiles the ROMS executable.
 
         This test ensures that the `build` method performs the following steps:
@@ -1781,7 +1788,8 @@ class TestProcessingAndExecution:
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
-        sim.compile_time_code.working_path = build_dir
+
+        mock_working_path.return_value = build_dir
 
         mock_subprocess.return_value = MagicMock(returncode=0, stderr="")
         mock_get_hash.return_value = "mockhash123"
@@ -1807,6 +1815,10 @@ class TestProcessingAndExecution:
         assert sim._exe_hash == "mockhash123"
 
     @patch(
+        "cstar.base.additional_code.AdditionalCode.working_path",
+        new_callable=PropertyMock,
+    )
+    @patch(
         "cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash"
     )  # Mock hash function
     @patch("subprocess.run")  # Mock subprocess (should not be called)
@@ -1814,6 +1826,7 @@ class TestProcessingAndExecution:
         self,
         mock_subprocess,
         mock_get_hash,
+        mock_working_path,
         example_roms_simulation,
         caplog: pytest.LogCaptureFixture,
     ):
@@ -1854,7 +1867,8 @@ class TestProcessingAndExecution:
         ):
             # Pretend the executable exists
             sim._exe_hash = "dummy_hash"
-            sim.compile_time_code.working_path = build_dir
+
+            mock_working_path.return_value = build_dir
             sim.build(rebuild=False)
 
             # Ensure early exit exception was triggered
@@ -1870,10 +1884,14 @@ class TestProcessingAndExecution:
             # Ensure subprocess.run was *not* called
             mock_subprocess.assert_not_called()
 
+    @patch(
+        "cstar.base.additional_code.AdditionalCode.working_path",
+        new_callable=PropertyMock,
+    )
     @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @patch("subprocess.run")
     def test_build_raises_if_make_clean_error(
-        self, mock_subprocess, mock_get_hash, example_roms_simulation
+        self, mock_subprocess, mock_get_hash, mock_working_path, example_roms_simulation
     ):
         """Tests that `build` raises an error if `make compile_clean` fails.
 
@@ -1895,7 +1913,8 @@ class TestProcessingAndExecution:
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
-        sim.compile_time_code.working_path = build_dir
+
+        mock_working_path.return_value = build_dir
 
         mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
@@ -1911,10 +1930,14 @@ class TestProcessingAndExecution:
             text=True,
         )
 
+    @patch(
+        "cstar.base.additional_code.AdditionalCode.working_path",
+        new_callable=PropertyMock,
+    )
     @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @patch("subprocess.run")
     def test_build_raises_if_make_error(
-        self, mock_subprocess, mock_get_hash, example_roms_simulation
+        self, mock_subprocess, mock_get_hash, mock_working_path, example_roms_simulation
     ):
         """Tests that `build` raises an error if `make` fails during compilation.
 
@@ -1935,7 +1958,8 @@ class TestProcessingAndExecution:
 
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
-        sim.compile_time_code.working_path = build_dir
+
+        mock_working_path.return_value = build_dir
 
         mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
@@ -2073,10 +2097,18 @@ class TestProcessingAndExecution:
             ):
                 sim.run()
 
+    @patch(
+        "cstar.base.additional_code.AdditionalCode.working_path",
+        new_callable=PropertyMock,
+    )
     @patch("cstar.roms.ROMSSimulation.persist")
     @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
     def test_run_local_execution(
-        self, mock_runtime_settings, mock_persist, example_roms_simulation
+        self,
+        mock_runtime_settings,
+        mock_persist,
+        mock_working_path,
+        example_roms_simulation,
     ):
         """Tests that `run` correctly starts a local process when no scheduler is
         available.
@@ -2110,7 +2142,7 @@ class TestProcessingAndExecution:
             ),
         ):
             sim.exe_path = directory / "ROMS/compile_time_code/roms"
-            sim.runtime_code.working_path = directory / "ROMS/runtime_code/"
+            mock_working_path.return_value = directory / "ROMS/runtime_code/"
             mock_process_instance = MagicMock()
             mock_local_process.return_value = mock_process_instance
 
@@ -2141,8 +2173,13 @@ class TestProcessingAndExecution:
     )
     @patch("cstar.roms.ROMSSimulation.persist")
     @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
+    @patch(
+        "cstar.base.additional_code.AdditionalCode.working_path",
+        new_callable=PropertyMock,
+    )
     def test_run_with_scheduler(
         self,
+        mock_working_path,
         mock_runtime_settings,
         mock_persist,
         example_roms_simulation,
@@ -2171,7 +2208,7 @@ class TestProcessingAndExecution:
 
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
-        sim.runtime_code.working_path = directory / "ROMS/runtime_code/"
+        mock_working_path.return_value = directory / "ROMS/runtime_code/"
 
         # Mock scheduler object
         mock_scheduler = MagicMock()
@@ -2210,7 +2247,6 @@ class TestProcessingAndExecution:
 
             # Call `run()` without explicitly passing `queue_name` and `walltime`
             execution_handler = sim.run(account_key="some_key")
-            print("HERES YA ARGS", mock_create_job.call_args_list)
             mock_create_job.assert_called_once_with(
                 commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {sim.runtime_code.working_path}/ROMSTest.in",
                 job_name=None,
@@ -2227,9 +2263,13 @@ class TestProcessingAndExecution:
 
             mock_persist.assert_called_once()
 
+    @patch(
+        "cstar.base.additional_code.AdditionalCode.working_path",
+        new_callable=PropertyMock,
+    )
     @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
     def test_run_with_scheduler_raises_if_no_account_key(
-        self, mock_runtime_settings, example_roms_simulation
+        self, mock_runtime_settings, mock_working_path, example_roms_simulation
     ):
         """Tests that `run` raises a `ValueError` if no account key is provided when
         using a scheduler.
@@ -2252,7 +2292,7 @@ class TestProcessingAndExecution:
 
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
-        sim.runtime_code.working_path = directory / "ROMS/runtime_code/"
+        mock_working_path.return_value = directory / "ROMS/runtime_code/"
 
         # Mock scheduler object
         mock_scheduler = MagicMock()
