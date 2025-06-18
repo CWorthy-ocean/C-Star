@@ -497,7 +497,7 @@ class Simulation(ABC, LoggingMixin):
         cls,
         blueprint: str,
         directory: str | Path,
-    ):
+    ) -> "Simulation":
         """Abstract method to create a Simulation instance from a blueprint file.
 
         This method should be implemented in subclasses to read a YAML file containing
