@@ -115,14 +115,12 @@ def test_codebase_str(generic_codebase):
 
 
 @mock.patch.dict(os.environ, {})
-def test_codebase_repr(generic_codebase, mock_system_name):
+def test_codebase_repr(generic_codebase: ExternalCodeBase) -> None:
     """Test the repr representation of the `ExternalCodeBase` class."""
 
-    cstar_sysmgr.environment._system_name = mock_system_name
-
     with mock.patch(
-        "cstar.system.environment.dotenv_values",
-        new_callable=mock.Mock,
+        "cstar.system.environment.CStarEnvironment.environment_variables",
+        new_callable=mock.PropertyMock,
         return_value={},
     ):
         result_repr = repr(generic_codebase)
