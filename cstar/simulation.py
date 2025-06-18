@@ -524,7 +524,7 @@ class Simulation(ABC, LoggingMixin):
         pass
 
     @abstractmethod
-    def to_blueprint(self, filename: str) -> None:
+    def to_blueprint(self, filename: str | Path) -> None:
         """Abstract method to save the Simulation instance as a YAML blueprint file.
 
         This method should be implemented in subclasses to serialize the Simulation
