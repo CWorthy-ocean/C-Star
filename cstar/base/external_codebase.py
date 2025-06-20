@@ -153,8 +153,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
         MARBL_ROOT."""
 
     @property
-    def externals_root(self) -> Path:
-        """Return the path the to root directory where external codebases are stored.
+    def default_externals_root(self) -> Path:
+        """The default path of the root directory where external codebases are stored.
 
         Returns
         -------
@@ -304,14 +304,14 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         f"an instance of {self.__class__.__name__}, "
                         "you will need to set it up.\n"
                         "It is recommended that you install this external codebase in \n"
-                        f"{self.externals_root}\n"
+                        f"{self.default_externals_root}\n"
                         f"This will also modify your `{user_env_path}` file.\n"
                         "#######################################################"
                     )
                 )
                 while True:
-                    if not self.externals_root.exists():
-                        self.externals_root.mkdir(parents=True)
+                    if not self.default_externals_root.exists():
+                        self.default_externals_root.mkdir(parents=True)
 
                     yn = "y"
                     if interactive:
@@ -322,7 +322,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                             )
                         )
                     if yn.casefold() in ["y", "yes", "ok"]:
-                        self.get(self.externals_root)
+                        self.get(self.default_externals_root)
                         break
                     elif yn.casefold() in ["n", "no"]:
                         raise EnvironmentError()
