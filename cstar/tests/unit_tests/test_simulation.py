@@ -96,7 +96,7 @@ class MockSimulation(Simulation):
     def from_blueprint(cls, blueprint, directory):
         pass
 
-    def to_blueprint(self, filename):
+    def to_blueprint(self, filename: str | Path) -> None:
         pass
 
     def setup(self):

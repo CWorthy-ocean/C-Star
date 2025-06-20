@@ -962,7 +962,7 @@ class ROMSSimulation(Simulation):
             bp_dict, directory=directory, start_date=start_date, end_date=end_date
         )
 
-    def to_blueprint(self, filename: str) -> None:
+    def to_blueprint(self, filename: str | Path) -> None:
         """Save the `ROMSSimulation` instance as a YAML blueprint.
 
         This method converts the simulation instance into a dictionary representation
@@ -970,7 +970,7 @@ class ROMSSimulation(Simulation):
 
         Parameters
         ----------
-        filename : str
+        filename : str or Path
             The name of the YAML file where the blueprint will be saved.
 
         Raises
