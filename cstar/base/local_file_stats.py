@@ -62,14 +62,15 @@ class LocalFileStatistics:
         self.parent_dir = paths[0].parent
 
         if stats is not None:
-            if set(k.resolve() for k in stats.keys()) != self.paths:
+            if set(k.resolve() for k in stats.keys()) != set(self.paths):
+                # import pdb;pdb.set_trace()
                 raise ValueError("Provided 'stats' keys must match provided 'paths'")
             self._stat_cache = stats
         else:
             self._stat_cache = dict[Path, os.stat_result]()
 
         if hashes is not None:
-            if set(k.resolve() for k in hashes.keys()) != self.paths:
+            if set(k.resolve() for k in hashes.keys()) != set(self.paths):
                 raise ValueError("Provided 'hashes' keys must provided 'paths'")
             self._hash_cache = hashes
         else:

@@ -3,14 +3,15 @@ import shutil
 import tempfile
 from abc import ABC
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import requests
 import roms_tools
 import yaml
 
 from cstar.base.input_dataset import InputDataset
-from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
+from cstar.base.local_file_stats import LocalFileStatistics
+from cstar.base.utils import _list_to_concise_str
 
 
 class ROMSPartitioning:
@@ -45,8 +46,9 @@ class ROMSPartitioning:
         self.np_xi = np_xi
         self.np_eta = np_eta
         self.files = files
-        self._local_file_hash_cache: Dict = {}
-        self._local_file_stat_cache: Dict = {}
+        self.local_file_stats: Optional[LocalFileStatistics] = None
+        # self._local_file_hash_cache: Dict = {}
+        # self._local_file_stat_cache: Dict = {}
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files,pad=43)})"
@@ -268,21 +270,24 @@ class ROMSInputDataset(InputDataset, ABC):
         local_dir (str or Path):
             Directory to save the dataset files.
         """
+
         # Ensure we're working with a Path object
         local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)
 
-        # If `working_path` is set, determine we're not fetching to the same parent dir:
-        if self.working_path is None:
-            working_path_parent = None
-        elif isinstance(self.working_path, list):
-            working_path_parent = self.working_path[0].parent
-        else:
-            working_path_parent = self.working_path.parent
+        # # If `working_path` is set, determine we're not fetching to the same parent dir:
+        # if self.working_path is None:
+        #     working_path_parent = None
+        # elif isinstance(self.working_path, list):
+        #     working_path_parent = self.working_path[0].parent
+        # else:
+        #     working_path_parent = self.working_path.parent
 
-        if (self.exists_locally) and (working_path_parent == local_dir):
-            self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
-            return
+        if self.exists_locally:
+            assert self.local_file_stats is not None
+            if self.local_file_stats.parent_dir == local_dir:
+                self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
+                return
 
         if self.source.source_type == "yaml":
             self._get_from_yaml(local_dir=local_dir)
@@ -321,10 +326,12 @@ class ROMSInputDataset(InputDataset, ABC):
         self._update_partitioning_attribute(
             new_np_xi=source_np_xi, new_np_eta=source_np_eta, parted_files=parted_files
         )
-        self.working_path = parted_files
+        # self.working_path = parted_files
         assert self.partitioning is not None
-        self._local_file_stat_cache.update(self.partitioning._local_file_stat_cache)
-        self._local_file_hash_cache.update(self.partitioning._local_file_hash_cache)
+        self.local_file_stats = LocalFileStatistics(paths=parted_files)
+
+        # self._local_file_stat_cache.update(self.partitioning._local_file_stat_cache)
+        # self._local_file_hash_cache.update(self.partitioning._local_file_hash_cache)
 
     def _get_from_yaml(self, local_dir: str | Path) -> None:
         """Handle the special case where the input dataset source is a `roms-tools`
@@ -411,12 +418,14 @@ class ROMSInputDataset(InputDataset, ABC):
         )
 
         savepath = roms_tools_class_instance.save(**save_kwargs)
-        self.working_path = savepath[0] if len(savepath) == 1 else savepath
+        # TODO
+        self.local_file_stats = LocalFileStatistics(paths=savepath)
+        # self.working_path = savepath[0] if len(savepath) == 1 else savepath
 
-        self._local_file_hash_cache.update(
-            {path: _get_sha256_hash(path.resolve()) for path in savepath}
-        )  # 27
-        self._local_file_stat_cache.update({path: path.stat() for path in savepath})
+        # self._local_file_hash_cache.update(
+        #     {path: _get_sha256_hash(path.resolve()) for path in savepath}
+        # )  # 27
+        # self._local_file_stat_cache.update({path: path.stat() for path in savepath})
 
     def _update_partitioning_attribute(
         self, new_np_xi: int, new_np_eta: int, parted_files: list[Path]
@@ -424,13 +433,13 @@ class ROMSInputDataset(InputDataset, ABC):
         self.partitioning = ROMSPartitioning(
             np_xi=new_np_xi, np_eta=new_np_eta, files=parted_files
         )
-
-        self.partitioning._local_file_hash_cache = {
-            path: _get_sha256_hash(path.resolve()) for path in parted_files
-        }  # 27
-        self.partitioning._local_file_stat_cache = {
-            path: path.stat() for path in parted_files
-        }
+        self.partitioning.local_file_stats = LocalFileStatistics(paths=parted_files)
+        # self.partitioning._local_file_hash_cache = {
+        #     path: _get_sha256_hash(path.resolve()) for path in parted_files
+        # }  # 27
+        # self.partitioning._local_file_stat_cache = {
+        #     path: path.stat() for path in parted_files
+        # }
 
     @property
     def path_for_roms(self) -> list[Path]:
