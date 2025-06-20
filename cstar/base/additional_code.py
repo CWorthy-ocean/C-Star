@@ -135,7 +135,7 @@ class AdditionalCode(LoggingMixin):
             return False
         try:
             self.local_file_stats.validate()
-        except (FileNotFoundError, ValueError):
+        except (FileNotFoundError, ValueError, KeyError):
             return False
         return True
 

@@ -52,7 +52,7 @@ class LocalFileStatistics:
         stats: Optional[dict[Path, os.stat_result]] = None,
         hashes: Optional[dict[Path, str]] = None,
     ):
-        self.paths = [p.resolve() for p in paths]
+        self.paths = [p.absolute() for p in paths]
 
         if not all([d.parent == self.paths[0].parent for d in self.paths]):
             raise ValueError(
@@ -62,15 +62,14 @@ class LocalFileStatistics:
         self.parent_dir = paths[0].parent
 
         if stats is not None:
-            if set(k.resolve() for k in stats.keys()) != set(self.paths):
-                # import pdb;pdb.set_trace()
+            if set(k.absolute() for k in stats.keys()) != set(self.paths):
                 raise ValueError("Provided 'stats' keys must match provided 'paths'")
             self._stat_cache = stats
         else:
             self._stat_cache = dict[Path, os.stat_result]()
 
         if hashes is not None:
-            if set(k.resolve() for k in hashes.keys()) != set(self.paths):
+            if set(k.absolute() for k in hashes.keys()) != set(self.paths):
                 raise ValueError("Provided 'hashes' keys must provided 'paths'")
             self._hash_cache = hashes
         else:
@@ -143,9 +142,9 @@ class LocalFileStatistics:
         rows = []
 
         for path in self.paths[:max_rows]:
-            resolved = path.resolve()
-            stat = self.stats.get(resolved)
-            hash_ = self.hashes.get(resolved)
+            abspath = path.absolute()
+            stat = self.stats.get(abspath)
+            hash_ = self.hashes.get(abspath)
 
             name = str(path.name)
             size = stat.st_size if stat else "UNKNOWN"

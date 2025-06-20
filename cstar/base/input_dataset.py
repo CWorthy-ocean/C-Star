@@ -148,7 +148,7 @@ class InputDataset(ABC, LoggingMixin):
             return False
         try:
             self.local_file_stats.validate()
-        except (FileNotFoundError, ValueError):
+        except (FileNotFoundError, ValueError, KeyError):
             return False
         return True
 
@@ -291,12 +291,13 @@ class InputDataset(ABC, LoggingMixin):
         )
 
         # TODO
+        p = target_path.absolute()
         self.local_file_stats = LocalFileStatistics(
             paths=[
-                target_path,
+                p,
             ],
-            stats={target_path: target_path.stat()},
-            hashes={target_path: computed_file_hash},
+            stats={p: p.stat()},
+            hashes={p: computed_file_hash},
         )
         # self.working_path = target_path
         # self._local_file_hash_cache.update({target_path: computed_file_hash})  # 27

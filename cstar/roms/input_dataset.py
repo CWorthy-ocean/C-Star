@@ -328,7 +328,9 @@ class ROMSInputDataset(InputDataset, ABC):
         )
         # self.working_path = parted_files
         assert self.partitioning is not None
-        self.local_file_stats = LocalFileStatistics(paths=parted_files)
+        self.local_file_stats = LocalFileStatistics(
+            paths=[p.resolve() for p in parted_files]
+        )
 
         # self._local_file_stat_cache.update(self.partitioning._local_file_stat_cache)
         # self._local_file_hash_cache.update(self.partitioning._local_file_hash_cache)
@@ -419,7 +421,9 @@ class ROMSInputDataset(InputDataset, ABC):
 
         savepath = roms_tools_class_instance.save(**save_kwargs)
         # TODO
-        self.local_file_stats = LocalFileStatistics(paths=savepath)
+        self.local_file_stats = LocalFileStatistics(
+            paths=[p.resolve() for p in savepath]
+        )
         # self.working_path = savepath[0] if len(savepath) == 1 else savepath
 
         # self._local_file_hash_cache.update(
@@ -433,7 +437,9 @@ class ROMSInputDataset(InputDataset, ABC):
         self.partitioning = ROMSPartitioning(
             np_xi=new_np_xi, np_eta=new_np_eta, files=parted_files
         )
-        self.partitioning.local_file_stats = LocalFileStatistics(paths=parted_files)
+        self.partitioning.local_file_stats = LocalFileStatistics(
+            paths=[p.resolve() for p in parted_files]
+        )
         # self.partitioning._local_file_hash_cache = {
         #     path: _get_sha256_hash(path.resolve()) for path in parted_files
         # }  # 27
