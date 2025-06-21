@@ -153,6 +153,18 @@ class ExternalCodeBase(ABC, LoggingMixin):
         MARBL_ROOT."""
 
     @property
+    def default_externals_root(self) -> Path:
+        """The default path of the root directory where external codebases are stored.
+
+        Returns
+        -------
+        Path
+            The path to the directory.
+        """
+        pkg_relative_path = f"externals/{self.repo_basename}"
+        return cstar_sysmgr.environment.package_root / pkg_relative_path
+
+    @property
     def local_config_status(self) -> int:
         """Perform a series of checks to ensure that the external codebase is properly
         configured on this machine.
@@ -281,10 +293,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     else:
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
-                ext_dir = (
-                    cstar_sysmgr.environment.package_root
-                    / f"externals/{self.repo_basename}"
-                )
                 user_env_path = cstar_sysmgr.environment.user_env_path
                 print(
                     (
@@ -295,14 +303,14 @@ class ExternalCodeBase(ABC, LoggingMixin):
                         f"an instance of {self.__class__.__name__}, "
                         "you will need to set it up.\n"
                         "It is recommended that you install this external codebase in \n"
-                        f"{ext_dir}\n"
+                        f"{self.default_externals_root}\n"
                         f"This will also modify your `{user_env_path}` file.\n"
                         "#######################################################"
                     )
                 )
                 while True:
-                    if not ext_dir.exists():
-                        ext_dir.mkdir(parents=True)
+                    if not self.default_externals_root.exists():
+                        self.default_externals_root.mkdir(parents=True)
 
                     yn = "y"
                     if interactive:
@@ -313,7 +321,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                             )
                         )
                     if yn.casefold() in ["y", "yes", "ok"]:
-                        self.get(ext_dir)
+                        self.get(self.default_externals_root)
                         break
                     elif yn.casefold() in ["n", "no"]:
                         raise EnvironmentError()
