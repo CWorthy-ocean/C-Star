@@ -291,8 +291,6 @@ def create_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         description="Run a c-star simulation.",
-        # prefix_chars="--",
-        # allow_abbrev=True,
         exit_on_error=True,
     )
     parser.add_argument(
