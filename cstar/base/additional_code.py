@@ -205,9 +205,6 @@ class AdditionalCode(LoggingMixin):
                 )
                 if src_file_path.exists():
                     shutil.copy(src_file_path, tgt_file_path)
-                    # self._local_file_hash_cache[tgt_file_path] = _get_sha256_hash(
-                    #     tgt_file_path
-                    # )
                 else:
                     raise FileNotFoundError(f"Error: {src_file_path} does not exist.")
 

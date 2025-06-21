@@ -11,6 +11,7 @@ import yaml
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.local_file_stats import LocalFileStatistics
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms import ROMSRuntimeSettings
@@ -473,10 +474,16 @@ class TestROMSSimulationInitialization:
         the relevant forcing files."""
         sim, _ = example_roms_simulation
         fake_paths = [
-            Path("tidal.nc"),
+            [
+                Path("tidal.nc"),
+            ],
             [Path("surface.nc"), Path("surface2.nc")],
-            Path("boundary.nc"),
-            Path("sw_corr.nc"),
+            [
+                Path("boundary.nc"),
+            ],
+            [
+                Path("sw_corr.nc"),
+            ],
         ]
         datasets = [
             sim.tidal_forcing,
@@ -491,11 +498,11 @@ class TestROMSSimulationInitialization:
         # Set working paths of forcing types to fake paths
         for ds, fake_path in zip(datasets, fake_paths):
             for d in ds if isinstance(ds, list) else [ds]:
-                d.working_path = fake_path
+                d.local_file_stats = LocalFileStatistics(paths=fake_path)
 
         # Flatten list of fake paths (contains a list as an entry)
         flat_paths = [
-            i
+            i.absolute()
             for item in fake_paths
             for i in (item if isinstance(item, list) else [item])
         ]
