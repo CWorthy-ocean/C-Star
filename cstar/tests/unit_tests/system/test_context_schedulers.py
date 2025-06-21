@@ -38,4 +38,4 @@ def test_context_registry(
         queues = getattr(scheduler, "queues")  # noqa: B009
         assert {q.name for q in queues} == exp_queue_names
     else:
-        assert exp_sched_type is None
+        assert scheduler is None
