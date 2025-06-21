@@ -168,8 +168,8 @@ class SimulationRunner(Service):
     def _on_start(self) -> None:
         """Prepare the simulation for execution.
 
-        Verifyies the simulation loaded properly, configuring the file system,
-        retrieving remote resources, and building third-party codebases.
+        Verifies the simulation loaded properly, configuring the file system, retrieving
+        remote resources, and building third-party codebases.
         """
         self._prepare_file_system()
 
@@ -404,9 +404,6 @@ def get_request(args: argparse.Namespace) -> BlueprintRequest:
 def configure_environment(log: logging.Logger) -> None:
     """Configure the environment variables required by the worker.
 
-    NOTE: The worker checks for CSTAR_ROMS_PREBUILT and CSTAR_MARBL_PREBUILT
-    to indicate that pre-built modeling binaries should be used.
-
     Parameters
     ----------
     log : logging.Logger
@@ -420,16 +417,17 @@ def configure_environment(log: logging.Logger) -> None:
     os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
 
-    is_roms_prebuilt = os.environ.get("CSTAR_ROMS_PREBUILT", None) == "1"
-    is_marbl_prebuilt = os.environ.get("CSTAR_MARBL_PREBUILT", None) == "1"
+    # TODO: re-run tests now that prebuilt is gone and rebase on develop is in.
+    # is_roms_prebuilt = os.environ.get("CSTAR_ROMS_PREBUILT", None) == "1"
+    # is_marbl_prebuilt = os.environ.get("CSTAR_MARBL_PREBUILT", None) == "1"
 
-    if is_roms_prebuilt:
-        ext_root = os.environ.get("ROMS_ROOT", None)
-        log.debug("Using prebuilt ROMS at: %s", ext_root)
+    # if is_roms_prebuilt:
+    #     ext_root = os.environ.get("ROMS_ROOT", None)
+    #     log.debug("Using prebuilt ROMS at: %s", ext_root)
 
-    if is_marbl_prebuilt:
-        ext_root = os.environ.get("MARBL_ROOT", None)
-        log.debug("Using prebuilt MARBL at: %s", ext_root)
+    # if is_marbl_prebuilt:
+    #     ext_root = os.environ.get("MARBL_ROOT", None)
+    #     log.debug("Using prebuilt MARBL at: %s", ext_root)
 
 
 async def main(raw_args: list[str]) -> int:
