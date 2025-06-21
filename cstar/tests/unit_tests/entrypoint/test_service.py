@@ -214,7 +214,7 @@ async def test_event_loop_task_service(loop_count: int) -> None:
         assert not service._can_shutdown()  # noqa: SLF001
         assert service.can_shutdown
 
-        # .execute should run the complete the service life-cycle
+        # .execute should run the complete service life-cycle
         await service.execute()
 
         # Service should ignore the "max iter" shutdown clause and use the
@@ -291,7 +291,7 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
 
     Confirm a frequency greater than zero is honored.
     """
-    # Configure the test service to run for 10 seconds.
+    # Configure the test service to run for <max_duration> seconds.
     with PrintingService(
         as_service=True, hc_freq=frequency, max_duration=max_duration
     ) as service:
@@ -317,7 +317,7 @@ async def test_event_hc_unknown_msg() -> None:
     Confirms that the health check thread does not crash when it receives an unknown
     message type.
     """
-    # Configure the test service to run for 10 seconds.
+    # Configure the test service to run for 2 seconds.
     with PrintingService(
         as_service=True,
         hc_freq=0.1,
@@ -353,7 +353,7 @@ async def test_event_hc_unknown_msg() -> None:
 )
 async def test_event_hc_term(max_duration: float, frequency: float) -> None:
     """Verify that the health check thread terminates when asked to do so."""
-    # Configure the test service to run for 10 seconds.
+    # Configure the test service to run for <max-duration> seconds.
     with PrintingService(
         as_service=True, hc_freq=frequency, max_duration=max_duration
     ) as service:
