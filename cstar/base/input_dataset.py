@@ -191,7 +191,6 @@ class InputDataset(ABC, LoggingMixin):
             logger=self.log,
         )
 
-        # TODO
         p = target_path.absolute()
         self.local_file_stats = LocalFileStatistics(
             paths=[
@@ -211,7 +210,7 @@ class InputDataset(ABC, LoggingMixin):
     ) -> str:
         if location_type == "path":
             source_location = Path(source_location).expanduser().resolve()
-            # TODO this probably doesn't need to be calculated here
+            # TODO when refactoring get(), avoid calculating hash here
             computed_file_hash = _get_sha256_hash(source_location)
             if (expected_file_hash is not None) and (
                 expected_file_hash != computed_file_hash

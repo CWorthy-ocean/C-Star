@@ -45,6 +45,13 @@ Input Datasets
    cstar.roms.ROMSForcingCorrections
    cstar.roms.ROMSRuntimeSettings
 
+Local File Statistics
+---------------------
+.. autosummary::
+   :toctree: generated/
+
+   cstar.base.LocalFileStatistics
+   
 Discretization
 ----------------
 
