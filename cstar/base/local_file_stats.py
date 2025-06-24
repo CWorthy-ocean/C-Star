@@ -101,7 +101,7 @@ class LocalFileStatistics:
             self._hash_cache = dict[Path, str]()
 
     @property
-    def stats(self):
+    def stats(self) -> dict[Path, os.stat_result]:
         """File stat metadata for each tracked file.
 
         Lazily computes and caches the output of `os.stat()` for each tracked
@@ -118,7 +118,7 @@ class LocalFileStatistics:
         return self._stat_cache
 
     @property
-    def hashes(self):
+    def hashes(self) -> dict[Path, str]:
         """SHA-256 hashes for each tracked file.
 
         Lazily computes and caches the SHA-256 hash for each file using
