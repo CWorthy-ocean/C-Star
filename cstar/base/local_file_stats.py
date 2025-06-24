@@ -52,6 +52,31 @@ class LocalFileStatistics:
         stats: Optional[dict[Path, os.stat_result]] = None,
         hashes: Optional[dict[Path, str]] = None,
     ):
+        """Initialize the LocalFileStatistics object.
+
+        Stores a list of local file paths and optionally precomputed metadata
+        such as file stat results and SHA-256 hashes. All paths must be located
+        within the same parent directory. Metadata is lazily computed if not
+        provided.
+
+        Parameters
+        ----------
+        paths : list of Path
+            List of file paths to track. All paths must reside in the same directory.
+        stats : dict of Path to os.stat_result, optional
+            Optional precomputed file stat results. If provided, must include all
+            tracked files and match `paths` exactly after resolution.
+        hashes : dict of Path to str, optional
+            Optional precomputed SHA-256 hashes. If provided, must include all
+            tracked files and match `paths` exactly after resolution.
+
+        Raises
+        ------
+        ValueError
+            If the provided paths are not all in the same directory or if the keys
+            of `stats` or `hashes` do not match the resolved paths.
+        """
+
         self.paths = [p.absolute() for p in paths]
 
         if not all([d.parent == self.paths[0].parent for d in self.paths]):
@@ -77,12 +102,35 @@ class LocalFileStatistics:
 
     @property
     def stats(self):
+        """File stat metadata for each tracked file.
+
+        Lazily computes and caches the output of `os.stat()` for each tracked
+        file path if not already provided. Returned as a dictionary mapping
+        absolute file paths to their `os.stat_result` values.
+
+        Returns
+        -------
+        dict of Path to os.stat_result
+            Mapping from file paths to their stat metadata.
+        """
         if not self._stat_cache:
             self._stat_cache = {path: path.stat() for path in self.paths}
         return self._stat_cache
 
     @property
     def hashes(self):
+        """SHA-256 hashes for each tracked file.
+
+        Lazily computes and caches the SHA-256 hash for each file using
+        `_get_sha256_hash()` if not already provided. Returned as a dictionary
+        mapping absolute file paths to their hash strings.
+
+        Returns
+        -------
+        dict of Path to str
+            Mapping from file paths to their SHA-256 hash values.
+        """
+
         if not self._hash_cache:
             self._hash_cache = {
                 path: _get_sha256_hash(path.resolve()) for path in self.paths
@@ -90,7 +138,20 @@ class LocalFileStatistics:
         return self._hash_cache
 
     def validate(self) -> None:
-        """TOOD docstring."""
+        """Validate that all tracked files exist and match cached metadata.
+
+        Verifies that each tracked file still exists on disk, and that its
+        current size, modification time, and SHA-256 hash match the cached
+        values. Raises an error if any discrepancies are found.
+
+        Raises
+        ------
+        FileNotFoundError
+            If any tracked file no longer exists at the expected path.
+        ValueError
+            If the current size, modification time, or SHA-256 hash of a file
+            differs from the cached value.
+        """
 
         for f in self.paths:
             if not f.exists():

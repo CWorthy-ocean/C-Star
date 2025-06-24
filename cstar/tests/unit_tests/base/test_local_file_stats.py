@@ -9,6 +9,14 @@ from cstar.base.local_file_stats import LocalFileStatistics
 
 @pytest.fixture
 def tmp_file_pair(tmp_path):
+    """Create two temporary files in a shared temporary directory.
+
+    Returns
+    -------
+    tuple of Path
+        A tuple containing two Path objects: (a.txt, b.txt).
+    """
+
     file1 = tmp_path / "a.txt"
     file2 = tmp_path / "b.txt"
     file1.touch()
@@ -17,7 +25,43 @@ def tmp_file_pair(tmp_path):
 
 
 class TestLocalFileStatisticsInit:
+    """Tests for the `__init__` method of `LocalFileStatistics`.
+
+    Ensures that the class initializes correctly with valid inputs and raises
+    appropriate exceptions for invalid ones. Also verifies that optional
+    `stats` and `hashes` arguments are correctly interpreted.
+
+    Tests
+    -----
+    test_init_with_paths_only
+        Confirms correct initialization when only file paths are provided.
+        Ensures that caches are empty and paths are resolved.
+    test_init_raises_if_paths_not_colocated
+        Verifies that a ValueError is raised when files are not in the same directory.
+    test_init_with_stats
+        Checks that a valid precomputed `stats` dictionary is accepted and used.
+    test_init_raises_if_stats_keys_mismatch
+        Verifies that a mismatched `stats` dictionary raises a ValueError.
+    test_init_with_hashes
+        Checks that a valid precomputed `hashes` dictionary is accepted and used.
+    test_init_raises_if_hash_keys_mismatch
+        Verifies that a mismatched `hashes` dictionary raises a ValueError.
+    """
+
     def test_init_with_paths_only(self, tmp_file_pair):
+        """Initialize with only file paths; verify default cache behavior.
+
+        Fixtures
+        ----------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - The `paths` attribute stores the absolute form of the input paths.
+        - The `parent_dir` is correctly inferred.
+        - Both `_stat_cache` and `_hash_cache` are empty dictionaries.
+        """
         file1, file2 = tmp_file_pair
 
         lfs = LocalFileStatistics(paths=[file1, file2])
@@ -28,6 +72,18 @@ class TestLocalFileStatisticsInit:
         assert lfs._hash_cache == {}
 
     def test_init_raises_if_paths_not_colocated(self, tmp_path):
+        """Raise ValueError if paths do not share a common parent directory.
+
+        Fixtures
+        --------
+        tmp_path : pathlib.Path
+            pytest-provided temporary root directory for the test.
+
+        Asserts
+        -------
+        - A ValueError is raised with an appropriate message.
+        """
+
         dir1 = tmp_path / "dir1"
         dir2 = tmp_path / "dir2"
         dir1.mkdir()
@@ -42,6 +98,20 @@ class TestLocalFileStatisticsInit:
             LocalFileStatistics(paths=[file1, file2])
 
     def test_init_with_stats(self, tmp_file_pair):
+        """Accept a valid `stats` dictionary and cache it properly.
+
+        Fixtures
+        --------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `_stat_cache` matches the input `stats` dictionary.
+        - `_hash_cache` is empty.
+        - The `stats` property returns the pre-supplied dictionary.
+        """
+
         file1, file2 = tmp_file_pair
 
         stats = {
@@ -56,6 +126,17 @@ class TestLocalFileStatisticsInit:
         assert lfs.stats == stats
 
     def test_init_raises_if_stats_keys_mismatch(self, tmp_file_pair):
+        """Raise ValueError if `stats` keys do not match the tracked paths.
+
+        Fixtures
+        --------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - A ValueError is raised due to key mismatch in the `stats` dictionary.
+        """
         file1, file2 = tmp_file_pair
 
         stats = {file1.parent: file1.stat(), file2.resolve(): file2.stat()}
@@ -64,6 +145,20 @@ class TestLocalFileStatisticsInit:
             LocalFileStatistics(paths=[file1, file2], stats=stats)
 
     def test_init_with_hashes(self, tmp_file_pair):
+        """Accept a valid `hashes` dictionary and cache it properly.
+
+        Fixtures
+        --------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `_hash_cache` matches the input `hashes` dictionary.
+        - `_stat_cache` is empty.
+        - The `hashes` property returns the pre-supplied dictionary.
+        """
+
         file1, file2 = tmp_file_pair
 
         dummy_hash = "a0b1c2d3" * 8
@@ -80,6 +175,18 @@ class TestLocalFileStatisticsInit:
         assert lfs.hashes == hashes
 
     def test_init_raises_if_hash_keys_mismatch(self, tmp_file_pair):
+        """Raise ValueError if `hashes` keys do not match the tracked paths.
+
+        Fixures
+        -------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - A ValueError is raised due to key mismatch in the `hashes` dictionary.
+        """
+
         file1, file2 = tmp_file_pair
         dummy_hash = "a0b1c2d3" * 8
 
@@ -93,8 +200,41 @@ class TestLocalFileStatisticsInit:
 
 
 class TestStatsAndHasesProperties:
+    """Tests for the `stats` and `hashes` properties of LocalFileStatistics.
+
+    Tests
+    -----
+    test_hashes_is_computed_and_cached
+        Confirms that hash values are computed once and cached.
+        Verifies that subsequent accesses do not re-trigger computation.
+    test_stats_is_computed_and_cached
+        Confirms that stat values are collected lazily and cached.
+        Validates both content and identity of cached stat data.
+    """
+
     @patch("cstar.base.local_file_stats._get_sha256_hash")
     def test_hashes_is_computed_and_cached(self, mock_hash, tmp_file_pair):
+        """Test lazy hash computation and caching.
+
+        Verifies that:
+        - SHA-256 hashes are computed only when first accessed
+        - The `_get_sha256_hash` function is called once per file
+        - Cached results are reused on subsequent accesses
+
+        Parameters
+        ----------
+        mock_hash : Mock
+            Patches `_get_sha256_hash` to return dummy hashes.
+        tmp_file_pair : list[Path]
+            Two temporary files for which hashes will be computed.
+
+        Asserts
+        -------
+        - `_hash_cache` is initially empty
+        - Hashes are correctly assigned on first access
+        - `_get_sha256_hash` is not called more than once per file
+        """
+
         file1, file2 = tmp_file_pair
         mock_hash.side_effect = ["fakehash1", "fakehash2"]
 
@@ -111,6 +251,21 @@ class TestStatsAndHasesProperties:
         assert mock_hash.call_count == 2  # still 2
 
     def test_stats_is_computed_and_cached(self, tmp_file_pair):
+        """Test lazy stat computation and caching.
+
+        Parameters
+        ----------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `_stat_cache` is initially empty
+        - Returned keys match the input file paths
+        - All values are `os.stat_result` instances
+        - The same dictionary object is returned on second access
+        """
+
         file1, file2 = tmp_file_pair
 
         lfs = LocalFileStatistics(paths=[file1, file2])
@@ -130,10 +285,54 @@ class TestStatsAndHasesProperties:
 
 
 class TestValidate:
+    """Tests for the `validate()` method of LocalFileStatistics.
+
+    These tests confirm that `validate()` correctly detects and raises errors when:
+    - Files are missing
+    - File metadata (size or modification time) has changed
+    - SHA-256 hashes no longer match the cached values
+
+    The method is also tested under ideal conditions to confirm it completes
+    without raising when all files and metadata are consistent.
+
+    Mocks
+    -----
+    - `_get_sha256_hash` is patched to simulate known hash values
+    - `Path.exists` is patched to simulate missing files
+
+    Tests
+    -----
+    test_validate_completes_with_matching_stats_and_hashes
+        Ensures that `validate()` does not raise when all file metadata matches.
+    test_validate_raises_if_file_missing
+        Verifies that a missing file causes a FileNotFoundError.
+    test_validate_raises_if_stats_mismatch
+        Simulates a change in file size or mtime and verifies ValueError is raised.
+    test_validate_raises_if_hashes_mismatch
+        Simulates a mismatch between computed and cached hashes and verifies error.
+    """
+
     @patch("cstar.base.local_file_stats._get_sha256_hash", return_value="fakehash")
     def test_validate_completes_with_matching_stats_and_hashes(
         self, mock_hash, tmp_file_pair
     ):
+        """`validate()` completes without error if metadata and hashes match.
+
+        Simulates a scenario where both `stats` and `hashes` are precomputed
+        and match the current state of the files.
+
+        Parameters
+        ----------
+        mock_hash : Mock
+            Patches `_get_sha256_hash` to return the expected value.
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - No exception is raised when calling `validate()`
+        """
+
         file1, file2 = tmp_file_pair
         stats = {file1: file1.stat(), file2: file2.stat()}
         hashes = {file1: "fakehash", file2: "fakehash"}
@@ -145,12 +344,42 @@ class TestValidate:
 
     @patch("pathlib.Path.exists", return_value=False)
     def test_validate_raises_if_file_missing(self, mock_exists, tmp_file_pair):
+        """Raise FileNotFoundError when a tracked file is missing.
+
+        Patches `Path.exists()` to simulate that a file does not exist.
+
+        Parameters
+        ----------
+        mock_exists : Mock
+            Forces `Path.exists()` to return False.
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `validate()` raises FileNotFoundError with a meaningful message.
+        """
+
         file1, file2 = tmp_file_pair
         lfs = LocalFileStatistics(paths=[file1, file2])
         with pytest.raises(FileNotFoundError, match="does not exist locally"):
             lfs.validate()
 
     def test_validate_raises_if_stats_mismatch(self, tmp_file_pair):
+        """Raise ValueError if file size or mtime no longer matches cache.
+
+        Manually alters the modification time of one file using `os.utime()`.
+
+        Parameters
+        ----------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `validate()` raises ValueError indicating stat mismatch.
+        """
+
         file1, file2 = tmp_file_pair
 
         lfs = LocalFileStatistics(
@@ -165,6 +394,20 @@ class TestValidate:
             lfs.validate()
 
     def test_validate_raises_if_hashes_mismatch(self, tmp_file_pair):
+        """Raise ValueError when computed hash does not match cached value.
+
+        Supplies intentionally incorrect hash values during initialization.
+
+        Parameters
+        ----------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `validate()` raises ValueError with the expected hash mismatch message.
+        """
+
         file1, file2 = tmp_file_pair
 
         lfs = LocalFileStatistics(
@@ -176,7 +419,40 @@ class TestValidate:
 
 
 class TestStrAndReprFunctions:
+    """Tests for `__str__`, `__repr__`, and `as_table()` in LocalFileStatistics.
+
+    Tests
+    -----
+    test_str
+        Confirms that the human-readable summary includes parent directory info
+        and a file list table.
+    test_repr
+        Verifies that the formal string representation includes all file paths
+        and is constructor-style.
+    test_as_table
+        Validates the output table formatting for a small number of files.
+    test_as_table_with_many_files
+        Ensures truncation occurs when file count exceeds `max_rows`.
+    """
+
     def test_str(self, tmp_file_pair):
+        """Test the `__str__` method for general format and content.
+
+        Ensures that the string representation includes:
+        - The class name and section dividers
+        - The correct parent directory path
+        - A table header labeled 'Files:'
+
+        Parameters
+        ----------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - The output contains key structural and descriptive components.
+        """
+
         file1, file2 = tmp_file_pair
 
         lfs = LocalFileStatistics(paths=[file1, file2])
@@ -191,6 +467,23 @@ Files:
         assert expected.strip() in out.strip()
 
     def test_repr(self, tmp_file_pair):
+        """Test the `__repr__` method for structured, evaluable output.
+
+        Verifies that:
+        - The output starts with the class name and an opening parenthesis
+        - All tracked file paths appear in the output
+        - The string ends with a closing parenthesis
+
+        Parameters
+        ----------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - The output conforms to a constructor-style format
+        - File paths are present and intact
+        """
         file1, file2 = tmp_file_pair
         lfs = LocalFileStatistics(paths=[file1, file2])
         rep = repr(lfs)
@@ -202,6 +495,22 @@ Files:
         assert rep.endswith(")")  # multiline repr still ends this way
 
     def test_as_table(self, tmp_file_pair):
+        """Test the tabular summary returned by `as_table()`.
+
+        Populates each file with content to ensure hash and size display.
+        Timestamps are extracted and matched exactly.
+
+        Parameters
+        ----------
+        tmp_file_pair : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - Output matches expected structure and content for both files
+        - Hashes, sizes, and modified timestamps are displayed correctly
+        """
+
         file1, file2 = tmp_file_pair
         file1.write_text("abc")
         file2.write_text("def")
@@ -225,6 +534,21 @@ b.txt                                    cb8379ac20…  3            {ts2}"""
         assert expected_tab == tab
 
     def test_as_table_with_many_files(self, tmp_path):
+        """Test table truncation behavior with more than `max_rows` files.
+
+        Creates 20 empty files and limits output to 10 rows in `as_table()`.
+
+        Parameters
+        ----------
+        tmp_path : pathlib.Path
+            Root temporary directory for generated files.
+
+        Asserts
+        -------
+        - Output includes a truncation notice
+        - Only `max_rows` lines of file metadata are printed before the notice
+        """
+
         paths = []
         for f in range(20):
             new_file = tmp_path / f"{f}.txt"
