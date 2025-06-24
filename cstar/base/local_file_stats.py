@@ -70,7 +70,7 @@ class LocalFileStatistics:
 
         if hashes is not None:
             if set(k.absolute() for k in hashes.keys()) != set(self.paths):
-                raise ValueError("Provided 'hashes' keys must provided 'paths'")
+                raise ValueError("Provided 'hashes' keys must match provided 'paths'")
             self._hash_cache = hashes
         else:
             self._hash_cache = dict[Path, str]()
@@ -96,9 +96,12 @@ class LocalFileStatistics:
             if not f.exists():
                 raise FileNotFoundError(f"File {f} does not exist locally")
 
+            cached_stats = self.stats[f]
             current_stats = f.stat()
-            if (f.stat().st_size != current_stats.st_size) or (
-                f.stat().st_mtime != current_stats.st_mtime
+
+            if (
+                current_stats.st_size != cached_stats.st_size
+                or current_stats.st_mtime != cached_stats.st_mtime
             ):
                 raise ValueError(f"File statistics for {f} do not match those in cache")
 
