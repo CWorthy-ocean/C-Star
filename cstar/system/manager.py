@@ -71,8 +71,8 @@ class HostNameEvaluator:
     def name(self) -> str:
         """Determine the system name that will be used by C-Star.
 
-        Makes use of environment variables and platform details. Prioritizes an LMOD-
-        based system name first, then falls back to
+        Prioritizes the LMOD-based system name. When LMOD-specific environment
+        variables are not present, the name is determiend by the OS.
 
         Raises
         ------
