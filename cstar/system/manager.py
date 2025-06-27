@@ -91,18 +91,18 @@ class HostNameEvaluator:
 
 
 class _SystemContext(Protocol):
-    """The contextual dependencies for a given system/platform."""
+    """The contextual dependencies for the system/platform."""
 
     name: ClassVar[str]
     """The unique name identifying the context."""
     compiler: ClassVar[str]
-    """The compiler that will be used when building software for a system."""
+    """The compiler used when building software for the system."""
     mpi_prefix: ClassVar[str]
-    """The prefix used when executing mpiexec for a system."""
+    """The prefix used when executing mpiexec for the system."""
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
-        """Instantiate a scheduler configured for a system."""
+        """Instantiate a scheduler configured for the system."""
 
 
 _registry: dict[str, type[_SystemContext]] = {}
@@ -168,13 +168,6 @@ class _PerlmutterSystemContext(_SystemContext):
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
-        """Instantiate a scheduler configured for Perlmutter.
-
-        Returns
-        -------
-        Scheduler
-            A SlurmScheduler instance
-        """
         per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
         per_shared_q = SlurmQOS(name="shared")
         per_debug_q = SlurmQOS(name="debug")
@@ -206,13 +199,6 @@ class _DerechoSystemContext(_SystemContext):
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
-        """Instantiate a scheduler configured for Perlmutter.
-
-        Returns
-        -------
-        Scheduler
-            A PBSScheduler instance
-        """
         # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
         der_main_q = PBSQueue(name="main", max_walltime="12:00:00")
         der_preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
@@ -242,13 +228,6 @@ class _ExpanseSystemContext(_SystemContext):
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
-        """Instantiate a scheduler configured for Perlmutter.
-
-        Returns
-        -------
-        Scheduler
-            A SlurmScheduler instance
-        """
         exp_compute_q = SlurmPartition(name="compute")
         exp_debug_q = SlurmPartition(name="debug")
         return SlurmScheduler(
