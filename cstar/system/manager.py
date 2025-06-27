@@ -241,7 +241,7 @@ class _ExpanseSystemContext(_SystemContext):
     """URI for documentation of the Expanse system."""
 
     @classmethod
-    def create_scheduler(cls) -> Scheduler:
+    def create_scheduler(cls) -> Scheduler | None:
         """Instantiate a scheduler configured for Perlmutter.
 
         Returns
