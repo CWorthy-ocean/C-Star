@@ -1,7 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
-from typing import Callable, Generator
+from typing import Callable, ChainMap, Generator
 from unittest import mock
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
@@ -107,7 +107,7 @@ class TestSetupEnvironmentFromFiles:
 
             mock_run.assert_has_calls(expected_calls, any_order=False)
 
-    def get_expected_lmod_modules(self, env):
+    def get_expected_lmod_modules(self, env: CStarEnvironment) -> list[str]:
         """Retrieves the expected list of Lmod modules for a given system from a .lmod
         file.
 
@@ -116,12 +116,8 @@ class TestSetupEnvironmentFromFiles:
         lmod_list: Module names to be loaded, based on the system's `.lmod` file.
         """
 
-        lmod_file_path = (
-            f"{env.package_root}/additional_files/lmod_lists/{env._system_name}.lmod"
-        )
-        with open(lmod_file_path) as file:
-            lmod_list = file.readlines()
-            return lmod_list
+        with open(env.lmod_path) as file:
+            return file.readlines()
 
     @patch.dict(
         "os.environ",
@@ -236,12 +232,14 @@ class TestSetupEnvironmentFromFiles:
         # Patch the root path and expanduser to point to our temporary files
         with (
             patch(
+                "cstar.system.environment.CStarEnvironment.system_env_path",
+                new_callable=PropertyMock,
+                return_value=system_dotenv_path,
+            ),
+            patch(
                 "cstar.system.environment.CStarEnvironment.user_env_path",
                 new_callable=PropertyMock,
                 return_value=dotenv_path,
-            ),
-            patch.object(
-                cstar.system.environment.CStarEnvironment, "package_root", new=tmp_path
             ),
         ):
             # Instantiate the environment to trigger loading the environment variables
@@ -273,7 +271,7 @@ class TestSetupEnvironmentFromFiles:
 
             for key, exp_value in updated_vars:
                 # Confirm the active environment variable is updated
-                assert exp_value in os.environ.get(key, "")
+                assert exp_value in os.environ.get(key, "key-not-found")
 
                 # Confirm the value stored in the user environment is updated
                 assert exp_value in env.environment_variables[key]
@@ -348,6 +346,164 @@ class TestSetupEnvironmentFromFiles:
             )
 
             assert env.lmod_path == tmp_path / expected_path
+
+    @patch.dict(
+        "os.environ",
+        {
+            "NETCDF_FORTRANHOME": "/mock/netcdf",
+            "MVAPICH2HOME": "/mock/mpi",
+            "LMOD_SYSHOST": "perlmutter",
+            "LMOD_DIR": "/mock/lmod",  # Ensures `uses_lmod` is valid
+        },
+        clear=True,
+    )
+    @pytest.mark.parametrize(
+        ("package_root", "system_name"),
+        [
+            ["foo/bar", "system-name-1"],
+            ["boo/far", "system-name-2"],
+            ["foz/baz", "system-name-3"],
+        ],
+    )
+    def test_system_env_path(
+        self,
+        tmp_path: Path,
+        package_root: str,
+        system_name: str,
+    ):
+        """Verify that the system env property is based on package root and system name.
+
+        Mocks
+        -----
+        - tmp_path creates temporary, emulated system and user .env files
+        - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
+        - system_name provides a test-safe system name
+
+        Asserts
+        -------
+        - Confirms merged environment variables with expected values after expansion.
+        """
+
+        # Patch the root path and expanduser to point to our temporary files
+        tmp_pkg_root = tmp_path / package_root
+
+        env = CStarEnvironment(
+            system_name=system_name,
+            mpi_exec_prefix="mpi-prefix",
+            compiler="gnu",
+        )
+
+        with patch.object(CStarEnvironment, "package_root", new=tmp_pkg_root):
+            # Instantiate the environment to trigger loading the environment variables
+
+            system_actual = env.system_env_path
+            expected = tmp_pkg_root / f"additional_files/env_files/{system_name}.env"
+
+            assert system_actual == expected
+
+    @patch.dict(
+        "os.environ",
+        {},
+        clear=True,
+    )
+    def test_env_file_load_count(
+        self,
+        mock_system_name: str,
+    ) -> None:
+        """Verify that env files are reloaded after an update.
+
+        Mocks
+        -----
+        - mock_system_name provides a temporary system name for the environment
+
+        Asserts
+        -------
+        - Confirms merged environment variables with expected values after expansion.
+        """
+        sys_var = "system-var"
+        usr_var = "user-var"
+        exp_system_env = {sys_var: "system-value"}
+        exp_user_env = {usr_var: "user-value"}
+
+        new_var, new_value = "new-user-var", "new-user-value"
+        updates = {new_var: new_value}
+
+        env0 = ChainMap(exp_system_env, exp_user_env)
+        env1 = ChainMap(env0, updates)
+
+        # patch the _load function so we can show loads only occur after updates
+        with patch(
+            "cstar.system.environment.CStarEnvironment._load_env",
+            new_callable=Mock,
+            side_effect=[env0, env1],
+        ) as loader:
+            # Instantiate the environment to trigger loading the environment variables
+            env = CStarEnvironment(
+                system_name=mock_system_name,
+                mpi_exec_prefix="mpi-prefix",
+                compiler="gnu",
+            )
+
+            initial_num_calls = 1
+            assert loader.call_count == initial_num_calls
+
+            assert sys_var in env.environment_variables
+            assert usr_var in env.environment_variables
+
+            # no load from disk should occur
+            assert loader.call_count == initial_num_calls
+
+            env.set_env_var(new_var, new_value)
+
+            # update should trigger load from disk
+            assert loader.call_count == initial_num_calls + 1
+            assert new_var in env.environment_variables
+
+    @patch.dict(
+        "os.environ",
+        {},
+        clear=True,
+    )
+    def test_env_vars_frozen(
+        self,
+        mock_system_name: str,
+    ) -> None:
+        """Verify that modifying the output from the .environment_variables property
+        does not result in a change to the actual environment.
+
+        Mocks
+        -----
+        - mock_system_name provides a temporary system name for the environment
+
+        Asserts
+        -------
+        - Confirm that CStarEnvironment does not allow environment variables to
+          be manipulated outside of using `set_env_var`
+        """
+        sys_var = "system-var"
+        exp_system_env = {sys_var: "system-value"}
+
+        with patch(
+            "cstar.system.environment.CStarEnvironment._load_env",
+            new_callable=Mock,
+            side_effect=[exp_system_env],
+        ):
+            # Instantiate the environment to trigger loading the environment variables
+            env = CStarEnvironment(
+                system_name=mock_system_name,
+                mpi_exec_prefix="mpi-prefix",
+                compiler="gnu",
+            )
+
+            # baseline test the property and expected values match
+            loaded_vars = env.environment_variables
+            assert loaded_vars == exp_system_env
+
+            # manipulate loaded vars and verify env is not changed
+            inserted_var = "inserted-var"
+            loaded_vars[inserted_var] = "inserted-value"
+
+            assert inserted_var not in env.environment_variables
 
 
 class TestStrAndReprMethods:
