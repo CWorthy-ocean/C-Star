@@ -73,7 +73,7 @@ class CStarEnvironment:
         self._system_name = system_name
         self._mpi_exec_prefix = mpi_exec_prefix
         self._compiler = compiler
-        self._package_root: Path = self._find_package_root()
+        self._PACKAGE_ROOT: Path = self._find_package_root()
         self._CSTAR_USER_ENV_PATH = Path("~/.cstar.env").expanduser()
         self._env_vars = self._load_env()
 
@@ -191,7 +191,7 @@ class CStarEnvironment:
         ImportError
             If the top-level package cannot be located.
         """
-        return self._package_root
+        return self._PACKAGE_ROOT
 
     # Environment management related
     @property
