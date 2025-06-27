@@ -157,6 +157,9 @@ class CStarEnvironment:
     def _find_package_root(cls) -> Path:
         """Determine the root directory containing the source for this package.
 
+        Uses `importlib.util.find_spec` to locate the package directory, enabling
+        access to additional configuration files within the package structure.
+
         Returns
         -------
         Path
