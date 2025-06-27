@@ -176,10 +176,7 @@ class CStarEnvironment:
 
     @property
     def package_root(self) -> Path:
-        """Identifies the root directory of the top-level package.
-
-        Uses `importlib.util.find_spec` to locate the package directory, enabling
-        access to additional configuration files within the package structure.
+        """Return the root directory of the top-level package.
 
         Returns
         -------
