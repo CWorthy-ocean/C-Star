@@ -128,13 +128,8 @@ def register_sys_context(
     return _inner()
 
 
-def _get_system_context(name: str) -> _SystemContext:
+def _get_system_context() -> _SystemContext:
     """Retrieve a system context from the context registry.
-
-    Parameters
-    ----------
-    name : str
-        The name of the system to retrieve a context for
 
     Returns
     -------
@@ -146,10 +141,12 @@ def _get_system_context(name: str) -> _SystemContext:
     CStarError
         If the supplied name has not been registered.
     """
-    if type_ := _registry.get(name):
+    namer = HostNameEvaluator()
+
+    if type_ := _registry.get(namer.name):
         return type_()
 
-    raise CstarError(f"Unknown system requested: {name}")
+    raise CstarError(f"Unknown system requested: {namer.name}")
 
 
 @register_sys_context
@@ -281,8 +278,8 @@ class CStarSystemManager:
         Initialize the system manager by determining the system name and initializing
         the environment and scheduler based on that name.
         """
-        namer = HostNameEvaluator()
-        self._context = _get_system_context(namer.name)
+
+        self._context = _get_system_context()
         """A context object configured for the current system."""
         self._environment = CStarEnvironment(
             system_name=self._context.name,
