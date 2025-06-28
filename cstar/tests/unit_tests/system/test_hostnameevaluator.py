@@ -42,8 +42,8 @@ def env_no_lmod() -> Generator[mock._patch, None, None]:
 def test_no_lmod_in_env(
     mock_system: mock.MagicMock, mock_machine: mock.MagicMock
 ) -> None:
-    """Verify that the an environment that specifies no lmod environment variables
-    return a platform-based name."""
+    """Verify that an environment without lmod environment variables returns a platform-
+    based name."""
     namer = HostNameEvaluator()
 
     mock_system.assert_called_once()
@@ -101,8 +101,8 @@ def test_partial_lmod_results_in_lmod_name(
     lmod_syshost: str,
     lmod_sysname: str,
 ) -> None:
-    """Verify that the an environment that specifies incomplete lmod variables returns
-    the value that is set."""
+    """Verify that an environment specifying incomplete lmod variables returns the value
+    that is set."""
     with patch.dict(
         os.environ,
         {
