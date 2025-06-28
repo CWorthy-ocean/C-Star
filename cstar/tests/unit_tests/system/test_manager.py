@@ -117,10 +117,8 @@ class TestSchedulerProperty:
         Confirms that the scheduler property is cached after instantiation.
     """
 
-    def test_scheduler_caching(
-        self,
-        mock_environment_vars: dict[str, str],  # noqa: ARG002
-    ) -> None:
+    @pytest.mark.usefixtures("mock_environment_vars")
+    def test_scheduler_caching(self) -> None:
         """Verify that the scheduler property is cached after first access."""
         system = CStarSystemManager()
 
