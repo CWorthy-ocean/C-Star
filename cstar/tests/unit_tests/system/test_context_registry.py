@@ -1,4 +1,5 @@
 from typing import ClassVar
+from unittest.mock import PropertyMock, patch
 
 import pytest
 
@@ -47,7 +48,12 @@ def test_unique_context_names() -> None:
 )
 def test_context_registry(cls_: type[_SystemContext]) -> None:
     """Verify that all known system contexts are registered."""
-    ctx = _get_system_context(cls_.name)
+    with patch(
+        "cstar.system.manager.HostNameEvaluator.name",
+        new_callable=PropertyMock,
+        return_value=cls_.name,
+    ):
+        ctx = _get_system_context()
 
     # confirm all properties of the factory produced context match
     assert ctx.name == cls_.name
@@ -88,7 +94,12 @@ def test_new_registration() -> None:
             """Mock scheduler creation."""
             raise NotImplementedError
 
-    ctx = _get_system_context(MockSystemContext.name)
+    with patch(
+        "cstar.system.manager.HostNameEvaluator.name",
+        new_callable=PropertyMock,
+        return_value=MockSystemContext.name,
+    ):
+        ctx = _get_system_context()
 
     assert ctx
     assert ctx.name == MockSystemContext.name
@@ -96,5 +107,12 @@ def test_new_registration() -> None:
 
 def test_unknown_context_name() -> None:
     """Verify that requesting an unregistered context fails."""
-    with pytest.raises(CstarError):
-        _ = _get_system_context("invalid-name")
+    with (
+        pytest.raises(CstarError),
+        patch(
+            "cstar.system.manager.HostNameEvaluator.name",
+            new_callable=PropertyMock,
+            return_value="invalid-name",
+        ),
+    ):
+        _ = _get_system_context()
