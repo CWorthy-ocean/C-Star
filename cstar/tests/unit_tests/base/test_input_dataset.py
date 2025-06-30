@@ -848,22 +848,26 @@ class TestLocalHash:
 
     def test_local_hash_multiple_files(self, local_input_dataset, mock_path_resolve):
         """Test `local_hash` calculation for multiple files."""
+
+        expected_path_1 = Path("/some/local/path1")
+        expected_path_2 = Path("/some/local/path2")
+
         local_input_dataset._local_file_hash_cache = {}
         local_input_dataset.working_path = [
-            Path("/some/local/path1"),
-            Path("/some/local/path2"),
+            expected_path_1,
+            expected_path_2,
         ]
         result = local_input_dataset.local_hash
 
         assert result == {
-            Path("/some/local/path1"): "mocked_hash",
-            Path("/some/local/path2"): "mocked_hash",
+            expected_path_1: "mocked_hash",
+            expected_path_2: "mocked_hash",
         }, f"Expected calculated local_hash for multiple files, but got {result}"
 
         self.mock_get_hash.assert_has_calls(
             [
-                mock.call(Path("/some/local/path1")),
-                mock.call(Path("/some/local/path2")),
+                mock.call(expected_path_1),
+                mock.call(expected_path_2),
             ],
             any_order=True,
         )
