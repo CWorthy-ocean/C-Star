@@ -387,6 +387,8 @@ class TestAdditionalCodeGet:
         # Ensure that the working_path is set correctly
         assert local_additional_code.working_path == Path("/mock/local/dir")
 
+        assert mock_path_resolve.called
+
     def test_get_from_remote_repository(
         self, mock_path_resolve, remote_additional_code
     ):

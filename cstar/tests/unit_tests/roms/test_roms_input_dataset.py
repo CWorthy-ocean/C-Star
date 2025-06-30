@@ -596,6 +596,8 @@ class TestROMSInputDatasetGet:
         # Assertions to ensure everything worked as expected
         self.mock_yaml_load.assert_called_once()
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
@@ -654,6 +656,8 @@ class TestROMSInputDatasetGet:
         self.mock_get.assert_not_called()
         self.mock_yaml_load.assert_not_called()
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
@@ -706,6 +710,8 @@ class TestROMSInputDatasetGet:
         self.mock_get.assert_not_called()
         self.mock_yaml_load.assert_not_called()
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
@@ -755,6 +761,8 @@ class TestROMSInputDatasetGet:
                 not self.mock_yaml_load.called
             ), "Expected no calls to yaml.safe_load, but some occurred."
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.roms.input_dataset.ROMSInputDataset._get_from_partitioned_source",
         autospec=True,
@@ -795,6 +803,8 @@ class TestROMSInputDatasetGet:
             source_np_xi=4,
             source_np_eta=3,
         )
+
+        mock_path_resolve.assert_called()
 
     @mock.patch(
         "cstar.roms.input_dataset.ROMSInputDataset._symlink_or_download_from_source",

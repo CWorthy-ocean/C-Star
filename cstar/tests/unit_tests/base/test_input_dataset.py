@@ -52,7 +52,7 @@ def local_input_dataset():
         mock_basename.return_value = "local_file.nc"
 
         dataset = MockInputDataset(
-            location=Path("some/local/source/path/local_file.nc"),
+            location="some/local/source/path/local_file.nc",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
         )
@@ -499,6 +499,8 @@ class TestInputDatasetGet:
             f"but got {local_input_dataset.working_path}"
         )
 
+        mock_path_resolve.assert_called()
+
     @mock.patch("cstar.base.input_dataset._get_sha256_hash", return_value="mocked_hash")
     def test_get_with_local_source(
         self, mock_get_hash, local_input_dataset, mock_path_resolve
@@ -531,6 +533,8 @@ class TestInputDatasetGet:
                 local_input_dataset.working_path == expected_target_path
             ), f"Expected working_path to be {expected_target_path}, but got {local_input_dataset.working_path}"
 
+        mock_path_resolve.assert_called()
+
     @mock.patch("cstar.base.input_dataset._get_sha256_hash", return_value="mocked_hash")
     def test_get_local_wrong_hash(
         self, mock_get_hash, local_input_dataset, mock_path_resolve
@@ -552,6 +556,8 @@ class TestInputDatasetGet:
 
         # Ensure `_get_sha256_hash` was called with the source path
         mock_get_hash.assert_called_once_with(source_filepath_local)
+
+        mock_path_resolve.assert_called()
 
     @mock.patch("pooch.create")
     @mock.patch("pooch.HTTPDownloader")
@@ -634,3 +640,5 @@ class TestInputDatasetGet:
         with pytest.raises(ValueError) as exception_info:
             remote_input_dataset.get(self.target_dir)
         assert str(exception_info.value) == expected_message
+
+        mock_path_resolve.assert_called()
