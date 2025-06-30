@@ -655,6 +655,8 @@ class TestInputDatasetGet:
                 local_input_dataset.working_path == expected_target_path
             ), f"Expected working_path to be {expected_target_path}, but got {local_input_dataset.working_path}"
 
+        mock_path_resolve.assert_called()
+
     @mock.patch("cstar.base.input_dataset._get_sha256_hash", return_value="mocked_hash")
     def test_get_local_wrong_hash(
         self, mock_get_hash, local_input_dataset, mock_path_resolve
