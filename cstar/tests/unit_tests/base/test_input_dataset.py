@@ -824,6 +824,7 @@ class TestLocalHash:
 
         # Verify _get_sha256_hash was called with the resolved path
         self.mock_get_hash.assert_called_once_with(Path("/some/local/path"))
+        mock_path_resolve.assert_called()
 
     def test_local_hash_cached(self, local_input_dataset):
         """Test `local_hash` when the hash is cached."""
