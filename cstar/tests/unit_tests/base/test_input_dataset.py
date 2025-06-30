@@ -54,7 +54,7 @@ def local_input_dataset():
         mock_basename.return_value = "local_file.nc"
 
         dataset = MockInputDataset(
-            location=Path("some/local/source/path/local_file.nc"),
+            location="some/local/source/path/local_file.nc",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
         )
