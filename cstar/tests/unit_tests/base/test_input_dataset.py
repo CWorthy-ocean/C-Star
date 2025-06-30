@@ -677,6 +677,8 @@ class TestInputDatasetGet:
         # Ensure `_get_sha256_hash` was called with the source path
         mock_get_hash.assert_called_once_with(source_filepath_local)
 
+        mock_path_resolve.assert_called()
+
     @mock.patch("pooch.create")
     @mock.patch("pooch.HTTPDownloader")
     @mock.patch("cstar.base.input_dataset._get_sha256_hash", return_value="mocked_hash")
@@ -758,6 +760,8 @@ class TestInputDatasetGet:
         with pytest.raises(ValueError) as exception_info:
             remote_input_dataset.get(self.target_dir)
         assert str(exception_info.value) == expected_message
+
+        mock_path_resolve.assert_called()
 
 
 class TestLocalHash:
@@ -863,3 +867,5 @@ class TestLocalHash:
             ],
             any_order=True,
         )
+
+        mock_path_resolve.assert_called()
