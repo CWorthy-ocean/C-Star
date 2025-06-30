@@ -51,8 +51,8 @@ def mock_path_resolve():
     def fake_resolve(self: Path) -> Path:
         return self
 
-    with patch.object(Path, "resolve", side_effect=fake_resolve, autospec=True):
-        yield
+    with patch.object(Path, "resolve", side_effect=fake_resolve, autospec=True) as mock:
+        yield mock
 
 
 @pytest.fixture
