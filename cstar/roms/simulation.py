@@ -1594,6 +1594,6 @@ class ROMSSimulation(Simulation):
         # Reset cached data for input datasets
 
         for inp in new_sim.input_datasets:
-            inp.local_file_stats = None
+            inp._clear()
 
         return new_sim

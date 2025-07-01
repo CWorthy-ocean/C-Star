@@ -251,3 +251,8 @@ class InputDataset(ABC, LoggingMixin):
                     + "Cannot proceed."
                 )
         return computed_file_hash
+
+    def _clear(self):
+        """Reset the internal state of this InputDataset, clearing any cached
+        information such as local file statistics."""
+        self.local_file_stats = None

@@ -642,3 +642,13 @@ class TestInputDatasetGet:
         assert str(exception_info.value) == expected_message
 
         mock_path_resolve.assert_called()
+
+
+def test_clear(remote_input_dataset):
+    """Test the 'clear' method resets the local_file_stats attribute to None."""
+
+    remote_input_dataset.local_file_stats = mock.Mock()
+    assert remote_input_dataset.local_file_stats is not None
+
+    remote_input_dataset._clear()
+    assert remote_input_dataset.local_file_stats is None
