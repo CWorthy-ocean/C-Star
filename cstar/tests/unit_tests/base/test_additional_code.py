@@ -102,6 +102,14 @@ class TestInit:
         assert additional_code.checkout_target is None
         assert len(additional_code.files) == 0
 
+    def test_init_raises_if_any_files_falsy(self):
+        """Test that initializing an AdditionalCode instance with an empty or none entry
+        in 'files' raises a ValueError."""
+        with pytest.raises(
+            ValueError, match="An invalid filename was supplied to AdditionalCode"
+        ):
+            AdditionalCode(location="test/location", files=["file1", "", "file3"])
+
 
 class TestStrAndRepr:
     """Test class for the `__str__` and `__repr__` methods of the AdditionalCode class.

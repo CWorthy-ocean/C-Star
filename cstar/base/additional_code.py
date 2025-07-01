@@ -76,7 +76,15 @@ class AdditionalCode(LoggingMixin):
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
         self._checkout_target = checkout_target
-        self.files: Optional[list[str]] = [] if files is None else files
+
+        self.files: Optional[list[str]]
+        if files is None:
+            self.files = []
+        elif any((not f) for f in files):
+            raise ValueError("An invalid filename was supplied to AdditionalCode")
+        else:
+            self.files = files
+
         # Initialize object state
         self.local_file_stats: Optional[LocalFileStatistics] = None
 
