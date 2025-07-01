@@ -314,7 +314,6 @@ class ROMSInputDataset(InputDataset, ABC):
         self._update_partitioning_attribute(
             new_np_xi=source_np_xi, new_np_eta=source_np_eta, parted_files=parted_files
         )
-        # self.working_path = parted_files
         assert self.partitioning is not None
         self.local_file_stats = LocalFileStatistics(
             paths=[p.resolve() for p in parted_files]
