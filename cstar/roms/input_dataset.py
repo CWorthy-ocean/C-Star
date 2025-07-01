@@ -273,8 +273,7 @@ class ROMSInputDataset(InputDataset, ABC):
         local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)
         if self.exists_locally:
-            assert self.local_file_stats is not None
-            if self.local_file_stats.parent_dir == local_dir:
+            if self.local_file_stats.parent_dir == local_dir:  # type: ignore[union-attr]
                 self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
                 return
 
