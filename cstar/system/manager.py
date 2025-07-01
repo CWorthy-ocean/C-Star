@@ -1,6 +1,6 @@
 import functools
 import os
-import platform as platform_
+import platform as platform
 from dataclasses import dataclass, field
 from typing import ClassVar, Protocol
 
@@ -25,13 +25,13 @@ class HostNameEvaluator:
     """The lmod-specific hostname."""
     lmod_sysname: str = field(default="", init=False)
     """The lmod-specific system name."""
-    lmod_name: str = field(default="", init=False)
+    lmod_hostname: str = field(default="", init=False)
     """Aggregate of lmod host and lmod name."""
-    platform: str = field(default="", init=False)
-    """The platform name."""
-    machine: str = field(default="", init=False)
-    """The machine name."""
     platform_name: str = field(default="", init=False)
+    """The platform name."""
+    machine_name: str = field(default="", init=False)
+    """The machine name."""
+    platform_hostname: str = field(default="", init=False)
     """Aggregate of machine and platform sysname."""
 
     ENV_LMOD_SYSHOST: ClassVar[str] = "LMOD_SYSHOST"
@@ -46,15 +46,15 @@ class HostNameEvaluator:
         setattr_ = object.__setattr__
         setattr_(self, "lmod_syshost", os.environ.get(self.ENV_LMOD_SYSHOST, ""))
         setattr_(self, "lmod_sysname", os.environ.get(self.ENV_LMOD_SYSNAME, ""))
-        setattr_(self, "lmod_name", (self.lmod_syshost or self.lmod_sysname).casefold())
-        setattr_(self, "platform", platform_.system())
-        setattr_(self, "machine", platform_.machine())
+        setattr_(self, "lmod_hostname", (self.lmod_syshost or self.lmod_sysname).casefold())
+        setattr_(self, "platform_name", platform.system())
+        setattr_(self, "machine_name", platform.machine())
         setattr_(
             self,
-            "platform_name",
+            "platform_hostname",
             (
-                f"{self.platform}_{self.machine}"
-                if self.platform and self.machine
+                f"{self.platform_name}_{self.machine_name}"
+                if self.platform_name and self.machine_name
                 else ""
             ).casefold(),
         )
@@ -64,7 +64,7 @@ class HostNameEvaluator:
         """Return a string useful for diagnosing failures to identify the name."""
         return (
             f"{self.lmod_syshost=}, {self.lmod_sysname=}, "
-            f"{self.platform=}, {self.machine=}"
+            f"{self.platform_name=}, {self.machine_name=}"
         )
 
     @property
@@ -79,11 +79,11 @@ class HostNameEvaluator:
         EnvironmentError
             If the name cannot be determined.
         """
-        if self.lmod_name:
-            return self.lmod_name
+        if self.lmod_hostname:
+            return self.lmod_hostname
 
-        if self.platform_name:
-            return self.platform_name
+        if self.platform_hostname:
+            return self.platform_hostname
 
         raise EnvironmentError(
             f"C-Star cannot determine your system name. Diagnostics: {self._diagnostic}"

@@ -52,11 +52,11 @@ def test_no_lmod_in_env(
 
     assert namer.lmod_syshost == ""
     assert namer.lmod_sysname == ""
-    assert namer.platform == DEFAULT_MOCK_HOST_NAME
-    assert namer.machine == DEFAULT_MOCK_MACHINE_NAME
-    assert namer.lmod_name == ""
-    assert namer.platform_name == f"{namer.platform}_{namer.machine}"
-    assert namer.name == namer.platform_name
+    assert namer.platform_name == DEFAULT_MOCK_HOST_NAME
+    assert namer.machine_name == DEFAULT_MOCK_MACHINE_NAME
+    assert namer.lmod_hostname == ""
+    assert namer.platform_hostname == f"{namer.platform_name}_{namer.machine_name}"
+    assert namer.name == namer.platform_hostname
 
 
 @patch("platform.machine", return_value="x86_64")
@@ -74,15 +74,15 @@ def test_known_linux_platform(
     mock_system.assert_called_once()
     mock_machine.assert_called_once()
 
-    expected_name = f"{namer.platform}_{namer.machine}".casefold()
+    expected_name = f"{namer.platform_name}_{namer.machine_name}".casefold()
 
     assert namer.lmod_syshost == ""
     assert namer.lmod_sysname == ""
-    assert namer.platform == "Linux"
-    assert namer.machine == "x86_64"
-    assert namer.lmod_name == ""
-    assert namer.platform_name == expected_name
-    assert namer.name == namer.platform_name
+    assert namer.platform_name == "Linux"
+    assert namer.machine_name == "x86_64"
+    assert namer.lmod_hostname == ""
+    assert namer.platform_hostname == expected_name
+    assert namer.name == namer.platform_hostname
 
 
 @pytest.mark.parametrize(
@@ -120,11 +120,11 @@ def test_partial_lmod_results_in_lmod_name(
     assert namer.lmod_sysname == lmod_sysname
     if lmod_syshost:
         expected_name = namer.lmod_syshost.casefold()
-        assert namer.lmod_name == expected_name
+        assert namer.lmod_hostname == expected_name
     elif lmod_sysname:
         expected_name = namer.lmod_sysname.casefold()
-        assert namer.lmod_name == expected_name
-    assert namer.name == namer.lmod_name
+        assert namer.lmod_hostname == expected_name
+    assert namer.name == namer.lmod_hostname
 
 
 @pytest.mark.usefixtures("env_full_lmod")
@@ -142,8 +142,8 @@ def test_lmod_prioritizes_syshost(
     mock_system.assert_called_once()
     mock_machine.assert_called_once()
 
-    assert namer.lmod_name == namer.lmod_syshost
-    assert namer.name == namer.lmod_name
+    assert namer.lmod_hostname == namer.lmod_syshost
+    assert namer.name == namer.lmod_hostname
 
 
 @pytest.mark.usefixtures("env_full_lmod")
@@ -167,9 +167,9 @@ def test_partial_platform_naming(
     ):
         namer = HostNameEvaluator()
 
-    assert namer.platform == system_name
-    assert namer.machine == machine_name
-    assert namer.platform_name == ""
+    assert namer.platform_name == system_name
+    assert namer.machine_name == machine_name
+    assert namer.platform_hostname == ""
 
     # partial platform info shouldn't affect overall name when lmod is available
     assert namer.name
@@ -196,9 +196,9 @@ def test_partial_platform_fallback(
     ):
         namer = HostNameEvaluator()
 
-    assert namer.platform == system_name
-    assert namer.machine == machine_name
-    assert namer.platform_name == ""
+    assert namer.platform_name == system_name
+    assert namer.machine_name == machine_name
+    assert namer.platform_hostname == ""
 
     # without lmod env vars, falling back on partial platform name should fail.
     with pytest.raises(EnvironmentError):
