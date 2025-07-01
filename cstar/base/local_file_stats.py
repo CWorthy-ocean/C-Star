@@ -79,7 +79,7 @@ class LocalFileStatistics:
 
         self.paths = [p.absolute() for p in paths]
 
-        if not all([d.parent == self.paths[0].parent for d in self.paths]):
+        if not all(d.parent == self.paths[0].parent for d in self.paths):
             raise ValueError(
                 "LocalFileStatistics requires paths to exist in a common directory"
             )
