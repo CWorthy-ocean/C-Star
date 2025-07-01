@@ -46,7 +46,9 @@ class HostNameEvaluator:
         setattr_ = object.__setattr__
         setattr_(self, "lmod_syshost", os.environ.get(self.ENV_LMOD_SYSHOST, ""))
         setattr_(self, "lmod_sysname", os.environ.get(self.ENV_LMOD_SYSNAME, ""))
-        setattr_(self, "lmod_hostname", (self.lmod_syshost or self.lmod_sysname).casefold())
+        setattr_(
+            self, "lmod_hostname", (self.lmod_syshost or self.lmod_sysname).casefold()
+        )
         setattr_(self, "platform_name", platform.system())
         setattr_(self, "machine_name", platform.machine())
         setattr_(
