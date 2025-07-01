@@ -121,18 +121,26 @@ class AdditionalCode(LoggingMixin):
 
     @property
     def checkout_target(self) -> Optional[str]:
+        """If in a repository, the commit hash or tag at which to checkout this
+        additional code."""
         return self._checkout_target
 
     @property
     def working_path(self) -> Optional[Path]:
+        """The current local path where this AdditionalCode exists on the local system,
+        if it has been fetched."""
+
         if self.local_file_stats is None:
             return None
         return self.local_file_stats.parent_dir
 
     @property
-    def exists_locally(self):
+    def exists_locally(self) -> bool:
+        """Determines whether this AdditionalCode instance exists on the local
+        system."""
         if not self.local_file_stats:
             return False
+
         try:
             self.local_file_stats.validate()
         except (FileNotFoundError, ValueError, KeyError):
@@ -212,7 +220,6 @@ class AdditionalCode(LoggingMixin):
                 paths=[local_dir / Path(f).name for f in self.files]
             )
             self.log.info("✅ All files copied successfully")
-            # self.working_path = local_dir
 
         finally:
             if tmp_dir:
