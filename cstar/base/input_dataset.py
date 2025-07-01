@@ -85,6 +85,7 @@ class InputDataset(ABC, LoggingMixin):
 
     @property
     def exists_locally(self):
+        """Determines whether this InputDataset instance exists on the local system."""
         if not self.local_file_stats:
             return False
         try:
@@ -95,6 +96,8 @@ class InputDataset(ABC, LoggingMixin):
 
     @property
     def working_path(self) -> Optional[Path | list[Path]]:
+        """The current local path where this InputDataset exists on the local system, if
+        it has been fetched."""
         if self.local_file_stats is None:
             return None
         if len(self.local_file_stats.paths) == 1:
@@ -208,6 +211,8 @@ class InputDataset(ABC, LoggingMixin):
         target_path: Path,
         logger: "logging.Logger",
     ) -> str:
+        """Helper method to either create a symbolic link to this InputDataset (if it
+        exists on the local filesystem) or download it (if it is located remotely)."""
         if location_type == "path":
             source_location = Path(source_location).expanduser().resolve()
             # TODO when refactoring get(), avoid calculating hash here
