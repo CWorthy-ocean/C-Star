@@ -109,12 +109,12 @@ _registry: dict[str, type[_SystemContext]] = {}
 
 
 def register_sys_context(
-    cls_: type[_SystemContext],
+    wrapped_cls: type[_SystemContext],
 ) -> type[_SystemContext]:
     """Register the decorated type as an available _SystemContext."""
-    _registry[cls_.name] = cls_
+    _registry[wrapped_cls.name] = wrapped_cls
 
-    @functools.wraps(cls_)
+    @functools.wraps(wrapped_cls)
     def _inner() -> type[_SystemContext]:
         """Return the original type after it is registered.
 
@@ -123,7 +123,7 @@ def register_sys_context(
         type[_SystemContext]
             The decorated type.
         """
-        return cls_
+        return wrapped_cls
 
     return _inner()
 

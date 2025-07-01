@@ -32,13 +32,14 @@ def env_no_lmod() -> Generator[mock._patch, None, None]:
     with patch.dict(
         os.environ,
         {},
+        clear=True,
     ) as _:
         yield _
 
 
 @patch("platform.machine", return_value=DEFAULT_MOCK_MACHINE_NAME)
 @patch("platform.system", return_value=DEFAULT_MOCK_HOST_NAME)
-@patch.dict(os.environ, {})
+@patch.dict(os.environ, {}, clear=True)
 def test_no_lmod_in_env(
     mock_system: mock.MagicMock, mock_machine: mock.MagicMock
 ) -> None:
@@ -60,7 +61,7 @@ def test_no_lmod_in_env(
 
 @patch("platform.machine", return_value="x86_64")
 @patch("platform.system", return_value="Linux")
-@patch.dict(os.environ, {})
+@patch.dict(os.environ, {}, clear=True)
 def test_known_linux_platform(
     mock_system: mock.MagicMock, mock_machine: mock.MagicMock
 ) -> None:

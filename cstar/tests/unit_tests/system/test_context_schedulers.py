@@ -15,7 +15,7 @@ DEFAULT_MOCK_HOST_NAME = "mock_system"
 
 
 @pytest.mark.parametrize(
-    ("cls_", "exp_sched_type", "exp_queue_names"),
+    ("wrapped_class", "exp_sched_type", "exp_queue_names"),
     [
         (_PerlmutterSystemContext, SlurmScheduler, {"regular", "shared", "debug"}),
         (_MacOSSystemContext, None, None),
@@ -25,13 +25,13 @@ DEFAULT_MOCK_HOST_NAME = "mock_system"
     ],
 )
 def test_context_registry(
-    cls_: type[_SystemContext],
+    wrapped_class: type[_SystemContext],
     exp_sched_type: type[Scheduler],
     exp_queue_names: set[str] | None,
 ) -> None:
     """Verify that the type of scheduler created by each of the known system contexts
     matches expectations."""
-    scheduler = cls_.create_scheduler()
+    scheduler = wrapped_class.create_scheduler()
 
     if exp_sched_type is not None:
         assert type(scheduler) is exp_sched_type
