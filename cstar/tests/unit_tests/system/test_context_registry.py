@@ -37,7 +37,7 @@ def test_unique_context_names() -> None:
 
 
 @pytest.mark.parametrize(
-    "cls_",
+    "wrapped_class",
     [
         _PerlmutterSystemContext,
         _MacOSSystemContext,
@@ -46,24 +46,24 @@ def test_unique_context_names() -> None:
         _LinuxSystemContext,
     ],
 )
-def test_context_registry(cls_: type[_SystemContext]) -> None:
+def test_context_registry(wrapped_class: type[_SystemContext]) -> None:
     """Verify that all known system contexts are registered."""
     with patch(
         "cstar.system.manager.HostNameEvaluator.name",
         new_callable=PropertyMock,
-        return_value=cls_.name,
+        return_value=wrapped_class.name,
     ):
         ctx = _get_system_context()
 
     # confirm all properties of the factory produced context match
-    assert ctx.name == cls_.name
-    assert ctx.compiler == cls_.compiler
-    assert ctx.mpi_prefix == cls_.mpi_prefix
-    assert isinstance(ctx.create_scheduler(), type(cls_.create_scheduler()))
+    assert ctx.name == wrapped_class.name
+    assert ctx.compiler == wrapped_class.compiler
+    assert ctx.mpi_prefix == wrapped_class.mpi_prefix
+    assert isinstance(ctx.create_scheduler(), type(wrapped_class.create_scheduler()))
 
 
 @pytest.mark.parametrize(
-    ("expected_name", "cls_"),
+    ("expected_name", "wrapped_class"),
     [
         ("perlmutter", _PerlmutterSystemContext),
         ("darwin_arm64", _MacOSSystemContext),
@@ -72,10 +72,10 @@ def test_context_registry(cls_: type[_SystemContext]) -> None:
         ("linux_x86_64", _LinuxSystemContext),
     ],
 )
-def test_registry_keys(expected_name: str, cls_: type[_SystemContext]) -> None:
+def test_registry_keys(expected_name: str, wrapped_class: type[_SystemContext]) -> None:
     """Verify that the system contexts have the names expected from using
     HostNameEvaluator for all known systems."""
-    assert expected_name == cls_.name
+    assert expected_name == wrapped_class.name
 
 
 def test_new_registration() -> None:
