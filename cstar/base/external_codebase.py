@@ -238,7 +238,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
             )
         )
 
-        interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
+        interactive = os.environ.get("CSTAR_INTERACTIVE", "1") == "1"
 
         match self.local_config_status:
             case 0:
