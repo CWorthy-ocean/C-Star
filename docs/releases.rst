@@ -23,6 +23,7 @@ Internal Changes:
 - Update internal/test blueprints to reflect new structure
 - Add ROMSRuntimeSettings class with ability to parse and create roms `.in` files
 - Save partitioned `ROMSInputDatasets` in the same directory as their un-partitioned versions, rather than a subdirectory "PARTITIONED"
+- Refactor local file metadata tracking with `LocalFileStatistics` class
 
 Documentation:
 ~~~~~~~~~~~~~~

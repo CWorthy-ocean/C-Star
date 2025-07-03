@@ -1,5 +1,7 @@
 import logging
 import pathlib
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -40,6 +42,17 @@ def system_dotenv_dir(tmp_path: pathlib.Path) -> pathlib.Path:
 def mock_system_name() -> str:
     # A name for the mock system/platform executing the tests.
     return "mock_system"
+
+
+@pytest.fixture
+def mock_path_resolve():
+    """Fixture to mock Path.resolve() so it returns the calling Path."""
+
+    def fake_resolve(self: Path) -> Path:
+        return self
+
+    with patch.object(Path, "resolve", side_effect=fake_resolve, autospec=True) as mock:
+        yield mock
 
 
 @pytest.fixture

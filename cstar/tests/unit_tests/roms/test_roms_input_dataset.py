@@ -7,6 +7,7 @@ from unittest import mock
 import pytest
 
 from cstar.base.datasource import DataSource
+from cstar.base.local_file_stats import LocalFileStatistics
 from cstar.roms import ROMSForcingCorrections, ROMSInputDataset, ROMSPartitioning
 
 
@@ -219,8 +220,11 @@ class TestStrAndRepr:
             expected_repr_normalized in actual_repr_normalized
         ), f"Expected:\n{expected_repr}\nBut got:\n{actual_repr}"
 
+    @mock.patch.object(
+        MockROMSInputDataset, "working_path", new_callable=mock.PropertyMock
+    )
     def test_repr_with_partitioned_files_and_working_path(
-        self, local_roms_netcdf_dataset
+        self, mock_working_path, local_roms_netcdf_dataset
     ):
         """Test the ROMSInputDataset repr includes `partitioned_files` and
         `working_path`.
@@ -249,7 +253,7 @@ class TestStrAndRepr:
             ],
         )
 
-        local_roms_netcdf_dataset.working_path = "/some/path/local_file.nc"
+        mock_working_path.return_value = "/some/path/local_file.nc"
 
         expected_repr = dedent(
             """\
@@ -320,9 +324,6 @@ class TestROMSInputDatasetGet:
         self.mock_get = self.patch_get.start()
 
         # Mocking Path methods
-        self.patch_resolve = mock.patch("pathlib.Path.resolve", autospec=True)
-        self.mock_resolve = self.patch_resolve.start()
-
         self.patch_mkdir = mock.patch("pathlib.Path.mkdir", autospec=True)
         self.mock_mkdir = self.patch_mkdir.start()
 
@@ -367,11 +368,12 @@ class TestROMSInputDatasetGet:
         """Stop all patches."""
         mock.patch.stopall()
 
-    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
-    @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("requests.get", autospec=True)
     def test_get_grid_from_remote_yaml(
-        self, mock_request, mock_stat, mock_get_hash, remote_roms_yaml_dataset
+        self,
+        mock_request,
+        remote_roms_yaml_dataset,
+        mock_path_resolve,
     ):
         """Test the `get` method for ROMS grid files from a remote YAML source.
 
@@ -386,8 +388,6 @@ class TestROMSInputDatasetGet:
 
         Mocks:
         ------
-        - `Path.stat`: Simulates retrieving file metadata for file.
-        - `_get_sha256_hash`: Simulates computing the hash of the file.
         - `yaml.safe_load`: Simulates loading YAML content from a file.
         - `roms_tools.Grid.from_yaml`: Simulates creating a Grid object from the YAML file.
         - `roms_tools.Grid.save`: Simulates saving Grid data as a NetCDF file.
@@ -398,28 +398,17 @@ class TestROMSInputDatasetGet:
         - Ensures `yaml.safe_load` processes the YAML content as expected.
         - Validates `roms_tools.Grid.from_yaml` creates the Grid object from the YAML file.
         - Verifies `roms_tools.Grid.save` saves files with correct parameters.
-        - Ensures metadata and checksums for saved file is cached via `stat` and `_get_sha256_hash`.
+        - Ensures metadata and checksums for saved file is cached via `local_file_stats`.
         """
-
-        # Mock the stat result
-        mock_stat_result = mock.Mock(
-            st_size=12345, st_mtime=1678901234, st_mode=0o100644
-        )
-        mock_stat.return_value = mock_stat_result
 
         # Mock the call to requests.get on the remote yaml file
         mock_request.return_value.text = "---\nheader---\ndata"
 
-        self.mock_resolve.side_effect = [
-            Path("some/local/dir"),  # First resolve: local_dir
-            Path("some/local/dir"),  # Second resolve: local_dir in _get_from_yaml
-            Path("some/local/dir/remote_file.nc"),  # Third resolve: during caching
-        ]
-
         # Mock the list of paths returned by roms_tools.save
-        self.mock_rt_grid_instance.save.return_value = [
+        save_paths = [
             Path("some/local/dir/remote_file.nc"),
         ]
+        self.mock_rt_grid_instance.save.return_value = save_paths
 
         # Mock yaml loading
         self.mock_yaml_load.return_value = {
@@ -429,17 +418,6 @@ class TestROMSInputDatasetGet:
 
         # Call the method under test
         remote_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
-
-        # Assert resolve calls
-        expected_resolve_calls = [
-            mock.call(Path("some/local/dir")),
-            mock.call(Path("some/local/dir")),
-            mock.call(Path("some/local/dir/remote_file.nc")),
-        ]
-        assert self.mock_resolve.call_args_list == expected_resolve_calls, (
-            f"Expected resolve calls:\n{expected_resolve_calls}\n"
-            f"But got:\n{self.mock_resolve.call_args_list}"
-        )
 
         # Check that the yaml.safe_load was called properly
         self.mock_yaml_load.assert_called_once()
@@ -452,15 +430,14 @@ class TestROMSInputDatasetGet:
             filepath=Path("some/local/dir/remote_file.nc")
         )
 
-        # Ensure stat was called for the saved file
-        assert (
-            mock_stat.call_count == 1
-        ), f"Expected stat to be called 1 time, but got {mock_stat.call_count} calls."
+        # Assert that the local_file_stats attr is set
+        for f in save_paths:
+            assert (
+                f.absolute() in remote_roms_yaml_dataset.local_file_stats.paths
+            ), f"{f} not found in {remote_roms_yaml_dataset.local_file_stats.paths}"
 
-    @mock.patch("pathlib.Path.stat", autospec=True)
-    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
     def test_get_surface_forcing_from_local_yaml(
-        self, mock_get_hash, mock_stat, local_roms_yaml_dataset
+        self, local_roms_yaml_dataset, mock_path_resolve
     ):
         """Test the `get` method for creating SurfaceForcing from a local YAML source.
 
@@ -474,8 +451,6 @@ class TestROMSInputDatasetGet:
 
         Mocks:
         ------
-        - `Path.stat`: Simulates retrieving file metadata for the generated file.
-        - `_get_sha256_hash`: Simulates computing the hash of the saved file.
         - `yaml.safe_load`: Simulates loading YAML content from a file.
         - `roms_tools.SurfaceForcing.from_yaml`: Simulates creating a SurfaceForcing object from the YAML file.
         - `roms_tools.SurfaceForcing.save`: Simulates saving SurfaceForcing data as a NetCDF file.
@@ -487,15 +462,8 @@ class TestROMSInputDatasetGet:
         - Verifies `yaml.safe_load` processes the YAML content correctly.
         - Confirms `roms_tools.SurfaceForcing.from_yaml` creates the SurfaceForcing object from the YAML file.
         - Ensures `roms_tools.SurfaceForcing.save` saves the file with the correct parameters.
-        - Verifies file metadata and checksum caching via `stat` and `_get_sha256_hash`.
+        - Verifies file metadata and checksum caching via `local_file_stats`.
         """
-
-        # Mock resolve to return a resolved path
-        self.mock_resolve.side_effect = [
-            Path("some/local/dir"),  # First resolve: local_dir
-            Path("some/local/dir"),  # Second resolve: local_dir in _get_from_yaml
-            Path("some/local/dir/local_file.nc"),  # Third resolve: during caching
-        ]
 
         # Mock yaml loading for a more complex YAML with both Grid and SurfaceForcing
         yaml_dict = {
@@ -517,15 +485,8 @@ class TestROMSInputDatasetGet:
             self.mock_rt_surface_forcing_instance
         )
         # Configure mock save method for SurfaceForcing to return a valid list
-        self.mock_rt_surface_forcing_instance.save.return_value = [
-            Path("some/local/dir/surface_forcing_file.nc")
-        ]
-
-        # Mock stat result for saved files
-        mock_stat_result = mock.Mock(
-            st_size=12345, st_mtime=1678901234, st_mode=0o100644
-        )
-        mock_stat.return_value = mock_stat_result
+        save_paths = [Path("some/local/dir/surface_forcing_file.nc")]
+        self.mock_rt_surface_forcing_instance.save.return_value = save_paths
 
         # Call the method under test
         local_roms_yaml_dataset.get(local_dir="some/local/dir")
@@ -552,10 +513,11 @@ class TestROMSInputDatasetGet:
             filepath=Path("some/local/dir/local_file.nc")
         )
 
-        # Ensure stat was called for the saved file
-        assert (
-            mock_stat.call_count == 1
-        ), f"Expected stat to be called 1 time, but got {mock_stat.call_count} calls."
+        # Ensure the `local_file_stats` attr is updated
+        for f in save_paths:
+            assert (
+                f.absolute() in local_roms_yaml_dataset.local_file_stats.paths
+            ), f"{f} not found in {local_roms_yaml_dataset.local_file_stats.paths}"
 
     def test_get_from_yaml_raises_if_not_yaml(self, local_roms_netcdf_dataset):
         """Tests that the `ROMSInputDataset._get_from_yaml` method raises if called from
@@ -578,7 +540,7 @@ class TestROMSInputDatasetGet:
 
     @mock.patch("pathlib.Path.stat", autospec=True)
     def test_get_raises_with_wrong_number_of_keys(
-        self, mock_stat, local_roms_yaml_dataset
+        self, mock_stat, local_roms_yaml_dataset, mock_path_resolve
     ):
         """Test that the `get` method raises a ValueError when the YAML file contains
         more than two sections.
@@ -597,18 +559,10 @@ class TestROMSInputDatasetGet:
 
         Asserts:
         --------
-        - Ensures `resolve` is called to determine the actual path of the YAML file.
         - Ensures `yaml.safe_load` is invoked to parse the YAML content.
         - Confirms that a `ValueError` is raised when the YAML file contains more than two sections.
         - Validates that the exception message matches the expected error message.
         """
-
-        # Mock resolve to return a resolved path
-        resolved_path = Path("/resolved/path/to/local_file.yaml")
-        self.mock_resolve.side_effect = [
-            Path("some/local/dir"),  # First resolve: local_dir
-            resolved_path,  # Second resolve: source location
-        ]
 
         # Mock yaml loading for a YAML with too many sections
         self.mock_yaml_load.return_value = {
@@ -640,18 +594,21 @@ class TestROMSInputDatasetGet:
         assert str(exception_info.value) == expected_message
 
         # Assertions to ensure everything worked as expected
-        self.mock_resolve.assert_called()
         self.mock_yaml_load.assert_called_once()
+
+        mock_path_resolve.assert_called()
 
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
     )
+    # @mock.patch.object(MockROMSInputDataset,"working_path",new_callable=mock.PropertyMock)
     def test_get_skips_if_working_path_in_same_parent_dir(
         self,
         mock_exists_locally,
         local_roms_yaml_dataset,
         caplog: pytest.LogCaptureFixture,
+        mock_path_resolve,
     ):
         """Test that the `get` method skips execution when `working_path` is set and
         points to the same parent directory as `local_dir`.
@@ -679,14 +636,15 @@ class TestROMSInputDatasetGet:
 
         caplog.set_level(logging.INFO, logger=local_roms_yaml_dataset.log.name)
 
-        # Mock `working_path` to point to a file in `some/local/dir`
-        local_roms_yaml_dataset.working_path = Path("some/local/dir/local_file.yaml")
-
         # Mock the `exists_locally` property to return True
         mock_exists_locally.return_value = True
 
-        # Set the `mock_resolve` side effect to resolve `local_dir` correctly
-        self.mock_resolve.return_value = Path("some/local/dir")
+        # Set the local_file_stats for the 'existing' file
+        local_roms_yaml_dataset.local_file_stats = LocalFileStatistics(
+            paths=[
+                Path("some/local/dir/local_file.yaml"),
+            ]
+        )
 
         local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
@@ -698,22 +656,21 @@ class TestROMSInputDatasetGet:
         self.mock_get.assert_not_called()
         self.mock_yaml_load.assert_not_called()
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
     )
-    def test_get_skips_if_working_path_list_in_same_parent_dir(
+    def test_get_skips_if_local_path_list_in_same_parent_dir(
         self,
         mock_exists_locally,
         local_roms_yaml_dataset,
         caplog: pytest.LogCaptureFixture,
+        mock_path_resolve,
     ):
-        """Test that the `get` method skips execution when `working_path` is a list and
-        its first element points to the same parent directory as `local_dir`.
-
-        This test ensures that if `working_path` is a list of paths, and at least one of
-        its elements exists in the same parent directory as `local_dir`, the `get` method
-        does not proceed with further file operations.
+        """Test that the `get` method skips execution when `local_file_stats` first
+        element points to the same parent directory as `local_dir`.
 
         Fixtures:
         ---------
@@ -734,16 +691,15 @@ class TestROMSInputDatasetGet:
         caplog.set_level(logging.INFO, logger=local_roms_yaml_dataset.log.name)
 
         # Mock `working_path` to be a list pointing to files in `some/local/dir`
-        local_roms_yaml_dataset.working_path = [
-            Path("some/local/dir/local_file_1.yaml"),
-            Path("some/local/dir/local_file_2.yaml"),
-        ]
+        local_roms_yaml_dataset.local_file_stats = LocalFileStatistics(
+            paths=[
+                Path("some/local/dir/local_file_1.yaml"),
+                Path("some/local/dir/local_file_2.yaml"),
+            ]
+        )
 
         # Mock the `exists_locally` property to return True
         mock_exists_locally.return_value = True
-
-        # Set the `mock_resolve` side effect to resolve `local_dir` correctly
-        self.mock_resolve.return_value = Path("some/local/dir")
 
         local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
@@ -754,11 +710,15 @@ class TestROMSInputDatasetGet:
         self.mock_get.assert_not_called()
         self.mock_yaml_load.assert_not_called()
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
     )
-    def test_get_exits_if_not_yaml(self, mock_exists_locally, local_roms_yaml_dataset):
+    def test_get_exits_if_not_yaml(
+        self, mock_exists_locally, local_roms_yaml_dataset, mock_path_resolve
+    ):
         """Test that the `get` method exits early if `self.source.source_type` is not
         'yaml'.
 
@@ -788,9 +748,6 @@ class TestROMSInputDatasetGet:
                 False  # Ensure the file does not exist locally
             )
 
-            # Mock `resolve` to return the expected path
-            self.mock_resolve.return_value = Path("some/local/dir")
-
             # Call the method under test
             local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
 
@@ -804,12 +761,17 @@ class TestROMSInputDatasetGet:
                 not self.mock_yaml_load.called
             ), "Expected no calls to yaml.safe_load, but some occurred."
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.roms.input_dataset.ROMSInputDataset._get_from_partitioned_source",
         autospec=True,
     )
     def test_get_with_partitioned_source(
-        self, mock_get_from_partitioned_source, local_roms_netcdf_dataset
+        self,
+        mock_get_from_partitioned_source,
+        local_roms_netcdf_dataset,
+        mock_path_resolve,
     ):
         """Tests the 'get' method calls _get_from_partitioned_source when the
         ROMSInputDataset has a partitioned source.
@@ -825,8 +787,6 @@ class TestROMSInputDatasetGet:
         -------
         - _get_from_partitioned_source is called once with the expected arguments
         """
-
-        self.mock_resolve.return_value = Path("/some/dir")
 
         # Set source partitioning attributes
         local_roms_netcdf_dataset.source._location = (
@@ -844,16 +804,14 @@ class TestROMSInputDatasetGet:
             source_np_eta=3,
         )
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.roms.input_dataset.ROMSInputDataset._symlink_or_download_from_source",
         autospec=False,
     )
-    @mock.patch("cstar.roms.input_dataset._get_sha256_hash")
-    @mock.patch("cstar.roms.input_dataset.Path.stat")
     def test_get_from_partitioned_source(
         self,
-        mock_path_stat,
-        mock_get_hash,
         mock_symlink_or_download,
         local_roms_netcdf_dataset,
     ):
@@ -865,10 +823,6 @@ class TestROMSInputDatasetGet:
 
         Mocks & Fixtures
         ----------------
-        mock_path_stat (MagicMock)
-            mocks the Path.stat method to set the ROMSPartitioning._local_file_stat_cache attr
-        mock_get_hash (MagicMock)
-            mocks the _get_sha256_hash method to compute the shasum of the partitioned files
         mock_symlink_or_download (MagicMock)
             mocks the InputDataset._symlink_or_download_from_source method to fetch the partitions
         local_roms_netcdf_dataset (ROMSInputDataset)
@@ -879,6 +833,7 @@ class TestROMSInputDatasetGet:
         - Asserts _symlink_or_download_from_source was called 12 times (once per partition)
         - Asserts the calls to _symlink_or_download_from_source have expected arguments
         - Asserts the `ROMSInputDataset.partitioning` attribute is set as expected
+        - Asserts that ROMSInputDataset.local_file_stats is set with the correct paths
         """
 
         # Set source partitioning attributes
@@ -893,8 +848,6 @@ class TestROMSInputDatasetGet:
             source_np_xi=4,
             source_np_eta=3,
         )
-
-        mock_get_hash.side_effect = [f"mock_hash_{i}" for i in range(12)]
 
         assert mock_symlink_or_download.call_count == 12
         expected_calls = [
@@ -915,6 +868,10 @@ class TestROMSInputDatasetGet:
         assert local_roms_netcdf_dataset.partitioning.np_xi == 4
         assert local_roms_netcdf_dataset.partitioning.np_eta == 3
         assert local_roms_netcdf_dataset.partitioning.files == expected_files
+
+        assert local_roms_netcdf_dataset.local_file_stats.paths == [
+            e.absolute() for e in expected_files
+        ]
 
 
 class TestROMSInputDatasetPartition:
@@ -969,11 +926,9 @@ class TestROMSInputDatasetPartition:
         assert test_dict["source_np_xi"] == 4
         assert test_dict["source_np_eta"] == 3
 
-    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
-    @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_single_file(
-        self, mock_partition_netcdf, mock_get_hash, mock_stat, local_roms_netcdf_dataset
+        self, mock_partition_netcdf, local_roms_netcdf_dataset
     ):
         """Ensures that a single NetCDF file is partitioned and tracked correctly.
 
@@ -981,7 +936,6 @@ class TestROMSInputDatasetPartition:
         ------
         - partition_netcdf: Simulates the behavior of the partitioning utility.
         - Path.stat: Mocks computation of file statistics
-        - _get_sha256_hash: Mocks file shasum calculation
         - Path.resolve: Mocks the resolution of the partitioned filepaths
 
         Fixtures:
@@ -998,9 +952,10 @@ class TestROMSInputDatasetPartition:
         np_xi, np_eta = 2, 3
         num_partitions = np_xi * np_eta
 
-        # Set up the working_path for the dataset
-        local_roms_netcdf_dataset.working_path = Path(
-            "some/local/source/path/local_file.nc"
+        local_roms_netcdf_dataset.local_file_stats = LocalFileStatistics(
+            paths=[
+                Path("some/local/source/path/local_file.nc"),
+            ]
         )
 
         # Mock the exists_locally property
@@ -1042,24 +997,15 @@ class TestROMSInputDatasetPartition:
                     == expected_partitioned_files
                 )
 
-                # Ensure stat was called for each saved file
-                assert (
-                    mock_stat.call_count == 6
-                ), f"Expected stat to be called 6 times, but got {mock_stat.call_count} calls."
-
-    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
-    @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_multiple_files(
-        self, mock_partition_netcdf, mock_get_hash, mock_stat, local_roms_netcdf_dataset
+        self, mock_partition_netcdf, local_roms_netcdf_dataset
     ):
         """Verifies partitioning behavior when multiple files are provided.
 
         Mocks:
         ------
         - partition_netcdf: Simulates the behavior of the partitioning utility.
-        - Path.stat: Mocks computation of file statistics
-        - _get_sha256_hash: Mocks file shasum calculation
         - Path.resolve: Mocks the resolution of the partitioned filepaths
 
         Fixtures:
@@ -1070,17 +1016,18 @@ class TestROMSInputDatasetPartition:
         --------
         - `partition_netcdf` is called the correct number of times.
         - `ROMSInputDataset.partitioning.files` is updated with the expected file paths.
-        - `Path.stat` is called once for each partitioned file
         """
 
         np_xi, np_eta = 2, 2
         num_partitions = np_xi * np_eta
 
         # Set up the working_path for multiple files
-        local_roms_netcdf_dataset.working_path = [
-            Path("some/local/source/path/file1.nc"),
-            Path("some/local/source/path/file2.nc"),
-        ]
+        local_roms_netcdf_dataset.local_file_stats = LocalFileStatistics(
+            paths=[
+                Path("some/local/source/path/file1.nc"),
+                Path("some/local/source/path/file2.nc"),
+            ]
+        )
 
         # Mock the exists_locally property
         with mock.patch.object(
@@ -1123,11 +1070,6 @@ class TestROMSInputDatasetPartition:
                     local_roms_netcdf_dataset.partitioning.files
                     == expected_partitioned_files
                 )
-
-                # Ensure stat was called for each saved file
-                assert (
-                    mock_stat.call_count == 8
-                ), f"Expected stat to be called 8 times, but got {mock_stat.call_count} calls."
 
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_skips_if_already_partitioned(
@@ -1247,7 +1189,11 @@ class TestROMSInputDatasetPartition:
         local_roms_netcdf_dataset.partitioning = ROMSPartitioning(
             np_xi=1, np_eta=2, files=existing_files
         )
-        local_roms_netcdf_dataset.working_path = "/some/dir/local_file.nc"
+        local_roms_netcdf_dataset.local_file_stats = LocalFileStatistics(
+            paths=[
+                Path("/some/dir/local_file.nc"),
+            ]
+        )
         mock_exists.return_value = True
         mock_partition_netcdf.side_effect = RuntimeError("simulated failure")
         with mock.patch.object(
@@ -1306,8 +1252,9 @@ class TestROMSInputDatasetPartition:
         )
         assert str(exception_info.value) == expected_message
 
+    @mock.patch.object(ROMSInputDataset, "working_path", new_callable=mock.PropertyMock)
     def test_partition_raises_with_mismatched_directories(
-        self, local_roms_netcdf_dataset
+        self, mock_working_path, local_roms_netcdf_dataset
     ):
         """Validates that an error is raised if files span multiple directories.
 
@@ -1325,7 +1272,7 @@ class TestROMSInputDatasetPartition:
         """
 
         # Set up the dataset with files in different directories
-        local_roms_netcdf_dataset.working_path = [
+        mock_working_path.return_value = [
             Path("some/local/source/path/file1.nc"),
             Path("some/other/source/path/file2.nc"),
         ]
