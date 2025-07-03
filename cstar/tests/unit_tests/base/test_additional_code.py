@@ -467,7 +467,6 @@ class TestAdditionalCodeGet:
         - tempfile.mkdtemp: Mocked to simulate creating temporary directories.
         - shutil.rmtree: Mocked to simulate cleaning up temporary directories.
         - cstar.base.utils._clone_and_checkout: Mocked to simulate cloning a remote repository.
-        - Path.resolve: Mocked to simulate resolving paths.
         - DataSource.location_type and DataSource.source_type: Mocked to simulate
         different source types for the AdditionalCode object.
         """
@@ -492,10 +491,6 @@ class TestAdditionalCodeGet:
         self.patch_rmtree = mock.patch("shutil.rmtree")
         self.mock_rmtree = self.patch_rmtree.start()
 
-        # Set up common mocks for Path.resolve and DataSource attributes
-        self.patch_resolve = mock.patch.object(Path, "resolve")
-        self.mock_resolve = self.patch_resolve.start()
-
         self.patch_location_type = mock.patch.object(
             DataSource, "location_type", new_callable=mock.PropertyMock
         )
@@ -513,7 +508,7 @@ class TestAdditionalCodeGet:
         """Stop all the patches after each test to clean up the mock environment."""
         mock.patch.stopall()
 
-    def test_get_from_local_directory(self, local_additional_code):
+    def test_get_from_local_directory(self, mock_path_resolve, local_additional_code):
         """Test the `get` method when fetching additional code from elsewhere on the
         current filesystem.
 
@@ -522,7 +517,7 @@ class TestAdditionalCodeGet:
         - local_additional_code: An example AdditionalCode instance representing local code.
         - mock_location_type: Mocks AdditionalCode.source.location_type as "path"
         - mock_source_type: Mocks AdditionalCode.source.source_type as "directory"
-        - mock_resolve: Mocks resolving the target directory, returning a mocked resolved path.
+        - mock_path_resolve: Mocks resolving the target directory, returning a mocked resolved path.
         - mock_mkdir: Mocks the creation of the target directory if it doesn’t exist.
         - mock_copy: Mocks the copying of files from the source to the target directory.
 
@@ -537,7 +532,6 @@ class TestAdditionalCodeGet:
         # Set specific mock return values for this test
         self.mock_location_type.return_value = "path"
         self.mock_source_type.return_value = "directory"
-        self.mock_resolve.return_value = Path("/mock/local/dir")
         self.mock_hash.return_value = "mock_hash_value"
 
         # Call the get() method to simulate fetching additional code from a local directory
@@ -566,7 +560,11 @@ class TestAdditionalCodeGet:
         # Ensure that the working_path is set correctly
         assert local_additional_code.working_path == Path("/mock/local/dir")
 
-    def test_get_from_remote_repository(self, remote_additional_code):
+        assert mock_path_resolve.called
+
+    def test_get_from_remote_repository(
+        self, mock_path_resolve, remote_additional_code
+    ):
         """Test the `get` method when fetching additional code from a remote Git
         repository.
 
@@ -575,7 +573,7 @@ class TestAdditionalCodeGet:
         - remote_additional_code: An example AdditionalCode instance representing code in a remote repo
         - mock_location_type: Mocks AdditionalCode.source.location_type as "url"
         - mock_source_type: Mocks AdditionalCode.source.source_type  as "repository"
-        - mock_resolve: Mocks resolving the target directory.
+        - mock_path_resolve: Mocks resolving the target directory.
         - mock_clone: Mocks cloning the repository and checking out the correct branch or commit.
         - mock_mkdir: Mocks the creation of the target directory (if needed).
         - mock_mkdtemp: Mocks the creation of a temporary directory for cloning the repo into.
@@ -596,7 +594,6 @@ class TestAdditionalCodeGet:
         # Set specific return values for this test
         self.mock_location_type.return_value = "url"
         self.mock_source_type.return_value = "repository"
-        self.mock_resolve.return_value = Path("/mock/local/dir")
         self.mock_hash.return_value = "mock_hash_value"
         # Call get method
         remote_additional_code.get("/mock/local/dir")
@@ -697,7 +694,9 @@ class TestAdditionalCodeGet:
 
         assert str(exception_info.value) == expected_message
 
-    def test_get_raises_if_missing_files(self, local_additional_code):
+    def test_get_raises_if_missing_files(
+        self, mock_path_resolve, local_additional_code
+    ):
         """Test that `get` raises a `FileNotFoundError` when a file is missing in a
         local directory.
 
@@ -706,7 +705,7 @@ class TestAdditionalCodeGet:
         - local_additional_code: An example AdditionalCode instance representing local code.
         - mock_location_type: Mocks AdditionalCode.source.location_type as "path".
         - mock_source_type: Mocks AdditionalCode.source.source_type as "directory".
-        - mock_resolve: Mocks resolving the target directory.
+        - mock_path_resolve: Mocks resolving the target directory.
         - mock_exists: Mocks file existence checks, simulating the third file as missing.
         - mock_copy: Mocks the copying of files to the target directory.
 
@@ -719,7 +718,6 @@ class TestAdditionalCodeGet:
         # Simulate local directory source with missing files
         self.mock_hash.return_value = "mock_hash_value"
         self.mock_exists.side_effect = [True, True, False]  # Third file is missing
-        self.mock_resolve.return_value = Path("/mock/local/dir")
         self.mock_location_type.return_value = "path"
         self.mock_source_type.return_value = "directory"
 
@@ -753,7 +751,7 @@ class TestAdditionalCodeGet:
 
         assert str(exception_info.value) == expected_message
 
-    def test_cleanup_temp_directory(self, remote_additional_code):
+    def test_cleanup_temp_directory(self, mock_path_resolve, remote_additional_code):
         """Test that the temporary directory is cleaned up (deleted) after fetching
         remote additional code.
 
@@ -762,7 +760,7 @@ class TestAdditionalCodeGet:
         - remote_additional_code: An example AdditionalCode instance representing code in a remote repo
         - mock_location_type: Mocks AdditionalCode.source.location_type as "url".
         - mock_source_type: Mocks AdditionalCode.source.source_type as "repository".
-        - mock_resolve: Mocks resolving the target directory.
+        - mock_path_resolve: Mocks resolving the target directory.
         - mock_clone: Mocks cloning the repository and checking out the correct branch or commit.
         - mock_mkdtemp: Mocks the creation of a temporary directory for cloning the repo.
         - mock_rmtree: Mocks the cleanup (removal) of the temporary directory.
@@ -773,7 +771,6 @@ class TestAdditionalCodeGet:
         """
         self.mock_location_type.return_value = "url"
         self.mock_source_type.return_value = "repository"
-        self.mock_resolve.return_value = Path("/mock/local/dir")
 
         # Call get method
         remote_additional_code.get("/mock/local/dir")
