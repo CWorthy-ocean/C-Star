@@ -81,11 +81,13 @@ class CStarEnvironment:
             self.load_lmod_modules(lmod_file=self.lmod_path)
 
     @property
-    def mpi_exec_prefix(self):
+    def mpi_exec_prefix(self) -> str:
+        """Get the MPI prefix used when calling mpiexec in the environment."""
         return self._mpi_exec_prefix
 
     @property
-    def compiler(self):
+    def compiler(self) -> str:
+        """Get the compiler used when building in the environment."""
         return self._compiler
 
     def __str__(self) -> str:
