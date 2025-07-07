@@ -1,9 +1,18 @@
 import os
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from cstar.base.utils import _get_sha256_hash
+
+
+@dataclass
+class FileInfo:
+    path: Path
+    stat: Optional[os.stat_result] = None
+    sha256: Optional[str] = None
 
 
 class LocalFileStatistics:
@@ -46,12 +55,7 @@ class LocalFileStatistics:
     'e3b0c44298fc1c149afbf4c8996fb924...'
     """
 
-    def __init__(
-        self,
-        paths: list[Path],
-        stats: Optional[dict[Path, os.stat_result]] = None,
-        hashes: Optional[dict[Path, str]] = None,
-    ):
+    def __init__(self, files: Sequence[Path | FileInfo]):
         """Initialize the LocalFileStatistics object.
 
         Stores a list of local file paths and optionally precomputed metadata
@@ -61,44 +65,62 @@ class LocalFileStatistics:
 
         Parameters
         ----------
-        paths : list of Path
-            List of file paths to track. All paths must reside in the same directory.
-        stats : dict of Path to os.stat_result, optional
-            Optional precomputed file stat results. If provided, must include all
-            tracked files and match `paths` exactly after resolution.
-        hashes : dict of Path to str, optional
-            Optional precomputed SHA-256 hashes. If provided, must include all
-            tracked files and match `paths` exactly after resolution.
+        files : list of FileInfo
+            List of files to track with optional stat and hash metadata.
+            All files must reside in the same directory
 
         Raises
         ------
         ValueError
-            If the provided paths are not all in the same directory or if the keys
-            of `stats` or `hashes` do not match the resolved paths.
+            If the provided paths are not all in the same directory.
         """
 
-        self.paths = [p.absolute() for p in paths]
+        # Check files is not empty
+        if not files:
+            raise ValueError("At least one file must be provided.")
 
-        if not all(d.parent == self.paths[0].parent for d in self.paths):
-            raise ValueError(
-                "LocalFileStatistics requires paths to exist in a common directory"
-            )
+        # Initialize attributes
+        self._stat_cache: dict[Path, os.stat_result] = {}
+        self._hash_cache: dict[Path, str] = {}
+        self.paths: list[Path] = []
 
-        self.parent_dir = paths[0].parent
+        # Normalize files to all be FileInfo instances:
+        def to_fileinfo(item: Path | FileInfo) -> FileInfo:
+            if isinstance(item, FileInfo):
+                return item
+            return FileInfo(path=item)
 
-        if stats is not None:
-            if set(k.absolute() for k in stats.keys()) != set(self.paths):
-                raise ValueError("Provided 'stats' keys must match provided 'paths'")
-            self._stat_cache = stats
-        else:
-            self._stat_cache = dict[Path, os.stat_result]()
+        normalized_files = [to_fileinfo(f) for f in files]
 
-        if hashes is not None:
-            if set(k.absolute() for k in hashes.keys()) != set(self.paths):
-                raise ValueError("Provided 'hashes' keys must match provided 'paths'")
-            self._hash_cache = hashes
-        else:
-            self._hash_cache = dict[Path, str]()
+        # For checking all files are colocated with the first:
+        first_parent = normalized_files[0].path.absolute().parent
+
+        for f in normalized_files:
+            abs_path = f.path.absolute()
+
+            if abs_path.parent != first_parent:
+                raise ValueError("All files must be in the same directory")
+
+            self.paths.append(abs_path)
+
+            if f.stat is not None:
+                self._stat_cache[abs_path] = f.stat
+            if f.sha256 is not None:
+                self._hash_cache[abs_path] = f.sha256
+
+        self.parent_dir: Path = first_parent
+
+    def __getitem__(self, key: str | Path) -> FileInfo:
+        path = Path(key).absolute()
+
+        if path not in self.paths:
+            raise KeyError(f"{path} not found.")
+
+        return FileInfo(
+            path=path,
+            stat=self.stats[path],
+            sha256=self.hashes[path],
+        )
 
     @property
     def stats(self) -> dict[Path, os.stat_result]:

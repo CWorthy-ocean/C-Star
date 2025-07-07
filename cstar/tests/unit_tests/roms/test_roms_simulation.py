@@ -498,7 +498,7 @@ class TestROMSSimulationInitialization:
         # Set working paths of forcing types to fake paths
         for ds, fake_path in zip(datasets, fake_paths):
             for d in ds if isinstance(ds, list) else [ds]:
-                d.local_file_stats = LocalFileStatistics(paths=fake_path)
+                d.local_file_stats = LocalFileStatistics(files=fake_path)
 
         # Flatten list of fake paths (contains a list as an entry)
         flat_paths = [

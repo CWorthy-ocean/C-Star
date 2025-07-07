@@ -323,10 +323,6 @@ class TestROMSInputDatasetGet:
         )
         self.mock_get = self.patch_get.start()
 
-        # Mocking Path methods
-        self.patch_mkdir = mock.patch("pathlib.Path.mkdir", autospec=True)
-        self.mock_mkdir = self.patch_mkdir.start()
-
         # Mock open for reading YAML
         # When we call 'read' in the tested method, we split header and data,
         # so reflect this here:
@@ -519,7 +515,9 @@ class TestROMSInputDatasetGet:
                 f.absolute() in local_roms_yaml_dataset.local_file_stats.paths
             ), f"{f} not found in {local_roms_yaml_dataset.local_file_stats.paths}"
 
-    def test_get_from_yaml_raises_if_not_yaml(self, local_roms_netcdf_dataset):
+    def test_get_from_yaml_raises_if_not_yaml(
+        self, local_roms_netcdf_dataset, tmp_path
+    ):
         """Tests that the `ROMSInputDataset._get_from_yaml` method raises if called from
         a ROMSInputDataset whose source.source_type is not 'yaml'.
 
@@ -536,11 +534,12 @@ class TestROMSInputDatasetGet:
             ValueError,
             match="_get_from_yaml requires a ROMSInputDataset whose source_type is yaml",
         ):
-            local_roms_netcdf_dataset._get_from_yaml(local_dir="/some/dir")
+            local_roms_netcdf_dataset._get_from_yaml(local_dir=tmp_path)
 
-    @mock.patch("pathlib.Path.stat", autospec=True)
     def test_get_raises_with_wrong_number_of_keys(
-        self, mock_stat, local_roms_yaml_dataset, mock_path_resolve
+        self,
+        local_roms_yaml_dataset,
+        tmp_path,
     ):
         """Test that the `get` method raises a ValueError when the YAML file contains
         more than two sections.
@@ -554,7 +553,6 @@ class TestROMSInputDatasetGet:
 
         Mocks:
         ------
-        - `Path.resolve`: Simulates resolving the path to the source yaml file
         - `yaml.safe_load`: Simulates loading YAML content from a file with too many sections.
 
         Asserts:
@@ -574,15 +572,9 @@ class TestROMSInputDatasetGet:
             "AnotherSection": {"should": "fail", "with": 3, "sections": "in yaml"},
         }
 
-        # Mock stat to prevent unintended file operations
-        mock_stat_result = mock.Mock(
-            st_size=12345, st_mtime=1678901234, st_mode=0o100644
-        )
-        mock_stat.return_value = mock_stat_result
-
         # Call the method under test and expect a ValueError
         with pytest.raises(ValueError) as exception_info:
-            local_roms_yaml_dataset.get(local_dir="some/local/dir")
+            local_roms_yaml_dataset.get(local_dir=tmp_path / "some/local/dir")
 
         # Define the expected error message
         expected_message = (
@@ -596,19 +588,16 @@ class TestROMSInputDatasetGet:
         # Assertions to ensure everything worked as expected
         self.mock_yaml_load.assert_called_once()
 
-        mock_path_resolve.assert_called()
-
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
     )
-    # @mock.patch.object(MockROMSInputDataset,"working_path",new_callable=mock.PropertyMock)
     def test_get_skips_if_working_path_in_same_parent_dir(
         self,
         mock_exists_locally,
         local_roms_yaml_dataset,
         caplog: pytest.LogCaptureFixture,
-        mock_path_resolve,
+        tmp_path,
     ):
         """Test that the `get` method skips execution when `working_path` is set and
         points to the same parent directory as `local_dir`.
@@ -625,7 +614,6 @@ class TestROMSInputDatasetGet:
         Mocks:
         ------
         - `exists_locally`: Simulates the local existence check for `working_path`.
-        - `Path.resolve`: Simulates resolving paths to their actual locations.
 
         Asserts:
         --------
@@ -636,17 +624,19 @@ class TestROMSInputDatasetGet:
 
         caplog.set_level(logging.INFO, logger=local_roms_yaml_dataset.log.name)
 
+        tgt_path = tmp_path / "local_file.yaml"
+        tgt_path.touch()
+
         # Mock the `exists_locally` property to return True
         mock_exists_locally.return_value = True
 
         # Set the local_file_stats for the 'existing' file
         local_roms_yaml_dataset.local_file_stats = LocalFileStatistics(
-            paths=[
-                Path("some/local/dir/local_file.yaml"),
+            files=[
+                tgt_path,
             ]
         )
-
-        local_roms_yaml_dataset.get(local_dir="some/local/dir")
+        local_roms_yaml_dataset.get(local_dir=tmp_path)
 
         # Assert the skip message was printed
         captured = caplog.text
@@ -656,7 +646,7 @@ class TestROMSInputDatasetGet:
         self.mock_get.assert_not_called()
         self.mock_yaml_load.assert_not_called()
 
-        mock_path_resolve.assert_called()
+        # mock_path_resolve.assert_called()
 
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
@@ -668,6 +658,7 @@ class TestROMSInputDatasetGet:
         local_roms_yaml_dataset,
         caplog: pytest.LogCaptureFixture,
         mock_path_resolve,
+        tmp_path,
     ):
         """Test that the `get` method skips execution when `local_file_stats` first
         element points to the same parent directory as `local_dir`.
@@ -690,18 +681,19 @@ class TestROMSInputDatasetGet:
 
         caplog.set_level(logging.INFO, logger=local_roms_yaml_dataset.log.name)
 
+        tmppath = tmp_path
         # Mock `working_path` to be a list pointing to files in `some/local/dir`
         local_roms_yaml_dataset.local_file_stats = LocalFileStatistics(
-            paths=[
-                Path("some/local/dir/local_file_1.yaml"),
-                Path("some/local/dir/local_file_2.yaml"),
+            files=[
+                Path(tmppath / "local_file_1.yaml"),
+                Path(tmppath / "local_file_2.yaml"),
             ]
         )
 
         # Mock the `exists_locally` property to return True
         mock_exists_locally.return_value = True
 
-        local_roms_yaml_dataset.get(local_dir="some/local/dir")
+        local_roms_yaml_dataset.get(local_dir=tmppath)
 
         # Assert the skip message was printed
         assert "already exists, skipping." in caplog.text
@@ -772,6 +764,7 @@ class TestROMSInputDatasetGet:
         mock_get_from_partitioned_source,
         local_roms_netcdf_dataset,
         mock_path_resolve,
+        tmp_path,
     ):
         """Tests the 'get' method calls _get_from_partitioned_source when the
         ROMSInputDataset has a partitioned source.
@@ -795,11 +788,11 @@ class TestROMSInputDatasetGet:
         local_roms_netcdf_dataset.source_np_xi = 4
         local_roms_netcdf_dataset.source_np_eta = 3
 
-        local_roms_netcdf_dataset.get(local_dir="/some/dir")
+        local_roms_netcdf_dataset.get(local_dir=tmp_path)
 
         mock_get_from_partitioned_source.assert_called_once_with(
             local_roms_netcdf_dataset,
-            local_dir=Path("/some/dir"),
+            local_dir=tmp_path,
             source_np_xi=4,
             source_np_eta=3,
         )
@@ -953,7 +946,7 @@ class TestROMSInputDatasetPartition:
         num_partitions = np_xi * np_eta
 
         local_roms_netcdf_dataset.local_file_stats = LocalFileStatistics(
-            paths=[
+            files=[
                 Path("some/local/source/path/local_file.nc"),
             ]
         )
@@ -1023,7 +1016,7 @@ class TestROMSInputDatasetPartition:
 
         # Set up the working_path for multiple files
         local_roms_netcdf_dataset.local_file_stats = LocalFileStatistics(
-            paths=[
+            files=[
                 Path("some/local/source/path/file1.nc"),
                 Path("some/local/source/path/file2.nc"),
             ]
@@ -1190,7 +1183,7 @@ class TestROMSInputDatasetPartition:
             np_xi=1, np_eta=2, files=existing_files
         )
         local_roms_netcdf_dataset.local_file_stats = LocalFileStatistics(
-            paths=[
+            files=[
                 Path("/some/dir/local_file.nc"),
             ]
         )

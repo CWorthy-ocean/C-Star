@@ -8,7 +8,7 @@ import dateutil.parser
 import pooch
 
 from cstar.base.datasource import DataSource
-from cstar.base.local_file_stats import LocalFileStatistics
+from cstar.base.local_file_stats import FileInfo, LocalFileStatistics
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import _get_sha256_hash
 
@@ -196,11 +196,9 @@ class InputDataset(ABC, LoggingMixin):
 
         p = target_path.absolute()
         self.local_file_stats = LocalFileStatistics(
-            paths=[
-                p,
-            ],
-            stats={p: p.stat()},
-            hashes={p: computed_file_hash},
+            files=[
+                FileInfo(path=p, stat=p.stat(), sha256=computed_file_hash),
+            ]
         )
 
     @staticmethod

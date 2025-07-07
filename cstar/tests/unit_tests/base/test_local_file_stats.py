@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from cstar.base.local_file_stats import LocalFileStatistics
+from cstar.base.local_file_stats import FileInfo, LocalFileStatistics
+from cstar.base.utils import _get_sha256_hash
 
 
 @pytest.fixture
@@ -64,7 +65,7 @@ class TestLocalFileStatisticsInit:
         """
         file1, file2 = tmp_file_pair
 
-        lfs = LocalFileStatistics(paths=[file1, file2])
+        lfs = LocalFileStatistics(files=[file1, file2])
 
         assert lfs.paths == [file1.resolve(), file2.resolve()]
         assert lfs.parent_dir.resolve() == file1.parent
@@ -94,39 +95,11 @@ class TestLocalFileStatisticsInit:
         file1.touch()
         file2.touch()
 
-        with pytest.raises(ValueError, match="paths to exist in a common directory"):
-            LocalFileStatistics(paths=[file1, file2])
+        with pytest.raises(ValueError, match="All files must be in the same directory"):
+            LocalFileStatistics(files=[file1, file2])
 
-    def test_init_with_stats(self, tmp_file_pair):
-        """Accept a valid `stats` dictionary and cache it properly.
-
-        Fixtures
-        --------
-        tmp_file_pair : list[Path]
-            A pair of temporary file paths in the same directory.
-
-        Asserts
-        -------
-        - `_stat_cache` matches the input `stats` dictionary.
-        - `_hash_cache` is empty.
-        - The `stats` property returns the pre-supplied dictionary.
-        """
-
-        file1, file2 = tmp_file_pair
-
-        stats = {
-            file1.absolute(): file1.stat(),
-            file2.absolute(): file2.stat(),
-        }
-
-        lfs = LocalFileStatistics(paths=[file1, file2], stats=stats)
-
-        assert lfs._stat_cache == stats
-        assert lfs._hash_cache == {}
-        assert lfs.stats == stats
-
-    def test_init_raises_if_stats_keys_mismatch(self, tmp_file_pair):
-        """Raise ValueError if `stats` keys do not match the tracked paths.
+    def test_init_with_fileinfo(self, tmp_file_pair):
+        """Accept a valid `FileInfo` instance and cache it properly.
 
         Fixtures
         --------
@@ -135,68 +108,30 @@ class TestLocalFileStatisticsInit:
 
         Asserts
         -------
-        - A ValueError is raised due to key mismatch in the `stats` dictionary.
-        """
-        file1, file2 = tmp_file_pair
-
-        stats = {file1.parent: file1.stat(), file2.resolve(): file2.stat()}
-
-        with pytest.raises(ValueError, match="keys must match"):
-            LocalFileStatistics(paths=[file1, file2], stats=stats)
-
-    def test_init_with_hashes(self, tmp_file_pair):
-        """Accept a valid `hashes` dictionary and cache it properly.
-
-        Fixtures
-        --------
-        tmp_file_pair : list[Path]
-            A pair of temporary file paths in the same directory.
-
-        Asserts
-        -------
-        - `_hash_cache` matches the input `hashes` dictionary.
-        - `_stat_cache` is empty.
-        - The `hashes` property returns the pre-supplied dictionary.
+        - `_stat_cache` matches the input `stat` instances.
+        - `_hash_cache` matches the input `hash` instances.
+        - The `stats` property returns the expected dict of stats
+        - The `hashes` property returns the expected dict of hashes
         """
 
         file1, file2 = tmp_file_pair
+        stat1 = file1.stat()
+        stat2 = file2.stat()
+        hash1 = _get_sha256_hash(file1)
+        hash2 = _get_sha256_hash(file2)
 
-        dummy_hash = "a0b1c2d3" * 8
+        fileinfo1 = FileInfo(path=file1, stat=stat1, sha256=hash1)
+        fileinfo2 = FileInfo(path=file2, stat=stat2, sha256=hash2)
 
-        hashes = {
-            file1.absolute(): dummy_hash,
-            file2.absolute(): dummy_hash,
-        }
+        lfs = LocalFileStatistics(files=[fileinfo1, fileinfo2])
 
-        lfs = LocalFileStatistics(paths=[file1, file2], hashes=hashes)
+        expected_stats = {file1: stat1, file2: stat2}
+        expected_hashes = {file1: hash1, file2: hash2}
 
-        assert lfs._hash_cache == hashes
-        assert lfs._stat_cache == {}
-        assert lfs.hashes == hashes
-
-    def test_init_raises_if_hash_keys_mismatch(self, tmp_file_pair):
-        """Raise ValueError if `hashes` keys do not match the tracked paths.
-
-        Fixures
-        -------
-        tmp_file_pair : list[Path]
-            A pair of temporary file paths in the same directory.
-
-        Asserts
-        -------
-        - A ValueError is raised due to key mismatch in the `hashes` dictionary.
-        """
-
-        file1, file2 = tmp_file_pair
-        dummy_hash = "a0b1c2d3" * 8
-
-        hashes = {
-            file1.parent: dummy_hash,
-            file2.absolute(): dummy_hash,
-        }
-
-        with pytest.raises(ValueError, match="keys must match"):
-            LocalFileStatistics(paths=[file1, file2], hashes=hashes)
+        assert lfs._stat_cache == expected_stats
+        assert lfs._hash_cache == expected_hashes
+        assert lfs.stats == expected_stats
+        assert lfs.hashes == expected_hashes
 
 
 class TestStatsAndHasesProperties:
@@ -238,7 +173,7 @@ class TestStatsAndHasesProperties:
         file1, file2 = tmp_file_pair
         mock_hash.side_effect = ["fakehash1", "fakehash2"]
 
-        lfs = LocalFileStatistics(paths=[file1, file2])
+        lfs = LocalFileStatistics(files=[file1, file2])
         assert lfs._hash_cache == {}
 
         hashes = lfs.hashes
@@ -268,7 +203,7 @@ class TestStatsAndHasesProperties:
 
         file1, file2 = tmp_file_pair
 
-        lfs = LocalFileStatistics(paths=[file1, file2])
+        lfs = LocalFileStatistics(files=[file1, file2])
         assert lfs._stat_cache == {}
 
         stats = lfs.stats
@@ -334,10 +269,15 @@ class TestValidate:
         """
 
         file1, file2 = tmp_file_pair
-        stats = {file1: file1.stat(), file2: file2.stat()}
-        hashes = {file1: "fakehash", file2: "fakehash"}
+        stat1, hash1 = file1.stat(), "fakehash"
+        stat2, hash2 = file2.stat(), "fakehash"
 
-        lfs = LocalFileStatistics(paths=[file1, file2], stats=stats, hashes=hashes)
+        lfs = LocalFileStatistics(
+            files=[
+                FileInfo(path=file1, stat=stat1, sha256=hash1),
+                FileInfo(path=file2, stat=stat2, sha256=hash2),
+            ]
+        )
         lfs.validate()
 
         assert True  # if validate does not raise, then pass
@@ -361,7 +301,7 @@ class TestValidate:
         """
 
         file1, file2 = tmp_file_pair
-        lfs = LocalFileStatistics(paths=[file1, file2])
+        lfs = LocalFileStatistics(files=[file1, file2])
         with pytest.raises(FileNotFoundError, match="does not exist locally"):
             lfs.validate()
 
@@ -381,9 +321,13 @@ class TestValidate:
         """
 
         file1, file2 = tmp_file_pair
+        stat1, stat2 = file1.stat(), file2.stat()
 
         lfs = LocalFileStatistics(
-            paths=[file1, file2], stats={file1: file1.stat(), file2: file2.stat()}
+            files=[
+                FileInfo(path=file1, stat=stat1, sha256="fakehash"),
+                FileInfo(path=file2, stat=stat2, sha256="fakehash"),
+            ]
         )
 
         # Set mtime to Jan 1, 2000
@@ -411,9 +355,12 @@ class TestValidate:
         file1, file2 = tmp_file_pair
 
         lfs = LocalFileStatistics(
-            paths=[file1, file2],
-            hashes={file1: "incorrect_hash1", file2: "incorrect_hash2"},
+            [
+                FileInfo(path=file1, stat=file1.stat(), sha256="incorrect_hash1"),
+                FileInfo(path=file2, stat=file2.stat(), sha256="incorrect_hash2"),
+            ]
         )
+
         with pytest.raises(ValueError, match="does not match value in cache"):
             lfs.validate()
 
@@ -455,7 +402,7 @@ class TestStrAndReprFunctions:
 
         file1, file2 = tmp_file_pair
 
-        lfs = LocalFileStatistics(paths=[file1, file2])
+        lfs = LocalFileStatistics(files=[file1, file2])
         out = str(lfs)
 
         expected = f"""LocalFileStatistics
@@ -485,7 +432,7 @@ Files:
         - File paths are present and intact
         """
         file1, file2 = tmp_file_pair
-        lfs = LocalFileStatistics(paths=[file1, file2])
+        lfs = LocalFileStatistics(files=[file1, file2])
         rep = repr(lfs)
 
         # Basic structure checks
@@ -522,7 +469,7 @@ Files:
             sep=" ", timespec="seconds"
         )
 
-        lfs = LocalFileStatistics(paths=[file1, file2])
+        lfs = LocalFileStatistics(files=[file1, file2])
 
         tab = lfs.as_table()
         expected_tab = (
@@ -555,6 +502,6 @@ b.txt                                    cb8379ac20…  3            {ts2}"""
             new_file.touch()
             paths.append(new_file)
 
-        lfs = LocalFileStatistics(paths=paths)
+        lfs = LocalFileStatistics(files=paths)
         tab = lfs.as_table(max_rows=10)
         assert "... (10 more files)" in tab

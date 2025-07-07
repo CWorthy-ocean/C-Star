@@ -225,7 +225,7 @@ class AdditionalCode(LoggingMixin):
                     raise FileNotFoundError(f"Error: {src_file_path} does not exist.")
 
             self.local_file_stats = LocalFileStatistics(
-                paths=[local_dir / Path(f).name for f in self.files]
+                files=[local_dir / Path(f).name for f in self.files]
             )
             self.log.info("✅ All files copied successfully")
 

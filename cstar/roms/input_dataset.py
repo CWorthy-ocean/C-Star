@@ -316,7 +316,7 @@ class ROMSInputDataset(InputDataset, ABC):
         )
         assert self.partitioning is not None
         self.local_file_stats = LocalFileStatistics(
-            paths=parted_files,
+            files=parted_files,
         )
 
     def _get_from_yaml(self, local_dir: str | Path) -> None:
@@ -404,7 +404,7 @@ class ROMSInputDataset(InputDataset, ABC):
         )
 
         savepath = roms_tools_class_instance.save(**save_kwargs)
-        self.local_file_stats = LocalFileStatistics(paths=savepath)
+        self.local_file_stats = LocalFileStatistics(files=savepath)
 
     def _update_partitioning_attribute(
         self, new_np_xi: int, new_np_eta: int, parted_files: list[Path]
@@ -412,7 +412,7 @@ class ROMSInputDataset(InputDataset, ABC):
         self.partitioning = ROMSPartitioning(
             np_xi=new_np_xi, np_eta=new_np_eta, files=parted_files
         )
-        self.partitioning.local_file_stats = LocalFileStatistics(paths=parted_files)
+        self.partitioning.local_file_stats = LocalFileStatistics(files=parted_files)
 
     @property
     def path_for_roms(self) -> list[Path]:
