@@ -1,19 +1,21 @@
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-from cstar.base.utils import _get_sha256_hash
 from cstar.base.log import get_logger
+from cstar.base.utils import _get_sha256_hash
 
 logger = get_logger(__name__)
 
+
 class FileInfo:
-
-    def __init__(self, path: Path|str, stat: os.stat_result | None = None, sha256: str | None = None):
-
+    def __init__(
+        self,
+        path: Path | str,
+        stat: os.stat_result | None = None,
+        sha256: str | None = None,
+    ):
         self.path = Path(path).absolute()
         self._stat = stat
         self._sha256 = sha256
@@ -30,7 +32,7 @@ class FileInfo:
             self._sha256 = _get_sha256_hash(self.path)
         return self._sha256
 
-    def validate(self) -> bool:
+    def validate(self):
         if not self.path.exists():
             raise FileNotFoundError(f"File {self.path} does not exist locally")
 
@@ -40,18 +42,18 @@ class FileInfo:
             logger.debug(f"File {self.path} has no cached stat")
             self._stat = current_stat
         else:
-
             if (
                 current_stat.st_size != self.stat.st_size
                 or current_stat.st_mtime != self.stat.st_mtime
             ):
-                raise ValueError(f"File statistics for {self.path} do not match those in cache")
+                raise ValueError(
+                    f"File statistics for {self.path} do not match those in cache"
+                )
 
         current_hash = _get_sha256_hash(self.path)
         if not self._sha256:
             logger.debug(f"File {self.path} has no cached hash")
         else:
-
             if current_hash != self.sha256:
                 raise ValueError(
                     f"Computed SHA256 hash for {self.path} ({current_hash}) does not "
@@ -123,22 +125,19 @@ class LocalFileStatistics:
         if not files:
             raise ValueError("At least one file must be provided.")
 
-        # Initialize attributes
-        self.files: dict[Path, FileInfo] = {}
-
         # Normalize files to all be FileInfo instances:
         def to_fileinfo(item: Path | FileInfo) -> FileInfo:
             if isinstance(item, FileInfo):
                 return item
             return FileInfo(path=item)
 
-        self.files: dict[Path: FileInfo] = {f: to_fileinfo(f) for f in files}
+        file_infos = [to_fileinfo(f) for f in files]
+        self.files: dict[Path, FileInfo] = {fi.path: fi for fi in file_infos}
 
         # For checking all files are colocated with the first:
         first_parent = self.paths[0].parent
 
         for f in self.paths:
-
             if f.parent != first_parent:
                 raise ValueError("All files must be in the same directory")
 
@@ -156,7 +155,6 @@ class LocalFileStatistics:
     def hashes(self) -> list[str]:
         return [f.sha256 for f in self.files.values()]
 
-
     def __getitem__(self, key: str | Path) -> FileInfo:
         path = Path(key).absolute()
 
@@ -164,7 +162,6 @@ class LocalFileStatistics:
             raise KeyError(f"{path} not found.")
 
         return self.files[path]
-
 
     def validate(self) -> None:
         """Validate that all tracked files exist and match cached metadata.
@@ -182,7 +179,6 @@ class LocalFileStatistics:
             differs from the cached value.
         """
         [f.validate() for f in self.files.values()]
-
 
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
@@ -225,8 +221,8 @@ class LocalFileStatistics:
             name = str(abspath.name)
             size = stat.st_size
             mtime = datetime.fromtimestamp(stat.st_mtime).isoformat(
-                    sep=" ", timespec="seconds"
-                )
+                sep=" ", timespec="seconds"
+            )
 
             short_hash = hash_[:10] + "…"
 
