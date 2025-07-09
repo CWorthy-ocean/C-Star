@@ -69,8 +69,6 @@ class TestLocalFileStatisticsInit:
 
         assert lfs.paths == [file1.resolve(), file2.resolve()]
         assert lfs.parent_dir.resolve() == file1.parent
-        assert lfs._stat_cache == {}
-        assert lfs._hash_cache == {}
 
     def test_init_raises_if_paths_not_colocated(self, tmp_path):
         """Raise ValueError if paths do not share a common parent directory.
@@ -125,11 +123,9 @@ class TestLocalFileStatisticsInit:
 
         lfs = LocalFileStatistics(files=[fileinfo1, fileinfo2])
 
-        expected_stats = {file1: stat1, file2: stat2}
-        expected_hashes = {file1: hash1, file2: hash2}
+        expected_stats = [stat1, stat2]
+        expected_hashes = [hash1, hash2]
 
-        assert lfs._stat_cache == expected_stats
-        assert lfs._hash_cache == expected_hashes
         assert lfs.stats == expected_stats
         assert lfs.hashes == expected_hashes
 
@@ -174,11 +170,10 @@ class TestStatsAndHasesProperties:
         mock_hash.side_effect = ["fakehash1", "fakehash2"]
 
         lfs = LocalFileStatistics(files=[file1, file2])
-        assert lfs._hash_cache == {}
 
         hashes = lfs.hashes
-        assert hashes[file1.resolve()] == "fakehash1"
-        assert hashes[file2.resolve()] == "fakehash2"
+        assert hashes[0] == "fakehash1"
+        assert hashes[1] == "fakehash2"
         assert mock_hash.call_count == 2
 
         # Second access should not re-call the hash function
@@ -204,19 +199,18 @@ class TestStatsAndHasesProperties:
         file1, file2 = tmp_file_pair
 
         lfs = LocalFileStatistics(files=[file1, file2])
-        assert lfs._stat_cache == {}
 
         stats = lfs.stats
 
         # Check keys match
-        assert set(stats.keys()) == {file1.absolute(), file2.absolute()}
+        assert set(lfs.paths) == {file1.absolute(), file2.absolute()}
 
         # Check values are stat_result instances
-        for stat in stats.values():
+        for stat in stats:
             assert isinstance(stat, os.stat_result)
 
         # Check second access returns same object (i.e. no recomputation)
-        assert lfs.stats is stats
+        assert lfs.stats == stats
 
 
 class TestValidate:
