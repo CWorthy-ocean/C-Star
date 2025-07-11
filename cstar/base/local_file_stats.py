@@ -3,13 +3,11 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-from cstar.base.log import get_logger
+from cstar.base.log import LoggingMixin
 from cstar.base.utils import _get_sha256_hash
 
-logger = get_logger(__name__)
 
-
-class FileInfo:
+class FileInfo(LoggingMixin):
     """Holds information about an individual file on the local system."""
 
     def __init__(
@@ -56,8 +54,7 @@ class FileInfo:
         current_stat = self.path.stat()
 
         if not self._stat:
-            logger.debug(f"File {self.path} has no cached stat")
-            self._stat = current_stat
+            self.log.debug(f"File {self.path} has no cached stat")
         else:
             if (
                 current_stat.st_size != self.stat.st_size
@@ -69,7 +66,7 @@ class FileInfo:
 
         current_hash = _get_sha256_hash(self.path)
         if not self._sha256:
-            logger.debug(f"File {self.path} has no cached hash")
+            self.log.debug(f"File {self.path} has no cached hash")
         else:
             if current_hash != self.sha256:
                 raise ValueError(
@@ -78,7 +75,7 @@ class FileInfo:
                 )
 
 
-class LocalFileStatistics:
+class LocalFileStatistics(LoggingMixin):
     """Tracks file metadata (stat and SHA-256 hash) for a list of local files."""
 
     def __init__(self, files: Sequence[Path | FileInfo]):

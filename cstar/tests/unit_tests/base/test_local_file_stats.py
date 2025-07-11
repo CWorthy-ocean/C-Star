@@ -1,5 +1,9 @@
+import logging
 import os
+from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
+from typing import List
 from unittest.mock import patch
 
 import pytest
@@ -9,8 +13,8 @@ from cstar.base.utils import _get_sha256_hash
 
 
 @pytest.fixture
-def make_tmp_files(tmp_path):
-    def _make_tmp_files(num_files=1):
+def make_tmp_files(tmp_path) -> Callable[[int], List[Path]]:
+    def _make_tmp_files(num_files: int = 1) -> List[Path]:
         paths = []
         for i in range(num_files):
             p = tmp_path / f"file_{i}.txt"
@@ -21,11 +25,235 @@ def make_tmp_files(tmp_path):
     return _make_tmp_files
 
 
-class TestFileInfo:
+class TestFileInfoInit:
     """Tests for the FileInfo class."""
 
-    def test_fileinfo_init_with_path(self):
-        pass
+    def test_fileinfo_init_with_path(self, make_tmp_files):
+        """Ensure a FileInfo instance with a single path creates a minimal instance with
+        empty caches for stat and sha256."""
+        (file1,) = make_tmp_files(num_files=1)
+
+        file_info = FileInfo(path=file1)
+        assert file_info.path == file1
+        assert file_info._stat is None
+        assert file_info._sha256 is None
+
+    def test_fileinfo_init_with_stat(self, make_tmp_files):
+        """Ensure a FileInfo instance with a path and stat creates a FileInfo instance
+        with a correct cache value for stat."""
+
+        (file1,) = make_tmp_files(num_files=1)
+        stat1 = file1.stat()
+        file_info = FileInfo(path=file1, stat=stat1)
+        assert file_info.path == file1
+        assert file_info._stat == stat1
+        assert file_info._sha256 is None
+
+    def test_fileinfo_init_with_hash(self, make_tmp_files):
+        """Ensure a FileInfo instance with a path and hash creates a FileInfo instance
+        with a correct cache value for hash."""
+
+        (file1,) = make_tmp_files(num_files=1)
+        hash1 = "my_hash"
+        file_info = FileInfo(path=file1, sha256=hash1)
+        assert file_info.path == file1
+        assert file_info._stat is None
+        assert file_info._sha256 == hash1
+
+
+class TestFileInfoStatsAndHasesProperties:
+    """Tests for the `stats` and `hashes` properties of LocalFileStatistics."""
+
+    @patch("cstar.base.local_file_stats._get_sha256_hash")
+    def test_sha256_is_computed_and_cached(self, mock_hash, make_tmp_files):
+        """Test lazy hash computation and caching.
+
+        Verifies that:
+        - SHA-256 hashes are computed only when first accessed
+        - The `_get_sha256_hash` function is called once per file
+        - Cached results are reused on subsequent accesses
+
+        Parameters
+        ----------
+        mock_hash : Mock
+            Patches `_get_sha256_hash` to return dummy hashes.
+        make_tmp_files : list[Path]
+            Two temporary files for which hashes will be computed.
+
+        Asserts
+        -------
+        - `_hash` is initially empty
+        - Hashes are correctly assigned on first access
+        - `_get_sha256_hash` is not called more than once per file
+        """
+
+        (file1,) = make_tmp_files(1)
+
+        mock_hash.return_value = "fakehash123"
+
+        file_info = FileInfo(path=file1)
+        assert file_info._sha256 is None
+        test_sha256 = file_info.sha256
+
+        assert test_sha256 == "fakehash123"
+        assert file_info._sha256 == "fakehash123"
+        assert mock_hash.call_count == 1
+
+        # Second access should not re-call the hash function
+        _ = file_info.sha256
+        assert mock_hash.call_count == 1  # still 1
+
+    def test_stat_is_computed_and_cached(self, make_tmp_files):
+        """Test lazy stat computation and caching.
+
+        Parameters
+        ----------
+        make_tmp_files : list[Path]
+            A pair of temporary file paths in the same directory.
+        """
+
+        (file1,) = make_tmp_files(1)
+        stat1 = file1.stat()
+
+        file_info = FileInfo(path=file1)
+
+        # Assert _stat cache is initially empty
+        assert file_info._stat is None
+        test_stat = file_info.stat
+
+        # Assert calculated stat matches expected
+        assert test_stat == stat1
+        # Assert cached stat is updated
+        assert file_info._stat == stat1
+
+
+class TestFileInfoValidate:
+    """Tests for the `validate()` method of FileInfo.
+
+    These tests confirm that `validate()` correctly detects and raises errors when:
+    - Files are missing
+    - File metadata (size or modification time) has changed
+    - SHA-256 hashes no longer match the cached values
+
+    Tests
+    -----
+    test_validate_raises_if_stats_mismatch
+        Simulates a change in file size or mtime and verifies ValueError is raised.
+    test_validate_raises_if_hashes_mismatch
+        Simulates a mismatch between computed and cached hashes and verifies error.
+    """
+
+    @patch("cstar.base.local_file_stats._get_sha256_hash", return_value="fakehash")
+    def test_validate_completes_with_matching_stats_and_hashes(
+        self, mock_hash, make_tmp_files
+    ):
+        """Confirms `validate()` completes without error if metadata and hashes match.
+
+        Simulates a scenario where both `stats` and `hashes` are precomputed
+        and match the current state of the files.
+
+        Parameters
+        ----------
+        mock_hash : Mock
+            Patches `_get_sha256_hash` to return the expected value.
+        make_tmp_files : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - No exception is raised when calling `validate()`
+        """
+
+        (file1,) = make_tmp_files(1)
+        stat1, hash1 = file1.stat(), "fakehash"
+
+        file_info = FileInfo(path=file1, stat=stat1, sha256=hash1)
+        file_info.validate()
+
+        assert True  # if validate does not raise, then pass
+
+    @patch("pathlib.Path.exists", return_value=False)
+    def test_validate_raises_if_file_missing(self, mock_exists, make_tmp_files):
+        """Verifies that a FileNotFoundError is raised when a tracked file is missing.
+
+        Patches `Path.exists()` to simulate that a file does not exist.
+
+        Parameters
+        ----------
+        mock_exists : Mock
+            Forces `Path.exists()` to return False.
+        make_tmp_files : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `validate()` raises FileNotFoundError with a meaningful message.
+        """
+
+        (file1,) = make_tmp_files(1)
+        file_info = FileInfo(path=file1)
+        with pytest.raises(FileNotFoundError, match="does not exist locally"):
+            file_info.validate()
+
+    def test_validate_raises_if_stats_mismatch(self, make_tmp_files):
+        """Raise ValueError if file size or mtime no longer matches cache.
+
+        Manually alters the modification time of one file using `os.utime()`.
+
+        Parameters
+        ----------
+        make_tmp_files : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `validate()` raises ValueError indicating stat mismatch.
+        """
+
+        (file1,) = make_tmp_files(1)
+        stat1 = file1.stat()
+
+        file_info = FileInfo(path=file1, stat=stat1)
+
+        # Set mtime to Jan 1, 2000
+        old_time = 946684800  # epoch seconds
+        os.utime(file1, (old_time, old_time))
+
+        with pytest.raises(ValueError, match="do not match those in cache"):
+            file_info.validate()
+
+    def test_validate_raises_if_hashes_mismatch(self, make_tmp_files):
+        """Tests for a ValueError raise when computed hash does not match cached value.
+
+        Supplies intentionally incorrect hash values during initialization.
+
+        Parameters
+        ----------
+        make_tmp_files : list[Path]
+            A pair of temporary file paths in the same directory.
+
+        Asserts
+        -------
+        - `validate()` raises ValueError with the expected hash mismatch message.
+        """
+
+        (file1,) = make_tmp_files(1)
+        file_info = FileInfo(path=file1, sha256="incorrect_hash1")
+
+        with pytest.raises(ValueError, match="does not match value in cache"):
+            file_info.validate()
+
+    def test_validate_logs_if_no_cache(self, make_tmp_files, caplog):
+        """Confirm that a DEBUG message is written to the logger with missing cache
+        values."""
+
+        (file1,) = make_tmp_files(1)
+        file_info = FileInfo(path=file1)
+
+        caplog.set_level(logging.DEBUG, logger=file_info.log.name)
+        file_info.validate()
+        assert any("has no cached stat" in message for message in caplog.messages)
+        assert any("has no cached hash" in message for message in caplog.messages)
 
 
 class TestLocalFileStatisticsInit:
@@ -70,6 +298,11 @@ class TestLocalFileStatisticsInit:
         assert lfs.hashes == expected_hashes
         assert lfs.files == {file1: fileinfo1, file2: fileinfo2}
 
+    def test_init_raises_if_files_missing(self):
+        """Ensure a ValueError is raised if files is an empty list or falsy."""
+        with pytest.raises(ValueError, match="At least one file must be provided"):
+            _ = LocalFileStatistics(files=[])
+
     def test_init_raises_if_paths_not_colocated(self, tmp_path):
         """Raise ValueError if paths do not share a common parent directory.
 
@@ -93,225 +326,6 @@ class TestLocalFileStatisticsInit:
         # Assert error is correctly raised when files not colocated:
         with pytest.raises(ValueError, match="All files must be in the same directory"):
             LocalFileStatistics(files=[file1, file2])
-
-
-class TestStatsAndHasesProperties:
-    """Tests for the `stats` and `hashes` properties of LocalFileStatistics."""
-
-    @patch("cstar.base.local_file_stats._get_sha256_hash")
-    def test_hashes_is_computed_and_cached(self, mock_hash, make_tmp_files):
-        """Test lazy hash computation and caching.
-
-        Verifies that:
-        - SHA-256 hashes are computed only when first accessed
-        - The `_get_sha256_hash` function is called once per file
-        - Cached results are reused on subsequent accesses
-
-        Parameters
-        ----------
-        mock_hash : Mock
-            Patches `_get_sha256_hash` to return dummy hashes.
-        make_tmp_files : list[Path]
-            Two temporary files for which hashes will be computed.
-
-        Asserts
-        -------
-        - `_hash_cache` is initially empty
-        - Hashes are correctly assigned on first access
-        - `_get_sha256_hash` is not called more than once per file
-        """
-
-        file1, file2 = make_tmp_files(2)
-        mock_hash.side_effect = ["fakehash1", "fakehash2"]
-
-        lfs = LocalFileStatistics(files=[file1, file2])
-
-        hashes = lfs.hashes
-        assert hashes[file1] == "fakehash1"
-        assert hashes[file2] == "fakehash2"
-        assert mock_hash.call_count == 2
-
-        # Second access should not re-call the hash function
-        _ = lfs.hashes
-        assert mock_hash.call_count == 2  # still 2
-
-    def test_stats_is_computed_and_cached(self, make_tmp_files):
-        """Test lazy stat computation and caching.
-
-        Parameters
-        ----------
-        make_tmp_files : list[Path]
-            A pair of temporary file paths in the same directory.
-
-        Asserts
-        -------
-        - `_stat_cache` is initially empty
-        - Returned keys match the input file paths
-        - All values are `os.stat_result` instances
-        - The same dictionary object is returned on second access
-        """
-
-        file1, file2 = make_tmp_files(2)
-
-        lfs = LocalFileStatistics(files=[file1, file2])
-
-        stats = lfs.stats
-
-        # Check keys match
-        assert set(lfs.paths) == {file1.absolute(), file2.absolute()}
-
-        # Check values are stat_result instances
-        for stat in stats.values():
-            assert isinstance(stat, os.stat_result)
-
-        # Check second access returns same object (i.e. no recomputation)
-        assert lfs.stats == stats
-
-
-class TestValidate:
-    """Tests for the `validate()` method of LocalFileStatistics.
-
-    These tests confirm that `validate()` correctly detects and raises errors when:
-    - Files are missing
-    - File metadata (size or modification time) has changed
-    - SHA-256 hashes no longer match the cached values
-
-    The method is also tested under ideal conditions to confirm it completes
-    without raising when all files and metadata are consistent.
-
-    Mocks
-    -----
-    - `_get_sha256_hash` is patched to simulate known hash values
-    - `Path.exists` is patched to simulate missing files
-
-    Tests
-    -----
-    test_validate_completes_with_matching_stats_and_hashes
-        Ensures that `validate()` does not raise when all file metadata matches.
-    test_validate_raises_if_file_missing
-        Verifies that a missing file causes a FileNotFoundError.
-    test_validate_raises_if_stats_mismatch
-        Simulates a change in file size or mtime and verifies ValueError is raised.
-    test_validate_raises_if_hashes_mismatch
-        Simulates a mismatch between computed and cached hashes and verifies error.
-    """
-
-    @patch("cstar.base.local_file_stats._get_sha256_hash", return_value="fakehash")
-    def test_validate_completes_with_matching_stats_and_hashes(
-        self, mock_hash, make_tmp_files
-    ):
-        """`validate()` completes without error if metadata and hashes match.
-
-        Simulates a scenario where both `stats` and `hashes` are precomputed
-        and match the current state of the files.
-
-        Parameters
-        ----------
-        mock_hash : Mock
-            Patches `_get_sha256_hash` to return the expected value.
-        make_tmp_files : list[Path]
-            A pair of temporary file paths in the same directory.
-
-        Asserts
-        -------
-        - No exception is raised when calling `validate()`
-        """
-
-        file1, file2 = make_tmp_files(2)
-        stat1, hash1 = file1.stat(), "fakehash"
-        stat2, hash2 = file2.stat(), "fakehash"
-
-        lfs = LocalFileStatistics(
-            files=[
-                FileInfo(path=file1, stat=stat1, sha256=hash1),
-                FileInfo(path=file2, stat=stat2, sha256=hash2),
-            ]
-        )
-        lfs.validate()
-
-        assert True  # if validate does not raise, then pass
-
-    @patch("pathlib.Path.exists", return_value=False)
-    def test_validate_raises_if_file_missing(self, mock_exists, make_tmp_files):
-        """Raise FileNotFoundError when a tracked file is missing.
-
-        Patches `Path.exists()` to simulate that a file does not exist.
-
-        Parameters
-        ----------
-        mock_exists : Mock
-            Forces `Path.exists()` to return False.
-        make_tmp_files : list[Path]
-            A pair of temporary file paths in the same directory.
-
-        Asserts
-        -------
-        - `validate()` raises FileNotFoundError with a meaningful message.
-        """
-
-        file1, file2 = make_tmp_files(2)
-        lfs = LocalFileStatistics(files=[file1, file2])
-        with pytest.raises(FileNotFoundError, match="does not exist locally"):
-            lfs.validate()
-
-    def test_validate_raises_if_stats_mismatch(self, make_tmp_files):
-        """Raise ValueError if file size or mtime no longer matches cache.
-
-        Manually alters the modification time of one file using `os.utime()`.
-
-        Parameters
-        ----------
-        make_tmp_files : list[Path]
-            A pair of temporary file paths in the same directory.
-
-        Asserts
-        -------
-        - `validate()` raises ValueError indicating stat mismatch.
-        """
-
-        file1, file2 = make_tmp_files(2)
-        stat1, stat2 = file1.stat(), file2.stat()
-
-        lfs = LocalFileStatistics(
-            files=[
-                FileInfo(path=file1, stat=stat1, sha256="fakehash"),
-                FileInfo(path=file2, stat=stat2, sha256="fakehash"),
-            ]
-        )
-
-        # Set mtime to Jan 1, 2000
-        old_time = 946684800  # epoch seconds
-        os.utime(file1, (old_time, old_time))
-
-        with pytest.raises(ValueError, match="do not match those in cache"):
-            lfs.validate()
-
-    def test_validate_raises_if_hashes_mismatch(self, make_tmp_files):
-        """Raise ValueError when computed hash does not match cached value.
-
-        Supplies intentionally incorrect hash values during initialization.
-
-        Parameters
-        ----------
-        make_tmp_files : list[Path]
-            A pair of temporary file paths in the same directory.
-
-        Asserts
-        -------
-        - `validate()` raises ValueError with the expected hash mismatch message.
-        """
-
-        file1, file2 = make_tmp_files(2)
-
-        lfs = LocalFileStatistics(
-            [
-                FileInfo(path=file1, stat=file1.stat(), sha256="incorrect_hash1"),
-                FileInfo(path=file2, stat=file2.stat(), sha256="incorrect_hash2"),
-            ]
-        )
-
-        with pytest.raises(ValueError, match="does not match value in cache"):
-            lfs.validate()
 
 
 class TestStrAndReprFunctions:
@@ -454,3 +468,26 @@ file_1.txt                               cb8379ac20…  3            {ts2}"""
         lfs = LocalFileStatistics(files=paths)
         tab = lfs.as_table(max_rows=10)
         assert "... (10 more files)" in tab
+
+
+def test_localfilestatistics_getitem(make_tmp_files):
+    """Tests that the getitem method on LocalFileStatistics performs correct file
+    lookup."""
+
+    # Create files, stats, hashes,
+    file1, file2, file3 = make_tmp_files(3)
+    stat1, stat2, _ = file1.stat(), file2.stat(), file3.stat()
+    hash1, hash2, _ = "fakehash1", "fakehash2", "fakehash3"
+
+    # Create FileInfo Instances
+    fileinfo1 = FileInfo(path=file1, stat=stat1, sha256=hash1)
+    fileinfo2 = FileInfo(path=file2, stat=stat2, sha256=hash2)
+
+    # Create LocalFileStatistics and attempt to retrieve FileInfo
+    lfs = LocalFileStatistics(files=[fileinfo1, fileinfo2])
+    assert lfs[file1] == fileinfo1
+    assert lfs[file2] == fileinfo2
+
+    # Test for raise with missing file:
+    with pytest.raises(KeyError, match="not found"):
+        lfs[file3]
