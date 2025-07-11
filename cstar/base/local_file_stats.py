@@ -10,6 +10,8 @@ logger = get_logger(__name__)
 
 
 class FileInfo:
+    """Holds information about an individual file on the local system."""
+
     def __init__(
         self,
         path: Path | str,
@@ -22,17 +24,32 @@ class FileInfo:
 
     @property
     def stat(self) -> os.stat_result:
+        """File status from os.stat()"""
+
         if self._stat is None:
             self._stat = self.path.stat()
         return self._stat
 
     @property
     def sha256(self) -> str:
+        """The sha256 hash of this file."""
+
         if self._sha256 is None:
             self._sha256 = _get_sha256_hash(self.path)
         return self._sha256
 
     def validate(self):
+        """Confirms that the cached path, stat, and sha256 values for this file are
+        correct.
+
+        Raises
+        ------
+        FileNotFoundError:
+           If the path does not exist on the local filesystem
+        ValueError:
+           If the filesize, modification time, or sha256 sum do not match cached values
+        """
+
         if not self.path.exists():
             raise FileNotFoundError(f"File {self.path} does not exist locally")
 
@@ -62,63 +79,36 @@ class FileInfo:
 
 
 class LocalFileStatistics:
-    """Tracks file metadata (stat and SHA-256 hash) for a list of local files.
-
-    Parameters
-    ----------
-    paths : list of Path
-        List of file paths to track. All paths must be in the same parent directory.
-    stats : dict of Path to os.stat_result, optional
-        Optional precomputed stat results. If not provided, they will be computed lazily.
-    hashes : dict of Path to str, optional
-        Optional precomputed SHA-256 hashes. If not provided, they will be computed lazily.
-
-    Attributes
-    ----------
-    paths : list of Path
-        The list of tracked file paths.
-    parent_dir : Path
-        The common parent directory of all paths.
-    stats : dict of Path to os.stat_result
-        Mapping of paths to their `os.stat()` results. Evaluated lazily.
-    hashes : dict of Path to str
-        Mapping of paths to their SHA-256 hash strings. Evaluated lazily.
-
-    Raises
-    ------
-    ValueError
-        If the provided paths are not all in the same directory
-        or if the keys of the `stats` or `hashes` dictionaries do not exactly
-        match the resolved set of `paths`.
-
-    Examples
-    --------
-    >>> files = [Path("data/a.txt"), Path("data/b.txt")]
-    >>> tracker = LocalFileStatistics(files)
-    >>> tracker.stats[files[0]]
-    os.stat_result(...)
-    >>> tracker.hashes[files[0]]
-    'e3b0c44298fc1c149afbf4c8996fb924...'
-    """
+    """Tracks file metadata (stat and SHA-256 hash) for a list of local files."""
 
     def __init__(self, files: Sequence[Path | FileInfo]):
         """Initialize the LocalFileStatistics object.
 
-        Stores a list of local file paths and optionally precomputed metadata
-        such as file stat results and SHA-256 hashes. All paths must be located
-        within the same parent directory. Metadata is lazily computed if not
-        provided.
+        Constructs a LocalFileStatistics instance from a list of local file paths
+        and optionally precomputed metadata such as file stat results and SHA-256 hashes.
+        All paths must be located within the same parent directory.
+        Metadata is lazily computed if not provided.
 
         Parameters
         ----------
-        files : list of FileInfo
-            List of files to track with optional stat and hash metadata.
-            All files must reside in the same directory
+        files: list[Path | FileInfo]
+            List of files to track. If the sha256 hash or status of the file are already known,
+            provide a FileInfo containing these attributes.
+            Otherwise, these are lazily computed from a list of Paths.
 
         Raises
         ------
         ValueError
-            If the provided paths are not all in the same directory.
+            If the provided files are not all in the same directory.
+
+        Examples
+        --------
+        >>> files = [Path("data/a.txt"), Path("data/b.txt")]
+        >>> tracker = LocalFileStatistics(files)
+        >>> tracker.stats[files[0]]
+        os.stat_result(...)
+        >>> tracker.hashes[files[0]]
+        'e3b0c44298fc1c149afbf4c8996fb924...'
         """
 
         # Check files is not empty
@@ -145,17 +135,28 @@ class LocalFileStatistics:
 
     @property
     def paths(self) -> list[Path]:
+        """The list of tracked file paths."""
         return [f.path for f in self.files.values()]
 
     @property
     def stats(self) -> dict[Path, os.stat_result]:
+        """Mapping of paths to their `os.stat()` results.
+
+        Evaluated lazily.
+        """
         return {f.path: f.stat for f in self.files.values()}
 
     @property
     def hashes(self) -> dict[Path, str]:
+        """Mapping of paths to their SHA-256 hash strings.
+
+        Evaluated lazily.
+        """
         return {f.path: f.sha256 for f in self.files.values()}
 
     def __getitem__(self, key: str | Path) -> FileInfo:
+        """Allows retrieval of FileInfo for a given path using
+        my_local_file_statistics[path]"""
         path = Path(key).absolute()
 
         if path not in self.paths:
@@ -166,18 +167,10 @@ class LocalFileStatistics:
     def validate(self) -> None:
         """Validate that all tracked files exist and match cached metadata.
 
-        Verifies that each tracked file still exists on disk, and that its
-        current size, modification time, and SHA-256 hash match the cached
-        values. Raises an error if any discrepancies are found.
-
-        Raises
-        ------
-        FileNotFoundError
-            If any tracked file no longer exists at the expected path.
-        ValueError
-            If the current size, modification time, or SHA-256 hash of a file
-            differs from the cached value.
+        Calls file.validate() for each file tracked by this LocalFileStatistics
+        instance.
         """
+
         [f.validate() for f in self.files.values()]
 
     def __str__(self) -> str:
@@ -209,6 +202,7 @@ class LocalFileStatistics:
         str
             Formatted table of file metadata.
         """
+
         header = f"{'Name':<40} {'Hash':<12} {'Size (bytes)':<12} {'Modified'}"
         rows = []
 
