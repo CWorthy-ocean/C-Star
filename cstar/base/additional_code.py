@@ -1,12 +1,13 @@
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 from cstar.base.datasource import DataSource
 from cstar.base.gitutils import _clone_and_checkout
+from cstar.base.local_file_stats import LocalFileStatistics
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
+from cstar.base.utils import _list_to_concise_str
 
 
 class AdditionalCode(LoggingMixin):
@@ -75,10 +76,17 @@ class AdditionalCode(LoggingMixin):
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
         self._checkout_target = checkout_target
-        self.files: Optional[list[str]] = [] if files is None else files
+
+        self.files: Optional[list[str]]
+        if files is None:
+            self.files = []
+        elif any((not f) for f in files):
+            raise ValueError("An invalid filename was supplied to AdditionalCode")
+        else:
+            self.files = files
+
         # Initialize object state
-        self.working_path: Optional[Path] = None
-        self._local_file_hash_cache: Dict = {}
+        self.local_file_stats: Optional[LocalFileStatistics] = None
 
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
@@ -110,33 +118,41 @@ class AdditionalCode(LoggingMixin):
         repr_str += "\n)"
         # Additional info:
         info_str = ""
+
         if self.working_path is not None:
             info_str += f"working_path = {self.working_path},"
             info_str += f"exists_locally = {self.exists_locally}"
+
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         return repr_str
 
     @property
     def checkout_target(self) -> Optional[str]:
+        """If in a repository, the commit hash or tag at which to checkout this
+        additional code."""
         return self._checkout_target
 
     @property
-    def exists_locally(self):
-        """Determine whether a local working copy of the AdditionalCode exists at
-        self.working_path (bool)"""
-        if (self.working_path is None) or (self._local_file_hash_cache is None):
+    def working_path(self) -> Optional[Path]:
+        """The current local path where this AdditionalCode exists on the local system,
+        if it has been fetched."""
+
+        if self.local_file_stats is None:
+            return None
+        return self.local_file_stats.parent_dir
+
+    @property
+    def exists_locally(self) -> bool:
+        """Determines whether this AdditionalCode instance exists on the local
+        system."""
+        if not self.local_file_stats:
             return False
 
-        for f in self.files:
-            path = self.working_path / f
-            if not path.exists():
-                return False
-
-            current_hash = _get_sha256_hash(path.resolve())
-            if self._local_file_hash_cache.get(path) != current_hash:
-                return False
-
+        try:
+            self.local_file_stats.validate()
+        except (FileNotFoundError, ValueError, KeyError):
+            return False
         return True
 
     def get(self, local_dir: str | Path) -> None:
@@ -205,15 +221,14 @@ class AdditionalCode(LoggingMixin):
                 )
                 if src_file_path.exists():
                     shutil.copy(src_file_path, tgt_file_path)
-                    self._local_file_hash_cache[tgt_file_path] = _get_sha256_hash(
-                        tgt_file_path
-                    )
-
                 else:
                     raise FileNotFoundError(f"Error: {src_file_path} does not exist.")
 
+            self.local_file_stats = LocalFileStatistics(
+                files=[local_dir / Path(f).name for f in self.files]
+            )
             self.log.info("✅ All files copied successfully")
-            self.working_path = local_dir
+
         finally:
             if tmp_dir:
                 shutil.rmtree(tmp_dir)
