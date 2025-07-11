@@ -148,12 +148,12 @@ class LocalFileStatistics:
         return [f.path for f in self.files.values()]
 
     @property
-    def stats(self) -> list[os.stat_result]:
-        return [f.stat for f in self.files.values()]
+    def stats(self) -> dict[Path, os.stat_result]:
+        return {f.path: f.stat for f in self.files.values()}
 
     @property
-    def hashes(self) -> list[str]:
-        return [f.sha256 for f in self.files.values()]
+    def hashes(self) -> dict[Path, str]:
+        return {f.path: f.sha256 for f in self.files.values()}
 
     def __getitem__(self, key: str | Path) -> FileInfo:
         path = Path(key).absolute()

@@ -123,8 +123,8 @@ class TestLocalFileStatisticsInit:
 
         lfs = LocalFileStatistics(files=[fileinfo1, fileinfo2])
 
-        expected_stats = [stat1, stat2]
-        expected_hashes = [hash1, hash2]
+        expected_stats = {file1: stat1, file2: stat2}
+        expected_hashes = {file1: hash1, file2: hash2}
 
         assert lfs.stats == expected_stats
         assert lfs.hashes == expected_hashes
@@ -172,8 +172,8 @@ class TestStatsAndHasesProperties:
         lfs = LocalFileStatistics(files=[file1, file2])
 
         hashes = lfs.hashes
-        assert hashes[0] == "fakehash1"
-        assert hashes[1] == "fakehash2"
+        assert hashes[file1] == "fakehash1"
+        assert hashes[file2] == "fakehash2"
         assert mock_hash.call_count == 2
 
         # Second access should not re-call the hash function
@@ -206,7 +206,7 @@ class TestStatsAndHasesProperties:
         assert set(lfs.paths) == {file1.absolute(), file2.absolute()}
 
         # Check values are stat_result instances
-        for stat in stats:
+        for stat in stats.values():
             assert isinstance(stat, os.stat_result)
 
         # Check second access returns same object (i.e. no recomputation)
