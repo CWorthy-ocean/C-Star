@@ -51,9 +51,8 @@ class TestROMSExternalCodeBaseGet:
         1. clones ROMS from `ROMSExternalCodeBase.source_repo`
         2. checks out the correct commit from `ROMSExternalCodeBase.checkout_target`
         3. Sets environment variable ROMS_ROOT and appends $ROMS_ROOT/Tools-Roms to PATH
-        4. Replaces ROMS Makefiles for machine-agnostic compilation [_codebase_adjustments()]
-        5. Compiles the NHMG library
-        6. Compiles the Tools-Roms package
+        4. Compiles the NHMG library
+        5. Compiles the Tools-Roms package
 
     Tests
     -----
