@@ -359,7 +359,9 @@ class TestROMSSimulationInitialization:
         assert "default codebase will be used" in caplog.text
 
         assert isinstance(sim.codebase, ROMSExternalCodeBase)
-        assert sim.codebase.source_repo == "https://github.com/CESR-lab/ucla-roms.git"
+        assert (
+            sim.codebase.source_repo == "https://github.com/CWorthy-ocean/ucla-roms.git"
+        )
         assert sim.codebase.checkout_target == "main"
 
         assert isinstance(sim.marbl_codebase, MARBLExternalCodeBase)

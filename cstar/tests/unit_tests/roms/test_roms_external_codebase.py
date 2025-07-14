@@ -12,7 +12,7 @@ from cstar.system.manager import cstar_sysmgr
 @pytest.fixture
 def roms_codebase():
     """Fixture providing a configured instance of `ROMSExternalCodeBase` for testing."""
-    source_repo = "https://github.com/CESR-lab/ucla-roms.git"
+    source_repo = "https://github.com/CWorthy-ocean/ucla-roms.git"
     checkout_target = "246c11fa537145ba5868f2256dfb4964aeb09a25"
     return ROMSExternalCodeBase(
         source_repo=source_repo, checkout_target=checkout_target
@@ -22,7 +22,8 @@ def roms_codebase():
 def test_default_source_repo(roms_codebase):
     """Test if the default source repo is set correctly."""
     assert (
-        roms_codebase.default_source_repo == "https://github.com/CESR-lab/ucla-roms.git"
+        roms_codebase.default_source_repo
+        == "https://github.com/CWorthy-ocean/ucla-roms.git"
     )
 
 
@@ -40,7 +41,7 @@ def test_defaults_are_set():
     """Test that the defaults are set correctly."""
 
     roms_codebase = ROMSExternalCodeBase()
-    assert roms_codebase.source_repo == "https://github.com/CESR-lab/ucla-roms.git"
+    assert roms_codebase.source_repo == "https://github.com/CWorthy-ocean/ucla-roms.git"
     assert roms_codebase.checkout_target == "main"
 
 
