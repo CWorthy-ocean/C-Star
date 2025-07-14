@@ -1,3 +1,4 @@
-intel
-netcdf
-cray-mpich/8.1.25
+ncarenv/23.09
+intel-oneapi/2024.2.1
+cray-mpich/8.1.29
+netcdf/4.9.2
