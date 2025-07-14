@@ -646,8 +646,6 @@ class TestROMSInputDatasetGet:
         self.mock_get.assert_not_called()
         self.mock_yaml_load.assert_not_called()
 
-        # mock_path_resolve.assert_called()
-
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
