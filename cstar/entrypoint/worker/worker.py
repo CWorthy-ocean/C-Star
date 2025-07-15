@@ -125,12 +125,6 @@ class SimulationRunner(Service):
         Removes any pre-existing directories and creates empty directories to avoid
         collisions.
         """
-        # a leftover .cstar.env cause empty repo/compilation errors; remove.
-        user_env_path = cstar_sysmgr.environment.user_env_path
-        if user_env_path.exists():
-            self.log.debug(f"Removing existing user env: {user_env_path}")
-            user_env_path.unlink()
-
         # a leftover root_dir may have files in it, breaking download; remove.
         if self._output_root.exists():
             self.log.debug(f"Removing existing output dir: {self._output_root}")
