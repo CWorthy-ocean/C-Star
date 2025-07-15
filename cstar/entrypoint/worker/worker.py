@@ -124,11 +124,18 @@ class SimulationRunner(Service):
 
         Removes any pre-existing directories and creates empty directories to avoid
         collisions.
+
+        Raises
+        ------
+        ValueError
+            If the output directory exists and contains
         """
-        # a leftover root_dir may have files in it, breaking download; remove.
-        if self._output_root.exists():
-            self.log.debug(f"Removing existing output dir: {self._output_root}")
-            shutil.rmtree(self._output_root)
+        # a leftover root_dir may have files in it, breaking download; warn.
+        if (
+            self._output_root.exists()
+            and next(self._output_root.glob("*"), None) is not None
+        ):
+            raise ValueError(f"Output directory {self._output_root} is not empty.")
 
         # leftover external code folder causes non-empty repo errors; remove.
         externals_path = cstar_sysmgr.environment.package_root / "externals"

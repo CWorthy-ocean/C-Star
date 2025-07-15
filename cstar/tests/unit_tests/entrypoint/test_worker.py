@@ -422,6 +422,45 @@ def test_start_runner(
     assert runner._simulation.end_date == request.end_date
 
 
+def test_runner_directory_check(
+    tmp_path: Path,
+    sim_runner: SimulationRunner,
+    dotenv_path: Path,
+) -> None:
+    """Test the simulation runner's file system preparation.
+
+    Verifies that a non-empty output directory causes an exception
+    to be raised.
+
+    Parameters
+    ----------
+    sim_runner: SimulationRunner
+        An instance of SimulationRunner to be used for the test.
+    tmp_path : Path
+        A temporary path to store simulation output and logs
+    dotenv_path : Path
+        Path to a temporary location to
+    """
+    output_dir = tmp_path / "output"
+
+    # populate the directories that should be cleaned-up
+    dotenv_path.parent.mkdir(parents=True, exist_ok=True)
+    dotenv_path.touch()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "somefile.txt").touch()
+
+    with (
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.user_env_path",
+            new_callable=mock.PropertyMock,
+            return_value=dotenv_path,
+        ),
+        pytest.raises(ValueError),
+    ):
+        sim_runner._prepare_file_system()
+
+
 def test_runner_directory_prep(
     tmp_path: Path,
     sim_runner: SimulationRunner,
@@ -446,8 +485,8 @@ def test_runner_directory_prep(
     dotenv_path.parent.mkdir(parents=True, exist_ok=True)
     dotenv_path.touch()
 
+    # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
 
     with mock.patch(
         "cstar.system.environment.CStarEnvironment.user_env_path",
@@ -457,8 +496,8 @@ def test_runner_directory_prep(
         # runner = SimulationRunner(request, service_config, job_config)
         sim_runner._prepare_file_system()
 
-    # Confirm there is no leftover user env file
-    assert not dotenv_path.exists()
+    # Confirm a user env file is not removed
+    assert dotenv_path.exists()
 
     # Confirm the output directory is created...
     assert sim_runner._output_dir.exists()
