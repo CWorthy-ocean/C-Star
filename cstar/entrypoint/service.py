@@ -83,7 +83,7 @@ class Service(ABC, LoggingMixin):
 
     @abstractmethod
     def _on_iteration(self) -> None:
-        """Contains the main logic into of the service event loop.
+        """Perform the main logic of the service event loop.
 
         It is executed continuously until shutdown conditions are satisfied.
         """
