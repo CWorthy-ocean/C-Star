@@ -172,13 +172,14 @@ class SimulationRunner(Service):
         Verifies the simulation loaded properly, configuring the file system, retrieving
         remote resources, and building third-party codebases.
         """
-        self._prepare_file_system()
 
         if self._blueprint_uri is None:
             raise BlueprintError("No blueprint URI provided")
 
         if self._simulation is None:
             raise BlueprintError(f"Unable to load the blueprint: {self._blueprint_uri}")
+
+        self._prepare_file_system()
 
         try:
             self.log.debug("Setting up simulation")

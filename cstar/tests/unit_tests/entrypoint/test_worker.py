@@ -871,7 +871,7 @@ async def test_runner_on_start_without_uri(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 1
+        assert mock_prep_fs.call_count == 0
         assert mock_iter.call_count == 0
         assert mock_shutdown.call_count == 1
 
@@ -922,7 +922,7 @@ async def test_runner_on_start_without_simulation(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 1
+        assert mock_prep_fs.call_count == 0
         assert mock_iter.call_count == 0
         assert mock_shutdown.call_count == 1
 
