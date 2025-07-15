@@ -98,9 +98,14 @@ class Service(ABC, LoggingMixin):
 
     @abstractmethod
     def _can_shutdown(self) -> bool:
-        """Empty hook method for use by subclasses.
+        """Determine if the service has met shutdown criteria.
 
-        Return `True` when the criteria to shut down the service are met.
+        This empty hook method must be implemented by subclasses.
+
+        Returns
+        -------
+        bool
+            `True` when the criteria to shut down the service are met.
         """
 
     @property
@@ -109,6 +114,11 @@ class Service(ABC, LoggingMixin):
 
         User-defined shutdown criteria will not be evaluated when the service is
         instantiated as a task (e.g. with `as_service=False`).
+
+        Returns
+        -------
+        bool
+            `True` when the criteria to shut down the service are met
         """
         if not self._config.as_service:
             return True
