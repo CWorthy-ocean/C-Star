@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Generator
+from unittest.mock import patch
 
 import dotenv
 import pytest
@@ -73,6 +74,17 @@ def system_dotenv_path(system_dotenv_dir: Path, mock_system_name: str) -> Path:
         system_dotenv_dir.mkdir(parents=True)
 
     return system_dotenv_dir / f"{mock_system_name}.env"
+
+
+@pytest.fixture
+def mock_path_resolve():
+    """Fixture to mock Path.resolve() so it returns the calling Path."""
+
+    def fake_resolve(self: Path) -> Path:
+        return self
+
+    with patch.object(Path, "resolve", side_effect=fake_resolve, autospec=True) as mock:
+        yield mock
 
 
 @pytest.fixture

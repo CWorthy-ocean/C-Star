@@ -320,9 +320,6 @@ class TestROMSInputDatasetGet:
         self.mock_get = self.patch_get.start()
 
         # Mocking Path methods
-        self.patch_resolve = mock.patch("pathlib.Path.resolve", autospec=True)
-        self.mock_resolve = self.patch_resolve.start()
-
         self.patch_mkdir = mock.patch("pathlib.Path.mkdir", autospec=True)
         self.mock_mkdir = self.patch_mkdir.start()
 
@@ -371,7 +368,12 @@ class TestROMSInputDatasetGet:
     @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("requests.get", autospec=True)
     def test_get_grid_from_remote_yaml(
-        self, mock_request, mock_stat, mock_get_hash, remote_roms_yaml_dataset
+        self,
+        mock_request,
+        mock_stat,
+        mock_get_hash,
+        remote_roms_yaml_dataset,
+        mock_path_resolve,
     ):
         """Test the `get` method for ROMS grid files from a remote YAML source.
 
@@ -410,12 +412,6 @@ class TestROMSInputDatasetGet:
         # Mock the call to requests.get on the remote yaml file
         mock_request.return_value.text = "---\nheader---\ndata"
 
-        self.mock_resolve.side_effect = [
-            Path("some/local/dir"),  # First resolve: local_dir
-            Path("some/local/dir"),  # Second resolve: local_dir in _get_from_yaml
-            Path("some/local/dir/remote_file.nc"),  # Third resolve: during caching
-        ]
-
         # Mock the list of paths returned by roms_tools.save
         self.mock_rt_grid_instance.save.return_value = [
             Path("some/local/dir/remote_file.nc"),
@@ -429,17 +425,6 @@ class TestROMSInputDatasetGet:
 
         # Call the method under test
         remote_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
-
-        # Assert resolve calls
-        expected_resolve_calls = [
-            mock.call(Path("some/local/dir")),
-            mock.call(Path("some/local/dir")),
-            mock.call(Path("some/local/dir/remote_file.nc")),
-        ]
-        assert self.mock_resolve.call_args_list == expected_resolve_calls, (
-            f"Expected resolve calls:\n{expected_resolve_calls}\n"
-            f"But got:\n{self.mock_resolve.call_args_list}"
-        )
 
         # Check that the yaml.safe_load was called properly
         self.mock_yaml_load.assert_called_once()
@@ -460,7 +445,7 @@ class TestROMSInputDatasetGet:
     @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
     def test_get_surface_forcing_from_local_yaml(
-        self, mock_get_hash, mock_stat, local_roms_yaml_dataset
+        self, mock_get_hash, mock_stat, local_roms_yaml_dataset, mock_path_resolve
     ):
         """Test the `get` method for creating SurfaceForcing from a local YAML source.
 
@@ -489,13 +474,6 @@ class TestROMSInputDatasetGet:
         - Ensures `roms_tools.SurfaceForcing.save` saves the file with the correct parameters.
         - Verifies file metadata and checksum caching via `stat` and `_get_sha256_hash`.
         """
-
-        # Mock resolve to return a resolved path
-        self.mock_resolve.side_effect = [
-            Path("some/local/dir"),  # First resolve: local_dir
-            Path("some/local/dir"),  # Second resolve: local_dir in _get_from_yaml
-            Path("some/local/dir/local_file.nc"),  # Third resolve: during caching
-        ]
 
         # Mock yaml loading for a more complex YAML with both Grid and SurfaceForcing
         yaml_dict = {
@@ -578,7 +556,7 @@ class TestROMSInputDatasetGet:
 
     @mock.patch("pathlib.Path.stat", autospec=True)
     def test_get_raises_with_wrong_number_of_keys(
-        self, mock_stat, local_roms_yaml_dataset
+        self, mock_stat, local_roms_yaml_dataset, mock_path_resolve
     ):
         """Test that the `get` method raises a ValueError when the YAML file contains
         more than two sections.
@@ -597,18 +575,10 @@ class TestROMSInputDatasetGet:
 
         Asserts:
         --------
-        - Ensures `resolve` is called to determine the actual path of the YAML file.
         - Ensures `yaml.safe_load` is invoked to parse the YAML content.
         - Confirms that a `ValueError` is raised when the YAML file contains more than two sections.
         - Validates that the exception message matches the expected error message.
         """
-
-        # Mock resolve to return a resolved path
-        resolved_path = Path("/resolved/path/to/local_file.yaml")
-        self.mock_resolve.side_effect = [
-            Path("some/local/dir"),  # First resolve: local_dir
-            resolved_path,  # Second resolve: source location
-        ]
 
         # Mock yaml loading for a YAML with too many sections
         self.mock_yaml_load.return_value = {
@@ -640,8 +610,9 @@ class TestROMSInputDatasetGet:
         assert str(exception_info.value) == expected_message
 
         # Assertions to ensure everything worked as expected
-        self.mock_resolve.assert_called()
         self.mock_yaml_load.assert_called_once()
+
+        mock_path_resolve.assert_called()
 
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
@@ -652,6 +623,7 @@ class TestROMSInputDatasetGet:
         mock_exists_locally,
         local_roms_yaml_dataset,
         caplog: pytest.LogCaptureFixture,
+        mock_path_resolve,
     ):
         """Test that the `get` method skips execution when `working_path` is set and
         points to the same parent directory as `local_dir`.
@@ -685,9 +657,6 @@ class TestROMSInputDatasetGet:
         # Mock the `exists_locally` property to return True
         mock_exists_locally.return_value = True
 
-        # Set the `mock_resolve` side effect to resolve `local_dir` correctly
-        self.mock_resolve.return_value = Path("some/local/dir")
-
         local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
         # Assert the skip message was printed
@@ -698,6 +667,8 @@ class TestROMSInputDatasetGet:
         self.mock_get.assert_not_called()
         self.mock_yaml_load.assert_not_called()
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
@@ -707,6 +678,7 @@ class TestROMSInputDatasetGet:
         mock_exists_locally,
         local_roms_yaml_dataset,
         caplog: pytest.LogCaptureFixture,
+        mock_path_resolve,
     ):
         """Test that the `get` method skips execution when `working_path` is a list and
         its first element points to the same parent directory as `local_dir`.
@@ -742,9 +714,6 @@ class TestROMSInputDatasetGet:
         # Mock the `exists_locally` property to return True
         mock_exists_locally.return_value = True
 
-        # Set the `mock_resolve` side effect to resolve `local_dir` correctly
-        self.mock_resolve.return_value = Path("some/local/dir")
-
         local_roms_yaml_dataset.get(local_dir="some/local/dir")
 
         # Assert the skip message was printed
@@ -754,11 +723,15 @@ class TestROMSInputDatasetGet:
         self.mock_get.assert_not_called()
         self.mock_yaml_load.assert_not_called()
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
         new_callable=mock.PropertyMock,
     )
-    def test_get_exits_if_not_yaml(self, mock_exists_locally, local_roms_yaml_dataset):
+    def test_get_exits_if_not_yaml(
+        self, mock_exists_locally, local_roms_yaml_dataset, mock_path_resolve
+    ):
         """Test that the `get` method exits early if `self.source.source_type` is not
         'yaml'.
 
@@ -788,9 +761,6 @@ class TestROMSInputDatasetGet:
                 False  # Ensure the file does not exist locally
             )
 
-            # Mock `resolve` to return the expected path
-            self.mock_resolve.return_value = Path("some/local/dir")
-
             # Call the method under test
             local_roms_yaml_dataset.get(local_dir=Path("some/local/dir"))
 
@@ -804,12 +774,17 @@ class TestROMSInputDatasetGet:
                 not self.mock_yaml_load.called
             ), "Expected no calls to yaml.safe_load, but some occurred."
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.roms.input_dataset.ROMSInputDataset._get_from_partitioned_source",
         autospec=True,
     )
     def test_get_with_partitioned_source(
-        self, mock_get_from_partitioned_source, local_roms_netcdf_dataset
+        self,
+        mock_get_from_partitioned_source,
+        local_roms_netcdf_dataset,
+        mock_path_resolve,
     ):
         """Tests the 'get' method calls _get_from_partitioned_source when the
         ROMSInputDataset has a partitioned source.
@@ -826,8 +801,6 @@ class TestROMSInputDatasetGet:
         - _get_from_partitioned_source is called once with the expected arguments
         """
 
-        self.mock_resolve.return_value = Path("/some/dir")
-
         # Set source partitioning attributes
         local_roms_netcdf_dataset.source._location = (
             "some/local/source/path/local_file.00.nc"
@@ -843,6 +816,8 @@ class TestROMSInputDatasetGet:
             source_np_xi=4,
             source_np_eta=3,
         )
+
+        mock_path_resolve.assert_called()
 
     @mock.patch(
         "cstar.roms.input_dataset.ROMSInputDataset._symlink_or_download_from_source",
