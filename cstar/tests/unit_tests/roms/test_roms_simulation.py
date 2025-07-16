@@ -1,9 +1,10 @@
 import logging
 import pickle
 import re
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Generator, Tuple, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, PropertyMock, mock_open, patch
 
 import pytest
@@ -34,7 +35,7 @@ from cstar.system.manager import cstar_sysmgr
 @pytest.fixture
 def example_roms_simulation(
     tmp_path,
-) -> Generator[Tuple[ROMSSimulation, Path], None, None]:
+) -> Generator[tuple[ROMSSimulation, Path], None, None]:
     """Fixture providing a `ROMSSimulation` instance for testing.
 
     This fixture initializes a `ROMSSimulation` with a comprehensive configuration,
@@ -158,7 +159,6 @@ class TestROMSSimulationInitialization:
         - `example_roms_simulation` : Provides a pre-configured `ROMSSimulation` instance
           and its corresponding directory.
         """
-
         sim, directory = example_roms_simulation
 
         assert sim.name == "ROMSTest"
@@ -237,7 +237,6 @@ class TestROMSSimulationInitialization:
         - `tmp_path` : A temporary directory fixture provided by `pytest` for
           safely testing file system interactions.
         """
-
         with pytest.raises(ValueError, match="could not find 'discretization' entry"):
             ROMSSimulation(
                 name="test",
@@ -267,7 +266,6 @@ class TestROMSSimulationInitialization:
         - `tmp_path` : A temporary directory fixture provided by `pytest` for
           safely testing file system interactions.
         """
-
         with pytest.raises(ValueError, match="could not find 'runtime_code' entry"):
             ROMSSimulation(
                 name="test",
@@ -298,7 +296,6 @@ class TestROMSSimulationInitialization:
         - `tmp_path` : A temporary directory fixture provided by `pytest` for
           safely testing file system interactions.
         """
-
         with pytest.raises(
             NotImplementedError, match="could not find a 'compile_time_code' entry"
         ):
@@ -338,7 +335,6 @@ class TestROMSSimulationInitialization:
         - caplog (pytest.LogCaptureFixture)
             Builtin fixture capturing log messages
         """
-
         sim = ROMSSimulation(
             name="test",
             directory=tmp_path,
@@ -373,15 +369,15 @@ class TestROMSSimulationInitialization:
 
     def test_find_dotin_file(self, example_roms_simulation):
         """Test that the `_find_dotin_file` helper function correctly finds and sets the
-        `_in_file` non-public attribute to the `.in` file."""
-
+        `_in_file` non-public attribute to the `.in` file.
+        """
         sim, _ = example_roms_simulation
         assert sim._in_file == "file2.in"
 
     def test_find_dotin_file_raises_if_no_dot_in_files(self, example_roms_simulation):
         """Test that the `_find_dotin_file` helper function correctly raises a
-        ValueError if a single `.in` file is not found."""
-
+        ValueError if a single `.in` file is not found.
+        """
         sim, _ = example_roms_simulation
         sim.runtime_code = AdditionalCode(
             location="some/dir", files=["no", "dotin.files", "here"]
@@ -461,7 +457,6 @@ class TestROMSSimulationInitialization:
         - `example_roms_simulation` : A fixture providing an initialized
           `ROMSSimulation` instance.
         """
-
         sim, _ = example_roms_simulation
         assert isinstance(sim.codebases, list)
         assert isinstance(sim.codebases[0], ROMSExternalCodeBase)
@@ -472,7 +467,8 @@ class TestROMSSimulationInitialization:
     def test_forcing_paths(self, example_roms_simulation):
         """Test that the `_forcing_paths` property correctly takes any forcing-related
         InputDatasets associated with the ROMSSimulation and returns a list of paths to
-        the relevant forcing files."""
+        the relevant forcing files.
+        """
         sim, _ = example_roms_simulation
         fake_paths = [
             Path("tidal.nc"),
@@ -552,7 +548,6 @@ class TestROMSSimulationInitialization:
            Mock the output of ROMSRuntimeSettings.from_file to return a basic, mocked
            ROMSRuntimeSettings instance.
         """
-
         sim, _ = example_roms_simulation
 
         # Stop complaints about missing local paths:
@@ -630,7 +625,6 @@ class TestROMSSimulationInitialization:
         example_roms_simulation: ROMSSimulation
            A pytest fixture returning a common, example ROMSSimulation instance.
         """
-
         sim, _ = example_roms_simulation
         with pytest.raises(
             ValueError, match="Cannot access runtime settings without local `.in` file."
@@ -660,7 +654,6 @@ class TestROMSSimulationInitialization:
         - `example_roms_simulation` : A fixture providing an initialized
           `ROMSSimulation` instance.
         """
-
         sim, directory = example_roms_simulation
         mg = sim.model_grid
         ic = sim.initial_conditions
@@ -732,7 +725,6 @@ class TestROMSSimulationInitialization:
         - Checks that `ROMSSimulation` raises a `ValueError` when the provided dates are invalid.
         - Asserts that the error message contains a specific substring identifying the issue.
         """
-
         with pytest.raises(ValueError) as exception_info:
             ROMSSimulation(
                 name="test",
@@ -770,7 +762,6 @@ class TestROMSSimulationInitialization:
         - A warning is logged
         - The input dataset's `start_date` is set to match the simulation's `start_date`.
         """
-
         sim, _ = example_roms_simulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
 
@@ -805,7 +796,6 @@ class TestROMSSimulationInitialization:
         - An appropriate warning message is logged
         - The input dataset's `end_date` is updated to match the simulation's `end_date`.
         """
-
         sim, _ = example_roms_simulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
         sim.river_forcing = ROMSRiverForcing(
@@ -882,7 +872,6 @@ class TestStrAndRepr:
         ----------
         - The string representation matches a predefined string.
         """
-
         sim, directory = example_roms_simulation
 
         mock_settings = ROMSRuntimeSettings(
@@ -948,7 +937,6 @@ Is setup: False"""
         ----------
         - The string representation matches a predefined string.
         """
-
         sim, directory = example_roms_simulation
         expected_repr = f"""\
 ROMSSimulation(
@@ -988,7 +976,6 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
         ----------
         - The output of tree() matches a predefined string
         """
-
         sim, directory = example_roms_simulation
         expected_tree = f"""\
 {directory}
@@ -1054,8 +1041,8 @@ class TestToAndFromDictAndBlueprint:
     def setup_method(self):
         """Sets a common dictionary representation of the ROMSSimulation instance
         associated with the `example_roms_simulation` fixture to be used across tests in
-        this class."""
-
+        this class.
+        """
         self.example_simulation_dict = {
             "name": "ROMSTest",
             "valid_start_date": datetime(2024, 1, 1, 0, 0),
@@ -1129,7 +1116,6 @@ class TestToAndFromDictAndBlueprint:
         ---------------------
         - `example_roms_simulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
         """
-
         sim, directory = example_roms_simulation
         test_dict = sim.to_dict()
 
@@ -1254,7 +1240,6 @@ class TestToAndFromDictAndBlueprint:
         ----------------
         - `example_roms_simulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
         """
-
         sim, directory = example_roms_simulation
         sim_to_dict = sim.to_dict()
         sim_from_dict = sim.from_dict(
@@ -1284,7 +1269,6 @@ class TestToAndFromDictAndBlueprint:
         - `mock_open`: A mock for Python's built-in `open()` function.
         - `mock_yaml_dump`: A mock for `yaml.dump()` to intercept and verify the YAML writing operation.
         """
-
         sim, directory = example_roms_simulation
         mock_file_path = "mock_path.yaml"
 
@@ -1327,7 +1311,6 @@ class TestToAndFromDictAndBlueprint:
          - `mock_path_exists`: Mocks `Path.exists()` to return `True`, ensuring the test bypasses file existence checks.
          - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint file's location.
         """
-
         blueprint_path = tmp_path / "roms_blueprint.yaml"
 
         with patch("yaml.safe_load", return_value=self.example_simulation_dict):
@@ -1367,7 +1350,6 @@ class TestToAndFromDictAndBlueprint:
         - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
         - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint's location.
         """
-
         blueprint_path = tmp_path / "roms_blueprint.nc"
 
         with patch("yaml.safe_load", return_value=self.example_simulation_dict):
@@ -1400,7 +1382,6 @@ class TestToAndFromDictAndBlueprint:
         - `mock_requests_get`: Mocks `requests.get()` to return a simulated YAML blueprint response.
         - `tmp_path`: A temporary directory provided by `pytest` to simulate the simulation directory.
         """
-
         mock_response = MagicMock()
         mock_response.text = yaml.dump(self.example_simulation_dict)
         mock_requests_get.return_value = mock_response
@@ -1432,7 +1413,6 @@ class TestToAndFromDictAndBlueprint:
         - `example_roms_simulation`: A fixture providing a sample `ROMSSimulation` instance.
         - `tmp_path`: A temporary directory provided by `pytest` to store the blueprint file.
         """
-
         sim, _ = example_roms_simulation
         output_file = tmp_path / "test.yaml"
         sim.to_blueprint(filename=output_file)
@@ -1539,7 +1519,6 @@ class TestProcessingAndExecution:
         - Ensures `get()` is called twice for compile-time and runtime code.
         - Ensures `get()` is called once per input dataset.
         """
-
         sim, directory = example_roms_simulation
         sim.setup()
         assert mock_handle_config_status.call_count == 2
@@ -1647,7 +1626,6 @@ class TestProcessingAndExecution:
         - Ensures `is_setup` returns `True` only when both runtime and compile-time code exist.
         - Ensures `is_setup` returns `False` when either component is missing.
         """
-
         sim, _ = example_roms_simulation
 
         mock_additionalcode_exists.side_effect = [runtime_exists, compile_exists]
@@ -1779,7 +1757,6 @@ class TestProcessingAndExecution:
         - Ensures the executable path is correctly stored in `exe_path`.
         - Ensures the executable hash is stored in `_exe_hash` after successful compilation.
         """
-
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
@@ -1840,7 +1817,6 @@ class TestProcessingAndExecution:
         - Ensures `build` exits early without calling `make compile_clean` or `make`.
         - Ensures an informational message is logged about skipping recompilation.
         """
-
         sim, directory = example_roms_simulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
         build_dir = directory / "ROMS/compile_time_code"
@@ -1893,7 +1869,6 @@ class TestProcessingAndExecution:
         - Ensures `make compile_clean` is called before compilation.
         - Verifies that a `RuntimeError` is raised when `make compile_clean` fails.
         """
-
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
@@ -1934,7 +1909,6 @@ class TestProcessingAndExecution:
         - Ensures `make` is called for ROMS compilation.
         - Verifies that a `RuntimeError` is raised when `make` fails.
         """
-
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         sim.compile_time_code.working_path = build_dir
@@ -1968,7 +1942,6 @@ class TestProcessingAndExecution:
         ----------
         - Ensures that calling `build` without a build directory raises a `ValueError`.
         """
-
         sim, directory = example_roms_simulation
         with pytest.raises(ValueError, match="Unable to compile ROMSSimulation"):
             sim.build()
@@ -1990,7 +1963,6 @@ class TestProcessingAndExecution:
         - Ensures that `partition()` is called only on datasets that exist locally.
         - Ensures that datasets not found locally are not partitioned.
         """
-
         sim, _ = example_roms_simulation
 
         # Mock some input datasets
@@ -2018,8 +1990,8 @@ class TestProcessingAndExecution:
 
     def test_run_raises_if_no_runtime_code_working_path(self, example_roms_simulation):
         """Confirm that ROMSSimulation.run() raises a FileNotFoundError if
-        ROMSSimulation.runtime_code does not exist locally."""
-
+        ROMSSimulation.runtime_code does not exist locally.
+        """
         sim, _ = example_roms_simulation
         sim.exe_path = Path("madeup.exe")
         with pytest.raises(
@@ -2042,7 +2014,6 @@ class TestProcessingAndExecution:
         ----------
         - Ensures `ValueError` is raised with the expected error message when `exe_path` is `None`.
         """
-
         sim, directory = example_roms_simulation
         with pytest.raises(ValueError, match="unable to find ROMS executable"):
             sim.run()
@@ -2062,7 +2033,6 @@ class TestProcessingAndExecution:
         ----------
         - Ensures `ValueError` is raised with the expected error message when `n_procs_tot` is `None`.
         """
-
         sim, directory = example_roms_simulation
         sim.exe_path = directory / "ROMS/compile_time_code/roms"
         with patch(
@@ -2099,7 +2069,6 @@ class TestProcessingAndExecution:
         - Ensures `LocalProcess.start()` is called.
         - Ensures the returned execution handler matches the mocked `LocalProcess` instance.
         """
-
         sim, directory = example_roms_simulation
 
         # Mock no scheduler
@@ -2170,7 +2139,6 @@ class TestProcessingAndExecution:
         - Ensures the scheduler job's `submit()` method is called.
         - Ensures the returned execution handler matches the created job instance.
         """
-
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         sim.runtime_code.working_path = directory / "ROMS/runtime_code/"
@@ -2251,7 +2219,6 @@ class TestProcessingAndExecution:
         - Ensures `create_scheduler_job` is never called if `account_key` is missing.
         - Confirms that the expected `ValueError` is raised with an appropriate message.
         """
-
         sim, directory = example_roms_simulation
         build_dir = directory / "ROMS/compile_time_code"
         sim.runtime_code.working_path = directory / "ROMS/runtime_code/"
@@ -2296,7 +2263,6 @@ class TestProcessingAndExecution:
         - Confirms that calling `post_run` without a prior `run` invocation raises `RuntimeError`.
         - Checks the error message to verify it correctly informs the user of the issue.
         """
-
         sim, _ = example_roms_simulation
         with pytest.raises(
             RuntimeError,
@@ -2324,7 +2290,6 @@ class TestProcessingAndExecution:
           raises `RuntimeError`.
         - Validates that the error message correctly informs the user of the issue.
         """
-
         sim, _ = example_roms_simulation
 
         # Mock `_execution_handler` and set its `status` attribute to something *not* COMPLETED
@@ -2363,7 +2328,6 @@ class TestProcessingAndExecution:
         - Confirms that the partitioned files are moved to `PARTITIONED` after merging.
         - Validates that the `post_run` process completes without errors.
         """
-
         # Setup
         sim, directory = example_roms_simulation
         output_dir = directory / "output"
@@ -2435,7 +2399,6 @@ class TestProcessingAndExecution:
         - Ensures `logger.info()` is called with the expected message.
         - Confirms that `Path.glob` is called once to check for output files.
         """
-
         # Setup
         sim, _ = example_roms_simulation
         sim._execution_handler = MagicMock()
@@ -2479,7 +2442,6 @@ class TestProcessingAndExecution:
         - Ensures `ncjoin` is executed with the correct file pattern.
         - Confirms that a `RuntimeError` is raised when `ncjoin` returns a non-zero exit code.
         """
-
         # Setup
         sim, directory = example_roms_simulation
         output_dir = directory / "output"
@@ -2563,7 +2525,6 @@ class TestROMSSimulationRestart:
         - The new instance's `initial_conditions` attribute is correctly assigned the
           detected restart file.
         """
-
         # Setup mock simulation
         sim, directory = example_roms_simulation
         new_end_date = datetime(2026, 6, 1)
@@ -2605,7 +2566,6 @@ class TestROMSSimulationRestart:
         - The method searches for restart files with the expected filename pattern.
         - A `FileNotFoundError` is raised if no matching restart files are found.
         """
-
         # Setup mock simulation
         sim, directory = example_roms_simulation
         new_end_date = datetime(2026, 6, 1)
@@ -2643,7 +2603,6 @@ class TestROMSSimulationRestart:
         - The method searches for restart files with the expected filename pattern.
         - A `ValueError` is raised if multiple restart files are found.
         """
-
         sim, directory = example_roms_simulation
         restart_dir = directory / "output"
         new_end_date = datetime(2025, 6, 1)

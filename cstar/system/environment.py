@@ -90,7 +90,6 @@ class CStarEnvironment:
         str
             Human-readable string representation of the environment's key attributes.
         """
-
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nCompiler: {self.compiler}"
@@ -145,7 +144,6 @@ class CStarEnvironment:
         ImportError
             If the top-level package cannot be located.
         """
-
         top_level_package_name = __name__.split(".")[0]
         spec = importlib.util.find_spec(top_level_package_name)
         if spec is not None:
@@ -164,7 +162,6 @@ class CStarEnvironment:
         bool
             True if the OS is Linux and `LMOD_DIR` is present in environment variables.
         """
-
         return (platform.system() == "Linux") and ("LMOD_CMD" in list(os.environ))
 
     def _call_lmod(self, *args) -> None:
@@ -205,7 +202,6 @@ class CStarEnvironment:
 
         >>> CStarEnvironment._call_lmod("unload", "gcc")
         """
-
         lmod_path = Path(os.environ.get("LMOD_CMD", ""))
         command = f"{lmod_path} python {' '.join(list(args))}"
         stdout = _run_cmd(
@@ -232,9 +228,8 @@ class CStarEnvironment:
         RuntimeError
             If any `module load <module_name>` command fails.
         """
-
         if not self.uses_lmod:
-            raise EnvironmentError(
+            raise OSError(
                 "Your system does not appear to use Linux Environment Modules"
             )
         self._call_lmod("reset")

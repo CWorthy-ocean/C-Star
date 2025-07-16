@@ -64,7 +64,6 @@ class TestLocalProcess:
         - commands : str
             The shell command(s) to execute.
         """
-
         self.patcher = patch("subprocess.Popen")
         self.mock_popen = self.patcher.start()
 
@@ -125,9 +124,9 @@ class TestLocalProcess:
         State: <status = <ExecutionStatus.UNSUBMITTED: 1>>"""
         )
 
-        assert (
-            mock_local_process.__repr__() == test_repr
-        ), f"expected \n{test_repr}\n, got \n{mock_local_process.__repr__()}\n"
+        assert mock_local_process.__repr__() == test_repr, (
+            f"expected \n{test_repr}\n, got \n{mock_local_process.__repr__()}\n"
+        )
 
     def test_start_success(self, tmp_path, mock_local_process):
         """Verifies that the subprocess starts successfully with valid commands.
@@ -197,7 +196,6 @@ class TestLocalProcess:
         - That the `status` property reflects the correct `ExecutionStatus` for
           each stage of the process lifecycle.
         """
-
         assert mock_local_process.status == ExecutionStatus.UNSUBMITTED
 
         # After starting: RUNNING
@@ -248,7 +246,6 @@ class TestLocalProcess:
         - _process is un-set if _process is set to a complete subprocess
         - RuntimeError raised if _process is set to a running subprocess
         """
-
         # no process (return early):
         mock_local_process._process = None
         mock_local_process._drop_process()
@@ -298,7 +295,6 @@ class TestLocalProcess:
         - That `kill()` is not called if `terminate()` succeeds.
         - That the `status` property reflects the `CANCELLED` state after cancellation.
         """
-
         # Simulate a running process
         self.mock_subprocess.poll.return_value = None  # Process is active
         mock_local_process.start()
@@ -344,7 +340,6 @@ class TestLocalProcess:
         - That `kill()` is called if `terminate()` fails.
         - That the `status` property reflects the `CANCELLED` state after cancellation.
         """
-
         # Simulate a running process
         self.mock_subprocess.poll.return_value = None  # Process is active
         self.mock_subprocess.terminate.side_effect = subprocess.TimeoutExpired(
@@ -399,7 +394,6 @@ class TestLocalProcess:
         - That the correct message is logged
         - That neither `terminate` nor `kill` is called.
         """
-
         # Simulate a completed process
         self.mock_subprocess.poll.return_value = 0  # Process has completed
 
@@ -443,7 +437,6 @@ class TestLocalProcess:
         - subprocess.Popen.wait() is called once
         - Information message is not printed
         """
-
         # Simulate a running process
         self.mock_subprocess.poll.return_value = None  # Process is active
         mock_local_process._process = self.mock_subprocess  # Assign mock process
@@ -481,7 +474,6 @@ class TestLocalProcess:
         - An information message is logged
         - subprocess.Popen.wait is not called
         """
-
         mock_local_process._process = None  # Assign mock process
         mock_local_process._cancelled = True
         caplog.set_level(logging.INFO, logger=mock_local_process.log.name)

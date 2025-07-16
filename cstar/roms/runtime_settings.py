@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import (
     Any,
     ClassVar,
-    Optional,
     Self,
     Union,
     get_args,
@@ -49,7 +48,8 @@ def _format_float(val: float) -> str:
 
 def _format_value(val: Any) -> str:
     """Format floats using _format_float, otherwise just return the string of the
-    value."""
+    value.
+    """
     if isinstance(val, float):
         return _format_float(val)
     return str(val)
@@ -73,7 +73,8 @@ def _get_alias(field_name: str) -> str:
 
 class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
     """Base class containing common serialization/deserialization methods used by
-    subsections of the ROMS runtime input file."""
+    subsections of the ROMS runtime input file.
+    """
 
     multi_line: ClassVar[bool] = False
     """If true, multiple values are split across multiple lines in the inputs file; if
@@ -88,7 +89,8 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
     @property
     def key_order(self):
         """Return the pydantic fields (no class vars or properties) in the order they
-        are specified."""
+        are specified.
+        """
         return list(self.__pydantic_fields__.keys())
 
     @model_validator(mode="wrap")
@@ -139,8 +141,8 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
 
     def _format_and_join_values(self, *args):
         """Formats any number of args corresponding to a single value, and joins them as
-        appropriate."""
-
+        appropriate.
+        """
         # if args is a single, non-list item, just format it (no join needed)
         if len(args) == 1 and not isinstance(args[0], list):
             return _format_value(args[0])
@@ -211,7 +213,6 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
         >>> InitialConditions.from_lines(["1", "input_datasets/roms_ini.nc"])
             InitialConditions(nrrec=1, ininame=Path("input_datasets/roms_ini.nc"))
         """
-
         if not lines:
             raise ValueError("Received empty input.")
 
@@ -279,7 +280,6 @@ class SingleEntryROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
         a relevant ValidationError) if the type does not strictly match and can't be
         validated as a dict/object either.
         """
-
         # If no data is provided (None, empty list, etc.), set the whole section to None.
         # We do need to explicitly let 0 through as a valid value, though.
         if data in [None, [], ""]:
@@ -375,12 +375,12 @@ class BottomDrag(ROMSRuntimeSettingsSection):
 
 class InitialConditions(ROMSRuntimeSettingsSection):
     nrrec: int
-    ininame: Optional[Path]
+    ininame: Path | None
 
     multi_line = True
 
     @classmethod
-    def from_lines(cls, lines: Optional[list[str]]) -> Self:
+    def from_lines(cls, lines: list[str] | None) -> Self:
         """Bespoke `from_lines` for the InitialConditions section, which may have a
         single '0' line, as in, e.g. `$ROMS_ROOT/Examples/Rivers_ana/river_ana.in`
 
@@ -393,12 +393,12 @@ class InitialConditions(ROMSRuntimeSettingsSection):
 
 
 class Forcing(ROMSRuntimeSettingsSection):
-    filenames: Optional[list[Path]]
+    filenames: list[Path] | None
 
     multi_line = True
 
     @classmethod
-    def from_lines(cls, lines: Optional[list[str]]) -> Self:
+    def from_lines(cls, lines: list[str] | None) -> Self:
         """Bespoke `from_lines` for the Forcing section, which must exist in ROMS but
         may be empty, as in, e.g. `$ROMS_ROOT/Examples/Rivers_ana/river_ana.in`
 
@@ -450,21 +450,21 @@ class ROMSRuntimeSettings(BaseModel):
     forcing: Forcing
     output_root_name: OutputRootName
 
-    s_coord: Optional[SCoord] = None
-    grid: Optional[Grid] = None
-    marbl_biogeochemistry: Optional[MARBLBiogeochemistry] = None
-    lateral_visc: Optional[LateralVisc] = None
-    rho0: Optional[Rho0] = None
-    lin_rho_eos: Optional[LinRhoEos] = None
-    gamma2: Optional[Gamma2] = None
-    tracer_diff2: Optional[TracerDiff2] = None
-    vertical_mixing: Optional[VerticalMixing] = None
-    my_bak_mixing: Optional[MYBakMixing] = None
-    sss_correction: Optional[SSSCorrection] = None
-    sst_correction: Optional[SSTCorrection] = None
-    ubind: Optional[UBind] = None
-    v_sponge: Optional[VSponge] = None
-    climatology: Optional[Climatology] = None
+    s_coord: SCoord | None = None
+    grid: Grid | None = None
+    marbl_biogeochemistry: MARBLBiogeochemistry | None = None
+    lateral_visc: LateralVisc | None = None
+    rho0: Rho0 | None = None
+    lin_rho_eos: LinRhoEos | None = None
+    gamma2: Gamma2 | None = None
+    tracer_diff2: TracerDiff2 | None = None
+    vertical_mixing: VerticalMixing | None = None
+    my_bak_mixing: MYBakMixing | None = None
+    sss_correction: SSSCorrection | None = None
+    sst_correction: SSTCorrection | None = None
+    ubind: UBind | None = None
+    v_sponge: VSponge | None = None
+    climatology: Climatology | None = None
 
     # Pydantic model configuration
     model_config = {"populate_by_name": True, "alias_generator": _get_alias}
@@ -602,7 +602,6 @@ class ROMSRuntimeSettings(BaseModel):
         - `ROMSRuntimeSettings.to_file()`: writes a ROMSRuntimeSettings instance to a
            ROMS-compatible `.in` file
         """
-
         # Read file
         sections = cls._load_raw_sections(filepath)
         required_fields = {"title", "time_stepping", "bottom_drag", "output_root_name"}
@@ -656,7 +655,7 @@ class ROMSRuntimeSettings(BaseModel):
             f"Initial conditions file (`ROMSRuntimeSettings.initial`): {self.initial.ininame}"
         )
         lines.append(
-            f"Forcing file(s): {_list_to_concise_str(self.forcing.filenames,pad=10)}"
+            f"Forcing file(s): {_list_to_concise_str(self.forcing.filenames, pad=10)}"
         )
         if self.s_coord is not None:
             lines.append("S-coordinate parameters (`ROMSRuntimeSettings.s_coord`):")
@@ -798,7 +797,8 @@ class ROMSRuntimeSettings(BaseModel):
     @model_serializer()
     def serialize_to_string(self) -> str:
         """Serialize the model (excluding null sections) to a single string as would be
-        found in a ROMS-compatible `.in` file."""
+        found in a ROMS-compatible `.in` file.
+        """
         output = ""
         for field_name, field_info in type(self).model_fields.items():
             section = getattr(self, field_name)
@@ -816,6 +816,5 @@ class ROMSRuntimeSettings(BaseModel):
         filepath : str or Path
             Path where the output file will be written.
         """
-
         with Path(filepath).open("w") as f:
             f.write(self.model_dump())

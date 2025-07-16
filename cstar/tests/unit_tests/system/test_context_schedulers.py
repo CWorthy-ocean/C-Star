@@ -30,7 +30,8 @@ def test_context_registry(
     exp_queue_names: set[str] | None,
 ) -> None:
     """Verify that the type of scheduler created by each of the known system contexts
-    matches expectations."""
+    matches expectations.
+    """
     scheduler = wrapped_class.create_scheduler()
 
     if exp_sched_type is not None:
