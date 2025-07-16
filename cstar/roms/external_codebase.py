@@ -1,4 +1,3 @@
-import shutil
 from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
@@ -22,7 +21,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
 
     @property
     def default_source_repo(self) -> str:
-        return "https://github.com/CESR-lab/ucla-roms.git"
+        return "https://github.com/CWorthy-ocean/ucla-roms.git"
 
     @property
     def default_checkout_target(self) -> str:
@@ -31,22 +30,6 @@ class ROMSExternalCodeBase(ExternalCodeBase):
     @property
     def expected_env_var(self) -> str:
         return "ROMS_ROOT"
-
-    def _codebase_adjustments(self) -> None:
-        """Perform C-Star specific adjustments to stock ROMS code.
-
-        In particular, this method replaces the default Makefiles with machine-agnostic
-        versions, allowing C-Star to be used with ROMS across multiple different
-        computing systems.
-        """
-        roms_root = Path(
-            cstar_sysmgr.environment.environment_variables[self.expected_env_var]
-        )
-        shutil.copytree(
-            roms_root / "ci/ci_makefiles/",
-            roms_root,
-            dirs_exist_ok=True,
-        )
 
     def get(self, target: str | Path) -> None:
         """Clone ROMS code to local machine, set environment, compile libraries.
@@ -78,9 +61,6 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         cstar_sysmgr.environment.set_env_var(
             "PATH", f"${{PATH}}:{target / 'Tools-Roms'}"
         )
-
-        # Distribute custom makefiles for ROMS
-        self._codebase_adjustments()
 
         # Make things
         _run_cmd(
