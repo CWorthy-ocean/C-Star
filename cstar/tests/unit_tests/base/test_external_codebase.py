@@ -30,10 +30,6 @@ class MockExternalCodeBase(ExternalCodeBase):
     def default_checkout_target(self):
         return "test_target"
 
-    # Abstract methods that aren't properties:
-    def _codebase_adjustments(self):
-        pass
-
     def get(self, target: str | Path):
         self.log.info(f"mock installing ExternalCodeBase at {target}")
         pass
