@@ -9,6 +9,7 @@ import requests
 import roms_tools
 import yaml
 
+from cstar.base.datasource import LocationType, SourceType
 from cstar.base.input_dataset import InputDataset
 from cstar.base.local_file_stats import LocalFileStatistics
 from cstar.base.utils import _list_to_concise_str
@@ -277,7 +278,7 @@ class ROMSInputDataset(InputDataset, ABC):
                 self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
                 return
 
-        if self.source.source_type == "yaml":
+        if self.source.source_type == SourceType.YAML:
             self._get_from_yaml(local_dir=local_dir)
         elif self.source_partitioning is not None:
             self._get_from_partitioned_source(
@@ -339,15 +340,15 @@ class ROMSInputDataset(InputDataset, ABC):
         local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.source.source_type != "yaml":
+        if self.source.source_type != SourceType.YAML:
             raise ValueError(
                 "_get_from_yaml requires a ROMSInputDataset whose source_type is yaml"
             )
 
-        if self.source.location_type == "path":
+        if self.source.location_type == LocationType.PATH:
             with open(Path(self.source.location).expanduser()) as F:
                 raw_yaml_text = F.read()
-        elif self.source.location_type == "url":
+        elif self.source.location_type == LocationType.URL:
             raw_yaml_text = requests.get(self.source.location).text
         _, header, yaml_data = raw_yaml_text.split("---", 2)
 
@@ -486,7 +487,7 @@ class ROMSForcingCorrections(ROMSInputDataset):
     """
 
     def validate(self):
-        if self.source.source_type == "yaml":
+        if self.source.source_type == SourceType.YAML:
             raise TypeError(
                 "Hey, you! we said no funny business! -Scotty E."
                 f"{self.__class__.__name__} cannot be initialized with a source YAML file. "

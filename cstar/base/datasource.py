@@ -1,6 +1,19 @@
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
+
+
+class LocationType(Enum):
+    URL = "url"
+    PATH = "path"
+
+
+class SourceType(Enum):
+    REPOSITORY = "repository"
+    DIRECTORY = "directory"
+    NETCDF = "netcdf"
+    YAML = "yaml"
 
 
 class DataSource:
@@ -13,10 +26,10 @@ class DataSource:
 
     Properties:
     -----------
-    location_type: str (read-only)
-       "url" or "path"
-    source_type: str (read only)
-       Typically describes file type (e.g. "netcdf") but can also be "repository"
+    location_type: LocationType (read-only)
+       Enum describing location type (e.g. URL or path)
+    source_type: SourceType (read only)
+       Enum describing source type (e.g. netCDF, yaml, repository)
     basename: str (read-only)
        The basename of self.location, typically the file name
     """
@@ -46,33 +59,33 @@ class DataSource:
         return self._file_hash
 
     @property
-    def location_type(self) -> str:
+    def location_type(self) -> LocationType:
         """Get the location type (e.g. "path" or "url") from the "location"
         attribute."""
         urlparsed_location = urlparse(self.location)
         if all([urlparsed_location.scheme, urlparsed_location.netloc]):
-            return "url"
+            return LocationType.URL
         elif Path(self.location).expanduser().exists():
-            return "path"
+            return LocationType.PATH
         else:
             raise ValueError(
                 f"{self.location} is not a recognised URL or local path pointing to an existing file or directory"
             )
 
     @property
-    def source_type(self) -> str:
+    def source_type(self) -> SourceType:
         """Get the source type (e.g. "netcdf") from the "location" attribute."""
         loc = Path(self.location).expanduser()
 
         if (loc.suffix.lower() == ".git") or ((loc / ".git").is_dir()):
             # TODO: a remote repository might not have a .git suffix, more advanced handling needed
-            return "repository"
+            return SourceType.REPOSITORY
         elif loc.is_dir():
-            return "directory"
+            return SourceType.DIRECTORY
         elif loc.suffix.lower() in {".yaml", ".yml"}:
-            return "yaml"
+            return SourceType.YAML
         elif loc.suffix.lower() == ".nc":
-            return "netcdf"
+            return SourceType.NETCDF
         else:
             raise ValueError(
                 f"{Path(self.location)} does not exist or is not a supported file type"
@@ -90,8 +103,8 @@ class DataSource:
         if self.file_hash is not None:
             base_str += f"\n file hash: {self.file_hash}"
         base_str += f"\n basename: {self.basename}"
-        base_str += f"\n location type: {self.location_type}"
-        base_str += f"\n source type: {self.source_type}"
+        base_str += f"\n location type: {self.location_type.value.lower()}"
+        base_str += f"\n source type: {self.source_type.value.lower()}"
         return base_str
 
     def __repr__(self) -> str:

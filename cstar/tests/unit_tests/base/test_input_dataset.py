@@ -5,7 +5,7 @@ from unittest import mock
 import pytest
 
 from cstar.base import InputDataset
-from cstar.base.datasource import DataSource
+from cstar.base.datasource import DataSource, LocationType, SourceType
 
 
 class MockInputDataset(InputDataset):
@@ -47,8 +47,8 @@ def local_input_dataset():
             DataSource, "basename", new_callable=mock.PropertyMock
         ) as mock_basename,
     ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "netcdf"
+        mock_location_type.return_value = LocationType.PATH
+        mock_source_type.return_value = SourceType.NETCDF
         mock_basename.return_value = "local_file.nc"
 
         dataset = MockInputDataset(
@@ -91,8 +91,8 @@ def remote_input_dataset():
         ) as mock_basename,
     ):
         # Mock property return values for a remote file (URL)
-        mock_location_type.return_value = "url"
-        mock_source_type.return_value = "netcdf"
+        mock_location_type.return_value = LocationType.URL
+        mock_source_type.return_value = SourceType.NETCDF
         mock_basename.return_value = "remote_file.nc"
 
         # Create the InputDataset instance; it will use the mocked DataSource
@@ -135,7 +135,7 @@ class TestInputDatasetInit:
         """
 
         assert (
-            local_input_dataset.source.location_type == "path"
+            local_input_dataset.source.location_type == LocationType.PATH
         ), "Expected location_type to be 'path'"
         assert (
             local_input_dataset.source.basename == "local_file.nc"
@@ -159,7 +159,7 @@ class TestInputDatasetInit:
         - The dataset is an instance of MockInputDataset.
         """
         assert (
-            remote_input_dataset.source.location_type == "url"
+            remote_input_dataset.source.location_type == LocationType.URL
         ), "Expected location_type to be 'url'"
         assert (
             remote_input_dataset.source.basename == "remote_file.nc"

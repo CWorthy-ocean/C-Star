@@ -9,7 +9,7 @@ import yaml
 import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.datasource import DataSource
+from cstar.base.datasource import DataSource, LocationType, SourceType
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
@@ -356,7 +356,7 @@ class ROMSSimulation(Simulation):
             *self.surface_forcing,
             *self.boundary_forcing,
         ]:
-            if (inp is not None) and (inp.source.source_type == "yaml"):
+            if (inp is not None) and (inp.source.source_type == SourceType.YAML):
                 if (
                     hasattr(inp, "start_date")
                     and (inp.start_date is not None)
@@ -948,14 +948,14 @@ class ROMSSimulation(Simulation):
         """
 
         source = DataSource(location=blueprint)
-        if source.source_type != "yaml":
+        if source.source_type != SourceType.YAML:
             raise ValueError(
                 f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
             )
-        if source.location_type == "path":
+        if source.location_type == LocationType.PATH:
             with open(blueprint, "r") as file:
                 bp_dict = yaml.safe_load(file)
-        elif source.location_type == "url":
+        elif source.location_type == LocationType.URL:
             bp_dict = yaml.safe_load(requests.get(source.location).text)
 
         return cls.from_dict(

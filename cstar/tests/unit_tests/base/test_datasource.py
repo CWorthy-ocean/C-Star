@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cstar.base.datasource import DataSource
+from cstar.base.datasource import DataSource, LocationType, SourceType
 
 
 # Mock paths for local file tests
@@ -45,7 +45,7 @@ def test_location_type_url():
     data source."""
 
     data_source = DataSource("https://example.com/data.nc")
-    assert data_source.location_type == "url"
+    assert data_source.location_type == LocationType.URL
 
 
 def test_location_type_path(mock_netcdf_file_path):
@@ -53,7 +53,7 @@ def test_location_type_path(mock_netcdf_file_path):
     data file."""
 
     data_source = DataSource(mock_netcdf_file_path)
-    assert data_source.location_type == "path"
+    assert data_source.location_type == LocationType.PATH
 
 
 def test_location_type_invalid():
@@ -71,7 +71,7 @@ def test_source_type_netcdf(mock_netcdf_file_path):
     '.nc' file."""
 
     data_source = DataSource(mock_netcdf_file_path)
-    assert data_source.source_type == "netcdf"
+    assert data_source.source_type == SourceType.NETCDF
 
 
 def test_source_type_directory(mock_directory_path):
@@ -79,7 +79,7 @@ def test_source_type_directory(mock_directory_path):
     temporary directory."""
 
     data_source = DataSource(mock_directory_path)
-    assert data_source.source_type == "directory"
+    assert data_source.source_type == SourceType.DIRECTORY
 
 
 def test_source_type_repository(mock_git_path):
@@ -87,14 +87,14 @@ def test_source_type_repository(mock_git_path):
     mock git repository."""
 
     data_source = DataSource(mock_git_path)
-    assert data_source.source_type == "repository"
+    assert data_source.source_type == SourceType.REPOSITORY
 
 
 def test_source_type_yaml(mock_yaml_file_path):
     """Test the DataSource.source_type property correctly returns 'yaml' for a mock
     '.yaml' file."""
     data_source = DataSource(mock_yaml_file_path)
-    assert data_source.source_type == "yaml"
+    assert data_source.source_type == SourceType.YAML
 
 
 def test_source_type_unsupported_extension(tmp_path):

@@ -7,7 +7,7 @@ from urllib.parse import urljoin
 import dateutil.parser
 import pooch
 
-from cstar.base.datasource import DataSource
+from cstar.base.datasource import DataSource, LocationType, SourceType
 from cstar.base.local_file_stats import FileInfo, LocalFileStatistics
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import _get_sha256_hash
@@ -56,9 +56,9 @@ class InputDataset(ABC, LoggingMixin):
 
         self.source: DataSource = DataSource(location=location, file_hash=file_hash)
         if (
-            (self.source.location_type == "url")
+            (self.source.location_type == LocationType.URL)
             and (self.source.file_hash is None)
-            and (self.source.source_type != "yaml")
+            and (self.source.source_type != SourceType.YAML)
         ):
             raise ValueError(
                 f"Cannot create InputDataset for \n {self.source.location}:\n "
@@ -204,14 +204,14 @@ class InputDataset(ABC, LoggingMixin):
     @staticmethod
     def _symlink_or_download_from_source(
         source_location: str | Path,
-        location_type: str,
+        location_type: LocationType,
         expected_file_hash: str | None,
         target_path: Path,
         logger: "logging.Logger",
     ) -> str:
         """Helper method to either create a symbolic link to this InputDataset (if it
         exists on the local filesystem) or download it (if it is located remotely)."""
-        if location_type == "path":
+        if location_type == LocationType.PATH:
             source_location = Path(source_location).expanduser().resolve()
             # TODO when refactoring get(), avoid calculating hash here
             computed_file_hash = _get_sha256_hash(source_location)
@@ -228,7 +228,7 @@ class InputDataset(ABC, LoggingMixin):
 
             target_path.symlink_to(source_location)
 
-        elif location_type == "url":
+        elif location_type == LocationType.URL:
             if expected_file_hash is not None:
                 downloader = pooch.HTTPDownloader(timeout=120)
                 to_fetch = pooch.create(

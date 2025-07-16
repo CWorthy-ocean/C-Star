@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from cstar.base.datasource import DataSource
+from cstar.base.datasource import DataSource, LocationType, SourceType
 from cstar.base.gitutils import _clone_and_checkout
 from cstar.base.local_file_stats import LocalFileStatistics
 from cstar.base.log import LoggingMixin
@@ -175,8 +175,8 @@ class AdditionalCode(LoggingMixin):
         try:
             tmp_dir = None  # initialise the tmp_dir variable in case we need it later
             # CASE 1: Additional code is in a remote repository:
-            if (self.source.location_type == "url") and (
-                self.source.source_type == "repository"
+            if (self.source.location_type == LocationType.URL) and (
+                self.source.source_type == SourceType.REPOSITORY
             ):
                 if self.checkout_target is None:
                     raise ValueError(
@@ -194,9 +194,9 @@ class AdditionalCode(LoggingMixin):
                 )
                 source_dir = Path(f"{tmp_dir}/{self.subdir}")
             # CASE 2: Additional code is in a local directory/repository
-            elif (self.source.location_type == "path") and (
-                (self.source.source_type == "directory")
-                or (self.source.source_type == "repository")
+            elif (self.source.location_type == LocationType.PATH) and (
+                (self.source.source_type == SourceType.DIRECTORY)
+                or (self.source.source_type == SourceType.REPOSITORY)
             ):
                 source_dir = Path(self.source.location).expanduser() / self.subdir
 
@@ -207,7 +207,7 @@ class AdditionalCode(LoggingMixin):
                     + "AdditionalCode.source.source_type should be "
                     + "'url' and 'repository', or 'path' and 'repository', or"
                     + "'path' and 'directory', not"
-                    + f"'{self.source.location_type}' and '{self.source.source_type}'"
+                    + f"'{self.source.location_type.value.lower()}' and '{self.source.source_type.value.lower()}'"
                 )
 
             # Now go through the file and copy them to local_dir

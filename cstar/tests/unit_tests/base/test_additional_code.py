@@ -5,6 +5,7 @@ from unittest import mock
 import pytest
 
 from cstar.base import AdditionalCode
+from cstar.base.datasource import LocationType, SourceType
 
 
 # Set up fixtures
@@ -364,8 +365,8 @@ class TestAdditionalCodeGet:
         - The `working_path` is set to the target directory path after the operation.
         """
         # Set specific mock return values for this test
-        self.mock_location_type.return_value = "path"
-        self.mock_source_type.return_value = "directory"
+        self.mock_location_type.return_value = LocationType.PATH
+        self.mock_source_type.return_value = SourceType.DIRECTORY
         self.mock_hash.return_value = "mock_hash_value"
 
         # Call the get() method to simulate fetching additional code from a local directory
@@ -426,8 +427,8 @@ class TestAdditionalCodeGet:
         - The `working_path` is set to the target directory path after the operation.
         """
         # Set specific return values for this test
-        self.mock_location_type.return_value = "url"
-        self.mock_source_type.return_value = "repository"
+        self.mock_location_type.return_value = LocationType.URL
+        self.mock_source_type.return_value = SourceType.REPOSITORY
         self.mock_hash.return_value = "mock_hash_value"
         # Call get method
         remote_additional_code.get("/mock/local/dir")
@@ -484,8 +485,8 @@ class TestAdditionalCodeGet:
 
         # Simulate a remote repository source but without checkout_target
         remote_additional_code._checkout_target = None  # This should raise a ValueError
-        self.mock_location_type.return_value = "url"
-        self.mock_source_type.return_value = "repository"
+        self.mock_location_type.return_value = LocationType.URL
+        self.mock_source_type.return_value = SourceType.REPOSITORY
 
         # Test that calling get raises ValueError
         with pytest.raises(ValueError, match="checkout_target is None"):
@@ -511,8 +512,8 @@ class TestAdditionalCodeGet:
         - No files are copied (mock_copy is not called).
         """
 
-        self.mock_location_type.return_value = "url"
-        self.mock_source_type.return_value = "directory"
+        self.mock_location_type.return_value = LocationType.URL
+        self.mock_source_type.return_value = SourceType.DIRECTORY
 
         with pytest.raises(ValueError) as exception_info:
             remote_additional_code.get("/mock/local/dir")
@@ -552,8 +553,8 @@ class TestAdditionalCodeGet:
         # Simulate local directory source with missing files
         self.mock_hash.return_value = "mock_hash_value"
         self.mock_exists.side_effect = [True, True, False]  # Third file is missing
-        self.mock_location_type.return_value = "path"
-        self.mock_source_type.return_value = "directory"
+        self.mock_location_type.return_value = LocationType.PATH
+        self.mock_source_type.return_value = SourceType.DIRECTORY
 
         # Test that get raises FileNotFoundError when a file doesn't exist
         with pytest.raises(FileNotFoundError, match="does not exist"):
@@ -603,8 +604,8 @@ class TestAdditionalCodeGet:
         --------
         - The temporary directory is cleaned up (mock_rmtree is called once with the correct path).
         """
-        self.mock_location_type.return_value = "url"
-        self.mock_source_type.return_value = "repository"
+        self.mock_location_type.return_value = LocationType.URL
+        self.mock_source_type.return_value = SourceType.REPOSITORY
 
         # Call get method
         remote_additional_code.get("/mock/local/dir")

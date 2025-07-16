@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.datasource import DataSource
+from cstar.base.datasource import DataSource, LocationType, SourceType
 from cstar.base.local_file_stats import LocalFileStatistics
 from cstar.roms import ROMSForcingCorrections, ROMSInputDataset, ROMSPartitioning
 
@@ -39,8 +39,8 @@ def local_roms_netcdf_dataset():
             DataSource, "source_type", new_callable=mock.PropertyMock
         ) as mock_source_type,
     ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "netcdf"
+        mock_location_type.return_value = LocationType.PATH
+        mock_source_type.return_value = SourceType.NETCDF
 
         dataset = MockROMSInputDataset(
             location="some/local/source/path/local_file.nc",
@@ -76,8 +76,8 @@ def local_roms_yaml_dataset():
             DataSource, "basename", new_callable=mock.PropertyMock
         ) as mock_basename,
     ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "yaml"
+        mock_location_type.return_value = LocationType.PATH
+        mock_source_type.return_value = SourceType.YAML
         mock_basename.return_value = "local_file.yaml"
 
         dataset = MockROMSInputDataset(
@@ -114,8 +114,8 @@ def remote_roms_yaml_dataset():
             DataSource, "basename", new_callable=mock.PropertyMock
         ) as mock_basename,
     ):
-        mock_location_type.return_value = "url"
-        mock_source_type.return_value = "yaml"
+        mock_location_type.return_value = LocationType.URL
+        mock_source_type.return_value = SourceType.YAML
         mock_basename.return_value = "remote_file.yaml"
 
         dataset = MockROMSInputDataset(
@@ -729,7 +729,7 @@ class TestROMSInputDatasetGet:
         # Mock the `source` attribute and its `source_type` property
         mock_source = mock.Mock()
         type(mock_source).source_type = mock.PropertyMock(
-            return_value="netcdf"
+            return_value=SourceType.NETCDF
         )  # Non-yaml type
 
         # Assign the mocked `source` to the dataset
@@ -844,7 +844,7 @@ class TestROMSInputDatasetGet:
         expected_calls = [
             mock.call(
                 source_location=f"some/local/source/path/local_file.{i:02d}.nc",
-                location_type="path",
+                location_type=LocationType.PATH,
                 expected_file_hash=None,
                 target_path=mock.ANY,
                 logger=mock.ANY,
