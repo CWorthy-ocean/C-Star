@@ -285,8 +285,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
                             )
                         except Exception as ex:
                             print(ex)
-                        else:
-                            self._codebase_adjustments()
                         return
                     elif yn.casefold() in ["n", "no"]:
                         raise EnvironmentError()
@@ -335,8 +333,3 @@ class ExternalCodeBase(ABC, LoggingMixin):
     @abstractmethod
     def get(self, target: str | Path) -> None:
         """Clone the external codebase to your local machine."""
-
-    def _codebase_adjustments(self) -> None:
-        """Perform any C-Star specific adjustments to the external codebase that would
-        be needed after a clean checkout."""
-        pass

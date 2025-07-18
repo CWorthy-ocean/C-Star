@@ -2,14 +2,14 @@ name: cstar_test_with_yaml_datasets
 valid_start_date: 2012-01-01 12:00:00
 valid_end_date: 2012-12-31 12:00:00
 codebase:
-  source_repo: 'https://github.com/CESR-lab/ucla-roms.git'
-  checkout_target: '246c11fa537145ba5868f2256dfb4964aeb09a25'
+  source_repo: 'https://github.com/CWorthy-ocean/ucla-roms.git'
+  checkout_target: 'e5e3658ac42b9a19b74bd4ba11d6f6536bdae2e9'
 marbl_codebase:
   source_repo: 'https://github.com/marbl-ecosys/MARBL.git'
   checkout_target: 'marbl0.45.0'
 runtime_code:
   location: '<additional_code_location>'
-  checkout_target: '93601045f7811919fb92e33bcbc53f25d0f64ad7'
+  checkout_target: '7fdf8ea2225d55e9b98b5d4d0e7adbff961c9940'
   subdir: 'additional_code/ROMS/namelists'
   files:
     - "roms.in"
@@ -18,7 +18,7 @@ runtime_code:
     - "marbl_diagnostic_output_list"
 compile_time_code:
   location: '<additional_code_location>'
-  checkout_target: '93601045f7811919fb92e33bcbc53f25d0f64ad7'
+  checkout_target: '7fdf8ea2225d55e9b98b5d4d0e7adbff961c9940'
   subdir: 'additional_code/ROMS/source_mods'
   files:
     - "bgc.opt"
