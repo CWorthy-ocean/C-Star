@@ -85,7 +85,6 @@ class ExecutionHandler(ABC, LoggingMixin):
         The specific implementation should query the underlying process or
         system to determine the task's status.
         """
-
         pass
 
     @property
@@ -98,7 +97,6 @@ class ExecutionHandler(ABC, LoggingMixin):
         output_file (Path):
             Path to the file in which stdout and stderr will be written.
         """
-
         pass
 
     def updates(self, seconds: float = 10, confirm_indefinite: bool = True):
@@ -128,7 +126,6 @@ class ExecutionHandler(ABC, LoggingMixin):
         - When streaming indefinitely (`seconds=0`), user confirmation is
           required before proceeding.
         """
-
         if self.status != ExecutionStatus.RUNNING:
             error_msg = f"This job is currently not running ({self.status}). Live updates cannot be provided."
             is_complete = self.status in {
@@ -160,7 +157,7 @@ class ExecutionHandler(ABC, LoggingMixin):
                 return
 
         try:
-            with open(self.output_file, "r") as f:
+            with open(self.output_file) as f:
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):

@@ -40,7 +40,6 @@ class ROMSDiscretization(Discretization):
         ROMSDiscretization:
             An initialized ROMSDiscretization object
         """
-
         super().__init__(time_step)
         self.n_procs_x = n_procs_x
         self.n_procs_y = n_procs_y

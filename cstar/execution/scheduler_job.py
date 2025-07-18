@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
-from typing import Optional, Tuple
 
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
@@ -24,15 +23,15 @@ def create_scheduler_job(
     commands: str,
     account_key: str,
     cpus: int,
-    nodes: Optional[int] = None,
-    cpus_per_node: Optional[int] = None,
-    script_path: Optional[str | Path] = None,
-    run_path: Optional[str | Path] = None,
-    job_name: Optional[str] = None,
-    output_file: Optional[str | Path] = None,
-    queue_name: Optional[str] = None,
-    send_email: Optional[bool] = True,
-    walltime: Optional[str] = None,
+    nodes: int | None = None,
+    cpus_per_node: int | None = None,
+    script_path: str | Path | None = None,
+    run_path: str | Path | None = None,
+    job_name: str | None = None,
+    output_file: str | Path | None = None,
+    queue_name: str | None = None,
+    send_email: bool | None = True,
+    walltime: str | None = None,
 ) -> "SchedulerJob":
     """Create a scheduler job for either SLURM or PBS based on the system's active
     scheduler.
@@ -79,7 +78,6 @@ def create_scheduler_job(
     TypeError
         If the active scheduler is not SLURM or PBS.
     """
-
     # mypy assigns type based on first condition, assigning explicitly:
     job_type: type[SlurmJob] | type[PBSJob]
 
@@ -171,15 +169,15 @@ class SchedulerJob(ExecutionHandler, ABC):
         commands: str,
         account_key: str,
         cpus: int,
-        nodes: Optional[int] = None,
-        cpus_per_node: Optional[int] = None,
-        script_path: Optional[str | Path] = None,
-        run_path: Optional[str | Path] = None,
-        job_name: Optional[str] = None,
-        output_file: Optional[str | Path] = None,
-        queue_name: Optional[str] = None,
-        send_email: Optional[bool] = True,
-        walltime: Optional[str] = None,
+        nodes: int | None = None,
+        cpus_per_node: int | None = None,
+        script_path: str | Path | None = None,
+        run_path: str | Path | None = None,
+        job_name: str | None = None,
+        output_file: str | Path | None = None,
+        queue_name: str | None = None,
+        send_email: bool | None = True,
+        walltime: str | None = None,
     ):
         """Initialize a SchedulerJob instance.
 
@@ -229,7 +227,6 @@ class SchedulerJob(ExecutionHandler, ABC):
             If neither `nodes` nor `cpus_per_node` are provided and the scheduler cannot
             determine the system's CPUs per node automatically.
         """
-
         self._scheduler = scheduler
         self._commands = commands
         self._cpus = cpus
@@ -287,8 +284,8 @@ class SchedulerJob(ExecutionHandler, ABC):
                 )
 
         # Explicitly typing to avoid mypy confusion in conditional pathways below
-        self._cpus_per_node: Optional[int]
-        self._nodes: Optional[int]
+        self._cpus_per_node: int | None
+        self._nodes: int | None
 
         if (
             (nodes is None)
@@ -310,7 +307,7 @@ class SchedulerJob(ExecutionHandler, ABC):
             and (scheduler.requires_task_distribution)
         ):
             if scheduler.global_max_cpus_per_node is None:
-                raise EnvironmentError(
+                raise OSError(
                     "You attempted to create a scheduler job without 'nodes', and "
                     + "'cpus_per_node' parameters, but your scheduler explicitly "
                     + "requires a task distribution. C-Star is unable to determine "
@@ -338,7 +335,7 @@ class SchedulerJob(ExecutionHandler, ABC):
             self._nodes = nodes
 
         self._account_key = account_key
-        self._id: Optional[int] = None
+        self._id: int | None = None
 
     @property
     def output_file(self) -> Path:
@@ -355,12 +352,12 @@ class SchedulerJob(ExecutionHandler, ABC):
         return self._account_key
 
     @property
-    def nodes(self) -> Optional[int]:
+    def nodes(self) -> int | None:
         """The number of nodes to request."""
         return self._nodes
 
     @property
-    def cpus_per_node(self) -> Optional[int]:
+    def cpus_per_node(self) -> int | None:
         """The number of CPUs per node to request."""
         return self._cpus_per_node
 
@@ -378,7 +375,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         return self._job_name
 
     @property
-    def walltime(self) -> Optional[str]:
+    def walltime(self) -> str | None:
         """The maximum walltime for the job, in the format "HH:MM:SS"."""
         return self._walltime
 
@@ -395,7 +392,8 @@ class SchedulerJob(ExecutionHandler, ABC):
     @property
     def scheduler(self) -> Scheduler:
         """The scheduler managing this job (e.g., a SlurmScheduler or PBSScheduler
-        instance)"""
+        instance)
+        """
         return self._scheduler
 
     @property
@@ -404,7 +402,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         return self._commands
 
     @property
-    def id(self) -> Optional[int]:
+    def id(self) -> int | None:
         """Retrieve the unique job ID assigned by the scheduler.
 
         The job ID is assigned when the job is successfully submitted to the scheduler.
@@ -417,7 +415,6 @@ class SchedulerJob(ExecutionHandler, ABC):
             The unique job ID assigned by the scheduler, or `None` if the job has not
             been submitted.
         """
-
         if self._id is None:
             self.log.warning(
                 "No Job ID found. Submit this job with SchedulerJob.submit()"
@@ -484,7 +481,7 @@ class SchedulerJob(ExecutionHandler, ABC):
 
     def _calculate_node_distribution(
         self, n_cores_required: int, tot_cores_per_node: int
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """Determine how many nodes and cores per node to request from a job scheduler.
 
         For example, if requiring 192 cores for a job on a system with 128 cores per node,
@@ -504,7 +501,6 @@ class SchedulerJob(ExecutionHandler, ABC):
         cores_to_request_per_node: int
             The number of cores per node to request from the scheduler
         """
-
         n_nodes_to_request = ceil(n_cores_required / tot_cores_per_node)
         cores_to_request_per_node = ceil(
             tot_cores_per_node
@@ -589,7 +585,6 @@ class SlurmJob(SchedulerJob):
         RuntimeError
             If the command to retrieve the job status fails or returns an unexpected result.
         """
-
         if self.id is None:
             return ExecutionStatus.UNSUBMITTED
         else:
@@ -623,7 +618,6 @@ class SlurmJob(SchedulerJob):
         scheduler_script: str
             The complete SLURM job script as a string, ready for submission.
         """
-
         scheduler_script = "#!/bin/bash"
         scheduler_script += f"\n#SBATCH --job-name={self.job_name}"
         scheduler_script += f"\n#SBATCH --output={self.output_file}"
@@ -650,7 +644,7 @@ class SlurmJob(SchedulerJob):
         scheduler_script += f"\n\n{self.commands}"
         return scheduler_script
 
-    def submit(self) -> Optional[int]:
+    def submit(self) -> int | None:
         """Submit the job to the SLURM scheduler.
 
         This method saves the job script to the specified `script_path` and submits it
@@ -709,7 +703,6 @@ class SlurmJob(SchedulerJob):
         RuntimeError
             If the `scancel` command fails or returns a non-zero exit code.
         """
-
         if self.status not in {ExecutionStatus.RUNNING, ExecutionStatus.PENDING}:
             self.log.info(f"Cannot cancel job with status '{self.status}'")
             return
@@ -787,7 +780,6 @@ class PBSJob(SchedulerJob):
         scheduler_script : str
             The complete PBS job script as a string, ready for submission.
         """
-
         scheduler_script = "#PBS -S /bin/bash"
         scheduler_script += f"\n#PBS -N {self.job_name}"
         scheduler_script += f"\n#PBS -o {self.output_file}"
@@ -832,7 +824,6 @@ class PBSJob(SchedulerJob):
         RuntimeError
             If the `qstat` command fails or the job cannot be found in the scheduler's records.
         """
-
         if self.id is None:
             return ExecutionStatus.UNSUBMITTED
 
@@ -873,7 +864,7 @@ class PBSJob(SchedulerJob):
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse JSON from qstat output: {e}")
 
-    def submit(self) -> Optional[int]:
+    def submit(self) -> int | None:
         """Submit the job to the PBS scheduler.
 
         This method saves the job script to the specified `script_path` and submits it
@@ -891,7 +882,6 @@ class PBSJob(SchedulerJob):
             If the `qsub` command fails or if the job ID cannot be parsed from the
             submission output.
         """
-
         self.save_script()
 
         # job_id_full will contain full job ID (e.g., "7063621.desched1")
@@ -922,7 +912,6 @@ class PBSJob(SchedulerJob):
         RuntimeError
             If the `qdel` command fails or returns a non-zero exit code.
         """
-
         if self.status not in {
             ExecutionStatus.RUNNING,
             ExecutionStatus.PENDING,

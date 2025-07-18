@@ -42,24 +42,24 @@ def mock_git_path(tmp_path):
 # Tests for the `location_type` property
 def test_location_type_url():
     """Check the DataSource.location_type property correctly returns 'url' for a remote
-    data source."""
-
+    data source.
+    """
     data_source = DataSource("https://example.com/data.nc")
     assert data_source.location_type == "url"
 
 
 def test_location_type_path(mock_netcdf_file_path):
     """Check the DataSource.location_type property correctly returns 'path' for a local
-    data file."""
-
+    data file.
+    """
     data_source = DataSource(mock_netcdf_file_path)
     assert data_source.location_type == "path"
 
 
 def test_location_type_invalid():
     """Test the DataSource.location_type property raises a ValueError for an invalid
-    location."""
-
+    location.
+    """
     with pytest.raises(ValueError):
         data_source = DataSource("invalid_location")
         data_source.location_type
@@ -68,39 +68,40 @@ def test_location_type_invalid():
 # Tests for the `source_type` property
 def test_source_type_netcdf(mock_netcdf_file_path):
     """Test the DataSource.source_type property correctly returns 'netcdf' for a mock
-    '.nc' file."""
-
+    '.nc' file.
+    """
     data_source = DataSource(mock_netcdf_file_path)
     assert data_source.source_type == "netcdf"
 
 
 def test_source_type_directory(mock_directory_path):
     """Test the DataSource.source_type property correctly returns 'directory' for a
-    temporary directory."""
-
+    temporary directory.
+    """
     data_source = DataSource(mock_directory_path)
     assert data_source.source_type == "directory"
 
 
 def test_source_type_repository(mock_git_path):
     """Test the DataSource.source_type property correctly returns 'repository' for a
-    mock git repository."""
-
+    mock git repository.
+    """
     data_source = DataSource(mock_git_path)
     assert data_source.source_type == "repository"
 
 
 def test_source_type_yaml(mock_yaml_file_path):
     """Test the DataSource.source_type property correctly returns 'yaml' for a mock
-    '.yaml' file."""
+    '.yaml' file.
+    """
     data_source = DataSource(mock_yaml_file_path)
     assert data_source.source_type == "yaml"
 
 
 def test_source_type_unsupported_extension(tmp_path):
     """Test the DataSource.source_type property raises a ValueError for an unsupported
-    file."""
-
+    file.
+    """
     unsupported_file = tmp_path / "data.unsupported"
     unsupported_file.touch()
     data_source = DataSource(unsupported_file)
@@ -110,14 +111,14 @@ def test_source_type_unsupported_extension(tmp_path):
 
 def test_basename(mock_netcdf_file_path):
     """Test the DataSource.basename property correctly returns the filename and
-    extension."""
+    extension.
+    """
     data_source = DataSource(mock_netcdf_file_path)
     assert data_source.basename == "testfile.nc"
 
 
 def test_str(mock_netcdf_file_path):
     """Test the string representation of DataSource."""
-
     expected_str = f"""DataSource
 ----------
  location: {mock_netcdf_file_path.resolve()}

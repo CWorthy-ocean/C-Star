@@ -37,7 +37,8 @@ def _clone_and_checkout(
 
 def _get_repo_remote(local_path: str | Path) -> str:
     """Take a local repository path string (local_path) and return as a string the
-    remote URL."""
+    remote URL.
+    """
     return _run_cmd(
         f"git -C {local_path} remote get-url origin",
         msg_pre=f"Retrieving URL for remote in repository `{local_path}`.",
@@ -48,7 +49,8 @@ def _get_repo_remote(local_path: str | Path) -> str:
 
 def _get_repo_head_hash(local_path: str | Path) -> str:
     """Take a local repository path string (local_path) and return as a string the
-    commit hash of HEAD."""
+    commit hash of HEAD.
+    """
     return _run_cmd(
         f"git -C {local_path} rev-parse HEAD",
         msg_pre=f"Retrieving commit hash for repository `{local_path}`.",
@@ -77,7 +79,6 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
     git_hash: str
         A git commit hash associated with the checkout target
     """
-
     # Get list of targets from git ls-remote
     ls_remote = _run_cmd(
         f"git ls-remote {repo_url}",

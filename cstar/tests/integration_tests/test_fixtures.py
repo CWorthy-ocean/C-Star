@@ -43,10 +43,10 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
         },
     )
 
-    assert isinstance(
-        test_blueprint, LocalPath
-    ), f"Expected type LocalPath, but got {type(test_blueprint)}"
-    with open(test_blueprint, "r") as bpfile:
+    assert isinstance(test_blueprint, LocalPath), (
+        f"Expected type LocalPath, but got {type(test_blueprint)}"
+    )
+    with open(test_blueprint) as bpfile:
         bpyaml = yaml.safe_load(bpfile)
 
     assert (
@@ -57,7 +57,8 @@ def test_modify_template_blueprint(modify_template_blueprint, tmpdir):
 
 class TestFetchData:
     """Test class for testing data-fetching fixtures defined in the roms/fixtures.py
-    file."""
+    file.
+    """
 
     def test_fetch_roms_tools_source_data(
         self, request, tmpdir, fetch_roms_tools_source_data
@@ -84,17 +85,16 @@ class TestFetchData:
         - The symlink exists and is valid
         - All expected data files are present in the symlinked directory
         """
-
         test_data_directory = Path(tmpdir / "test_data_directory")
         fetch_roms_tools_source_data(test_data_directory)
 
-        assert (
-            test_data_directory.resolve() == ROMS_TOOLS_DATA_DIRECTORY.resolve()
-        ), f"{test_data_directory} links to {test_data_directory.resolve}, not {ROMS_TOOLS_DATA_DIRECTORY}"
+        assert test_data_directory.resolve() == ROMS_TOOLS_DATA_DIRECTORY.resolve(), (
+            f"{test_data_directory} links to {test_data_directory.resolve}, not {ROMS_TOOLS_DATA_DIRECTORY}"
+        )
         assert test_data_directory.exists(), f"{test_data_directory} does not exist"
-        assert (
-            test_data_directory.is_symlink()
-        ), f"{test_data_directory} is not a symbolic link as expected"
+        assert test_data_directory.is_symlink(), (
+            f"{test_data_directory} is not a symbolic link as expected"
+        )
 
         file_list = [f.name for f in test_data_directory.glob("*")]
         expected_files = [
@@ -127,7 +127,9 @@ class TestFetchData:
         fetch_remote_test_case_data()
 
         zip_files = list(CSTAR_TEST_DATA_DIRECTORY.glob("*.zip"))
-        assert not zip_files, f"Zip file was not removed: {zip_files[0] if zip_files else 'Unknown zip file'}"
+        assert not zip_files, (
+            f"Zip file was not removed: {zip_files[0] if zip_files else 'Unknown zip file'}"
+        )
 
         expected_files = [
             "additional_code/ROMS/namelists/roms.in",
@@ -144,6 +146,6 @@ class TestFetchData:
             if not expected_path.exists():
                 missing_items.append(expected_file)
 
-        assert (
-            not missing_items
-        ), f"Missing expected files in the test data directory: {missing_items}"
+        assert not missing_items, (
+            f"Missing expected files in the test data directory: {missing_items}"
+        )

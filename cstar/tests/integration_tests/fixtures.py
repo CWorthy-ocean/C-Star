@@ -1,7 +1,7 @@
 import shutil
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pooch
 import pytest
@@ -58,7 +58,6 @@ def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
         -------
         None
         """
-
         if isinstance(symlink_path, str):
             symlink_path = Path(symlink_path)
 
@@ -123,7 +122,6 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
         -------
         None
         """
-
         test_case_repo_url = (
             "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/"
         )

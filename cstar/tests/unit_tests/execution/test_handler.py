@@ -63,7 +63,6 @@ class TestExecutionHandlerUpdates:
         - That instructions for viewing the job output are provided if the job status
           is `COMPLETED` or similar.
         """
-
         caplog.set_level(logging.WARNING)
         handler = MockExecutionHandler(
             ExecutionStatus.COMPLETED, tmp_path / "mock_output.log"
@@ -105,7 +104,6 @@ class TestExecutionHandlerUpdates:
         - That previously existing content in the file is also logged.
         - That the method properly interacts with the output file in real-time.
         """
-
         # Create a temporary output file
         output_file = tmp_path / "output.log"
         initial_content = ["First line\n"]
@@ -234,7 +232,6 @@ class TestExecutionHandlerUpdates:
         caplog (pytest.LogCaptureFixture)
             Builtin fixture to capture log outputs
         """
-
         # Create a temporary output file
         output_file = tmp_path / "output.log"
         initial_content = ["First line\n"]

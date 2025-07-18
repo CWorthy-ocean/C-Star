@@ -55,7 +55,6 @@ class TestSlurmJob:
           `scheduler`, `commands`, `account_key`, `cpus`, `walltime`, and more.
         - mock_env_vars: A dictionary simulating environment variables.
         """
-
         # Create a SlurmQOS and patch its max_walltime property
         self.mock_qos = SlurmQOS(name="test_queue", query_name="test_queue")
         self.mock_partition = SlurmPartition(name="test_queue")
@@ -107,7 +106,8 @@ class TestSlurmJob:
 
     def test_script_task_distribution_not_required(self):
         """Verifies that the correct script is generated when the node x cpu breakdown
-        is not required."""
+        is not required.
+        """
         # Initialize the job
         job = SlurmJob(
             **self.common_job_params,
@@ -127,9 +127,9 @@ class TestSlurmJob:
             "\necho Hello, World"
         )
 
-        assert (
-            job.script.strip() == expected_script.strip()
-        ), f"Expected:\n{expected_script}\n\nGot:\n{job.script}"
+        assert job.script.strip() == expected_script.strip(), (
+            f"Expected:\n{expected_script}\n\nGot:\n{job.script}"
+        )
 
     @pytest.mark.filterwarnings(
         r"ignore:.* Attempting to create scheduler job.*:UserWarning"
@@ -158,7 +158,6 @@ class TestSlurmJob:
         -------
         - That the generated job script matches a pre-specified expected script
         """
-
         mock_global_max_cpus.return_value = 64
 
         params = self.common_job_params
@@ -189,9 +188,9 @@ class TestSlurmJob:
             "\necho Hello, World"
         )
 
-        assert (
-            job.script.strip() == expected_script.strip()
-        ), f"Expected:\n{expected_script}\n\nGot:\n{job.script}"
+        assert job.script.strip() == expected_script.strip(), (
+            f"Expected:\n{expected_script}\n\nGot:\n{job.script}"
+        )
 
     @patch(
         "cstar.system.manager.CStarSystemManager.environment", new_callable=PropertyMock
@@ -226,7 +225,6 @@ class TestSlurmJob:
         - That the `sbatch` command is executed with the correct arguments.
         - That the job ID is correctly extracted and assigned.
         """
-
         # Mock environment
         mock_environment.return_value.environment_variables = self.mock_env_vars
         mock_environment.return_value.uses_lmod = False
@@ -253,9 +251,9 @@ class TestSlurmJob:
         assert script_path.exists()
         with script_path.open() as f:
             script_content = f.read()
-        assert (
-            script_content.strip() == job.script.strip()
-        ), f"Script content mismatch!\nExpected:\n{job.script}\nGot:\n{script_content}"
+        assert script_content.strip() == job.script.strip(), (
+            f"Script content mismatch!\nExpected:\n{job.script}\nGot:\n{script_content}"
+        )
 
         # Hardcoded expected environment (excluding SLURM_ variables)
         expected_env = {"SOME_ENV_VAR": "value"}
@@ -319,7 +317,6 @@ class TestSlurmJob:
         -------
         - That a `RuntimeError` is raised with the expected message for each failure scenario.
         """
-
         # Mock the subprocess.run behavior
         mock_subprocess.return_value = MagicMock(
             returncode=subprocess_returncode,
@@ -367,7 +364,6 @@ class TestSlurmJob:
         - That the job is successfully canceled when `scancel` succeeds.
         - That a `RuntimeError` is raised with an appropriate error message when `scancel` fails.
         """
-
         # Create a temporary directory for the job run path
         run_path = tmp_path
 
@@ -435,7 +431,6 @@ class TestSlurmJob:
         - That the job script file is created at the specified path.
         - That the content of the created file matches the expected script.
         """
-
         # Define paths for the script file
         script_path = tmp_path / "test_job.sh"
 
@@ -455,9 +450,9 @@ class TestSlurmJob:
         with script_path.open() as f:
             file_content = f.read()
 
-        assert (
-            file_content.strip() == job.script.strip()
-        ), f"Script content mismatch!\nExpected:\n{job.script}\nGot:\n{file_content}"
+        assert file_content.strip() == job.script.strip(), (
+            f"Script content mismatch!\nExpected:\n{job.script}\nGot:\n{file_content}"
+        )
 
     @patch("subprocess.run")
     @pytest.mark.parametrize(
@@ -514,7 +509,6 @@ class TestSlurmJob:
         - That the job status matches the expected state for valid `sacct` outputs.
         - That a `RuntimeError` is raised when `sacct` fails or returns invalid data.
         """
-
         # Initialize the job
         job = SlurmJob(**self.common_job_params)
 
@@ -536,6 +530,6 @@ class TestSlurmJob:
             ):
                 job.status
         else:
-            assert (
-                job.status == expected_status
-            ), f"Expected status '{expected_status}' but got '{job.status}'"
+            assert job.status == expected_status, (
+                f"Expected status '{expected_status}' but got '{job.status}'"
+            )

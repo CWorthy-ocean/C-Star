@@ -1,7 +1,6 @@
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
 
 from cstar.base.datasource import DataSource
 from cstar.base.gitutils import _clone_and_checkout
@@ -48,8 +47,8 @@ class AdditionalCode(LoggingMixin):
         self,
         location: str,
         subdir: str = "",
-        checkout_target: Optional[str] = None,
-        files: Optional[list[str]] = None,
+        checkout_target: str | None = None,
+        files: list[str] | None = None,
     ):
         """Initialize an AdditionalCode object from a DataSource  and a list of code
         files.
@@ -75,10 +74,10 @@ class AdditionalCode(LoggingMixin):
         self.source: DataSource = DataSource(location)
         self.subdir: str = subdir
         self._checkout_target = checkout_target
-        self.files: Optional[list[str]] = [] if files is None else files
+        self.files: list[str] | None = [] if files is None else files
         # Initialize object state
-        self.working_path: Optional[Path] = None
-        self._local_file_hash_cache: Dict = {}
+        self.working_path: Path | None = None
+        self._local_file_hash_cache: dict = {}
 
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
@@ -118,13 +117,14 @@ class AdditionalCode(LoggingMixin):
         return repr_str
 
     @property
-    def checkout_target(self) -> Optional[str]:
+    def checkout_target(self) -> str | None:
         return self._checkout_target
 
     @property
     def exists_locally(self):
         """Determine whether a local working copy of the AdditionalCode exists at
-        self.working_path (bool)"""
+        self.working_path (bool)
+        """
         if (self.working_path is None) or (self._local_file_hash_cache is None):
             return False
 
@@ -167,9 +167,9 @@ class AdditionalCode(LoggingMixin):
                         "AdditionalCode.source points to a repository but AdditionalCode.checkout_target is None"
                     )
                 else:
-                    assert isinstance(
-                        self.checkout_target, str
-                    ), "We have just verified checkout_target is not None"
+                    assert isinstance(self.checkout_target, str), (
+                        "We have just verified checkout_target is not None"
+                    )
                 tmp_dir = tempfile.mkdtemp()
                 _clone_and_checkout(
                     source_repo=self.source.location,
