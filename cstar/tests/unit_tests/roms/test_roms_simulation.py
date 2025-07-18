@@ -1323,7 +1323,7 @@ class TestToAndFromDictAndBlueprint:
 
         # Assertions
         assert isinstance(sim, ROMSSimulation)
-        mock_open_file.assert_called_once_with(str(blueprint_path), "r")
+        mock_open_file.assert_called_once_with(str(blueprint_path))
 
     @patch("pathlib.Path.exists", return_value=True)
     @patch(
