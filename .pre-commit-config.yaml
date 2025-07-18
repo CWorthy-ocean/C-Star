@@ -39,10 +39,3 @@ repos:
     hooks:
       - id: absolufy-imports
         args: [--application-directories=.]
-# TODO: figure out the contradiction, or determine if ruff is doing everything we need here
-#  - repo: https://github.com/PyCQA/docformatter
-#    rev: v1.7.7
-#    hooks:
-#      - id: docformatter
-#        language: python
-#        args: ["--in-place", "--recursive", "--wrap-summaries=88", "--wrap-descriptions=88"]
