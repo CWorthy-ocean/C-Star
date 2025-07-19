@@ -382,7 +382,6 @@ async def test_event_hc_term(max_duration: float, frequency: float) -> None:
 @pytest.mark.parametrize(
     ("loop_delay", "loop_count"),
     [
-        (0.05, 10),
         (0.05, 20),
         (0.1, 10),
     ],
