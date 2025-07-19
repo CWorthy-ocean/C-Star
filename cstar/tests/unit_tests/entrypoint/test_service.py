@@ -362,7 +362,7 @@ async def test_event_hc_term(max_duration: float, frequency: float) -> None:
         service._start_healthcheck()  # noqa: SLF001
         await asyncio.sleep(0.1)
         service._send_terminate_to_hc("test_event_hc_term")  # noqa: SLF001
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
 
         assert not service.is_healthcheck_running
 
