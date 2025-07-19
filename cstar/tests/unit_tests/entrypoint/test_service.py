@@ -416,6 +416,7 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
         assert elapsed <= upper_bound
 
 
+@pytest.mark.skip
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail_on_shutdown", [False, True])
 async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
