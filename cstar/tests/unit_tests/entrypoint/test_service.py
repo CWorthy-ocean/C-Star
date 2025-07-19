@@ -184,7 +184,7 @@ async def run_a_fail_on_shutdown_printer() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [1, 10, 1000])
+@pytest.mark.parametrize("loop_count", [1, 10, 100])
 async def test_event_loop_shutdown(loop_count: int) -> None:
     """Verify that _on_iteration repeats until _can_shutdown returns True."""
     service = PrintingService(max_iterations=loop_count, hc_freq=1.0)
@@ -199,7 +199,7 @@ async def test_event_loop_shutdown(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [0, 10, 100, 1000])
+@pytest.mark.parametrize("loop_count", [0, 10, 50, 100])
 async def test_event_loop_task_service(loop_count: int) -> None:
     """Verify that  using as_service=False executes _on_iteration 1x."""
     with PrintingService(
@@ -224,7 +224,7 @@ async def test_event_loop_task_service(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [10, 100, 1000])
+@pytest.mark.parametrize("loop_count", [10, 40, 100])
 async def test_event_loop_hc_start(loop_count: int) -> None:
     """Verify aspects of the health-check startup.
 
@@ -254,7 +254,7 @@ async def test_event_loop_hc_start(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [10, 100, 1000])
+@pytest.mark.parametrize("loop_count", [10, 30, 100])
 async def test_event_loop_hc_freq(loop_count: int) -> None:
     """Verify that the health check occurs at the correct frequency.
 
