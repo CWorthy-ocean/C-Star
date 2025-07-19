@@ -276,7 +276,7 @@ class Service(ABC, LoggingMixin):
                 remaining_wait = max(hcf_remaining, 0)
 
                 # report large gaps between updates.
-                if hc_elapsed > 3 * config.health_check_frequency:
+                if hc_elapsed > 10 * config.health_check_frequency:
                     self.log.warning(
                         f"No health update in last {hc_elapsed:.2f} seconds."
                     )
