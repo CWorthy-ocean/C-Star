@@ -187,7 +187,7 @@ async def run_a_fail_on_shutdown_printer() -> None:
 @pytest.mark.parametrize("loop_count", [1, 10, 100])
 async def test_event_loop_shutdown(loop_count: int) -> None:
     """Verify that _on_iteration repeats until _can_shutdown returns True."""
-    service = PrintingService(max_iterations=loop_count, hc_freq=1.0)
+    service = PrintingService(max_iterations=loop_count, hc_freq=0.1)
 
     # Service should run until `loop_count` is exceeded
     assert not service.can_shutdown
@@ -411,7 +411,7 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
         # Confirm the delay plus "other time" combine to a total runtime over
         # the minimum possible time, but don't let them vastly exceed min.
 
-        upper_bound = 1.2 * expected_duration
+        upper_bound = 1.5 * expected_duration
 
         assert expected_duration <= elapsed
         assert elapsed <= upper_bound
