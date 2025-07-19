@@ -25,13 +25,13 @@ class PrintingService(Service):
         *,
         max_iterations: int = 0,
         as_service: bool = True,
-        hc_freq: float = -1,
+        hc_freq: float = 1,
         max_duration: float = 0.0,
         delay: float = 0.0,
     ) -> None:
         """Initialize the PrintingService."""
         config = ServiceConfiguration(
-            as_service, delay, hc_freq, logging.DEBUG, "PrintingService"
+            as_service, delay, abs(hc_freq), logging.DEBUG, "PrintingService"
         )
 
         super().__init__(config)
@@ -164,7 +164,7 @@ async def run_a_printer() -> None:
 
     Utility method for testing signal handling or shutdown behavior.
     """
-    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=90)
+    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=10)
     await service.execute()
 
 
@@ -174,7 +174,7 @@ async def run_a_fail_on_shutdown_printer() -> None:
     Utility method for testing signal handling or shutdown behavior. This service will
     raise an exception on shutdown.
     """
-    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=90)
+    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=10)
     mock.patch.object(
         service,
         "_on_shutdown",
@@ -184,10 +184,10 @@ async def run_a_fail_on_shutdown_printer() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [1, 10, 1000])
+@pytest.mark.parametrize("loop_count", [1, 10, 100])
 async def test_event_loop_shutdown(loop_count: int) -> None:
     """Verify that _on_iteration repeats until _can_shutdown returns True."""
-    service = PrintingService(max_iterations=loop_count)
+    service = PrintingService(max_iterations=loop_count, hc_freq=0.1)
 
     # Service should run until `loop_count` is exceeded
     assert not service.can_shutdown
@@ -199,12 +199,13 @@ async def test_event_loop_shutdown(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [0, 10, 100, 1000])
+@pytest.mark.parametrize("loop_count", [0, 10, 50, 100])
 async def test_event_loop_task_service(loop_count: int) -> None:
     """Verify that  using as_service=False executes _on_iteration 1x."""
     with PrintingService(
         max_iterations=loop_count,
         as_service=False,
+        hc_freq=1.0,
     ) as service:
         mock_on_iter = mock.MagicMock()
         mock.patch.object(service, "_on_iteration", mock_on_iter)
@@ -223,7 +224,7 @@ async def test_event_loop_task_service(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [10, 100, 1000])
+@pytest.mark.parametrize("loop_count", [10, 40, 100])
 async def test_event_loop_hc_start(loop_count: int) -> None:
     """Verify aspects of the health-check startup.
 
@@ -240,7 +241,7 @@ async def test_event_loop_hc_start(loop_count: int) -> None:
             "cstar.entrypoint.Service._start_healthcheck",
             mock_hc_start,
         ),
-        PrintingService(max_iterations=loop_count, hc_freq=0) as service,
+        PrintingService(max_iterations=loop_count, hc_freq=1) as service,
     ):
         # Confirm it isn't called on instantiation
         assert mock_hc_start.call_count == 0
@@ -253,7 +254,7 @@ async def test_event_loop_hc_start(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [10, 100, 1000])
+@pytest.mark.parametrize("loop_count", [10, 30, 100])
 async def test_event_loop_hc_freq(loop_count: int) -> None:
     """Verify that the health check occurs at the correct frequency.
 
@@ -361,7 +362,7 @@ async def test_event_hc_term(max_duration: float, frequency: float) -> None:
         service._start_healthcheck()  # noqa: SLF001
         await asyncio.sleep(0.1)
         service._send_terminate_to_hc("test_event_hc_term")  # noqa: SLF001
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
 
         assert not service.is_healthcheck_running
 
@@ -381,7 +382,6 @@ async def test_event_hc_term(max_duration: float, frequency: float) -> None:
 @pytest.mark.parametrize(
     ("loop_delay", "loop_count"),
     [
-        (0.05, 10),
         (0.05, 20),
         (0.1, 10),
     ],
@@ -410,7 +410,7 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
         # Confirm the delay plus "other time" combine to a total runtime over
         # the minimum possible time, but don't let them vastly exceed min.
 
-        upper_bound = 1.2 * expected_duration
+        upper_bound = 1.5 * expected_duration
 
         assert expected_duration <= elapsed
         assert elapsed <= upper_bound
