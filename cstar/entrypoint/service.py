@@ -267,7 +267,6 @@ class Service(ABC, LoggingMixin):
 
         last_health_check = time.time()  # timestamp of last health check
         running = True
-        update_delay = 0.0
         hc_elapsed = 0.0
 
         while running:
@@ -279,7 +278,7 @@ class Service(ABC, LoggingMixin):
                 # report large gaps between updates.
                 if hc_elapsed > 3 * config.health_check_frequency:
                     self.log.warning(
-                        f"No health update in last {update_delay:.2f} seconds."
+                        f"No health update in last {hc_elapsed:.2f} seconds."
                     )
 
                 if msg := msg_queue.get_nowait():
