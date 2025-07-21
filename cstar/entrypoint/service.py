@@ -8,6 +8,7 @@ from multiprocessing import Queue
 from queue import Empty
 from threading import Thread
 from types import FrameType
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -56,6 +57,9 @@ class Service(ABC, LoggingMixin):
     Provides overridable hook methods to modify behaviors in the main event loop, during
     health checks, and for specifying shutdown criteria.
     """
+
+    CMD_PREFIX: Literal["cmd"] = "cmd"
+    CMD_QUIT: Literal["quit"] = "quit"
 
     def __init__(
         self,
@@ -243,6 +247,7 @@ class Service(ABC, LoggingMixin):
         None
         """
         self.log.debug("Terminating healthcheck")
+        self._send_update_to_hc({self.CMD_PREFIX: self.CMD_QUIT, "reason": reason})
         self._send_update_to_hc({"cmd": "quit", "reason": reason})
 
     def _healthcheck(
@@ -294,12 +299,12 @@ class Service(ABC, LoggingMixin):
                         self._on_health_check()
                         last_health_check = time.time()
 
-                    command = msg.get("cmd", None)
+                    command = msg.get(self.CMD_PREFIX, None)
                     if not command:
                         self.log.info(
                             f"Healthcheck thread received message: {msg}",
                         )
-                    elif command == "quit":
+                    elif command == self.CMD_QUIT:
                         running = False
                 else:
                     time.sleep(remaining_wait)
@@ -420,7 +425,7 @@ class Service(ABC, LoggingMixin):
                         "Terminating service due to failure in _on_delay."
                     )
 
-            self._send_update_to_hc({"cmd": "heartbeat"})
+            self._send_update_to_hc({self.CMD_PREFIX: "heartbeat"})
 
         self._shutdown()
 
