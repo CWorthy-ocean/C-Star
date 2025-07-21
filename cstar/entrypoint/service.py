@@ -316,6 +316,9 @@ class Service(ABC, LoggingMixin):
         The health check thread is not blocked by the main thread when service
         operations are blocking.
         """
+        if self._config.health_check_frequency is None:
+            return
+
         if self._config.health_check_frequency >= 0:
             self.log.debug(
                 "Starting healthcheck thread w/frequency: %s.",
