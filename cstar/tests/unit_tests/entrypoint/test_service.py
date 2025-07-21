@@ -329,7 +329,7 @@ async def test_event_loop_hc_freq(loop_count: int) -> None:
     # Configure the health check to update every event loop iteration
     with PrintingService(max_iterations=loop_count, hc_freq=0) as service:
         service._start_healthcheck()  # noqa: SLF001
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
 
         # Confirm the HC thread and queue are created
         assert service.is_healthcheck_running
@@ -501,7 +501,7 @@ async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
         # clearly cause it to exit early.
         process = mp.Process(target=printer_fn)
         process.start()
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.1)
 
         term_at = time.time()
         process.terminate()  # Send a signal to terminate the service
