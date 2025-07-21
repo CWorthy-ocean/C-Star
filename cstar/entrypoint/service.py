@@ -364,7 +364,7 @@ class Service(ABC, LoggingMixin):
         """
         self._send_terminate_to_hc(reason=reason)
         if self._hc_thread and self._hc_thread.is_alive():
-            self._hc_thread.join()
+            self._hc_thread.join(timeout=1.0)
 
     def _shutdown(self) -> None:
         """Perform a clean shutdown of the service.
