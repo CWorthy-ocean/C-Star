@@ -40,7 +40,13 @@ class ServiceConfiguration(BaseModel):
 
     @computed_field
     def max_health_check_latency(self) -> float:
-        """Get the max latency allowed before missed health checks should be logged."""
+        """Get the max latency allowed before missed health checks should be logged.
+
+        When no healthcheck frequency is supplied, defaults to 1 second.
+        """
+        if self.health_check_frequency == 0:
+            return 1.0
+
         return self.health_check_frequency * self.health_check_log_threshold
 
 
