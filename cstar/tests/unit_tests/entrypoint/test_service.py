@@ -5,7 +5,6 @@ import queue
 import time
 import types
 from collections import defaultdict
-from typing import Optional
 from unittest import mock
 
 import pytest
@@ -490,7 +489,7 @@ async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
     If the service is configured to fail on shutdown, the signal handler must gracefully
     handle the failure without crashing.
     """
-    process: Optional[mp.Process] = None
+    process: mp.Process | None = None
 
     try:
         printer_fn = run_a_fail_on_shutdown_printer
