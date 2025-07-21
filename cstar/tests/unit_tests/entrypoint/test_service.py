@@ -471,8 +471,8 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
         summary = service.summarize(finalize=True)
         assert summary["_on_delay"] >= n_loops
 
-        # Confirm the delay plus "other time" combine to a total runtime over
-        # the minimum possible time, but don't let them vastly exceed min.
+        # Confirm the cumulative delay to the total runtime is over the minimum
+        # possible time, while allowing for compute overhead of processes/threads
 
         upper_bound = 1.3 * expected_duration
 
