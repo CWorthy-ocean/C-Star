@@ -189,6 +189,7 @@ async def run_a_fail_on_shutdown_printer() -> None:
     await service.execute()
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "value",
     [
@@ -204,6 +205,7 @@ async def test_config_check_delay(value: float) -> None:
     assert ps
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "value",
     [
@@ -218,6 +220,7 @@ async def test_config_check_delay_out_of_range(value: float) -> None:
         _ = PrintingService(delay=value)
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "value",
     [
@@ -233,6 +236,7 @@ async def test_config_check_hcfreq(value: float) -> None:
     assert ps
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "value",
     [
