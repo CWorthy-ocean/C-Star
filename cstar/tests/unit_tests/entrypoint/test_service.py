@@ -410,7 +410,7 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
         # Confirm the delay plus "other time" combine to a total runtime over
         # the minimum possible time, but don't let them vastly exceed min.
 
-        upper_bound = 1.5 * expected_duration
+        upper_bound = 1.3 * expected_duration
 
         assert expected_duration <= elapsed
         assert elapsed <= upper_bound
