@@ -26,7 +26,7 @@ class PrintingService(Service):
         *,
         max_iterations: int = 0,
         as_service: bool = True,
-        hc_freq: float = 1,
+        hc_freq: float | None = None,
         max_duration: float = 0.0,
         delay: float = 0.0,
     ) -> None:
@@ -251,7 +251,7 @@ async def test_config_check_hcfreq_out_of_range(value: float) -> None:
 @pytest.mark.parametrize("loop_count", [1, 10, 100])
 async def test_event_loop_shutdown(loop_count: int) -> None:
     """Verify that _on_iteration repeats until _can_shutdown returns True."""
-    service = PrintingService(max_iterations=loop_count, hc_freq=0.1)
+    service = PrintingService(max_iterations=loop_count)
 
     # Service should run until `loop_count` is exceeded
     assert not service.can_shutdown
@@ -269,7 +269,6 @@ async def test_event_loop_task_service(loop_count: int) -> None:
     with PrintingService(
         max_iterations=loop_count,
         as_service=False,
-        hc_freq=1.0,
     ) as service:
         mock_on_iter = mock.MagicMock()
         mock.patch.object(service, "_on_iteration", mock_on_iter)
