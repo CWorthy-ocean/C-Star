@@ -156,13 +156,7 @@ class PrintingService(Service):
                 "Exception occurred in service context: %s",
                 exc_value,
             )
-        self._send_terminate_to_hc("context manager exit")
-        if self.test_queue is not None:
-            self.test_queue.close()
-            self.test_queue.join_thread()
-        if self._hc_thread is not None:
-            self._send_terminate_to_hc("context manager exit")
-            self._hc_thread.join()
+        self._shutdown()
 
 
 async def run_a_printer() -> None:
