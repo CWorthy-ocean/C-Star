@@ -9,7 +9,7 @@ from queue import Empty
 from threading import Thread
 from types import FrameType
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from cstar.base.log import LoggingMixin
 
@@ -33,8 +33,15 @@ class ServiceConfiguration(BaseModel):
     """
     log_level: int = logging.INFO
     """The logging level used by the service."""
+    health_check_log_threshold: int = Field(10, ge=3)
+    """The number of health-checks that may be missed before logging."""
     name: str = "Service"
     """A user-friendly name for logging."""
+
+    @computed_field
+    def max_health_check_latency(self) -> float:
+        """Get the max latency allowed before missed health checks should be logged."""
+        return self.health_check_frequency * self.health_check_log_threshold
 
 
 class Service(ABC, LoggingMixin):
@@ -271,7 +278,7 @@ class Service(ABC, LoggingMixin):
                 remaining_wait = max(hcf_remaining, 0)
 
                 # report large gaps between updates.
-                if hc_elapsed > 10 * config.health_check_frequency:
+                if hc_elapsed > config.max_health_check_latency:
                     self.log.warning(
                         f"No health update in last {hc_elapsed:.2f} seconds."
                     )

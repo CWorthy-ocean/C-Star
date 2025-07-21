@@ -36,6 +36,7 @@ class PrintingService(Service):
             loop_delay=delay,
             health_check_frequency=hc_freq,
             log_level=logging.DEBUG,
+            health_check_log_threshold=20,
             name="PrintingService",
         )
 
