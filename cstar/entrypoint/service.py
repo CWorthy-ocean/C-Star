@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 from cstar.base.log import LoggingMixin
 
 
-# @dc.dataclass
 class ServiceConfiguration(BaseModel):
     """Configuration options for a Service."""
 
