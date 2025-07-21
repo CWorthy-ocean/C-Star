@@ -9,6 +9,7 @@ from typing import Optional
 from unittest import mock
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.entrypoint.service import Service, ServiceConfiguration
 
@@ -31,7 +32,11 @@ class PrintingService(Service):
     ) -> None:
         """Initialize the PrintingService."""
         config = ServiceConfiguration(
-            as_service, delay, abs(hc_freq), logging.DEBUG, "PrintingService"
+            as_service=as_service,
+            loop_delay=delay,
+            health_check_frequency=hc_freq,
+            log_level=logging.DEBUG,
+            name="PrintingService",
         )
 
         super().__init__(config)
@@ -181,6 +186,64 @@ async def run_a_fail_on_shutdown_printer() -> None:
         side_effect=RuntimeError("Kaboom!"),
     )
     await service.execute()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(100000, id="Large delay"),
+        pytest.param(1, id="1s delay"),
+        pytest.param(0.000001, id="Tiny delay"),
+        pytest.param(0.0, id="No delay"),
+    ],
+)
+async def test_config_check_delay(value: float) -> None:
+    """Verify the acceptable input range of ServiceConfiguration.loop_delay."""
+    ps = PrintingService(delay=value)
+    assert ps
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(-0.000001, id="Tiny negative delay"),
+        pytest.param(-1, id="1s negative delay"),
+        pytest.param(-100000, id="Large, negative delay"),
+    ],
+)
+async def test_config_check_delay_out_of_range(value: float) -> None:
+    """Verify the acceptable input range of ServiceConfiguration.loop_delay."""
+    with pytest.raises(ValidationError):
+        _ = PrintingService(delay=value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(100000, id="Large hc_freq"),
+        pytest.param(1, id="1s hc_freq"),
+        pytest.param(0.000001, id="Tiny hc_freq"),
+        pytest.param(0.0, id="0s hc_freq"),
+    ],
+)
+async def test_config_check_hcfreq(value: float) -> None:
+    """Verify the acceptable input range of ServiceConfiguration.loop_delay."""
+    ps = PrintingService(hc_freq=value)
+    assert ps
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(-0.000001, id="Tiny negative hc_freq"),
+        pytest.param(-1, id="1s negative hc_freq"),
+        pytest.param(-100000, id="Large, negative hc_freq"),
+    ],
+)
+async def test_config_check_hcfreq_out_of_range(value: float) -> None:
+    """Verify the acceptable input range of ServiceConfiguration.loop_delay."""
+    with pytest.raises(ValidationError):
+        _ = PrintingService(hc_freq=value)
 
 
 @pytest.mark.asyncio

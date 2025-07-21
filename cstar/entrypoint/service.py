@@ -1,5 +1,4 @@
 import asyncio
-import dataclasses as dc
 import logging
 import signal
 import time
@@ -10,11 +9,13 @@ from queue import Empty
 from threading import Thread
 from types import FrameType
 
+from pydantic import BaseModel, Field
+
 from cstar.base.log import LoggingMixin
 
 
-@dc.dataclass
-class ServiceConfiguration:
+# @dc.dataclass
+class ServiceConfiguration(BaseModel):
     """Configuration options for a Service."""
 
     as_service: bool = False
@@ -24,10 +25,9 @@ class ServiceConfiguration:
     shutdown criteria are met. When `False`, the service completes a single
     pass through the service lifecycle and automatically exits.
     """
-    loop_delay: float = 0
-    """Duration (in seconds) of a forced delay between iterations of the main event
-    loop."""
-    health_check_frequency: float = 0
+    loop_delay: float = Field(0.0, ge=0.0)
+    """Duration (in seconds) of a delay between iterations of the main event loop."""
+    health_check_frequency: float = Field(0.0, ge=0.0)
     """Time (in seconds) between calls to a health check handler.
 
     A value of 0 triggers the health check on every iteration.
@@ -55,10 +55,6 @@ class Service(ABC, LoggingMixin):
         ----------
         config: ServiceConfiguration
             Configuration to modify the behavior of the service.
-
-        Returns
-        -------
-        None
         """
         self._config = config
         """Runtime configuration of the `Service`"""
