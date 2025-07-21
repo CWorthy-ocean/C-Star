@@ -520,7 +520,7 @@ async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
         "_on_iteration",
         "_on_iteration_complete",
         "_on_shutdown",
-        "_on_health_check",  # done in 2nd thread, mock fails to patch
+        "_start_healthcheck",
         "_on_delay",
         "_can_shutdown",
     ],
