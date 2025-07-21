@@ -63,6 +63,11 @@ class PrintingService(Service):
         self.log.debug("Running PrintingService._on_delay")
         self.test_queue.put_nowait("_on_delay")
 
+    @property
+    def n_on_delay(self) -> int:
+        """Return the number of delays executed."""
+        return self.metrics["_on_delay"]
+
     def _on_iteration(self) -> None:
         super()._on_iteration()
         self.log.debug("Running PrintingService._on_iteration")
@@ -335,9 +340,9 @@ async def test_event_loop_hc_freq(loop_count: int) -> None:
         await service.execute()
 
         # Collect any leftover call metrics from the HC thread.
-        summary = service.summarize(finalize=True)
+        service.summarize(finalize=True)
 
-        assert summary["_on_health_check"] >= loop_count
+        assert service.n_on_health_check >= loop_count
 
 
 @pytest.mark.asyncio
@@ -361,7 +366,7 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
         await service.execute()
 
         # Collect any leftover call metrics from the HC thread.
-        summary = service.summarize(finalize=True)
+        service.summarize(finalize=True)
 
         # Confirm the hc frequency doesn't exceed maximum count possible (if
         # each HC occurred at exactly the right timestep and takes 0 time).
@@ -369,7 +374,7 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
         max_hc_calls = max_duration / frequency
         lower_bound = (0.9 * max_hc_calls) // max_hc_calls
 
-        assert lower_bound <= summary["_on_health_check"] <= max_hc_calls
+        assert lower_bound <= service.n_on_health_check <= max_hc_calls
 
 
 @pytest.mark.asyncio
@@ -428,7 +433,7 @@ async def test_event_hc_term(max_duration: float, frequency: float) -> None:
         assert not service.is_healthcheck_running
 
         # Collect any leftover call metrics from the HC thread.
-        summary = service.summarize(finalize=True)
+        service.summarize(finalize=True)
 
         # Confirm the hc frequency doesn't exceed maximum count possible (if
         # each HC occurred at exactly the right timestep and takes 0 time). Off
@@ -436,7 +441,7 @@ async def test_event_hc_term(max_duration: float, frequency: float) -> None:
         max_hc_calls = max_duration / frequency
         lower_bound = (0.9 * max_hc_calls) // max_hc_calls
 
-        assert lower_bound <= summary["_on_health_check"] <= max_hc_calls
+        assert lower_bound <= service.n_on_health_check <= max_hc_calls
 
 
 @pytest.mark.asyncio
@@ -465,8 +470,8 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
         elapsed = te - ts
 
         # Collect any leftover call metrics from the HC thread.
-        summary = service.summarize(finalize=True)
-        assert summary["_on_delay"] >= n_loops
+        service.summarize(finalize=True)
+        assert service.n_on_delay >= n_loops
 
         # Confirm the cumulative delay to the total runtime is over the minimum
         # possible time, while allowing for compute overhead of processes/threads
