@@ -533,10 +533,10 @@ async def test_user_unhandled_exceptions(user_hook_name: str) -> None:
     """
     # Configured to run for 3 seconds but it should blow up immediately.
     service = PrintingService(
+        # run as service to avoid shutting down before delay is invoke
         as_service=True,
-        hc_freq=0.1,
-        max_duration=3,
-        delay=0.1,
+        max_iterations=2,
+        delay=0.01,
     )
     # Any exception raised in user code should not propagate here.
     with (
