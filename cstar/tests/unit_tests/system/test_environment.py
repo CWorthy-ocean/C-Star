@@ -520,7 +520,7 @@ class TestStrAndReprMethods:
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
-    def test_str_method(self, _mock_uses_lmod):
+    def test_str_method(self, tmp_path: Path, custom_system_env, custom_user_env):
         """Tests that __str__ produces a formatted, readable summary.
 
         Mocks
@@ -547,10 +547,11 @@ class TestStrAndReprMethods:
         )
 
         with mock.patch(
-            "cstar.system.environment.CStarEnvironment.environment_variables",
-            new_callable=PropertyMock,
+            "cstar.system.environment.CStarEnvironment._load_env",
+            new_callable=Mock,
             return_value={"VAR1": "value1", "VAR2": "value2"},
         ):
+            # Instantiate the environment to trigger loading the cstar environment variables
             env = MockEnvironment()
             assert str(env) == expected_str
 

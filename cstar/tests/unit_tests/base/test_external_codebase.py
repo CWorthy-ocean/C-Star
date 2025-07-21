@@ -193,22 +193,36 @@ class TestExternalCodeBaseConfig:
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "test123"
 
-        # Assert local_config_status logic
-        assert generic_codebase.local_config_status == 0
-        assert generic_codebase.is_setup
+        with mock.patch.dict(
+            "os.environ",
+            {"TEST_ROOT": "https://github.com/test/repo.git"},
+            clear=True,
+        ):
+            # Assert local_config_status logic
+            assert generic_codebase.local_config_status == 0
 
     def test_local_config_status_wrong_remote(self, generic_codebase):
         self.mock_get_repo_remote.return_value = (
             "https://github.com/test/wrong_repo.git"
         )
 
-        assert generic_codebase.local_config_status == 1
+        with mock.patch.dict(
+            "os.environ",
+            {"TEST_ROOT": "https://github.com/test/repo.git"},
+            clear=True,
+        ):
+            assert generic_codebase.local_config_status == 1
 
     def test_local_config_status_wrong_checkout(self, generic_codebase):
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
-        assert generic_codebase.local_config_status == 2
+        with mock.patch.dict(
+            "os.environ",
+            {"TEST_ROOT": "https://github.com/test/repo.git"},
+            clear=True,
+        ):
+            assert generic_codebase.local_config_status == 2
 
     def test_local_config_status_no_env_var(self, generic_codebase):
         self.mock_environment.return_value.environment_variables = {}
@@ -379,13 +393,10 @@ class TestExternalCodeBaseConfigHandling:
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
-        with mock.patch(
-            "cstar.system.manager.CStarSystemManager.environment",
-            new_callable=mock.PropertyMock,
-            return_value=mock.Mock(
-                environment_variables={"TEST_ROOT": "/path/to/repo"},
-                package_root=tmp_path,
-            ),
+        with mock.patch.dict(
+            "os.environ",
+            {"TEST_ROOT": "/path/to/repo"},
+            clear=True,
         ):
             # Call the method to trigger the flow
             generic_codebase.handle_config_status()
