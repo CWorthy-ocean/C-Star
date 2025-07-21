@@ -110,7 +110,7 @@ def sim_runner(
 
     service_config = ServiceConfiguration(
         as_service=False,
-        health_check_frequency=-1,
+        health_check_frequency=0,
         log_level=logging.DEBUG,
         name="test_simulation_runner",
     )
@@ -409,7 +409,7 @@ def test_start_runner(
 
     service_config = ServiceConfiguration(
         as_service=False,
-        health_check_frequency=-1,
+        health_check_frequency=0,
         log_level=logging.DEBUG,
         name="test_start_runner",
     )

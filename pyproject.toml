@@ -76,6 +76,7 @@ include-package-data = true
 norecursedirs = [".tox", ".git", "__pycache__", ".#*", "*~"]
 log_cli_format = "%(asctime)s | %(levelname)s | %(name)s::%(funcName)s:%(lineno)d: %(message)s"
 log_cli_level = "INFO"
+asyncio_mode = "auto"
 
 
 # Use addopts to ignore specific files and directories

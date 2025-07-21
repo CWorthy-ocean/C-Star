@@ -1,5 +1,4 @@
 import asyncio
-import dataclasses as dc
 import logging
 import signal
 import time
@@ -9,12 +8,14 @@ from multiprocessing import Queue
 from queue import Empty
 from threading import Thread
 from types import FrameType
+from typing import Literal
+
+from pydantic import BaseModel, Field, computed_field
 
 from cstar.base.log import LoggingMixin
 
 
-@dc.dataclass
-class ServiceConfiguration:
+class ServiceConfiguration(BaseModel):
     """Configuration options for a Service."""
 
     as_service: bool = False
@@ -24,18 +25,32 @@ class ServiceConfiguration:
     shutdown criteria are met. When `False`, the service completes a single
     pass through the service lifecycle and automatically exits.
     """
-    loop_delay: float = 0
-    """Duration (in seconds) of a forced delay between iterations of the main event
-    loop."""
-    health_check_frequency: float = 0
+    loop_delay: float = Field(0.0, ge=0.0)
+    """Duration (in seconds) of a delay between iterations of the main event loop."""
+    health_check_frequency: float | None = Field(None, ge=0.0)
     """Time (in seconds) between calls to a health check handler.
 
-    A value of 0 triggers the health check on every iteration.
+    NOTE:
+    - A value of `None` disables health checks.
+    - A value of `0` triggers the health check on every iteration.
     """
     log_level: int = logging.INFO
     """The logging level used by the service."""
+    health_check_log_threshold: int = Field(10, ge=3)
+    """The number of health-checks that may be missed before logging."""
     name: str = "Service"
     """A user-friendly name for logging."""
+
+    @computed_field
+    def max_health_check_latency(self) -> float:
+        """Get the max latency allowed before missed health checks should be logged.
+
+        When no healthcheck frequency is supplied, defaults to 1 second.
+        """
+        if self.health_check_frequency is None or self.health_check_frequency == 0:
+            return 1.0
+
+        return self.health_check_frequency * self.health_check_log_threshold
 
 
 class Service(ABC, LoggingMixin):
@@ -44,6 +59,9 @@ class Service(ABC, LoggingMixin):
     Provides overridable hook methods to modify behaviors in the main event loop, during
     health checks, and for specifying shutdown criteria.
     """
+
+    CMD_PREFIX: Literal["cmd"] = "cmd"
+    CMD_QUIT: Literal["quit"] = "quit"
 
     def __init__(
         self,
@@ -55,10 +73,6 @@ class Service(ABC, LoggingMixin):
         ----------
         config: ServiceConfiguration
             Configuration to modify the behavior of the service.
-
-        Returns
-        -------
-        None
         """
         self._config = config
         """Runtime configuration of the `Service`"""
@@ -235,6 +249,7 @@ class Service(ABC, LoggingMixin):
         None
         """
         self.log.debug("Terminating healthcheck")
+        self._send_update_to_hc({self.CMD_PREFIX: self.CMD_QUIT, "reason": reason})
         self._send_update_to_hc({"cmd": "quit", "reason": reason})
 
     def _healthcheck(
@@ -261,13 +276,12 @@ class Service(ABC, LoggingMixin):
         -------
         None
         """
-        if config.health_check_frequency < 0:
-            self.log.debug("Health check disabled with a negative frequency.")
+        if config.health_check_frequency is None:
+            self.log.debug("Health check disabled.")
             return
 
         last_health_check = time.time()  # timestamp of last health check
         running = True
-        update_delay = 0.0
         hc_elapsed = 0.0
 
         while running:
@@ -277,9 +291,9 @@ class Service(ABC, LoggingMixin):
                 remaining_wait = max(hcf_remaining, 0)
 
                 # report large gaps between updates.
-                if hc_elapsed > 3 * config.health_check_frequency:
+                if hc_elapsed > config.max_health_check_latency:
                     self.log.warning(
-                        f"No health update in last {update_delay:.2f} seconds."
+                        f"No health update in last {hc_elapsed:.2f} seconds."
                     )
 
                 if msg := msg_queue.get_nowait():
@@ -287,12 +301,12 @@ class Service(ABC, LoggingMixin):
                         self._on_health_check()
                         last_health_check = time.time()
 
-                    command = msg.get("cmd", None)
+                    command = msg.get(self.CMD_PREFIX, None)
                     if not command:
                         self.log.info(
                             f"Healthcheck thread received message: {msg}",
                         )
-                    elif command == "quit":
+                    elif command == self.CMD_QUIT:
                         running = False
                 else:
                     time.sleep(remaining_wait)
@@ -309,6 +323,9 @@ class Service(ABC, LoggingMixin):
         The health check thread is not blocked by the main thread when service
         operations are blocking.
         """
+        if self._config.health_check_frequency is None:
+            return
+
         if self._config.health_check_frequency >= 0:
             self.log.debug(
                 "Starting healthcheck thread w/frequency: %s.",
@@ -347,7 +364,7 @@ class Service(ABC, LoggingMixin):
         """
         self._send_terminate_to_hc(reason=reason)
         if self._hc_thread and self._hc_thread.is_alive():
-            self._hc_thread.join()
+            self._hc_thread.join(timeout=1.0)
 
     def _shutdown(self) -> None:
         """Perform a clean shutdown of the service.
@@ -372,8 +389,8 @@ class Service(ABC, LoggingMixin):
         """
         try:
             running = True
-            self._start_healthcheck()
             self._on_start()
+            self._start_healthcheck()
         except Exception:
             self.log.exception("Unable to start service.")
             running = False
@@ -410,7 +427,7 @@ class Service(ABC, LoggingMixin):
                         "Terminating service due to failure in _on_delay."
                     )
 
-            self._send_update_to_hc({"cmd": "heartbeat"})
+            self._send_update_to_hc({self.CMD_PREFIX: "heartbeat"})
 
         self._shutdown()
 
