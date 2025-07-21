@@ -27,10 +27,12 @@ class ServiceConfiguration(BaseModel):
     """
     loop_delay: float = Field(0.0, ge=0.0)
     """Duration (in seconds) of a delay between iterations of the main event loop."""
-    health_check_frequency: float = Field(0.0, ge=0.0)
+    health_check_frequency: float | None = Field(None, ge=0.0)
     """Time (in seconds) between calls to a health check handler.
 
-    A value of 0 triggers the health check on every iteration.
+    NOTE:
+    - A value of `None` disables health checks.
+    - A value of `0` triggers the health check on every iteration.
     """
     log_level: int = logging.INFO
     """The logging level used by the service."""
@@ -45,7 +47,7 @@ class ServiceConfiguration(BaseModel):
 
         When no healthcheck frequency is supplied, defaults to 1 second.
         """
-        if self.health_check_frequency == 0:
+        if self.health_check_frequency is None or self.health_check_frequency == 0:
             return 1.0
 
         return self.health_check_frequency * self.health_check_log_threshold
@@ -274,8 +276,8 @@ class Service(ABC, LoggingMixin):
         -------
         None
         """
-        if config.health_check_frequency < 0:
-            self.log.debug("Health check disabled with a negative frequency.")
+        if config.health_check_frequency is None:
+            self.log.debug("Health check disabled.")
             return
 
         last_health_check = time.time()  # timestamp of last health check
