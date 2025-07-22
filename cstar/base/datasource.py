@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
 
@@ -21,7 +20,7 @@ class DataSource:
        The basename of self.location, typically the file name
     """
 
-    def __init__(self, location: str | Path, file_hash: Optional[str] = None):
+    def __init__(self, location: str | Path, file_hash: str | None = None):
         """Initialize a DataSource from a location string.
 
         Parameters:
@@ -42,13 +41,14 @@ class DataSource:
         return self._location
 
     @property
-    def file_hash(self) -> Optional[str]:
+    def file_hash(self) -> str | None:
         return self._file_hash
 
     @property
     def location_type(self) -> str:
         """Get the location type (e.g. "path" or "url") from the "location"
-        attribute."""
+        attribute.
+        """
         urlparsed_location = urlparse(self.location)
         if all([urlparsed_location.scheme, urlparsed_location.netloc]):
             return "url"

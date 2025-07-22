@@ -148,7 +148,6 @@ class TestSchedulerJobBase:
         - This test suppresses warnings about unspecified walltime using
           `@pytest.mark.filterwarnings`.
         """
-
         params = {
             key: value
             for key, value in self.common_job_params.items()
@@ -213,7 +212,6 @@ class TestSchedulerJobBase:
         - That a warning is logged about the missing queue walltime.
         - That the job's walltime matches the user-provided value ("01:00:00").
         """
-
         with patch.object(
             MockScheduler, "get_queue", return_value=MagicMock(max_walltime=None)
         ):
@@ -244,7 +242,6 @@ class TestSchedulerJobBase:
         - That a warning is logged about the unspecified walltime.
         - That the job's walltime matches the queue's maximum walltime ("02:00:00").
         """
-
         with patch.object(
             MockScheduler, "get_queue", return_value=MagicMock(max_walltime="02:00:00")
         ):
@@ -481,7 +478,8 @@ class TestCalculateNodeDistribution:
 
     def test_partial_division(self):
         """Test when `n_cores_required` is not an exact multiple of
-        `tot_cores_per_node`."""
+        `tot_cores_per_node`.
+        """
         n_cores_required = 300
         tot_cores_per_node = 64
 
@@ -492,7 +490,8 @@ class TestCalculateNodeDistribution:
 
     def test_single_node(self):
         """Test when `n_cores_required` is less than or equal to
-        `tot_cores_per_node`."""
+        `tot_cores_per_node`.
+        """
         n_cores_required = 50
         tot_cores_per_node = 64
 
@@ -612,7 +611,6 @@ class TestCreateSchedulerJob:
         - That the job's attributes (e.g., commands, CPUs, nodes, walltime) are assigned
           correctly based on the provided parameters.
         """
-
         # Mock global_max_cpus_per_node for the scheduler
         mock_global_max_cpus.return_value = 128
 
@@ -684,7 +682,6 @@ class TestCreateSchedulerJob:
         - That a `TypeError` is raised with a message indicating the missing
           required arguments.
         """
-
         with pytest.raises(TypeError, match="missing .* required positional argument"):
             create_scheduler_job(
                 cpus=4,

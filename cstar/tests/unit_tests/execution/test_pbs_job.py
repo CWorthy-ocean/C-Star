@@ -57,7 +57,6 @@ class TestPBSJob:
           including `scheduler`, `commands`, `account_key`, `cpus`, `nodes`, `walltime`,
           `job_name`, `output_file`, and `queue_name`.
         """
-
         # Create PBSQueue with specified max_walltime
         self.mock_queue = PBSQueue(name="test_queue", max_walltime="02:00:00")
 
@@ -94,7 +93,6 @@ class TestPBSJob:
           - Custom scheduler directives provided in `other_scheduler_directives`.
           - Commands to execute in the job script (`echo Hello, World`).
         """
-
         # Initialize a PBSJob
         job = PBSJob(**self.common_job_params)
 
@@ -114,9 +112,9 @@ class TestPBSJob:
         )
 
         # Validate the script content
-        assert (
-            job.script.strip() == expected_script.strip()
-        ), f"Script mismatch!\nExpected:\n{expected_script}\n\nGot:\n{job.script}"
+        assert job.script.strip() == expected_script.strip(), (
+            f"Script mismatch!\nExpected:\n{expected_script}\n\nGot:\n{job.script}"
+        )
 
     @patch("subprocess.run")
     def test_submit(self, mock_subprocess, tmp_path):
@@ -139,7 +137,6 @@ class TestPBSJob:
         - That the script file is created in the specified path.
         - That the `qsub` command is executed with the correct arguments.
         """
-
         # Mock subprocess.run for qsub
         mock_subprocess.return_value = MagicMock(
             returncode=0, stdout="12345.mockserver\n", stderr=""
@@ -196,7 +193,6 @@ class TestPBSJob:
         -------
         - That a `RuntimeError` is raised with the expected error message when submission fails.
         """
-
         # Mock subprocess.run for qsub
         mock_subprocess.return_value = MagicMock(
             returncode=returncode, stdout=stdout, stderr=stderr
@@ -237,7 +233,6 @@ class TestPBSJob:
         - That the `qdel` command is called with the correct job ID and parameters.
         - That no exceptions are raised during the cancellation process.
         """
-
         # Mock the status to "running"
         mock_status.return_value = ExecutionStatus.RUNNING
 
@@ -489,7 +484,6 @@ class TestPBSJob:
         - That the job status is correctly determined for valid `qstat` outputs.
         - That appropriate exceptions are raised for invalid or error scenarios.
         """
-
         # Mock qstat command output
         if qstat_output is not None:
             if qstat_output == "invalid_json":
@@ -514,9 +508,9 @@ class TestPBSJob:
             with pytest.raises(expected_exception, match=expected_message):
                 job.status
         else:
-            assert (
-                job.status == expected_status
-            ), f"Expected status '{expected_status}' but got '{job.status}'"
+            assert job.status == expected_status, (
+                f"Expected status '{expected_status}' but got '{job.status}'"
+            )
 
     @patch("json.loads", side_effect=json.JSONDecodeError("Expecting value", "", 0))
     @patch("subprocess.run")

@@ -22,7 +22,6 @@ def _get_sha256_hash(file_path: str | Path) -> str:
     file_hash: str
        The SHA-256 checksum of the file at file_path
     """
-
     file_path = Path(file_path)
     if not file_path.is_file():
         raise FileNotFoundError(
@@ -62,7 +61,7 @@ def _replace_text_in_file(file_path: str | Path, old_text: str, new_text: str) -
     file_path = Path(file_path).resolve()
     temp_file_path = Path(str(file_path) + ".tmp")
 
-    with open(file_path, "r") as read_file, open(temp_file_path, "w") as write_file:
+    with open(file_path) as read_file, open(temp_file_path, "w") as write_file:
         for line in read_file:
             if old_text in line:
                 text_replaced = True

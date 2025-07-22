@@ -1,7 +1,8 @@
 import os
 import subprocess
+from collections import ChainMap
+from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Callable, ChainMap, Generator
 from unittest import mock
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
@@ -69,7 +70,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         - Confirms the correct sequence of subprocess calls for resetting and loading modules.
         """
-
         # Set up the LMOD_SYSHOST environment variable
         with patch.dict(
             "cstar.system.environment.os.environ", {"LMOD_SYSHOST": lmod_syshost}
@@ -115,7 +115,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         lmod_list: Module names to be loaded, based on the system's `.lmod` file.
         """
-
         with open(env.lmod_path) as file:
             return file.readlines()
 
@@ -147,7 +146,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         - Confirms merged environment variables with expected values after expansion.
         """
-
         # Write simulated system .env content to the appropriate location
         system_dotenv_path.write_text(
             "NETCDFHOME=${NETCDF_FORTRANHOME}/\n"
@@ -211,7 +209,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         - Confirms merged environment variables with expected values after expansion.
         """
-
         # Write simulated system .env content to the appropriate location
         exp_system_env = {
             "NETCDFHOME": "${NETCDF_FORTRANHOME}/",
@@ -317,7 +314,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         - Confirms merged environment variables with expected values after expansion.
         """
-
         # Write simulated system .env content to the appropriate location
         custom_system_env(
             {
@@ -383,7 +379,6 @@ class TestSetupEnvironmentFromFiles:
         -------
         - Confirms merged environment variables with expected values after expansion.
         """
-
         # Patch the root path and expanduser to point to our temporary files
         tmp_pkg_root = tmp_path / package_root
 
@@ -607,7 +602,6 @@ class TestExceptions:
         - CStarEnvironment.uses_lmod: Patched to simulate environments that use or don’t use Lmod.
         - os.environ: Cleared and patched with specific values for test isolation.
         """
-
         self.subprocess_patcher = patch(
             "cstar.base.utils.subprocess.run",
             return_value=subprocess.CompletedProcess(args="module reset", returncode=0),
@@ -661,7 +655,6 @@ class TestExceptions:
         -------
         - Raises EnvironmentError with a message indicating Lmod modules are not supported on the system.
         """
-
         self.mock_uses_lmod.return_value = False
         with pytest.raises(
             EnvironmentError, match="does not appear to use Linux Environment Modules"
@@ -688,7 +681,6 @@ class TestExceptions:
         - Raises RuntimeError with a message indicating failure of the "module reset" command.
         - subprocess.run is called with the expected command for `module reset`.
         """
-
         mock_subprocess.return_value.returncode = 1  # Simulate failure
         mock_subprocess.return_value.stderr = "Module reset error"
 
@@ -725,7 +717,6 @@ class TestExceptions:
         - Raises RuntimeError with a message indicating failure of the "module load" command.
         - subprocess.run is called with the expected commands `reset` and `load`
         """
-
         # Define side effects for subprocess.run
         side_effects = [
             subprocess.CompletedProcess(

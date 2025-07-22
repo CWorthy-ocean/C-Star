@@ -39,7 +39,6 @@ def test_expected_env_var(roms_codebase):
 
 def test_defaults_are_set():
     """Test that the defaults are set correctly."""
-
     roms_codebase = ROMSExternalCodeBase()
     assert roms_codebase.source_repo == "https://github.com/CWorthy-ocean/ucla-roms.git"
     assert roms_codebase.checkout_target == "main"
@@ -175,7 +174,6 @@ class TestROMSExternalCodeBaseGet:
 
     def test_make_nhmg_failure(self, roms_codebase, tmp_path):
         """Test that the get method raises an error when 'make nhmg' fails."""
-
         ## There are two subprocess calls, we'd like one fail, one pass:
         self.mock_subprocess_run.side_effect = [
             mock.Mock(
@@ -205,7 +203,6 @@ class TestROMSExternalCodeBaseGet:
 
     def test_make_tools_roms_failure(self, roms_codebase, tmp_path):
         """Test that the get method raises an error when 'make Tools-Roms' fails."""
-
         # Simulate success for `make nhmg` and failure for `make Tools-Roms`
         self.mock_subprocess_run.side_effect = [
             mock.Mock(returncode=0),  # Success for nhmg

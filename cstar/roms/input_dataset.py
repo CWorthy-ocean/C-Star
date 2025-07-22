@@ -3,7 +3,7 @@ import shutil
 import tempfile
 from abc import ABC
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 import roms_tools
@@ -41,15 +41,15 @@ class ROMSPartitioning:
         Paths to the partitioned files.
     """
 
-    def __init__(self, np_xi: int, np_eta: int, files: List[Path]):
+    def __init__(self, np_xi: int, np_eta: int, files: list[Path]):
         self.np_xi = np_xi
         self.np_eta = np_eta
         self.files = files
-        self._local_file_hash_cache: Dict = {}
-        self._local_file_stat_cache: Dict = {}
+        self._local_file_hash_cache: dict = {}
+        self._local_file_stat_cache: dict = {}
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files,pad=43)})"
+        return f"{self.__class__.__name__}(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files, pad=43)})"
 
     def __len__(self):
         return len(self.files)
@@ -74,11 +74,11 @@ class ROMSInputDataset(InputDataset, ABC):
     def __init__(
         self,
         location: str,
-        file_hash: Optional[str] = None,
-        start_date: Optional[str | dt.datetime] = None,
-        end_date: Optional[str | dt.datetime] = None,
-        source_np_xi: Optional[int] = None,
-        source_np_eta: Optional[int] = None,
+        file_hash: str | None = None,
+        start_date: str | dt.datetime | None = None,
+        end_date: str | dt.datetime | None = None,
+        source_np_xi: int | None = None,
+        source_np_eta: int | None = None,
     ):
         super().__init__(
             location=location,
@@ -89,7 +89,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
         self.source_np_xi = source_np_xi
         self.source_np_eta = source_np_eta
-        self.partitioning: Optional[ROMSPartitioning] = None
+        self.partitioning: ROMSPartitioning | None = None
 
     @property
     def source_partitioning(self) -> tuple[int, int] | None:
@@ -176,7 +176,8 @@ class ROMSInputDataset(InputDataset, ABC):
 
         def get_files_to_partition():
             """Helper function to obtain a list of files associated with this
-            ROMSInputDataset to partition."""
+            ROMSInputDataset to partition.
+            """
             if isinstance(self.working_path, list):
                 # if single InputDataset corresponds to many files, check they're colocated
                 if not all(
@@ -197,7 +198,8 @@ class ROMSInputDataset(InputDataset, ABC):
 
         def partition_files(files: list[Path]) -> list[Path]:
             """Helper function that wraps the actual roms_tools.partition_netcdf
-            call."""
+            call.
+            """
             new_parted_files = []
 
             for idfile in files:
@@ -210,7 +212,8 @@ class ROMSInputDataset(InputDataset, ABC):
 
         def backup_existing_partitioned_files(files: list[Path]):
             """Helper function to move existing parted files to a tmp dir while
-            attempting to create new ones."""
+            attempting to create new ones.
+            """
             tmpdir = tempfile.TemporaryDirectory()
             backup_path = Path(tmpdir.name)
 
@@ -222,8 +225,8 @@ class ROMSInputDataset(InputDataset, ABC):
             backup_dir: Path, restore_paths: list[Path]
         ):
             """Helper function to restore existing parted files if partitioning
-            fails."""
-
+            fails.
+            """
             for f in restore_paths:
                 shutil.move(backup_dir / f.name, f.resolve())
 
@@ -341,7 +344,6 @@ class ROMSInputDataset(InputDataset, ABC):
         local_dir (Path):
             Directory where the resulting NetCDF files should be saved.
         """
-
         # Ensure we're working with a Path object
         local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)
@@ -407,7 +409,7 @@ class ROMSInputDataset(InputDataset, ABC):
         )
         save_kwargs: dict[Any, Any] = {}
         save_kwargs["filepath"] = Path(
-            f"{local_dir/Path(self.source.location).stem}.nc"
+            f"{local_dir / Path(self.source.location).stem}.nc"
         )
 
         savepath = roms_tools_class_instance.save(**save_kwargs)
@@ -463,7 +465,8 @@ class ROMSModelGrid(ROMSInputDataset):
 
 class ROMSInitialConditions(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model initial condition
-    files."""
+    files.
+    """
 
     pass
 
@@ -476,14 +479,16 @@ class ROMSTidalForcing(ROMSInputDataset):
 
 class ROMSBoundaryForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model boundary condition
-    files."""
+    files.
+    """
 
     pass
 
 
 class ROMSSurfaceForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model surface forcing
-    files."""
+    files.
+    """
 
     pass
 

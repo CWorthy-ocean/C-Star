@@ -38,7 +38,7 @@ test = [
      "pytest>=7.0",
      "roms_tools[dask]==2.6.2"
      ]
-dev =[]
+dev =["ruff"]
 
 [build-system]
 requires = [
@@ -53,15 +53,39 @@ fallback_version = "9999"
 
 # Configuration for mypy type checker
 [tool.mypy]
-ignore_missing_imports = true 
+ignore_missing_imports = true
 exclude = "properties|asv_bench|docs"
 
 # Configuration for ruff linter and formatter
 [tool.ruff]
 fix = true
+show-fixes = true
+line-length = 88
 
 [tool.ruff.lint]
-extend-select = ["I"]
+extend-select = ["I", "F", "E", "W", "D", "UP"] #  "RUF", "UP"]
+ignore = [
+    # will fix eventually
+    "E501",
+    "D205",
+    "D102",
+    "D101",
+    "D400",
+    "D103",
+    "D106",
+    # maybe fix
+    "D100",
+    "D401",
+    "D104", # will this show up in the readthedocs?
+    # won't fix
+    "D105",
+    "D107", # if you're doing wacky init stuff, please document
+
+]#, "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
 
 [tool.pre-commit]
 config = ".pre-commit-config.yaml"

@@ -97,7 +97,6 @@ def get_logger(
     logging.Logger
         A logger instance with the specified name.
     """
-
     fmt = fmt or DEFAULT_LOG_FORMAT
 
     logger = logging.getLogger(name)

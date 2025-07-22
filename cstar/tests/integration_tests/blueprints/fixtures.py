@@ -1,5 +1,5 @@
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -45,10 +45,9 @@ def modify_template_blueprint(tmpdir) -> Callable[[Path | str, dict[str, str]], 
         modified_blueprint_path:
            A temporary path to a modified version of the template blueprint file.
         """
-
         template_blueprint_path = Path(template_blueprint_path)
 
-        with open(template_blueprint_path, "r") as template_file:
+        with open(template_blueprint_path) as template_file:
             template_content = template_file.read()
 
         modified_template_content = template_content

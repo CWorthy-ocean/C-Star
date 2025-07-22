@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
 
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import _run_cmd
@@ -19,7 +18,7 @@ class Queue(ABC):
         Defaults to the value of `name` (as the two are usually the same).
     """
 
-    def __init__(self, name: str, query_name: Optional[str] = None):
+    def __init__(self, name: str, query_name: str | None = None):
         """Initialize a Queue instance.
 
         Parameters
@@ -30,7 +29,6 @@ class Queue(ABC):
             An alternative name used for querying the queue. If not provided, it defaults
             to the value of `name`.
         """
-
         self.name = name
         self.query_name = query_name if query_name is not None else name
 
@@ -90,7 +88,6 @@ class SlurmQueue(Queue, ABC):
         str
             The formatted walltime string in the "HH:MM:SS" format.
         """
-
         if walltime_str.count("-") == 1:  # D-HH:MM:SS
             mw_d = int(walltime_str.split("-")[0])
             mw_hms = walltime_str.split("-")[1]
@@ -102,11 +99,11 @@ class SlurmQueue(Queue, ABC):
             mw_m, mw_s = map(int, mw_hms.split(":"))
         elif mw_hms.count(":") == 2:  # HH:MM:SS
             mw_h, mw_m, mw_s = map(int, mw_hms.split(":"))
-        return f"{mw_d*24 + mw_h:02}:{mw_m:02}:{mw_s:02}"
+        return f"{mw_d * 24 + mw_h:02}:{mw_m:02}:{mw_s:02}"
 
     @property
     @abstractmethod
-    def max_walltime(self) -> Optional[str]:
+    def max_walltime(self) -> str | None:
         pass
 
 
@@ -128,7 +125,7 @@ class SlurmQOS(SlurmQueue):
     """
 
     @property
-    def max_walltime(self) -> Optional[str]:
+    def max_walltime(self) -> str | None:
         """Retrieve the maximum walltime for the SLURM QOS.
 
         Queries the SLURM accounting manager (`sacctmgr`) to fetch the maximum walltime
@@ -144,7 +141,6 @@ class SlurmQOS(SlurmQueue):
         RuntimeError
             If the command to query the SLURM accounting manager (`sacctmgr`) fails.
         """
-
         sp_cmd = f"sacctmgr show qos {self.name} format=MaxWall --noheader"
         mw = _run_cmd(sp_cmd)
         return self._parse_walltime(mw) if mw else None
@@ -168,7 +164,7 @@ class SlurmPartition(SlurmQueue):
     """
 
     @property
-    def max_walltime(self) -> Optional[str]:
+    def max_walltime(self) -> str | None:
         """Retrieve the maximum walltime for the SLURM partition.
 
         Queries the SLURM scheduler (`sinfo`) to fetch the maximum walltime
@@ -184,7 +180,6 @@ class SlurmPartition(SlurmQueue):
         RuntimeError
             If the command to query the SLURM scheduler (`sinfo`) fails.
         """
-
         sp_cmd = f"sinfo -h -o '%l' -p {self.name}"
         mw = _run_cmd(sp_cmd)
         return self._parse_walltime(mw) if mw else None
@@ -207,7 +202,7 @@ class PBSQueue(Queue):
         The maximum walltime allowed for jobs in this queue, formatted as "HH:MM:SS".
     """
 
-    def __init__(self, name: str, max_walltime: str, query_name: Optional[str] = None):
+    def __init__(self, name: str, max_walltime: str, query_name: str | None = None):
         """Initialize a PBSQueue instance.
 
         Parameters
@@ -219,7 +214,6 @@ class PBSQueue(Queue):
         query_name : str, optional
             An alternative name used for querying the queue. Defaults to the value of `name`.
         """
-
         super().__init__(name)
         self._max_walltime = max_walltime
 
@@ -280,11 +274,11 @@ class Scheduler(ABC, LoggingMixin):
 
     def __init__(
         self,
-        queues: List["Queue"],
+        queues: list["Queue"],
         primary_queue_name: str,
-        other_scheduler_directives: Optional[Dict[str, str]] = None,
-        requires_task_distribution: Optional[bool] = True,
-        documentation: Optional[str] = None,
+        other_scheduler_directives: dict[str, str] | None = None,
+        requires_task_distribution: bool | None = True,
+        documentation: str | None = None,
     ):
         """Initialize a Scheduler instance.
 
@@ -308,7 +302,6 @@ class Scheduler(ABC, LoggingMixin):
         ValueError
             If the primary queue name is not found in the list of queues.
         """
-
         self.queues = queues
         self.queue_names = [q.name for q in queues]
         self.primary_queue_name = primary_queue_name
@@ -338,7 +331,6 @@ class Scheduler(ABC, LoggingMixin):
         ValueError
             If the specified queue name is not found in the list of queues.
         """
-
         queue = next((queue for queue in self.queues if queue.name == name), None)
         if queue is None:
             raise ValueError(f"{name} not found in list of queues: {self.queue_names}")
@@ -373,14 +365,16 @@ class Scheduler(ABC, LoggingMixin):
     @abstractmethod
     def global_max_cpus_per_node(self):
         """Abstract method to retrieve the maximum number of CPUs available per node
-        across all queues."""
+        across all queues.
+        """
         pass
 
     @property
     @abstractmethod
     def global_max_mem_per_node_gb(self):
         """Abstract method to retrieve the maximum memory available per node across all
-        queues."""
+        queues.
+        """
         pass
 
 
@@ -419,7 +413,7 @@ class SlurmScheduler(Scheduler):
     """
 
     @property
-    def global_max_cpus_per_node(self) -> Optional[int]:
+    def global_max_cpus_per_node(self) -> int | None:
         """Retrieve the maximum number of CPUs available per node across all SLURM
         nodes.
 
@@ -445,7 +439,7 @@ class SlurmScheduler(Scheduler):
         return None
 
     @property
-    def global_max_mem_per_node_gb(self) -> Optional[float]:
+    def global_max_mem_per_node_gb(self) -> float | None:
         """Retrieve the maximum memory available per node across all SLURM nodes, in
         gigabytes.
 
@@ -462,7 +456,6 @@ class SlurmScheduler(Scheduler):
         RuntimeError
             If the command to query the SLURM scheduler fails.
         """
-
         if stdout := _run_cmd(
             'scontrol show nodes | grep -o "RealMemory=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
             msg_err="Error querying node property.",
@@ -503,7 +496,7 @@ class PBSScheduler(Scheduler):
     requires_task_distribution = True
 
     @property
-    def global_max_cpus_per_node(self) -> Optional[int]:
+    def global_max_cpus_per_node(self) -> int | None:
         """Retrieve the maximum number of CPUs available per node across all PBS nodes.
 
         Queries the PBS scheduler to determine the highest CPU capacity of any single node.
@@ -519,7 +512,6 @@ class PBSScheduler(Scheduler):
         RuntimeError
             If the command to query the PBS scheduler fails.
         """
-
         if stdout := _run_cmd(
             'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
             msg_err="Error querying node property.",
@@ -529,7 +521,7 @@ class PBSScheduler(Scheduler):
         return None
 
     @property
-    def global_max_mem_per_node_gb(self) -> Optional[float]:
+    def global_max_mem_per_node_gb(self) -> float | None:
         """Retrieve the maximum memory available per node across all PBS nodes, in
         gigabytes.
 
@@ -546,7 +538,6 @@ class PBSScheduler(Scheduler):
         RuntimeError
             If the command to query the PBS scheduler fails.
         """
-
         stdout = _run_cmd(
             'pbsnodes -a | grep "resources_available.mem" | cut -d== -f2 | sort -nr | head -1',
             msg_err="Error querying node property.",

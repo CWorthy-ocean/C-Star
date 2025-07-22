@@ -75,10 +75,10 @@ class Simulation(ABC, LoggingMixin):
         runtime_code: Optional["AdditionalCode"] = None,
         compile_time_code: Optional["AdditionalCode"] = None,
         codebase: Optional["ExternalCodeBase"] = None,
-        start_date: Optional[str | datetime] = None,
-        end_date: Optional[str | datetime] = None,
-        valid_start_date: Optional[str | datetime] = None,
-        valid_end_date: Optional[str | datetime] = None,
+        start_date: str | datetime | None = None,
+        end_date: str | datetime | None = None,
+        valid_start_date: str | datetime | None = None,
+        valid_end_date: str | datetime | None = None,
     ):
         """Initialize a Simulation object with a given name, directory, codebase, and
         configuration parameters.
@@ -106,7 +106,6 @@ class Simulation(ABC, LoggingMixin):
         valid_end_date : str or datetime, optional
             The latest allowed end date, based on, e.g., the availability of input data.
         """
-
         self.directory: Path = self._validate_simulation_directory(directory)
         self.name = name
 
@@ -183,8 +182,8 @@ class Simulation(ABC, LoggingMixin):
         return resolved_directory
 
     def _parse_date(
-        self, date: Optional[str | datetime], field_name: str
-    ) -> Optional[datetime]:
+        self, date: str | datetime | None, field_name: str
+    ) -> datetime | None:
         """Converts a date string to a datetime object if it's not None.
 
         If the input is a string, it attempts to parse it into a `datetime` object.
@@ -216,8 +215,8 @@ class Simulation(ABC, LoggingMixin):
 
     def _get_date_or_fallback(
         self,
-        date: Optional[str | datetime],
-        fallback: Optional[datetime],
+        date: str | datetime | None,
+        fallback: datetime | None,
         field_name: str,
     ) -> datetime:
         """Ensures a date is set, using a fallback if needed.
@@ -278,7 +277,6 @@ class Simulation(ABC, LoggingMixin):
         ValueError
             If `start_date` is later than `end_date`.
         """
-
         if self.valid_start_date and self.start_date < self.valid_start_date:
             raise ValueError(
                 f"start_date {self.start_date} is before the earliest valid start date {self.valid_start_date}."
@@ -304,7 +302,6 @@ class Simulation(ABC, LoggingMixin):
         str
             A formatted string summarizing the simulation's attributes.
         """
-
         class_name = self.__class__.__name__
         base_str = f"{class_name}\n" + ("-" * len(class_name)) + "\n"
 
@@ -354,7 +351,6 @@ class Simulation(ABC, LoggingMixin):
         str
             A string representation of the simulation suitable for debugging.
         """
-
         repr_str = f"{self.__class__.__name__}("
         repr_str += f"\nname = {self.name},"
         repr_str += f"\ndirectory = {self.directory},"
@@ -422,7 +418,6 @@ class Simulation(ABC, LoggingMixin):
         to_dict : Converts an existing Simulation instance into a dictionary representation.
         from_blueprint: Reads an equivalent representation from a yaml file.
         """
-
         pass
 
     def to_dict(self) -> dict:
@@ -442,7 +437,6 @@ class Simulation(ABC, LoggingMixin):
         from_dict : Constructs a Simulation instance from a dictionary.
         to_blueprint: Writes an equivalent representation to a yaml file.
         """
-
         simulation_dict: dict[Any, Any] = {}
 
         # Top-level information
@@ -521,7 +515,6 @@ class Simulation(ABC, LoggingMixin):
         to_blueprint : Saves the Simulation instance to a YAML blueprint file.
         from_dict : Creates a Simulation instance from a dictionary.
         """
-
         pass
 
     @abstractmethod

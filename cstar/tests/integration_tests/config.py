@@ -55,7 +55,7 @@ TEST_CONFIG = {
     "test_case_local_with_netcdf_datasets": {
         "template_blueprint_path": f"{TEST_DIRECTORY}/integration_tests/blueprints/cstar_blueprint_with_netcdf_datasets_template.yaml",
         "strs_to_replace": {
-            "<input_datasets_location>": f"{CSTAR_TEST_DATA_DIRECTORY/'input_datasets/ROMS'}",
+            "<input_datasets_location>": f"{CSTAR_TEST_DATA_DIRECTORY / 'input_datasets/ROMS'}",
             "<additional_code_location>": f"{CSTAR_TEST_DATA_DIRECTORY}",
         },
     },
@@ -63,7 +63,7 @@ TEST_CONFIG = {
     "test_case_local_with_yaml_datasets": {
         "template_blueprint_path": f"{TEST_DIRECTORY}/integration_tests/blueprints/cstar_blueprint_with_yaml_datasets_template.yaml",
         "strs_to_replace": {
-            "<input_datasets_location>": f"{CSTAR_TEST_DATA_DIRECTORY/'roms_tools_yaml_files'}",
+            "<input_datasets_location>": f"{CSTAR_TEST_DATA_DIRECTORY / 'roms_tools_yaml_files'}",
             "<additional_code_location>": f"{CSTAR_TEST_DATA_DIRECTORY}",
         },
     },

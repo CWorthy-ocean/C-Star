@@ -1,8 +1,7 @@
 import functools
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Generator
 from unittest.mock import patch
 
 import dotenv
