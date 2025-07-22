@@ -45,8 +45,6 @@ COPY --from=stage_conda $INSTALL_BASE_DIR/miniconda3/ $INSTALL_BASE_DIR/minicond
 
 WORKDIR $INSTALL_BASE_DIR
 
-COPY blueprint.yml ./blueprint.yml
-
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
