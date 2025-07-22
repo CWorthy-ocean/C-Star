@@ -1,0 +1,58 @@
+ARG IMG_MPI="ankona/cstar-mpi-5.0.7:latest"
+ARG SRC_DIR="/install"
+ARG INSTALL_BASE_DIR="/opt"
+
+
+FROM $IMG_MPI as main
+
+ARG HDF5_PROFILE="/etc/profile.d/hdf5.sh"
+ARG SRC_DIR
+ARG INSTALL_BASE_DIR
+ARG HDF5_INSTALL_DIR="hdf5-1.14.6-install"
+ARG HDF5_TAR="hdf5_1.14.6.tar.gz"
+ARG HDF5_URL="https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.6.tar.gz"
+
+ENV HDF5_HOME=$INSTALL_BASE_DIR/$HDF5_INSTALL_DIR
+ENV HDF5_SRC=$SRC_DIR/hdf5-hdf5_1.14.6
+
+WORKDIR $SRC_DIR
+RUN wget -q $HDF5_URL && \
+    tar xvf ./$HDF5_TAR && \
+    rm ./$HDF5_TAR
+
+WORKDIR $HDF5_SRC
+RUN mkdir -p $HDF5_HOME && \
+    ./configure \
+        --prefix=$HDF5_HOME \
+        CC=mpicc FC=gfortran CXX=mpicxx \
+        CFLAGS="-fPIC -O3 -march=x86-64" \
+        FFLAGS="-fPIC -O3 -march=x86-64" \
+        CXXFLAGS="-fPIC -O3 -march=x86-64" \
+        --enable-fortran --enable-shared --with-pic && \
+    make -j $(nproc) && make install && \
+    rm -rf $HDF5_SRC
+
+# confirm these replacements...
+# using mpicc, gfortran, mpicxx
+# CC=mpiicx FC=mpiifx CXX=mpiicpc
+ENV PATH="$HDF5_HOME/bin:$PATH"
+ENV LD_LIBRARY_PATH="$HDF5_HOME/lib:$LD_LIBRARY_PATH"
+ENV CPATH="$HDF5_HOME/include:$CPATH"
+ENV LIBRARY_PATH="$HDF5_HOME/lib:$LIBRARY_PATH"
+ENV LD_RUN_PATH="$HDF5_HOME/lib:$LD_RUN_PATH"
+
+RUN echo "export HDF5_HOME=$HDF5_HOME" >> $HDF5_PROFILE && \
+    echo 'export PATH=$HDF5_HOME/bin:$PATH' >> $HDF5_PROFILE && \
+    echo 'export LD_LIBRARY_PATH=$HDF5_HOME/lib:$LD_LIBRARY_PATH' >> $HDF5_PROFILE && \
+    echo 'export CPATH=$HDF5_HOME/include:$CPATH' >> $HDF5_PROFILE && \
+    echo 'export LIBRARY_PATH=$HDF5_HOME/lib:$LIBRARY_PATH' >> $HDF5_PROFILE && \
+    echo 'export LD_RUN_PATH=$HDF5_HOME/lib:$LD_RUN_PATH' >> $HDF5_PROFILE
+
+
+WORKDIR $INSTALL_BASE_DIR
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD []
+ENTRYPOINT ["/entrypoint.sh"]
