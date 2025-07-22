@@ -43,35 +43,6 @@ RUN mkdir -p "/etc/profile.d" && \
     echo 'export OMPI_ALLOW_RUN_AS_ROOT=1' >> $MPI_PROFILE && \
     echo 'export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1' >> $MPI_PROFILE
 
-
-# FROM main as add_test
-
-# ARG TEST_ENV="/etc/profile.d/99-ring.sh"
-# ENV RING_URI="https://gist.githubusercontent.com/ankona/42bd3fd28cbeec4da65ed57f0529b8dc/raw/3e0a3b7cac0536a0726a5fb36aceb5db1dba8506/ring.c"
-
-# ENV MPI_TEST_HARNESS="/test/ring"
-# ENV PATH="/test:$PATH"
-# RUN mkdir -p "/test" && \
-#     wget -q "$RING_URI" -O "/test/ring.c" && \
-#     mpicc "/test/ring.c" -o $MPI_TEST_HARNESS && \
-#     rm "/test/ring.c" && \
-#     echo "#!/bin/bash" >> "$TEST_ENV" && \
-#     echo "export MPI_TEST_HARNESS=$MPI_TEST_HARNESS" >> "$TEST_ENV" && \
-#     printf '#!/bin/bash\nmpirun -n 2 --allow-run-as-root %s\n' "$MPI_TEST_HARNESS" >> "/test/runtest" && \
-#     chmod +x "$TEST_ENV" && \
-#     chmod +x "/test/runtest" && \
-#     apt-get update && \
-#     apt-get install -y --no-install-recommends neovim && \
-#     apt-get clean && \
-#     rm -rf /var/lib/apt/lists/*
-
-
-# FROM $MAIN_STAGE as final
-
-# ARG INSTALL_BASE_DIR
-
-# COPY --from=main /etc/profile.d/*mpi*.sh /etc/profile.d/
-# COPY --from=main $INSTALL_BASE_DIR/openmpi*/ $INSTALL_BASE_DIR/
 WORKDIR $INSTALL_BASE_DIR
 
 COPY entrypoint.sh /entrypoint.sh

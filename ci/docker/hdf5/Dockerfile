@@ -32,9 +32,6 @@ RUN mkdir -p $HDF5_HOME && \
     make -j $(nproc) && make install && \
     rm -rf $HDF5_SRC
 
-# confirm these replacements...
-# using mpicc, gfortran, mpicxx
-# CC=mpiicx FC=mpiifx CXX=mpiicpc
 ENV PATH="$HDF5_HOME/bin:$PATH"
 ENV LD_LIBRARY_PATH="$HDF5_HOME/lib:$LD_LIBRARY_PATH"
 ENV CPATH="$HDF5_HOME/include:$CPATH"
@@ -47,7 +44,6 @@ RUN echo "export HDF5_HOME=$HDF5_HOME" >> $HDF5_PROFILE && \
     echo 'export CPATH=$HDF5_HOME/include:$CPATH' >> $HDF5_PROFILE && \
     echo 'export LIBRARY_PATH=$HDF5_HOME/lib:$LIBRARY_PATH' >> $HDF5_PROFILE && \
     echo 'export LD_RUN_PATH=$HDF5_HOME/lib:$LD_RUN_PATH' >> $HDF5_PROFILE
-
 
 WORKDIR $INSTALL_BASE_DIR
 

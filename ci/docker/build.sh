@@ -2,11 +2,16 @@
 set -e
 
 # Parameters:
-# $1: context root (required)
-# $2: image name (required)
-# $3: account (required)
-# $4: image repository uri (required)
+# $1: context root
+#     - The path to a parent of a directory containing a Dockerfile
+# $2: image name
+#     - The base image name matching a directory name
+# $3: account
+#     - The dockerhub account to upload to
+# $4: image repository uri 
+#     - repository URI, such as "docker.io"
 # $5: build args (optional)
+#     - extra build args
 SCRIPT="$0"
 CONTEXT_ROOT="$1"
 IMAGE_NAME="$2"
@@ -35,7 +40,6 @@ show_usage() {
     printf " - default repo: %s\n" $REPO_DEFAULT
 }
 
-# Ensure required parameters are present
 if [ $# -lt 2 ]; then
     show_usage
     exit 1
@@ -92,9 +96,6 @@ if [[ "$CONTEXT_CONTENT" != *Dockerfile* ]]; then
     exit 1
 fi
 
-# log_info "Pulling $REPO/$TAG_L"
-# podman-hpc pull "$REPO/$TAG_L"
-
 cp "$CONTEXT_PATH/../entrypoint.sh" $CONTEXT_PATH/entrypoint.sh
 chmod a+r $CONTEXT_PATH/entrypoint.sh
 
@@ -103,11 +104,7 @@ if [ ! -z "$BUILD_ARGS" ]; then
     $RUNTIME_ENGINE build -t "$VTAG" --no-cache --build-arg "$BUILD_ARGS" "$CONTEXT_PATH" 
 else
     log_info "Building $VTAG in $CONTEXT_PATH from source \n $CONTEXT_DIR"
-    # if [ -z "$SLURM_JOB_ID"]; then
-    #     srun -n 1 --cpus-per-task=16 $RUNTIME_ENGINE build -t "$VTAG" "$CONTEXT_PATH"
-    # else
     $RUNTIME_ENGINE build -t "$VTAG" --no-cache "$CONTEXT_PATH"
-    # fi
 fi
 
 log_info "Migrating $VTAG"
@@ -126,7 +123,6 @@ for item in "${TAGS[@]}"; do
     fi
 
     log_info "Publishing $REPO/$item"
-    # $RUNTIME_ENGINE push "$REPO/$item"
     $RUNTIME_ENGINE push "$item"
 done
 

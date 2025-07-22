@@ -10,9 +10,6 @@ ENV ROMS_PATH=$ROMS_ROOT/Tools-Roms/
 ARG REPO_ROMS="https://github.com/dafyddstephenson/ucla-roms/archive/refs/heads/update_makefiles.tar.gz"
 ENV ROMS_PROFILE="/etc/profile.d/ucla-roms.sh"
 
-# RUN apt-get update && apt-get install -y --no-install-recommends build-essential
-# RUN apt-get install -y --no-install-recommends openmpi-bin openmpi-doc libopenmpi-dev
-
 WORKDIR "$SRC_DIR"
 
 RUN echo "export ROMS_ROOT=$ROMS_ROOT" >> $ROMS_PROFILE && \

@@ -19,12 +19,6 @@ RUN apt-get update && \
         software-properties-common \
 	    wget \
         zlib1g-dev \
-        # openmpi-bin \
-        # openmpi-doc \
-        # libopenmpi-dev \
-        # libpmi2-0-dev \
-        # libnetcdf-dev \
-        # libhdf5-serial-dev \
         --no-install-recommends && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \

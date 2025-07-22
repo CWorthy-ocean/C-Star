@@ -46,11 +46,6 @@ IMG_RUNNER := "runner"
 runner: # conda roms marbl
 	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_RUNNER) $(ACCOUNT) $(REPO_URI)
 
-# IMG_WORKER := "worker"
-# .PHONY: worker
-# worker: runner
-# 	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_WORKER) $(ACCOUNT) $(REPO_URI)
-
 .PHONY: pull
 pull:
 	podman-hpc pull $(REPO_URI)/$(ACCOUNT)/cstar-$(img):latest
@@ -73,15 +68,6 @@ irun:
 .PHONY: clean
 clean:
 	podman-hpc images --format "{{.Repository}}:{{.Tag}}" | sed 's/^localhost\///' | grep "$(img)" | xargs -r podman-hpc rmi --force --ignore
-
-# 	IMAGES=$(shell podman-hpc images --format "{{.Repository}}:{{.Tag}}" | grep worker)
-# 	$(shell $(IMAGES) | xargs -r podman-hpc rmi --ignore --force)
-# 	echo $(IMAGES)
-# 	podman-hpc images --format "{{.Repository}}:{{.Tag}}" | grep $(img) | xargs -r podman-hpc rmi --ignore --force
-# 	podman-hpc image rm --force cstar-$(img):latest
-# 	podman-hpc image rm --force cstar-$(img):$(TAG_VERSION)
-# 	podman-hpc image rm --force $(ACCOUNT)/cstar-$(img):latest
-# 	podman-hpc image rm --force $(ACCOUNT)/cstar-$(img):$(TAG_VERSION)
 
 .PHONY: cleanall
 cleanall:
