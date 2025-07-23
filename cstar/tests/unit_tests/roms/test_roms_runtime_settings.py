@@ -35,7 +35,6 @@ def example_runtime_settings():
     ROMSRuntimeSettings
        The example ROMSRuntimeSettings instance
     """
-
     yield ROMSRuntimeSettings(
         title="Example runtime settings",
         time_stepping={"ntimes": 360, "dt": 60, "ndtfast": 60, "ninfo": 1},
@@ -94,12 +93,14 @@ class MockSection(ROMSRuntimeSettingsSection):
 
 class EmptySection(ROMSRuntimeSettingsSection):
     """No actual values defined, just used to test some of the formatting/joining
-    functions."""
+    functions.
+    """
 
 
 class TestHelperMethods:
     """Test module-level non-public methods for formatting various types for use in
-    serializers."""
+    serializers.
+    """
 
     @pytest.mark.parametrize(
         "fl,st",
@@ -197,7 +198,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_validate_from_lines_calls_from_lines(self):
         """Test ROMSRuntimeSettingsSection.validate_from_lines calls `from_lines` if
-        given a list of strings."""
+        given a list of strings.
+        """
         mock_handler = MagicMock()
         test_lines = ["1", "2.0"]
 
@@ -212,7 +214,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_validate_from_lines_falls_back_to_handler(self):
         """Test ROMSRuntimeSettingsSection.validate_from_lines falls back to handler if
-        not given a list of strings."""
+        not given a list of strings.
+        """
         mock_handler = MagicMock(return_value="fallback")
         test_data = {"a": 1, "b": 2.0}
 
@@ -225,7 +228,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_validate_from_lines_raises_on_exception(self):
         """Test ROMSRuntimeSettingsSection.validate_from_lines falls back to handler if
-        from_lines fails."""
+        from_lines fails.
+        """
         mock_handler = MagicMock(return_value="handled")
         test_lines = ["bad", "data"]
 
@@ -234,7 +238,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_default_serializer(self):
         """Test the `ROMSRuntimeSettingsSection.default_serializer` returns an expected
-        string from a range of attributes."""
+        string from a range of attributes.
+        """
         obj = MockSection(
             floats=[0.0, 1e-5, 123.4],
             paths=[Path("a.nc"), Path("b.nc")],
@@ -268,13 +273,15 @@ class TestROMSRuntimeSettingsSection:
 
     def test_from_lines_raises_if_no_lines(self):
         """Test the `ROMSRuntimeSettingsSection.from_lines` method returns None if given
-        an empty list."""
+        an empty list.
+        """
         with pytest.raises(ValueError):
             MockSection.from_lines([])
 
     def test_from_lines_on_float_section_with_D_formatting(self):
         """Test a ROMSRuntimeSettingsSection subclass with a single float entry is
-        correctly returned by `from_lines` with fortran-style formatting."""
+        correctly returned by `from_lines` with fortran-style formatting.
+        """
 
         class FloatSection(ROMSRuntimeSettingsSection):
             val: float
@@ -284,7 +291,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_from_lines_multiple_fields(self):
         """Test a ROMSRuntimeSettingsSection with more than one entry is correctly
-        returned by `from_lines`"""
+        returned by `from_lines`
+        """
 
         class MixedSection(ROMSRuntimeSettingsSection):
             count: int
@@ -296,7 +304,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_from_lines_list_field_at_end(self):
         """Test that ROMSRuntimeSettingsSection.from_lines correctly handles lines where
-        the final entry is a list (using all remaining values to populate it)"""
+        the final entry is a list (using all remaining values to populate it)
+        """
 
         class ListAtEnd(ROMSRuntimeSettingsSection):
             prefix: str
@@ -308,7 +317,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_from_lines_list_field_only(self):
         """Test that ROMSRuntimeSettingsSection.from_lines correctly returns a valid
-        instance when the only entry is a list."""
+        instance when the only entry is a list.
+        """
 
         class OnlyList(ROMSRuntimeSettingsSection):
             entries: list[str]
@@ -318,7 +328,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_from_lines_multiline_flag(self):
         """Test that ROMSRuntimeSettingsSection.from_lines correctly handles the case
-        where entries are on different lines."""
+        where entries are on different lines.
+        """
 
         class MultiLinePaths(ROMSRuntimeSettingsSection):
             multi_line = True
@@ -329,7 +340,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_from_lines_on_initial_conditions_with_nrrec_0(self):
         """Test the bespoke InitialConditions.from_lines() method handles the situation
-        where nrrec is 0 and ininame is empty."""
+        where nrrec is 0 and ininame is empty.
+        """
         lines = [
             "0",
         ]
@@ -341,7 +353,8 @@ class TestROMSRuntimeSettingsSection:
 
     def test_from_lines_on_forcing_with_filenames_empty(self):
         """Test the bespoke Forcing.from_lines() method handles the situation where
-        filenames is empty."""
+        filenames is empty.
+        """
         lines = []
         fr = Forcing.from_lines(lines)
         assert fr.filenames is None
@@ -375,8 +388,8 @@ class TestSingleEntryROMSRuntimeSettingsSection:
 
     def test_single_entry_validator_returns_cls_when_type_matches(self):
         """Tests that the `single_entry_validator` method passes a correctly typed value
-        to cls() without requiring a dict or kwargs for initialization."""
-
+        to cls() without requiring a dict or kwargs for initialization.
+        """
         result = self.MockSingleEntrySection(3.14)
 
         assert isinstance(
@@ -386,7 +399,8 @@ class TestSingleEntryROMSRuntimeSettingsSection:
 
     def test_single_entry_validator_calls_handler_when_type_does_not_match(self):
         """Tests that `single_entry_validator` falls back to the handler if the value
-        supplied to __init__ is not of the expected type."""
+        supplied to __init__ is not of the expected type.
+        """
         handler = MagicMock(return_value="fallback")
         result = self.MockSingleEntrySection.single_entry_validator(
             "not a float", handler
@@ -421,14 +435,16 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     def test_str_and_repr_return_value(self):
         """Tests that the `str` and `repr` functions for
         SingleEntryROMSRuntimeSettingsSection simply return a string of the single
-        entry's value."""
+        entry's value.
+        """
         section = self.MockSingleEntrySection(1.0)
         assert str(section) == "1.0"
         assert repr(section) == "1.0"
 
     def test_single_entry_section_raises_if_multiple_fields(self):
         """Tests that attempting to initialize a SingleEntryROMSRuntimeSettingsSection
-        with multiple entries raises a TypeError."""
+        with multiple entries raises a TypeError.
+        """
         with pytest.raises(TypeError):
 
             class InvalidSection(SingleEntryROMSRuntimeSettingsSection):
@@ -625,7 +641,6 @@ class TestROMSRuntimeSettings:
         - The ROMSRuntimeSettings instance returned by `from_file` with the modified
           file has `None` for its `climatology` attribute
         """
-
         modified_file = tmp_path / "modified_example_settings.in"
         shutil.copy2(
             Path(__file__).parent / "fixtures/example_runtime_settings.in",
@@ -662,7 +677,6 @@ class TestROMSRuntimeSettings:
         - Each attribute in the instance returned by `from_file` is equal
           to those in the instance passed to `to_file`
         """
-
         expected_settings = example_runtime_settings
         expected_settings.to_file(tmp_path / "test.in")
 
@@ -696,7 +710,8 @@ class TestROMSRuntimeSettings:
 
 class TestStrAndRepr:
     """Test that the __str__ and __repr__ functions of the ROMSRuntimeSettings class
-    behave as expected."""
+    behave as expected.
+    """
 
     def test_str(self, example_runtime_settings):
         """Test that the __str__ function of ROMSRuntimeSettings matches an expected
@@ -760,9 +775,9 @@ Open boundary binding velocity (`ROMSRuntimeSettings.ubind`, m/s) = 0.1
 Maximum sponge layer viscosity (`ROMSRuntimeSettings.v_sponge`, m2/s) = 0.0
 Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
 
-        assert (
-            str(example_runtime_settings) == expected_str
-        ), f"expected \n{expected_str}\n, got\n{str(example_runtime_settings)}"
+        assert str(example_runtime_settings) == expected_str, (
+            f"expected \n{expected_str}\n, got\n{str(example_runtime_settings)}"
+        )
 
     def test_repr(self, example_runtime_settings):
         """Test that the __repr__ function of ROMSRuntimeSettings matches an expected
@@ -778,6 +793,6 @@ Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
         - repr(example_runtime_settings) matches an expected reference string
         """
         expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_list_fname'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
-        assert expected_repr == repr(
-            example_runtime_settings
-        ), f"expected \n{expected_repr}\n, got\n{repr(example_runtime_settings)}"
+        assert expected_repr == repr(example_runtime_settings), (
+            f"expected \n{expected_repr}\n, got\n{repr(example_runtime_settings)}"
+        )

@@ -44,7 +44,8 @@ def test_no_lmod_in_env(
     mock_system: mock.MagicMock, mock_machine: mock.MagicMock
 ) -> None:
     """Verify that an environment without lmod environment variables returns a platform-
-    based name."""
+    based name.
+    """
     namer = HostNameEvaluator()
 
     mock_system.assert_called_once()
@@ -103,7 +104,8 @@ def test_partial_lmod_results_in_lmod_name(
     lmod_sysname: str,
 ) -> None:
     """Verify that an environment specifying incomplete lmod variables returns the value
-    that is set."""
+    that is set.
+    """
     with patch.dict(
         os.environ,
         {
@@ -135,8 +137,8 @@ def test_lmod_prioritizes_syshost(
     mock_machine: mock.MagicMock,
 ) -> None:
     """Verify that the an when both LMOD env vars are set, the value from sys host is
-    prioritized as the lmod name."""
-
+    prioritized as the lmod name.
+    """
     namer = HostNameEvaluator()
 
     mock_system.assert_called_once()
@@ -159,8 +161,8 @@ def test_partial_platform_naming(
     machine_name: str,
 ) -> None:
     """Verify that when the system name and machine name are not both found, the
-    platform name is empty."""
-
+    platform name is empty.
+    """
     with (
         patch("platform.system", return_value=system_name),
         patch("platform.machine", return_value=machine_name),
@@ -188,8 +190,8 @@ def test_partial_platform_fallback(
     machine_name: str,
 ) -> None:
     """Verify that when there is no lmod information and the system name and machine
-    name are not both found, accessing the name fails."""
-
+    name are not both found, accessing the name fails.
+    """
     with (
         patch("platform.system", return_value=system_name),
         patch("platform.machine", return_value=machine_name),

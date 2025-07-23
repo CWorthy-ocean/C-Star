@@ -12,7 +12,8 @@ from cstar.system.manager import cstar_sysmgr
 @pytest.fixture
 def marbl_codebase():
     """Fixture providing a configured instance of `MARBLExternalCodeBase` for
-    testing."""
+    testing.
+    """
     source_repo = "https://github.com/marbl-ecosys/MARBL.git"
     checkout_target = "marbl0.45.0"
     return MARBLExternalCodeBase(
@@ -40,8 +41,8 @@ def test_expected_env_var(marbl_codebase):
 
 def test_defaults_are_set():
     """Test that the defaults are set correctly if MARBLExternalCodeBase initialized
-    without args."""
-
+    without args.
+    """
     marbl_codebase = MARBLExternalCodeBase()
     assert marbl_codebase.source_repo == "https://github.com/marbl-ecosys/MARBL.git"
     assert marbl_codebase.checkout_target == "marbl0.45.0"
@@ -141,7 +142,6 @@ class TestMARBLExternalCodeBaseGet:
 
     def test_make_failure(self, marbl_codebase, tmp_path):
         """Test that the get method raises an error when 'make' fails."""
-
         ## There are two subprocess calls, we'd like one fail, one pass:
         dotenv_path = tmp_path / ".cstar.env"
 

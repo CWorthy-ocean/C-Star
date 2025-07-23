@@ -58,7 +58,6 @@ class TestCStar:
         log (logging.Logger):
             Logger instance for logging messages during test execution.
         """
-
         dotenv_path = tmp_path / ".cstar.env"
         ext_root = tmp_path / "externals"
 

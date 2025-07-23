@@ -42,7 +42,7 @@ if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then
   cat > payload.json <<EOF
 {
   "fields": {
-    "project": { "key": "CW" },
+    "project": { "key": "CSD" },
     "summary": "$ESCAPED_TITLE",
     "description": "$ESCAPED_BODY",
     "issuetype": { "name": "Story" },
@@ -54,7 +54,7 @@ else
   cat > payload.json <<EOF
 {
   "fields": {
-    "project": { "key": "CW" },
+    "project": { "key": "CSD" },
     "summary": "$ESCAPED_TITLE",
     "description": "$ESCAPED_BODY",
     "issuetype": { "name": "Story" }
@@ -135,7 +135,7 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
 	cat > subtask.json <<EOF
 {
   "fields": {
-    "project": { "key": "CW" },
+    "project": { "key": "CSD" },
     "summary": "$ESCAPED_TASK_SUMMARY",
     "description": "$ESCAPED_TASK_DESCRIPTION",
     "issuetype": { "id": "10009" },
@@ -148,7 +148,7 @@ EOF
 	cat > subtask.json <<EOF
 {
   "fields": {
-    "project": { "key": "CW" },
+    "project": { "key": "CSD" },
     "summary": "$ESCAPED_TASK_SUMMARY",
     "description": "$ESCAPED_TASK_DESCRIPTION",
     "issuetype": { "id": "10009" },

@@ -1,7 +1,6 @@
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
 
 from cstar.base.gitutils import (
     _checkout,
@@ -55,7 +54,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
     """
 
     def __init__(
-        self, source_repo: Optional[str] = None, checkout_target: Optional[str] = None
+        self, source_repo: str | None = None, checkout_target: str | None = None
     ):
         """Initialize a ExternalCodeBase object manually from a source repository and
         checkout target.
@@ -72,7 +71,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
         ExternalCodeBase
             An initialized ExternalCodeBase object
         """
-
         self._source_repo = source_repo
         self._checkout_target = checkout_target
 
@@ -150,7 +148,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
     @abstractmethod
     def expected_env_var(self) -> str:
         """Environment variable associated with the external codebase, e.g.
-        MARBL_ROOT."""
+        MARBL_ROOT.
+        """
 
     @property
     def default_externals_root(self) -> Path:
@@ -183,7 +182,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
            2: The expected environment variable is present, points to the correct repository remote, but is checked out at the wrong hash
            3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
         """
-
         # check 1: X_ROOT variable is in user's env
         env_var = os.environ.get(self.expected_env_var, "")
 
@@ -241,29 +239,25 @@ class ExternalCodeBase(ABC, LoggingMixin):
             case 1:
                 env_var_repo_remote = _get_repo_remote(local_root)
 
-                raise EnvironmentError(
-                    (
-                        "System environment variable "
-                        f"'{self.expected_env_var}' points to "
-                        "a github repository whose "
-                        f"remote: \n '{env_var_repo_remote}' \n"
-                        "does not match that expected by C-Star: \n"
-                        f"{self.source_repo}."
-                        "Your environment may be misconfigured."
-                    )
+                raise OSError(
+                    "System environment variable "
+                    f"'{self.expected_env_var}' points to "
+                    "a github repository whose "
+                    f"remote: \n '{env_var_repo_remote}' \n"
+                    "does not match that expected by C-Star: \n"
+                    f"{self.source_repo}."
+                    "Your environment may be misconfigured."
                 )
             case 2:
                 head_hash = _get_repo_head_hash(local_root)
                 print(
-                    (
-                        "############################################################\n"
-                        f"C-STAR: {self.expected_env_var} points to the correct repo "
-                        f"{self.source_repo} but HEAD is at: \n"
-                        f"{head_hash}, rather than the hash associated with "
-                        f"checkout_target {self.checkout_target}:\n"
-                        f"{self.checkout_hash}\n"
-                        "############################################################"
-                    )
+                    "############################################################\n"
+                    f"C-STAR: {self.expected_env_var} points to the correct repo "
+                    f"{self.source_repo} but HEAD is at: \n"
+                    f"{head_hash}, rather than the hash associated with "
+                    f"checkout_target {self.checkout_target}:\n"
+                    f"{self.checkout_hash}\n"
+                    "############################################################"
                 )
                 while True:
                     yn = "y"
@@ -279,24 +273,22 @@ class ExternalCodeBase(ABC, LoggingMixin):
                             print(ex)
                         return
                     elif yn.casefold() in ["n", "no"]:
-                        raise EnvironmentError()
+                        raise OSError()
                     else:
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
                 user_env_path = cstar_sysmgr.environment.user_env_path
                 print(
-                    (
-                        "#######################################################\n"
-                        f"C-STAR: {self.expected_env_var}"
-                        " not found in current cstar_sysmgr.environment. \n"
-                        "if this is your first time running C-Star with "
-                        f"an instance of {self.__class__.__name__}, "
-                        "you will need to set it up.\n"
-                        "It is recommended that you install this external codebase in \n"
-                        f"{self.default_externals_root}\n"
-                        f"This will also modify your `{user_env_path}` file.\n"
-                        "#######################################################"
-                    )
+                    "#######################################################\n"
+                    f"C-STAR: {self.expected_env_var}"
+                    " not found in current cstar_sysmgr.environment. \n"
+                    "if this is your first time running C-Star with "
+                    f"an instance of {self.__class__.__name__}, "
+                    "you will need to set it up.\n"
+                    "It is recommended that you install this external codebase in \n"
+                    f"{self.default_externals_root}\n"
+                    f"This will also modify your `{user_env_path}` file.\n"
+                    "#######################################################"
                 )
                 while True:
                     if not self.default_externals_root.exists():
@@ -305,16 +297,14 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     yn = "y"
                     if interactive:
                         yn = input(
-                            (
-                                "Would you like to do this now? "
-                                "('y', 'n', or 'custom' to install at a custom path)\n"
-                            )
+                            "Would you like to do this now? "
+                            "('y', 'n', or 'custom' to install at a custom path)\n"
                         )
                     if yn.casefold() in ["y", "yes", "ok"]:
                         self.get(self.default_externals_root)
                         break
                     elif yn.casefold() in ["n", "no"]:
-                        raise EnvironmentError()
+                        raise OSError()
                     elif yn.casefold() == "custom":
                         custom_path = input("Enter custom path for install:\n")
                         self.get(Path(custom_path).resolve())

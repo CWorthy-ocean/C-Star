@@ -1,7 +1,7 @@
 import datetime as dt
 from abc import ABC
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 
 import dateutil.parser
@@ -37,9 +37,9 @@ class InputDataset(ABC, LoggingMixin):
     def __init__(
         self,
         location: str,
-        file_hash: Optional[str] = None,
-        start_date: Optional[str | dt.datetime] = None,
-        end_date: Optional[str | dt.datetime] = None,
+        file_hash: str | None = None,
+        start_date: str | dt.datetime | None = None,
+        end_date: str | dt.datetime | None = None,
     ):
         """Initialize an InputDataset object associated with a model simulation using a
         source URL and file hash.
@@ -52,7 +52,6 @@ class InputDataset(ABC, LoggingMixin):
         file_hash: str, optional
             The 256 bit SHA sum associated with the file for verification if remote
         """
-
         self.source: DataSource = DataSource(location=location, file_hash=file_hash)
         if (
             (self.source.location_type == "url")
@@ -74,9 +73,9 @@ class InputDataset(ABC, LoggingMixin):
         assert self.end_date is None or isinstance(self.end_date, dt.datetime)
 
         # Initialize object state:
-        self.working_path: Optional[Path | List[Path]] = None
-        self._local_file_hash_cache: Dict = {}
-        self._local_file_stat_cache: Dict = {}
+        self.working_path: Path | list[Path] | None = None
+        self._local_file_hash_cache: dict = {}
+        self._local_file_stat_cache: dict = {}
 
         # Subclass-specific  confirmation that everything is set up correctly:
         self.validate()
@@ -138,7 +137,7 @@ class InputDataset(ABC, LoggingMixin):
         return True
 
     @property
-    def local_hash(self) -> Optional[Dict]:
+    def local_hash(self) -> dict | None:
         """Compute or retrieve the cached SHA-256 hash of the local dataset.
 
         This property calculates the SHA-256 hash for the dataset located at `working_path`.
@@ -156,7 +155,6 @@ class InputDataset(ABC, LoggingMixin):
               and the values are their respective SHA-256 hashes.
             - `None` if `working_path` is not set or no files exist locally.
         """
-
         if self._local_file_hash_cache:
             return self._local_file_hash_cache
 

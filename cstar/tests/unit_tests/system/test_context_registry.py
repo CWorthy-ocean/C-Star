@@ -74,7 +74,8 @@ def test_context_registry(wrapped_class: type[_SystemContext]) -> None:
 )
 def test_registry_keys(expected_name: str, wrapped_class: type[_SystemContext]) -> None:
     """Verify that the system contexts have the names expected from using
-    HostNameEvaluator for all known systems."""
+    HostNameEvaluator for all known systems.
+    """
     assert expected_name == wrapped_class.name
 
 

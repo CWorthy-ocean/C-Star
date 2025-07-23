@@ -24,7 +24,7 @@ def all_levels() -> list[int]:
 @pytest.fixture
 def levels_fn(
     all_levels: list[int],
-) -> t.Callable[[int], t.Tuple[list[int], list[int]]]:
+) -> t.Callable[[int], tuple[list[int], list[int]]]:
     """Return a function that returns a tuple of lists containing all log levels below
     and above the specified log level.
 
@@ -32,7 +32,7 @@ def levels_fn(
         t.Callable[list[int], list[int]]: the function
     """
 
-    def _inner(level: int) -> t.Tuple[list[int], list[int]]:
+    def _inner(level: int) -> tuple[list[int], list[int]]:
         """Return a tuple containing:
         1. list of levels less than the supplied level
         2. list of levels greater than or equal to the supplied level
@@ -74,8 +74,8 @@ def test_loglevel_fh(
     tmp_path: pathlib.Path,
 ) -> None:
     """Verify the loggers are configured properly to output the desired log levels when
-    the optional file handler is requested."""
-
+    the optional file handler is requested.
+    """
     for level_ in all_levels:
         logger_name = f"{request.function.__name__}-{level_}"
         filename = tmp_path / f"{logger_name}.log"
@@ -106,8 +106,8 @@ def test_filehandler_no_dupes(
     tmp_path: pathlib.Path,
 ) -> None:
     """Verify the loggers are configured properly to output the desired log levels when
-    the optional file handler is requested."""
-
+    the optional file handler is requested.
+    """
     level = logging.INFO
     logger_name = f"{request.function.__name__}-{level}"
     filename = tmp_path / f"{logger_name}.log"

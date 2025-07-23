@@ -1,7 +1,6 @@
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 
@@ -40,8 +39,8 @@ class LocalProcess(ExecutionHandler):
     def __init__(
         self,
         commands: str,
-        output_file: Optional[str | Path] = None,
-        run_path: Optional[str | Path] = None,
+        output_file: str | Path | None = None,
+        run_path: str | Path | None = None,
     ):
         """Initialize a `LocalProcess` instance.
 
@@ -57,7 +56,6 @@ class LocalProcess(ExecutionHandler):
             The directory from which the subprocess will be executed.
             Defaults to the current working directory.
         """
-
         self.commands = commands
         self.run_path = Path(run_path) if run_path is not None else Path.cwd()
         self._default_name = (
@@ -110,7 +108,6 @@ class LocalProcess(ExecutionHandler):
         --------
         cancel : Terminates the running subprocess.
         """
-
         # Open the output file to write to
         self._output_file_handle = open(self.output_file, "w")
         local_process = subprocess.Popen(
@@ -179,7 +176,6 @@ class LocalProcess(ExecutionHandler):
         If the _process attribute is not set, no action is taken.
         If it is set to a running process, a RuntimeError is raised.
         """
-
         if self._process is None:
             return
         elif self._process.poll() is not None:
@@ -213,7 +209,6 @@ class LocalProcess(ExecutionHandler):
         --------
         wait : Wait for the local process to finish
         """
-
         if self._process and self.status == ExecutionStatus.RUNNING:
             try:
                 self._process.terminate()  # Send SIGTERM to allow graceful shutdown
@@ -237,7 +232,6 @@ class LocalProcess(ExecutionHandler):
         --------
         cancel : end the current process
         """
-
         if self.status == ExecutionStatus.RUNNING:
             self._process.wait()
         else:

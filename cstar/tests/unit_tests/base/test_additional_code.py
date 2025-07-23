@@ -81,7 +81,8 @@ class TestInit:
 
     def test_init(self, remote_additional_code):
         """Test that an AdditionalCode object is initialized with the correct
-        attributes."""
+        attributes.
+        """
         assert (
             remote_additional_code.source.location == "https://github.com/test/repo.git"
         )
@@ -95,7 +96,8 @@ class TestInit:
 
     def test_defaults(self):
         """Test that a minimal AdditionalCode object is initialized with correct default
-        values."""
+        values.
+        """
         additional_code = AdditionalCode(location="test/location")
 
         assert additional_code.source.location == "test/location"
@@ -131,7 +133,8 @@ class TestStrAndRepr:
 
     def test_repr_remote(self, remote_additional_code):
         """Test that the __repr__ method returns the correct string for the example
-        remote AdditionalCode instance defined in the above fixture."""
+        remote AdditionalCode instance defined in the above fixture.
+        """
         expected_repr = dedent("""\
         AdditionalCode(
         location = 'https://github.com/test/repo.git',
@@ -141,14 +144,14 @@ class TestStrAndRepr:
                  'test_file_2.py',
                  'test_file_3.opt']
         )""")
-        assert (
-            repr(remote_additional_code) == expected_repr
-        ), f"expected \n{repr(remote_additional_code)}\n, got \n{expected_repr}"
+        assert repr(remote_additional_code) == expected_repr, (
+            f"expected \n{repr(remote_additional_code)}\n, got \n{expected_repr}"
+        )
 
     def test_repr_local(self, local_additional_code):
         """Test that the __repr__ method returns the correct string for the example
-        local AdditionalCode instance defined in the above fixture."""
-
+        local AdditionalCode instance defined in the above fixture.
+        """
         expected_repr = dedent("""\
         AdditionalCode(
         location = '/some/local/directory',
@@ -174,7 +177,6 @@ class TestStrAndRepr:
         - mock_exists: Patches Path.exists() to ensure exists_locally property used in __repr__ returns True.
         - local_additional_code: An example AdditionalCode instance representing local code
         """
-
         local_additional_code.working_path = Path("/mock/local/dir")
         assert "State: <working_path = /mock/local/dir,exists_locally = True>" in repr(
             local_additional_code
@@ -182,8 +184,8 @@ class TestStrAndRepr:
 
     def test_str_remote(self, remote_additional_code):
         """Test that the __str__ method returns the correct string for the example
-        remote AdditionalCode instance defined in the above fixture."""
-
+        remote AdditionalCode instance defined in the above fixture.
+        """
         expected_str = dedent("""\
         AdditionalCode
         --------------
@@ -197,14 +199,14 @@ class TestStrAndRepr:
             test_file_2.py
             test_file_3.opt""")
 
-        assert (
-            str(remote_additional_code) == expected_str
-        ), f"expected \n{str(remote_additional_code)}\n, got \n{expected_str}"
+        assert str(remote_additional_code) == expected_str, (
+            f"expected \n{str(remote_additional_code)}\n, got \n{expected_str}"
+        )
 
     def test_str_local(self, local_additional_code):
         """Test that the __str__ method returns the correct string for the example local
-        AdditionalCode instance defined in the above fixture."""
-
+        AdditionalCode instance defined in the above fixture.
+        """
         expected_str = dedent("""\
         AdditionalCode
         --------------
@@ -217,9 +219,9 @@ class TestStrAndRepr:
             test_file_2.py
             test_file_3.opt""")
 
-        assert (
-            str(local_additional_code) == expected_str
-        ), f"expected \n{str(local_additional_code)}\n, got \n{expected_str}"
+        assert str(local_additional_code) == expected_str, (
+            f"expected \n{str(local_additional_code)}\n, got \n{expected_str}"
+        )
 
 
 class TestExistsLocally:
@@ -364,7 +366,6 @@ class TestExistsLocally:
         - `exists_locally` is False when a hash mismatch occurs for any file.
         - `Path.exists` and `_get_sha256_hash` are only called up to the first mismatch.
         """
-
         self.mock_exists.return_value = True
 
         additional_code = AdditionalCode(
@@ -406,7 +407,6 @@ class TestExistsLocally:
         - `exists_locally` is False when `working_path` is None.
         - `_get_sha256_hash` is not called, as no files are checked.
         """
-
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
@@ -429,7 +429,6 @@ class TestExistsLocally:
         - `exists_locally` is False when `_local_file_hash_cache` is None.
         - `_get_sha256_hash` is not called, as no hashes are available for comparison.
         """
-
         additional_code = AdditionalCode(
             location="/mock/local",
             subdir="subdir",
@@ -647,7 +646,6 @@ class TestAdditionalCodeGet:
         - The repository is not cloned (mock_clone is not called).
         - No files are copied (mock_copy is not called).
         """
-
         # Simulate a remote repository source but without checkout_target
         remote_additional_code._checkout_target = None  # This should raise a ValueError
         self.mock_location_type.return_value = "url"
@@ -676,7 +674,6 @@ class TestAdditionalCodeGet:
         - A `ValueError` is raised with the correct message when AdditionalCode.source.source_type is "directory" and AdditionalCode.source.location_type is "url"
         - No files are copied (mock_copy is not called).
         """
-
         self.mock_location_type.return_value = "url"
         self.mock_source_type.return_value = "directory"
 
