@@ -1,7 +1,7 @@
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
-from typing import Any, List, Optional, cast
+from typing import Any, Optional, cast
 
 import requests
 import yaml
@@ -126,18 +126,18 @@ class ROMSSimulation(Simulation):
         runtime_code: "AdditionalCode",
         compile_time_code: Optional["AdditionalCode"] = None,
         codebase: Optional["ROMSExternalCodeBase"] = None,
-        start_date: Optional[str | datetime] = None,
-        end_date: Optional[str | datetime] = None,
-        valid_start_date: Optional[str | datetime] = None,
-        valid_end_date: Optional[str | datetime] = None,
+        start_date: str | datetime | None = None,
+        end_date: str | datetime | None = None,
+        valid_start_date: str | datetime | None = None,
+        valid_end_date: str | datetime | None = None,
         marbl_codebase: Optional["MARBLExternalCodeBase"] = None,
         model_grid: Optional["ROMSModelGrid"] = None,
         initial_conditions: Optional["ROMSInitialConditions"] = None,
         tidal_forcing: Optional["ROMSTidalForcing"] = None,
         river_forcing: Optional["ROMSRiverForcing"] = None,
-        boundary_forcing: Optional[list["ROMSBoundaryForcing"]] = None,
-        surface_forcing: Optional[list["ROMSSurfaceForcing"]] = None,
-        forcing_corrections: Optional[list["ROMSForcingCorrections"]] = None,
+        boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
+        surface_forcing: list["ROMSSurfaceForcing"] | None = None,
+        forcing_corrections: list["ROMSForcingCorrections"] | None = None,
     ):
         """Initializes a `ROMSSimulation` instance.
 
@@ -257,10 +257,10 @@ class ROMSSimulation(Simulation):
         self._find_dotin_file()
 
         # roms-specific
-        self.exe_path: Optional[Path] = None
-        self._exe_hash: Optional[str] = None
+        self.exe_path: Path | None = None
+        self._exe_hash: str | None = None
 
-        self._execution_handler: Optional["ExecutionHandler"] = None
+        self._execution_handler: ExecutionHandler | None = None
 
     def _find_dotin_file(self) -> None:
         """Identify the runtime settings (.in) file from runtime code.
@@ -274,7 +274,6 @@ class ROMSSimulation(Simulation):
         ValueError
             If no `.in` file or more than one is found in the runtime code files.
         """
-
         in_files = [f for f in self.runtime_code.files if f.endswith(".in")]
 
         if not in_files:
@@ -304,7 +303,6 @@ class ROMSSimulation(Simulation):
         TypeError
             If any item in the list is not an instance of `expected_class`.
         """
-
         if not all([isinstance(ind, expected_class) for ind in collection]):
             raise TypeError(
                 f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
@@ -313,8 +311,8 @@ class ROMSSimulation(Simulation):
     def _check_inputdataset_partitioning(self) -> None:
         """If a ROMSInputDataset's source is already partitioned, confirm that the
         partitioning matches the processor distribution of the simulation and raise a
-        ValueError if not."""
-
+        ValueError if not.
+        """
         for inp in self.input_datasets:
             if inp.source_partitioning:
                 if (inp.source_np_xi != self.discretization.n_procs_x) or (
@@ -349,7 +347,6 @@ class ROMSSimulation(Simulation):
         - `ROMSInitialConditions` datasets only have their `start_date` checked;
           `end_date` is not required or enforced for initial conditions.
         """
-
         for inp in [
             self.initial_conditions,
             self.river_forcing,
@@ -392,7 +389,6 @@ class ROMSSimulation(Simulation):
         str
             A formatted string summarizing the simulation's attributes.
         """
-
         class_name = self.__class__.__name__
         base_str = super().__str__()
 
@@ -446,7 +442,6 @@ class ROMSSimulation(Simulation):
         str
             A string representation of the simulation suitable for debugging.
         """
-
         repr_str = super().__repr__().rstrip(")")
 
         if hasattr(self, "model_grid") and self.model_grid is not None:
@@ -495,7 +490,6 @@ class ROMSSimulation(Simulation):
         ROMSExternalCodeBase
             A default instance of the ROMS external codebase.
         """
-
         return ROMSExternalCodeBase()
 
     @property
@@ -510,7 +504,6 @@ class ROMSSimulation(Simulation):
         list
             A list containing the ROMS external codebase and MARBL external codebase.
         """
-
         return [self.codebase, self.marbl_codebase]
 
     @property
@@ -538,7 +531,6 @@ class ROMSSimulation(Simulation):
           is included individually.
         - This property is used to populate `runtime_settings.forcing`.
         """
-
         forcing_sources = chain(
             [self.tidal_forcing, self.river_forcing],
             self.surface_forcing,
@@ -582,7 +574,6 @@ class ROMSSimulation(Simulation):
         AttributeError
             If `start_date`, `end_date`, or `discretization.time_step` is not set.
         """
-
         run_length_seconds = int((self.end_date - self.start_date).total_seconds())
         return run_length_seconds // self.discretization.time_step
 
@@ -615,7 +606,6 @@ class ROMSSimulation(Simulation):
         - If MARBL configuration files are present in `runtime_code.files`, their paths
           are also included.
         """
-
         if self.runtime_code.working_path is None:
             raise ValueError(
                 "Cannot access runtime settings without local "
@@ -681,8 +671,7 @@ class ROMSSimulation(Simulation):
         list of ROMSInputDataset
             A list containing all input datasets used in the simulation.
         """
-
-        input_datasets: List[ROMSInputDataset] = []
+        input_datasets: list[ROMSInputDataset] = []
         if self.model_grid is not None:
             input_datasets.append(self.model_grid)
         if self.initial_conditions is not None:
@@ -704,8 +693,8 @@ class ROMSSimulation(Simulation):
         cls,
         simulation_dict: dict,
         directory: str | Path,
-        start_date: Optional[str | datetime] = None,
-        end_date: Optional[str | datetime] = None,
+        start_date: str | datetime | None = None,
+        end_date: str | datetime | None = None,
     ):
         """Create a `ROMSSimulation` instance from a dictionary representation.
 
@@ -737,7 +726,6 @@ class ROMSSimulation(Simulation):
         to_dict : Serializes a `ROMSSimulation` instance into a dictionary.
         from_blueprint : Creates a `ROMSSimulation` from a YAML blueprint file.
         """
-
         # Initialise keyword argument dictionary to create ROMSSimulation
         simulation_kwargs: dict[Any, Any] = {}
 
@@ -872,7 +860,6 @@ class ROMSSimulation(Simulation):
         from_dict : Reconstructs a `ROMSSimulation` instance from a dictionary.
         to_blueprint : Saves the dictionary representation as a YAML blueprint.
         """
-
         simulation_dict = super().to_dict()
 
         # MARBLExternalCodeBase
@@ -910,8 +897,8 @@ class ROMSSimulation(Simulation):
         cls,
         blueprint: str,
         directory: str | Path,
-        start_date: Optional[str | datetime] = None,
-        end_date: Optional[str | datetime] = None,
+        start_date: str | datetime | None = None,
+        end_date: str | datetime | None = None,
     ):
         """Create a `ROMSSimulation` instance from a YAML blueprint.
 
@@ -946,14 +933,13 @@ class ROMSSimulation(Simulation):
         to_blueprint : Saves the simulation as a YAML blueprint.
         from_dict : Creates an instance from a dictionary representation.
         """
-
         source = DataSource(location=blueprint)
         if source.source_type != "yaml":
             raise ValueError(
                 f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
             )
         if source.location_type == "path":
-            with open(blueprint, "r") as file:
+            with open(blueprint) as file:
                 bp_dict = yaml.safe_load(file)
         elif source.location_type == "url":
             bp_dict = yaml.safe_load(requests.get(source.location).text)
@@ -983,7 +969,6 @@ class ROMSSimulation(Simulation):
         from_blueprint : Creates a `ROMSSimulation` instance from a YAML blueprint.
         to_dict : Converts the instance into a dictionary representation.
         """
-
         with open(filename, "w") as yaml_file:
             yaml.dump(
                 self.to_dict(), yaml_file, default_flow_style=False, sort_keys=False
@@ -1016,7 +1001,6 @@ class ROMSSimulation(Simulation):
         - The displayed tree is based on the files tracked by the `ROMSSimulation` instance.
         - It does not necessarily reflect the actual state of the filesystem.
         """
-
         # Build a dictionary of files connected to this case
         simulation_tree_dict = {}
 
@@ -1074,7 +1058,6 @@ class ROMSSimulation(Simulation):
         build : Compiles the ROMS model.
         is_setup : Checks if the simulation has been properly configured.
         """
-
         compile_time_code_dir = self.directory / "ROMS/compile_time_code"
         runtime_code_dir = self.directory / "ROMS/runtime_code"
         input_datasets_dir = self.directory / "ROMS/input_datasets"
@@ -1142,7 +1125,6 @@ class ROMSSimulation(Simulation):
         --------
         setup : Fetches and organizes necessary files for the simulation.
         """
-
         if self.codebase.local_config_status != 0:
             return False
         if self.marbl_codebase.local_config_status != 0:
@@ -1293,7 +1275,6 @@ class ROMSSimulation(Simulation):
         run : Executes the compiled ROMS model.
         post_run : Performs post-processing steps after execution.
         """
-
         # Partition input datasets and add their paths to namelist
         if self.input_datasets is not None and all(
             [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
@@ -1310,10 +1291,10 @@ class ROMSSimulation(Simulation):
 
     def run(
         self,
-        account_key: Optional[str] = None,
-        walltime: Optional[str] = None,
-        queue_name: Optional[str] = None,
-        job_name: Optional[str] = None,
+        account_key: str | None = None,
+        walltime: str | None = None,
+        queue_name: str | None = None,
+        job_name: str | None = None,
     ) -> "ExecutionHandler":
         """Execute the ROMS simulation.
 
@@ -1375,7 +1356,6 @@ class ROMSSimulation(Simulation):
         pre_run : Prepares the input data before running.
         post_run : Handles output processing after execution.
         """
-
         if self.exe_path is None:
             raise ValueError(
                 "C-STAR: ROMSSimulation.exe_path is None; unable to find ROMS executable."
@@ -1479,7 +1459,6 @@ class ROMSSimulation(Simulation):
         run : Executes the ROMS simulation.
         pre_run : Prepares the simulation before execution.
         """
-
         if self._execution_handler is None:
             raise RuntimeError(
                 "Cannot call 'ROMSSimulation.post_run()' before calling 'ROMSSimulation.run()'"
@@ -1561,7 +1540,6 @@ class ROMSSimulation(Simulation):
         post_run : Handles post-processing of ROMS output files.
         run : Executes the ROMS simulation.
         """
-
         new_sim = cast(ROMSSimulation, super().restart(new_end_date=new_end_date))
 
         restart_dir = self.directory / "output"

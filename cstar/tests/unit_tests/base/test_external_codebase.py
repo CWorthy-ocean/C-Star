@@ -12,7 +12,8 @@ from cstar.system.manager import cstar_sysmgr
 
 class MockExternalCodeBase(ExternalCodeBase):
     """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
-    purposes."""
+    purposes.
+    """
 
     def __init__(self, log: logging.Logger):
         super().__init__(None, None)
@@ -38,7 +39,8 @@ class MockExternalCodeBase(ExternalCodeBase):
 @pytest.fixture
 def generic_codebase(log: logging.Logger):
     """Yields a generic codebase (instance of MockExternalCodeBase defined above) for
-    use in testing."""
+    use in testing.
+    """
     # Correctly patch the imported _get_hash_from_checkout_target in the ExternalCodeBase's module
     with mock.patch(
         "cstar.base.external_codebase._get_hash_from_checkout_target",
@@ -111,7 +113,6 @@ def test_codebase_str(generic_codebase):
 
 def test_codebase_repr(generic_codebase):
     """Test the repr representation of the `ExternalCodeBase` class."""
-
     result_repr = repr(generic_codebase)
     expected_repr = (
         "MockExternalCodeBase("
@@ -366,8 +367,8 @@ class TestExternalCodeBaseConfigHandling:
         tmp_path: Path,
     ):
         """Test handling when local_config_status == 2 (right remote, wrong hash) and
-        user agrees to checkout."""
-
+        user agrees to checkout.
+        """
         self.mock_local_config_status.return_value = 2
 
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"

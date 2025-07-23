@@ -31,12 +31,11 @@ def test_get_sha256_hash(tmp_path):
     - The calculated hash matches the expected hash
     - A FileNotFoundError is raised if the file does not exist
     """
-
     file_path = tmp_path / "test_file.txt"
     file_path.write_text("Test data for hash")
 
     # Compute the expected hash manually
-    expected_hash = hashlib.sha256("Test data for hash".encode()).hexdigest()
+    expected_hash = hashlib.sha256(b"Test data for hash").hexdigest()
 
     # Call _get_sha256_hash and verify
     calculated_hash = _get_sha256_hash(file_path)
@@ -105,7 +104,6 @@ class TestCloneAndCheckout:
         -------
         - Verifies RuntimeError is raised with an appropriate error message on clone failure.
         """
-
         # Simulate failure in the clone command
         self.mock_subprocess_run.side_effect = [
             mock.Mock(returncode=1, stderr="Error: clone failed."),
@@ -336,11 +334,13 @@ class TestGetHashFromCheckoutTarget:
 
 class TestReplaceTextInFile:
     """Tests for `_replace_text_in_file`, verifying correct behavior for text
-    replacement within a file."""
+    replacement within a file.
+    """
 
     def setup_method(self):
         """Common setup for each test, initializing base content that can be modified
-        per test."""
+        per test.
+        """
         self.base_content = "This is a test file with some old_text to replace."
 
     def test_replace_text_success(self, tmp_path):
@@ -411,7 +411,8 @@ class TestReplaceTextInFile:
 
 class TestListToConciseStr:
     """Tests for `_list_to_concise_str`, verifying correct behavior under different list
-    lengths and parameter configurations."""
+    lengths and parameter configurations.
+    """
 
     def test_basic_case_no_truncation(self):
         """Test `_list_to_concise_str` with a short list that does not exceed
@@ -470,7 +471,8 @@ class TestListToConciseStr:
 
 class TestDictToTree:
     """Tests for `_dict_to_tree`, verifying the correct tree-like string representation
-    of various dictionary structures."""
+    of various dictionary structures.
+    """
 
     def test_simple_flat_dict(self):
         """Test `_dict_to_tree` with a single-level dictionary.

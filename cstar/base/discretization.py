@@ -6,7 +6,6 @@ class Discretization(ABC):
 
     Attributes:
     -----------
-
     time_step: int
         The time step with which to run the Component
     """
@@ -27,7 +26,6 @@ class Discretization(ABC):
         Discretization:
             An initialized Discretization object
         """
-
         self.time_step: int = time_step
 
     def __str__(self) -> str:

@@ -79,7 +79,6 @@ def remote_input_dataset():
     ------
     MockInputDataset: Instance representing a remote input dataset for testing.
     """
-
     # Using context managers to patch properties on DataSource
     with (
         mock.patch.object(
@@ -135,16 +134,15 @@ class TestInputDatasetInit:
         - The `basename` is "local_file.nc".
         - The dataset is an instance of MockInputDataset.
         """
-
-        assert (
-            local_input_dataset.source.location_type == "path"
-        ), "Expected location_type to be 'path'"
-        assert (
-            local_input_dataset.source.basename == "local_file.nc"
-        ), "Expected basename to be 'local_file.nc'"
-        assert isinstance(
-            local_input_dataset, MockInputDataset
-        ), "Expected an instance of MockInputDataset"
+        assert local_input_dataset.source.location_type == "path", (
+            "Expected location_type to be 'path'"
+        )
+        assert local_input_dataset.source.basename == "local_file.nc", (
+            "Expected basename to be 'local_file.nc'"
+        )
+        assert isinstance(local_input_dataset, MockInputDataset), (
+            "Expected an instance of MockInputDataset"
+        )
 
     def test_remote_init(self, remote_input_dataset):
         """Test initialization of an InputDataset with a remote source.
@@ -160,18 +158,18 @@ class TestInputDatasetInit:
         - The `file_hash` is set to "abc123".
         - The dataset is an instance of MockInputDataset.
         """
-        assert (
-            remote_input_dataset.source.location_type == "url"
-        ), "Expected location_type to be 'url'"
-        assert (
-            remote_input_dataset.source.basename == "remote_file.nc"
-        ), "Expected basename to be 'remote_file.nc'"
-        assert (
-            remote_input_dataset.source.file_hash == "abc123"
-        ), "Expected file_hash to be 'abc123'"
-        assert isinstance(
-            remote_input_dataset, MockInputDataset
-        ), "Expected an instance of MockInputDataset"
+        assert remote_input_dataset.source.location_type == "url", (
+            "Expected location_type to be 'url'"
+        )
+        assert remote_input_dataset.source.basename == "remote_file.nc", (
+            "Expected basename to be 'remote_file.nc'"
+        )
+        assert remote_input_dataset.source.file_hash == "abc123", (
+            "Expected file_hash to be 'abc123'"
+        )
+        assert isinstance(remote_input_dataset, MockInputDataset), (
+            "Expected an instance of MockInputDataset"
+        )
 
     def test_remote_requires_file_hash(self, remote_input_dataset):
         """Test that a remote InputDataset raises an error when the file hash is
@@ -389,9 +387,9 @@ class TestExistsLocally:
         """
         local_input_dataset.working_path = None
         local_input_dataset._local_file_stat_cache = None
-        assert (
-            not local_input_dataset.exists_locally
-        ), "Expected exists_locally to be False when working_path or stat cache is None"
+        assert not local_input_dataset.exists_locally, (
+            "Expected exists_locally to be False when working_path or stat cache is None"
+        )
 
     def test_file_does_not_exist(self, local_input_dataset):
         """Test exists_locally when the file does not exist.
@@ -405,9 +403,9 @@ class TestExistsLocally:
         }
 
         with mock.patch.object(Path, "exists", return_value=False):
-            assert (
-                not local_input_dataset.exists_locally
-            ), "Expected exists_locally to be False when the file does not exist"
+            assert not local_input_dataset.exists_locally, (
+                "Expected exists_locally to be False when the file does not exist"
+            )
 
     def test_no_cached_stats(self, local_input_dataset):
         """Test exists_locally when no cached stats are available.
@@ -419,9 +417,9 @@ class TestExistsLocally:
         local_input_dataset._local_file_stat_cache = {}
 
         with mock.patch.object(Path, "exists", return_value=True):
-            assert (
-                not local_input_dataset.exists_locally
-            ), "Expected exists_locally to be False when no cached stats are available"
+            assert not local_input_dataset.exists_locally, (
+                "Expected exists_locally to be False when no cached stats are available"
+            )
 
     def test_size_mismatch(self, local_input_dataset):
         """Test exists_locally when the file size does not match the cached value.
@@ -436,7 +434,9 @@ class TestExistsLocally:
 
         with mock.patch.object(Path, "exists", return_value=True):
             with mock.patch.object(Path, "stat", return_value=mock.Mock(st_size=200)):
-                assert not local_input_dataset.exists_locally, "Expected exists_locally to be False when file size does not match cached stats"
+                assert not local_input_dataset.exists_locally, (
+                    "Expected exists_locally to be False when file size does not match cached stats"
+                )
 
     def test_modification_time_mismatch_with_hash_match(self, local_input_dataset):
         """Test exists_locally when the modification time does not match but the hash
@@ -465,7 +465,9 @@ class TestExistsLocally:
                     "cstar.base.input_dataset._get_sha256_hash",
                     return_value="mocked_hash",
                 ):
-                    assert local_input_dataset.exists_locally, "Expected exists_locally to be True when modification time mismatches but hash matches"
+                    assert local_input_dataset.exists_locally, (
+                        "Expected exists_locally to be True when modification time mismatches but hash matches"
+                    )
 
     def test_modification_time_and_hash_mismatch(self, local_input_dataset):
         """Test exists_locally when both modification time and hash do not match.
@@ -493,7 +495,9 @@ class TestExistsLocally:
                     "cstar.base.input_dataset._get_sha256_hash",
                     return_value="different_hash",
                 ):
-                    assert not local_input_dataset.exists_locally, "Expected exists_locally to be False when both modification time and hash do not match"
+                    assert not local_input_dataset.exists_locally, (
+                        "Expected exists_locally to be False when both modification time and hash do not match"
+                    )
 
     def test_all_checks_pass(self, local_input_dataset):
         """Test exists_locally when all checks pass.
@@ -513,9 +517,9 @@ class TestExistsLocally:
             with mock.patch.object(
                 Path, "stat", return_value=mock.Mock(st_size=100, st_mtime=12345)
             ):
-                assert (
-                    local_input_dataset.exists_locally
-                ), "Expected exists_locally to be True when all checks pass"
+                assert local_input_dataset.exists_locally, (
+                    "Expected exists_locally to be True when all checks pass"
+                )
 
 
 def test_to_dict(remote_input_dataset):
@@ -651,9 +655,9 @@ class TestInputDatasetGet:
 
             # Assert that working_path is updated to the resolved target path
             expected_target_path = self.target_dir / "local_file.nc"
-            assert (
-                local_input_dataset.working_path == expected_target_path
-            ), f"Expected working_path to be {expected_target_path}, but got {local_input_dataset.working_path}"
+            assert local_input_dataset.working_path == expected_target_path, (
+                f"Expected working_path to be {expected_target_path}, but got {local_input_dataset.working_path}"
+            )
 
         mock_path_resolve.assert_called()
 
@@ -728,9 +732,9 @@ class TestInputDatasetGet:
                 )
 
                 # Assert that working_path is updated to the expected target path
-                assert (
-                    remote_input_dataset.working_path == target_filepath_remote
-                ), f"Expected working_path to be {target_filepath_remote}, but got {remote_input_dataset.working_path}"
+                assert remote_input_dataset.working_path == target_filepath_remote, (
+                    f"Expected working_path to be {target_filepath_remote}, but got {remote_input_dataset.working_path}"
+                )
 
     def test_get_remote_with_no_file_hash(
         self, remote_input_dataset, mock_path_resolve
@@ -792,7 +796,6 @@ class TestLocalHash:
 
     def setup_method(self):
         """Set up common mocks for `local_hash` tests."""
-
         # Patch _get_sha256_hash
         self.patcher_get_hash = mock.patch("cstar.base.input_dataset._get_sha256_hash")
         self.mock_get_hash = self.patcher_get_hash.start()
@@ -818,9 +821,9 @@ class TestLocalHash:
         result = local_input_dataset.local_hash
 
         # Check that the result uses the resolved path
-        assert result == {
-            Path("/some/local/path"): "mocked_hash"
-        }, f"Expected calculated local_hash, but got {result}"
+        assert result == {Path("/some/local/path"): "mocked_hash"}, (
+            f"Expected calculated local_hash, but got {result}"
+        )
 
         # Verify _get_sha256_hash was called with the resolved path
         self.mock_get_hash.assert_called_once_with(Path("/some/local/path"))
@@ -841,14 +844,13 @@ class TestLocalHash:
 
         result = local_input_dataset.local_hash
 
-        assert (
-            result == {}
-        ), "Expected local_hash to be empty when working_path is not set."
+        assert result == {}, (
+            "Expected local_hash to be empty when working_path is not set."
+        )
         self.mock_get_hash.assert_not_called()
 
     def test_local_hash_multiple_files(self, local_input_dataset, mock_path_resolve):
         """Test `local_hash` calculation for multiple files."""
-
         expected_path_1 = Path("/some/local/path1")
         expected_path_2 = Path("/some/local/path2")
 
