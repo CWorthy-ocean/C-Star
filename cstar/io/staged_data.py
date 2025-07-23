@@ -1,45 +1,46 @@
 import os
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cstar.retrieval.source_data import SourceData
+    from cstar.io.source_data import SourceData
 
 
-class RetrievedData(ABC):
+class StagedData(ABC):
     def __init__(self, source: "SourceData"):
         self._source = source
 
     @property
     def source(self) -> "SourceData":
-        """The SourceData describing the source of the retrieved data."""
+        """The SourceData describing the source of the staged data."""
         return self._source
 
     @property
     @abstractmethod
     def paths(self) -> list[Path]:
-        """The local path(s) of the retrieved data."""
+        """The local path(s) of the staged data."""
 
     @property
     @abstractmethod
     def changed_from_source(self) -> bool:
-        """Whether the data have been modified since retrieval."""
+        """Whether the data have been modified since staging."""
 
     @abstractmethod
     def reset(self):
-        """Revert to original retrieved state if changed_from_source."""
+        """Revert to original staged state if changed_from_source."""
         pass
 
 
-class RetrievedFile(RetrievedData):
+class StagedFile(StagedData):
     def __init__(
         self,
         source: "SourceData",
         path: Path,
-        sha256: Optional[str],
-        stat: Optional[os.stat_result],
+        sha256: str | None,
+        stat: os.stat_result | None,
     ):
         super().__init__(source)
         self._path = path
@@ -50,7 +51,8 @@ class RetrievedFile(RetrievedData):
     @property
     def changed_from_source(self) -> bool:
         """Check cached checksum, filesize, and modification time against current
-        values."""
+        values.
+        """
         if not self._path.exists():
             return True
         # etc.
@@ -73,10 +75,10 @@ class RetrievedFile(RetrievedData):
         return self._path
 
 
-class RetrievedFileSet(RetrievedData):
-    """Collection of related RetrievedFile instances."""
+class StagedFileSet(StagedData):
+    """Collection of related StagedFile instances."""
 
-    def __init__(self, source: "SourceData", files: Sequence[RetrievedFile]):
+    def __init__(self, source: "SourceData", files: Sequence[StagedFile]):
         super().__init__(source)
         self._files = list(files)
 
@@ -93,7 +95,7 @@ class RetrievedFileSet(RetrievedData):
             f.reset()
 
 
-class RetrievedRepository(RetrievedData):
+class StagedRepository(StagedData):
     def __init__(self, source: "SourceData", path: Path):
         super().__init__(source)
         self._source = source
