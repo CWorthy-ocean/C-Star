@@ -1,6 +1,5 @@
 from cstar.io.retriever import (
-    LocalBinaryFileRetriever,
-    LocalTextFileRetriever,
+    LocalFileRetriever,
     RemoteBinaryFileRetriever,
     RemoteRepositoryRetriever,
     RemoteTextFileRetriever,
@@ -41,7 +40,6 @@ __all__ = [
     "Retriever",
     "RemoteBinaryFileRetriever",
     "RemoteTextFileRetriever",
-    "LocalBinaryFileRetriever",
-    "LocalTextFileRetriever",
+    "LocalFileRetriever",
     "RemoteRepositoryRetriever",
 ]

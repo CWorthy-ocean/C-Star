@@ -51,6 +51,10 @@ class SourceData:
     def file_hash(self) -> str | None:
         return self._file_hash
 
+    @property
+    def checkout_target(self) -> str | None:
+        return self._checkout_target
+
     # Inferred data characteristics
     @property
     def location_type(self) -> LocationType:
