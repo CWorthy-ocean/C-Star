@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from cstar.base.utils import _get_sha256_hash
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -43,9 +45,17 @@ class StagedFile(StagedData):
         stat: os.stat_result | None = None,
     ):
         super().__init__(source)
+
         self._path = path
-        self._sha256 = sha256
-        self._stat = stat
+        if sha256:
+            self._sha256 = sha256
+        else:
+            self._sha256 = _get_sha256_hash(self.path)
+
+        if stat:
+            self._stat = stat
+        else:
+            self._stat = os.stat(self.path)
 
     # Abstract
     @property
