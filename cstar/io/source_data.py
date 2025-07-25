@@ -1,9 +1,20 @@
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
-if TYPE_CHECKING:
-    from cstar.io import StagedData, Stager
+import charset_normalizer
+import requests
+
+from cstar.base.utils import _run_cmd
+from cstar.io import (
+    LocalBinaryFileStager,
+    LocalTextFileStager,
+    RemoteBinaryFileStager,
+    RemoteRepositoryStager,
+    RemoteTextFileStager,
+    StagedData,
+    Stager,
+)
 
 
 class SourceType(Enum):
@@ -13,24 +24,13 @@ class SourceType(Enum):
 
 
 class LocationType(Enum):
-    URL = "url"
+    HTTP = "http"
     PATH = "path"
-
-
-class FileType(Enum):
-    YAML = "yaml"
-    NETCDF = "netcdf"
 
 
 class FileEncoding(Enum):
     TEXT = "text"
     BINARY = "binary"
-
-
-FILE_ENCODING_LOOKUP: dict[FileType, FileEncoding] = {
-    FileType.YAML: FileEncoding.TEXT,
-    FileType.NETCDF: FileEncoding.BINARY,
-}
 
 
 class SourceData:
@@ -58,32 +58,113 @@ class SourceData:
     # Inferred data characteristics
     @property
     def location_type(self) -> LocationType:
-        """Determine type of location (path or URL) from 'location'."""
-        raise NotImplementedError
+        """Get the location type (e.g. "path" or "url") from the "location"
+        attribute.
+        """
+        urlparsed_location = urlparse(self.location)
+        if all([urlparsed_location.scheme, urlparsed_location.netloc]):
+            return LocationType.HTTP
+        elif Path(self.location).expanduser().exists():
+            return LocationType.PATH
+        else:
+            raise ValueError(
+                f"{self.location} is not a recognised URL or local path pointing to an existing file or directory"
+            )
+
+    @property
+    def _is_repository(self) -> bool:
+        """Checks if self.location describes a repository using a git ls-remote subprocess."""
+        try:
+            _run_cmd(f"git ls-remote {self.location}", raise_on_error=True)
+            return True
+        except RuntimeError:
+            return False
+
+    @property
+    def _http_is_html(self) -> bool:
+        r = requests.head(self.location, allow_redirects=True, timeout=10)
+        content_type = r.headers.get("Content-Type", "").lower()
+        return content_type.startswith("text/html")
+
+    @property
+    def suffix(self) -> str:
+        if self.location_type is LocationType.HTTP:
+            return Path(urlparse(self.location).path).suffix
+        elif self.location_type is LocationType.PATH:
+            return Path(self.location).suffix
 
     @property
     def source_type(self) -> SourceType:
         """Infer source type (file/directory/repository) from 'location'."""
-        raise NotImplementedError
-
-    @property
-    def file_type(self) -> FileType | None:
-        """Infer file type from 'location'."""
-        raise NotImplementedError
+        if self._is_repository:
+            return SourceType.REPOSITORY
+        elif self.location_type is LocationType.HTTP:
+            if (not self._http_is_html) and (self.suffix):
+                return SourceType.FILE
+        elif self.location_type is LocationType.PATH:
+            resolved_path = Path(self.location).resolve()
+            if resolved_path.is_file():
+                return SourceType.FILE
+            elif resolved_path.is_dir():
+                return SourceType.DIRECTORY
+        raise ValueError(
+            f"{self.location} does not appear to point to a valid source type. "
+            "Valid source types: \n"
+            "\n".join([value.value for value in SourceType])
+        )
 
     @property
     def file_encoding(self) -> FileEncoding | None:
         """Look up file encoding based on source_type."""
-        return (
-            FILE_ENCODING_LOOKUP.get(self.file_type, None) if self.file_type else None
-        )
+        if self.source_type is not SourceType.FILE:
+            return None
+
+        def get_header_bytes(location, n_bytes=512) -> bytes:
+            if self.location_type is LocationType.HTTP:
+                response = requests.get(location, stream=True, allow_redirects=True)
+                response.raw.decode_content = True
+                header_bytes = response.raw.read(n_bytes)
+            elif self.location_type is LocationType.PATH:
+                with open(location, "rb") as f:
+                    header_bytes = f.read(n_bytes)
+            return header_bytes
+
+        best_encoding = charset_normalizer.from_bytes(
+            get_header_bytes(self.location)
+        ).best()
+        if best_encoding:
+            return FileEncoding.TEXT
+        else:
+            return FileEncoding.BINARY
 
     # Staging logic
     def _select_stager(self) -> "Stager":
         """Logic to determine the correct stager based on the above
         characteristics.
         """
-        raise NotImplementedError
+        # Remote stagers
+        if self.location_type is LocationType.HTTP:
+            if self.source_type is SourceType.REPOSITORY:
+                return RemoteRepositoryStager()
+
+            if self.source_type is SourceType.FILE:
+                if self.file_encoding is FileEncoding.BINARY:
+                    return RemoteBinaryFileStager()
+                elif self.file_encoding is FileEncoding.TEXT:
+                    return RemoteTextFileStager()
+
+        # Local stagers
+        if (self.location_type is LocationType.PATH) and (
+            self.source_type is SourceType.FILE
+        ):
+            if self.file_encoding is FileEncoding.TEXT:
+                return LocalTextFileStager()
+            elif self.file_encoding is FileEncoding.BINARY:
+                return LocalBinaryFileStager()
+
+        raise ValueError(
+            f"Unable to determine an appropriate stager for data at {self.location}"
+        )
 
     def get(self, target_path: str | Path) -> "StagedData":
         return self._stager.stage(target_path=Path(target_path), source=self)

@@ -23,7 +23,7 @@ class Retriever(ABC):
 
 class RemoteFileRetriever(Retriever, ABC):
     def read(self, source: SourceData) -> bytes:
-        response = requests.get(source.location)
+        response = requests.get(source.location, allow_redirects=True)
         response.raise_for_status()
         data = response.content
 
@@ -38,7 +38,7 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
     def save(self, target_path: Path, source: SourceData) -> None:
         hash_obj = hashlib.sha256()
 
-        with requests.get(source.location, stream=True) as r:
+        with requests.get(source.location, stream=True, allow_redirects=True) as r:
             r.raise_for_status()
             with open(target_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):  # Download in 8kB chunks
