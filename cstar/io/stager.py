@@ -5,6 +5,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from cstar.io import (
+        LocalFileRetriever,
+        RemoteBinaryFileRetriever,
+        RemoteRepositoryRetriever,
+        RemoteTextFileRetriever,
         SourceData,
         StagedData,
         StagedFile,
@@ -23,35 +27,63 @@ class RemoteBinaryFileStager(Stager):
     # Used for e.g. a remote netCDF InputDataset
     def stage(self, target_path: Path, source: "SourceData") -> "StagedFile":
         """Stage a remote binary file with hash verification using Pooch."""
-        raise NotImplementedError
+        retriever = RemoteBinaryFileRetriever()
+        retriever.save(source=source, target_path=target_path)
+
+        return StagedFile(
+            source=source,
+            path=target_path,
+            sha256=(source.file_hash or None),
+            stat=None,
+        )
 
 
 class RemoteTextFileStager(Stager):
     # Used for e.g. a remote yaml file
     def stage(self, target_path: Path, source: "SourceData") -> "StagedFile":
         """Stage remote text directly using requests."""
-        raise NotImplementedError
+        retriever = RemoteTextFileRetriever()
+        retriever.save(source=source, target_path=target_path)
+
+        return StagedFile(
+            source=source,
+            path=target_path,
+            sha256=(source.file_hash or None),
+            stat=None,
+        )
 
 
 class LocalBinaryFileStager(Stager):
     # Used for e.g. a local netCDF InputDataset
     def stage(self, target_path: Path, source: "SourceData") -> "StagedFile":
         """Create a local symlink to a binary file on the current filesystem."""
-        raise NotImplementedError
+        target_path.symlink_to(source.location)
+
+        return StagedFile(
+            source=source, path=target_path, sha256=(source.file_hash or None)
+        )
 
 
 class LocalTextFileStager(Stager):
     # Used for e.g. a local yaml file
     def stage(self, target_path: Path, source: "SourceData") -> "StagedFile":
         """Create a local copy of a text file on the current filesystem."""
-        raise NotImplementedError
+        retriever = LocalFileRetriever()
+        retriever.save(source=source, target_path=target_path)
+
+        return StagedFile(
+            source=source, path=target_path, sha256=source.file_hash or None
+        )
 
 
 class RemoteRepositoryStager(Stager):
     # Used for e.g. an ExternalCodeBase
     def stage(self, target_path: Path, source: "SourceData") -> "StagedRepository":
         """Clone and checkout a git repository at a given target."""
-        raise NotImplementedError
+        retriever = RemoteRepositoryRetriever()
+        retriever.save(source=source, target_path=target_path)
+
+        return StagedRepository(source=source, path=target_path)
 
 
 class LocalTextFileSetStager(Stager):

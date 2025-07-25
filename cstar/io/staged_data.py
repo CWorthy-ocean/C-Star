@@ -39,8 +39,8 @@ class StagedFile(StagedData):
         self,
         source: "SourceData",
         path: Path,
-        sha256: str | None,
-        stat: os.stat_result | None,
+        sha256: str | None = None,
+        stat: os.stat_result | None = None,
     ):
         super().__init__(source)
         self._path = path

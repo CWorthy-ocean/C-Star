@@ -34,7 +34,7 @@ class RemoteFileRetriever(Retriever, ABC):
         pass
 
 
-class RemoteBinaryFileRetriever(Retriever):
+class RemoteBinaryFileRetriever(RemoteFileRetriever):
     def save(self, target_path: Path, source: SourceData) -> None:
         hash_obj = hashlib.sha256()
 
@@ -60,7 +60,7 @@ class RemoteBinaryFileRetriever(Retriever):
                 )
 
 
-class RemoteTextFileRetriever(Retriever):
+class RemoteTextFileRetriever(RemoteFileRetriever):
     def save(self, target_path: Path, source: SourceData) -> None:
         data = self.read(source=source)
         with open(target_path, "wb") as f:
@@ -73,7 +73,7 @@ class LocalFileRetriever(Retriever):
             return f.read()
 
     def save(self, target_path: Path, source: SourceData) -> None:
-        shutil.copyfile(Path(source.location).resolve(), target_path)
+        shutil.copy2(src=Path(source.location).resolve(), dst=target_path)
 
 
 class RemoteRepositoryRetriever(Retriever):
