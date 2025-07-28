@@ -9,16 +9,16 @@ from cstar.io.source_data import SourceData
 from cstar.io.staged_data import (
     StagedData,
     StagedFile,
-    StagedFileSet,
+    # StagedFileSet,
     StagedRepository,
 )
 from cstar.io.stager import (
     LocalBinaryFileStager,
-    LocalTextFileSetStager,
+    # LocalTextFileSetStager,
     LocalTextFileStager,
     RemoteBinaryFileStager,
     RemoteRepositoryStager,
-    RemoteTextFileSetStager,
+    # RemoteTextFileSetStager,
     RemoteTextFileStager,
     Stager,
 )
@@ -26,15 +26,15 @@ from cstar.io.stager import (
 __all__ = [
     "StagedData",
     "StagedFile",
-    "StagedFileSet",
+    # "StagedFileSet",
     "StagedRepository",
     "LocalBinaryFileStager",
     "LocalTextFileStager",
-    "LocalTextFileSetStager",
+    # "LocalTextFileSetStager",
     "RemoteBinaryFileStager",
     "RemoteRepositoryStager",
     "RemoteTextFileStager",
-    "RemoteTextFileSetStager",
+    # "RemoteTextFileSetStager",
     "Stager",
     "SourceData",
     "Retriever",

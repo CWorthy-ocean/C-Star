@@ -15,8 +15,26 @@ class Retriever(ABC):
         """Retrieve data to memory, if supported"""
         pass
 
+    def save(self, target_dir: Path, source: SourceData) -> Path:
+        """
+        Save this object to the given directory.
+
+        This method performs common setup ( ensuring the target directory exists)
+        and then calls the subclass-defined `_save()` method for the actual save.
+        """
+        if target_dir.exists():
+            if not target_dir.is_dir():
+                raise ValueError(
+                    f"Cannot save to target_dir={target_dir} (not a directory)"
+                )
+        else:
+            target_dir.mkdir(parents=True)
+
+        savepath = self._save(target_dir=target_dir, source=source)
+        return savepath
+
     @abstractmethod
-    def save(self, target_path: Path, source: SourceData) -> None:
+    def _save(self, target_dir: Path, source: SourceData) -> Path:
         """Retrieve data to a local path"""
         pass
 
@@ -30,13 +48,15 @@ class RemoteFileRetriever(Retriever, ABC):
         return data
 
     @abstractmethod
-    def save(self, target_path: Path, source: SourceData) -> None:
+    def _save(self, target_dir: Path, source: SourceData) -> Path:
         pass
 
 
 class RemoteBinaryFileRetriever(RemoteFileRetriever):
-    def save(self, target_path: Path, source: SourceData) -> None:
+    def _save(self, target_dir: Path, source: SourceData) -> Path:
         hash_obj = hashlib.sha256()
+
+        target_path = target_dir / source.filename
 
         with requests.get(source.location, stream=True, allow_redirects=True) as r:
             r.raise_for_status()
@@ -58,13 +78,16 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
                     f"Expected: {expected_hash}\nActual:   {actual_hash}.\n"
                     f"File deleted for safety."
                 )
+        return target_path
 
 
 class RemoteTextFileRetriever(RemoteFileRetriever):
-    def save(self, target_path: Path, source: SourceData) -> None:
+    def _save(self, target_dir: Path, source: SourceData) -> Path:
         data = self.read(source=source)
+        target_path = target_dir / source.filename
         with open(target_path, "wb") as f:
             f.write(data)
+        return target_path
 
 
 class LocalFileRetriever(Retriever):
@@ -72,22 +95,25 @@ class LocalFileRetriever(Retriever):
         with open(source.location, "rb") as f:
             return f.read()
 
-    def save(self, target_path: Path, source: SourceData) -> None:
+    def _save(self, target_dir: Path, source: SourceData) -> Path:
+        target_path = target_dir / source.filename
         shutil.copy2(src=Path(source.location).resolve(), dst=target_path)
+        return target_path
 
 
 class RemoteRepositoryRetriever(Retriever):
     def read(self, source: SourceData) -> bytes:
         raise NotImplementedError("Cannot 'read' a remote repository to memory")
 
-    def save(self, target_path: Path, source: SourceData) -> None:
+    def _save(self, target_dir: Path, source: SourceData) -> Path:
         _clone(
             source_repo=source.location,
-            local_path=target_path,
+            local_path=target_dir,
         )
         if source.checkout_target:
             _checkout(
                 source_repo=source.location,
-                local_path=target_path,
+                local_path=target_dir,
                 checkout_target=source.checkout_target,
             )
+        return target_dir

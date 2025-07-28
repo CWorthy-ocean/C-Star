@@ -56,6 +56,26 @@ class SourceData:
         return self._checkout_target
 
     # Inferred data characteristics
+
+    @property
+    def _location_as_path(self) -> Path:
+        """Return self.location as a Path for parsing"""
+        if self.location_type is LocationType.HTTP:
+            return Path(urlparse(self.location).path)
+        elif self.location_type is LocationType.PATH:
+            return Path(self.location)
+        raise ValueError(f"Cannot convert location {self.location} to Path")
+
+    @property
+    def filename(self) -> str:
+        """Get the filename from `location`"""
+        return self._location_as_path.name
+
+    @property
+    def suffix(self) -> str:
+        """Get the extension from `location`"""
+        return self._location_as_path.suffix
+
     @property
     def location_type(self) -> LocationType:
         """Get the location type (e.g. "path" or "url") from the "location"
@@ -85,13 +105,6 @@ class SourceData:
         r = requests.head(self.location, allow_redirects=True, timeout=10)
         content_type = r.headers.get("Content-Type", "").lower()
         return content_type.startswith("text/html")
-
-    @property
-    def suffix(self) -> str:
-        if self.location_type is LocationType.HTTP:
-            return Path(urlparse(self.location).path).suffix
-        elif self.location_type is LocationType.PATH:
-            return Path(self.location).suffix
 
     @property
     def source_type(self) -> SourceType:
@@ -166,5 +179,9 @@ class SourceData:
             f"Unable to determine an appropriate stager for data at {self.location}"
         )
 
-    def get(self, target_path: str | Path) -> "StagedData":
-        return self._stager.stage(target_path=Path(target_path), source=self)
+    def get(self, target_dir: str | Path) -> "StagedData":
+        return self._stager.stage(target_dir=Path(target_dir), source=self)
+
+
+class SourceDataCollection:
+    pass
