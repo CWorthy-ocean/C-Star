@@ -74,11 +74,11 @@ for item in "${ENGINES[@]}"; do
     RESULT=$(command -v "$item" || true)
 
     if [ -n "$RESULT" ]; then
-        log_info "Using $item runtime engine."
+        log_info "Using runtime engine: $item"
         RUNTIME_ENGINE="$RESULT"
         break
     else
-        log_info "Runtime engine $item was not found."
+        log_info "Runtime engine not found: $item"
     fi
 done
 
@@ -94,7 +94,7 @@ TAG_L="$ACCOUNT/cstar-$IMAGE_NAME:$LATEST"
 CONTEXT_CONTENT=$(ls -l $CONTEXT_PATH)
 
 if [[ "$CONTEXT_CONTENT" != *Dockerfile* ]]; then
-    log_error "Dockerfile not found in $CONTEXT_PATH"
+    log_error "Dockerfile not found in: $CONTEXT_PATH"
     exit 1
 fi
 
@@ -110,7 +110,7 @@ else
 fi
 
 if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then
-    log_info "Migrating $VTAG"
+    log_info "Migrating: $VTAG"
     $RUNTIME_ENGINE migrate "$VTAG"
 fi
 
@@ -121,11 +121,11 @@ for item in "${TAGS[@]}"; do
     $RUNTIME_ENGINE tag "$VTAG" "$item"
 
     if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then
-        log_info "Migrating $item"
+        log_info "Migrating: $item"
         $RUNTIME_ENGINE migrate "$item"
     fi
 
-    log_info "Publishing $REPO/$item"
+    log_info "Publishing: $REPO/$item"
     $RUNTIME_ENGINE push "$item"
 done
 
