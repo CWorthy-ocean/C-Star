@@ -21,7 +21,7 @@ BUILD_ARGS="$5"
 
 CONTEXT_PATH="$CONTEXT_ROOT/$IMAGE_NAME"
 ACCOUNT_DEFAULT=ankona
-VERSION_DEFAULT=1
+VERSION_DEFAULT=$(git rev-parse --short HEAD)
 REPO_DEFAULT="docker.io"
 LOG_FORMAT="[%s] %s %s\n"
 
@@ -57,8 +57,8 @@ if [ -z "$ACCOUNT" ]; then
 fi
 
 if [ -z "$TAG_VERSION" ]; then
-    TAG_VERSION=$(git rev-parse --short HEAD)
-    log_info "Using default tag version: $TAG_VERSION" 
+    TAG_VERSION=$VERSION_DEFAULT
+    log_info "Using default tag version: $TAG_VERSION"
 fi
 
 if [ -z "$REPO" ]; then
