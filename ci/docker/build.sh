@@ -73,7 +73,7 @@ for item in "${ENGINES[@]}"; do
     log_info "Checking for $item runtime engine"
     RESULT=$(command -v "$item" || true)
 
-    if [ ! -z "$RESULT" ]; then
+    if [ -n "$RESULT" ]; then
         log_info "Using $item runtime engine."
         RUNTIME_ENGINE="$RESULT"
         break
