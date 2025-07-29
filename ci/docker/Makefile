@@ -31,6 +31,11 @@ IMG_CONDA := "condabase"
 conda:
 	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_CONDA) $(ACCOUNT) $(REPO_URI)
 
+IMG_PYTHON := "python"
+.PHONY: python
+python:
+	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_PYTHON) $(ACCOUNT) $(REPO_URI)
+
 IMG_ROMS := "roms"
 .PHONY: roms
 roms: # netcdf
@@ -53,6 +58,7 @@ pull:
 .PHONY: pullall
 pullall:
 	$(MAKE) pull img=$(IMG_CONDA)
+	$(MAKE) pull img=$(IMG_PYTHON)
 	$(MAKE) pull img=$(IMG_BUILDBASE)
 	$(MAKE) pull img=$(IMG_MPI507)
 	$(MAKE) pull img=$(IMG_HDF5)
@@ -73,6 +79,7 @@ clean:
 cleanall:
 	$(MAKE) clean img=$(IMG_RUNNER)
 	$(MAKE) clean img=$(IMG_CONDA)
+	$(MAKE) clean img=$(IMG_PYTHON)
 	$(MAKE) clean img=$(IMG_MARBL)
 	$(MAKE) clean img=$(IMG_ROMS)
 	$(MAKE) clean img=$(IMG_NETCDF)
@@ -88,6 +95,7 @@ login:
 all: 
 	$(MAKE) buildbase
 	$(MAKE) conda
+	$(MAKE) python
 	$(MAKE) mpi5
 	$(MAKE) hdf5
 	$(MAKE) netcdf
