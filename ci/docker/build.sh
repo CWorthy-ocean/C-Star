@@ -23,7 +23,7 @@ CONTEXT_PATH="$CONTEXT_ROOT/$IMAGE_NAME"
 ACCOUNT_DEFAULT=ankona
 VERSION_DEFAULT=$(git rev-parse --short HEAD)
 REPO_DEFAULT="docker.io"
-LOG_FORMAT="[%s] %s %s\n"
+LOG_FORMAT="[%s] %s %b\n"
 
 log_info() {
     printf "$LOG_FORMAT" "INFO" "$SCRIPT" "$1"
