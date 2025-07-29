@@ -1,3 +1,4 @@
+from collections.abc import Iterable, Iterator, Sequence
 from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
@@ -13,6 +14,7 @@ from cstar.io import (
     RemoteRepositoryStager,
     RemoteTextFileStager,
     StagedData,
+    StagedDataCollection,
     Stager,
 )
 
@@ -179,9 +181,69 @@ class SourceData:
             f"Unable to determine an appropriate stager for data at {self.location}"
         )
 
-    def get(self, target_dir: str | Path) -> "StagedData":
+    def stage(self, target_dir: str | Path) -> "StagedData":
         return self._stager.stage(target_dir=Path(target_dir), source=self)
 
 
 class SourceDataCollection:
-    pass
+    def __init__(self, sources: Iterable[SourceData] = ()):
+        self._sources: list[SourceData] = list(sources)
+        self._validate()
+
+    def _validate(self):
+        for s in self._sources:
+            if s.source_type in [SourceType.DIRECTORY, SourceType.REPOSITORY]:
+                raise TypeError(
+                    f"Cannot create SourceDataCollection with data of source type '{s.source_type.value}'"
+                )
+
+    def __len__(self) -> int:
+        return len(self._sources)
+
+    def __getitem__(self, idx: int) -> SourceData:
+        return self._sources[idx]
+
+    def __iter__(self) -> Iterator[SourceData]:
+        return iter(self._sources)
+
+    def append(self, source: SourceData) -> None:
+        self._sources.append(source)
+        self._validate()
+
+    @property
+    def locations(self) -> list[str]:
+        return [s.location for s in self._sources]
+
+    @classmethod
+    def from_locations(
+        cls,
+        locations: Sequence[str | Path],
+        file_hashes: Sequence[str | None] | None = None,
+        checkout_targets: Sequence[str | None] | None = None,
+    ) -> "SourceDataCollection":
+        """Create a SourceDataCollection from a list of locations with optional
+        parallel hash and checkout_target lists.
+        """
+        n = len(locations)
+        file_hashes = file_hashes or [None] * n
+        checkout_targets = checkout_targets or [None] * n
+
+        if not (len(file_hashes) == len(checkout_targets) == n):
+            raise ValueError("Length mismatch between inputs")
+
+        sources = [
+            SourceData(location=loc, file_hash=fh, checkout_target=ct)
+            for loc, fh, ct in zip(locations, file_hashes, checkout_targets)
+        ]
+        return cls(sources)
+
+    @property
+    def sources(self) -> list[SourceData]:
+        return list(self._sources)
+
+    def stage(self, target_dir: str | Path) -> StagedDataCollection:
+        staged_data_instances = []
+        for s in self.sources:
+            staged_data = s.stage(target_dir=target_dir)
+            staged_data_instances.append(staged_data)
+        return StagedDataCollection(items=staged_data_instances)

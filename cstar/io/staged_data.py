@@ -1,6 +1,7 @@
 import os
 import shutil
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING
 
 from cstar.base.utils import _get_sha256_hash, _run_cmd
@@ -91,7 +92,7 @@ class StagedFile(StagedData):
         else:
             self.unstage()
             self._clear_cache()
-            self.source.get(target_dir=self.path)
+            self.source.stage(target_dir=self.path)
 
 
 class StagedRepository(StagedData):
@@ -149,27 +150,42 @@ class StagedRepository(StagedData):
 
 
 class StagedDataCollection:
-    pass
+    def __init__(self, items: Iterable[StagedData]):
+        self._items = list(items)
+        self._validate()
 
+    def _validate(self):
+        for s in self._items:
+            if not isinstance(s, StagedData):
+                raise TypeError(
+                    f"Invalid type: {type(s)} (must be StagedData subclass)"
+                )
 
-# class StagedFileSet(StagedData):
-#     """Collection of related StagedFile instances."""
+    def __len__(self) -> int:
+        return len(self._items)
 
-#     def __init__(self, source: "SourceData", files: Sequence[StagedFile]):
-#         super().__init__(source)
-#         self._files = list(files)
+    def __getitem__(self, idx: int) -> StagedData:
+        return self._items[idx]
 
-#     @property
-#     def paths(self) -> list[Path]:
-#         return [f.path for f in self._files]
+    def __iter__(self) -> Iterator[StagedData]:
+        return iter(self._items)
 
-#     @property
-#     def changed_from_source(self) -> bool:
-#         return any(f.changed_from_source for f in self._files)
+    def append(self, staged: StagedData):
+        self._items.append(staged)
+        self._validate()
 
-#     def unstage(self):
-#         pass
+    @property
+    def paths(self) -> list[Path]:
+        """Flattened list of all paths across all staged entries."""
+        return [s.path for s in self._items]
 
-#     def reset(self):
-#         for f in self._files:
-#             f.reset()
+    def changed_from_source(self) -> bool:
+        return any(s.changed_from_source for s in self._items)
+
+    def reset(self):
+        for s in self._items:
+            s.reset()
+
+    @property
+    def items(self) -> list[StagedData]:
+        return list(self._items)
