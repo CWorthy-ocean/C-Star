@@ -101,10 +101,10 @@ chmod a+r $CONTEXT_PATH/entrypoint.sh
 
 if [ ! -z "$BUILD_ARGS" ]; then
     log_info "Building parameterized $VTAG in $CONTEXT_PATH from source \n$CONTEXT_DIR\n$BUILD_ARGS"
-    $RUNTIME_ENGINE build -t "$VTAG" --no-cache --build-arg "$BUILD_ARGS" "$CONTEXT_PATH" 
+    $RUNTIME_ENGINE build -t "$VTAG" --build-arg "$BUILD_ARGS" "$CONTEXT_PATH" 
 else
     log_info "Building $VTAG in $CONTEXT_PATH from source \n $CONTEXT_DIR"
-    $RUNTIME_ENGINE build -t "$VTAG" --no-cache "$CONTEXT_PATH"
+    $RUNTIME_ENGINE build -t "$VTAG" "$CONTEXT_PATH"
 fi
 
 log_info "Migrating $VTAG"
