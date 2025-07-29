@@ -51,6 +51,10 @@ IMG_RUNNER := "runner"
 runner: # conda roms marbl
 	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_RUNNER) $(ACCOUNT) $(REPO_URI)
 
+.PHONY: buildhelp
+buildhelp:
+	./build.sh
+
 .PHONY: pull
 pull:
 	podman-hpc pull $(REPO_URI)/$(ACCOUNT)/cstar-$(img):latest
