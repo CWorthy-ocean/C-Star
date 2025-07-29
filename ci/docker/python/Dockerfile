@@ -13,8 +13,7 @@ RUN python -m venv "$CSTAR_HOME" && \
     echo ". $CSTAR_HOME/bin/activate" >> "$PY_PROFILE" && \
     . /etc/profile && \
     git clone -b $CSTAR_HASH --single-branch "https://github.com/$CSTAR_REPO" /tmp/cstar && \
-    cd /tmp/cstar && \
-    pip install . --no-cache-dir && \
+    pip install /tmp/cstar --no-cache-dir && \
     rm -rf /tmp/cstar
 
 WORKDIR $INSTALL_BASE_DIR
