@@ -86,9 +86,10 @@ if [ -z "$RUNTIME_ENGINE" ]; then
     exit 1
 fi
 
+LATEST="latest"
 VTAG="cstar-$IMAGE_NAME:$TAG_VERSION"
 TAG_V="$ACCOUNT/cstar-$IMAGE_NAME:$TAG_VERSION"
-TAG_L="$ACCOUNT/cstar-$IMAGE_NAME:latest"
+TAG_L="$ACCOUNT/cstar-$IMAGE_NAME:$LATEST"
 CONTEXT_CONTENT=$(ls -l $CONTEXT_PATH)
 
 if [[ "$CONTEXT_CONTENT" != *Dockerfile* ]]; then
