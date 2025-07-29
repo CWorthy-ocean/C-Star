@@ -50,7 +50,6 @@ class StagedFile(StagedData):
     ):
         super().__init__(source, path)
 
-        self._path = path
         if sha256:
             self._sha256 = sha256
         else:
@@ -98,8 +97,6 @@ class StagedFile(StagedData):
 class StagedRepository(StagedData):
     def __init__(self, source: "SourceData", path: Path):
         super().__init__(source, path)
-        self._source = source
-        self._path = path
 
         self._checkout_hash = _run_cmd(
             cmd="git rev-parse HEAD", cwd=self.path, raise_on_error=True
@@ -142,11 +139,14 @@ class StagedRepository(StagedData):
 
     def reset(self):
         """Hard reset back to original checkout target."""
-        _run_cmd(
-            cmd=f"git reset --hard {self.source.checkout_target}",
-            cwd=self.path,
-            raise_on_error=True,
-        )
+        if not self.path.exists():
+            self.source.stage(target_dir=self.path)
+        else:
+            _run_cmd(
+                cmd=f"git reset --hard {self.source.checkout_target}",
+                cwd=self.path,
+                raise_on_error=True,
+            )
 
 
 class StagedDataCollection:

@@ -65,7 +65,7 @@ class SourceData:
         if self.location_type is LocationType.HTTP:
             return Path(urlparse(self.location).path)
         elif self.location_type is LocationType.PATH:
-            return Path(self.location)
+            return Path(self.location).resolve()
         raise ValueError(f"Cannot convert location {self.location} to Path")
 
     @property
@@ -86,7 +86,7 @@ class SourceData:
         urlparsed_location = urlparse(self.location)
         if all([urlparsed_location.scheme, urlparsed_location.netloc]):
             return LocationType.HTTP
-        elif Path(self.location).expanduser().exists():
+        elif self._location_as_path.exists():
             return LocationType.PATH
         else:
             raise ValueError(
@@ -239,7 +239,7 @@ class SourceDataCollection:
 
     @property
     def sources(self) -> list[SourceData]:
-        return list(self._sources)
+        return self._sources
 
     def stage(self, target_dir: str | Path) -> StagedDataCollection:
         staged_data_instances = []

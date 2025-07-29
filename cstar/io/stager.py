@@ -25,7 +25,7 @@ class Stager(ABC):
 class RemoteBinaryFileStager(Stager):
     # Used for e.g. a remote netCDF InputDataset
     def stage(self, target_dir: Path, source: "SourceData") -> "StagedFile":
-        """Stage a remote binary file with hash verification using Pooch."""
+        """Stage a remote binary file."""
         retriever = RemoteBinaryFileRetriever()
         retrieved_path = retriever.save(source=source, target_dir=target_dir)
 
@@ -40,7 +40,7 @@ class RemoteBinaryFileStager(Stager):
 class RemoteTextFileStager(Stager):
     # Used for e.g. a remote yaml file
     def stage(self, target_dir: Path, source: "SourceData") -> "StagedFile":
-        """Stage remote text directly using requests."""
+        """Stage a remote text file."""
         retriever = RemoteTextFileRetriever()
         retrieved_path = retriever.save(source=source, target_dir=target_dir)
 
@@ -56,7 +56,8 @@ class LocalBinaryFileStager(Stager):
     # Used for e.g. a local netCDF InputDataset
     def stage(self, target_dir: Path, source: "SourceData") -> "StagedFile":
         """Create a local symlink to a binary file on the current filesystem."""
-        target_dir.symlink_to(source.location)
+        target_path = target_dir / source.filename
+        target_path.symlink_to(source.location)
 
         return StagedFile(
             source=source, path=target_dir, sha256=(source.file_hash or None)
