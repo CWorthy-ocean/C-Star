@@ -6,7 +6,7 @@ FROM $IMG_NCDF
 ARG SRC_DIR="/install"
 ARG INSTALL_BASE_DIR=/opt
 ENV ROMS_ROOT=$INSTALL_BASE_DIR/ucla-roms 
-ENV ROMS_PATH=$ROMS_ROOT/Tools-Roms/
+ENV ROMS_PATH=$ROMS_ROOT/Tools-Roms
 ARG REPO_ROMS="https://github.com/dafyddstephenson/ucla-roms/archive/refs/heads/update_makefiles.tar.gz"
 ENV ROMS_PROFILE="/etc/profile.d/ucla-roms.sh"
 
