@@ -34,7 +34,11 @@ log_error() {
 }
 
 show_usage() {
-    printf "Usage: %s <image_name> <context-path> [<account>] [<version>] [<repo-uri>]\n" $SCRIPT
+    printf "Usage: %s <context-path> <image-name> <account> <repo-uri> [<build-args>]\n\n" $SCRIPT
+    printf "Examples:\n"
+    printf " > ./build.sh ~/code/cstar/ci/docker buildbase ankona docker.io\n"
+    printf " > ./build.sh ~/code/cstar/ci/docker runner ankona registry.nersc.gov/cstar\n\n"
+    printf "Defaults:\n"
     printf " - default account: %s\n" $ACCOUNT_DEFAULT
     printf " - default version: %s\n" $VERSION_DEFAULT
     printf " - default repo: %s\n" $REPO_DEFAULT
