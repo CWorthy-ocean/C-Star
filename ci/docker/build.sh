@@ -97,8 +97,8 @@ TAG_V="$ACCOUNT/cstar-$IMAGE_NAME:$TAG_VERSION"
 TAG_L="$ACCOUNT/cstar-$IMAGE_NAME:$LATEST"
 CONTEXT_CONTENT=$(ls -l $CONTEXT_PATH)
 
-if [[ "$CONTEXT_CONTENT" != *Dockerfile* ]]; then
-    log_error "Dockerfile not found in: $CONTEXT_PATH"
+if [[ "$CONTEXT_CONTENT" != *Dockerfile* && "$CONTEXT_CONTENT" != *Containerfile* ]]; then
+    log_error "Containerfile not found in: $CONTEXT_PATH"
     exit 1
 fi
 
