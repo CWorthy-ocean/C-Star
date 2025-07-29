@@ -6,7 +6,7 @@ ARG INSTALL_BASE_DIR="/opt"
 ARG CSTAR_REPO="cworthy-ocean/c-star"
 ARG CSTAR_HASH="develop"
 
-ARG CSTAR_HOME="$INSTALL_BASE_DIR/venv/cstar"
+ARG CSTAR_HOME="$INSTALL_BASE_DIR/venv"
 
 RUN python -m venv "$CSTAR_HOME" && \
     echo ". $CSTAR_HOME/bin/activate" >> /etc/profile.d/conda.sh && \
