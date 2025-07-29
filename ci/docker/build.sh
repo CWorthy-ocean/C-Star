@@ -70,7 +70,8 @@ ENGINES=("podman-hpc" "podman" "docker")
 RUNTIME_ENGINE=""
 
 for item in "${ENGINES[@]}"; do
-    RESULT=$(command -v "$item")
+    log_info "Checking for $item runtime engine"
+    RESULT=$(command -v "$item" || true)
 
     if [ ! -z "$RESULT" ]; then
         log_info "Using $item runtime engine."
