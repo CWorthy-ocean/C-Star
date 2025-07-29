@@ -107,9 +107,10 @@ else
     $RUNTIME_ENGINE build -t "$VTAG" "$CONTEXT_PATH"
 fi
 
-log_info "Migrating $VTAG"
-$RUNTIME_ENGINE migrate "$VTAG"
-
+if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then
+    log_info "Migrating $VTAG"
+    $RUNTIME_ENGINE migrate "$VTAG"
+fi
 
 TAGS=("$TAG_V" "$TAG_L")
 
