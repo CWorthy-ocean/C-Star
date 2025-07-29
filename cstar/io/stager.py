@@ -83,19 +83,3 @@ class RemoteRepositoryStager(Stager):
         retrieved_path = retriever.save(source=source, target_dir=target_dir)
 
         return StagedRepository(source=source, path=retrieved_path)
-
-
-# class LocalTextFileSetStager(Stager):
-#     # Used for e.g. a local AdditionalCode dir
-#     def stage(self, target_dir: Path, source: "SourceData") -> "StagedFileSet":
-#         """Copy a set of related text files from a location on the current
-#         filesystem.
-#         """
-#         raise NotImplementedError
-
-
-# class RemoteTextFileSetStager(Stager):
-#     # Used for e.g. AdditionalCode in a repo
-#     def stage(self, target_dir: Path, source: "SourceData") -> "StagedFileSet":
-#         """Obtain a set of related text files from a remote location."""
-#         raise NotImplementedError
