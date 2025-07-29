@@ -102,10 +102,10 @@ cp "$CONTEXT_PATH/../entrypoint.sh" $CONTEXT_PATH/entrypoint.sh
 chmod a+r $CONTEXT_PATH/entrypoint.sh
 
 if [ -z "$BUILD_ARGS" ]; then
-    log_info "Building $VTAG in $CONTEXT_PATH from source \n $CONTEXT_DIR"
+    log_info "Building '$VTAG' in $CONTEXT_PATH from source '$CONTEXT_PATH'"
     $RUNTIME_ENGINE build -t "$VTAG" "$CONTEXT_PATH"
 else
-    log_info "Building parameterized $VTAG in $CONTEXT_PATH from source \n$CONTEXT_DIR\n$BUILD_ARGS"
+    log_info "Building parameterized '$VTAG' in '$CONTEXT_PATH' from source '$CONTEXT_PATH' and build-args '$BUILD_ARGS'"
     $RUNTIME_ENGINE build -t "$VTAG" --build-arg "$BUILD_ARGS" "$CONTEXT_PATH" 
 fi
 
@@ -117,7 +117,7 @@ fi
 TAGS=("$TAG_V" "$TAG_L")
 
 for item in "${TAGS[@]}"; do
-    log_info "Tagging $VTAG in $CONTEXT_PATH as [$item]"
+    log_info "Tagging '$VTAG' in '$CONTEXT_PATH' as [$item]"
     $RUNTIME_ENGINE tag "$VTAG" "$item"
 
     if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then
