@@ -2,136 +2,245 @@
 set -e
 
 # Parameters:
-# $1: context root
-#     - The path to a parent of a directory containing a Dockerfile
-# $2: image name
-#     - The base image name matching a directory name
-# $3: account
-#     - The dockerhub account to upload to
-# $4: image repository uri 
-#     - repository URI, such as "docker.io"
-# $5: build args (optional)
-#     - extra build args
-SCRIPT="$0"
-CONTEXT_ROOT="$1"
-IMAGE_NAME="$2"
-ACCOUNT="$3"
-REPO="$4"
-BUILD_ARGS="$5"
+# - see action handling blocks
+#
+# Required Environment variables:
+# $CSTAR_CI_TAG_VERSION
+# - The version information to use when tagging & pushing images (e.g. <repo>/<image>:<$CSTAR_CI_TAG_VERSION>)
+# $CSTAR_CI_CONTAINER_REGISTRY_ACCOUNT
+# - The acount to use when tagging images (e.g. ubuntu)
+# $CSTAR_CI_CONTAINER_REGISTRY
+# - The image repository to use when tagging & pushing images (e.g. "docker.io")
 
-CONTEXT_PATH="$CONTEXT_ROOT/$IMAGE_NAME"
-ACCOUNT_DEFAULT=ankona
-VERSION_DEFAULT=$(git rev-parse --short HEAD)
-REPO_DEFAULT="docker.io"
+SCRIPT="$0"
+ACTION="$1"
+
+ACCOUNT="$CSTAR_CI_CONTAINER_REGISTRY_ACCOUNT"
+REPO_URI="$CSTAR_CI_CONTAINER_REGISTRY"
+
 LOG_FORMAT="[%s] %s %b\n"
+RUNTIME_ENGINE=""
 
 log_info() {
+    # print a log entry to stdout using LOG_FORMAT
     printf "$LOG_FORMAT" "INFO" "$SCRIPT" "$1"
 }
 
 log_error() {
+    # print a log entry to stderr using LOG_FORMAT
     printf "$LOG_FORMAT" "ERROR" "$SCRIPT" "$1" >&2
 }
 
 show_usage() {
-    printf "Usage: %s <context-path> <image-name> <account> <repo-uri> [<build-args>]\n\n" $SCRIPT
-    printf "Examples:\n"
-    printf " > ./build.sh ~/code/cstar/ci/docker buildbase ankona docker.io\n"
-    printf " > ./build.sh ~/code/cstar/ci/docker runner ankona registry.nersc.gov/cstar\n\n"
-    printf "Defaults:\n"
-    printf " - default account: %s\n" $ACCOUNT_DEFAULT
-    printf " - default version: %s\n" $VERSION_DEFAULT
-    printf " - default repo: %s\n" $REPO_DEFAULT
+    # Print a user-friendly usage string on stdout
+    printf "Usage: %s <action> [<parameters>]\n" $SCRIPT
+    printf " > %s [login|build|fetch|run|clean] <parameters>\n" $SCRIPT
+    printf "\n"
+    printf "Using the build action:\n"
+    printf "%s build <context-path> <image-name> [<build-args>]\n\n" $SCRIPT
+    printf " > %s build ~/code/cstar/ci/docker/buildbase buildbase\n" $SCRIPT
+    printf " > %s build ~/code/cstar/ci/docker/runner runner\n" $SCRIPT
+    printf "\n"
+    printf "Using the login action:\n"
+    printf "%s fetch <image-name>\n" $SCRIPT
+    printf " > %s login\n" $SCRIPT
+    printf "\n"
+    printf "Using the fetch action:\n"
+    printf "%s fetch <image-name>\n" $SCRIPT
+    printf " > %s fetch buildbase\n" $SCRIPT
+    printf " > %s fetch runner\n" $SCRIPT
+    printf "\n"
+    printf "Expected Environment Variables:\n"
+    printf " CSTAR_CI_CONTAINER_REGISTRY_ACCOUNT\n"
+    printf " CSTAR_CI_CONTAINER_REGISTRY\n"
+    printf " CSTAR_CI_TAG_VERSION\n"
 }
 
-if [ $# -lt 2 ]; then
-    show_usage
-    exit 1
-fi
-
-if [ ! -e "$CONTEXT_PATH" ]; then
-    log_error "Directory was not found at the supplied context path: $CONTEXT_PATH"
-    show_usage
-    exit 1
-fi
-
-if [ -z "$ACCOUNT" ]; then
-    ACCOUNT=$ACCOUNT_DEFAULT
-    log_info "Using default account: $ACCOUNT" 
-fi
-
-if [ -z "$TAG_VERSION" ]; then
-    TAG_VERSION=$VERSION_DEFAULT
-    log_info "Using default tag version: $TAG_VERSION"
-fi
-
-if [ -z "$REPO" ]; then
-    REPO=$REPO_DEFAULT
-    log_info "Using default repo: $REPO" 
-fi
-
-ENGINES=("podman-hpc" "podman" "docker")
-RUNTIME_ENGINE=""
-
-for item in "${ENGINES[@]}"; do
-    log_info "Checking for $item runtime engine"
-    RESULT=$(command -v "$item" || true)
-
-    if [ -n "$RESULT" ]; then
-        log_info "Using runtime engine: $item"
-        RUNTIME_ENGINE="$RESULT"
-        break
-    else
-        log_info "Runtime engine not found: $item"
+check_num_args() {
+    # Verify the minimum number of arguments is passed.
+    if [ $1 -lt $2 ]; then
+        log_error "Not enough arguments supplied. $0 $1 $2 $3"
+        exit 1
     fi
-done
+}
 
-if [ -z "$RUNTIME_ENGINE" ]; then
-    log_error "No runtime engine was found."
-    exit 1
-fi
+check_context_path() {
+    # Verify the context path exists and has a Containerfile to build
+    if [ ! -e "$1" ]; then
+        log_error "Directory was not found at the supplied context path: $1"
+        exit 1
+    fi
 
-LATEST="latest"
-VTAG="cstar-$IMAGE_NAME:$TAG_VERSION"
-TAG_V="$ACCOUNT/cstar-$IMAGE_NAME:$TAG_VERSION"
-TAG_L="$ACCOUNT/cstar-$IMAGE_NAME:$LATEST"
-CONTEXT_CONTENT=$(ls -l $CONTEXT_PATH)
+    CONTEXT_CONTENT=$(ls -l $1)
 
-if [[ "$CONTEXT_CONTENT" != *Dockerfile* && "$CONTEXT_CONTENT" != *Containerfile* ]]; then
-    log_error "Containerfile not found in: $CONTEXT_PATH"
-    exit 1
-fi
+    if [[ "$CONTEXT_CONTENT" != *Dockerfile* && "$CONTEXT_CONTENT" != *Containerfile* ]]; then
+        log_error "Containerfile not found in: $1"
+        exit 1
+    fi
+}
 
-cp "$CONTEXT_PATH/../entrypoint.sh" $CONTEXT_PATH/entrypoint.sh
-chmod a+r $CONTEXT_PATH/entrypoint.sh
+get_runtime_engine() {
+    # Determine the appropriate runtime engine to use
+    ENGINES=("podman-hpc" "podman" "docker")
+    RUNTIME_ENGINE=""
 
-if [ -z "$BUILD_ARGS" ]; then
-    log_info "Building '$VTAG' in '$CONTEXT_PATH'"
-    $RUNTIME_ENGINE build -t "$VTAG" "$CONTEXT_PATH"
-else
-    log_info "Building parameterized '$VTAG' in '$CONTEXT_PATH' with build-args '$BUILD_ARGS'"
-    $RUNTIME_ENGINE build -t "$VTAG" --build-arg "$BUILD_ARGS" "$CONTEXT_PATH" 
-fi
+    for item in "${ENGINES[@]}"; do
+        RESULT=$(command -v "$item" || true)
 
-if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then
-    log_info "Migrating: $VTAG"
-    $RUNTIME_ENGINE migrate "$VTAG"
-fi
+        if [ -n "$RESULT" ]; then
+            RUNTIME_ENGINE="$RESULT"
+            break
+        fi
+    done
 
-TAGS=("$TAG_V" "$TAG_L")
+    if [ -z "$RUNTIME_ENGINE" ]; then
+        log_error "No runtime engine was found."
+        exit 1
+    fi
 
-for item in "${TAGS[@]}"; do
-    log_info "Tagging '$VTAG' in '$CONTEXT_PATH' as [$item]"
-    $RUNTIME_ENGINE tag "$VTAG" "$item"
+    echo "$RUNTIME_ENGINE"
+}
+
+check_registry_info() {
+    # Check for registry information in environment variables
+    if [ -z "$CSTAR_CI_CONTAINER_REGISTRY_ACCOUNT" ]; then
+        log_error "Container registry account not set."
+        log_info "Configure environment with: export CSTAR_CI_CONTAINER_REGISTRY_ACCOUNT=<account-id>"
+        exit 1
+    fi
+
+    log_info "Using container registry account: $CSTAR_CI_CONTAINER_REGISTRY_ACCOUNT"
+
+    if [ -z "$CSTAR_CI_CONTAINER_REGISTRY" ]; then
+        log_error "Container registry URI not set."
+        log_info "Configure environment with: export CSTAR_CI_CONTAINER_REGISTRY=<registry-uri>"
+        exit 1
+    fi
+
+    log_info "Using container registry URI: $CSTAR_CI_CONTAINER_REGISTRY"
+}
+
+perform_build() {
+    # Build an image
+    # Parameters:
+    # $1 - context path (directory containing a Containerfile)
+    # $2 - core image name (e.g. python for cstar-python:latest)
+    # $3 - build args to customize the image
+    CONTEXT_PATH=$1
+    IMAGE_NAME=$2
+    BUILD_ARGS=$3
+
+    check_context_path "$CONTEXT_PATH"
+
+    LOCAL_TAG="cstar-$IMAGE_NAME:$CSTAR_CI_TAG_VERSION"
+    TAG_V="$ACCOUNT/cstar-$IMAGE_NAME:$CSTAR_CI_TAG_VERSION"
+    TAG_L="$ACCOUNT/cstar-$IMAGE_NAME:latest"
+
+    cp "$CONTEXT_PATH/../entrypoint.sh" $CONTEXT_PATH/entrypoint.sh
+    chmod a+r $CONTEXT_PATH/entrypoint.sh
+
+    if [ -z "$BUILD_ARGS" ]; then
+        log_info "Building '$LOCAL_TAG' in '$CONTEXT_PATH'"
+        $RUNTIME_ENGINE build -t "$LOCAL_TAG" "$CONTEXT_PATH"
+    else
+        log_info "Building parameterized '$LOCAL_TAG' in '$CONTEXT_PATH' with build-args '$BUILD_ARGS'"
+        $RUNTIME_ENGINE build -t "$LOCAL_TAG" --build-arg "$BUILD_ARGS" "$CONTEXT_PATH" 
+    fi
 
     if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then
-        log_info "Migrating: $item"
-        $RUNTIME_ENGINE migrate "$item"
+        log_info "Migrating: $LOCAL_TAG"
+        $RUNTIME_ENGINE migrate "$LOCAL_TAG"
     fi
 
-    log_info "Publishing: $REPO/$item"
-    $RUNTIME_ENGINE push "$item"
-done
+    TAGS=("$TAG_V" "$TAG_L")
 
-log_info "Run the new image with: $RUNTIME_ENGINE run -i -t --rm $TAG_V bash"
-rm $CONTEXT_PATH/entrypoint.sh
+    for item in "${TAGS[@]}"; do
+        log_info "Tagging '$LOCAL_TAG' in '$CONTEXT_PATH' as [$item]"
+        $RUNTIME_ENGINE tag "$LOCAL_TAG" "$item"
+
+        if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then
+            log_info "Migrating: $item"
+            $RUNTIME_ENGINE migrate "$item"
+        fi
+
+        log_info "Publishing: $REPO_URI/$item"
+        $RUNTIME_ENGINE push "$item"
+    done
+
+    log_info "Build complete. Run with: $RUNTIME_ENGINE run -i -t --rm $TAG_V bash"
+}
+
+perform_login() {
+    # Authenticate with an image repository
+    $RUNTIME_ENGINE login $REPO_URI -u "$ACCOUNT"
+}
+
+perform_fetch() {
+    # Fetch an image from the image repository
+    # Parameters:
+    # $1 - image name
+    $RUNTIME_ENGINE pull $REPO_URI/$ACCOUNT/cstar-$1:latest
+}
+
+perform_run() {
+    # Run an interactive shell in the latest version of an image
+    # Parameters:
+    # $1 - image name
+    $RUNTIME_ENGINE run --rm -i -t $ACCOUNT/cstar-$1:latest bash
+}
+
+perform_clean() {
+    # Clean up local image resources
+    # Parameters:
+    # $1 - image name
+    if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then
+        log_info "Cleaning..."
+        $RUNTIME_ENGINE images --format "{{.Repository}}:{{.Tag}}" | sed 's/^localhost\///' | grep "$1" | xargs -r $RUNTIME_ENGINE rmi --force --ignore
+    else
+        $RUNTIME_ENGINE image rm $REPO_URI/$ACCOUNT/cstar-$1:latest
+    fi
+}
+
+handle_exit() {
+    exit_code=$?
+    
+    rm -f $CONTEXT_PATH/entrypoint.sh
+
+    if [ $exit_code -ne 0 ]; then
+        show_usage
+    fi
+}
+
+trap handle_exit EXIT
+
+RUNTIME_ENGINE=$(get_runtime_engine)
+
+check_registry_info
+
+if [[ $ACTION == "build" ]]; then
+    check_num_args $# 3
+    CONTEXT_PATH="$2"
+    IMAGE_NAME="$3"
+    BUILD_ARGS="$4"
+    
+    perform_build "$CONTEXT_PATH" "$IMAGE_NAME" "$BUILD_ARGS"
+elif [[ $ACTION == "login" ]]; then
+    perform_login
+elif [[ $ACTION == "run" ]]; then
+    check_num_args $# 2
+    IMAGE_NAME="$2"
+    
+    perform_run $IMAGE_NAME
+elif [[ $ACTION == "fetch" ]]; then
+    check_num_args $# 2
+    IMAGE_NAME="$2"
+    
+    perform_fetch $IMAGE_NAME
+elif [[ $ACTION == "clean" ]]; then
+    check_num_args $# 2
+    IMAGE_NAME="$2"
+    
+    perform_clean $IMAGE_NAME
+else
+    show_usage
+fi
