@@ -203,8 +203,10 @@ perform_clean() {
 
 handle_exit() {
     exit_code=$?
-    
-    rm -f $CONTEXT_PATH/entrypoint.sh
+
+    if [[ -n "$CONTEXT_PATH" && -f "$CONTEXT_PATH/entrypoint.sh" ]]; then
+        rm -f "$CONTEXT_PATH/entrypoint.sh"
+    fi
 
     if [ $exit_code -ne 0 ]; then
         show_usage
