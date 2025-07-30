@@ -1,55 +1,54 @@
 CI_DIR      := $(patsubst %/,%, $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
-ACCOUNT     := ankona
-VERSION     := 1
-REPO_URI    := docker.io
-TAG_VERSION  = $(shell git rev-parse --short HEAD)
+CSTAR_CI_TAG_VERSION = $(shell git rev-parse --short HEAD)
+ACTION_BUILD := "build"
+.PHONY : _build
+_build:
+	CSTAR_CI_TAG_VERSION="$(CSTAR_CI_TAG_VERSION)" ./build.sh $(action) $(CI_DIR)/$(img) $(img)
 
-
-IMG_BUILDBASE := "buildbase"
+IMG_BUILDBASE := buildbase
 .PHONY: buildbase
 buildbase:
-	echo "TAG_VERSION: $(TAG_VERSION)"
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_BUILDBASE) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_BUILDBASE)
 
-IMG_MPI507 := "mpi-5.0.7"
+IMG_MPI507 := mpi-5.0.7
 .PHONY: mpi5
 mpi5: # buildbase
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_MPI507) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_MPI507)
 
-IMG_HDF5 := "hdf5"
+IMG_HDF5 := hdf5
 .PHONY: hdf5
 hdf5: # buildbase mpi5
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_HDF5) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_HDF5)
 
-IMG_NETCDF := "netcdf"
+IMG_NETCDF := netcdf
 .PHONY: netcdf
 netcdf: # buildbase hdf5
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_NETCDF) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_NETCDF)
 
-IMG_CONDA := "condabase"
+IMG_CONDA := condabase
 .PHONY: conda
 conda:
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_CONDA) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_CONDA)
 
-IMG_PYTHON := "python"
+IMG_PYTHON := python
 .PHONY: python
 python:
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_PYTHON) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_PYTHON)
 
-IMG_ROMS := "roms"
+IMG_ROMS := roms
 .PHONY: roms
 roms: # netcdf
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_ROMS) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_ROMS)
 
-IMG_MARBL := "roms-marbl"
+IMG_MARBL := roms-marbl
 .PHONY: marbl
 marbl: # netcdf roms
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_MARBL) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_MARBL)
 
-IMG_RUNNER := "runner"
+IMG_RUNNER := runner
 .PHONY: runner
 runner: # conda roms marbl
-	TAG_VERSION=$(TAG_VERSION) ./build.sh $(CI_DIR) $(IMG_RUNNER) $(ACCOUNT) $(REPO_URI)
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_RUNNER)
 
 .PHONY: buildhelp
 buildhelp:
