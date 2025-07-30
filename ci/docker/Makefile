@@ -1,6 +1,12 @@
 CI_DIR      := $(patsubst %/,%, $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 CSTAR_CI_TAG_VERSION = $(shell git rev-parse --short HEAD)
 ACTION_BUILD := "build"
+ACTION_LOGIN := "login"
+ACTION_FETCH := "fetch"
+ACTION_RUN   := "run"
+ACTION_CLEAN := "clean"
+
+
 .PHONY : _build
 _build:
 	CSTAR_CI_TAG_VERSION="$(CSTAR_CI_TAG_VERSION)" ./build.sh $(action) $(CI_DIR)/$(img) $(img)
@@ -56,7 +62,7 @@ buildhelp:
 
 .PHONY: pull
 pull:
-	podman-hpc pull $(REPO_URI)/$(ACCOUNT)/cstar-$(img):latest
+	./build.sh $(ACTION_FETCH) $(img)
 
 .PHONY: pullall
 pullall:
@@ -72,11 +78,11 @@ pullall:
 
 .PHONY: irun
 irun:
-	podman-hpc run --rm -i -t $(ACCOUNT)/cstar-$(img):latest bash
+	./build.sh $(ACTION_RUN) $(img)
 
 .PHONY: clean
 clean:
-	podman-hpc images --format "{{.Repository}}:{{.Tag}}" | sed 's/^localhost\///' | grep "$(img)" | xargs -r podman-hpc rmi --force --ignore
+	./build.sh $(ACTION_CLEAN) $(img)
 
 .PHONY: cleanall
 cleanall:
@@ -92,7 +98,7 @@ cleanall:
 
 .PHONY: login
 login:
-	podman-hpc login "$(REPO_URI)"
+	./build.sh $(ACTION_LOGIN)
 
 .PHONY: all
 all: 
