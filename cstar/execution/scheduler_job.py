@@ -178,7 +178,6 @@ class SchedulerJob(ExecutionHandler, ABC):
         queue_name: str | None = None,
         send_email: bool | None = True,
         walltime: str | None = None,
-        use_hyperthreads: bool = False,
     ):
         """Initialize a SchedulerJob instance.
 
@@ -218,10 +217,6 @@ class SchedulerJob(ExecutionHandler, ABC):
         walltime : str, optional
             The maximum walltime for the job, in the format "HH:MM:SS". If not provided,
             it defaults to the queue's maximum walltime.
-        use_hyperthreads : bool, optional
-            Whether to consider hyperthreads when calculating the node distribution, as opposed
-             to only using physical cores, which is usually the desired behavior for CPU-bound models.
-             Defaults to False (physical cores only).
 
         Raises
         ------
@@ -319,13 +314,9 @@ class SchedulerJob(ExecutionHandler, ABC):
                     + "your system's CPUs per node automatically and cannot continue"
                 )
 
-            max_cpus = (
-                scheduler.global_max_cpus_per_node
-                if use_hyperthreads
-                else scheduler.global_max_cpus_per_node // 2
+            nnodes, ncpus = self._calculate_node_distribution(
+                cpus, scheduler.global_max_cpus_per_node
             )
-
-            nnodes, ncpus = self._calculate_node_distribution(cpus, max_cpus)
             self.log.warning(
                 (
                     "Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
@@ -333,7 +324,7 @@ class SchedulerJob(ExecutionHandler, ABC):
                     + "\n C-Star will attempt "
                     + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
                     + "\nbased on your system maximum of "
-                    + f"{scheduler.global_max_cpus_per_node} CPUS per node, the choice to {'' if use_hyperthreads else 'not'} use hyperthreads,"
+                    + f"{scheduler.global_max_cpus_per_node} CPUS per node "
                     + f"\nand your job requirement of {cpus} CPUS."
                 ),
             )

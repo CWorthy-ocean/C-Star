@@ -330,8 +330,7 @@ class TestSchedulerJobBase:
         assert job.nodes == 2
         assert job.cpus_per_node == 2  # cpus=4, nodes=2
 
-    @pytest.mark.parametrize("use_ht", [True, False])
-    def test_init_without_nodes_or_cpus_per_node(self, caplog, use_ht):
+    def test_init_without_nodes_or_cpus_per_node(self, caplog):
         """Ensures that both `nodes` and `cpus_per_node` are automatically calculated
         when neither is provided.
 
@@ -362,15 +361,14 @@ class TestSchedulerJobBase:
                 "nodes": None,
                 "cpus_per_node": None,  # Both nodes and cpus_per_node are missing
                 "cpus": 128,
-                "use_hyperthreads": use_ht,
             }
         )
         job = MockSchedulerJob(**params)
         caplog.set_level(logging.INFO, logger=job.log.name)
         # Check the calculated values from _calculate_node_distribution
         # cpus=128, max_cpus_per_node=64
-        assert job.nodes == 2 if use_ht else 4
-        assert job.cpus_per_node == 64 if use_ht else 32
+        assert job.nodes == 2
+        assert job.cpus_per_node == 64
         assert (
             "Attempting to create scheduler job without 'nodes' and 'cpus_per_node'"
             in caplog.text
