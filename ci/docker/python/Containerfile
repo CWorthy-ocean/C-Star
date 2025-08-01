@@ -1,4 +1,5 @@
-ARG IMG_BUILDBASE="ankona/cstar-buildbase:latest"
+ARG ACCT="C-Worthy"
+ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:latest"
 
 FROM $IMG_BUILDBASE as main
 

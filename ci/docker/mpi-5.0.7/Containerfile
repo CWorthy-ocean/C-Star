@@ -1,4 +1,4 @@
-ARG IMG_BUILDBASE="ankona/cstar-buildbase:latest"
+ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:latest"
 ARG MAIN_STAGE="main"  # pass `add_test` to build the test program /runtest
 
 FROM $IMG_BUILDBASE as main
