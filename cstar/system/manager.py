@@ -172,7 +172,7 @@ class _PerlmutterSystemContext(_SystemContext):
         per_shared_q = SlurmQOS(name="shared")
         per_debug_q = SlurmQOS(name="debug")
 
-        scheduler = SlurmScheduler(
+        return SlurmScheduler(
             queues=[per_regular_q, per_shared_q, per_debug_q],
             primary_queue_name="regular",
             other_scheduler_directives={"-C": "cpu"},
@@ -180,8 +180,6 @@ class _PerlmutterSystemContext(_SystemContext):
             documentation=cls.docs,
             max_cpus_per_node=128,
         )
-
-        return scheduler
 
 
 @register_sys_context
