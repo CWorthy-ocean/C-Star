@@ -1,57 +1,86 @@
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+import functools
+from abc import ABC
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from cstar.io import (
-        LocalFileRetriever,
-        RemoteBinaryFileRetriever,
-        RemoteRepositoryRetriever,
-        RemoteTextFileRetriever,
+        SourceClassification,
         SourceData,
         StagedData,
         StagedFile,
         StagedRepository,
     )
+from cstar.io.retriever import Retriever, get_retriever
+
+_registry: dict[SourceClassification, type["Stager"]] = {}
+
+
+def register_stager(
+    wrapped_cls: type["Stager"],
+) -> type["Stager"]:
+    """Register the decorated type as an available Stager"""
+    _registry[wrapped_cls._classification] = wrapped_cls
+
+    @functools.wraps(wrapped_cls)
+    def _inner() -> type[Stager]:
+        """Return the original type after it is registered
+
+        Returns
+        -------
+        type[Stager]
+            The decorated type.
+        """
+        return wrapped_cls
+
+    return _inner()
+
+
+def get_stager(classification: SourceClassification) -> "Stager":
+    """Retrieve a Stager from the registry given a source classification.
+
+    Returns
+    -------
+    Stager
+        The stager matching the source classification
+
+    Raises
+    ------
+    ValueError
+        if no registered stager is associated with this classification
+    """
+    if stager := _registry.get(classification):
+        return stager()
+    raise ValueError(f"No stager for {classification}")
 
 
 class Stager(ABC):
-    @abstractmethod
+    _classification: ClassVar[SourceClassification]
+
     def stage(self, target_dir: Path, source: "SourceData") -> "StagedData":
         """Stage this data using an appropriate strategy."""
+        retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
+        return StagedFile(
+            source=source, path=retrieved_path, sha256=source.file_hash, stat=None
+        )
+
+    @property
+    def retriever(self) -> Retriever:
+        return get_retriever(self._classification)
 
 
+@register_stager
 class RemoteBinaryFileStager(Stager):
-    # Used for e.g. a remote netCDF InputDataset
-    def stage(self, target_dir: Path, source: "SourceData") -> "StagedFile":
-        """Stage a remote binary file."""
-        retriever = RemoteBinaryFileRetriever()
-        retrieved_path = retriever.save(source=source, target_dir=target_dir)
-
-        return StagedFile(
-            source=source,
-            path=retrieved_path,
-            sha256=(source.identifier or None),
-            stat=None,
-        )
+    _classification = SourceClassification.REMOTE_BINARY_FILE
 
 
+@register_stager
 class RemoteTextFileStager(Stager):
-    # Used for e.g. a remote yaml file
-    def stage(self, target_dir: Path, source: "SourceData") -> "StagedFile":
-        """Stage a remote text file."""
-        retriever = RemoteTextFileRetriever()
-        retrieved_path = retriever.save(source=source, target_dir=target_dir)
-
-        return StagedFile(
-            source=source,
-            path=retrieved_path,
-            sha256=(source.identifier or None),
-            stat=None,
-        )
+    _classification = SourceClassification.REMOTE_TEXT_FILE
 
 
+@register_stager
 class LocalBinaryFileStager(Stager):
     # Used for e.g. a local netCDF InputDataset
     def stage(self, target_dir: Path, source: "SourceData") -> "StagedFile":
@@ -60,27 +89,22 @@ class LocalBinaryFileStager(Stager):
         target_path.symlink_to(source.location)
 
         return StagedFile(
-            source=source, path=target_dir, sha256=(source.identifier or None)
+            source=source, path=target_dir, sha256=(source.file_hash or None)
         )
 
 
+@register_stager
 class LocalTextFileStager(Stager):
-    # Used for e.g. a local yaml file
-    def stage(self, target_dir: Path, source: "SourceData") -> "StagedFile":
-        """Create a local copy of a text file on the current filesystem."""
-        retriever = LocalFileRetriever()
-        retrieved_path = retriever.save(source=source, target_dir=target_dir)
-
-        return StagedFile(
-            source=source, path=retrieved_path, sha256=source.identifier or None
-        )
+    _classification = SourceClassification.LOCAL_TEXT_FILE
 
 
+@register_stager
 class RemoteRepositoryStager(Stager):
+    _classification = SourceClassification.REMOTE_REPOSITORY
+
     # Used for e.g. an ExternalCodeBase
     def stage(self, target_dir: Path, source: "SourceData") -> "StagedRepository":
         """Clone and checkout a git repository at a given target."""
-        retriever = RemoteRepositoryRetriever()
-        retrieved_path = retriever.save(source=source, target_dir=target_dir)
+        retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
 
         return StagedRepository(source=source, path=retrieved_path)

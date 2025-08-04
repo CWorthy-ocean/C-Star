@@ -43,7 +43,8 @@ def get_retriever(source_classification: SourceClassification) -> "Retriever":
 
     Raises
     ------
-    ValueError if the supplied name has not been registered
+    ValueError
+        if no registered retriever is associated with this classification
     """
     if retriever := _registry.get(source_classification):
         return retriever()

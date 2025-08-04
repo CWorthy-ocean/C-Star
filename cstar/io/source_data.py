@@ -210,7 +210,13 @@ class SourceData:
 
     @property
     def checkout_target(self) -> str | None:
-        if self._classification is SourceClassification.REMOTE_REPOSITORY:
+        if self._inspector.source_type is SourceType.REPOSITORY:
+            return self.identifier
+        return None
+
+    @property
+    def file_hash(self) -> str | None:
+        if self._inspector.source_type is SourceType.FILE:
             return self.identifier
         return None
 
