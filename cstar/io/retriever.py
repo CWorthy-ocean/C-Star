@@ -1,4 +1,3 @@
-import functools
 import hashlib
 import shutil
 from abc import ABC, abstractmethod
@@ -19,18 +18,7 @@ def register_retriever(
     """Register the decorated type as an available Retriever."""
     _registry[wrapped_cls._classification] = wrapped_cls
 
-    @functools.wraps(wrapped_cls)
-    def _inner() -> type[Retriever]:
-        """Return the original type after it is registered.
-
-        Returns
-        -------
-        type[_SystemContext]
-            The decorated type
-        """
-        return wrapped_cls
-
-    return _inner()
+    return wrapped_cls
 
 
 def get_retriever(source_classification: SourceClassification) -> "Retriever":

@@ -1,4 +1,3 @@
-import functools
 from abc import ABC
 from typing import TYPE_CHECKING, ClassVar
 
@@ -23,18 +22,7 @@ def register_stager(
     """Register the decorated type as an available Stager"""
     _registry[wrapped_cls._classification] = wrapped_cls
 
-    @functools.wraps(wrapped_cls)
-    def _inner() -> type[Stager]:
-        """Return the original type after it is registered
-
-        Returns
-        -------
-        type[Stager]
-            The decorated type.
-        """
-        return wrapped_cls
-
-    return _inner()
+    return wrapped_cls
 
 
 def get_stager(classification: SourceClassification) -> "Stager":
