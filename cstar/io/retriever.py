@@ -1,15 +1,59 @@
+import functools
 import hashlib
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import ClassVar
 
 import requests
 
 from cstar.base.gitutils import _checkout, _clone
-from cstar.io import SourceData
+from cstar.io import SourceClassification, SourceData
+
+_registry: dict[SourceClassification, type["Retriever"]] = {}
+
+
+def register_retriever(
+    wrapped_cls: type["Retriever"],
+) -> type["Retriever"]:
+    """Register the decorated type as an available Retriever."""
+    _registry[wrapped_cls._classification] = wrapped_cls
+
+    @functools.wraps(wrapped_cls)
+    def _inner() -> type[Retriever]:
+        """Return the original type after it is registered.
+
+        Returns
+        -------
+        type[_SystemContext]
+            The decorated type
+        """
+        return wrapped_cls
+
+    return _inner()
+
+
+def get_retriever(source_classification: SourceClassification) -> "Retriever":
+    """Get a retriever from the retriever registry.
+
+    Returns
+    -------
+    Retriever
+        The retriever matching the supplied name
+
+    Raises
+    ------
+    ValueError if the supplied name has not been registered
+    """
+    if retriever := _registry.get(source_classification):
+        return retriever()
+
+    raise ValueError(f"No retriever for {source_classification}")
 
 
 class Retriever(ABC):
+    _classification: ClassVar[SourceClassification]
+
     @abstractmethod
     def read(self, source: SourceData) -> bytes:
         """Retrieve data to memory, if supported"""
@@ -52,6 +96,7 @@ class RemoteFileRetriever(Retriever, ABC):
         pass
 
 
+@register_retriever
 class RemoteBinaryFileRetriever(RemoteFileRetriever):
     def _save(self, target_dir: Path, source: SourceData) -> Path:
         hash_obj = hashlib.sha256()
@@ -81,6 +126,7 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
         return target_path
 
 
+@register_retriever
 class RemoteTextFileRetriever(RemoteFileRetriever):
     def _save(self, target_dir: Path, source: SourceData) -> Path:
         data = self.read(source=source)
@@ -101,7 +147,20 @@ class LocalFileRetriever(Retriever):
         return target_path
 
 
+@register_retriever
+class LocalBinaryFileRetriever(LocalFileRetriever):
+    _classification = SourceClassification.LOCAL_BINARY_FILE
+
+
+@register_retriever
+class LocalTextFileRetriever(LocalFileRetriever):
+    _classification = SourceClassification.LOCAL_TEXT_FILE
+
+
+@register_retriever
 class RemoteRepositoryRetriever(Retriever):
+    _classification = SourceClassification.REMOTE_REPOSITORY
+
     def read(self, source: SourceData) -> bytes:
         raise NotImplementedError("Cannot 'read' a remote repository to memory")
 

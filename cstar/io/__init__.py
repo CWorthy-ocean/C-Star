@@ -5,7 +5,7 @@ from cstar.io.retriever import (
     RemoteTextFileRetriever,
     Retriever,
 )
-from cstar.io.source_data import SourceData, SourceDataCollection
+from cstar.io.source_data import SourceClassification, SourceData, SourceDataCollection
 from cstar.io.staged_data import (
     StagedData,
     StagedDataCollection,
@@ -33,6 +33,7 @@ __all__ = [
     "RemoteTextFileStager",
     "Stager",
     "SourceData",
+    "SourceClassification",
     "SourceDataCollection",
     "Retriever",
     "RemoteBinaryFileRetriever",
