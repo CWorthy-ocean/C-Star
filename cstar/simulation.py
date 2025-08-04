@@ -734,7 +734,7 @@ class Simulation(ABC, LoggingMixin):
         new_sim.start_date = self.end_date
         new_sim.directory = (
             new_sim.directory
-            / f"RESTART_{new_sim.start_date.strftime(format='%Y%m%d_%H%M%S')}"
+            / f"RESTART_{new_sim.start_date.strftime('%Y%m%d_%H%M%S')}"
         )
         if isinstance(new_end_date, str):
             new_sim.end_date = dateutil.parser.parse(new_end_date)
