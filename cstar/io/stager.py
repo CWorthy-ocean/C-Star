@@ -32,7 +32,7 @@ class RemoteBinaryFileStager(Stager):
         return StagedFile(
             source=source,
             path=retrieved_path,
-            sha256=(source.file_hash or None),
+            sha256=(source.identifier or None),
             stat=None,
         )
 
@@ -47,7 +47,7 @@ class RemoteTextFileStager(Stager):
         return StagedFile(
             source=source,
             path=retrieved_path,
-            sha256=(source.file_hash or None),
+            sha256=(source.identifier or None),
             stat=None,
         )
 
@@ -60,7 +60,7 @@ class LocalBinaryFileStager(Stager):
         target_path.symlink_to(source.location)
 
         return StagedFile(
-            source=source, path=target_dir, sha256=(source.file_hash or None)
+            source=source, path=target_dir, sha256=(source.identifier or None)
         )
 
 
@@ -72,7 +72,7 @@ class LocalTextFileStager(Stager):
         retrieved_path = retriever.save(source=source, target_dir=target_dir)
 
         return StagedFile(
-            source=source, path=retrieved_path, sha256=source.file_hash or None
+            source=source, path=retrieved_path, sha256=source.identifier or None
         )
 
 

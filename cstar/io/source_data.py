@@ -36,12 +36,9 @@ class FileEncoding(Enum):
 
 
 class SourceData:
-    def __init__(
-        self, location: str | Path, file_hash: str | None, checkout_target: str | None
-    ):
+    def __init__(self, location: str | Path, identifier: str | None):
         self._location = str(location)
-        self._file_hash = file_hash
-        self._checkout_target = checkout_target
+        self._identifier = identifier
         self._stager = self._select_stager()
 
     # non-public attrs:
@@ -50,12 +47,8 @@ class SourceData:
         return self._location
 
     @property
-    def file_hash(self) -> str | None:
-        return self._file_hash
-
-    @property
-    def checkout_target(self) -> str | None:
-        return self._checkout_target
+    def identifier(self) -> str | None:
+        return self._identifier
 
     # Inferred data characteristics
 
@@ -101,6 +94,12 @@ class SourceData:
             return True
         except RuntimeError:
             return False
+
+    @property
+    def checkout_target(self) -> str | None:
+        if self._is_repository:
+            return self.identifier
+        return None
 
     @property
     def _http_is_html(self) -> bool:
@@ -218,22 +217,20 @@ class SourceDataCollection:
     def from_locations(
         cls,
         locations: Sequence[str | Path],
-        file_hashes: Sequence[str | None] | None = None,
-        checkout_targets: Sequence[str | None] | None = None,
+        identifiers: Sequence[str | None] | None = None,
     ) -> "SourceDataCollection":
         """Create a SourceDataCollection from a list of locations with optional
-        parallel hash and checkout_target lists.
+        parallel identifier list.
         """
         n = len(locations)
-        file_hashes = file_hashes or [None] * n
-        checkout_targets = checkout_targets or [None] * n
+        identifiers = identifiers or [None] * n
 
-        if not (len(file_hashes) == len(checkout_targets) == n):
+        if not (len(identifiers) == n):
             raise ValueError("Length mismatch between inputs")
 
         sources = [
-            SourceData(location=loc, file_hash=fh, checkout_target=ct)
-            for loc, fh, ct in zip(locations, file_hashes, checkout_targets)
+            SourceData(location=loc, identifier=idt)
+            for loc, idt in zip(locations, identifiers)
         ]
         return cls(sources)
 

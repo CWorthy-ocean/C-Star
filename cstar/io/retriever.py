@@ -67,9 +67,9 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
                         hash_obj.update(chunk)
 
         # Hash verification if specified in SourceData:
-        if source.file_hash:
+        if source.identifier:
             actual_hash = hash_obj.hexdigest()
-            expected_hash = source.file_hash.lower()
+            expected_hash = source.identifier.lower()
 
             if actual_hash != expected_hash:
                 target_path.unlink(missing_ok=True)  # Remove downloaded file
