@@ -1,11 +1,12 @@
-ARG IMG_BUILDBASE="ankona/cstar-buildbase:latest"
+ARG ACCT="C-Worthy"
+ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:latest"
 
 FROM $IMG_BUILDBASE as main
 
 ARG MINICONDA_SCRIPT="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" 
 ARG INSTALL_BASE_DIR="/opt"
-ARG CSTAR_REPO="ankona/C-Star"
-ARG CSTAR_HASH="CW-799"
+ARG CSTAR_REPO="cworthy-ocean/c-star"
+ARG CSTAR_HASH="develop"
 
 ARG CONDA_HOME="$INSTALL_BASE_DIR/miniconda3"
 

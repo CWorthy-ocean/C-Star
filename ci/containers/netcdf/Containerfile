@@ -1,5 +1,6 @@
-ARG IMG_HDF5="ankona/cstar-hdf5:latest"
-ARG IMG_MPI="ankona/cstar-mpi-5.0.7:latest"
+ARG ACCT="C-Worthy"
+ARG IMG_HDF5="$ACCT/cstar-hdf5:latest"
+ARG IMG_MPI="$ACCT/cstar-mpi-5.0.7:latest"
 
 ARG SRC_DIR="/install"
 ARG INSTALL_BASE_DIR="/opt"
