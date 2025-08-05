@@ -32,6 +32,8 @@ The available targets are:
 - `roms-marbl`
 - `runner`
 
+These target names are used in all commands referencing a single image.
+
 To build an image:
 
 - Run `make <target>` (e.g. `make mpi5`)
@@ -43,3 +45,13 @@ After an image is built, a `Makefile` target can be used to enter an interactive
 Pass the name of the directory containing the `Containerfile` as the `img` argument:
 
 - Run `make irun img=<target>`
+
+## Fetching Images
+
+To retrieve the latest version of all images, run:
+
+- `make pullall`
+
+To retrieve the latest version of a specific image, run:
+
+- `make pull img=<target>`
