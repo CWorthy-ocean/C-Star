@@ -452,9 +452,7 @@ class Service(ABC, LoggingMixin):
             # perform sub-class specific clean-up
             self._shutdown()
         except Exception:
-            self.log.exception(
-                "Unable to perform a clean shutdown for signal.",
-            )
+            print("Unable to perform a clean shutdown for signal.")
 
     def _register_signal_handlers(self) -> None:
         """Register termination signal handlers for the service.
