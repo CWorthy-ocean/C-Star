@@ -60,7 +60,6 @@ class StagedFile(StagedData):
         else:
             self._stat = os.stat(self.path)
 
-    # Abstract
     @property
     def changed_from_source(self) -> bool:
         """Check cached checksum, filesize, and modification time against current
