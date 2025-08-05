@@ -103,7 +103,6 @@ login:
 .PHONY: all
 all: 
 	$(MAKE) buildbase
-	$(MAKE) conda
 	$(MAKE) python
 	$(MAKE) mpi5
 	$(MAKE) hdf5

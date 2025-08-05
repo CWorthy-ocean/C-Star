@@ -1,4 +1,5 @@
-ARG IMG_NCDF="ankona/cstar-netcdf:latest"
+ARG ACCT="C-Worthy"
+ARG IMG_NCDF="$ACCT/cstar-netcdf:latest"
 
 FROM $IMG_NCDF
 
