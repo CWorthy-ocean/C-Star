@@ -1,6 +1,4 @@
 from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass
-from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
@@ -9,14 +7,20 @@ import charset_normalizer
 import requests
 
 from cstar.base.utils import _run_cmd
-from cstar.io import (
+from cstar.io.constants import (
+    FileEncoding,
+    LocationType,
+    SourceCharacteristics,
+    SourceClassification,
+    SourceType,
+)
+from cstar.io.staged_data import StagedData, StagedDataCollection
+from cstar.io.stager import (
     LocalBinaryFileStager,
     LocalTextFileStager,
     RemoteBinaryFileStager,
     RemoteRepositoryStager,
     RemoteTextFileStager,
-    StagedData,
-    StagedDataCollection,
     Stager,
 )
 
@@ -27,38 +31,6 @@ def get_remote_header(location, n_bytes):
     response.raw.decode_content = True
     header_bytes = response.raw.read(n_bytes)
     return header_bytes
-
-
-class SourceType(Enum):
-    FILE = "file"
-    DIRECTORY = "directory"
-    REPOSITORY = "repository"
-
-
-class LocationType(Enum):
-    HTTP = "http"
-    PATH = "path"
-
-
-class FileEncoding(Enum):
-    TEXT = "text"
-    BINARY = "binary"
-    NA = "NA"
-
-
-@dataclass
-class SourceCharacteristics:
-    source_type: SourceType
-    location_type: LocationType
-    file_encoding: FileEncoding
-
-
-class SourceClassification(SourceCharacteristics, Enum):
-    REMOTE_TEXT_FILE = SourceType.FILE, LocationType.HTTP, FileEncoding.TEXT
-    REMOTE_BINARY_FILE = SourceType.FILE, LocationType.HTTP, FileEncoding.BINARY
-    LOCAL_TEXT_FILE = SourceType.FILE, LocationType.PATH, FileEncoding.TEXT
-    LOCAL_BINARY_FILE = SourceType.FILE, LocationType.PATH, FileEncoding.BINARY
-    REMOTE_REPOSITORY = SourceType.REPOSITORY, LocationType.HTTP, FileEncoding.NA
 
 
 class _SourceInspector:
@@ -184,8 +156,7 @@ class _SourceInspector:
         )
 
     def classify(self) -> SourceClassification:
-        # https://github.com/python/mypy/issues/12841 possibly related
-        return SourceClassification(self.characteristics)  # type: ignore[arg-type,call-arg]
+        return SourceClassification(self.characteristics)
 
 
 class SourceData:

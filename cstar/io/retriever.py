@@ -7,7 +7,8 @@ from typing import ClassVar
 import requests
 
 from cstar.base.gitutils import _checkout, _clone
-from cstar.io import SourceClassification, SourceData
+from cstar.io.constants import SourceClassification
+from cstar.io.source_data import SourceData
 
 _registry: dict[SourceClassification, type["Retriever"]] = {}
 
