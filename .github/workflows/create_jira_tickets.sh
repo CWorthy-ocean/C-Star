@@ -30,12 +30,31 @@ declare -A JIRA_IDS=(
   ["NoraLoose"]="712020:383dc845-6121-46b3-a5f9-3b90a54478a5"
   ["dafyddstephenson"]="712020:41094963-a473-4408-9c16-c445f195fd65"
   ["ScottEilerman"]="712020:88545277-44ba-4546-b3d9-647abc939a7d"
+  ["smaticka"]="712020:1dfae59f-fbfd-4938-b72f-c68a0dde1e97"
+  ["ankona"]="712020:cedffeec-c788-43f4-8658-f7cdc87b1c97"
 )
 
 JIRA_ASSIGNEE_ID="${JIRA_IDS[$GITHUB_ASSIGNEE_USERNAME]}"
 
+BOARD_ID=144
+
+# Get the current active sprint for our board
+RESPONSE=$(curl -s -w "%{http_code}" -o response.json -u "$JIRA_EMAIL_MENDOCINO:$JIRA_API_TOKEN_MENDOCINO" \
+  -H "Content-Type: application/json" \
+  -X GET \
+  "https://cworthy.atlassian.net/rest/agile/1.0/board/$BOARD_ID/sprint?state=active")
+
+echo "Jira response (Code $RESPONSE):"
+cat response.json
+
+ACTIVE_SPRINT_ID=$(echo $response | jq ".values.[0].id")
+
+
 ##############################
 # CREATE THE STORY
+
+# note that customfield_10020 is our sprint field
+# one could figure that out again someday by searching through the results of their GET issue fields endpoint
 
 # Create the JSON payload, adding assignee if there is one
 if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then
@@ -46,7 +65,8 @@ if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then
     "summary": "$ESCAPED_TITLE",
     "description": "$ESCAPED_BODY",
     "issuetype": { "name": "Story" },
-    "assignee": { "accountId": "$JIRA_ASSIGNEE_ID" }
+    "assignee": { "accountId": "$JIRA_ASSIGNEE_ID" },
+    "customfield_10020": 460
   }
 }
 EOF
@@ -57,7 +77,8 @@ else
     "project": { "key": "CSD" },
     "summary": "$ESCAPED_TITLE",
     "description": "$ESCAPED_BODY",
-    "issuetype": { "name": "Story" }
+    "issuetype": { "name": "Story" },
+    "customfield_10020": 460
   }
 }
 EOF
@@ -128,7 +149,7 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
     ESCAPED_TASK_DESCRIPTION="${ESCAPED_TASK_DESCRIPTION//$'\n'/ }"
     
     # Create JSON payload for each subtask with summary and description
-    # issuetype id 10009 corresponds to subtask
+    # issuetype id 10017 corresponds to subtask for current CSD project
 
 
     if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then	
@@ -138,7 +159,7 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
     "project": { "key": "CSD" },
     "summary": "$ESCAPED_TASK_SUMMARY",
     "description": "$ESCAPED_TASK_DESCRIPTION",
-    "issuetype": { "id": "10009" },
+    "issuetype": { "id": "10017" },
     "parent": { "key": "$STORY_ID" },
     "assignee": { "accountId": "$JIRA_ASSIGNEE_ID" }
   }
@@ -151,7 +172,7 @@ EOF
     "project": { "key": "CSD" },
     "summary": "$ESCAPED_TASK_SUMMARY",
     "description": "$ESCAPED_TASK_DESCRIPTION",
-    "issuetype": { "id": "10009" },
+    "issuetype": { "id": "10017" },
     "parent": { "key": "$STORY_ID" }
   }
 }
