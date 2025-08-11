@@ -37,7 +37,7 @@ RESPONSE=$(curl -s -w "%{http_code}" -o sprint_response.json -u "$JIRA_EMAIL_MEN
 echo "Jira response (Code $RESPONSE):"
 cat sprint_response.json
 
-ACTIVE_SPRINT_ID=$(echo "$RESPONSE" | jq ".values.[0].id")
+ACTIVE_SPRINT_ID=$(jq ".values.[0].id" < sprint_response.json)
 
 
 ##############################
