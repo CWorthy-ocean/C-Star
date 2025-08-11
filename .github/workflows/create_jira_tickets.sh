@@ -24,30 +24,20 @@ ESCAPED_BODY="${ESCAPED_BODY} --- [View the original GitHub issue|$GITHUB_ISSUE_
 # Trim and set GITHUB_ASSIGNEE_USERNAME if needed
 GITHUB_ASSIGNEE_USERNAME=$(echo "$GITHUB_ASSIGNEE_USERNAME" | xargs)
 
-# Map GitHub username to Jira account ID directly
-declare -A JIRA_IDS=(
-  ["TomNicholas"]="712020:035c37ae-65d0-49c2-aa10-89ecfde5257a"
-  ["NoraLoose"]="712020:383dc845-6121-46b3-a5f9-3b90a54478a5"
-  ["dafyddstephenson"]="712020:41094963-a473-4408-9c16-c445f195fd65"
-  ["ScottEilerman"]="712020:88545277-44ba-4546-b3d9-647abc939a7d"
-  ["smaticka"]="712020:1dfae59f-fbfd-4938-b72f-c68a0dde1e97"
-  ["ankona"]="712020:cedffeec-c788-43f4-8658-f7cdc87b1c97"
-)
+# Map GitHub username to Jira account ID
+JIRA_ASSIGNEE_ID=$(echo "$JIRA_USERID_MAP" | jq ".$GITHUB_ASSIGNEE_USERNAME")
 
-JIRA_ASSIGNEE_ID="${JIRA_IDS[$GITHUB_ASSIGNEE_USERNAME]}"
-
-BOARD_ID=144
 
 # Get the current active sprint for our board
-RESPONSE=$(curl -s -w "%{http_code}" -o response.json -u "$JIRA_EMAIL_MENDOCINO:$JIRA_API_TOKEN_MENDOCINO" \
+RESPONSE=$(curl -s -w "%{http_code}" -o sprint_response.json -u "$JIRA_EMAIL_MENDOCINO:$JIRA_API_TOKEN_MENDOCINO" \
   -H "Content-Type: application/json" \
   -X GET \
-  "https://cworthy.atlassian.net/rest/agile/1.0/board/$BOARD_ID/sprint?state=active")
+  "https://cworthy.atlassian.net/rest/agile/1.0/board/$JIRA_BOARD_ID/sprint?state=active")
 
 echo "Jira response (Code $RESPONSE):"
-cat response.json
+cat sprint_response.json
 
-ACTIVE_SPRINT_ID=$(echo $response | jq ".values.[0].id")
+ACTIVE_SPRINT_ID=$(echo "$RESPONSE" | jq ".values.[0].id")
 
 
 ##############################
@@ -61,12 +51,12 @@ if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then
   cat > payload.json <<EOF
 {
   "fields": {
-    "project": { "key": "CSD" },
+    "project": { "key": "$JIRA_BOARD_KEY" },
     "summary": "$ESCAPED_TITLE",
     "description": "$ESCAPED_BODY",
     "issuetype": { "name": "Story" },
     "assignee": { "accountId": "$JIRA_ASSIGNEE_ID" },
-    "customfield_10020": 460
+    "$JIRA_SPRINT_FIELD_ID": $ACTIVE_SPRINT_ID
   }
 }
 EOF
@@ -74,11 +64,11 @@ else
   cat > payload.json <<EOF
 {
   "fields": {
-    "project": { "key": "CSD" },
+    "project": { "key": "$JIRA_BOARD_KEY" },
     "summary": "$ESCAPED_TITLE",
     "description": "$ESCAPED_BODY",
     "issuetype": { "name": "Story" },
-    "customfield_10020": 460
+    "$JIRA_SPRINT_FIELD_ID": $ACTIVE_SPRINT_ID
   }
 }
 EOF
@@ -149,17 +139,14 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
     ESCAPED_TASK_DESCRIPTION="${ESCAPED_TASK_DESCRIPTION//$'\n'/ }"
     
     # Create JSON payload for each subtask with summary and description
-    # issuetype id 10017 corresponds to subtask for current CSD project
-
-
     if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then	
 	cat > subtask.json <<EOF
 {
   "fields": {
-    "project": { "key": "CSD" },
+    "project": { "key": "$JIRA_BOARD_KEY" },
     "summary": "$ESCAPED_TASK_SUMMARY",
     "description": "$ESCAPED_TASK_DESCRIPTION",
-    "issuetype": { "id": "10017" },
+    "issuetype": { "id": "$JIRA_SUBTASK_ISSUETYPE_ID" },
     "parent": { "key": "$STORY_ID" },
     "assignee": { "accountId": "$JIRA_ASSIGNEE_ID" }
   }
@@ -169,10 +156,10 @@ EOF
 	cat > subtask.json <<EOF
 {
   "fields": {
-    "project": { "key": "CSD" },
+    "project": { "key": "$JIRA_BOARD_KEY" },
     "summary": "$ESCAPED_TASK_SUMMARY",
     "description": "$ESCAPED_TASK_DESCRIPTION",
-    "issuetype": { "id": "10017" },
+    "issuetype": { "id": "$JIRA_SUBTASK_ISSUETYPE_ID" },
     "parent": { "key": "$STORY_ID" }
   }
 }
