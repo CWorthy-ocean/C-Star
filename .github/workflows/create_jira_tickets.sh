@@ -25,7 +25,7 @@ ESCAPED_BODY="${ESCAPED_BODY} --- [View the original GitHub issue|$GITHUB_ISSUE_
 GITHUB_ASSIGNEE_USERNAME=$(echo "$GITHUB_ASSIGNEE_USERNAME" | xargs)
 
 # Map GitHub username to Jira account ID
-JIRA_ASSIGNEE_ID=$(echo "$JIRA_USERID_MAP" | jq ".$GITHUB_ASSIGNEE_USERNAME")
+JIRA_ASSIGNEE_ID=$(echo "$JIRA_USERID_MAP" | jq ".$GITHUB_ASSIGNEE_USERNAME" | tr -d '"')
 
 
 # Get the current active sprint for our board
