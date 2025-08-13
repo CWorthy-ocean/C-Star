@@ -275,7 +275,7 @@ class _MacOSSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _LinuxARM64(_SystemContext):
+class _LinuxARM64SystemContext(_SystemContext):
     name: ClassVar[str] = "linux_aarch64"
     """The unique name identifying the Linux system on an ARM64 platform."""
     compiler: ClassVar[str] = "gnu"
