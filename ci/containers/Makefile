@@ -1,10 +1,10 @@
 CI_DIR      := $(patsubst %/,%, $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 CSTAR_CI_TAG_VERSION = $(shell git rev-parse --short HEAD)
 ACTION_BUILD := "build"
-ACTION_LOGIN := "login"
-ACTION_FETCH := "fetch"
-ACTION_RUN   := "run"
 ACTION_CLEAN := "clean"
+ACTION_LOGIN := "login"
+ACTION_PULL  := "pull"
+ACTION_RUN   := "run"
 
 
 .PHONY : _build
@@ -62,7 +62,7 @@ buildhelp:
 
 .PHONY: pull
 pull:
-	./build.sh $(ACTION_FETCH) $(img)
+	./build.sh $(ACTION_PULL) $(img)
 
 .PHONY: pullall
 pullall:
