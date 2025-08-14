@@ -19,9 +19,9 @@ from cstar.system.manager import cstar_sysmgr
 if TYPE_CHECKING:
     from cstar import Simulation
 
-DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-WORKER_LOG_FILE_TPL = "cstar-worker.{0}.log"
-JOBFILE_DATE_FORMAT = "%Y%m%d_%H%M%S"
+DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
+WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
+JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
 LOGS_DIRECTORY: Final[str] = "logs"
 
 
