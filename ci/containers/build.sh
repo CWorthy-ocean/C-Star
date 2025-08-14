@@ -34,7 +34,7 @@ log_error() {
 show_usage() {
     # Print a user-friendly usage string on stdout
     printf "Usage: %s <action> [<parameters>]\n" $SCRIPT
-    printf " > %s [login|build|fetch|run|clean] <parameters>\n" $SCRIPT
+    printf " > %s [login|build|pull|run|clean] <parameters>\n" $SCRIPT
     printf "\n"
     printf "Using the build action:\n"
     printf "%s build <context-path> <image-name> [<build-args>]\n\n" $SCRIPT
@@ -42,15 +42,15 @@ show_usage() {
     printf " > %s build ~/code/cstar/ci/docker/runner runner\n" $SCRIPT
     printf "\n"
     printf "Using the login action:\n"
-    printf "%s fetch <image-name>\n" $SCRIPT
-    printf " > %s login\n" $SCRIPT
+    printf "%s login\n\n" $SCRIPT
+    printf "> %s login\n" $SCRIPT
     printf "\n"
-    printf "Using the fetch action:\n"
-    printf "%s fetch <image-name>\n" $SCRIPT
-    printf " > %s fetch buildbase\n" $SCRIPT
-    printf " > %s fetch runner\n" $SCRIPT
+    printf "Using the pull action:\n"
+    printf "%s pull <image-name>\n" $SCRIPT
+    printf " > %s pull buildbase\n" $SCRIPT
+    printf " > %s pull runner\n" $SCRIPT
     printf "\n"
-    printf "Expected Environment Variables:\n"
+    printf "Required Environment Variables:\n"
     printf " CSTAR_CI_CONTAINER_REGISTRY_ACCOUNT\n"
     printf " CSTAR_CI_CONTAINER_REGISTRY\n"
     printf " CSTAR_CI_TAG_VERSION\n"
@@ -175,7 +175,7 @@ perform_login() {
     $RUNTIME_ENGINE login $REPO_URI -u "$ACCOUNT"
 }
 
-perform_fetch() {
+perform_pull() {
     # Fetch an image from the image repository
     # Parameters:
     # $1 - image name
@@ -233,11 +233,11 @@ elif [[ $ACTION == "run" ]]; then
     IMAGE_NAME="$2"
     
     perform_run $IMAGE_NAME
-elif [[ $ACTION == "fetch" ]]; then
+elif [[ $ACTION == "pull" ]]; then
     check_num_args $# 2
     IMAGE_NAME="$2"
     
-    perform_fetch $IMAGE_NAME
+    perform_pull $IMAGE_NAME
 elif [[ $ACTION == "clean" ]]; then
     check_num_args $# 2
     IMAGE_NAME="$2"
