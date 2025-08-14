@@ -7,7 +7,7 @@ import pathlib
 import shutil
 import sys
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Final, override
 
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
@@ -19,9 +19,10 @@ from cstar.system.manager import cstar_sysmgr
 if TYPE_CHECKING:
     from cstar import Simulation
 
-DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-WORKER_LOG_FILE_TPL = "cstar-worker.{0}.log"
-JOBFILE_DATE_FORMAT = "%Y%m%d_%H%M%S"
+DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
+WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
+JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
+LOGS_DIRECTORY: Final[str] = "logs"
 
 
 def _generate_job_name() -> str:
@@ -130,23 +131,28 @@ class SimulationRunner(Service):
         ValueError
             If the output directory exists and contains
         """
-        # a leftover root_dir may have files in it, breaking download; warn.
-        if (
-            self._output_root.exists()
-            and next(self._output_root.glob("*"), None) is not None
-        ):
-            raise ValueError(f"Output directory {self._output_root} is not empty.")
+        # ensure that log files don't cause startup to fail.
+        outputs = next(
+            (p for p in self._output_root.glob("*") if LOGS_DIRECTORY not in str(p)),
+            None,
+        )
+
+        if self._output_root.exists() and outputs:
+            msg = f"Output directory {self._output_root} is not empty."
+            raise ValueError(msg)
 
         # leftover external code folder causes non-empty repo errors; remove.
         externals_path = cstar_sysmgr.environment.package_root / "externals"
         if externals_path.exists():
-            self.log.debug(f"Removing existing externals dir: {externals_path}")
+            msg = f"Removing existing externals dir: {externals_path}"
+            self.log.debug(msg)
             shutil.rmtree(externals_path)
         externals_path.mkdir(parents=True, exist_ok=False)
 
         # create a clean location to write outputs.
         if not self._output_dir.exists():
-            self.log.debug(f"Creating clean output dir: {self._output_dir}")
+            msg = f"Creating clean output dir: {self._output_dir}"
+            self.log.debug(msg)
             self._output_dir.mkdir(parents=True, exist_ok=True)
 
     def _log_disposition(self) -> None:
@@ -454,7 +460,7 @@ async def main(raw_args: list[str]) -> int:
 
     log_file = (
         blueprint_req.output_dir
-        / "logs"
+        / LOGS_DIRECTORY
         / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
     )
     log = get_logger(__name__, level=service_cfg.log_level, filename=log_file)
