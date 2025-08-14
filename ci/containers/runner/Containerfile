@@ -49,6 +49,9 @@ WORKDIR $INSTALL_BASE_DIR
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+COPY run.sh /run.sh
+RUN chmod +x /run.sh
+
 CMD []
 ENTRYPOINT ["/entrypoint.sh"]
 
