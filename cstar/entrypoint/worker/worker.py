@@ -7,7 +7,7 @@ import pathlib
 import shutil
 import sys
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Final, override
 
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL = "cstar-worker.{0}.log"
 JOBFILE_DATE_FORMAT = "%Y%m%d_%H%M%S"
+LOGS_DIRECTORY: Final[str] = "logs"
 
 
 def _generate_job_name() -> str:
@@ -132,7 +133,7 @@ class SimulationRunner(Service):
         """
         # ensure that log files don't cause startup to fail.
         outputs = next(
-            (p for p in self._output_root.glob("*") if "logs" not in str(p)),
+            (p for p in self._output_root.glob("*") if LOGS_DIRECTORY not in str(p)),
             None,
         )
 
@@ -459,7 +460,7 @@ async def main(raw_args: list[str]) -> int:
 
     log_file = (
         blueprint_req.output_dir
-        / "logs"
+        / LOGS_DIRECTORY
         / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
     )
     log = get_logger(__name__, level=service_cfg.log_level, filename=log_file)
