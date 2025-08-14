@@ -140,13 +140,15 @@ class SimulationRunner(Service):
         # leftover external code folder causes non-empty repo errors; remove.
         externals_path = cstar_sysmgr.environment.package_root / "externals"
         if externals_path.exists():
-            self.log.debug(f"Removing existing externals dir: {externals_path}")
+            msg = f"Removing existing externals dir: {externals_path}"
+            self.log.debug(msg)
             shutil.rmtree(externals_path)
         externals_path.mkdir(parents=True, exist_ok=False)
 
         # create a clean location to write outputs.
         if not self._output_dir.exists():
-            self.log.debug(f"Creating clean output dir: {self._output_dir}")
+            msg = f"Creating clean output dir: {self._output_dir}"
+            self.log.debug(msg)
             self._output_dir.mkdir(parents=True, exist_ok=True)
 
     def _log_disposition(self) -> None:
