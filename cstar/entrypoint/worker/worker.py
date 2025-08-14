@@ -131,7 +131,10 @@ class SimulationRunner(Service):
             If the output directory exists and contains
         """
         # ensure that log files don't cause startup to fail.
-        outputs = (p for p in self._output_root.glob("*") if "logs" not in str(p))
+        outputs = next(
+            (p for p in self._output_root.glob("*") if "logs" not in str(p)),
+            None,
+        )
 
         if self._output_root.exists() and outputs:
             msg = f"Output directory {self._output_root} is not empty."
