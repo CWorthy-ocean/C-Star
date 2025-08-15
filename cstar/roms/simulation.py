@@ -296,7 +296,8 @@ class ROMSSimulation(Simulation):
 
         Returns
         -------
-        str : The file path
+        str or None :
+            The `.in` file path
 
         Raises
         ------
