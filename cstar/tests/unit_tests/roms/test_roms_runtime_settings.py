@@ -713,7 +713,7 @@ class TestStrAndRepr:
     behave as expected.
     """
 
-    def test_str(self, example_runtime_settings):
+    def test_str(self, example_runtime_settings: ROMSRuntimeSettings):
         """Test that the __str__ function of ROMSRuntimeSettings matches an expected
         string for the example instance.
 
