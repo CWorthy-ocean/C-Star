@@ -7,7 +7,8 @@ from typing import Any, Optional
 
 import dateutil
 
-from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
+from cstar.base import AdditionalCode, ExternalCodeBase
+from cstar.base.discretization import Discretization
 from cstar.base.log import LoggingMixin
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
@@ -67,6 +68,27 @@ class Simulation(ABC, LoggingMixin):
         Create a new Simulation instance starting from the end of this one.
     """
 
+    name: str
+    """The name of this simulation."""
+    directory: Path
+    """The local directory in which this simulation will be prepared and executed."""
+    start_date: datetime
+    """The starting date of the simulation."""
+    end_date: datetime
+    """The ending date of the simulation."""
+    valid_start_date: datetime | None
+    """ The earliest allowed start date, based on, e.g. the availability of input data."""
+    valid_end_date: datetime | None
+    """The latest allowed end date, based on, e.g., the availability of input data."""
+    codebase: ExternalCodeBase | None
+    """The repository containing the base source code for this simulation."""
+    runtime_code: AdditionalCode | None
+    """Runtime configuration files."""
+    compile_time_code: AdditionalCode | None
+    """Additional source code modifications and compile-time configuration files."""
+    discretization: "Discretization"
+    """Numerical discretization parameters for this simulation."""
+
     def __init__(
         self,
         name: str,
@@ -79,7 +101,7 @@ class Simulation(ABC, LoggingMixin):
         end_date: str | datetime | None = None,
         valid_start_date: str | datetime | None = None,
         valid_end_date: str | datetime | None = None,
-    ):
+    ) -> None:
         """Initialize a Simulation object with a given name, directory, codebase, and
         configuration parameters.
 
@@ -445,41 +467,40 @@ class Simulation(ABC, LoggingMixin):
         simulation_dict["valid_end_date"] = self.valid_end_date
 
         # ExternalCodeBases:
-        codebase_info = {}
-        codebase_info["source_repo"] = self.codebase.source_repo
-        codebase_info["checkout_target"] = self.codebase.checkout_target
-        simulation_dict["codebase"] = codebase_info
+        if self.codebase is not None:
+            codebase_info: dict[str, str] = {}
+            codebase_info["source_repo"] = self.codebase.source_repo
+            codebase_info["checkout_target"] = self.codebase.checkout_target
+            simulation_dict["codebase"] = codebase_info
 
         # discretization
         simulation_dict["discretization"] = self.discretization.__dict__
 
         # runtime code
-        runtime_code = getattr(self, "runtime_code")
-        if runtime_code is not None:
-            runtime_code_info = {}
-            runtime_code_info["location"] = runtime_code.source.location
-            if runtime_code.subdir is not None:
-                runtime_code_info["subdir"] = runtime_code.subdir
-            if runtime_code.checkout_target is not None:
-                runtime_code_info["checkout_target"] = runtime_code.checkout_target
-            if runtime_code.files is not None:
-                runtime_code_info["files"] = runtime_code.files
+        if self.runtime_code is not None:
+            runtime_code_info: dict[str, str | list[str]] = {}
+            runtime_code_info["location"] = self.runtime_code.source.location
+            if self.runtime_code.subdir is not None:
+                runtime_code_info["subdir"] = self.runtime_code.subdir
+            if self.runtime_code.checkout_target is not None:
+                runtime_code_info["checkout_target"] = self.runtime_code.checkout_target
+            if self.runtime_code.files is not None:
+                runtime_code_info["files"] = self.runtime_code.files
 
             simulation_dict["runtime_code"] = runtime_code_info
 
         # compile-time code
-        compile_time_code = getattr(self, "compile_time_code")
-        if compile_time_code is not None:
-            compile_time_code_info = {}
-            compile_time_code_info["location"] = compile_time_code.source.location
-            if compile_time_code.subdir is not None:
-                compile_time_code_info["subdir"] = compile_time_code.subdir
-            if compile_time_code.checkout_target is not None:
+        if self.compile_time_code is not None:
+            compile_time_code_info: dict[str, str | list[str]] = {}
+            compile_time_code_info["location"] = self.compile_time_code.source.location
+            if self.compile_time_code.subdir is not None:
+                compile_time_code_info["subdir"] = self.compile_time_code.subdir
+            if self.compile_time_code.checkout_target is not None:
                 compile_time_code_info["checkout_target"] = (
-                    compile_time_code.checkout_target
+                    self.compile_time_code.checkout_target
                 )
-            if compile_time_code.files is not None:
-                compile_time_code_info["files"] = compile_time_code.files
+            if self.compile_time_code.files is not None:
+                compile_time_code_info["files"] = self.compile_time_code.files
 
             simulation_dict["compile_time_code"] = compile_time_code_info
 
