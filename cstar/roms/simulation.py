@@ -36,7 +36,7 @@ from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
 
 
-class ROMSSimulation(Simulation):
+class ROMSSimulation(Simulation[ROMSDiscretization]):
     """A specialized `Simulation` subclass for configuring and running ROMS (Regional
     Ocean Modeling System) simulations.
 
@@ -350,13 +350,13 @@ class ROMSSimulation(Simulation):
 
         for inp in datasets:
             if inp.source_partitioning:
-                if (inp.source_np_xi != self._roms_discretization.n_procs_x) or (
-                    inp.source_np_eta != self._roms_discretization.n_procs_y
+                if (inp.source_np_xi != self.discretization.n_procs_x) or (
+                    inp.source_np_eta != self.discretization.n_procs_y
                 ):
                     raise ValueError(
                         f"Cannot instantiate ROMSSimulation with "
-                        f"n_procs_x={self._roms_discretization.n_procs_x}, "
-                        f"n_procs_y={self._roms_discretization.n_procs_y} "
+                        f"n_procs_x={self.discretization.n_procs_x}, "
+                        f"n_procs_y={self.discretization.n_procs_y} "
                         "when {inp.__class__.__name__} has partitioning "
                         f"({inp.source_np_xi},{inp.source_np_eta}) at source."
                     )
@@ -512,11 +512,6 @@ class ROMSSimulation(Simulation):
         repr_str += "\n)"
 
         return repr_str
-
-    @property
-    def _roms_discretization(self) -> ROMSDiscretization:
-        """Cast and return the base-class Discretization to the expected subclass."""
-        return cast(ROMSDiscretization, self.discretization)
 
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
@@ -1335,8 +1330,8 @@ class ROMSSimulation(Simulation):
             datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
             for f in datasets_to_partition:
                 f.partition(
-                    np_xi=self._roms_discretization.n_procs_x,
-                    np_eta=self._roms_discretization.n_procs_y,
+                    np_xi=self.discretization.n_procs_x,
+                    np_eta=self.discretization.n_procs_y,
                     overwrite_existing_files=overwrite_existing_files,
                 )
 
@@ -1421,7 +1416,7 @@ class ROMSSimulation(Simulation):
                 " add the executable path manually using Simulation.exe_path='YOUR/PATH'."
             )
 
-        if self._roms_discretization.n_procs_tot is None:
+        if self.discretization.n_procs_tot is None:
             raise ValueError(
                 "Unable to calculate node distribution for this Simulation. "
                 "Simulation.n_procs_tot is not set"
@@ -1451,7 +1446,7 @@ class ROMSSimulation(Simulation):
         ## 2: RUN ROMS
 
         roms_exec_cmd = (
-            f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self._roms_discretization.n_procs_tot} {self.exe_path} "
+            f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
             f"{final_runtime_settings_file}"
         )
 
@@ -1464,7 +1459,7 @@ class ROMSSimulation(Simulation):
             job_instance = create_scheduler_job(
                 commands=roms_exec_cmd,
                 job_name=job_name,
-                cpus=self._roms_discretization.n_procs_tot,
+                cpus=self.discretization.n_procs_tot,
                 account_key=account_key,
                 run_path=run_path,
                 queue_name=queue_name,

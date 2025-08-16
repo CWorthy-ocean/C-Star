@@ -3,7 +3,7 @@ import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Generic, Optional, TypeVar
 
 import dateutil
 
@@ -13,8 +13,10 @@ from cstar.base.log import LoggingMixin
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 
+_TDiscretization = TypeVar("_TDiscretization", bound=Discretization)
 
-class Simulation(ABC, LoggingMixin):
+
+class Simulation(Generic[_TDiscretization], ABC, LoggingMixin):
     """An abstract base class representing a C-Star simulation.
 
     Attributes
@@ -86,14 +88,14 @@ class Simulation(ABC, LoggingMixin):
     """Runtime configuration files."""
     compile_time_code: AdditionalCode | None
     """Additional source code modifications and compile-time configuration files."""
-    discretization: "Discretization"
+    discretization: _TDiscretization
     """Numerical discretization parameters for this simulation."""
 
     def __init__(
         self,
         name: str,
         directory: str | Path,
-        discretization: "Discretization",
+        discretization: _TDiscretization,
         runtime_code: Optional["AdditionalCode"] = None,
         compile_time_code: Optional["AdditionalCode"] = None,
         codebase: Optional["ExternalCodeBase"] = None,
