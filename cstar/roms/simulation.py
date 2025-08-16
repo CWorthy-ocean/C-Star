@@ -36,7 +36,7 @@ from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
 
 
-class ROMSSimulation(Simulation):
+class ROMSSimulation(Simulation[ROMSDiscretization]):
     """A specialized `Simulation` subclass for configuring and running ROMS (Regional
     Ocean Modeling System) simulations.
 
@@ -115,8 +115,33 @@ class ROMSSimulation(Simulation):
     Simulation : Base class providing general simulation functionalities.
     """
 
-    discretization: ROMSDiscretization
-    runtime_code: AdditionalCode
+    exe_path: Path | None
+    """Path to the compiled ROMS executable."""
+    _exe_hash: str | None
+    """A hash that can be used to verify the ROMS library version."""
+    _execution_handler: ExecutionHandler | None
+    """An execution handler used to query simulation status."""
+    _in_file: str | None
+    """The .in file used by the simulation"""
+    model_grid: ROMSModelGrid | None
+    """The grid used by the ROMS simulation."""
+    initial_conditions: ROMSInitialConditions | None
+    """Initial conditions dataset specifying the starting ocean state."""
+    tidal_forcing: ROMSTidalForcing | None
+    """Tidal forcing dataset providing tidal components for the simulation."""
+    river_forcing: ROMSRiverForcing | None
+    """River forcing dataset providing river location and flux information."""
+    surface_forcing: list[ROMSSurfaceForcing]
+    """List of surface forcing datasets (e.g., wind stress, heat flux)."""
+    boundary_forcing: list[ROMSBoundaryForcing]
+    """List of datasets specifying boundary conditions for ROMS."""
+    forcing_corrections: list[ROMSForcingCorrections]
+    """List of surface forcing correction datasets."""
+    marbl_codebase: MARBLExternalCodeBase | None
+    """External codebase for MARBL (Marine Biogeochemistry Library) integration.
+
+    If not provided, a default MARBL codebase is used.
+    """
 
     def __init__(
         self,
@@ -138,7 +163,7 @@ class ROMSSimulation(Simulation):
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
-    ):
+    ) -> None:
         """Initializes a `ROMSSimulation` instance.
 
         This constructor defines a ROMS simulation via its parameters, codebase,
@@ -254,7 +279,7 @@ class ROMSSimulation(Simulation):
 
         # Determine which runtime_code file corresponds to the `.in` runtime settings
         # And set the in_file attribute to be used internally
-        self._find_dotin_file()
+        self._in_file = self._find_dotin_file()
 
         # roms-specific
         self.exe_path: Path | None = None
@@ -262,18 +287,26 @@ class ROMSSimulation(Simulation):
 
         self._execution_handler: ExecutionHandler | None = None
 
-    def _find_dotin_file(self) -> None:
+    def _find_dotin_file(self) -> str | None:
         """Identify the runtime settings (.in) file from runtime code.
 
         This internal method checks the `ROMSSimulation.runtime_code.files`
         list for exactly one file ending in `.in`, which is required to
         configure ROMS runtime settings.
 
+        Returns
+        -------
+        str or None :
+            The `.in` file path
+
         Raises
         ------
         ValueError
             If no `.in` file or more than one is found in the runtime code files.
         """
+        if self.runtime_code is None or self.runtime_code.files is None:
+            return None
+
         in_files = [f for f in self.runtime_code.files if f.endswith(".in")]
 
         if not in_files:
@@ -282,7 +315,7 @@ class ROMSSimulation(Simulation):
         if len(in_files) > 1:
             raise RuntimeError(f"Only 1 .in file is allowed. Got: {in_files}")
 
-        self._in_file = in_files[0]
+        return in_files[0]
 
     def _check_forcing_collection_types(self, collection: list, expected_class: type):
         """Validate the types of input datasets in a forcing collection.
@@ -313,7 +346,9 @@ class ROMSSimulation(Simulation):
         partitioning matches the processor distribution of the simulation and raise a
         ValueError if not.
         """
-        for inp in self.input_datasets:
+        datasets = [x for x in self.input_datasets if x is not None]
+
+        for inp in datasets:
             if inp.source_partitioning:
                 if (inp.source_np_xi != self.discretization.n_procs_x) or (
                     inp.source_np_eta != self.discretization.n_procs_y
@@ -393,7 +428,7 @@ class ROMSSimulation(Simulation):
         base_str = super().__str__()
 
         # ROMS runtime settings
-        if self.runtime_code.exists_locally:
+        if self.runtime_code and self.runtime_code.exists_locally:
             base_str += f"\nRuntime Settings: {self.roms_runtime_settings.__class__.__name__} instance (query using {class_name}.roms_runtime_settings)\n"
 
         # MARBL Codebase
@@ -504,7 +539,7 @@ class ROMSSimulation(Simulation):
         list
             A list containing the ROMS external codebase and MARBL external codebase.
         """
-        return [self.codebase, self.marbl_codebase]
+        return [x for x in [self.codebase, self.marbl_codebase] if x is not None]
 
     @property
     def _forcing_paths(self) -> list[Path]:
@@ -606,12 +641,20 @@ class ROMSSimulation(Simulation):
         - If MARBL configuration files are present in `runtime_code.files`, their paths
           are also included.
         """
+        if self.runtime_code is None:
+            msg = "Unable to retrieve runtime settings - no runtime code."
+            raise RuntimeError(msg)
+
         if self.runtime_code.working_path is None:
             raise ValueError(
                 "Cannot access runtime settings without local "
                 + "`.in` file. Call ROMSSimulation.setup() or "
                 + "ROMSSimulation.runtime_code.get() and try again."
             )
+
+        if self._in_file is None:
+            msg = "Unable to retrieve runtime settings file. In-file not set."
+            raise RuntimeError(msg)
 
         simulation_runtime_settings = ROMSRuntimeSettings.from_file(
             self.runtime_code.working_path / self._in_file
@@ -863,10 +906,11 @@ class ROMSSimulation(Simulation):
         simulation_dict = super().to_dict()
 
         # MARBLExternalCodeBase
-        marbl_codebase_info = {}
-        marbl_codebase_info["source_repo"] = self.marbl_codebase.source_repo
-        marbl_codebase_info["checkout_target"] = self.marbl_codebase.checkout_target
-        simulation_dict["marbl_codebase"] = marbl_codebase_info
+        if self.marbl_codebase is not None:
+            marbl_codebase_info = {}
+            marbl_codebase_info["source_repo"] = self.marbl_codebase.source_repo
+            marbl_codebase_info["checkout_target"] = self.marbl_codebase.checkout_target
+            simulation_dict["marbl_codebase"] = marbl_codebase_info
 
         # InputDatasets:
         if self.model_grid is not None:
@@ -1125,9 +1169,13 @@ class ROMSSimulation(Simulation):
         --------
         setup : Fetches and organizes necessary files for the simulation.
         """
+        if self.codebase is None:
+            msg = "Simulation setup failure. No codebase configured."
+            raise RuntimeError(msg)
+
         if self.codebase.local_config_status != 0:
             return False
-        if self.marbl_codebase.local_config_status != 0:
+        if self.marbl_codebase and self.marbl_codebase.local_config_status != 0:
             return False
         if (self.runtime_code is not None) and (not self.runtime_code.exists_locally):
             return False
@@ -1356,6 +1404,10 @@ class ROMSSimulation(Simulation):
         pre_run : Prepares the input data before running.
         post_run : Handles output processing after execution.
         """
+        if self.runtime_code is None:
+            msg = "Cannot resolve working path without runtime code."
+            raise RuntimeError(msg)
+
         if self.exe_path is None:
             raise ValueError(
                 "C-STAR: ROMSSimulation.exe_path is None; unable to find ROMS executable."
