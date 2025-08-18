@@ -39,6 +39,18 @@ def valid_args() -> dict[str, str]:
     }
 
 
+@pytest.fixture
+def valid_args_short() -> dict[str, str]:
+    """Fixture to provide valid arguments for the SimulationRunner."""
+    return {
+        "-b": "blueprint.yaml",
+        "-o": "output",
+        "-l": "INFO",
+        "-s": "2012-01-03 12:00:00",
+        "-e": "2012-01-04 12:00:00",
+    }
+
+
 def test_create_parser_help() -> None:
     """Verify that a help argument is present in the parser."""
     parser = create_parser()
@@ -124,26 +136,43 @@ def test_create_parser_happy_path() -> None:
     parser = create_parser()
 
     # ruff: noqa: SLF001
+    assert "-b" in parser._option_string_actions
     assert "--blueprint-uri" in parser._option_string_actions
+
+    assert "-o" in parser._option_string_actions
     assert "--output-dir" in parser._option_string_actions
+
+    assert "-l" in parser._option_string_actions
     assert "--log-level" in parser._option_string_actions
+
+    assert "-s" in parser._option_string_actions
     assert "--start-date" in parser._option_string_actions
+
+    assert "-e" in parser._option_string_actions
     assert "--end-date" in parser._option_string_actions
 
 
 @pytest.mark.parametrize(
-    ("log_level", "expected_level"),
+    ("log_level", "expected_level", "args_fixture_name"),
     [
-        ("DEBUG", logging.DEBUG),
-        ("INFO", logging.INFO),
-        ("WARNING", logging.WARNING),
-        ("ERROR", logging.ERROR),
+        ("DEBUG", logging.DEBUG, "valid_args"),
+        ("INFO", logging.INFO, "valid_args"),
+        ("WARNING", logging.WARNING, "valid_args"),
+        ("ERROR", logging.ERROR, "valid_args"),
+        ("DEBUG", logging.DEBUG, "valid_args_short"),
+        ("INFO", logging.INFO, "valid_args_short"),
+        ("WARNING", logging.WARNING, "valid_args_short"),
+        ("ERROR", logging.ERROR, "valid_args_short"),
     ],
 )
 def test_parser_good_log_level(
-    valid_args: dict[str, str], log_level: str, expected_level: int
+    request: pytest.FixtureRequest,
+    log_level: str,
+    expected_level: int,
+    args_fixture_name: str,
 ) -> None:
     """Verify that a log level is parsed correctly."""
+    valid_args: dict[str, str] = request.getfixturevalue(args_fixture_name)
     valid_args = valid_args.copy()
     valid_args["--log-level"] = log_level
 
