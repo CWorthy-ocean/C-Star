@@ -108,7 +108,7 @@ def sim_runner(
         output_path,
         simulation.start_date,
         simulation.end_date,
-        stages=list(SimulationStages),
+        stages=tuple(SimulationStages),
     )
 
     service_config = ServiceConfiguration(
@@ -1266,7 +1266,7 @@ async def test_runner_setup_stage(
         output_path,
         simulation.start_date,
         simulation.end_date,
-        stages=stages,
+        stages=tuple(stages),
     )
 
     service_config = ServiceConfiguration(
