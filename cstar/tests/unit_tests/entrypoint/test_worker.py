@@ -624,17 +624,12 @@ async def test_runner_can_shutdown_as_task_null_sim(
 
     # Configure the SimulationRunner to run as a task
     sim_runner._config.as_service = False
-    with mock.patch.object(
-        sim_runner,
-        "_simulation",
-        new=mock.PropertyMock,
-        return_value=None,
-    ):
-        # sim_runner._simulation = None  # type: ignore[assignment]
+    # use `setattr` to force-change the Final
+    setattr(sim_runner, "_simulation", None)  # noqa: B010
 
-        # and confirm it exits immediately when the simulation is None
-        assert sim_runner._can_shutdown()
-        assert sim_runner._is_status_complete()
+    # and confirm it exits immediately when the simulation is None
+    assert sim_runner._can_shutdown()
+    assert sim_runner._is_status_complete()
 
 
 @pytest.mark.asyncio
@@ -663,17 +658,12 @@ async def test_runner_can_shutdown_as_service_null_sim(
     # Configure the SimulationRunner to run as a task
     sim_runner._config.as_service = True
 
-    with mock.patch.object(
-        sim_runner,
-        "_simulation",
-        new=mock.PropertyMock,
-        return_value=None,
-    ):
-        # sim_runner._simulation = None  # type: ignore[assignment]
+    # use `setattr` to force-change the Final
+    setattr(sim_runner, "_simulation", None)  # noqa: B010
 
-        # and confirm it exits immediately when the simulation is None
-        assert sim_runner._can_shutdown()
-        assert sim_runner._is_status_complete()
+    # and confirm it exits immediately when the simulation is None
+    assert sim_runner._can_shutdown()
+    assert sim_runner._is_status_complete()
 
 
 @pytest.mark.asyncio
@@ -919,13 +909,11 @@ async def test_runner_on_start_without_uri(
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.object(
-            sim_runner, "_blueprint_uri", new=mock.PropertyMock(), return_value=None
-        ),
         mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # clear blueprint URI from the default SimulationRunner from the fixture
-        # sim_runner._blueprint_uri = None  # type: ignore[assignment]
+        # use `setattr` to force-change the Final
+        setattr(sim_runner, "_blueprint_uri", None)  # noqa: B010
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
@@ -974,12 +962,10 @@ async def test_runner_on_start_without_simulation(
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
         mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
-        mock.patch.object(
-            sim_runner, "_simulation", new=mock.PropertyMock, return_value=None
-        ),
     ):
         # simulate a failure to load the simulation blueprint
-        # sim_runner._simulation = None  # type: ignore[assignment]
+        # use `setattr` to force-change the Final
+        setattr(sim_runner, "_simulation", None)  # noqa: B010
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
