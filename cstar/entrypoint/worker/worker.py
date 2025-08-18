@@ -215,7 +215,6 @@ class SimulationRunner(Service):
             msg = f"Unable to load the blueprint: {self._blueprint_uri}"
             raise BlueprintError(msg)
 
-        # self._wrap_conditional_stages(self._stages)
         self._prepare_file_system()
 
         try:
