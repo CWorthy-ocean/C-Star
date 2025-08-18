@@ -7,7 +7,6 @@ import os
 import pathlib
 import shutil
 import sys
-from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Final, override
 
@@ -58,7 +57,7 @@ class BlueprintRequest:
     """The date on which to begin the simulation."""
     end_date: datetime
     """The date on which to end the simulation."""
-    stages: Sequence[SimulationStages] = dc.field(default_factory=tuple)
+    stages: tuple[SimulationStages, ...] = dc.field(default=())
     """The simulation stages to execute."""
 
 
@@ -87,7 +86,7 @@ class SimulationRunner(Service):
     """A unique directory for this simulation run to write outputs."""
     _simulation: Final[ROMSSimulation]
     """The simulation instance created from the blueprint."""
-    _stages: Final[Sequence[SimulationStages]]
+    _stages: Final[tuple[SimulationStages, ...]]
     """The simulation stages that should be executed."""
     _handler: ExecutionHandler | None
     """The execution handler for the simulation."""
@@ -125,7 +124,7 @@ class SimulationRunner(Service):
             start_date=request.start_date,
             end_date=request.end_date,
         )
-        self._stages = request.stages
+        self._stages = tuple(request.stages)
 
         roms_root = os.environ.get("ROMS_ROOT", None)
         self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
