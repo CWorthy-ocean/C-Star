@@ -404,7 +404,6 @@ def create_parser() -> argparse.ArgumentParser:
         help=(f"The simulation end date, formatted `{DATE_FORMAT}`"),
     )
     parser.add_argument(
-        "-g",
         "--stage",
         default=tuple(x for x in SimulationStages),
         type=str,
