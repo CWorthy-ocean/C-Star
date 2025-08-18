@@ -231,23 +231,23 @@ class ExternalCodeBase(ABC, LoggingMixin):
         interactive = os.environ.get("CSTAR_INTERACTIVE", "1") == "1"
 
         match self.local_config_status:
-            case 0:
+            case (0, 1):
                 self.log.info(
                     f"✅ {self.__class__.__name__} correctly configured. Nothing to be done"
                 )
                 return
-            case 1:
-                env_var_repo_remote = _get_repo_remote(local_root)
+            # case 1:
+            #     env_var_repo_remote = _get_repo_remote(local_root)
 
-                raise OSError(
-                    "System environment variable "
-                    f"'{self.expected_env_var}' points to "
-                    "a github repository whose "
-                    f"remote: \n '{env_var_repo_remote}' \n"
-                    "does not match that expected by C-Star: \n"
-                    f"{self.source_repo}."
-                    "Your environment may be misconfigured."
-                )
+            #     raise OSError(
+            #         "System environment variable "
+            #         f"'{self.expected_env_var}' points to "
+            #         "a github repository whose "
+            #         f"remote: \n '{env_var_repo_remote}' \n"
+            #         "does not match that expected by C-Star: \n"
+            #         f"{self.source_repo}."
+            #         "Your environment may be misconfigured."
+            #     )
             case 2:
                 head_hash = _get_repo_head_hash(local_root)
                 print(

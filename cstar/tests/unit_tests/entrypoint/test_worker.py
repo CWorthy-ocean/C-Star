@@ -13,6 +13,7 @@ from cstar.entrypoint.worker.worker import (
     BlueprintRequest,
     JobConfig,
     SimulationRunner,
+    SimulationStages,
     _format_date,
     configure_environment,
     create_parser,
@@ -22,6 +23,7 @@ from cstar.entrypoint.worker.worker import (
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms.simulation import ROMSSimulation
+from cstar.simulation import Simulation
 
 DEFAULT_LOOP_DELAY = 5
 DEFAULT_HEALTH_CHECK_FREQUENCY = 10
@@ -106,12 +108,15 @@ def sim_runner(
         output_path,
         simulation.start_date,
         simulation.end_date,
+        stages=list(SimulationStages),
     )
 
     service_config = ServiceConfiguration(
         as_service=False,
+        loop_delay=0,
         health_check_frequency=0,
         log_level=logging.DEBUG,
+        health_check_log_threshold=10,
         name="test_simulation_runner",
     )
     job_config = JobConfig()
@@ -619,11 +624,17 @@ async def test_runner_can_shutdown_as_task_null_sim(
 
     # Configure the SimulationRunner to run as a task
     sim_runner._config.as_service = False
-    sim_runner._simulation = None  # type: ignore[assignment]
+    with mock.patch.object(
+        sim_runner,
+        "_simulation",
+        new=mock.PropertyMock,
+        return_value=None,
+    ):
+        # sim_runner._simulation = None  # type: ignore[assignment]
 
-    # and confirm it exits immediately when the simulation is None
-    assert sim_runner._can_shutdown()
-    assert sim_runner._is_status_complete()
+        # and confirm it exits immediately when the simulation is None
+        assert sim_runner._can_shutdown()
+        assert sim_runner._is_status_complete()
 
 
 @pytest.mark.asyncio
@@ -651,11 +662,18 @@ async def test_runner_can_shutdown_as_service_null_sim(
 
     # Configure the SimulationRunner to run as a task
     sim_runner._config.as_service = True
-    sim_runner._simulation = None  # type: ignore[assignment]
 
-    # and confirm it exits immediately when the simulation is None
-    assert sim_runner._can_shutdown()
-    assert sim_runner._is_status_complete()
+    with mock.patch.object(
+        sim_runner,
+        "_simulation",
+        new=mock.PropertyMock,
+        return_value=None,
+    ):
+        # sim_runner._simulation = None  # type: ignore[assignment]
+
+        # and confirm it exits immediately when the simulation is None
+        assert sim_runner._can_shutdown()
+        assert sim_runner._is_status_complete()
 
 
 @pytest.mark.asyncio
@@ -901,10 +919,13 @@ async def test_runner_on_start_without_uri(
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(
+            sim_runner, "_blueprint_uri", new=mock.PropertyMock(), return_value=None
+        ),
         mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # clear blueprint URI from the default SimulationRunner from the fixture
-        sim_runner._blueprint_uri = None  # type: ignore[assignment]
+        # sim_runner._blueprint_uri = None  # type: ignore[assignment]
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
@@ -953,9 +974,12 @@ async def test_runner_on_start_without_simulation(
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
         mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
+        mock.patch.object(
+            sim_runner, "_simulation", new=mock.PropertyMock, return_value=None
+        ),
     ):
         # simulate a failure to load the simulation blueprint
-        sim_runner._simulation = None  # type: ignore[assignment]
+        # sim_runner._simulation = None  # type: ignore[assignment]
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
@@ -1175,6 +1199,125 @@ async def test_runner_on_iteration(
         assert mock_simulation.pre_run.call_count == 1
         assert mock_simulation.run.call_count == 1
         assert mock_shutdown.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("setup", "build", "pre_run", "run", "post_run"),
+    [
+        (0, 0, 0, 0, 0),
+        (1, 0, 0, 0, 0),
+        (0, 1, 0, 0, 0),
+        (0, 0, 1, 0, 0),
+        (0, 0, 0, 1, 0),
+        (0, 0, 0, 1, 1),
+        (1, 1, 0, 0, 0),
+        (0, 0, 1, 1, 0),
+        (1, 0, 1, 0, 0),
+        (1, 0, 0, 1, 0),
+        (0, 1, 1, 0, 0),
+        (0, 1, 0, 1, 0),
+        (0, 1, 0, 1, 1),
+        (0, 1, 1, 1, 0),
+        (0, 1, 1, 1, 1),
+        (1, 0, 0, 1, 1),
+        (1, 1, 0, 1, 1),
+        (1, 0, 1, 1, 1),
+        (1, 1, 1, 1, 1),
+    ],
+)
+@pytest.mark.asyncio
+async def test_runner_setup_stage(
+    # sim_runner: SimulationRunner,
+    example_roms_simulation: tuple[ROMSSimulation, ...],
+    tmp_path: Path,
+    setup: bool,
+    build: bool,
+    pre_run: bool,
+    run: bool,
+    post_run: bool,
+) -> None:
+    """Test conditional stage execution.
+
+    Verifies that each conditionally stage is executed when configured to do so.
+
+    WARNING: executing post-run without run is currently not tested/supported due to
+    the way the simulation creates and relies on a stateful execution handler.
+
+    Parameters
+    ----------
+    sim_runner: SimulationRunner
+        An instance of SimulationRunner to be used for the test.
+    tmp_path : Path
+        A temporary path to store simulation output and logs
+    """
+    output_dir = tmp_path / "output"
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "somefile.txt").touch()
+
+    mock_simulation = mock.Mock(spec=Simulation)
+    mock_prep_fs = mock.Mock()
+
+    # Use the fixture simulation to create a blueprint
+    simulation, _ = example_roms_simulation
+    output_path = tmp_path / "output"
+    bp_path = tmp_path / "blueprint.yaml"
+    simulation.to_blueprint(str(bp_path))
+
+    # stages = [s for s in SimulationStages if
+    stages = []
+    if setup:
+        stages.append(SimulationStages.SETUP)
+    if build:
+        stages.append(SimulationStages.BUILD)
+    if pre_run:
+        stages.append(SimulationStages.PRE_RUN)
+    if run:
+        stages.append(SimulationStages.RUN)
+    if post_run:
+        stages.append(SimulationStages.POST_RUN)
+
+    request = BlueprintRequest(
+        str(bp_path),
+        output_path,
+        simulation.start_date,
+        simulation.end_date,
+        stages=stages,
+    )
+
+    service_config = ServiceConfiguration(
+        as_service=False,
+        loop_delay=0,
+        health_check_frequency=0,
+        log_level=logging.DEBUG,
+        health_check_log_threshold=30,
+        name="test_simulation_runner",
+    )
+    job_config = JobConfig()
+    sim_runner = SimulationRunner(request, service_config, job_config)
+
+    def _mock_run(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
+        return mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
+
+    mock_simulation.run.configure_mock(side_effect=_mock_run)
+
+    # don't let it perform any real work
+    with (
+        mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
+        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
+        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
+    ):
+        # Trigger a run through the lifecycle as a task.
+        await sim_runner.execute()
+
+        # Now confirm that my target lifecycle behaviors were conditionally executed
+        assert mock_prep_fs.call_count == 1
+        assert mock_simulation.setup.call_count == (1 if setup else 0)
+        assert mock_simulation.build.call_count == (1 if build else 0)
+        assert mock_simulation.pre_run.call_count == (1 if pre_run else 0)
+        assert mock_simulation.run.call_count == (1 if run else 0)
+        assert mock_simulation.post_run.call_count == (1 if post_run else 0)
 
 
 @pytest.mark.asyncio
