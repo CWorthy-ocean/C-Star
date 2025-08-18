@@ -39,6 +39,18 @@ def valid_args() -> dict[str, str]:
     }
 
 
+@pytest.fixture
+def valid_args_short() -> dict[str, str]:
+    """Fixture to provide valid arguments for the SimulationRunner."""
+    return {
+        "-b": "blueprint.yaml",
+        "-o": "output",
+        "-l": "INFO",
+        "-s": "2012-01-03 12:00:00",
+        "-e": "2012-01-04 12:00:00",
+    }
+
+
 def test_create_parser_help() -> None:
     """Verify that a help argument is present in the parser."""
     parser = create_parser()
@@ -132,20 +144,31 @@ def test_create_parser_happy_path() -> None:
 
 
 @pytest.mark.parametrize(
-    ("log_level", "expected_level"),
+    ("log_level", "expected_level", "args_fixture_name"),
     [
-        ("DEBUG", logging.DEBUG),
-        ("INFO", logging.INFO),
-        ("WARNING", logging.WARNING),
-        ("ERROR", logging.ERROR),
+        ("DEBUG", logging.DEBUG, "valid_args"),
+        ("INFO", logging.INFO, "valid_args"),
+        ("WARNING", logging.WARNING, "valid_args"),
+        ("ERROR", logging.ERROR, "valid_args"),
+        ("DEBUG", logging.DEBUG, "valid_args_short"),
+        ("INFO", logging.INFO, "valid_args_short"),
+        ("WARNING", logging.WARNING, "valid_args_short"),
+        ("ERROR", logging.ERROR, "valid_args_short"),
     ],
 )
 def test_parser_good_log_level(
-    valid_args: dict[str, str], log_level: str, expected_level: int
+    request: pytest.FixtureRequest,
+    log_level: str,
+    expected_level: int,
+    args_fixture_name: str,
 ) -> None:
     """Verify that a log level is parsed correctly."""
+    valid_args: dict[str, str] = request.getfixturevalue(args_fixture_name)
     valid_args = valid_args.copy()
-    valid_args["--log-level"] = log_level
+    if "--log-level" in valid_args:
+        valid_args["--log-level"] = log_level
+    else:
+        valid_args["-l"] = log_level
 
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
@@ -201,25 +224,35 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("blueprint_uri", "output_dir", "start_date", "end_date"),
+    ("blueprint_uri", "output_dir", "start_date", "end_date", "log_level"),
     [
         (
-            "blueprint1.yaml",
-            "output1",
-            "2012-01-01 12:00:00",
-            "2012-02-04 12:00:00",
+            "-b blueprint1.yaml",
+            "-o output1",
+            "-s 2012-01-01 12:00:00",
+            "-e 2012-02-04 12:00:00",
+            "-l DEBUG",
         ),
         (
-            "blueprint2.yaml",
-            "output2",
-            "2020-02-01 00:00:00",
-            "2020-03-02 00:00:00",
+            "--blueprint-uri blueprint2.yaml",
+            "--output-dir output2",
+            "--start-date 2020-02-01 00:00:00",
+            "--end-date 2020-03-02 00:00:00",
+            "--log-level INFO",
         ),
         (
-            "blueprint3.yaml",
-            "output3",
-            "2021-03-01 08:30:00",
-            "2021-04-16 09:30:00",
+            "--blueprint-uri blueprint3.yaml",
+            "--output-dir output3",
+            "--start-date 2021-03-01 08:30:00",
+            "--end-date 2021-04-16 09:30:00",
+            "--log-level WARNING",
+        ),
+        (
+            "-b blueprint1.yaml",
+            "-o output1",
+            "-s 2012-01-01 12:00:00",
+            "-e 2012-02-04 12:00:00",
+            "-l ERROR",
         ),
     ],
 )
@@ -228,22 +261,29 @@ def test_get_service_config(
     output_dir: str,
     start_date: str,
     end_date: str,
+    log_level: str,
 ) -> None:
     """Verify that the expected values are set on the service config."""
+    arg_b, val_b = blueprint_uri.split(" ", maxsplit=1)
+    arg_o, val_o = output_dir.split(" ", maxsplit=1)
+    arg_s, val_s = start_date.split(" ", maxsplit=1)
+    arg_e, val_e = end_date.split(" ", maxsplit=1)
+    arg_l, val_l = log_level.split(" ", maxsplit=1)
+
     parser = create_parser()
     parsed_args = parser.parse_args(
         [
-            "--blueprint-uri",
-            blueprint_uri,
-            "--output-dir",
-            output_dir,
-            "--log-level",
-            "INFO",
-            "--start-date",
-            start_date,
-            "--end-date",
-            end_date,
-        ]
+            arg_b,
+            val_b,
+            arg_o,
+            val_o,
+            arg_l,
+            val_l,
+            arg_s,
+            val_s,
+            arg_e,
+            val_e,
+        ],
     )
 
     config = get_service_config(parsed_args)
