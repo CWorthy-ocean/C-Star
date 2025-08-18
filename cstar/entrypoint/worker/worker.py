@@ -293,16 +293,15 @@ def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run a c-star simulation.",
         exit_on_error=True,
+        allow_abbrev=True,
     )
     parser.add_argument(
-        "-b",
         "--blueprint-uri",
         type=str,
         required=True,
         help="The URI of a blueprint.",
     )
     parser.add_argument(
-        "-l",
         "--log-level",
         default="INFO",
         type=str,
@@ -319,7 +318,6 @@ def create_parser() -> argparse.ArgumentParser:
         ],
     )
     parser.add_argument(
-        "-o",
         "--output-dir",
         default="~/code/cstar/examples/",
         type=str,
@@ -327,7 +325,6 @@ def create_parser() -> argparse.ArgumentParser:
         help="Local path to write simulation outputs to.",
     )
     parser.add_argument(
-        "-s",
         "--start-date",
         default="2012-01-03 12:00:00",
         type=str,
@@ -335,7 +332,6 @@ def create_parser() -> argparse.ArgumentParser:
         help=(f"Simulation start date, formatted `{DATE_FORMAT}`"),
     )
     parser.add_argument(
-        "-e",
         "--end-date",
         default="2012-01-04 12:00:00",
         type=str,

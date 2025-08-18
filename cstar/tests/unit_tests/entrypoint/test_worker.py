@@ -43,11 +43,11 @@ def valid_args() -> dict[str, str]:
 def valid_args_short() -> dict[str, str]:
     """Fixture to provide valid arguments for the SimulationRunner."""
     return {
-        "-b": "blueprint.yaml",
-        "-o": "output",
-        "-l": "INFO",
-        "-s": "2012-01-03 12:00:00",
-        "-e": "2012-01-04 12:00:00",
+        "--b": "blueprint.yaml",
+        "--o": "output",
+        "--l": "INFO",
+        "--s": "2012-01-03 12:00:00",
+        "--e": "2012-01-04 12:00:00",
     }
 
 
@@ -136,19 +136,10 @@ def test_create_parser_happy_path() -> None:
     parser = create_parser()
 
     # ruff: noqa: SLF001
-    assert "-b" in parser._option_string_actions
     assert "--blueprint-uri" in parser._option_string_actions
-
-    assert "-o" in parser._option_string_actions
     assert "--output-dir" in parser._option_string_actions
-
-    assert "-l" in parser._option_string_actions
     assert "--log-level" in parser._option_string_actions
-
-    assert "-s" in parser._option_string_actions
     assert "--start-date" in parser._option_string_actions
-
-    assert "-e" in parser._option_string_actions
     assert "--end-date" in parser._option_string_actions
 
 
@@ -177,7 +168,7 @@ def test_parser_good_log_level(
     if "--log-level" in valid_args:
         valid_args["--log-level"] = log_level
     else:
-        valid_args["-l"] = log_level
+        valid_args["--l"] = log_level
 
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
@@ -236,11 +227,11 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
     ("blueprint_uri", "output_dir", "start_date", "end_date", "log_level"),
     [
         (
-            "-b blueprint1.yaml",
-            "-o output1",
-            "-s 2012-01-01 12:00:00",
-            "-e 2012-02-04 12:00:00",
-            "-l DEBUG",
+            "--b blueprint1.yaml",
+            "--o output1",
+            "--s 2012-01-01 12:00:00",
+            "--e 2012-02-04 12:00:00",
+            "--l DEBUG",
         ),
         (
             "--blueprint-uri blueprint2.yaml",
@@ -257,11 +248,11 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
             "--log-level WARNING",
         ),
         (
-            "-b blueprint1.yaml",
-            "-o output1",
-            "-s 2012-01-01 12:00:00",
-            "-e 2012-02-04 12:00:00",
-            "-l ERROR",
+            "--b blueprint1.yaml",
+            "--o output1",
+            "--s 2012-01-01 12:00:00",
+            "--e 2012-02-04 12:00:00",
+            "--l ERROR",
         ),
     ],
 )
