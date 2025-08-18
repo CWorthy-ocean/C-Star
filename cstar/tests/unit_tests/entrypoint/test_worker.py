@@ -227,11 +227,11 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
     ("blueprint_uri", "output_dir", "start_date", "end_date", "log_level"),
     [
         (
-            "--b blueprint1.yaml",
-            "--o output1",
-            "--s 2012-01-01 12:00:00",
-            "--e 2012-02-04 12:00:00",
-            "--l DEBUG",
+            "-b blueprint1.yaml",
+            "-o output1",
+            "-s 2012-01-01 12:00:00",
+            "-e 2012-02-04 12:00:00",
+            "-l DEBUG",
         ),
         (
             "--blueprint-uri blueprint2.yaml",
@@ -248,11 +248,11 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
             "--log-level WARNING",
         ),
         (
-            "--b blueprint1.yaml",
-            "--o output1",
-            "--s 2012-01-01 12:00:00",
-            "--e 2012-02-04 12:00:00",
-            "--l ERROR",
+            "-b blueprint1.yaml",
+            "-o output1",
+            "-s 2012-01-01 12:00:00",
+            "-e 2012-02-04 12:00:00",
+            "-l ERROR",
         ),
     ],
 )
