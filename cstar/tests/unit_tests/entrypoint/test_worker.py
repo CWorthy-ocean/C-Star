@@ -1213,7 +1213,6 @@ async def test_runner_on_iteration(
 )
 @pytest.mark.asyncio
 async def test_runner_setup_stage(
-    # sim_runner: SimulationRunner,
     example_roms_simulation: tuple[ROMSSimulation, ...],
     tmp_path: Path,
     setup: bool,
@@ -1348,7 +1347,6 @@ async def test_worker_main(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_worker_main_exec(
     example_roms_simulation: tuple[ROMSSimulation, Path],
-    # sim_runner: SimulationRunner,
     tmp_path: Path,
 ) -> None:
     """Test the main entrypoint of the worker service.
@@ -1406,7 +1404,6 @@ async def test_worker_main_exec(
 @pytest.mark.asyncio
 async def test_worker_main_cstar_error(
     example_roms_simulation: tuple[ROMSSimulation, Path],
-    # sim_runner: SimulationRunner,
     tmp_path: Path,
     exception_type: type[Exception],
 ) -> None:
