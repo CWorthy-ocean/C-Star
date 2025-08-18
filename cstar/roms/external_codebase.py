@@ -2,7 +2,6 @@ from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import _clone_and_checkout
-from cstar.base.utils import _run_cmd
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -62,19 +61,19 @@ class ROMSExternalCodeBase(ExternalCodeBase):
             "PATH", f"${{PATH}}:{target / 'Tools-Roms'}"
         )
 
-        # Make things
-        _run_cmd(
-            f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=target / "Work",
-            msg_pre="Compiling NHMG library...",
-            msg_err="Error when compiling ROMS' NHMG library.",
-            raise_on_error=True,
-        )
-        _run_cmd(
-            f"make COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=target / "Tools-Roms",
-            msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
-            msg_post=f"UCLA-ROMS is installed at {target}",
-            msg_err="Error when compiling Tools-Roms.",
-            raise_on_error=True,
-        )
+        # # Make things
+        # _run_cmd(
+        #     f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
+        #     cwd=target / "Work",
+        #     msg_pre="Compiling NHMG library...",
+        #     msg_err="Error when compiling ROMS' NHMG library.",
+        #     raise_on_error=True,
+        # )
+        # _run_cmd(
+        #     f"make COMPILER={cstar_sysmgr.environment.compiler}",
+        #     cwd=target / "Tools-Roms",
+        #     msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
+        #     msg_post=f"UCLA-ROMS is installed at {target}",
+        #     msg_err="Error when compiling Tools-Roms.",
+        #     raise_on_error=True,
+        # )
