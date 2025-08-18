@@ -9,7 +9,7 @@ import shutil
 import sys
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Final, override
+from typing import Final, override
 
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
@@ -17,9 +17,6 @@ from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
 from cstar.system.manager import cstar_sysmgr
-
-if TYPE_CHECKING:
-    pass
 
 DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
