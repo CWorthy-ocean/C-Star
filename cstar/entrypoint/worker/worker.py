@@ -66,7 +66,7 @@ class BlueprintRequest:
 class JobConfig:
     """Configuration required to submit HPC jobs."""
 
-    account_id: str = "m4632"
+    account_id: str = "m4746"
     """HPC account used for billing."""
     walltime: str = "01:00:00"
     """Maximum walltime allowed for job."""
