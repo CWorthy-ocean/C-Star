@@ -16,6 +16,11 @@ jobs:
         env:
           JIRA_EMAIL_MENDOCINO: ${{ secrets.JIRA_EMAIL_MENDOCINO }}
           JIRA_API_TOKEN_MENDOCINO: ${{ secrets.JIRA_API_TOKEN_MENDOCINO }}
+          JIRA_BOARD_ID: ${{ vars.JIRA_BOARD_ID }}
+          JIRA_BOARD_KEY: ${{ vars.JIRA_BOARD_KEY }}
+          JIRA_USERID_MAP: ${{ vars.JIRA_USERID_MAP }}
+          JIRA_SPRINT_FIELD_ID: ${{ vars.JIRA_SPRINT_FIELD_ID }}
+          JIRA_SUBTASK_ISSUETYPE_ID: ${{ vars.JIRA_SUBTASK_ISSUETYPE_ID }}
           ISSUE_TITLE: "${{ github.event.issue.title }}"
           ISSUE_BODY: "${{ github.event.issue.body }}"
           GITHUB_ISSUE_URL: "https://github.com/${{ github.repository }}/issues/${{ github.event.issue.number }}"
