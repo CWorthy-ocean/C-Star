@@ -43,11 +43,11 @@ def valid_args() -> dict[str, str]:
 def valid_args_short() -> dict[str, str]:
     """Fixture to provide valid arguments for the SimulationRunner."""
     return {
-        "--b": "blueprint.yaml",
-        "--o": "output",
-        "--l": "INFO",
-        "--s": "2012-01-03 12:00:00",
-        "--e": "2012-01-04 12:00:00",
+        "-b": "blueprint.yaml",
+        "-o": "output",
+        "-l": "INFO",
+        "-s": "2012-01-03 12:00:00",
+        "-e": "2012-01-04 12:00:00",
     }
 
 
@@ -168,7 +168,7 @@ def test_parser_good_log_level(
     if "--log-level" in valid_args:
         valid_args["--log-level"] = log_level
     else:
-        valid_args["--l"] = log_level
+        valid_args["-l"] = log_level
 
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
