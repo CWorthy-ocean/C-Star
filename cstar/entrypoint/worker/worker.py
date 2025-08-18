@@ -251,34 +251,35 @@ class SimulationRunner(Service):
         Execute simulation post-run behavior and log the final disposition of the
         simulation.
         """
-        if not self._simulation:
-            self.log.warning("No simulation available at shutdown")
-            return
-
         # perform simulation cleanup activities only when required
         stage_enabled = SimulationStages.POST_RUN in self._stages
 
-        if not stage_enabled:
-            self.log.debug("Skipping simulation post-run")
-            return
-
-        # note: calling post_run on any status but completed fails.
-        if not self._handler:
-            self.log.debug("Skipping simulation post-run; handler not found.")
-            return
-
-        if self._handler.status != ExecutionStatus.COMPLETED:
-            self.log.debug("Skipping simulation post-run; simulation is not complete.")
-            return
-
         try:
-            self.log.debug("Executing simulation post-run")
-            self._simulation.post_run()
+            if not self._simulation:
+                self.log.warning("No simulation available at shutdown")
+                return
+
+            # note: calling post_run on any status but completed fails.
+            if not self._handler:
+                self.log.debug("Skipping simulation post-run; handler not found.")
+                return
+
+            if self._handler.status != ExecutionStatus.COMPLETED:
+                self.log.debug(
+                    "Skipping simulation post-run; simulation is not complete."
+                )
+                return
+
+            if stage_enabled:
+                self._simulation.post_run()
+                self.log.debug("Executing simulation post-run")
+            else:
+                self.log.debug("Skipping simulation post-run")
         except RuntimeError:
             self.log.exception("Simulation post_run failed.")
-
-        # ensure status is logged even if _handler updates are suppressed.
-        self._log_disposition()
+        finally:
+            # ensure status is logged even if _handler updates are suppressed.
+            self._log_disposition()
 
     @override
     def _on_iteration(self) -> None:
