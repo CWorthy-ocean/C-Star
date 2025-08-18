@@ -1289,7 +1289,6 @@ async def test_runner_setup_stage(
     bp_path = tmp_path / "blueprint.yaml"
     simulation.to_blueprint(str(bp_path))
 
-    # stages = [s for s in SimulationStages if
     stages = []
     if setup:
         stages.append(SimulationStages.SETUP)
