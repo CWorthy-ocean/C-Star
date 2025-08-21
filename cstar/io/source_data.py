@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import charset_normalizer
 import requests
 
+from cstar.base.gitutils import _get_hash_from_checkout_target
 from cstar.base.utils import _run_cmd
 from cstar.io.constants import (
     FileEncoding,
@@ -183,6 +184,14 @@ class SourceData:
     def checkout_target(self) -> str | None:
         if self._inspector.source_type is SourceType.REPOSITORY:
             return self.identifier
+        return None
+
+    @property
+    def checkout_hash(self) -> str | None:
+        if (self._inspector.source_type is SourceType.REPOSITORY) and (
+            self.checkout_target
+        ):
+            return _get_hash_from_checkout_target(self.location, self.checkout_target)
         return None
 
     @property
