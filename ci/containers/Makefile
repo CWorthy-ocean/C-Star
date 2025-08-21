@@ -16,9 +16,14 @@ IMG_BUILDBASE := buildbase
 buildbase:
 	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_BUILDBASE)
 
+IMG_MPICH := mpich-4.2.2
+.PHONY: mpich
+mpich: # buildbase
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_MPICH)
+
 IMG_MPI507 := mpi-5.0.7
-.PHONY: mpi5
-mpi5: # buildbase
+.PHONY: openmpi
+openmpi: # buildbase
 	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_MPI507)
 
 IMG_HDF5 := hdf5
@@ -55,6 +60,11 @@ IMG_RUNNER := runner
 .PHONY: runner
 runner: # conda roms marbl
 	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_RUNNER)
+
+IMG_MY_RUNNER := my_runner
+.PHONY: my_runner
+my_runner: #roms marbl
+	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_MY_RUNNER)
 
 .PHONY: buildhelp
 buildhelp:
@@ -104,9 +114,10 @@ login:
 all: 
 	$(MAKE) buildbase
 	$(MAKE) python
-	$(MAKE) mpi5
+	$(MAKE) openmpi
 	$(MAKE) hdf5
 	$(MAKE) netcdf
 	$(MAKE) roms
 	$(MAKE) marbl
 	$(MAKE) runner
+	$(MAKE) my_runner

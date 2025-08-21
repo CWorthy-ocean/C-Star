@@ -36,7 +36,11 @@ COPY --from=stage_roms $PROFILE_DIR/*roms*.sh $PROFILE_DIR/
 COPY --from=stage_marbl $PROFILE_DIR/*marbl*.sh $PROFILE_DIR/
 COPY --from=stage_cstar $PROFILE_DIR/*cstar*.sh $PROFILE_DIR/
 
+#COPY --from=stage_netcdf /usr/local/bin/*  /usr/local/bin/
+#COPY --from=stage_netcdf /usr/local/lib/*  /usr/local/lib/
+#COPY --from=stage_netcdf /usr/local/include/*  /usr/local/include/
 COPY --from=stage_netcdf $INSTALL_BASE_DIR/openmpi-5.0.7/ $INSTALL_BASE_DIR/openmpi-5.0.7/
+
 COPY --from=stage_netcdf $INSTALL_BASE_DIR/hdf5-1.14.6-install/ $INSTALL_BASE_DIR/hdf5-1.14.6-install/
 COPY --from=stage_netcdf $INSTALL_BASE_DIR/netcdf-4.9.3-install/ $INSTALL_BASE_DIR/netcdf-4.9.3-install/
 COPY --from=stage_netcdf $INSTALL_BASE_DIR/netcdf-fortran-4.6.2-install/ $INSTALL_BASE_DIR/netcdf-fortran-4.6.2-install/
@@ -45,15 +49,13 @@ COPY --from=stage_roms $INSTALL_BASE_DIR/ucla-roms/ $INSTALL_BASE_DIR/ucla-roms/
 COPY --from=stage_marbl $INSTALL_BASE_DIR/marbl0.45.0/ $INSTALL_BASE_DIR/marbl0.45.0/
 COPY --from=stage_cstar $INSTALL_BASE_DIR/venv/ $INSTALL_BASE_DIR/venv/
 
+
 WORKDIR $INSTALL_BASE_DIR
 RUN mkdir -p $INSTALL_BASE_DIR/work_internal/compile_time_code
 
-COPY entrypoint-run.sh /entrypoint-run.sh
-RUN chmod +x /entrypoint-run.sh
+COPY * $INSTALL_BASE_DIR/work_internal/compile_time_code
+RUN bash -c "source /etc/profile && cd $INSTALL_BASE_DIR/work_internal/compile_time_code && make compile_clean && make tools-roms && make" 
 
-COPY run.sh /run.sh
-RUN chmod +x /run.sh
+# BUILD_MODE=debug KEEP_PPSRC=true"
 
-CMD []
-ENTRYPOINT ["/entrypoint.sh"]
 

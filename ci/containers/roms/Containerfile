@@ -1,9 +1,10 @@
 ARG ACCT="C-Worthy"
-ARG IMG_NCDF="$ACCT/cstar-netcdf:latest"
+ARG FROM_TAG="latest"
+ARG IMG_NCDF="$ACCT/cstar-netcdf:$FROM_TAG"
 
 FROM $IMG_NCDF
 
-
+ARG REDO=1
 ARG SRC_DIR="/install"
 ARG INSTALL_BASE_DIR=/opt
 ENV ROMS_ROOT=$INSTALL_BASE_DIR/ucla-roms 
@@ -24,13 +25,11 @@ RUN . /etc/profile && \
     mv "ucla-roms-$TARGET_BRANCH" "$ROMS_ROOT" && \
     rm "$TARGET_BRANCH.tar.gz"
 
-RUN . /etc/profile && \
-    cd "$ROMS_ROOT/Work" && \
-    make nhmg COMPILER=gnu
 
-RUN . /etc/profile && \
-    cd $ROMS_PATH && \
-    make COMPILER=gnu
+#RUN \
+#    cd "$ROMS_ROOT/Work" && \
+#    make tools-roms COMPILER=gnu
+ENV PATH=$PATH:$ROMS_PATH
 
 WORKDIR $INSTALL_BASE_DIR
 

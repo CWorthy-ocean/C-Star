@@ -4,6 +4,7 @@ ENV TERM="xterm-256color"
 
 RUN apt-get update && \
     apt-get install -y \
+        --no-install-recommends \
         binutils \
         build-essential \
         ca-certificates \
@@ -24,10 +25,14 @@ RUN apt-get update && \
         software-properties-common \
 	    wget \
         zlib1g-dev \
-        --no-install-recommends && \
+        libfabric-dev \
+        libssl-dev autoconf automake libtool \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
+
+
     ldconfig
+
 
 
 COPY entrypoint.sh /entrypoint.sh
