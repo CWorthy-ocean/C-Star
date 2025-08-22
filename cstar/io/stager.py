@@ -5,9 +5,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from cstar.io.source_data import SourceData
-    from cstar.io.staged_data import StagedData, StagedFile, StagedRepository
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever, get_retriever
+from cstar.io.staged_data import StagedData, StagedFile, StagedRepository
 
 _registry: dict[SourceClassification, type["Stager"]] = {}
 
@@ -71,7 +71,7 @@ class LocalBinaryFileStager(Stager):
     # Used for e.g. a local netCDF InputDataset
     def stage(self, target_dir: "Path", source: "SourceData") -> "StagedFile":
         """Create a local symlink to a binary file on the current filesystem."""
-        target_path = target_dir / source.filename
+        target_path = target_dir / source.basename
         target_path.symlink_to(source.location)
 
         return StagedFile(
@@ -92,5 +92,4 @@ class RemoteRepositoryStager(Stager):
     def stage(self, target_dir: "Path", source: "SourceData") -> "StagedRepository":
         """Clone and checkout a git repository at a given target."""
         retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
-
         return StagedRepository(source=source, path=retrieved_path)

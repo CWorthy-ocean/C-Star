@@ -97,7 +97,6 @@ class StagedFile(StagedData):
 class StagedRepository(StagedData):
     def __init__(self, source: "SourceData", path: "Path"):
         super().__init__(source, path)
-
         self._checkout_hash = _run_cmd(
             cmd="git rev-parse HEAD", cwd=self.path, raise_on_error=True
         )
@@ -123,7 +122,7 @@ class StagedRepository(StagedData):
 
             # if HEAD is at expected hash, check if dirty:
             status_output = _run_cmd(
-                cmd="git status --porcelain", cwd=self.path, raise_on_error=True
+                cmd="git diff-index HEAD", cwd=self.path, raise_on_error=True
             )
 
             return bool(status_output.strip())  # True if any changes

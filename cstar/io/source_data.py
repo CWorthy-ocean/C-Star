@@ -51,11 +51,9 @@ class _SourceInspector:
         return Path(urlparse(self.location).path)
 
     @property
-    def filename(self) -> str:
-        """Get the filename from `location`"""
-        if self.source_type is SourceType.FILE:
-            return self._location_as_path.name
-        return ""
+    def basename(self) -> str:
+        """Get the basename from `location`"""
+        return self._location_as_path.name
 
     @property
     def suffix(self) -> str:
@@ -103,11 +101,14 @@ class _SourceInspector:
                     self._source_type = SourceType.FILE
                 elif resolved_path.is_dir():
                     self._source_type = SourceType.DIRECTORY
+
+        if not self._source_type:
             raise ValueError(
                 f"{self.location} does not appear to point to a valid source type. "
                 "Valid source types: \n"
                 "\n".join([value.value for value in SourceType])
             )
+
         return self._source_type
 
     @property
@@ -128,23 +129,23 @@ class _SourceInspector:
         if not self._file_encoding:
             if self.source_type is not SourceType.FILE:
                 self._file_encoding = FileEncoding.NA
-
-            n_bytes = 512
-            if self.location_type is LocationType.HTTP:
-                header_bytes = get_remote_header(self.location, n_bytes)
-            elif self.location_type is LocationType.PATH:
-                with open(self.location, "rb") as f:
-                    header_bytes = f.read(n_bytes)
             else:
-                raise ValueError(
-                    f"Cannot determine file encoding for location type {self.location_type}"
-                )
+                n_bytes = 512
+                if self.location_type is LocationType.HTTP:
+                    header_bytes = get_remote_header(self.location, n_bytes)
+                elif self.location_type is LocationType.PATH:
+                    with open(self.location, "rb") as f:
+                        header_bytes = f.read(n_bytes)
+                else:
+                    raise ValueError(
+                        f"Cannot determine file encoding for location type {self.location_type}"
+                    )
 
-            best_encoding = charset_normalizer.from_bytes(header_bytes).best()
-            if best_encoding:
-                self._file_encoding = FileEncoding.TEXT
-            else:
-                self._file_encoding = FileEncoding.BINARY
+                best_encoding = charset_normalizer.from_bytes(header_bytes).best()
+                if best_encoding:
+                    self._file_encoding = FileEncoding.TEXT
+                else:
+                    self._file_encoding = FileEncoding.BINARY
 
         return self._file_encoding
 
@@ -161,20 +162,20 @@ class _SourceInspector:
 
 
 class SourceData:
-    def __init__(self, location: str | Path, identifier: str | None):
+    def __init__(self, location: str | Path, identifier: str | None = None):
         self._location = str(location)
         self._inspector = _SourceInspector(self._location)
         self._identifier = identifier
-        self._stager = self._select_stager()
         self._classification = self._inspector.classify()
+        self._stager = self._select_stager()
 
     @property
     def location(self) -> str:
         return self._location
 
     @property
-    def filename(self) -> str:
-        return self._inspector.filename
+    def basename(self) -> str:
+        return self._inspector.basename
 
     @property
     def identifier(self) -> str | None:

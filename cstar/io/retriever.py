@@ -63,7 +63,6 @@ class Retriever(ABC):
                 raise ValueError(
                     f"Cannot save to target_dir={target_dir} (not a directory)"
                 )
-
         else:
             target_dir.mkdir(parents=True)
 
@@ -96,7 +95,7 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
     def _save(self, target_dir: Path, source: "SourceData") -> Path:
         hash_obj = hashlib.sha256()
 
-        target_path = target_dir / source.filename
+        target_path = target_dir / source.basename
 
         with requests.get(source.location, stream=True, allow_redirects=True) as r:
             r.raise_for_status()
@@ -127,7 +126,7 @@ class RemoteTextFileRetriever(RemoteFileRetriever):
 
     def _save(self, target_dir: Path, source: "SourceData") -> Path:
         data = self.read(source=source)
-        target_path = target_dir / source.filename
+        target_path = target_dir / source.basename
         with open(target_path, "wb") as f:
             f.write(data)
         return target_path
@@ -139,7 +138,7 @@ class LocalFileRetriever(Retriever):
             return f.read()
 
     def _save(self, target_dir: Path, source: "SourceData") -> Path:
-        target_path = target_dir / source.filename
+        target_path = target_dir / source.basename
         shutil.copy2(src=Path(source.location).resolve(), dst=target_path)
         return target_path
 
@@ -165,17 +164,14 @@ class RemoteRepositoryRetriever(Retriever):
         if any(target_dir.iterdir()):
             raise ValueError(f"cannot clone repository to {target_dir} - dir not empty")
 
-        try:
-            _clone(
+        _clone(
+            source_repo=source.location,
+            local_path=target_dir,
+        )
+        if source.checkout_target:
+            _checkout(
                 source_repo=source.location,
                 local_path=target_dir,
+                checkout_target=source.checkout_target,
             )
-            if source.checkout_target:
-                _checkout(
-                    source_repo=source.location,
-                    local_path=target_dir,
-                    checkout_target=source.checkout_target,
-                )
-        finally:
-            shutil.rmtree(target_dir)
         return target_dir
