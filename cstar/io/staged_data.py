@@ -2,6 +2,7 @@ import os
 import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cstar.base.utils import _get_sha256_hash, _run_cmd
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class StagedData(ABC):
-    def __init__(self, source: "SourceData", path: Path):
+    def __init__(self, source: "SourceData", path: "Path"):
         self._source = source
         self._path = path
 
@@ -23,7 +24,7 @@ class StagedData(ABC):
         return self._source
 
     @property
-    def path(self) -> Path:
+    def path(self) -> "Path":
         return self._path
 
     @property
@@ -44,7 +45,7 @@ class StagedFile(StagedData):
     def __init__(
         self,
         source: "SourceData",
-        path: Path,
+        path: "Path",
         sha256: str | None = None,
         stat: os.stat_result | None = None,
     ):
@@ -94,9 +95,8 @@ class StagedFile(StagedData):
 
 
 class StagedRepository(StagedData):
-    def __init__(self, source: "SourceData", path: Path):
+    def __init__(self, source: "SourceData", path: "Path"):
         super().__init__(source, path)
-
         self._checkout_hash = _run_cmd(
             cmd="git rev-parse HEAD", cwd=self.path, raise_on_error=True
         )
@@ -105,7 +105,7 @@ class StagedRepository(StagedData):
     def changed_from_source(self) -> bool:
         """Check if the current repo is dirty or differs from a given commit hash."""
         # Check existence
-        if not self.path.exists():
+        if (not self.path.exists()) or (not (self.path / ".git").exists()):
             return True
 
         # Check if diverged from checkout target
@@ -122,7 +122,7 @@ class StagedRepository(StagedData):
 
             # if HEAD is at expected hash, check if dirty:
             status_output = _run_cmd(
-                cmd="git status --porcelain", cwd=self.path, raise_on_error=True
+                cmd="git diff-index HEAD", cwd=self.path, raise_on_error=True
             )
 
             return bool(status_output.strip())  # True if any changes
@@ -174,7 +174,7 @@ class StagedDataCollection:
         self._validate()
 
     @property
-    def paths(self) -> list[Path]:
+    def paths(self) -> list["Path"]:
         """Flattened list of all paths across all staged entries."""
         return [s.path for s in self._items]
 

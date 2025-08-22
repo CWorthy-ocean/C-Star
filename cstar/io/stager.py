@@ -4,12 +4,10 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cstar.io.constants import (
-        SourceClassification,
-    )
     from cstar.io.source_data import SourceData
-    from cstar.io.staged_data import StagedData, StagedFile, StagedRepository
+from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever, get_retriever
+from cstar.io.staged_data import StagedData, StagedFile, StagedRepository
 
 _registry: dict[SourceClassification, type["Stager"]] = {}
 
@@ -44,7 +42,7 @@ def get_stager(classification: SourceClassification) -> "Stager":
 class Stager(ABC):
     _classification: ClassVar[SourceClassification]
 
-    def stage(self, target_dir: Path, source: "SourceData") -> "StagedData":
+    def stage(self, target_dir: "Path", source: "SourceData") -> "StagedData":
         """Stage this data using an appropriate strategy."""
         retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
         return StagedFile(
@@ -68,10 +66,12 @@ class RemoteTextFileStager(Stager):
 
 @register_stager
 class LocalBinaryFileStager(Stager):
+    _classification = SourceClassification.LOCAL_BINARY_FILE
+
     # Used for e.g. a local netCDF InputDataset
-    def stage(self, target_dir: Path, source: "SourceData") -> "StagedFile":
+    def stage(self, target_dir: "Path", source: "SourceData") -> "StagedFile":
         """Create a local symlink to a binary file on the current filesystem."""
-        target_path = target_dir / source.filename
+        target_path = target_dir / source.basename
         target_path.symlink_to(source.location)
 
         return StagedFile(
@@ -89,8 +89,7 @@ class RemoteRepositoryStager(Stager):
     _classification = SourceClassification.REMOTE_REPOSITORY
 
     # Used for e.g. an ExternalCodeBase
-    def stage(self, target_dir: Path, source: "SourceData") -> "StagedRepository":
+    def stage(self, target_dir: "Path", source: "SourceData") -> "StagedRepository":
         """Clone and checkout a git repository at a given target."""
         retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
-
         return StagedRepository(source=source, path=retrieved_path)
