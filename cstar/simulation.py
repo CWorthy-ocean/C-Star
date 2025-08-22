@@ -444,10 +444,11 @@ class Simulation(ABC, LoggingMixin):
         simulation_dict["valid_end_date"] = self.valid_end_date
 
         # ExternalCodeBases:
-        codebase_info = {}
-        codebase_info["source_repo"] = self.codebase.source_repo
-        codebase_info["checkout_target"] = self.codebase.checkout_target
-        simulation_dict["codebase"] = codebase_info
+        simulation_dict["codebase"] = self.codebase.to_dict()
+        # codebase_info = {}
+        # codebase_info["source_repo"] = self.codebase.source_repo
+        # codebase_info["checkout_target"] = self.codebase.checkout_target
+        # simulation_dict["codebase"] = codebase_info
 
         # discretization
         simulation_dict["discretization"] = self.discretization.__dict__

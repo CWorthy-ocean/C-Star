@@ -863,10 +863,11 @@ class ROMSSimulation(Simulation):
         simulation_dict = super().to_dict()
 
         # MARBLExternalCodeBase
-        marbl_codebase_info = {}
-        marbl_codebase_info["source_repo"] = self.marbl_codebase.source_repo
-        marbl_codebase_info["checkout_target"] = self.marbl_codebase.checkout_target
-        simulation_dict["marbl_codebase"] = marbl_codebase_info
+        simulation_dict["marbl_codebase"] = self.marbl_codebase.to_dict()
+        # marbl_codebase_info = {}
+        # marbl_codebase_info["source_repo"] = self.marbl_codebase.source_repo
+        # marbl_codebase_info["checkout_target"] = self.marbl_codebase.checkout_target
+        # simulation_dict["marbl_codebase"] = marbl_codebase_info
 
         # InputDatasets:
         if self.model_grid is not None:
@@ -1066,7 +1067,9 @@ class ROMSSimulation(Simulation):
 
         for codebase in filter(lambda x: x is not None, self.codebases):
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
-            codebase.handle_config_status()
+            # codebase.handle_config_status()
+            codebase.get()
+            codebase.configure()
 
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")
