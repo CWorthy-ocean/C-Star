@@ -241,16 +241,7 @@ class ROMSSimulation(Simulation):
         self._check_inputdataset_partitioning()
         self._check_inputdataset_dates()
 
-        if marbl_codebase is None:
-            self.marbl_codebase = MARBLExternalCodeBase()
-            self.log.warning(
-                "Creating MARBLSimulation instance without a specified "
-                + "MARBLExternalCodeBase, default codebase will be used:\n"
-                + f"          • Source location: {self.marbl_codebase.source_repo}\n"
-                + f"          • Checkout target: {self.marbl_codebase.checkout_target}\n"
-            )
-        else:
-            self.marbl_codebase = marbl_codebase
+        self.marbl_codebase = marbl_codebase
 
         # Determine which runtime_code file corresponds to the `.in` runtime settings
         # And set the in_file attribute to be used internally
@@ -504,7 +495,12 @@ class ROMSSimulation(Simulation):
         list
             A list containing the ROMS external codebase and MARBL external codebase.
         """
-        return [self.codebase, self.marbl_codebase]
+        codebases = [
+            self.codebase,
+        ]
+        if self.marbl_codebase:
+            codebases.append(self.marbl_codebase)
+        return codebases
 
     @property
     def _forcing_paths(self) -> list[Path]:
@@ -746,7 +742,11 @@ class ROMSSimulation(Simulation):
         simulation_kwargs["codebase"] = codebase
 
         marbl_codebase_kwargs = simulation_dict.get("marbl_codebase", {})
-        marbl_codebase = MARBLExternalCodeBase(**marbl_codebase_kwargs)
+        marbl_codebase = (
+            MARBLExternalCodeBase(**marbl_codebase_kwargs)
+            if marbl_codebase_kwargs
+            else None
+        )
 
         simulation_kwargs["marbl_codebase"] = marbl_codebase
 
@@ -863,11 +863,8 @@ class ROMSSimulation(Simulation):
         simulation_dict = super().to_dict()
 
         # MARBLExternalCodeBase
-        simulation_dict["marbl_codebase"] = self.marbl_codebase.to_dict()
-        # marbl_codebase_info = {}
-        # marbl_codebase_info["source_repo"] = self.marbl_codebase.source_repo
-        # marbl_codebase_info["checkout_target"] = self.marbl_codebase.checkout_target
-        # simulation_dict["marbl_codebase"] = marbl_codebase_info
+        if self.marbl_codebase:
+            simulation_dict["marbl_codebase"] = self.marbl_codebase.to_dict()
 
         # InputDatasets:
         if self.model_grid is not None:
@@ -1128,9 +1125,9 @@ class ROMSSimulation(Simulation):
         --------
         setup : Fetches and organizes necessary files for the simulation.
         """
-        if self.codebase.local_config_status != 0:
+        if not self.codebase.is_configured:
             return False
-        if self.marbl_codebase.local_config_status != 0:
+        if self.marbl_codebase and not self.marbl_codebase.is_configured:
             return False
         if (self.runtime_code is not None) and (not self.runtime_code.exists_locally):
             return False

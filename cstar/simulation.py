@@ -137,8 +137,8 @@ class Simulation(ABC, LoggingMixin):
             self.log.warning(
                 f"Creating {self.__class__.__name__} instance without a specified "
                 "ExternalCodeBase, default codebase will be used:\n"
-                f"          • Source location: {self.codebase.source_repo}\n"
-                f"          • Checkout target: {self.codebase.checkout_target}\n"
+                f"          • Source location: {self.codebase._default_source_repo}\n"
+                f"          • Checkout target: {self.codebase._default_checkout_target}\n"
             )
         else:
             self.codebase = codebase

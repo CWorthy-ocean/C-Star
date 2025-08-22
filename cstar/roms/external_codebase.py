@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
 from cstar.system.manager import cstar_sysmgr
 
@@ -30,56 +31,9 @@ class ROMSExternalCodeBase(ExternalCodeBase):
     def expected_env_var(self) -> str:
         return "ROMS_ROOT"
 
-    # def get(self, target: str | Path) -> None:
-    #     """Clone ROMS code to local machine, set environment, compile libraries.
-
-    #     This method:
-    #     1. clones ROMS from `source_repo`
-    #     2. checks out the correct commit from `checkout_target`
-    #     3. Sets environment variable ROMS_ROOT and appends $ROMS_ROOT/Tools-Roms to PATH
-    #     4. Replaces ROMS Makefiles for machine-agnostic compilation
-    #     5. Compiles the NHMG library
-    #     6. Compiles the Tools-Roms package
-
-    #     Parameters:
-    #     -----------
-    #     target: src
-    #         the path where ROMS will be cloned and compiled
-    #     """
-    #     target = Path(target).expanduser()
-    #     # TODO: Situation where environment variables like ROMS_ROOT are not set...
-    #     # ... but repo already exists at local_path results in an error rather than a prompt
-    #     _clone_and_checkout(
-    #         source_repo=self.source_repo,
-    #         local_path=target,
-    #         checkout_target=self.checkout_target,
-    #     )
-
-    #     # Set environment variables for this session:
-    #     cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(target))
-    #     cstar_sysmgr.environment.set_env_var(
-    #         "PATH", f"${{PATH}}:{target / 'Tools-Roms'}"
-    #     )
-
-    #     # Make things
-    #     _run_cmd(
-    #         f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
-    #         cwd=target / "Work",
-    #         msg_pre="Compiling NHMG library...",
-    #         msg_err="Error when compiling ROMS' NHMG library.",
-    #         raise_on_error=True,
-    #     )
-    #     _run_cmd(
-    #         f"make COMPILER={cstar_sysmgr.environment.compiler}",
-    #         cwd=target / "Tools-Roms",
-    #         msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
-    #         msg_post=f"UCLA-ROMS is installed at {target}",
-    #         msg_err="Error when compiling Tools-Roms.",
-    #         raise_on_error=True,
-    #     )
-
     def _configure(self) -> None:
         # Set env vars:
+        assert self.working_copy is not None  # verified by ExternalCodeBase.configure()
         roms_root = self.working_copy.path
         cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(roms_root))
         cstar_sysmgr.environment.set_env_var(
@@ -113,8 +67,13 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         )
         if not roms_root:
             return False
-        if self.working_copy.changed_from_source:
-            print("here's ya")
+        assert self.source.checkout_target is not None  # Cannot be for ExternalCodeBase
+        #
+        if _check_local_repo_changed_from_remote(
+            remote_repo=self.source.location,
+            local_repo=roms_root,
+            checkout_target=self.source.checkout_target,
+        ):
             return False
 
         # Check fundamental Tools-Roms programs compiled

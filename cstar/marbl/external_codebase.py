@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from cstar.base import ExternalCodeBase
+from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
 from cstar.system.manager import cstar_sysmgr
 
@@ -63,6 +64,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
     #     )
 
     def _configure(self) -> None:
+        assert self.working_copy is not None  # Has been verified by `configure()``
         marbl_root = self.working_copy.path
         # Set env var:
         cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(marbl_root))
@@ -86,13 +88,17 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         if not marbl_root:
             return False
         # Check MARBL repo hasn't changed:
-        if self.working_copy.changed_from_source():
+        assert self.source.checkout_target is not None  # cannot be for ExternalCodeBase
+        if _check_local_repo_changed_from_remote(
+            remote_repo=self.source.location,
+            local_repo=marbl_root,
+            checkout_target=self.source.checkout_target,
+        ):
             return False
         # Check library file exists for current compiler:
-        if (
-            not Path(marbl_root)
-            / f"lib/libmarbl-{cstar_sysmgr.environment.compiler}-mpi.a".exists()
-        ):
+        if not (
+            Path(marbl_root) / f"lib/libmarbl-{cstar_sysmgr.environment.compiler}-mpi.a"
+        ).exists():
             return False
         # Check include dir is not empty:
         inc_dir = Path(marbl_root) / f"include/{cstar_sysmgr.environment.compiler}-mpi/"

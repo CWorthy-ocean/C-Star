@@ -123,7 +123,7 @@ class TestROMSExternalCodeBaseGet:
 
             # Test
             ## Call the get method
-            roms_codebase.get(target=roms_path)
+            roms_codebase.get(target_dir=roms_path)
 
             # Assertions:
             ## Check environment variables
@@ -137,9 +137,9 @@ class TestROMSExternalCodeBaseGet:
 
             ## Check that _clone_and_checkout was (mock) called correctly
             self.mock_clone_and_checkout.assert_called_once_with(
-                source_repo=roms_codebase.source_repo,
+                source_repo=roms_codebase.source.location,
                 local_path=roms_path,
-                checkout_target=roms_codebase.checkout_target,
+                checkout_target=roms_codebase.source.checkout_target,
             )
 
             k0, v0 = roms_codebase.expected_env_var, str(roms_path)

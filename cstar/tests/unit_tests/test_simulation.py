@@ -48,7 +48,7 @@ class MockExternalCodeBase(ExternalCodeBase):
     def expected_env_var(self) -> str:
         return "TEST_CODEBASE_ROOT"
 
-    def get(self, target: str | Path) -> None:
+    def get(self, target_dir: Path | None = Path("mock_default_target_dir")) -> None:
         pass
 
 

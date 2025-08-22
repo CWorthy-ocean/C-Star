@@ -114,7 +114,7 @@ class TestMARBLExternalCodeBaseGet:
         ):
             # Test
             ## Call the get method
-            marbl_codebase.get(target=marbl_path)
+            marbl_codebase.get(target_dir=marbl_path)
 
             # Assertions:
             ## Check environment variables
@@ -122,9 +122,9 @@ class TestMARBLExternalCodeBaseGet:
 
             ## Check that _clone_and_checkout was (mock) called correctly
             self.mock_clone_and_checkout.assert_called_once_with(
-                source_repo=marbl_codebase.source_repo,
+                source_repo=marbl_codebase.source.location,
                 local_path=marbl_path,
-                checkout_target=marbl_codebase.checkout_target,
+                checkout_target=marbl_codebase.source.checkout_target,
             )
 
             ## Check that environment was updated correctly
