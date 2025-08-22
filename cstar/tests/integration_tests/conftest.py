@@ -1,6 +1,4 @@
-import builtins
 import logging
-from contextlib import contextmanager
 
 import pytest
 

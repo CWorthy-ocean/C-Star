@@ -80,10 +80,8 @@ class ROMSExternalCodeBase(ExternalCodeBase):
 
     def _configure(self) -> None:
         # Set env vars:
-        roms_root=self.working_copy.path
-        cstar_sysmgr.environment.set_env_var(
-            self.expected_env_var, str(roms_root)
-        )
+        roms_root = self.working_copy.path
+        cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(roms_root))
         cstar_sysmgr.environment.set_env_var(
             "PATH", f"${{PATH}}:{roms_root / 'Tools-Roms'}"
         )
@@ -120,6 +118,6 @@ class ROMSExternalCodeBase(ExternalCodeBase):
             return False
 
         # Check fundamental Tools-Roms programs compiled
-        if not (Path(roms_root)/"Tools-Roms/mpc").exists():
+        if not (Path(roms_root) / "Tools-Roms/mpc").exists():
             return False
         return True

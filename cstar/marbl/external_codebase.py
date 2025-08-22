@@ -65,9 +65,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
     def _configure(self) -> None:
         marbl_root = self.working_copy.path
         # Set env var:
-        cstar_sysmgr.environment.set_env_var(
-            self.expected_env_var, str(marbl_root)
-        )
+        cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(marbl_root))
 
         # Compile
         _run_cmd(
