@@ -32,9 +32,9 @@ def test_default_checkout_target(roms_codebase):
     assert roms_codebase.default_checkout_target == "main"
 
 
-def test_expected_env_var(roms_codebase):
+def test_root_env_var(roms_codebase):
     """Test if the expected environment variable is set correctly."""
-    assert roms_codebase.expected_env_var == "ROMS_ROOT"
+    assert roms_codebase.root_env_var == "ROMS_ROOT"
 
 
 def test_defaults_are_set():
@@ -132,7 +132,7 @@ class TestROMSExternalCodeBaseGet:
             exp_roms_value = str(roms_path)
             exp_roms_tools_value = f":{roms_path / 'Tools-Roms'}"
 
-            assert os.environ[roms_codebase.expected_env_var] == exp_roms_value
+            assert os.environ[roms_codebase.root_env_var] == exp_roms_value
             assert exp_roms_tools_value in os.environ["PATH"]
 
             ## Check that _clone_and_checkout was (mock) called correctly
@@ -142,7 +142,7 @@ class TestROMSExternalCodeBaseGet:
                 checkout_target=roms_codebase.source.checkout_target,
             )
 
-            k0, v0 = roms_codebase.expected_env_var, str(roms_path)
+            k0, v0 = roms_codebase.root_env_var, str(roms_path)
             k1, v1 = "PATH", f"${{PATH}}{exp_roms_tools_value}"
 
             cfg = dotenv.dotenv_values(dotenv_path)

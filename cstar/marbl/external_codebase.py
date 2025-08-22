@@ -28,7 +28,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         return "marbl0.45.0"
 
     @property
-    def expected_env_var(self) -> str:
+    def root_env_var(self) -> str:
         return "MARBL_ROOT"
 
     # def get(self, target: str | Path) -> None:
@@ -51,7 +51,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
     #         checkout_target=self.checkout_target,
     #     )
     #     # Set environment variables for this session:
-    #     cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(target))
+    #     cstar_sysmgr.environment.set_env_var(self.root_env_var, str(target))
 
     #     # Make things
     #     _run_cmd(
@@ -67,7 +67,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         assert self.working_copy is not None  # Has been verified by `configure()``
         marbl_root = self.working_copy.path
         # Set env var:
-        cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(marbl_root))
+        cstar_sysmgr.environment.set_env_var(self.root_env_var, str(marbl_root))
 
         # Compile
         _run_cmd(
@@ -83,7 +83,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
     def is_configured(self) -> bool:
         # Check MARBL_ROOT env var is set:
         marbl_root = cstar_sysmgr.environment.environment_variables.get(
-            self.expected_env_var
+            self.root_env_var
         )
         if not marbl_root:
             return False

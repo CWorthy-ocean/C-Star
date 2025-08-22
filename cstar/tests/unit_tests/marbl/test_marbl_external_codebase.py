@@ -34,9 +34,9 @@ def test_default_checkout_target(marbl_codebase):
     assert marbl_codebase.default_checkout_target == "marbl0.45.0"
 
 
-def test_expected_env_var(marbl_codebase):
+def test_root_env_var(marbl_codebase):
     """Test if the expected environment variable is set correctly."""
-    assert marbl_codebase.expected_env_var == "MARBL_ROOT"
+    assert marbl_codebase.root_env_var == "MARBL_ROOT"
 
 
 def test_defaults_are_set():
@@ -105,7 +105,7 @@ class TestMARBLExternalCodeBaseGet:
         ## Mock success of calls to subprocess.run:
         self.mock_subprocess_run.return_value.returncode = 0
 
-        key = marbl_codebase.expected_env_var
+        key = marbl_codebase.root_env_var
         value = str(marbl_path)
 
         with mock.patch(

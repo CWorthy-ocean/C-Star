@@ -19,7 +19,7 @@ class MockExternalCodeBase(ExternalCodeBase):
         self._log = log
 
     @property
-    def expected_env_var(self):
+    def root_env_var(self):
         return "TEST_ROOT"
 
     @property

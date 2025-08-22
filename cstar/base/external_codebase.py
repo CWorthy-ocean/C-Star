@@ -30,6 +30,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
     TODO : update here
     """
 
+    _working_copy: StagedRepository | None = None  # updated by self.get()
+
     def __init__(
         self, source_repo: str | None = None, checkout_target: str | None = None
     ):
@@ -55,8 +57,15 @@ class ExternalCodeBase(ABC, LoggingMixin):
         if not checkout_target:
             checkout_target = self._default_checkout_target
         self._source = SourceData(location=source_repo, identifier=checkout_target)
-
-        self._working_copy: StagedRepository | None = None  # updated by self.get()
+        if not self.is_configured:
+            self._working_copy = None
+        else:
+            root_dir = str(
+                cstar_sysmgr.environment.environment_variables.get(self.root_env_var)
+            )
+            self._working_copy = StagedRepository(
+                source=self.source, path=Path(root_dir)
+            )
 
     def __str__(self) -> str:
         base_str = f"{self.__class__.__name__}"
@@ -105,9 +114,9 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     @abstractmethod
-    def expected_env_var(self) -> str:
-        """Environment variable associated with the external codebase, e.g.
-        MARBL_ROOT.
+    def root_env_var(self) -> str:
+        """Environment variable pointing to the location of the codebase when configured, e.g.
+        MARBL_ROOT
         """
 
     @property
@@ -117,9 +126,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
     def get(self, target_dir: Path | None = None) -> None:
         """Retrieve and stage this ExternalCodeBase"""
         if self.working_copy:
-            raise ValueError(
-                f"ExternalCodeBase is already staged at {self.working_copy.path}. "
-                "Consider ExternalCodeBase.working_copy.reset or ExternalCodeBase.uninstall"
+            self.log.info(
+                f"ExternalCodeBase is already staged at {self.working_copy.path}. Skipping get() call"
             )
 
         if not target_dir:

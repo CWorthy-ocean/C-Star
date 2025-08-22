@@ -28,14 +28,14 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         return "main"
 
     @property
-    def expected_env_var(self) -> str:
+    def root_env_var(self) -> str:
         return "ROMS_ROOT"
 
     def _configure(self) -> None:
         # Set env vars:
         assert self.working_copy is not None  # verified by ExternalCodeBase.configure()
         roms_root = self.working_copy.path
-        cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(roms_root))
+        cstar_sysmgr.environment.set_env_var(self.root_env_var, str(roms_root))
         cstar_sysmgr.environment.set_env_var(
             "PATH", f"${{PATH}}:{roms_root / 'Tools-Roms'}"
         )
@@ -63,7 +63,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
     def is_configured(self) -> bool:
         # Check ROMS_ROOT env var is set:
         roms_root = cstar_sysmgr.environment.environment_variables.get(
-            self.expected_env_var
+            self.root_env_var
         )
         if not roms_root:
             return False
