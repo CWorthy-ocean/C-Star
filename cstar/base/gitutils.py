@@ -35,6 +35,42 @@ def _clone_and_checkout(
     _checkout(source_repo, local_path, checkout_target)
 
 
+def _check_local_repo_changed_from_remote(
+    remote_repo: str, local_repo: str | Path, checkout_target: str
+):
+    """Returns True if a local repository has changed since being checked out from a remote at a given target"""
+    local_repo = Path(local_repo)
+
+    if (not local_repo.exists()) or (not (local_repo / ".git").exists()):
+        return True
+
+        try:
+            expected_hash = _get_hash_from_checkout_target(
+                repo_url=remote_repo, checkout_target=checkout_target
+            )
+
+            # 1. Check current HEAD commit hash
+            head_hash = _run_cmd(
+                cmd="git rev-parse HEAD", cwd=local_repo, raise_on_error=True
+            )
+
+            if head_hash != expected_hash:
+                return True  # HEAD is not at the expected hash
+
+            # if HEAD is at expected hash, check if dirty:
+            status_output = _run_cmd(
+                cmd="git diff-index HEAD", cwd=local_repo, raise_on_error=True
+            )
+
+            return bool(status_output.strip())  # True if any changes
+
+        except RuntimeError as e:
+            print(f"Git error: {e}")
+            return True
+
+        return False
+
+
 def _get_repo_remote(local_path: str | Path) -> str:
     """Take a local repository path string (local_path) and return as a string the
     remote URL.

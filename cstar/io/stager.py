@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from cstar.io.source_data import SourceData
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever, get_retriever
-from cstar.io.staged_data import StagedData, StagedFile, StagedRepository
+from cstar.io.staged_data import StagedFile, StagedRepository
 
 _registry: dict[SourceClassification, type["Stager"]] = {}
 
@@ -42,7 +42,9 @@ def get_stager(classification: SourceClassification) -> "Stager":
 class Stager(ABC):
     _classification: ClassVar[SourceClassification]
 
-    def stage(self, target_dir: "Path", source: "SourceData") -> "StagedData":
+    def stage(
+        self, target_dir: "Path", source: "SourceData"
+    ) -> "StagedFile" | "StagedRepository":
         """Stage this data using an appropriate strategy."""
         retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
         return StagedFile(
