@@ -5,6 +5,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _get_sha256_hash, _run_cmd
 
 if TYPE_CHECKING:
@@ -105,33 +106,11 @@ class StagedRepository(StagedData):
     def changed_from_source(self) -> bool:
         """Check if the current repo is dirty or differs from a given commit hash."""
         # Check existence
-        if (not self.path.exists()) or (not (self.path / ".git").exists()):
-            return True
-
-        # Check if diverged from checkout target
-        try:
-            cached_hash = self._checkout_hash
-
-            # 1. Check current HEAD commit hash
-            head_hash = _run_cmd(
-                cmd="git rev-parse HEAD", cwd=self.path, raise_on_error=True
-            )
-
-            if head_hash != cached_hash:
-                return True  # HEAD is not at the expected hash
-
-            # if HEAD is at expected hash, check if dirty:
-            status_output = _run_cmd(
-                cmd="git diff-index HEAD", cwd=self.path, raise_on_error=True
-            )
-
-            return bool(status_output.strip())  # True if any changes
-
-        except RuntimeError as e:
-            print(f"Git error: {e}")
-            return True
-
-        return False
+        return _check_local_repo_changed_from_remote(
+            remote_repo=self.source.location,
+            local_repo=self.path,
+            checkout_target=self._checkout_hash,
+        )
 
     def unstage(self):
         shutil.rmtree(self.path)
