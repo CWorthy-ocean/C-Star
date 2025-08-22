@@ -44,7 +44,7 @@ class Stager(ABC):
 
     def stage(
         self, target_dir: "Path", source: "SourceData"
-    ) -> "StagedFile" | "StagedRepository":
+    ) -> StagedFile | StagedRepository:
         """Stage this data using an appropriate strategy."""
         retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
         return StagedFile(
