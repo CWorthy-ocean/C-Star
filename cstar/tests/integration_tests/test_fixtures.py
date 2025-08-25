@@ -101,6 +101,9 @@ class TestFetchData:
             "GLORYS_NA_2012.nc",
             "ERA5_NA_2012.nc",
             "TPXO_global_test_data.nc",
+            "global_grid_tpxo10.v2.nc",
+            "global_h_tpxo10.v2.nc",
+            "global_u_tpxo10.v2.nc",
             "CESM_BGC_2012.nc",
             "CESM_BGC_SURFACE_2012.nc",
         ]
