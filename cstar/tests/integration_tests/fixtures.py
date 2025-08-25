@@ -69,13 +69,19 @@ def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
             registry={
                 "GLORYS_NA_2012.nc": "b862add892f5d6e0d670c8f7fa698f4af5290ac87077ca812a6795e120d0ca8c",
                 "ERA5_NA_2012.nc": "d07fa7450869dfd3aec54411777a5f7de3cb3ec21492eec36f4980e220c51757",
-                "TPXO_global_test_data.nc": "457bfe87a7b247ec6e04e3c7d3e741ccf223020c41593f8ae33a14f2b5255e60",
+                "global_grid_tpxo10.v2.nc": "26eb97cd135cd6f2b4e894c5f11bf7f860ff19cec8dbaa9190e37d30ee6e744e",
+                "global_h_tpxo10.v2.nc": "ef60fae6d52fa514dcc59a737435d74aa798dc114b57f01b123aa39dbaffc592",
+                "global_u_tpxo10.v2.nc": "022e57e6287e51f52eb1e5296614b1086e0e22ecd0bd57c9fd8d0e155babf5c3",
+                # "TPXO_global_test_data.nc": "457bfe87a7b247ec6e04e3c7d3e741ccf223020c41593f8ae33a14f2b5255e60",
                 "CESM_BGC_2012.nc": "e374d5df3c1be742d564fd26fd861c2d40af73be50a432c51d258171d5638eb6",
                 "CESM_BGC_SURFACE_2012.nc": "3c4d156adca97909d0fac36bf50b99583ab37d8020d7a3e8511e92abf2331b38",
             },
         )
         pup_test_data.fetch("GLORYS_NA_2012.nc")
-        pup_test_data.fetch("TPXO_global_test_data.nc")
+        # pup_test_data.fetch("TPXO_global_test_data.nc")
+        pup_test_data.fetch("global_grid_tpxo10.v2.nc")
+        pup_test_data.fetch("global_h_tpxo10.v2.nc")
+        pup_test_data.fetch("global_u_tpxo10.v2.nc")
         pup_test_data.fetch("ERA5_NA_2012.nc")
         pup_test_data.fetch("CESM_BGC_2012.nc")
         pup_test_data.fetch("CESM_BGC_SURFACE_2012.nc")
@@ -125,7 +131,7 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
         test_case_repo_url = (
             "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/"
         )
-        checkout_target = "7fdf8ea2225d55e9b98b5d4d0e7adbff961c9940"
+        checkout_target = "roms_tools_3_1_2"
 
         # Construct the URL of this commit as a zip archive:
         archive_url = f"{test_case_repo_url.rstrip('/')}/archive/{checkout_target}.zip"
@@ -133,7 +139,7 @@ def fetch_remote_test_case_data() -> Callable[[], None]:
         # Download the zip with pooch
         zip_path = pooch.retrieve(
             url=archive_url,
-            known_hash="74126fce593fa86aa09937a9eb89b75f64517c341b899821bb6b07fbb579cc58",
+            known_hash="ea5d149975622bde9aefe4af32e078969b5e68e4bf08efd85d562799aa3e5500",
             fname=f"{checkout_target}.zip",  # Name of the cached file
             path=CSTAR_TEST_DATA_DIRECTORY,  # Set the cache directory (customize as needed)
         )
