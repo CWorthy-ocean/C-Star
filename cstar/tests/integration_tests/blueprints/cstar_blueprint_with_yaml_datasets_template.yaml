@@ -9,8 +9,8 @@ marbl_codebase:
   checkout_target: 'marbl0.45.0'
 runtime_code:
   location: '<additional_code_location>'
-  checkout_target: '7fdf8ea2225d55e9b98b5d4d0e7adbff961c9940'
-  subdir: 'additional_code/ROMS/namelists'
+  checkout_target: 'roms_tools_3_1_2'
+  subdir: 'additional_code/ROMS/runtime_code'
   files:
     - "roms.in"
     - "marbl_in"
@@ -18,8 +18,8 @@ runtime_code:
     - "marbl_diagnostic_output_list"
 compile_time_code:
   location: '<additional_code_location>'
-  checkout_target: '7fdf8ea2225d55e9b98b5d4d0e7adbff961c9940'
-  subdir: 'additional_code/ROMS/source_mods'
+  checkout_target: 'roms_tools_3_1_2'
+  subdir: 'additional_code/ROMS/compile_time_code'
   files:
     - "bgc.opt"
     - "bulk_frc.opt"

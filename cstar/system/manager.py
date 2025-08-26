@@ -178,6 +178,7 @@ class _PerlmutterSystemContext(_SystemContext):
             other_scheduler_directives={"-C": "cpu"},
             requires_task_distribution=False,
             documentation=cls.docs,
+            max_cpus_per_node=128,
         )
 
 
