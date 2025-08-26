@@ -100,7 +100,9 @@ class TestFetchData:
         expected_files = [
             "GLORYS_NA_2012.nc",
             "ERA5_NA_2012.nc",
-            "TPXO_global_test_data.nc",
+            "global_grid_tpxo10.v2.nc",
+            "global_h_tpxo10.v2.nc",
+            "global_u_tpxo10.v2.nc",
             "CESM_BGC_2012.nc",
             "CESM_BGC_SURFACE_2012.nc",
         ]
@@ -132,8 +134,8 @@ class TestFetchData:
         )
 
         expected_files = [
-            "additional_code/ROMS/namelists/roms.in",
-            "additional_code/ROMS/source_mods/Makefile",
+            "additional_code/ROMS/runtime_code/roms.in",
+            "additional_code/ROMS/compile_time_code/Makefile",
             "input_datasets/ROMS/roms_bry.nc",
             "input_datasets/ROMS/roms_frc.nc",
             "roms_tools_yaml_files/roms_bry.yaml",
