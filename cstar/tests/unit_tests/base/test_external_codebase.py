@@ -10,45 +10,6 @@ from cstar.system.manager import cstar_sysmgr
 ################################################################################
 
 
-class MockExternalCodeBase(ExternalCodeBase):
-    """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
-    purposes.
-    """
-
-    def __init__(self, log: logging.Logger):
-        super().__init__(None, None)
-        self._log = log
-
-    @property
-    def expected_env_var(self):
-        return "TEST_ROOT"
-
-    @property
-    def default_source_repo(self):
-        return "https://github.com/test/repo.git"
-
-    @property
-    def default_checkout_target(self):
-        return "test_target"
-
-    def get(self, target: str | Path):
-        self.log.info(f"mock installing ExternalCodeBase at {target}")
-        pass
-
-
-@pytest.fixture
-def generic_codebase(log: logging.Logger):
-    """Yields a generic codebase (instance of MockExternalCodeBase defined above) for
-    use in testing.
-    """
-    # Correctly patch the imported _get_hash_from_checkout_target in the ExternalCodeBase's module
-    with mock.patch(
-        "cstar.base.external_codebase._get_hash_from_checkout_target",
-        return_value="test123",
-    ):
-        yield MockExternalCodeBase(log=log)
-
-
 def test_codebase_str(generic_codebase):
     """Test the string representation of the `ExternalCodeBase` class.
 
@@ -295,7 +256,7 @@ class TestExternalCodeBaseConfigHandling:
         """
         # Mock the config status to be 0 (everything is correct)
         self.mock_local_config_status.return_value = 0
-        caplog.set_level(logging.INFO)
+        caplog.set_level(logging.INFO, logger=generic_codebase.log.name)
 
         # Call the method
         generic_codebase.handle_config_status()
@@ -414,7 +375,7 @@ class TestExternalCodeBaseConfigHandling:
         self, mock_input, generic_codebase, caplog: pytest.LogCaptureFixture
     ):
         self.mock_local_config_status.return_value = 3
-        caplog.set_level(logging.INFO)
+        caplog.set_level(logging.INFO, logger=generic_codebase.log.name)
 
         generic_codebase.handle_config_status()
 
@@ -461,7 +422,7 @@ class TestExternalCodeBaseConfigHandling:
         self, mock_input, generic_codebase, caplog
     ):
         self.mock_local_config_status.return_value = 3
-        caplog.set_level(logging.INFO)
+        caplog.set_level(logging.INFO, logger=generic_codebase.log.name)
 
         generic_codebase.handle_config_status()
         expected_install_dir = Path("some/install/path").resolve()

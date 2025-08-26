@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import TypeVar
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 from pydantic import ValidationError
 
@@ -17,84 +16,9 @@ from cstar.roms.runtime_settings import (
     ROMSRuntimeSettingsSection,
     SingleEntryROMSRuntimeSettingsSection,
 )
+from cstar.tests.unit_tests.generic_abc_subclasses import EmptySection, MockSection
 
 T = TypeVar("T")
-
-
-@pytest.fixture
-def example_runtime_settings():
-    """Fixture providing a `ROMSRuntimeSettings` instance for testing.
-
-    The example instance corresponds to the file `fixtures/example_runtime_settings.in`
-    in order to test the `ROMSRuntimeSettings.to_file` and `from_file` methods.
-
-    Paths do not correspond to real files.
-
-    Yields
-    ------
-    ROMSRuntimeSettings
-       The example ROMSRuntimeSettings instance
-    """
-    yield ROMSRuntimeSettings(
-        title="Example runtime settings",
-        time_stepping={"ntimes": 360, "dt": 60, "ndtfast": 60, "ninfo": 1},
-        bottom_drag={
-            "rdrg": 0.0e-4,
-            "rdrg2": 1e-3,
-            "zob": 1e-2,
-            "cdb_min": 1e-4,
-            "cdb_max": 1e-2,
-        },
-        initial={"nrrec": 1, "ininame": Path("input_datasets/roms_ini.nc")},
-        forcing={
-            "filenames": [
-                Path("input_datasets/roms_frc.nc"),
-                Path("input_datasets/roms_frc_bgc.nc"),
-                Path("input_datasets/roms_bry.nc"),
-                Path("input_datasets/roms_bry_bgc.nc"),
-            ]
-        },
-        output_root_name="ROMS_test",
-        s_coord={"theta_s": 5.0, "theta_b": 2.0, "tcline": 300.0},
-        rho0=1000.0,
-        lin_rho_eos={"Tcoef": 0.2, "T0": 1.0, "Scoef": 0.822, "S0": 1.0},
-        marbl_biogeochemistry={
-            "marbl_namelist_fname": Path("marbl_in"),
-            "marbl_tracer_list_fname": Path("marbl_tracer_list_fname"),
-            "marbl_diag_list_fname": Path("marbl_diagnostic_output_list"),
-        },
-        lateral_visc=0.0,
-        gamma2=1.0,
-        tracer_diff2=[
-            0.0,
-        ]
-        * 38,
-        vertical_mixing={"Akv_bak": 0, "Akt_bak": np.zeros(37)},
-        my_bak_mixing={"Akq_bak": 1.0e-5, "q2nu2": 0.0, "q2nu4": 0.0},
-        sss_correction=7.777,
-        sst_correction=10.0,
-        ubind=0.1,
-        v_sponge=0.0,
-        grid=Path("input_datasets/roms_grd.nc"),
-        climatology=Path("climfile2.nc"),
-    )
-
-
-class MockSection(ROMSRuntimeSettingsSection):
-    """A simple ROMSRuntimeSettingsSection subclass for testing."""
-
-    floats: list[float]
-    paths: list[Path]
-    others: list[str | int]
-    floatval: float
-    pathval: Path
-    otherval: str
-
-
-class EmptySection(ROMSRuntimeSettingsSection):
-    """No actual values defined, just used to test some of the formatting/joining
-    functions.
-    """
 
 
 class TestHelperMethods:

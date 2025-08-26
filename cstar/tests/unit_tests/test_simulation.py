@@ -6,155 +6,52 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
+from cstar.base import Discretization
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
-from cstar.simulation import Simulation
-
+from cstar.tests.unit_tests.generic_abc_subclasses import (
+    MockExternalCodeBase,
+    MockSimulation,
+)
 
 # Minimal concrete subclass for testing
-class MockExternalCodeBase(ExternalCodeBase):
-    """Mock subclass of `ExternalCodeBase` for testing purposes.
+# class MockExternalCodeBase(ExternalCodeBase):
+#     """Mock subclass of `ExternalCodeBase` for testing purposes.
 
-    This class provides a minimal implementation of `ExternalCodeBase` to be used
-        in unit tests. It defines the necessary properties and methods required for a
-        valid subclass but does not perform any actual external codebase operations.
+#     This class provides a minimal implementation of `ExternalCodeBase` to be used
+#         in unit tests. It defines the necessary properties and methods required for a
+#         valid subclass but does not perform any actual external codebase operations.
 
-        Attributes
-        ----------
-        default_source_repo : str
-            The default URL of the source repository.
-        default_checkout_target : str
-            The default branch or tag to checkout from the repository.
-        expected_env_var : str
-            The expected environment variable associated with this external codebase.
+#         Attributes
+#         ----------
+#         default_source_repo : str
+#             The default URL of the source repository.
+#         default_checkout_target : str
+#             The default branch or tag to checkout from the repository.
+#         expected_env_var : str
+#             The expected environment variable associated with this external codebase.
 
-        Methods
-        -------
-        get(target)
-        A placeholder method that does nothing. In a real implementation, this
-        would fetch and store the external codebase at the specified target.
-    """
+#         Methods
+#         -------
+#         get(target)
+#         A placeholder method that does nothing. In a real implementation, this
+#         would fetch and store the external codebase at the specified target.
+#     """
 
-    @property
-    def default_source_repo(self) -> str:
-        return "https://github.com/test/repo.git"
+#     @property
+#     def default_source_repo(self) -> str:
+#         return "https://github.com/test/repo.git"
 
-    @property
-    def default_checkout_target(self) -> str:
-        return "test-tag"
+#     @property
+#     def default_checkout_target(self) -> str:
+#         return "test-tag"
 
-    @property
-    def expected_env_var(self) -> str:
-        return "TEST_CODEBASE_ROOT"
+#     @property
+#     def expected_env_var(self) -> str:
+#         return "TEST_CODEBASE_ROOT"
 
-    def get(self, target: str | Path) -> None:
-        pass
-
-
-class MockSimulation(Simulation):
-    """Mock subclass of `Simulation` for testing purposes.
-
-    This class provides a minimal implementation of `Simulation` that overrides
-    abstract methods to allow for isolated unit testing without requiring actual
-    simulation execution.
-
-    Attributes
-    ----------
-    default_codebase : ExternalCodeBase
-        Returns an instance of `MockExternalCodeBase`.
-
-    Methods
-    -------
-    from_dict(simulation_dict, directory)
-        Minimal implementation of abstract method
-    from_blueprint(blueprint, directory)
-        No-op implementation of abstract method
-    to_blueprint(filename)
-        No-op implementation of abstract method
-    setup()
-        No-op implementation of abstract method
-    build(rebuild)
-        No-op implementation of abstract method
-    pre_run()
-        No-op implementation of abstract method
-    run()
-        No-op implementation of abstract method
-    post_run()
-        No-op implementation of abstract method
-    """
-
-    @property
-    def default_codebase(self):
-        return MockExternalCodeBase()
-
-    @classmethod
-    def from_dict(cls, simulation_dict, directory):
-        return cls(**simulation_dict)
-
-    @classmethod
-    def from_blueprint(cls, blueprint, directory):
-        pass
-
-    def to_blueprint(self, filename):
-        pass
-
-    def setup(self):
-        pass
-
-    def build(self, rebuild=False):
-        pass
-
-    def pre_run(self):
-        pass
-
-    def run(self):
-        pass
-
-    def post_run(self):
-        pass
-
-
-@pytest.fixture
-def example_simulation(tmp_path):
-    """Fixture providing a `MockSimulation` instance for testing.
-
-    This fixture sets up a minimal `MockSimulation` instance with a mock external
-    codebase, runtime and compile-time code, and basic discretization settings.
-    The temporary directory (`tmp_path`) serves as the working directory for the
-    simulation.
-
-    Yields
-    ------
-    tuple[MockSimulation, Path]
-        A tuple containing:
-        - `MockSimulation` instance configured for testing.
-        - The temporary directory where the simulation is stored.
-    """
-    directory = tmp_path
-    sim = MockSimulation(
-        name="TestSim",
-        directory=directory,
-        codebase=MockExternalCodeBase(),
-        runtime_code=AdditionalCode(
-            location=directory.parent,
-            subdir="subdir/",
-            checkout_target="main",
-            files=["file1", "file2"],
-        ),
-        compile_time_code=AdditionalCode(
-            location=directory.parent,
-            subdir="subdir/",
-            checkout_target="main",
-            files=["file1", "file2"],
-        ),
-        discretization=Discretization(time_step=60),
-        start_date="2025-01-01",
-        end_date="2025-12-31",
-        valid_start_date="2024-01-01",
-        valid_end_date="2026-01-01",
-    )
-    yield sim, directory
+#     def get(self, target: str | Path) -> None:
+#         pass
 
 
 class TestSimulationInitialization:
@@ -932,7 +829,7 @@ def test_to_dict(example_simulation):
     assert test_dict["name"] == "TestSim"
     assert test_dict["discretization"] == {"time_step": 60}
     assert test_dict["codebase"]["source_repo"] == "https://github.com/test/repo.git"
-    assert test_dict["codebase"]["checkout_target"] == "test-tag"
+    assert test_dict["codebase"]["checkout_target"] == "test_target"
     assert test_dict["runtime_code"]["location"] == str(directory.parent)
     assert test_dict["runtime_code"]["files"] == ["file1", "file2"]
     assert test_dict["runtime_code"]["subdir"] == "subdir/"

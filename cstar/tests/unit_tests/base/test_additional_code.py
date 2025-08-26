@@ -8,61 +8,6 @@ from cstar.base import AdditionalCode
 from cstar.base.datasource import DataSource
 
 
-# Set up fixtures
-@pytest.fixture
-def remote_additional_code():
-    """Pytest fixture that provides an instance of the AdditionalCode class representing
-    a remote repository.
-
-    This fixture simulates additional code retrieved from a remote Git
-    repository. It sets up the following attributes:
-
-    - `location`: The URL of the remote repository
-    - `checkout_target`: The specific branch, tag, or commit to checkout
-    - `subdir`: A subdirectory within the repository where files are located
-    - `files`: A list of files to be included from the repository
-
-    This fixture can be used in tests that involve handling or manipulating code
-    fetched from a remote Git repository.
-
-    Returns:
-        AdditionalCode: An instance of the AdditionalCode class with preset
-        remote repository details.
-    """
-    return AdditionalCode(
-        location="https://github.com/test/repo.git",
-        checkout_target="test123",
-        subdir="test/subdir",
-        files=["test_file_1.F", "test_file_2.py", "test_file_3.opt"],
-    )
-
-
-@pytest.fixture
-def local_additional_code():
-    """Pytest fixture that provides an instance of the AdditionalCode class representing
-    code located on the local filesystem.
-
-    This fixture simulates additional code stored in a local directory. It sets
-    up the following attributes:
-
-    - `location`: The path to the local directory containing the code
-    - `subdir`: A subdirectory within the local directory where the files are located
-    - `files`: A list of files to be included from the local directory
-
-    This fixture can be used in tests that involve handling or manipulating
-    code that resides on the local filesystem.
-
-    Returns:
-        AdditionalCode: An instance of the AdditionalCode class with preset
-        local directory details.
-    """
-    return AdditionalCode(
-        location="/some/local/directory",
-        subdir="some/subdirectory",
-        files=["test_file_1.F", "test_file_2.py", "test_file_3.opt"],
-    )
-
-
 class TestInit:
     """Test class for the initialization of the AdditionalCode class.
 
