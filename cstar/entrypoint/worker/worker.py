@@ -1,13 +1,14 @@
 import argparse
 import asyncio
 import dataclasses as dc
+import enum
 import logging
 import os
 import pathlib
 import shutil
 import sys
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Final, override
+from typing import Final, override
 
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
@@ -15,9 +16,6 @@ from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
 from cstar.system.manager import cstar_sysmgr
-
-if TYPE_CHECKING:
-    from cstar import Simulation
 
 DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
@@ -32,7 +30,22 @@ def _generate_job_name() -> str:
     return f"cstar_worker_{formatted_now_utc}"
 
 
-@dc.dataclass
+class SimulationStages(enum.StrEnum):
+    """The stages in the simulation pipeline."""
+
+    SETUP = enum.auto()
+    """Execute simulation setup. See `Simulation.setup`"""
+    BUILD = enum.auto()
+    """Execute builds of simulation depdencies. See `Simulation.build`"""
+    PRE_RUN = enum.auto()
+    """Execute hooks before the simulation starts. See `Simulation.pre_run`"""
+    RUN = enum.auto()
+    """Execute the simulation. See `Simulation.run`"""
+    POST_RUN = enum.auto()
+    """Execute hooks after the simulation completes. See `Simulation.post_run`"""
+
+
+@dc.dataclass(frozen=True)
 class BlueprintRequest:
     """Represents a request to run a c-star simulation."""
 
@@ -44,9 +57,11 @@ class BlueprintRequest:
     """The date on which to begin the simulation."""
     end_date: datetime
     """The date on which to end the simulation."""
+    stages: tuple[SimulationStages, ...] = dc.field(default=())
+    """The simulation stages to execute."""
 
 
-@dc.dataclass
+@dc.dataclass(frozen=True)
 class JobConfig:
     """Configuration required to submit HPC jobs."""
 
@@ -57,11 +72,26 @@ class JobConfig:
     job_name: str = _generate_job_name()
     """User-friendly job name."""
     priority: str = "regular"
-    """"""
+    """Job priority."""
 
 
 class SimulationRunner(Service):
     """Worker class to run c-star simulations."""
+
+    _blueprint_uri: Final[str]
+    """The URI of the blueprint to run."""
+    _output_root: Final[pathlib.Path]
+    """The root directory where simulation outputs will be written."""
+    _output_dir: Final[pathlib.Path]
+    """A unique directory for this simulation run to write outputs."""
+    _simulation: Final[ROMSSimulation]
+    """The simulation instance created from the blueprint."""
+    _stages: Final[tuple[SimulationStages, ...]]
+    """The simulation stages that should be executed."""
+    _handler: ExecutionHandler | None
+    """The execution handler for the simulation."""
+    _job_config: Final[JobConfig]
+    """Configuration for submitting jobs to an HPC."""
 
     def __init__(
         self,
@@ -86,22 +116,20 @@ class SimulationRunner(Service):
         super().__init__(service_cfg)
 
         self._blueprint_uri = request.blueprint_uri
-        """The URI of the blueprint to run."""
         self._output_root = request.output_dir.expanduser()
-        """The root directory where simulation outputs will be written."""
         self._output_dir = self._get_unique_path(self._output_root)
-        """A unique directory for this simulation run to write outputs."""
-        self._simulation: Simulation = ROMSSimulation.from_blueprint(
+        self._simulation: ROMSSimulation = ROMSSimulation.from_blueprint(
             blueprint=self._blueprint_uri,
             directory=self._output_dir,
             start_date=request.start_date,
             end_date=request.end_date,
         )
-        """The simulation instance created from the blueprint."""
-        self._handler: ExecutionHandler | None = None
-        """The execution handler for the simulation."""
+        self._stages = tuple(request.stages)
+
+        roms_root = os.environ.get("ROMS_ROOT", None)
+        self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
+        self._handler = None
         self._job_config = job_cfg
-        """Configuration for submitting jobs to an HPC."""
 
     @staticmethod
     def _get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
@@ -179,26 +207,40 @@ class SimulationRunner(Service):
         remote resources, and building third-party codebases.
         """
         if self._blueprint_uri is None:
-            raise BlueprintError("No blueprint URI provided")
+            msg = "No blueprint URI provided"
+            raise BlueprintError(msg)
 
         if self._simulation is None:
-            raise BlueprintError(f"Unable to load the blueprint: {self._blueprint_uri}")
+            msg = f"Unable to load the blueprint: {self._blueprint_uri}"
+            raise BlueprintError(msg)
 
         self._prepare_file_system()
 
         try:
-            self.log.debug("Setting up simulation")
-            self._simulation.setup()
+            if SimulationStages.SETUP in self._stages:
+                self.log.debug("Setting up simulation")
+                self._simulation.setup()
+            else:
+                self.log.debug("Skipping simulation setup")
 
-            self.log.debug("Building simulation")
-            self._simulation.build()
+            if SimulationStages.BUILD in self._stages:
+                self.log.debug("Building simulation")
+                self._simulation.build()
+            else:
+                self.log.debug("Skipping simulation build")
 
-            self.log.debug("Executing simulation pre-run")
-            self._simulation.pre_run()
+            if SimulationStages.PRE_RUN in self._stages:
+                self.log.debug("Executing simulation pre-run")
+                self._simulation.pre_run()
+            else:
+                self.log.debug("Skipping simulation pre_run")
+
         except RuntimeError as ex:
-            raise CstarError("Failed to build simulation") from ex
+            msg = "Failed to build simulation"
+            raise CstarError(msg) from ex
         except ValueError as ex:
-            raise CstarError("Failed to prepare simulation") from ex
+            msg = "Failed to prepare simulation"
+            raise CstarError(msg) from ex
 
     @override
     def _on_shutdown(self) -> None:
@@ -207,29 +249,41 @@ class SimulationRunner(Service):
         Execute simulation post-run behavior and log the final disposition of the
         simulation.
         """
-        if not self._simulation:
-            self.log.warning("No simulation available at shutdown")
-            return
+        # perform simulation cleanup activities only when required
+        stage_enabled = SimulationStages.POST_RUN in self._stages
 
-        # perform simulation cleanup activities when possible
-        if self._handler and self._handler.status == ExecutionStatus.COMPLETED:
+        try:
+            if not self._simulation:
+                self.log.warning("No simulation available at shutdown")
+                return
+
             # note: calling post_run on any status but completed fails.
-            self.log.debug("Executing simulation post-run")
-            self._simulation.post_run()
-        else:
-            self.log.debug("Skipping simulation post-run.")
+            if not self._handler:
+                self.log.debug("Skipping simulation post-run; handler not found.")
+                return
 
-        # ensure simulation status is reliably logged if/when self._handler
-        # updates are suppressed.
-        self._log_disposition()
+            if self._handler.status != ExecutionStatus.COMPLETED:
+                self.log.debug(
+                    "Skipping simulation post-run; simulation is not complete."
+                )
+                return
+
+            if stage_enabled:
+                self._simulation.post_run()
+                self.log.debug("Executing simulation post-run")
+            else:
+                self.log.debug("Skipping simulation post-run")
+        except RuntimeError:
+            self.log.exception("Simulation post_run failed.")
+        finally:
+            # ensure status is logged even if _handler updates are suppressed.
+            self._log_disposition()
 
     @override
     def _on_iteration(self) -> None:
         """Execute the c-star simulation."""
         try:
             if not self._handler:
-                self.log.debug("Running simulation.")
-
                 # if os.environ.get("SLURM_JOB_ID", True):
                 run_params = {
                     "account_key": self._job_config.account_id,
@@ -237,7 +291,11 @@ class SimulationRunner(Service):
                     "job_name": self._job_config.job_name,
                 }
 
-                self._handler = self._simulation.run(**run_params)
+                if SimulationStages.RUN in self._stages:
+                    self.log.debug("Running simulation.")
+                    self._handler = self._simulation.run(**run_params)
+                else:
+                    self.log.debug("Skipping simulation run")
             else:
                 self._handler.updates(1.0)
                 self._send_update_to_hc({"status": str(self._handler.status)})
@@ -348,6 +406,16 @@ def create_parser() -> argparse.ArgumentParser:
         required=False,
         help=(f"Simulation end date, formatted `{DATE_FORMAT}`"),
     )
+    parser.add_argument(
+        "-g",
+        "--stage",
+        default=tuple(x for x in SimulationStages),
+        type=str,
+        required=False,
+        action="append",
+        dest="stages",
+        help=("Simulation stages to execute."),
+    )
     return parser
 
 
@@ -369,6 +437,7 @@ def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
         loop_delay=5,
         health_check_frequency=10,
         log_level=logging.getLevelNamesMapping()[args.log_level],
+        health_check_log_threshold=10,
         name="SimulationRunner",
     )
 
@@ -410,6 +479,7 @@ def get_request(args: argparse.Namespace) -> BlueprintRequest:
         output_dir=pathlib.Path(args.output_dir),
         start_date=_format_date(args.start_date),
         end_date=_format_date(args.end_date),
+        stages=args.stages,
     )
 
 
