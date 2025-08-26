@@ -10,8 +10,8 @@ marbl_codebase:
   checkout_target: 'marbl0.45.0'
 runtime_code:
   location: '<additional_code_location>'
-  checkout_target: '7fdf8ea2225d55e9b98b5d4d0e7adbff961c9940'
-  subdir: 'additional_code/ROMS/namelists'
+  checkout_target: 'roms_tools_3_1_2'
+  subdir: 'additional_code/ROMS/runtime_code'
   files:
     - "roms.in"
     - "marbl_in"
@@ -19,8 +19,8 @@ runtime_code:
     - "marbl_diagnostic_output_list"
 compile_time_code:
   location: '<additional_code_location>'
-  checkout_target: '7fdf8ea2225d55e9b98b5d4d0e7adbff961c9940'
-  subdir: 'additional_code/ROMS/source_mods'
+  checkout_target: 'roms_tools_3_1_2'
+  subdir: 'additional_code/ROMS/compile_time_code'
   files:
     - "bgc.opt"
     - "bulk_frc.opt"
@@ -36,20 +36,20 @@ discretization:
   time_step: 60
 model_grid:
   location: '<input_datasets_location>/roms_grd.nc'
-  file_hash: 'cd8c8901a44eaaf30e3f4532ae34e039ee35b59ce3683b37597bd71feb18f51b'
+  file_hash: '73a15442870db4c22a626c19ec6764d2cd1214bb15795c46983ec0f3030aea5c'
 initial_conditions:
   location: '<input_datasets_location>/roms_ini.nc'
-  file_hash: '049eb5a966e20e90e270557386d414def168017f2bdcf726ebc455b979728e1c'
+  file_hash: '5f37c42b538dfe9963a6dd9e6887b9aaf537562eda086d2f2538a2e70d7f3606'
 tidal_forcing:
   location: '<input_datasets_location>/roms_tides.nc'
-  file_hash: '62125b05ca140667e472e223795b1254751eca4923bb6502c11b9835f2539910'
+  file_hash: '2db437f0cdaadec0e9eaa15f00cb077f1b2b384dc1abe5c8ec2d38f07a3418c0'
 boundary_forcing:
   - location: '<input_datasets_location>/roms_bry.nc'
-    file_hash: '5dff15e078bf075aed78d7b54b5d9be2c536a0d4f4daa29e5091b2d3076d0fb3'
+    file_hash: '5946f6aba0093a1123aa9f247a6f78270fa05228e5e33c56053a6efada2be0a0'
   - location: '<input_datasets_location>/roms_bry_bgc.nc'
-    file_hash: 'e9b25ab60c7631a61868015a0ef2cb10a5098cfb795275ebce1f851187e429e4'
+    file_hash: 'd3bdf070100e9ed3ddca15ca37cd3c6ecbae93b9425aa5bafb4b37418efae43c'
 surface_forcing:
   - location: '<input_datasets_location>/roms_frc.nc'
-    file_hash: '2479c18308367216fba78b1ff887792315535518faa3a29d1e2f4f280beb2b4e'
+    file_hash: '096f0b19aa27e99a92ac2b76b534e59051f76846b62dc7d41c607da2a2517e16'
   - location: '<input_datasets_location>/roms_frc_bgc.nc'
-    file_hash: '41ac621adece1883a553214f875f3dcad1e37ded9baacc8a130b918d2b874c65'
+    file_hash: '142b19c66f9e37d3c24a858424ad01b3448b563c89f0fecaabc398c88458b0de'
