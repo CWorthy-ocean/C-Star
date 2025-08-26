@@ -537,8 +537,8 @@ class ROMSSimulation(Simulation):
         forcing_paths: list[Path] = []
 
         for source in filter(None, forcing_sources):
-            paths = source.working_path
-            if paths is None:
+            paths = source.path_for_roms
+            if not paths:
                 raise ValueError(
                     f"{source.__class__.__name__} does not have "
                     + "a local working_path. Call ROMSSimulation.setup() or "

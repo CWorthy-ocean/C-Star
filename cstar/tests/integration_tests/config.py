@@ -38,7 +38,7 @@ TEST_CONFIG = {
     "test_case_remote_with_netcdf_datasets": {
         "template_blueprint_path": f"{TEST_DIRECTORY}/integration_tests/blueprints/cstar_blueprint_with_netcdf_datasets_template.yaml",
         "strs_to_replace": {
-            "<input_datasets_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/raw/main/input_datasets/ROMS",
+            "<input_datasets_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/raw/roms_tools_3_1_2/input_datasets/ROMS",
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git",
         },
     },
@@ -46,7 +46,7 @@ TEST_CONFIG = {
     "test_case_remote_with_yaml_datasets": {
         "template_blueprint_path": f"{TEST_DIRECTORY}/integration_tests/blueprints/cstar_blueprint_with_yaml_datasets_template.yaml",
         "strs_to_replace": {
-            "<input_datasets_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/raw/main/roms_tools_yaml_files",
+            "<input_datasets_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/raw/roms_tools_3_1_2/roms_tools_yaml_files",
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git",
         },
     },

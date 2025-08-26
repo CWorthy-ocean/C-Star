@@ -366,8 +366,9 @@ class TestSchedulerJobBase:
         job = MockSchedulerJob(**params)
         caplog.set_level(logging.INFO, logger=job.log.name)
         # Check the calculated values from _calculate_node_distribution
+        # cpus=128, max_cpus_per_node=64
         assert job.nodes == 2
-        assert job.cpus_per_node == 64  # cpus=128, max_cpus_per_node=64
+        assert job.cpus_per_node == 64
         assert (
             "Attempting to create scheduler job without 'nodes' and 'cpus_per_node'"
             in caplog.text

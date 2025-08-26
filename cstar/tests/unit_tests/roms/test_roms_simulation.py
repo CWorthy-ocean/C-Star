@@ -464,7 +464,8 @@ class TestROMSSimulationInitialization:
         assert sim.codebases[0] == sim.codebase
         assert sim.codebases[1] == sim.marbl_codebase
 
-    def test_forcing_paths(self, example_roms_simulation):
+    @patch.object(ROMSInputDataset, "path_for_roms")
+    def test_forcing_paths(self, mock_path_for_roms, example_roms_simulation):
         """Test that the `_forcing_paths` property correctly takes any forcing-related
         InputDatasets associated with the ROMSSimulation and returns a list of paths to
         the relevant forcing files.
@@ -489,7 +490,7 @@ class TestROMSSimulationInitialization:
         # Set working paths of forcing types to fake paths
         for ds, fake_path in zip(datasets, fake_paths):
             for d in ds if isinstance(ds, list) else [ds]:
-                d.working_path = fake_path
+                d.path_for_roms = fake_path
 
         # Flatten list of fake paths (contains a list as an entry)
         flat_paths = [
@@ -501,7 +502,7 @@ class TestROMSSimulationInitialization:
 
     def test_forcing_paths_raises_if_path_missing(self, example_roms_simulation):
         sim, _ = example_roms_simulation
-        with pytest.raises(ValueError, match="does not have a local working_path"):
+        with pytest.raises(FileNotFoundError):
             sim._forcing_paths
 
     def test_n_time_steps(self, example_roms_simulation):

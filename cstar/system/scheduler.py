@@ -279,6 +279,7 @@ class Scheduler(ABC, LoggingMixin):
         other_scheduler_directives: dict[str, str] | None = None,
         requires_task_distribution: bool | None = True,
         documentation: str | None = None,
+        max_cpus_per_node: int | None = None,
     ):
         """Initialize a Scheduler instance.
 
@@ -296,6 +297,9 @@ class Scheduler(ABC, LoggingMixin):
             based on the number of CPUs alone. Defaults to True.
         documentation : str, optional
             Where to find additional documentation for this system's scheduler
+        max_cpus_per_node : int, optional
+            If specified, the maximum cpus used for distribution calculations
+            will be fixed, instead of determined by inspecting the machine.
 
         Raises
         ------
@@ -310,6 +314,7 @@ class Scheduler(ABC, LoggingMixin):
         )
         self.requires_task_distribution = requires_task_distribution
         self.documentation = documentation
+        self._max_cpus_per_node = max_cpus_per_node
 
     def get_queue(self, name) -> Queue:
         """Retrieve a queue by name.
@@ -430,13 +435,14 @@ class SlurmScheduler(Scheduler):
         RuntimeError
             If the command to query the SLURM scheduler fails.
         """
-        if stdout := _run_cmd(
-            'scontrol show nodes | grep -o "cpu=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
-            msg_err="Error querying node property.",
-        ):
-            return int(stdout)
+        if self._max_cpus_per_node is None:
+            if stdout := _run_cmd(
+                'scontrol show nodes | grep -o "cpu=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
+                msg_err="Error querying node property.",
+            ):
+                self._max_cpus_per_node = int(stdout)
 
-        return None
+        return self._max_cpus_per_node
 
     @property
     def global_max_mem_per_node_gb(self) -> float | None:
