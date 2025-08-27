@@ -16,7 +16,10 @@ from cstar.roms.runtime_settings import (
     ROMSRuntimeSettingsSection,
     SingleEntryROMSRuntimeSettingsSection,
 )
-from cstar.tests.unit_tests.generic_abc_subclasses import EmptySection, MockSection
+from cstar.tests.unit_tests.fake_abc_subclasses import (
+    FakeROMSRuntimeSettingsSection,
+    FakeROMSRuntimeSettingsSectionEmpty,
+)
 
 T = TypeVar("T")
 
@@ -99,25 +102,29 @@ class TestROMSRuntimeSettingsSection:
         assert section.val2 == "hello"
 
     def test_format_list_of_floats(self):
-        lf = EmptySection()._format_and_join_values([1e-3, 0.0, 2])
+        lf = FakeROMSRuntimeSettingsSectionEmpty()._format_and_join_values(
+            [1e-3, 0.0, 2]
+        )
         assert lf == "1.000000E-03 0. 2"
 
     def test_format_path(self):
-        p = EmptySection()._format_and_join_values(Path("mypath.nc"))
+        p = FakeROMSRuntimeSettingsSectionEmpty()._format_and_join_values(
+            Path("mypath.nc")
+        )
         assert p == "mypath.nc"
 
     def test_format_list_of_paths(self):
-        lp = EmptySection()._format_and_join_values(
+        lp = FakeROMSRuntimeSettingsSectionEmpty()._format_and_join_values(
             [Path("path1.nc"), Path("path2.nc")]
         )
         assert lp == "path1.nc path2.nc"
 
     @pytest.mark.parametrize("o,st", [(5, "5"), ("helloworld", "helloworld")])
     def test_format_other(self, o, st):
-        assert EmptySection()._format_and_join_values(o) == st
+        assert FakeROMSRuntimeSettingsSectionEmpty()._format_and_join_values(o) == st
 
     def test_format_list_of_other(self):
-        o = EmptySection()._format_and_join_values([5, "foo"])
+        o = FakeROMSRuntimeSettingsSectionEmpty()._format_and_join_values([5, "foo"])
         assert o == "5 foo"
 
     def test_validate_from_lines_calls_from_lines(self):
@@ -128,9 +135,11 @@ class TestROMSRuntimeSettingsSection:
         test_lines = ["1", "2.0"]
 
         with patch.object(
-            MockSection, "from_lines", return_value="parsed"
+            FakeROMSRuntimeSettingsSection, "from_lines", return_value="parsed"
         ) as mock_from_lines:
-            result = MockSection.validate_from_lines(test_lines, mock_handler)
+            result = FakeROMSRuntimeSettingsSection.validate_from_lines(
+                test_lines, mock_handler
+            )
 
         mock_from_lines.assert_called_once_with(test_lines)
         mock_handler.assert_not_called()
@@ -143,8 +152,12 @@ class TestROMSRuntimeSettingsSection:
         mock_handler = MagicMock(return_value="fallback")
         test_data = {"a": 1, "b": 2.0}
 
-        with patch.object(MockSection, "from_lines") as mock_from_lines:
-            result = MockSection.validate_from_lines(test_data, mock_handler)
+        with patch.object(
+            FakeROMSRuntimeSettingsSection, "from_lines"
+        ) as mock_from_lines:
+            result = FakeROMSRuntimeSettingsSection.validate_from_lines(
+                test_data, mock_handler
+            )
 
         mock_from_lines.assert_not_called()
         mock_handler.assert_called_once_with(test_data)
@@ -158,13 +171,13 @@ class TestROMSRuntimeSettingsSection:
         test_lines = ["bad", "data"]
 
         with pytest.raises(ValueError):
-            MockSection.validate_from_lines(test_lines, mock_handler)
+            FakeROMSRuntimeSettingsSection.validate_from_lines(test_lines, mock_handler)
 
     def test_default_serializer(self):
         """Test the `ROMSRuntimeSettingsSection.default_serializer` returns an expected
         string from a range of attributes.
         """
-        obj = MockSection(
+        obj = FakeROMSRuntimeSettingsSection(
             floats=[0.0, 1e-5, 123.4],
             paths=[Path("a.nc"), Path("b.nc")],
             others=["x", 42],
@@ -173,12 +186,12 @@ class TestROMSRuntimeSettingsSection:
             otherval="done",
         )
 
-        expected = "mock_section: floats paths others floatval pathval otherval\n    0. 1.000000E-05 123.4    a.nc b.nc    x 42    1.000000E+05    grid.nc    done\n\n"
+        expected = "fake_roms_runtime_settings_section: floats paths others floatval pathval otherval\n    0. 1.000000E-05 123.4    a.nc b.nc    x 42    1.000000E+05    grid.nc    done\n\n"
 
         assert obj.model_dump() == expected
 
     def test_key_order_property(self):
-        obj = MockSection(
+        obj = FakeROMSRuntimeSettingsSection(
             floats=[0.0, 1e-5, 123.4],
             paths=[Path("a.nc"), Path("b.nc")],
             others=["x", 42],
@@ -200,7 +213,7 @@ class TestROMSRuntimeSettingsSection:
         an empty list.
         """
         with pytest.raises(ValueError):
-            MockSection.from_lines([])
+            FakeROMSRuntimeSettingsSection.from_lines([])
 
     def test_from_lines_on_float_section_with_D_formatting(self):
         """Test a ROMSRuntimeSettingsSection subclass with a single float entry is
@@ -393,12 +406,12 @@ class TestROMSRuntimeSettings:
        Tests that the load_raw_sections method raises a FileNotFoundError if
        the supplied file does not exist
     test_to_file
-       Tests against a reference file the writing of example_runtime_settings
+       Tests against a reference file the writing of fake_roms_runtime_settings
     test_to_file_skips_missing_section
        Tests to_file does not attempt to write a section that is None
        in the ROMSRuntimeSettings instance
     test_from_file
-       Tests the reading of a reference file against example_runtime_settings
+       Tests the reading of a reference file against fake_roms_runtime_settings
     test_from_file_with_missing_optional_sections
        Tests that `from_file` sets as None any ROMSRuntimeSettings attributes
        corresponding to missing optional sections
@@ -406,7 +419,7 @@ class TestROMSRuntimeSettings:
        Tests that `from_file` raises a ValueError if any missing non-optional
        sections
     test_file_roundtrip
-       Tests that the example_runtime_settings instance written to_file is
+       Tests that the fake_roms_runtime_settings instance written to_file is
        functionally identical with the one subsequently read back with from_file
     """
 
@@ -454,18 +467,18 @@ class TestROMSRuntimeSettings:
         with pytest.raises(FileNotFoundError, match="does not exist"):
             ROMSRuntimeSettings._load_raw_sections(Path("not_a_file.in"))
 
-    def test_to_file(self, example_runtime_settings, tmp_path):
+    def test_to_file(self, fake_roms_runtime_settings, tmp_path):
         """Test the ROMSRuntimeSettings.to_file method.
 
         This test writes the example ROMSRuntimeSettings instance
-        defined by the example_runtime_settings fixture to a temporary
+        defined by the fake_roms_runtime_settings fixture to a temporary
         file and compares each non-commented line in the example `.in`
-        file `fixtures/example_runtime_settings.in` with those in the
+        file `fixtures/fake_roms_runtime_settings.in` with those in the
         temporary file.
 
         Mocks and Fixtures
         ------------------
-        example_runtime_settings: ROMSRuntimeSettings
+        fake_roms_runtime_settings: ROMSRuntimeSettings
            Fixture returning an example ROMSRuntimeSettings instance
         tmp_path: Path
            Fixture creating and returning a temporary pathlib.Path
@@ -474,15 +487,15 @@ class TestROMSRuntimeSettings:
         -------
         - The lines in the written file match those in the reference file
         """
-        example_runtime_settings.to_file(
-            Path(__file__).parent / "fixtures/example_runtime_settings.in"
+        fake_roms_runtime_settings.to_file(
+            Path(__file__).parent / "fixtures/fake_roms_runtime_settings.in"
         )
-        example_runtime_settings.to_file(tmp_path / "test.in")
+        fake_roms_runtime_settings.to_file(tmp_path / "test.in")
 
         with (
             open(tmp_path / "test.in") as out_f,
             open(
-                Path(__file__).parent / "fixtures/example_runtime_settings.in"
+                Path(__file__).parent / "fixtures/fake_roms_runtime_settings.in"
             ) as ref_f,
         ):
             ref = [
@@ -491,24 +504,24 @@ class TestROMSRuntimeSettings:
             out = out_f.readlines()
             assert ref == out, f"Expected \n{ref}\n,got\n{out}"
 
-    def test_to_file_skips_missing_section(self, example_runtime_settings, tmp_path):
-        example_runtime_settings.climatology = None
+    def test_to_file_skips_missing_section(self, fake_roms_runtime_settings, tmp_path):
+        fake_roms_runtime_settings.climatology = None
 
-        example_runtime_settings.to_file(tmp_path / "tmp.in")
+        fake_roms_runtime_settings.to_file(tmp_path / "tmp.in")
         with open(tmp_path / "tmp.in") as f:
             lns = f.readlines()
         assert all(["climatology" not in s for s in lns])
 
-    def test_from_file(self, example_runtime_settings):
+    def test_from_file(self, fake_roms_runtime_settings):
         """Test the ROMSRuntimeSettings.from_file method.
 
         This test compares the ROMSRuntimeSettings instance created from
-        the reference file `fixtures/example_runtime_settings.in` with the
-        example instance returned by the `example_runtime_settings` fixture.
+        the reference file `fixtures/fake_roms_runtime_settings.in` with the
+        example instance returned by the `fake_roms_runtime_settings` fixture.
 
         Mocks and Fixtures
         ------------------
-        example_runtime_settings: ROMSRuntimeSettings
+        fake_roms_runtime_settings: ROMSRuntimeSettings
            Fixture returning an example ROMSRuntimeSettings instance
 
         Asserts
@@ -517,9 +530,9 @@ class TestROMSRuntimeSettings:
           instances and checks for equality.
         """
         tested_settings = ROMSRuntimeSettings.from_file(
-            Path(__file__).parent / "fixtures/example_runtime_settings.in"
+            Path(__file__).parent / "fixtures/fake_roms_runtime_settings.in"
         )
-        expected_settings = example_runtime_settings
+        expected_settings = fake_roms_runtime_settings
 
         assert tested_settings.title == expected_settings.title
         assert tested_settings.time_stepping == expected_settings.time_stepping
@@ -550,7 +563,7 @@ class TestROMSRuntimeSettings:
         """Confirms that ROMSRuntimeSettings.from_file sets the attributes corresponding
         to settings that are not present in the file to None.
 
-        This test copies the reference file in `fixtures/example_runtime_settings.in`
+        This test copies the reference file in `fixtures/fake_roms_runtime_settings.in`
         to a temporary path and modifies it to remove the value of the `climatology`
         entry, then confirms that `ROMSRuntimeSettings.from_file(tmp_file).climatology
         is None
@@ -567,7 +580,7 @@ class TestROMSRuntimeSettings:
         """
         modified_file = tmp_path / "modified_example_settings.in"
         shutil.copy2(
-            Path(__file__).parent / "fixtures/example_runtime_settings.in",
+            Path(__file__).parent / "fixtures/fake_roms_runtime_settings.in",
             modified_file,
         )
         _replace_text_in_file(modified_file, "climfile2.nc", "")
@@ -577,7 +590,7 @@ class TestROMSRuntimeSettings:
     def test_from_file_raises_if_missing_section(self, tmp_path):
         modified_file = tmp_path / "modified_example_settings.in"
         shutil.copy2(
-            Path(__file__).parent / "fixtures/example_runtime_settings.in",
+            Path(__file__).parent / "fixtures/fake_roms_runtime_settings.in",
             modified_file,
         )
         _replace_text_in_file(modified_file, "title: title", "")
@@ -585,13 +598,13 @@ class TestROMSRuntimeSettings:
         with pytest.raises(ValueError, match="Required field missing from file."):
             ROMSRuntimeSettings.from_file(modified_file)
 
-    def test_file_roundtrip(self, example_runtime_settings, tmp_path):
+    def test_file_roundtrip(self, fake_roms_runtime_settings, tmp_path):
         """Tests that the `to_file`/`from_file` roundtrip results in a functionally
         indentical ROMSRuntimeSettings instance.
 
         Mocks and Fixtures
         ------------------
-        - example_runtime_settings: ROMSRuntimeSettings
+        - fake_roms_runtime_settings: ROMSRuntimeSettings
            A fixture returning an example ROMSRuntimeSettings instance
         - tmp_path: Path
            Fixture creating and returning a temporary pathlib.Path
@@ -601,7 +614,7 @@ class TestROMSRuntimeSettings:
         - Each attribute in the instance returned by `from_file` is equal
           to those in the instance passed to `to_file`
         """
-        expected_settings = example_runtime_settings
+        expected_settings = fake_roms_runtime_settings
         expected_settings.to_file(tmp_path / "test.in")
 
         tested_settings = ROMSRuntimeSettings.from_file(tmp_path / "test.in")
@@ -637,18 +650,18 @@ class TestStrAndRepr:
     behave as expected.
     """
 
-    def test_str(self, example_runtime_settings):
+    def test_str(self, fake_roms_runtime_settings):
         """Test that the __str__ function of ROMSRuntimeSettings matches an expected
         string for the example instance.
 
         Mocks and Fixtures
         ------------------
-        example_runtime_settings: ROMSRuntimeSettings
+        fake_roms_runtime_settings: ROMSRuntimeSettings
            A fixture returning an example ROMSRuntimeSettings instance
 
         Asserts
         -------
-        - str(example_runtime_settings) matches an expected reference string
+        - str(fake_roms_runtime_settings) matches an expected reference string
         """
         expected_str = """ROMSRuntimeSettings
 -------------------
@@ -699,24 +712,24 @@ Open boundary binding velocity (`ROMSRuntimeSettings.ubind`, m/s) = 0.1
 Maximum sponge layer viscosity (`ROMSRuntimeSettings.v_sponge`, m2/s) = 0.0
 Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
 
-        assert str(example_runtime_settings) == expected_str, (
-            f"expected \n{expected_str}\n, got\n{str(example_runtime_settings)}"
+        assert str(fake_roms_runtime_settings) == expected_str, (
+            f"expected \n{expected_str}\n, got\n{str(fake_roms_runtime_settings)}"
         )
 
-    def test_repr(self, example_runtime_settings):
+    def test_repr(self, fake_roms_runtime_settings):
         """Test that the __repr__ function of ROMSRuntimeSettings matches an expected
         string for the example instance.
 
         Mocks and Fixtures
         ------------------
-        example_runtime_settings: ROMSRuntimeSettings
+        fake_roms_runtime_settings: ROMSRuntimeSettings
            A fixture returning an example ROMSRuntimeSettings instance
 
         Asserts
         -------
-        - repr(example_runtime_settings) matches an expected reference string
+        - repr(fake_roms_runtime_settings) matches an expected reference string
         """
         expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_list_fname'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
-        assert expected_repr == repr(example_runtime_settings), (
-            f"expected \n{expected_repr}\n, got\n{repr(example_runtime_settings)}"
+        assert expected_repr == repr(fake_roms_runtime_settings), (
+            f"expected \n{expected_repr}\n, got\n{repr(fake_roms_runtime_settings)}"
         )

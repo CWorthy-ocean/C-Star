@@ -22,11 +22,11 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
 )
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
-from cstar.tests.unit_tests.generic_abc_subclasses import (
-    MockExternalCodeBase,
-    MockInputDataset,
-    MockROMSInputDataset,
-    MockSimulation,
+from cstar.tests.unit_tests.fake_abc_subclasses import (
+    FakeExternalCodeBase,
+    FakeInputDataset,
+    FakeROMSInputDataset,
+    FakeSimulation,
 )
 
 ################################################################################
@@ -35,7 +35,7 @@ from cstar.tests.unit_tests.generic_abc_subclasses import (
 
 
 @pytest.fixture
-def remote_additional_code():
+def fake_additional_code_remote():
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     a remote repository.
 
@@ -63,7 +63,7 @@ def remote_additional_code():
 
 
 @pytest.fixture
-def local_additional_code():
+def fake_additional_code_local():
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     code located on the local filesystem.
 
@@ -92,8 +92,8 @@ def local_additional_code():
 # ExternalCodeBase
 ################################################################################
 @pytest.fixture
-def generic_codebase(log: logging.Logger):
-    """Yields a generic codebase (instance of MockExternalCodeBase defined above) for
+def fake_codebase(log: logging.Logger):
+    """Yields a fake codebase (instance of FakeExternalCodeBase) for
     use in testing.
     """
     # Correctly patch the imported _get_hash_from_checkout_target in the ExternalCodeBase's module
@@ -101,7 +101,7 @@ def generic_codebase(log: logging.Logger):
         "cstar.base.external_codebase._get_hash_from_checkout_target",
         return_value="test123",
     ):
-        yield MockExternalCodeBase()
+        yield FakeExternalCodeBase()
 
 
 @pytest.fixture
@@ -130,7 +130,7 @@ def roms_codebase():
 # ROMSRuntimeSettings
 ################################################################################
 @pytest.fixture
-def example_runtime_settings():
+def fake_roms_runtime_settings():
     """Fixture providing a `ROMSRuntimeSettings` instance for testing.
 
     The example instance corresponds to the file `fixtures/example_runtime_settings.in`
@@ -194,7 +194,7 @@ def example_runtime_settings():
 
 
 @pytest.fixture
-def local_input_dataset():
+def fake_input_dataset_local():
     """Fixture to provide a mock local InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a local dataset,
@@ -208,7 +208,7 @@ def local_input_dataset():
 
     Yields
     ------
-    MockInputDataset: Instance representing a local input dataset for testing.
+    FakeInputDataset: Instance representing a local input dataset for testing.
     """
     with (
         mock.patch.object(
@@ -225,7 +225,7 @@ def local_input_dataset():
         mock_source_type.return_value = "netcdf"
         mock_basename.return_value = "local_file.nc"
 
-        dataset = MockInputDataset(
+        dataset = FakeInputDataset(
             location="some/local/source/path/local_file.nc",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
@@ -235,7 +235,7 @@ def local_input_dataset():
 
 
 @pytest.fixture
-def remote_input_dataset():
+def fake_input_dataset_remote():
     """Fixture to provide a mock remote InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a remote dataset,
@@ -249,7 +249,7 @@ def remote_input_dataset():
 
     Yields
     ------
-    MockInputDataset: Instance representing a remote input dataset for testing.
+    FakeInputDataset: Instance representing a remote input dataset for testing.
     """
     # Using context managers to patch properties on DataSource
     with (
@@ -269,7 +269,7 @@ def remote_input_dataset():
         mock_basename.return_value = "remote_file.nc"
 
         # Create the InputDataset instance; it will use the mocked DataSource
-        dataset = MockInputDataset(
+        dataset = FakeInputDataset(
             location="http://example.com/remote_file.nc",
             file_hash="abc123",
             start_date="2024-10-22 12:34:56",
@@ -286,7 +286,7 @@ def remote_input_dataset():
 
 
 @pytest.fixture
-def local_roms_netcdf_dataset():
+def fake_roms_input_dataset_netcdf_local():
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
 
     Mocks:
@@ -297,7 +297,7 @@ def local_roms_netcdf_dataset():
 
     Yields:
     -------
-        MockROMSInputDataset: A mock dataset pointing to a local NetCDF file.
+        FakeROMSInputDataset: A mock dataset pointing to a local NetCDF file.
     """
     with (
         mock.patch.object(
@@ -310,7 +310,7 @@ def local_roms_netcdf_dataset():
         mock_location_type.return_value = "path"
         mock_source_type.return_value = "netcdf"
 
-        dataset = MockROMSInputDataset(
+        dataset = FakeROMSInputDataset(
             location="some/local/source/path/local_file.nc",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
@@ -320,7 +320,7 @@ def local_roms_netcdf_dataset():
 
 
 @pytest.fixture
-def local_roms_yaml_dataset():
+def fake_roms_input_dataset_yaml_local():
     """Fixture to provide a ROMSInputDataset with a local YAML source.
 
     Mocks:
@@ -331,7 +331,7 @@ def local_roms_yaml_dataset():
 
     Yields:
     -------
-        MockROMSInputDataset: A mock dataset pointing to a local YAML file.
+        FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
     """
     with (
         mock.patch.object(
@@ -348,7 +348,7 @@ def local_roms_yaml_dataset():
         mock_source_type.return_value = "yaml"
         mock_basename.return_value = "local_file.yaml"
 
-        dataset = MockROMSInputDataset(
+        dataset = FakeROMSInputDataset(
             location="some/local/source/path/local_file.yaml",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
@@ -358,7 +358,7 @@ def local_roms_yaml_dataset():
 
 
 @pytest.fixture
-def remote_roms_yaml_dataset():
+def fake_roms_input_dataset_yaml_remote():
     """Fixture to provide a ROMSInputDataset with a remote YAML source.
 
     Mocks:
@@ -369,7 +369,7 @@ def remote_roms_yaml_dataset():
 
     Yields:
     -------
-        MockROMSInputDataset: A mock dataset pointing to a local YAML file.
+        FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
     """
     with (
         mock.patch.object(
@@ -386,7 +386,7 @@ def remote_roms_yaml_dataset():
         mock_source_type.return_value = "yaml"
         mock_basename.return_value = "remote_file.yaml"
 
-        dataset = MockROMSInputDataset(
+        dataset = FakeROMSInputDataset(
             location="https://dodgyfakeyamlfiles.ru/all/remote_file.yaml",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
@@ -401,26 +401,26 @@ def remote_roms_yaml_dataset():
 
 
 @pytest.fixture
-def example_simulation(tmp_path):
-    """Fixture providing a `MockSimulation` instance for testing.
+def fake_simulation(tmp_path):
+    """Fixture providing a `FakeSimulation` instance for testing.
 
-    This fixture sets up a minimal `MockSimulation` instance with a mock external
+    This fixture sets up a minimal `FakeSimulation` instance with a mock external
     codebase, runtime and compile-time code, and basic discretization settings.
     The temporary directory (`tmp_path`) serves as the working directory for the
     simulation.
 
     Yields
     ------
-    tuple[MockSimulation, Path]
+    tuple[FakeSimulation, Path]
         A tuple containing:
-        - `MockSimulation` instance configured for testing.
+        - `FakeSimulation` instance configured for testing.
         - The temporary directory where the simulation is stored.
     """
     directory = tmp_path
-    sim = MockSimulation(
+    sim = FakeSimulation(
         name="TestSim",
         directory=directory,
-        codebase=MockExternalCodeBase(),
+        codebase=FakeExternalCodeBase(),
         runtime_code=AdditionalCode(
             location=directory.parent,
             subdir="subdir/",
@@ -448,7 +448,7 @@ def example_simulation(tmp_path):
 
 
 @pytest.fixture
-def example_roms_simulation(
+def fake_roms_simulation(
     tmp_path,
 ) -> Generator[tuple[ROMSSimulation, Path], None, None]:
     """Fixture providing a `ROMSSimulation` instance for testing.

@@ -6,7 +6,7 @@ from cstar.roms import ROMSInputDataset
 from cstar.roms.runtime_settings import ROMSRuntimeSettingsSection
 
 
-class MockExternalCodeBase(ExternalCodeBase):
+class FakeExternalCodeBase(ExternalCodeBase):
     """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
     purposes.
     """
@@ -32,7 +32,7 @@ class MockExternalCodeBase(ExternalCodeBase):
         pass
 
 
-class MockSection(ROMSRuntimeSettingsSection):
+class FakeROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
     """A simple ROMSRuntimeSettingsSection subclass for testing."""
 
     floats: list[float]
@@ -43,13 +43,13 @@ class MockSection(ROMSRuntimeSettingsSection):
     otherval: str
 
 
-class EmptySection(ROMSRuntimeSettingsSection):
+class FakeROMSRuntimeSettingsSectionEmpty(ROMSRuntimeSettingsSection):
     """No actual values defined, just used to test some of the formatting/joining
     functions.
     """
 
 
-class MockInputDataset(InputDataset):
+class FakeInputDataset(InputDataset):
     """Mock subclass of the InputDataset abstract base class.
 
     Since InputDataset is an abstract base class, this mock class is needed to allow
@@ -60,13 +60,13 @@ class MockInputDataset(InputDataset):
     pass
 
 
-class MockROMSInputDataset(ROMSInputDataset):
+class FakeROMSInputDataset(ROMSInputDataset):
     """A minimal example subclass of the ROMSInputDataset abstract base class."""
 
     pass
 
 
-class MockSimulation(Simulation):
+class FakeSimulation(Simulation):
     """Mock subclass of `Simulation` for testing purposes.
 
     This class provides a minimal implementation of `Simulation` that overrides
@@ -76,7 +76,7 @@ class MockSimulation(Simulation):
     Attributes
     ----------
     default_codebase : ExternalCodeBase
-        Returns an instance of `MockExternalCodeBase`.
+        Returns an instance of `FakeExternalCodeBase`.
 
     Methods
     -------
@@ -100,7 +100,7 @@ class MockSimulation(Simulation):
 
     @property
     def default_codebase(self):
-        return MockExternalCodeBase()
+        return FakeExternalCodeBase()
 
     @classmethod
     def from_dict(cls, simulation_dict, directory):
