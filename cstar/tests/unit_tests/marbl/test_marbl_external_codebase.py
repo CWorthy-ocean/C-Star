@@ -9,18 +9,6 @@ from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.system.manager import cstar_sysmgr
 
 
-@pytest.fixture
-def marbl_codebase():
-    """Fixture providing a configured instance of `MARBLExternalCodeBase` for
-    testing.
-    """
-    source_repo = "https://github.com/marbl-ecosys/MARBL.git"
-    checkout_target = "marbl0.45.0"
-    return MARBLExternalCodeBase(
-        source_repo=source_repo, checkout_target=checkout_target
-    )
-
-
 def test_default_source_repo(marbl_codebase):
     """Test if the default source repo is set correctly."""
     assert (
