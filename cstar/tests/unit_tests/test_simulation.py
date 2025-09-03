@@ -11,7 +11,7 @@ from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
-    FakeSimulation,
+    StubSimulation,
 )
 
 
@@ -59,7 +59,7 @@ class TestSimulationInitialization:
             (None, None),
         ],
     )
-    def test_parse_date(self, input_date, expected, fake_simulation):
+    def test_parse_date(self, input_date, expected, stub_simulation):
         """Test `_parse_date()` for correct date format handling.
 
         This test ensures that `_parse_date()` properly converts string representations
@@ -67,7 +67,7 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Parameters
         ----------
@@ -80,10 +80,10 @@ class TestSimulationInitialization:
         ----------
         - The returned value matches the expected `datetime` object or `None`.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         assert sim._parse_date(date=input_date, field_name="test_field") == expected
 
-    def test_get_date_or_fallback_valid(self, fake_simulation):
+    def test_get_date_or_fallback_valid(self, stub_simulation):
         """Test `_get_date_or_fallback()` with a provided valid date.
 
         This test ensures that `_get_date_or_fallback()` correctly selects the provided
@@ -91,19 +91,19 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        fake_simulation (cstar.Simulation)
+        stub_simulation (cstar.Simulation)
             Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The returned value matches the explicitly provided date.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         assert sim._get_date_or_fallback(
             date="2025-01-01", fallback=datetime(2024, 1, 1), field_name="start_date"
         ) == datetime(2025, 1, 1)
 
-    def test_get_date_or_fallback_fallback(self, fake_simulation, caplog):
+    def test_get_date_or_fallback_fallback(self, stub_simulation, caplog):
         """Test `_get_date_or_fallback()` when the date is missing.
 
         This test verifies that `_get_date_or_fallback()` correctly defaults to the
@@ -111,7 +111,7 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        fake_simulation (cstar.Simulation)
+        stub_simulation (cstar.Simulation)
             Provides a mock `Simulation` instance.
         caplog (pytest.LogCaptureFixture)
             Builtin fixture capturing log messages
@@ -121,7 +121,7 @@ class TestSimulationInitialization:
         - A warning is logged indicating that the fallback value is being used.
         - The returned value matches the fallback date.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         caplog.set_level(logging.DEBUG, logger=sim.log.name)
 
         assert sim._get_date_or_fallback(
@@ -129,7 +129,7 @@ class TestSimulationInitialization:
         ) == datetime(2024, 1, 1)
         assert "start_date not provided" in caplog.text
 
-    def test_get_date_or_fallback_raises_if_no_dates(self, fake_simulation):
+    def test_get_date_or_fallback_raises_if_no_dates(self, stub_simulation):
         """Test `_get_date_or_fallback()` when both date and fallback are `None`.
 
         This test ensures that `_get_date_or_fallback()` raises a `ValueError` when
@@ -137,19 +137,19 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - A `ValueError` is raised with the expected error message.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         with pytest.raises(
             ValueError, match="Neither start_date nor a valid fallback was provided."
         ):
             sim._get_date_or_fallback(date=None, fallback=None, field_name="start_date")
 
-    def test_validate_date_range_valid(self, fake_simulation):
+    def test_validate_date_range_valid(self, stub_simulation):
         """Test `_validate_date_range()` with valid date ranges.
 
         This test ensures that `_validate_date_range()` does not raise any errors
@@ -157,9 +157,9 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         sim._validate_date_range()  # Should not raise any error
 
     def test_validate_date_range_start_date_too_early(self, tmp_path):
@@ -179,7 +179,7 @@ class TestSimulationInitialization:
         with pytest.raises(
             ValueError, match="start_date .* is before the earliest valid start date"
         ):
-            FakeSimulation(
+            StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
                 codebase=FakeExternalCodeBase(),
@@ -207,7 +207,7 @@ class TestSimulationInitialization:
         with pytest.raises(
             ValueError, match="end_date .* is after the latest valid end date"
         ):
-            FakeSimulation(
+            StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
                 codebase=FakeExternalCodeBase(),
@@ -233,7 +233,7 @@ class TestSimulationInitialization:
         - A `ValueError` is raised with a message indicating `start_date` is after `end_date`.
         """
         with pytest.raises(ValueError, match="start_date .* is after end_date"):
-            FakeSimulation(
+            StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
                 codebase=FakeExternalCodeBase(),
@@ -246,7 +246,7 @@ class TestSimulationInitialization:
 
     # Tests for _validate_simulation_directory
     def test_validate_simulation_directory_new_directory(
-        self, tmp_path, fake_simulation
+        self, tmp_path, stub_simulation
     ):
         """Test `_validate_simulation_directory()` with a new/empty directory.
 
@@ -256,19 +256,19 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The returned directory path is correctly resolved.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         new_dir = tmp_path / "new_simulation"
 
         assert sim._validate_simulation_directory(new_dir) == new_dir.resolve()
 
     def test_validate_simulation_directory_existing_non_empty_directory(
-        self, tmp_path, fake_simulation
+        self, tmp_path, stub_simulation
     ):
         """Test `_validate_simulation_directory()` with a non-empty existing directory.
 
@@ -278,13 +278,13 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - A `FileExistsError` is raised with a message indicating the directory is not empty.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
 
         non_empty_dir = tmp_path / "existing_simulation"
         non_empty_dir.mkdir()
@@ -306,8 +306,8 @@ class TestSimulationInitialization:
 
         Mocks & Fixtures
         ----------------
-        - `patch.object(FakeSimulation, "_validate_simulation_directory")`: Mocks directory validation.
-        - `patch.object(FakeSimulation, "_validate_date_range")`: Mocks date range validation.
+        - `patch.object(StubSimulation, "_validate_simulation_directory")`: Mocks directory validation.
+        - `patch.object(StubSimulation, "_validate_date_range")`: Mocks date range validation.
 
         Assertions
         ----------
@@ -317,12 +317,12 @@ class TestSimulationInitialization:
         """
         with (
             patch.object(
-                FakeSimulation, "_validate_simulation_directory"
+                StubSimulation, "_validate_simulation_directory"
             ) as mock_validate_dir,
-            patch.object(FakeSimulation, "_validate_date_range") as mock_validate_dates,
+            patch.object(StubSimulation, "_validate_date_range") as mock_validate_dates,
         ):
             mock_validate_dir.return_value = Path("some/dir").resolve()
-            sim = FakeSimulation(
+            sim = StubSimulation(
                 name="TestSim",
                 directory="some/dir",
                 codebase=FakeExternalCodeBase(),
@@ -362,7 +362,7 @@ class TestSimulationInitialization:
         - The `Simulation` instance's `end_date` is set to `valid_end_date`.
         - A warning is logged indicating that default values are being used.
         """
-        sim = FakeSimulation(
+        sim = StubSimulation(
             name="FallbackSim",
             directory=tmp_path,
             codebase=FakeExternalCodeBase(),
@@ -395,7 +395,7 @@ class TestSimulationInitialization:
         ----------
           - A warning is logged indicating that date range validation is not possible.
         """
-        sim = FakeSimulation(
+        sim = StubSimulation(
             name="FallbackSim",
             codebase=FakeExternalCodeBase(),
             directory=tmp_path,
@@ -423,7 +423,7 @@ class TestStrAndRepr:
       suitable for debugging, preserving all key attributes.
     """
 
-    def test_str(self, fake_simulation):
+    def test_str(self, stub_simulation):
         """Test the `__str__()` method of `Simulation`.
 
         This test ensures that `__str__()` produces a correctly formatted string
@@ -433,17 +433,17 @@ class TestStrAndRepr:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The generated string matches the expected multi-line formatted output.
         """
-        sim, sim_dir = fake_simulation
-        sim.exe_path = sim_dir
-
+        sim = stub_simulation
+        sim.exe_path = sim.directory
+        sim_dir = sim.directory
         expected_str = f"""\
-FakeSimulation
+StubSimulation
 --------------
 Name: TestSim
 Directory: {sim_dir.resolve()}
@@ -455,15 +455,15 @@ Valid end date: 2026-01-01 00:00:00
 Discretization: Discretization(time_step = 60)
 
 Code:
-Codebase: FakeExternalCodeBase instance (query using FakeSimulation.codebase)
-Runtime code: AdditionalCode instance with 2 files (query using FakeSimulation.runtime_code)
-Compile-time code: AdditionalCode instance with 2 files (query using FakeSimulation.compile_time_code)
+Codebase: FakeExternalCodeBase instance (query using StubSimulation.codebase)
+Runtime code: AdditionalCode instance with 2 files (query using StubSimulation.runtime_code)
+Compile-time code: AdditionalCode instance with 2 files (query using StubSimulation.compile_time_code)
 Is compiled: True
 Executable path: {sim_dir}"""
 
         assert sim.__str__() == expected_str
 
-    def test_repr(self, fake_simulation):
+    def test_repr(self, stub_simulation):
         """Test the `__repr__()` method of `Simulation`.
 
         This test ensures that `__repr__()` returns a correctly formatted string
@@ -472,17 +472,17 @@ Executable path: {sim_dir}"""
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The generated string matches the expected format for `repr()`.
         """
-        sim, sim_dir = fake_simulation
+        sim = stub_simulation
         expected_repr = f"""\
-FakeSimulation(
+StubSimulation(
 name = TestSim,
-directory = {sim_dir},
+directory = {sim.directory},
 start_date = 2025-01-01 00:00:00,
 end_date = 2025-12-31 00:00:00,
 valid_start_date = 2024-01-01 00:00:00,
@@ -512,7 +512,7 @@ class TestSimulationPersistence:
       raises an error if the simulation is currently running.
     """
 
-    def test_persist_creates_file(self, fake_simulation):
+    def test_persist_creates_file(self, stub_simulation):
         """Test that `persist()` creates the expected simulation state file.
 
         This test verifies that calling `persist()` results in a
@@ -520,17 +520,17 @@ class TestSimulationPersistence:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The `simulation_state.pkl` file is successfully created in the directory.
         """
-        sim, directory = fake_simulation
+        sim = stub_simulation
         sim.persist()
-        assert directory / "simulation_state.pkl", "Persisted file was not created."
+        assert sim.directory / "simulation_state.pkl", "Persisted file was not created."
 
-    def test_persist_and_restore(self, fake_simulation):
+    def test_persist_and_restore(self, stub_simulation):
         """Test that `persist()` and `restore()` correctly save and reload a
         `Simulation`.
 
@@ -539,16 +539,16 @@ class TestSimulationPersistence:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The restored instance matches the original instance when converted to a dictionary.
         - The serialized version of the restored instance matches the original.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         sim.persist()
-        restored_sim = FakeSimulation.restore(sim.directory)
+        restored_sim = StubSimulation.restore(sim.directory)
 
         # Ensure the restored object has the same attributes
         assert restored_sim.to_dict() == sim.to_dict(), (
@@ -576,9 +576,9 @@ class TestSimulationPersistence:
           without a saved state file.
         """
         with pytest.raises(FileNotFoundError):
-            FakeSimulation.restore(tmp_path)
+            StubSimulation.restore(tmp_path)
 
-    def test_persist_raises_error_if_simulation_is_running(self, fake_simulation):
+    def test_persist_raises_error_if_simulation_is_running(self, stub_simulation):
         """Test `persist()` raises an error if it is running in a local process.
 
         This test ensures that calling `persist()` while the simulation has an
@@ -586,7 +586,7 @@ class TestSimulationPersistence:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
         - `MagicMock(spec=LocalProcess)`: Mocks an LocalProcess with a
           running status.
 
@@ -595,7 +595,7 @@ class TestSimulationPersistence:
         - A `RuntimeError` is raised with a message indicating that persistence
           is not allowed while a local process is running.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         mock_handler = MagicMock(spec=LocalProcess)
         mock_handler.status = ExecutionStatus.RUNNING
 
@@ -629,7 +629,7 @@ class TestSimulationRestart:
       string representations of `new_end_date`.
     """
 
-    def test_restart_creates_new_instance(self, fake_simulation):
+    def test_restart_creates_new_instance(self, stub_simulation):
         """Test that `restart()` creates a new `Simulation` instance.
 
         This test ensures that calling `restart()` generates a new instance of
@@ -637,22 +637,22 @@ class TestSimulationRestart:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
-        - The restarted simulation is an instance of `FakeSimulation`.
+        - The restarted simulation is an instance of `StubSimulation`.
         - The restarted simulation is a new object and not the same as the original instance.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         new_sim = sim.restart(new_end_date="2026-06-30")
 
-        assert isinstance(new_sim, FakeSimulation), (
-            "Restart did not return a new FakeSimulation instance"
+        assert isinstance(new_sim, StubSimulation), (
+            "Restart did not return a new StubSimulation instance"
         )
         assert new_sim is not sim, "Restarted simulation should be a new object"
 
-    def test_restart_updates_start_and_end_dates(self, fake_simulation):
+    def test_restart_updates_start_and_end_dates(self, stub_simulation):
         """Test that `restart()` correctly updates `start_date` and `end_date`.
 
         This test ensures that calling `restart()` sets the new simulation's
@@ -661,14 +661,14 @@ class TestSimulationRestart:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The restarted simulation's `start_date` matches the original simulation's `end_date`.
         - The restarted simulation's `end_date` matches the provided `new_end_date`.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         new_end_date = datetime(2026, 6, 30)
         new_sim = sim.restart(new_end_date=new_end_date)
         assert new_sim.start_date == sim.end_date, (
@@ -678,7 +678,7 @@ class TestSimulationRestart:
             "Restarted simulation end_date does not match input"
         )
 
-    def test_restart_preserves_other_attributes(self, fake_simulation):
+    def test_restart_preserves_other_attributes(self, stub_simulation):
         """Test that `restart()` maintains all attributes except dates and directory.
 
         This test ensures that calling `restart()` does not modify attributes
@@ -686,7 +686,7 @@ class TestSimulationRestart:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
@@ -694,7 +694,7 @@ class TestSimulationRestart:
         - The `discretization` settings remain identical.
         - `valid_start_date` and `valid_end_date` remain the same.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         new_sim = sim.restart(new_end_date="2026-06-30")
 
         assert new_sim.name == sim.name
@@ -702,7 +702,7 @@ class TestSimulationRestart:
         assert new_sim.valid_start_date == sim.valid_start_date
         assert new_sim.valid_end_date == sim.valid_end_date
 
-    def test_restart_updates_directory(self, fake_simulation):
+    def test_restart_updates_directory(self, stub_simulation):
         """Test that `restart()` updates the simulation directory.
 
         This test ensures that the restarted simulation's directory is updated to a
@@ -711,14 +711,14 @@ class TestSimulationRestart:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The restarted simulation's directory name includes the expected timestamp
           derived from the original simulation's `end_date`.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         new_sim = sim.restart(new_end_date="2026-06-30")
 
         expected_dir_suffix = f"RESTART_{sim.end_date.strftime('%Y%m%d_%H%M%S')}"
@@ -726,7 +726,7 @@ class TestSimulationRestart:
             "Restart directory does not include correct timestamp"
         )
 
-    def test_restart_raises_error_on_invalid_new_end_date(self, fake_simulation):
+    def test_restart_raises_error_on_invalid_new_end_date(self, stub_simulation):
         """Test that `restart()` raises an error for an invalid `new_end_date`.
 
         This test ensures that calling `restart()` with a `new_end_date` that is
@@ -734,20 +734,20 @@ class TestSimulationRestart:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - A `ValueError` is raised with a message indicating that `new_end_date`
           must be a `str` or `datetime`.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         with pytest.raises(
             ValueError, match="Expected str or datetime for `new_end_date`"
         ):
             sim.restart(new_end_date=42)  # Invalid type
 
-    def test_restart_with_string_end_date(self, fake_simulation):
+    def test_restart_with_string_end_date(self, stub_simulation):
         """Test that `restart()` correctly parses string `new_end_date`.
 
         This test ensures that calling `restart()` with a string representation
@@ -755,14 +755,14 @@ class TestSimulationRestart:
 
         Mocks & Fixtures
         ----------------
-        - `fake_simulation`: Provides a mock `Simulation` instance.
+        - `stub_simulation`: Provides a mock `Simulation` instance.
 
         Assertions
         ----------
         - The restarted simulation's `end_date` is correctly parsed as a `datetime` object.
         - The parsed `end_date` matches the expected `datetime` value.
         """
-        sim, _ = fake_simulation
+        sim = stub_simulation
         new_sim = sim.restart(new_end_date="2026-06-30")
 
         assert new_sim.end_date == datetime(2026, 6, 30), (
@@ -770,7 +770,7 @@ class TestSimulationRestart:
         )
 
 
-def test_to_dict(fake_simulation):
+def test_to_dict(stub_simulation):
     """Test that `to_dict()` correctly serializes the `Simulation` instance.
 
     This test ensures that calling `to_dict()` returns a dictionary containing
@@ -778,24 +778,24 @@ def test_to_dict(fake_simulation):
 
     Mocks & Fixtures
     ----------------
-    - `fake_simulation`: Provides a mock `Simulation` instance.
+    - `stub_simulation`: Provides a mock `Simulation` instance.
 
     Assertions
     ----------
     - The values in the dictionary correctly match the `Simulation` instance's attributes.
     """
-    sim, directory = fake_simulation
+    sim = stub_simulation
     test_dict = sim.to_dict()
 
     assert test_dict["name"] == "TestSim"
     assert test_dict["discretization"] == {"time_step": 60}
     assert test_dict["codebase"]["source_repo"] == "https://github.com/test/repo.git"
     assert test_dict["codebase"]["checkout_target"] == "test_target"
-    assert test_dict["runtime_code"]["location"] == str(directory.parent)
+    assert test_dict["runtime_code"]["location"] == str(sim.directory.parent)
     assert test_dict["runtime_code"]["files"] == ["file1", "file2"]
     assert test_dict["runtime_code"]["subdir"] == "subdir/"
     assert test_dict["runtime_code"]["checkout_target"] == "main"
-    assert test_dict["compile_time_code"]["location"] == str(directory.parent)
+    assert test_dict["compile_time_code"]["location"] == str(sim.directory.parent)
     assert test_dict["compile_time_code"]["subdir"] == "subdir/"
     assert test_dict["compile_time_code"]["files"] == ["file1", "file2"]
     assert test_dict["compile_time_code"]["checkout_target"] == "main"

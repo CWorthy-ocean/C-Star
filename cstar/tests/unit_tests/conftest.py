@@ -26,7 +26,7 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
     FakeROMSInputDataset,
-    FakeSimulation,
+    StubSimulation,
 )
 
 ################################################################################
@@ -35,7 +35,7 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 @pytest.fixture
-def fake_additional_code_remote():
+def fake_additionalcode_remote():
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     a remote repository.
 
@@ -50,7 +50,8 @@ def fake_additional_code_remote():
     This fixture can be used in tests that involve handling or manipulating code
     fetched from a remote Git repository.
 
-    Returns:
+    Returns
+    -------
         AdditionalCode: An instance of the AdditionalCode class with preset
         remote repository details.
     """
@@ -63,7 +64,7 @@ def fake_additional_code_remote():
 
 
 @pytest.fixture
-def fake_additional_code_local():
+def fake_additionalcode_local():
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     code located on the local filesystem.
 
@@ -77,7 +78,8 @@ def fake_additional_code_local():
     This fixture can be used in tests that involve handling or manipulating
     code that resides on the local filesystem.
 
-    Returns:
+    Returns
+    --------
         AdditionalCode: An instance of the AdditionalCode class with preset
         local directory details.
     """
@@ -92,7 +94,7 @@ def fake_additional_code_local():
 # ExternalCodeBase
 ################################################################################
 @pytest.fixture
-def fake_codebase(log: logging.Logger):
+def fake_externalcodebase(log: logging.Logger):
     """Yields a fake codebase (instance of FakeExternalCodeBase) for
     use in testing.
     """
@@ -104,33 +106,11 @@ def fake_codebase(log: logging.Logger):
         yield FakeExternalCodeBase()
 
 
-@pytest.fixture
-def marbl_codebase():
-    """Fixture providing a configured instance of `MARBLExternalCodeBase` for
-    testing.
-    """
-    source_repo = "https://github.com/marbl-ecosys/MARBL.git"
-    checkout_target = "marbl0.45.0"
-    return MARBLExternalCodeBase(
-        source_repo=source_repo, checkout_target=checkout_target
-    )
-
-
-@pytest.fixture
-def roms_codebase():
-    """Fixture providing a configured instance of `ROMSExternalCodeBase` for testing."""
-    source_repo = "https://github.com/CWorthy-ocean/ucla-roms.git"
-    checkout_target = "246c11fa537145ba5868f2256dfb4964aeb09a25"
-    return ROMSExternalCodeBase(
-        source_repo=source_repo, checkout_target=checkout_target
-    )
-
-
 ################################################################################
 # ROMSRuntimeSettings
 ################################################################################
 @pytest.fixture
-def fake_roms_runtime_settings():
+def fake_romsruntimesettings():
     """Fixture providing a `ROMSRuntimeSettings` instance for testing.
 
     The example instance corresponds to the file `fixtures/example_runtime_settings.in`
@@ -194,7 +174,7 @@ def fake_roms_runtime_settings():
 
 
 @pytest.fixture
-def fake_input_dataset_local():
+def fake_inputdataset_local():
     """Fixture to provide a mock local InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a local dataset,
@@ -235,7 +215,7 @@ def fake_input_dataset_local():
 
 
 @pytest.fixture
-def fake_input_dataset_remote():
+def fake_inputdataset_remote():
     """Fixture to provide a mock remote InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a remote dataset,
@@ -286,7 +266,7 @@ def fake_input_dataset_remote():
 
 
 @pytest.fixture
-def fake_roms_input_dataset_netcdf_local():
+def fake_romsinputdataset_netcdf_local():
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
 
     Mocks:
@@ -320,7 +300,7 @@ def fake_roms_input_dataset_netcdf_local():
 
 
 @pytest.fixture
-def fake_roms_input_dataset_yaml_local():
+def fake_romsinputdataset_yaml_local():
     """Fixture to provide a ROMSInputDataset with a local YAML source.
 
     Mocks:
@@ -358,7 +338,7 @@ def fake_roms_input_dataset_yaml_local():
 
 
 @pytest.fixture
-def fake_roms_input_dataset_yaml_remote():
+def fake_romsinputdataset_yaml_remote():
     """Fixture to provide a ROMSInputDataset with a remote YAML source.
 
     Mocks:
@@ -401,34 +381,31 @@ def fake_roms_input_dataset_yaml_remote():
 
 
 @pytest.fixture
-def fake_simulation(tmp_path):
-    """Fixture providing a `FakeSimulation` instance for testing.
+def stub_simulation(tmp_path):
+    """Fixture providing a `StubSimulation` instance for testing.
 
-    This fixture sets up a minimal `FakeSimulation` instance with a mock external
+    This fixture sets up a minimal `StubSimulation` instance with a mock external
     codebase, runtime and compile-time code, and basic discretization settings.
     The temporary directory (`tmp_path`) serves as the working directory for the
     simulation.
 
     Yields
     ------
-    tuple[FakeSimulation, Path]
-        A tuple containing:
-        - `FakeSimulation` instance configured for testing.
-        - The temporary directory where the simulation is stored.
+    StubSimulation: instance configured for testing
+
     """
-    directory = tmp_path
-    sim = FakeSimulation(
+    sim = StubSimulation(
         name="TestSim",
-        directory=directory,
+        directory=tmp_path,
         codebase=FakeExternalCodeBase(),
         runtime_code=AdditionalCode(
-            location=directory.parent,
+            location=tmp_path.parent,
             subdir="subdir/",
             checkout_target="main",
             files=["file1", "file2"],
         ),
         compile_time_code=AdditionalCode(
-            location=directory.parent,
+            location=tmp_path.parent,
             subdir="subdir/",
             checkout_target="main",
             files=["file1", "file2"],
@@ -439,7 +416,7 @@ def fake_simulation(tmp_path):
         valid_start_date="2024-01-01",
         valid_end_date="2026-01-01",
     )
-    yield sim, directory
+    yield sim
 
 
 ################################################################################
@@ -448,9 +425,9 @@ def fake_simulation(tmp_path):
 
 
 @pytest.fixture
-def fake_roms_simulation(
+def fake_romssimulation(
     tmp_path,
-) -> Generator[tuple[ROMSSimulation, Path], None, None]:
+) -> Generator[ROMSSimulation, None, None]:
     """Fixture providing a `ROMSSimulation` instance for testing.
 
     This fixture initializes a `ROMSSimulation` with a comprehensive configuration,
@@ -524,7 +501,7 @@ def fake_roms_simulation(
         ],
     )
 
-    yield sim, directory  # Ensures pytest can handle resource cleanup if needed
+    yield sim  # Ensures pytest can handle resource cleanup if needed
 
 
 ################################################################################

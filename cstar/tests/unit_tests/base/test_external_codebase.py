@@ -10,12 +10,12 @@ from cstar.system.manager import cstar_sysmgr
 ################################################################################
 
 
-def test_codebase_str(fake_codebase):
+def test_codebase_str(fake_externalcodebase):
     """Test the string representation of the `ExternalCodeBase` class.
 
     Fixtures
     --------
-    fake_codebase : FakeExternalCodeBase
+    fake_externalcodebase : FakeExternalCodeBase
         A mock instance of `ExternalCodeBase` with a predefined environment and repository configuration.
 
     Mocks
@@ -39,42 +39,44 @@ def test_codebase_str(fake_codebase):
     )
 
     # Compare the actual result with the expected result
-    assert expected_str in str(fake_codebase)
+    assert expected_str in str(fake_externalcodebase)
 
-    # Assuming fake_codebase is an instance of a class
+    # Assuming fake_externalcodebase is an instance of a class
     with mock.patch.object(
-        type(fake_codebase), "local_config_status", new_callable=mock.PropertyMock
+        type(fake_externalcodebase),
+        "local_config_status",
+        new_callable=mock.PropertyMock,
     ) as mock_local_config_status:
         mock_local_config_status.return_value = 0
         assert (
             "(Environment variable TEST_ROOT is present, points to the correct repository remote, and is checked out at the correct hash)"
-            in str(fake_codebase)
+            in str(fake_externalcodebase)
         )
 
         mock_local_config_status.return_value = 1
         assert (
             "(Environment variable TEST_ROOT is present but does not point to the correct repository remote [unresolvable])"
-            in str(fake_codebase)
+            in str(fake_externalcodebase)
         )
 
         # Change the return value again
         mock_local_config_status.return_value = 2
         assert (
             "(Environment variable TEST_ROOT is present, points to the correct repository remote, but is checked out at the wrong hash)"
-            in str(fake_codebase)
+            in str(fake_externalcodebase)
         )
 
         # Final test with return value 3
         mock_local_config_status.return_value = 3
         assert (
             "(Environment variable TEST_ROOT is not present and it is assumed the external codebase is not installed locally)"
-            in str(fake_codebase)
+            in str(fake_externalcodebase)
         )
 
 
-def test_codebase_repr(fake_codebase):
+def test_codebase_repr(fake_externalcodebase):
     """Test the repr representation of the `ExternalCodeBase` class."""
-    result_repr = repr(fake_codebase)
+    result_repr = repr(fake_externalcodebase)
     expected_repr = (
         "FakeExternalCodeBase("
         + "\nsource_repo = 'https://github.com/test/repo.git',"
@@ -106,7 +108,7 @@ class TestExternalCodeBaseConfig:
 
     Fixtures
     --------
-    fake_codebase : FakeExternalCodeBase
+    fake_externalcodebase : FakeExternalCodeBase
         Provides a mock instance of `ExternalCodeBase` for use in the tests.
 
     Mocks
@@ -144,31 +146,31 @@ class TestExternalCodeBaseConfig:
         self.patch_get_repo_remote.stop()
         self.patch_get_repo_head_hash.stop()
 
-    def test_local_config_status_valid(self, fake_codebase):
+    def test_local_config_status_valid(self, fake_externalcodebase):
         # Set return values for other mocks
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "test123"
 
         # Assert local_config_status logic
-        assert fake_codebase.local_config_status == 0
-        assert fake_codebase.is_setup
+        assert fake_externalcodebase.local_config_status == 0
+        assert fake_externalcodebase.is_setup
 
-    def test_local_config_status_wrong_remote(self, fake_codebase):
+    def test_local_config_status_wrong_remote(self, fake_externalcodebase):
         self.mock_get_repo_remote.return_value = (
             "https://github.com/test/wrong_repo.git"
         )
 
-        assert fake_codebase.local_config_status == 1
+        assert fake_externalcodebase.local_config_status == 1
 
-    def test_local_config_status_wrong_checkout(self, fake_codebase):
+    def test_local_config_status_wrong_checkout(self, fake_externalcodebase):
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
-        assert fake_codebase.local_config_status == 2
+        assert fake_externalcodebase.local_config_status == 2
 
-    def test_local_config_status_no_env_var(self, fake_codebase):
+    def test_local_config_status_no_env_var(self, fake_externalcodebase):
         self.mock_environment.return_value.environment_variables = {}
-        assert fake_codebase.local_config_status == 3
+        assert fake_externalcodebase.local_config_status == 3
 
 
 class TestExternalCodeBaseConfigHandling:
@@ -201,7 +203,7 @@ class TestExternalCodeBaseConfigHandling:
 
     Fixtures
     --------
-    fake_codebase : FakeExternalCodeBase
+    fake_externalcodebase : FakeExternalCodeBase
         Provides a mock instance of `ExternalCodeBase` for testing configuration handling.
 
     Mocks
@@ -245,7 +247,7 @@ class TestExternalCodeBaseConfigHandling:
         self.patch_get_repo_remote.stop()
 
     def test_handle_config_status_valid(
-        self, fake_codebase, caplog: pytest.LogCaptureFixture
+        self, fake_externalcodebase, caplog: pytest.LogCaptureFixture
     ):
         """Test when local_config_status == 0 (correct configuration)
 
@@ -256,16 +258,16 @@ class TestExternalCodeBaseConfigHandling:
         """
         # Mock the config status to be 0 (everything is correct)
         self.mock_local_config_status.return_value = 0
-        caplog.set_level(logging.INFO, logger=fake_codebase.log.name)
+        caplog.set_level(logging.INFO, logger=fake_externalcodebase.log.name)
 
         # Call the method
-        fake_codebase.handle_config_status()
+        fake_externalcodebase.handle_config_status()
 
         # Capture printed output and check that nothing happens
         captured = caplog.text
         assert "correctly configured. Nothing to be done" in captured
 
-    def test_handle_config_status_wrong_repo(self, fake_codebase):
+    def test_handle_config_status_wrong_repo(self, fake_externalcodebase):
         """Test when local_config_status == 1 (wrong repository remote)"""
         # Mock the config status to be 1 (wrong repo)
         self.mock_local_config_status.return_value = 1
@@ -275,7 +277,7 @@ class TestExternalCodeBaseConfigHandling:
 
         # Assert that it raises an EnvironmentError
         with pytest.raises(EnvironmentError) as exception_info:
-            fake_codebase.handle_config_status()
+            fake_externalcodebase.handle_config_status()
 
         # Check error message:
         expected_message = (
@@ -290,7 +292,7 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_invalid(
-        self, mock_input, fake_codebase, capsys: pytest.CaptureFixture
+        self, mock_input, fake_externalcodebase, capsys: pytest.CaptureFixture
     ):
         # Assert that it raises an EnvironmentError
         self.mock_local_config_status.return_value = 2
@@ -299,7 +301,7 @@ class TestExternalCodeBaseConfigHandling:
 
         # Expect StopIteration after the invalid input due to no further inputs
         with pytest.raises(StopIteration):
-            fake_codebase.handle_config_status()
+            fake_externalcodebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y' or 'n'"
         captured = capsys.readouterr().out
@@ -307,14 +309,14 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["n"])  # mock_input
     def test_handle_config_status_wrong_checkout_user_n(
-        self, mock_input, fake_codebase, capsys
+        self, mock_input, fake_externalcodebase, capsys
     ):
         # Assert that it raises an EnvironmentError
         self.mock_local_config_status.return_value = 2
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
         with pytest.raises(EnvironmentError):
-            fake_codebase.handle_config_status()
+            fake_externalcodebase.handle_config_status()
 
         # Capture print statements
         capsys.readouterr()
@@ -323,7 +325,7 @@ class TestExternalCodeBaseConfigHandling:
     def test_handle_config_status_wrong_checkout_user_y(
         self,
         mock_input,
-        fake_codebase,
+        fake_externalcodebase,
         capsys: pytest.CaptureFixture,
         tmp_path: Path,
     ):
@@ -344,7 +346,7 @@ class TestExternalCodeBaseConfigHandling:
             ),
         ):
             # Call the method to trigger the flow
-            fake_codebase.handle_config_status()
+            fake_externalcodebase.handle_config_status()
 
         ## Assert that subprocess.run was called with the correct git checkout command
         self.mock_subprocess_run.assert_called_with(
@@ -372,12 +374,12 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["y"])  # mock_input
     def test_handle_config_status_no_env_var_user_y(
-        self, mock_input, fake_codebase, caplog: pytest.LogCaptureFixture
+        self, mock_input, fake_externalcodebase, caplog: pytest.LogCaptureFixture
     ):
         self.mock_local_config_status.return_value = 3
-        caplog.set_level(logging.INFO, logger=fake_codebase.log.name)
+        caplog.set_level(logging.INFO, logger=fake_externalcodebase.log.name)
 
-        fake_codebase.handle_config_status()
+        fake_externalcodebase.handle_config_status()
 
         expected_install_dir = (
             Path(cstar_sysmgr.environment.package_root) / "externals/repo"
@@ -391,25 +393,25 @@ class TestExternalCodeBaseConfigHandling:
 
     @mock.patch("builtins.input", side_effect=["n"])  # mock_input
     def test_handle_config_status_no_env_var_user_n(
-        self, mock_input, fake_codebase, capsys
+        self, mock_input, fake_externalcodebase, capsys
     ):
         self.mock_local_config_status.return_value = 3
 
         with pytest.raises(EnvironmentError):
-            fake_codebase.handle_config_status()
+            fake_externalcodebase.handle_config_status()
 
     @mock.patch("builtins.input", side_effect=["not y or n"])  # mock_input
     def test_handle_config_status_no_env_var_user_invalid(
         self,
         mock_input,
-        fake_codebase: ExternalCodeBase,
+        fake_externalcodebase: ExternalCodeBase,
         capsys: pytest.CaptureFixture,
     ):
         self.mock_local_config_status.return_value = 3
 
         # Expect StopIteration after the invalid input due to no further inputs
         with pytest.raises(StopIteration):
-            fake_codebase.handle_config_status()
+            fake_externalcodebase.handle_config_status()
 
         expected_message = "invalid selection; enter 'y','n',or 'custom'"
         captured = capsys.readouterr().out
@@ -419,12 +421,12 @@ class TestExternalCodeBaseConfigHandling:
         "builtins.input", side_effect=["custom", "some/install/path"]
     )  # mock_input
     def test_handle_config_status_no_env_var_user_custom(
-        self, mock_input, fake_codebase, caplog
+        self, mock_input, fake_externalcodebase, caplog
     ):
         self.mock_local_config_status.return_value = 3
-        caplog.set_level(logging.INFO, logger=fake_codebase.log.name)
+        caplog.set_level(logging.INFO, logger=fake_externalcodebase.log.name)
 
-        fake_codebase.handle_config_status()
+        fake_externalcodebase.handle_config_status()
         expected_install_dir = Path("some/install/path").resolve()
 
         captured = caplog.text

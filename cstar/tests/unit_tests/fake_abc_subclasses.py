@@ -11,10 +11,6 @@ class FakeExternalCodeBase(ExternalCodeBase):
     purposes.
     """
 
-    # def __init__(self, log: logging.Logger):
-    #     super().__init__(None, None)
-    #     self._log = log
-
     @property
     def expected_env_var(self):
         return "TEST_ROOT"
@@ -48,9 +44,11 @@ class FakeROMSRuntimeSettingsSectionEmpty(ROMSRuntimeSettingsSection):
     functions.
     """
 
+    pass
+
 
 class FakeInputDataset(InputDataset):
-    """Mock subclass of the InputDataset abstract base class.
+    """Fake subclass of the InputDataset abstract base class.
 
     Since InputDataset is an abstract base class, this mock class is needed to allow
     instantiation for testing purposes. It inherits from InputDataset without adding any
@@ -61,69 +59,54 @@ class FakeInputDataset(InputDataset):
 
 
 class FakeROMSInputDataset(ROMSInputDataset):
-    """A minimal example subclass of the ROMSInputDataset abstract base class."""
+    """A subclass of the ROMSInputDataset abstract base class."""
 
     pass
 
 
-class FakeSimulation(Simulation):
-    """Mock subclass of `Simulation` for testing purposes.
+class StubSimulation(Simulation):
+    """Fake subclass of `Simulation` ABC for testing purposes.
 
     This class provides a minimal implementation of `Simulation` that overrides
     abstract methods to allow for isolated unit testing without requiring actual
     simulation execution.
-
-    Attributes
-    ----------
-    default_codebase : ExternalCodeBase
-        Returns an instance of `FakeExternalCodeBase`.
-
-    Methods
-    -------
-    from_dict(simulation_dict, directory)
-        Minimal implementation of abstract method
-    from_blueprint(blueprint, directory)
-        No-op implementation of abstract method
-    to_blueprint(filename)
-        No-op implementation of abstract method
-    setup()
-        No-op implementation of abstract method
-    build(rebuild)
-        No-op implementation of abstract method
-    pre_run()
-        No-op implementation of abstract method
-    run()
-        No-op implementation of abstract method
-    post_run()
-        No-op implementation of abstract method
     """
 
     @property
     def default_codebase(self):
+        """Minimal implementation of abstract method."""
         return FakeExternalCodeBase()
 
     @classmethod
     def from_dict(cls, simulation_dict, directory):
+        """Minimal implementation of abstract method."""
         return cls(**simulation_dict)
 
     @classmethod
     def from_blueprint(cls, blueprint, directory):
+        """No-op implementation of abstract method."""
         pass
 
     def to_blueprint(self, filename):
+        """No-op implementation of abstract method."""
         pass
 
     def setup(self):
+        """No-op implementation of abstract method."""
         pass
 
     def build(self, rebuild=False):
+        """No-op implementation of abstract method."""
         pass
 
     def pre_run(self):
+        """No-op implementation of abstract method."""
         pass
 
     def run(self):
+        """No-op implementation of abstract method."""
         pass
 
     def post_run(self):
+        """No-op implementation of abstract method."""
         pass
