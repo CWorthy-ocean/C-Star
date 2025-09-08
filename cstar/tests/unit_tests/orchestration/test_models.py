@@ -518,3 +518,33 @@ def test_workplan_compute_environment(
     )
 
     assert plan.compute_environment == compute_env
+
+
+def test_json_serialize(gen_fake_steps: t.Callable[[int], t.Generator[Step]]) -> None:
+    """Verify that the model is json serializable.
+
+    Parameters
+    ----------
+    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+        A generator function to produce minimally valid test steps
+
+    """
+    plan = WorkPlan(
+        name="test-plan",
+        description="test-description",
+        steps=list(gen_fake_steps(1)),
+    )
+
+    json = plan.model_dump_json()
+
+    assert "name" in json
+    assert "description" in json
+    assert "steps" in json
+    assert "state" in json
+    assert "compute_environment" in json
+    assert "application" in json
+    assert "blueprint" in json
+    assert "depends_on" in json
+    assert "blueprint_overrides" in json
+    assert "compute_overrides" in json
+    assert "workflow_overrides" in json
