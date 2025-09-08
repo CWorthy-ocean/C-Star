@@ -459,6 +459,35 @@ def test_workplan_state_validation(
 
 
 @pytest.mark.parametrize(
+    "invalid_value",
+    [
+        [],
+        None,
+        [None],
+    ],
+)
+def test_workplan_steps_validation(invalid_value: list | None) -> None:
+    """Verify steps validation works as expected.
+
+    Parameters
+    ----------
+    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+        A generator function to produce minimally valid test steps
+    """
+    name = f"test-plan-{uuid.uuid4()}"
+    description = f"test-desc-{uuid.uuid4()}"
+
+    with pytest.raises(ValidationError) as error:
+        _ = WorkPlan(
+            name=name,
+            description=description,
+            steps=invalid_value,  # type: ignore[reportArgumentType]
+        )
+
+    assert "steps" in str(error)
+
+
+@pytest.mark.parametrize(
     "compute_env",
     [
         {},
