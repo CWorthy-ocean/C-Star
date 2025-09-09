@@ -119,4 +119,17 @@ class WorkPlan(BaseModel):
     @field_validator("steps", mode="before")
     @classmethod
     def _deep_copy_steps(cls, value: list[Step]) -> list[Step]:
+        """Ensure the steps provided are deep copied to avoid external change propagation.
+
+        Parameters
+        ----------
+        value : list[Step]
+            The list of steps assigned to the instance
+
+        Returns
+        -------
+        list[Step]
+            The deep-copied step list
+
+        """
         return deepcopy(value)
