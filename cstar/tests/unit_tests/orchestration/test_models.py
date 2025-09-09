@@ -85,7 +85,7 @@ def fake_blueprint_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step]]:
+def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step, None, None]]:
     """Create fake steps for testing purposes.
 
     Parameters
@@ -94,7 +94,7 @@ def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step]]:
         Unique path for test-specific files
     """
 
-    def _gen_fake_steps(num_steps: int) -> t.Generator[Step]:
+    def _gen_fake_steps(num_steps: int) -> t.Generator[Step, None, None]:
         """Create `num_steps` fake steps."""
         for _ in range(num_steps):
             step_name = f"test-step-{uuid.uuid4()}"
@@ -623,13 +623,13 @@ def test_step_blueprint_overrides_set(
 
 
 def test_workplan_defaults(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify attributes and default values are set as expected.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
     """
     steps = list(gen_fake_steps(5))
@@ -663,14 +663,14 @@ def test_workplan_defaults(
     ],
 )
 def test_workplan_name_validation(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
     invalid_value: str | None,
 ) -> None:
     """Verify name validation works as expected.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
     invalid_value : str
         A test value that should trigger a validation error
@@ -697,14 +697,14 @@ def test_workplan_name_validation(
     ],
 )
 def test_workplan_description_validation(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
     invalid_value: str | None,
 ) -> None:
     """Verify description validation works as expected.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
     invalid_value : str
         A test value that should trigger a validation error
@@ -723,13 +723,13 @@ def test_workplan_description_validation(
 
 
 def test_workplan_state_validation(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify description validation works as expected.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
     """
     steps = list(gen_fake_steps(5))
@@ -760,7 +760,7 @@ def test_workplan_steps_validation(invalid_value: list | None) -> None:
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
     """
     name = f"test-plan-{uuid.uuid4()}"
@@ -787,7 +787,7 @@ def test_workplan_steps_validation(invalid_value: list | None) -> None:
 )
 def test_workplan_compute_environment(
     compute_env: dict[str, str | int],
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify the compute environment of the workplan is set as expected.
 
@@ -795,7 +795,7 @@ def test_workplan_compute_environment(
     ----------
     overrides: dict[str, str | int]
         A set of overrides for the step
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
     """
     steps = list(gen_fake_steps(5))
@@ -809,12 +809,14 @@ def test_workplan_compute_environment(
     assert plan.compute_environment == compute_env
 
 
-def test_json_serialize(gen_fake_steps: t.Callable[[int], t.Generator[Step]]) -> None:
+def test_json_serialize(
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
+) -> None:
     """Verify that the model is json serializable.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """
@@ -841,14 +843,14 @@ def test_json_serialize(gen_fake_steps: t.Callable[[int], t.Generator[Step]]) ->
 
 
 def test_yaml_serialize(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
     tmp_path: pathlib.Path,
 ) -> None:
     """Verify that the model serializes to YAML without errors.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
     tmp_path : Path
         Temporarily write a yaml document to disk for manual test review of failures.
@@ -881,14 +883,14 @@ def test_yaml_serialize(
 
 
 def test_yaml_deserialize(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
     tmp_path: pathlib.Path,
 ) -> None:
     """Verify that the model deserializes from YAML without errors.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
     tmp_path : Path
         Temporarily write a yaml document to disk to ensure deserialization.
@@ -914,13 +916,13 @@ def test_yaml_deserialize(
 
 
 def test_workplan_step_copy(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify that the WorkPlan deep-copies steps.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """
@@ -950,13 +952,13 @@ def test_workplan_step_copy(
 
 
 def test_workplan_step_set(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify that the WorkPlan does not allow the steps list reference to change.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """
@@ -974,13 +976,13 @@ def test_workplan_step_set(
 
 
 def test_workplan_runtimevars_copy(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify that the WorkPlan copy of runtime_vars is distinct
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """
@@ -1009,13 +1011,13 @@ def test_workplan_runtimevars_copy(
 
 
 def test_workplan_runtimevars_set(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify that the WorkPlan does not allow the runtime_vars list reference to change.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """
@@ -1034,13 +1036,13 @@ def test_workplan_runtimevars_set(
 
 
 def test_workplan_computeenv_copy(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify that the WorkPlan copy of compute_environment is distinct
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """
@@ -1069,13 +1071,13 @@ def test_workplan_computeenv_copy(
 
 
 def test_workplan_computeenv_set(
-    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify that the WorkPlan does not allow the compute env reference to change.
 
     Parameters
     ----------
-    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """
