@@ -40,7 +40,7 @@ class Step(BaseModel):
     """An optional list of external step names that must execute prior to this step."""
     blueprint: FilePath
     """The blueprint that will be executed in this step."""
-    depends_on: t.Annotated[set[RequiredString], Field(default_factory=set)] = set()
+    depends_on: t.Annotated[list[RequiredString], Field(default_factory=list)] = []
     """A collection of key-value pairs specifying overrides for blueprint attributes."""
     blueprint_overrides: t.Annotated[
         dict[str, str | int],
@@ -69,7 +69,7 @@ class Step(BaseModel):
 
 
 class WorkPlan(BaseModel):
-    """A set of executable steps and the associated configuration to run them."""
+    """A collection of executable steps and the associated configuration to run them."""
 
     name: RequiredString
     """The user-friendly name of the workplan."""
@@ -86,10 +86,10 @@ class WorkPlan(BaseModel):
     ] = {}
     """A collection of key-value pairs specifying attributes for the target compute environment."""
     runtime_vars: t.Annotated[
-        set[str],
+        list[str],
         Field(
-            default_factory=set,
+            default_factory=list,
             validate_default=False,
         ),
-    ] = set()
+    ] = []
     """A collection of user-defined variables that will be populated at runtime."""

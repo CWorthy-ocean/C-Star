@@ -1,13 +1,39 @@
 # ruff: noqa: S101
 
+import pathlib
 import typing as t
 import uuid
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+import yaml
+from pydantic import BaseModel, ValidationError
 
 from cstar.orchestration.models import Step, WorkPlan, WorkPlanState
+
+
+def model_to_yaml(model: BaseModel) -> str:
+    """Serialize a model to yaml."""
+    dumped = model.model_dump()
+
+    def path_representer(
+        dumper: yaml.Dumper,
+        data: pathlib.PosixPath,
+    ) -> yaml.ScalarNode:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+    def workplanstate_representer(
+        dumper: yaml.Dumper,
+        data: WorkPlanState,
+    ) -> yaml.ScalarNode:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+    dumper = yaml.Dumper
+
+    dumper.add_representer(pathlib.PosixPath, path_representer)
+    dumper.add_representer(WorkPlanState, workplanstate_representer)
+
+    return yaml.dump(dumped, sort_keys=False)
 
 
 @pytest.fixture
@@ -177,9 +203,8 @@ def test_step_path_validation(invalid_value: Path | None) -> None:
 @pytest.mark.parametrize(
     "invalid_value",
     [
-        # set(),
-        {""},
-        {" ", "bbb"},
+        [""],
+        [" ", "bbb"],
     ],
 )
 def test_step_depends_on_validation(
@@ -209,14 +234,14 @@ def test_step_depends_on_validation(
 @pytest.mark.parametrize(
     "depends_on",
     [
-        set(),
-        {"aaa"},
-        {"aaa", "bbb"},
+        [],
+        ["aaa"],
+        ["aaa", "bbb"],
     ],
 )
 def test_step_depends_on(
     fake_blueprint_path: Path,
-    depends_on: set[str],
+    depends_on: list[str],
 ) -> None:
     """Verify that step depends_on value is stored as expected.
 
@@ -529,10 +554,11 @@ def test_json_serialize(gen_fake_steps: t.Callable[[int], t.Generator[Step]]) ->
         A generator function to produce minimally valid test steps
 
     """
+    fake_steps = list(gen_fake_steps(1))
     plan = WorkPlan(
         name="test-plan",
         description="test-description",
-        steps=list(gen_fake_steps(1)),
+        steps=fake_steps,
     )
 
     json = plan.model_dump_json()
@@ -548,3 +574,43 @@ def test_json_serialize(gen_fake_steps: t.Callable[[int], t.Generator[Step]]) ->
     assert "blueprint_overrides" in json
     assert "compute_overrides" in json
     assert "workflow_overrides" in json
+
+
+def test_yaml_serialize(
+    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    tmp_path: pathlib.Path,
+) -> None:
+    """Verify that the model serializes to YAML without errors.
+
+    Parameters
+    ----------
+    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+        A generator function to produce minimally valid test steps
+    tmp_path : Path
+        Temporarily write a yaml document to disk for manual test review of failures.
+
+    """
+    plan = WorkPlan(
+        name="test-plan",
+        description="test-description",
+        steps=list(gen_fake_steps(1)),
+    )
+
+    yaml_doc = model_to_yaml(plan)
+    yaml_path = tmp_path / "test.yaml"
+
+    print(f"Writing test yaml document to: {yaml_path}")
+    with yaml_path.open("w") as fp:
+        fp.write(yaml_doc)
+
+    assert "name" in yaml_doc
+    assert "description" in yaml_doc
+    assert "steps" in yaml_doc
+    assert "state" in yaml_doc
+    assert "compute_environment" in yaml_doc
+    assert "application" in yaml_doc
+    assert "blueprint" in yaml_doc
+    assert "depends_on" in yaml_doc
+    assert "blueprint_overrides" in yaml_doc
+    assert "compute_overrides" in yaml_doc
+    assert "workflow_overrides" in yaml_doc
