@@ -13,7 +13,18 @@ from cstar.orchestration.models import Step, WorkPlan, WorkPlanState
 
 
 def model_to_yaml(model: BaseModel) -> str:
-    """Serialize a model to yaml."""
+    """Serialize a model to yaml.
+
+    Parameters
+    ----------
+    model : BaseModel
+        The model to be serialized
+
+    Returns
+    -------
+    str
+        The serialized model
+    """
     dumped = model.model_dump()
 
     def path_representer(
@@ -34,6 +45,29 @@ def model_to_yaml(model: BaseModel) -> str:
     dumper.add_representer(WorkPlanState, workplanstate_representer)
 
     return yaml.dump(dumped, sort_keys=False)
+
+
+_T = t.TypeVar("_T", bound=BaseModel)
+
+
+def yaml_to_model(yaml_doc: str, cls: type[_T]) -> _T:
+    """Deserialize yaml to a model.
+
+    Parameters
+    ----------
+    yaml_doc : str
+        The serialized model
+    cls : type
+        The type to deserialize to
+
+    Returns
+    -------
+    _T
+        The deserialized model instance
+    """
+    loaded_dict = yaml.safe_load(yaml_doc)
+
+    return cls.model_validate(loaded_dict)
 
 
 @pytest.fixture
@@ -614,3 +648,36 @@ def test_yaml_serialize(
     assert "blueprint_overrides" in yaml_doc
     assert "compute_overrides" in yaml_doc
     assert "workflow_overrides" in yaml_doc
+
+
+def test_yaml_deserialize(
+    gen_fake_steps: t.Callable[[int], t.Generator[Step]],
+    tmp_path: pathlib.Path,
+) -> None:
+    """Verify that the model deserializes from YAML without errors.
+
+    Parameters
+    ----------
+    gen_fake_steps : t.Callable[[int], t.Generator[Step]]
+        A generator function to produce minimally valid test steps
+    tmp_path : Path
+        Temporarily write a yaml document to disk to ensure deserialization.
+
+    """
+    plan = WorkPlan(
+        name="test-plan",
+        description="test-description",
+        steps=list(gen_fake_steps(1)),
+    )
+
+    yaml_doc = model_to_yaml(plan)
+    yaml_path = tmp_path / "test.yaml"
+
+    print(f"Writing test yaml document to: {yaml_path}")
+    with yaml_path.open("w") as fp:
+        fp.write(yaml_doc)
+
+    written = yaml_path.read_text()
+    plan2 = yaml_to_model(written, WorkPlan)
+
+    assert plan == plan2
