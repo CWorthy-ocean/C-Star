@@ -552,7 +552,7 @@ def test_step_all_overrides_copy(
     fake_blueprint_path: pathlib.Path,
     dict_prop: str,
 ) -> None:
-    """Verify that the Step copy of blueprint_overrides is distinct
+    """Verify that the Step's copy of the attribute specified in `dict_prop` is distinct
 
     Parameters
     ----------
