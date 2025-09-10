@@ -87,7 +87,7 @@ For the rest of the command:
 * `-v /pscratch/sd/e/eilerman/2node1wk/playground:/work` mounts my runtime files into the container (in retrospect, this wasn't needed after I found the `--scratch` shortcut)
 * `$IMG_NAME` is just an env-var identifying our migrated image
 * `bash -c` calls the rest of the commands in a single shell
-* `source /etc/profile` sets internal environment variables pointing to libs and repos, established during the build. Note that in the current, official runner Containerfile, `entrypoint.sh` effectively does this. During testing, I had removed that, as podman-hpc perhaps doesn't work with entrypoint commands. You should be able to additionally skip an existing ENTRYPOINT directive with `--entrypoint=""`.
+* `source /etc/profile` sets internal environment variables pointing to libs and repos, established during the build. Note that in the current, official runner Containerfile, `entrypoint.sh` effectively does this. During testing, I had removed that, as podman-hpc perhaps doesn't work with entrypoint commands. You should be able to additionally skip an existing ENTRYPOINT directive with `--entrypoint=""` rather than removing it during build-time.
 * `cd /tmp` was probably not necessary, but it's worth noting that when containers run on compute node, most of the container filesystem is read-only. Only `/tmp` and some other special directories can be written to inside the container.
 * `hostname` was a sanity check that processes were starting on multiple nodes, and could be omitted when not debugging
 * `/opt/work_internal/compile_time_code/roms` is the container-internal path to our pre-built roms executable

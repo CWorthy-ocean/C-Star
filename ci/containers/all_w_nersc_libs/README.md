@@ -12,6 +12,7 @@ module load cray-netcdf/4.9.0.9
 module load PrgEnv-gnu/8.5.0
 
 podman-hpc build -v /opt/cray:/opt/cray . -t runner_built_w_nersc_libs:latest
+podman-hpc migrate runner_built_w_nersc_libs:latest
 ```
 
 And then at runtime:
