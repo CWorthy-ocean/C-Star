@@ -58,13 +58,9 @@ marbl: # netcdf roms
 
 IMG_RUNNER := runner
 .PHONY: runner
-runner: # conda roms marbl
+runner: # python roms marbl
 	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_RUNNER)
 
-IMG_MY_RUNNER := my_runner
-.PHONY: my_runner
-my_runner: #roms marbl
-	$(MAKE) _build action=$(ACTION_BUILD) img=$(IMG_MY_RUNNER)
 
 .PHONY: buildhelp
 buildhelp:
@@ -79,7 +75,7 @@ pullall:
 	$(MAKE) pull img=$(IMG_CONDA)
 	$(MAKE) pull img=$(IMG_PYTHON)
 	$(MAKE) pull img=$(IMG_BUILDBASE)
-	$(MAKE) pull img=$(IMG_MPI507)
+	$(MAKE) pull img=$(IMG_MPICH)
 	$(MAKE) pull img=$(IMG_HDF5)
 	$(MAKE) pull img=$(IMG_NETCDF)
 	$(MAKE) pull img=$(IMG_ROMS)
@@ -104,20 +100,21 @@ cleanall:
 	$(MAKE) clean img=$(IMG_NETCDF)
 	$(MAKE) clean img=$(IMG_HDF5)
 	$(MAKE) clean img=$(IMG_MPI507)
+	$(MAKE) clean img=$(IMG_MPICH)
 	$(MAKE) clean img=$(IMG_BUILDBASE)
 
 .PHONY: login
 login:
 	./build.sh $(ACTION_LOGIN)
 
+# note: swap openmpi for mpich below as desired
 .PHONY: all
 all: 
 	$(MAKE) buildbase
 	$(MAKE) python
-	$(MAKE) openmpi
+	$(MAKE) mpich
 	$(MAKE) hdf5
 	$(MAKE) netcdf
 	$(MAKE) roms
 	$(MAKE) marbl
 	$(MAKE) runner
-	$(MAKE) my_runner

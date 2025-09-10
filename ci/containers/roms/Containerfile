@@ -4,7 +4,6 @@ ARG IMG_NCDF="$ACCT/cstar-netcdf:$FROM_TAG"
 
 FROM $IMG_NCDF
 
-ARG REDO=1
 ARG SRC_DIR="/install"
 ARG INSTALL_BASE_DIR=/opt
 ENV ROMS_ROOT=$INSTALL_BASE_DIR/ucla-roms 
@@ -26,10 +25,13 @@ RUN . /etc/profile && \
     rm "$TARGET_BRANCH.tar.gz"
 
 
-#RUN \
-#    cd "$ROMS_ROOT/Work" && \
-#    make tools-roms COMPILER=gnu
 ENV PATH=$PATH:$ROMS_PATH
+
+RUN  source /etc/profile &&  \
+     cd $INSTALL_BASE_DIR/work_internal/compile_time_code  \
+     && make compile_clean &&  \
+     make tools-roms &&  \
+     make
 
 WORKDIR $INSTALL_BASE_DIR
 
