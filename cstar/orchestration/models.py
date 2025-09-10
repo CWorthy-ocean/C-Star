@@ -2,13 +2,22 @@ import typing as t
 from copy import deepcopy
 from enum import StrEnum, auto
 
-from pydantic import BaseModel, Field, FilePath, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    FilePath,
+    StringConstraints,
+    field_validator,
+)
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
+"""A non-empty string with no leading or trailing whitespace."""
+
 KeyValueStore: t.TypeAlias = dict[str, str | int]
+"""A collection of user-defined key-value pairs."""
 
 
 class WorkPlanState(StrEnum):
@@ -39,44 +48,38 @@ class Step(BaseModel):
 
     name: RequiredString
     """The user-friendly name of the step."""
+
     application: RequiredString
     """An optional list of external step names that must execute prior to this step."""
+
     blueprint: FilePath
     """The blueprint that will be executed in this step."""
-    depends_on: t.Annotated[
-        list[RequiredString],
-        Field(
-            default_factory=list,
-            frozen=True,
-        ),
-    ] = []
+
+    depends_on: list[RequiredString] = Field(
+        default_factory=list,
+        frozen=True,
+    )
     """A collection of key-value pairs specifying overrides for blueprint attributes."""
-    blueprint_overrides: t.Annotated[
-        KeyValueStore,
-        Field(
-            default_factory=dict,
-            validate_default=False,
-            frozen=True,
-        ),
-    ] = {}
+
+    blueprint_overrides: KeyValueStore = Field(
+        default_factory=dict,
+        validate_default=False,
+        frozen=True,
+    )
     """The user-friendly name of the application executed in the step."""
-    compute_overrides: t.Annotated[
-        KeyValueStore,
-        Field(
-            default_factory=dict,
-            validate_default=False,
-            frozen=True,
-        ),
-    ] = {}
+
+    compute_overrides: KeyValueStore = Field(
+        default_factory=dict,
+        validate_default=False,
+        frozen=True,
+    )
     """A collection of key-value pairs specifying overrides for compute attributes."""
-    workflow_overrides: t.Annotated[
-        KeyValueStore,
-        Field(
-            default_factory=dict,
-            validate_default=False,
-            frozen=True,
-        ),
-    ] = {}
+
+    workflow_overrides: KeyValueStore = Field(
+        default_factory=dict,
+        validate_default=False,
+        frozen=True,
+    )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
 
 
@@ -85,35 +88,31 @@ class WorkPlan(BaseModel):
 
     name: RequiredString
     """The user-friendly name of the workplan."""
+
     description: RequiredString
     """A user-friendly description of the workplan."""
-    steps: t.Annotated[
-        t.Sequence[Step],
-        Field(
-            default_factory=list,
-            min_length=1,
-            frozen=True,
-        ),
-    ]
+
+    steps: t.Sequence[Step] = Field(
+        default_factory=list,
+        min_length=1,
+        frozen=True,
+    )
     """The steps to be executed by the workplan."""
+
     state: WorkPlanState = WorkPlanState.Draft
     """The current validation status of the workplan."""
-    compute_environment: t.Annotated[
-        KeyValueStore,
-        Field(
-            default_factory=dict,
-            frozen=True,
-        ),
-    ] = {}
+
+    compute_environment: KeyValueStore = Field(
+        default_factory=dict,
+        frozen=True,
+    )
     """A collection of key-value pairs specifying attributes for the target compute environment."""
-    runtime_vars: t.Annotated[
-        list[str],
-        Field(
-            default_factory=list,
-            validate_default=False,
-            frozen=True,
-        ),
-    ] = []
+
+    runtime_vars: list[str] = Field(
+        default_factory=list,
+        validate_default=False,
+        frozen=True,
+    )
     """A collection of user-defined variables that will be populated at runtime."""
 
     @field_validator("steps", mode="before")
