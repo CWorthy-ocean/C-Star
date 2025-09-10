@@ -27,9 +27,9 @@ RUN . /etc/profile && \
 
 ENV PATH=$PATH:$ROMS_PATH
 
-RUN  source /etc/profile &&  \
-     cd $INSTALL_BASE_DIR/work_internal/compile_time_code  \
-     && make compile_clean &&  \
+RUN  . /etc/profile &&  \
+     cd $ROMS_ROOT/Work &&  \
+     make compile_clean &&  \
      make tools-roms &&  \
      make
 
