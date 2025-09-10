@@ -1,8 +1,12 @@
 ARG ACCT="C-Worthy"
 ARG FROM_TAG="latest"
 ARG IMG_HDF5="$ACCT/cstar-hdf5:$FROM_TAG"
-# ARG IMG_MPI="$ACCT/cstar-mpich-4.2.2:$FROM_TAG"
-ARG IMG_MPI="$ACCT/cstar-mpi-5.0.7:$FROM_TAG"
+
+# use this for building with nersc's MPICH
+ARG IMG_MPI="$ACCT/cstar-mpich-4.2.2:$FROM_TAG"
+
+# use this for building with our openmpi build
+# ARG IMG_MPI="$ACCT/cstar-mpi-5.0.7:$FROM_TAG"
 
 ARG SRC_DIR="/install"
 ARG INSTALL_BASE_DIR="/opt"

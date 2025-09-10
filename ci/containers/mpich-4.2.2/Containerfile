@@ -1,4 +1,5 @@
-
+# note: this containerfile was derived from NERSC's mpich build
+# as of this commit, it's on a PR branch here: https://gitlab.com/NERSC/nersc-official-images/-/merge_requests/6
 ARG ACCT="C-Worthy"
 ARG FROM_TAG="latest"
 ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:$FROM_TAG"
@@ -7,7 +8,6 @@ FROM $IMG_BUILDBASE
 SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND noninteractive
 WORKDIR /tmp
-
 
 
 ARG mpich=4.2.2
