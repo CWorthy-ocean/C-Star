@@ -1,7 +1,6 @@
 ARG ACCT="C-Worthy"
 ARG FROM_TAG="latest"
 
-
 ARG INSTALL_BASE_DIR="/opt"
 ARG PROFILE_DIR="/etc/profile.d"
 
@@ -46,42 +45,7 @@ RUN \
 ARG mpich=4.2.2
 ARG mpich_prefix=mpich-$mpich
 ARG ncpus $(( $nproc / 8 ))
-# RUN \
-#     wget https://www.mpich.org/static/downloads/$mpich/$mpich_prefix.tar.gz && \
-#     tar xvzf $mpich_prefix.tar.gz                                           && \
-#     cd $mpich_prefix                                                        && \
-#     ./configure                                                             && \
-#     make -j $ncpus                                                          && \
-#     make install                                                            && \
-#     make clean                                                              && \
-#     cd ..                                                                   && \
-#     rm -rf $mpich_prefix
 
-
-
-# ARG HDF5_INSTALL_DIR="hdf5-1.14.6-install"
-# ARG HDF5_TAR="hdf5_1.14.6.tar.gz"
-# ARG HDF5_URL="https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.6.tar.gz"
-# 
-# ARG SRC_DIR="/install"
-# WORKDIR $SRC_DIR
-# RUN wget -q $HDF5_URL && \
-#     tar xvf ./$HDF5_TAR && \
-#     rm ./$HDF5_TAR
-# ENV HDF5_SRC=$SRC_DIR/hdf5-hdf5_1.14.6
-# 
-# WORKDIR $HDF5_SRC
-# RUN ./configure \
-#         CC=mpicc FC=gfortran CXX=mpicxx \
-#         CFLAGS="-fPIC -O3 -march=x86-64" \
-#         FFLAGS="-fPIC -O3 -march=x86-64" \
-#         CXXFLAGS="-fPIC -O3 -march=x86-64" \
-#         --enable-fortran --enable-shared --with-pic && \
-#     make -j $(nproc) && make install 
-# 
-# #&&   rm -rf $HDF5_SRC
-# 
-# RUN /sbin/ldconfig
 
 
 ARG SRC_DIR="/install"
@@ -95,22 +59,6 @@ ENV HDF5_HOME=$INSTALL_BASE_DIR/$HDF5_INSTALL_DIR
 ENV HDF5_SRC=$SRC_DIR/hdf5-hdf5_1.14.6
 
 WORKDIR $SRC_DIR
-# RUN wget -q $HDF5_URL && \
-#     tar xvf ./$HDF5_TAR && \
-#     rm ./$HDF5_TAR
-
-# WORKDIR $HDF5_SRC
-# RUN mkdir -p $HDF5_HOME && \
-#     ./configure \
-#         --prefix=$HDF5_HOME \
-#         CC=mpicc FC=gfortran CXX=mpicxx \
-#         CFLAGS="-fPIC -O3 -march=x86-64" \
-#         FFLAGS="-fPIC -O3 -march=x86-64" \
-#         CXXFLAGS="-fPIC -O3 -march=x86-64" \
-#         --enable-fortran --enable-shared --with-pic && \
-#     make -j $(nproc) && make install && \
-#     rm -rf $HDF5_SRC
-
 
 
 ARG NETCDF_V="4.9.3"
@@ -128,47 +76,9 @@ ARG NETCDF_FORTRAN_HOME="$INSTALL_BASE_DIR/netcdf-fortran-$NETCDF_FV-install"
 
 
 WORKDIR "$SRC_DIR"
-# RUN . /etc/profile && \
-#     mkdir -p "$NETCDF_HOME" && \
-#     wget -q "$NETCDF_URL" && \
-#     tar xvf "$NETCDF_TAR" && \
-#     cd "$NETCDF_SRC" && \ 
-#     ./configure \
-#     	--prefix=$NETCDF_HOME \
-#     	CC=gcc FC=gfortran \
-# 	CFLAGS="-O3 -march=x86-64 -I$HDF5_HOME/include" \
-# 	LDFLAGS="-L$HDF5_HOME/lib" \
-# 	--enable-netcdf-4 \
-# 	--enable-shared && \
-#     make -j $(nproc) && \
-#     make install && \
-#     rm -rf "$SRC_DIR"
-
-
-
-WORKDIR "$SRC_DIR"
-# RUN . /etc/profile && \
-#     mkdir -p "$NETCDF_FORTRAN_HOME" && \
-#     wget -q "$NETCDF_FORTRAN_URL" && \
-#     tar xvf ./$NETCDF_FORTRAN_TAR && \
-#     cd "$NETCDF_FORTRAN_SRC" && \
-#     ./configure \
-#         --prefix="$NETCDF_FORTRAN_HOME" \
-#         CC=mpicc FC=gfortran \
-#         CFLAGS="-O3 -march=x86-64 -I$NETCDF_HOME/include" \
-#         FFLAGS="-O3 -march=x86-64 -I$NETCDF_HOME/include" \
-#         LDFLAGS="-L$NETCDF_HOME/lib" \
-#         --enable-shared && \
-#     make -j $(nproc) && \
-#     make install && \
-#     rm -rf "$SRC_DIR"
-
-
-
 
 
 ENV NETCDF_DIR=/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3
-
 
 ENV MPIHOME=/opt/cray/pe/mpich/8.1.30/ofi/gnu/12.3
 ENV NETCDFHOME=/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/
@@ -182,39 +92,14 @@ ENV LD_RUN_PATH="$MPIHOME/lib:$NETCDF_FORTRAN_HOME/lib:$NETCDF_HOME/lib:$HDF5_HO
 RUN /sbin/ldconfig
 
 
-
-
-
-# RUN . /etc/profile && \
-#     cd "$ROMS_ROOT/Work" && \
-#     make nhmg COMPILER=gnu
-# 
-# RUN . /etc/profile && \
-#     cd $ROMS_PATH && \
-#     make COMPILER=gnu
-
-
-#RUN \
-#    cd "$ROMS_ROOT/Work" && \
-#    make nhmg COMPILER=gnu
-# 
-# 
-# RUN which mpifort && which gfortran && which cpp
-#RUN \
-#   cd $ROMS_PATH && \
-#   make COMPILER=gnu
-
-
-ARG MARBL_BASENAME=sje-marbl
+ARG MARBL_BASENAME=marbl0.45.0
 ARG TGZ_NAME="$MARBL_BASENAME.tar.gz"
-# ARG REPO_MARBL="https://github.com/ScottEilerman/MARBL/archive/refs/heads/$TGZ_NAME"
 ARG REPO_MARBL="https://github.com/marbl-ecosys/MARBL/archive/refs/tags/$TGZ_NAME"
 
 ENV MARBL_ROOT=$INSTALL_BASE_DIR/$MARBL_BASENAME
 ARG MARBL_PROFILE=/etc/profile.d/marbl.sh
 
 
-ARG REDO_2=3
 RUN wget -q "$REPO_MARBL" && \
     tar xvf "$TGZ_NAME" && \
     mv MARBL-$MARBL_BASENAME $MARBL_ROOT && \
@@ -239,7 +124,6 @@ RUN echo "export ROMS_ROOT=$ROMS_ROOT" >> $ROMS_PROFILE && \
     echo "export ROMS_PATH=$ROMS_PATH" >> $ROMS_PROFILE && \
     echo 'export PATH=$PATH:$ROMS_PATH' >> $ROMS_PROFILE
 
-ARG REDO=21
 RUN . /etc/profile && \
     wget -q "$REPO_ROMS" && \
     tar xvf $ROMS_BASENAME.tar.gz && \
@@ -249,23 +133,15 @@ RUN . /etc/profile && \
 WORKDIR /opt
 RUN mkdir -p /opt/work_internal/compile_time_code
 
-
-
-# RUN bash -c "source /etc/profile && cd /opt/work_internal/compile_time_code && make compile_clean && make"
-
 RUN \
     cd "$ROMS_ROOT/Work" && \
     make tools-roms COMPILER=gnu
 
 ENV PATH=$PATH:$ROMS_PATH
 
-#RUN \
-#   cd $ROMS_PATH && \
-#   make COMPILER=gnu
-
 COPY * /opt/work_internal/compile_time_code
 
-RUN cd /opt/work_internal/compile_time_code && make compile_clean && make COMPILER=gnu 
+RUN cd /opt/work_internal/compile_time_code && make compile_clean && make COMPILER=gnu
+
+# add these to end of roms compile if you need debug outputs:
 #BUILD_MODE=debug KEEP_PPSRC=true
-
-
