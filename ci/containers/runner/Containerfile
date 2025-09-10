@@ -48,9 +48,6 @@ COPY --from=stage_cstar $INSTALL_BASE_DIR/venv/ $INSTALL_BASE_DIR/venv/
 WORKDIR $INSTALL_BASE_DIR
 RUN mkdir -p $INSTALL_BASE_DIR/work_internal/compile_time_code
 
-COPY entrypoint-run.sh /entrypoint-run.sh
-RUN chmod +x /entrypoint-run.sh
-
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 

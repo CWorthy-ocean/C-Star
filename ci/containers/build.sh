@@ -137,9 +137,7 @@ perform_build() {
     TAG_L="$ACCOUNT/cstar-$IMAGE_NAME:latest"
 
     cp "$CONTEXT_PATH/../entrypoint.sh" $CONTEXT_PATH/entrypoint.sh
-    cp "$CONTEXT_PATH/../entrypoint-run.sh" $CONTEXT_PATH/entrypoint-run.sh
     chmod a+r $CONTEXT_PATH/entrypoint.sh
-    chmod a+r $CONTEXT_PATH/entrypoint-run.sh
 
     if [ -z "$BUILD_ARGS" ]; then
         log_info "Building '$LOCAL_TAG' in '$CONTEXT_PATH'"
