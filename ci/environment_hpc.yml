@@ -9,6 +9,7 @@ dependencies:
   - netCDF4
   - pip
   - pydantic>=2.11
+  - networkx>=3.5
   # testing
   - pre-commit==3.8.0
   - coverage

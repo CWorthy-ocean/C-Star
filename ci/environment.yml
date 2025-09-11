@@ -11,6 +11,7 @@ dependencies:
   - xarray
   - netCDF4
   - pydantic>=2.11
+  - networkx>=3.5
   # tests
   - pytest
   - pip
