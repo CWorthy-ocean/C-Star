@@ -58,7 +58,7 @@ To retrieve the latest version of a specific image, run:
 
 ## Running on multiple nodes on Perlmutter
 
-Podman-hpc is necessary to facilitate MPI communications between containers. It's a bit tricky to get right. To date, we have not gotten it working with our openmpi build (MPI_Init hangs indefinitely when multiple ranks exist on the _same_ node/container), but it does work using MPICH.
+Podman-hpc is necessary to facilitate MPI communications between containers. It's a bit tricky to get right. To date, we have not gotten it working with our openmpi build (MPI_Init hangs indefinitely when multiple ranks exist in the _same_ container, e.g. when using shared-run mode), but it does work using MPICH.
 
 Two different versions of an MPICH build have succeeded: one that links in NERSC's optimized libraries at build time (see [here](ci/containers/all_w_nersc_libs)), and one that builds our own versions of mpich, hdf5, and netcdf from source (see the Makefile in this directory, culminating in the [runner container image](ci/containers/runner)). Instructions for building and running the NERSC-linked container are in a [separate README](ci/containers/all_w_nersc_libs/README.md).
 
