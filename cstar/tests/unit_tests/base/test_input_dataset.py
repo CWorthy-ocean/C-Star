@@ -563,7 +563,7 @@ class TestInputDatasetGet:
 
             assert fake_inputdataset_local.working_path == expected_target_path, (
                 f"Expected working_path to be {expected_target_path}, but got {fake_inputdataset_local.working_path}"
-
+            )
 
         mock_path_resolve.assert_called()
 
