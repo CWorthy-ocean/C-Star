@@ -9,11 +9,11 @@ import pytest
 from cstar.base import Discretization
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
+
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     StubSimulation,
 )
-
 
 class TestSimulationInitialization:
     """Tests the initialization of the `Simulation` class and its helper functions.

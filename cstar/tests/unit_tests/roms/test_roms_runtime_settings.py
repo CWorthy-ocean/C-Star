@@ -90,7 +90,7 @@ class TestROMSRuntimeSettingsSection:
        where entries are on different lines.
     """
 
-    def test_init_with_args(self):
+    def test_init_with_args(self) -> None:
         """Test ROMSRuntimeSettingsSection.__init__ with *args instead of **kwargs."""
 
         class TestSection(ROMSRuntimeSettingsSection):
@@ -208,14 +208,14 @@ class TestROMSRuntimeSettingsSection:
             "otherval",
         ]
 
-    def test_from_lines_raises_if_no_lines(self):
+    def test_from_lines_raises_if_no_lines(self) -> None:
         """Test the `ROMSRuntimeSettingsSection.from_lines` method returns None if given
         an empty list.
         """
         with pytest.raises(ValueError):
             FakeROMSRuntimeSettingsSection.from_lines([])
 
-    def test_from_lines_on_float_section_with_D_formatting(self):
+    def test_from_lines_on_float_section_with_D_formatting(self) -> None:
         """Test a ROMSRuntimeSettingsSection subclass with a single float entry is
         correctly returned by `from_lines` with fortran-style formatting.
         """
@@ -226,7 +226,7 @@ class TestROMSRuntimeSettingsSection:
         section = FloatSection.from_lines(["5.0D0"])
         assert section.val == 5.0
 
-    def test_from_lines_multiple_fields(self):
+    def test_from_lines_multiple_fields(self) -> None:
         """Test a ROMSRuntimeSettingsSection with more than one entry is correctly
         returned by `from_lines`
         """
@@ -239,7 +239,7 @@ class TestROMSRuntimeSettingsSection:
         assert section.count == 7
         assert section.name == "example_name"
 
-    def test_from_lines_list_field_at_end(self):
+    def test_from_lines_list_field_at_end(self) -> None:
         """Test that ROMSRuntimeSettingsSection.from_lines correctly handles lines where
         the final entry is a list (using all remaining values to populate it)
         """
@@ -252,7 +252,7 @@ class TestROMSRuntimeSettingsSection:
         assert section.prefix == "prefix"
         assert section.items == [1, 2, 3]
 
-    def test_from_lines_list_field_only(self):
+    def test_from_lines_list_field_only(self) -> None:
         """Test that ROMSRuntimeSettingsSection.from_lines correctly returns a valid
         instance when the only entry is a list.
         """
@@ -263,7 +263,7 @@ class TestROMSRuntimeSettingsSection:
         section = OnlyList.from_lines(["a b c"])
         assert section.entries == ["a", "b", "c"]
 
-    def test_from_lines_multiline_flag(self):
+    def test_from_lines_multiline_flag(self) -> None:
         """Test that ROMSRuntimeSettingsSection.from_lines correctly handles the case
         where entries are on different lines.
         """
@@ -275,7 +275,7 @@ class TestROMSRuntimeSettingsSection:
         section = MultiLinePaths.from_lines(["a.nc", "b.nc", "c.nc"])
         assert section.paths == [Path("a.nc"), Path("b.nc"), Path("c.nc")]
 
-    def test_from_lines_on_initial_conditions_with_nrrec_0(self):
+    def test_from_lines_on_initial_conditions_with_nrrec_0(self) -> None:
         """Test the bespoke InitialConditions.from_lines() method handles the situation
         where nrrec is 0 and ininame is empty.
         """
@@ -288,11 +288,11 @@ class TestROMSRuntimeSettingsSection:
         assert ic.ininame is None
         assert ic.model_dump() == "initial: nrrec ininame\n    0\n\n"
 
-    def test_from_lines_on_forcing_with_filenames_empty(self):
+    def test_from_lines_on_forcing_with_filenames_empty(self) -> None:
         """Test the bespoke Forcing.from_lines() method handles the situation where
         filenames is empty.
         """
-        lines = []
+        lines: list[str] = []
         fr = Forcing.from_lines(lines)
         assert fr.filenames is None
         assert fr.model_dump() == "forcing: filenames\n    \n\n"
@@ -323,7 +323,7 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     class MockSingleEntrySection(SingleEntryROMSRuntimeSettingsSection):
         value: float
 
-    def test_single_entry_validator_returns_cls_when_type_matches(self):
+    def test_single_entry_validator_returns_cls_when_type_matches(self) -> None:
         """Tests that the `single_entry_validator` method passes a correctly typed value
         to cls() without requiring a dict or kwargs for initialization.
         """
@@ -334,7 +334,9 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         )
         assert result.value == 3.14
 
-    def test_single_entry_validator_calls_handler_when_type_does_not_match(self):
+    def test_single_entry_validator_calls_handler_when_type_does_not_match(
+        self,
+    ) -> None:
         """Tests that `single_entry_validator` falls back to the handler if the value
         supplied to __init__ is not of the expected type.
         """
@@ -362,14 +364,16 @@ class TestSingleEntryROMSRuntimeSettingsSection:
             (Path.cwd(), Path, nullcontext()),
         ],
     )
-    def test_strict_validation_for_single_entries(self, obj, annotation, context):
+    def test_strict_validation_for_single_entries(
+        self, obj, annotation, context
+    ) -> None:
         class MyTestClass(SingleEntryROMSRuntimeSettingsSection):
             value: annotation
 
         with context:
             assert MyTestClass(obj).value == obj
 
-    def test_str_and_repr_return_value(self):
+    def test_str_and_repr_return_value(self) -> None:
         """Tests that the `str` and `repr` functions for
         SingleEntryROMSRuntimeSettingsSection simply return a string of the single
         entry's value.
@@ -378,7 +382,7 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         assert str(section) == "1.0"
         assert repr(section) == "1.0"
 
-    def test_single_entry_section_raises_if_multiple_fields(self):
+    def test_single_entry_section_raises_if_multiple_fields(self) -> None:
         """Tests that attempting to initialize a SingleEntryROMSRuntimeSettingsSection
         with multiple entries raises a TypeError.
         """
@@ -423,7 +427,7 @@ class TestROMSRuntimeSettings:
        functionally identical with the one subsequently read back with from_file
     """
 
-    def test_load_raw_sections_parses_multiple_sections(self, tmp_path):
+    def test_load_raw_sections_parses_multiple_sections(self, tmp_path: Path) -> None:
         file = tmp_path / "test.in"
         file.write_text(
             """
@@ -448,7 +452,9 @@ class TestROMSRuntimeSettings:
             "bottom_drag": ["0.0 1.0E-3 1.0E-2"],
         }
 
-    def test_load_raw_sections_skips_blank_and_comment_lines(self, tmp_path):
+    def test_load_raw_sections_skips_blank_and_comment_lines(
+        self, tmp_path: Path
+    ) -> None:
         file = tmp_path / "test.in"
         file.write_text(
             """
@@ -463,11 +469,15 @@ class TestROMSRuntimeSettings:
         result = ROMSRuntimeSettings._load_raw_sections(file)
         assert result == {"title": ["This is a test"]}
 
-    def test_load_raw_sections_raises_on_missing_file(self):
+    def test_load_raw_sections_raises_on_missing_file(self) -> None:
         with pytest.raises(FileNotFoundError, match="does not exist"):
             ROMSRuntimeSettings._load_raw_sections(Path("not_a_file.in"))
 
-    def test_to_file(self, fake_romsruntimesettings, tmp_path):
+
+    def test_to_file(
+        self, fake_romsruntimesettings: ROMSRuntimeSettings, tmp_path: Path
+    ) -> None:
+
         """Test the ROMSRuntimeSettings.to_file method.
 
         This test writes the example ROMSRuntimeSettings instance
@@ -512,7 +522,9 @@ class TestROMSRuntimeSettings:
             lns = f.readlines()
         assert all(["climatology" not in s for s in lns])
 
-    def test_from_file(self, fake_romsruntimesettings):
+
+    def test_from_file(self, fake_romsruntimesettings: ROMSRuntimeSettings) -> None:
+
         """Test the ROMSRuntimeSettings.from_file method.
 
         This test compares the ROMSRuntimeSettings instance created from
@@ -559,7 +571,7 @@ class TestROMSRuntimeSettings:
         assert tested_settings.tracer_diff2 == expected_settings.tracer_diff2
         assert tested_settings.vertical_mixing == expected_settings.vertical_mixing
 
-    def test_from_file_with_missing_optional_sections(self, tmp_path):
+    def test_from_file_with_missing_optional_sections(self, tmp_path: Path) -> None:
         """Confirms that ROMSRuntimeSettings.from_file sets the attributes corresponding
         to settings that are not present in the file to None.
 
@@ -587,7 +599,7 @@ class TestROMSRuntimeSettings:
         tested_settings = ROMSRuntimeSettings.from_file(modified_file)
         assert tested_settings.climatology is None
 
-    def test_from_file_raises_if_missing_section(self, tmp_path):
+    def test_from_file_raises_if_missing_section(self, tmp_path: Path) -> None:
         modified_file = tmp_path / "modified_example_settings.in"
         shutil.copy2(
             Path(__file__).parent / "fixtures/fake_romsruntimesettings.in",
@@ -598,7 +610,11 @@ class TestROMSRuntimeSettings:
         with pytest.raises(ValueError, match="Required field missing from file."):
             ROMSRuntimeSettings.from_file(modified_file)
 
-    def test_file_roundtrip(self, fake_romsruntimesettings, tmp_path):
+
+    def test_file_roundtrip(
+        self, fake_romsruntimesettings: ROMSRuntimeSettings, tmp_path: Path
+    ) -> None:
+
         """Tests that the `to_file`/`from_file` roundtrip results in a functionally
         indentical ROMSRuntimeSettings instance.
 
@@ -650,7 +666,8 @@ class TestStrAndRepr:
     behave as expected.
     """
 
-    def test_str(self, fake_romsruntimesettings):
+    def test_str(self, fake_romsruntimesettings: ROMSRuntimeSettings) -> None:
+
         """Test that the __str__ function of ROMSRuntimeSettings matches an expected
         string for the example instance.
 
@@ -712,11 +729,13 @@ Open boundary binding velocity (`ROMSRuntimeSettings.ubind`, m/s) = 0.1
 Maximum sponge layer viscosity (`ROMSRuntimeSettings.v_sponge`, m2/s) = 0.0
 Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
 
+
         assert str(fake_romsruntimesettings) == expected_str, (
-            f"expected \n{expected_str}\n, got\n{str(fake_romsruntimesettings)}"
+            f"expected \n{expected_str}\n, got\n{fake_romsruntimesettings!s}"
         )
 
-    def test_repr(self, fake_romsruntimesettings):
+    def test_repr(self, fake_romsruntimesettings: ROMSRuntimeSettings) -> None:
+
         """Test that the __repr__ function of ROMSRuntimeSettings matches an expected
         string for the example instance.
 
@@ -730,6 +749,7 @@ Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
         - repr(fake_romsruntimesettings) matches an expected reference string
         """
         expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_list_fname'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
+
         assert expected_repr == repr(fake_romsruntimesettings), (
-            f"expected \n{expected_repr}\n, got\n{repr(fake_romsruntimesettings)}"
+            f"expected \n{expected_repr}\n, got\n{fake_romsruntimesettings!r}"
         )

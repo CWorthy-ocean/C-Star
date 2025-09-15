@@ -9,7 +9,6 @@ from cstar.base.gitutils import (
     _get_repo_remote,
 )
 from cstar.base.log import LoggingMixin
-from cstar.system.environment import CSTAR_USER_ENV_PATH
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -44,11 +43,11 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     Methods
     -------
-    get_local_config_status()
+    local_config_status()
         Perform a series of checks to determine how the external codebase is configured on this machine
         relative to this ExternalCodeBase instance.
     handle_local_config_status()
-        Perform actions depending on the output of get_local_config_status()
+        Perform actions depending on the output of local_config_status()
     get()
         Obtain and configure the external codebase on this machine if it is not already.
         handle_local_config_status() prompts the user to run get() if the model cannot be found.
@@ -153,6 +152,18 @@ class ExternalCodeBase(ABC, LoggingMixin):
         """
 
     @property
+    def default_externals_root(self) -> Path:
+        """The default path of the root directory where external codebases are stored.
+
+        Returns
+        -------
+        Path
+            The path to the directory.
+        """
+        pkg_relative_path = f"externals/{self.repo_basename}"
+        return cstar_sysmgr.environment.package_root / pkg_relative_path
+
+    @property
     def local_config_status(self) -> int:
         """Perform a series of checks to ensure that the external codebase is properly
         configured on this machine.
@@ -172,16 +183,11 @@ class ExternalCodeBase(ABC, LoggingMixin):
            3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
         """
         # check 1: X_ROOT variable is in user's env
-        env_var_exists = (
-            self.expected_env_var
-            in cstar_sysmgr.environment.environment_variables.keys()
-        )
+        env_var = os.environ.get(self.expected_env_var, "")
 
         # check 2: X_ROOT points to the correct repository
-        if env_var_exists:
-            local_root = Path(
-                cstar_sysmgr.environment.environment_variables[self.expected_env_var]
-            )
+        if env_var:
+            local_root = Path(env_var)
             env_var_repo_remote = _get_repo_remote(local_root)
             env_var_matches_repo = self.source_repo == env_var_repo_remote
             if not env_var_matches_repo:
@@ -204,9 +210,9 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     def handle_config_status(self) -> None:
         """Perform actions depending on the output of
-        ExternalCodeBase.get_local_config_status()
+        ExternalCodeBase.local_config_status()
 
-        The config_status attribute should be set by the get_local_config_status method
+        The config_status attribute should be set by the local_config_status method
 
         The method then proceeds as follows:
         config_status =
@@ -220,13 +226,9 @@ class ExternalCodeBase(ABC, LoggingMixin):
            - 3: The expected environment variable is not present and it is assumed the external codebase is not installed locally
                -> prompt installation of the external codebase
         """
-        local_root = Path(
-            cstar_sysmgr.environment.environment_variables.get(
-                self.expected_env_var, ""
-            )
-        )
+        local_root = Path(os.environ.get(self.expected_env_var, ""))
 
-        interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
+        interactive = os.environ.get("CSTAR_INTERACTIVE", "1") == "1"
 
         match self.local_config_status:
             case 0:
@@ -275,10 +277,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     else:
                         print("invalid selection; enter 'y' or 'n'")
             case 3:
-                ext_dir = (
-                    cstar_sysmgr.environment.package_root
-                    / f"externals/{self.repo_basename}"
-                )
+                user_env_path = cstar_sysmgr.environment.user_env_path
                 print(
                     "#######################################################\n"
                     f"C-STAR: {self.expected_env_var}"
@@ -287,13 +286,13 @@ class ExternalCodeBase(ABC, LoggingMixin):
                     f"an instance of {self.__class__.__name__}, "
                     "you will need to set it up.\n"
                     "It is recommended that you install this external codebase in \n"
-                    f"{ext_dir}\n"
-                    f"This will also modify your `{CSTAR_USER_ENV_PATH}` file.\n"
+                    f"{self.default_externals_root}\n"
+                    f"This will also modify your `{user_env_path}` file.\n"
                     "#######################################################"
                 )
                 while True:
-                    if not ext_dir.exists():
-                        ext_dir.mkdir(parents=True)
+                    if not self.default_externals_root.exists():
+                        self.default_externals_root.mkdir(parents=True)
 
                     yn = "y"
                     if interactive:
@@ -302,7 +301,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                             "('y', 'n', or 'custom' to install at a custom path)\n"
                         )
                     if yn.casefold() in ["y", "yes", "ok"]:
-                        self.get(ext_dir)
+                        self.get(self.default_externals_root)
                         break
                     elif yn.casefold() in ["n", "no"]:
                         raise OSError()

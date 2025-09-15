@@ -131,9 +131,7 @@ class InputDataset(ABC, LoggingMixin):
             # Compare modification time, fallback to hash check if mismatched
             if current_stats.st_mtime != cached_stats.st_mtime:
                 current_hash = _get_sha256_hash(path.resolve())
-                if (self._local_file_hash_cache is None) or (
-                    self._local_file_hash_cache.get(path) != current_hash
-                ):
+                if self._local_file_hash_cache.get(path, None) != current_hash:
                     return False
 
         return True

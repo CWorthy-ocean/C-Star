@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from unittest import mock
 
@@ -74,19 +75,24 @@ def test_codebase_str(fake_externalcodebase):
         )
 
 
+
 def test_codebase_repr(fake_externalcodebase):
     """Test the repr representation of the `ExternalCodeBase` class."""
-    result_repr = repr(fake_externalcodebase)
-    expected_repr = (
-        "FakeExternalCodeBase("
-        + "\nsource_repo = 'https://github.com/test/repo.git',"
-        + "\ncheckout_target = 'test_target'"
-        + "\n)"
-        + "\nState: <local_config_status = 3>"
-    )
+    with mock.patch(
+        "cstar.system.environment.CStarEnvironment.environment_variables",
+        new_callable=mock.PropertyMock,
+        return_value={},
+    ):
+      result_repr = repr(fake_externalcodebase)
+      expected_repr = (
+          "FakeExternalCodeBase("
+          + "\nsource_repo = 'https://github.com/test/repo.git',"
+          + "\ncheckout_target = 'test_target'"
+          + "\n)"
+          + "\nState: <local_config_status = 3>"
+      )
 
-    assert result_repr == expected_repr
-    pass
+      assert result_repr == expected_repr
 
 
 class TestExternalCodeBaseConfig:
@@ -151,22 +157,40 @@ class TestExternalCodeBaseConfig:
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "test123"
 
-        # Assert local_config_status logic
-        assert fake_externalcodebase.local_config_status == 0
-        assert fake_externalcodebase.is_setup
+        with mock.patch.dict(
+            "os.environ",
+            {"TEST_ROOT": "https://github.com/test/repo.git"},
+            clear=True,
+        ):
+            # Assert local_config_status logic
+            assert fake_externalcodebase.local_config_status == 0
+            assert fake_externalcodebase.is_setup
+
 
     def test_local_config_status_wrong_remote(self, fake_externalcodebase):
         self.mock_get_repo_remote.return_value = (
             "https://github.com/test/wrong_repo.git"
         )
 
-        assert fake_externalcodebase.local_config_status == 1
+        with mock.patch.dict(
+            "os.environ",
+            {"TEST_ROOT": "https://github.com/test/repo.git"},
+            clear=True,
+        ):
+            assert fake_externalcodebase.local_config_status == 1
+
 
     def test_local_config_status_wrong_checkout(self, fake_externalcodebase):
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
-        assert fake_externalcodebase.local_config_status == 2
+        with mock.patch.dict(
+            "os.environ",
+            {"TEST_ROOT": "https://github.com/test/repo.git"},
+            clear=True,
+        ):
+            assert fake_externalcodebase.local_config_status == 2
+
 
     def test_local_config_status_no_env_var(self, fake_externalcodebase):
         self.mock_environment.return_value.environment_variables = {}
@@ -337,13 +361,10 @@ class TestExternalCodeBaseConfigHandling:
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
 
-        with mock.patch(
-            "cstar.system.manager.CStarSystemManager.environment",
-            new_callable=mock.PropertyMock,
-            return_value=mock.Mock(
-                environment_variables={"TEST_ROOT": "/path/to/repo"},
-                package_root=tmp_path,
-            ),
+        with mock.patch.dict(
+            "os.environ",
+            {"TEST_ROOT": "/path/to/repo"},
+            clear=True,
         ):
             # Call the method to trigger the flow
             fake_externalcodebase.handle_config_status()

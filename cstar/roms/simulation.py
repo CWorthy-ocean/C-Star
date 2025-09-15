@@ -948,7 +948,7 @@ class ROMSSimulation(Simulation):
             bp_dict, directory=directory, start_date=start_date, end_date=end_date
         )
 
-    def to_blueprint(self, filename: str) -> None:
+    def to_blueprint(self, filename: str | Path) -> None:
         """Save the `ROMSSimulation` instance as a YAML blueprint.
 
         This method converts the simulation instance into a dictionary representation
@@ -956,7 +956,7 @@ class ROMSSimulation(Simulation):
 
         Parameters
         ----------
-        filename : str
+        filename : str or Path
             The name of the YAML file where the blueprint will be saved.
 
         Raises
@@ -1227,7 +1227,7 @@ class ROMSSimulation(Simulation):
             _run_cmd(
                 "make compile_clean",
                 cwd=build_dir,
-                msg_err="Error when compiling ROMS.",
+                msg_err="Error when cleaning existing ROMS compilation.",
                 raise_on_error=True,
             )
 
@@ -1571,8 +1571,8 @@ class ROMSSimulation(Simulation):
 
         # Reset cached data for input datasets
         for inp in new_sim.input_datasets:
-            inp._local_file_hash_cache = None
-            inp._local_file_stat_cache = None
+            inp._local_file_hash_cache.clear()
+            inp._local_file_stat_cache.clear()
             inp.working_path = None
 
         return new_sim

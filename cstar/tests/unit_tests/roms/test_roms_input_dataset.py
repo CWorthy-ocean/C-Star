@@ -654,6 +654,8 @@ class TestROMSInputDatasetGet:
 
         mock_path_resolve.assert_called()
 
+        mock_path_resolve.assert_called()
+
     @mock.patch(
         "cstar.roms.input_dataset.ROMSInputDataset._get_from_partitioned_source",
         autospec=True,

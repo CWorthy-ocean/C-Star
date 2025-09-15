@@ -94,8 +94,9 @@ class TestMARBLExternalCodeBaseGet:
         value = str(marbl_path)
 
         with mock.patch(
-            "cstar.system.environment.CSTAR_USER_ENV_PATH",
-            dotenv_path,
+            "cstar.system.environment.CStarEnvironment.user_env_path",
+            new_callable=mock.PropertyMock,
+            return_value=dotenv_path,
         ):
             # Test
             ## Call the get method
@@ -143,8 +144,9 @@ class TestMARBLExternalCodeBaseGet:
                 ),
             ),
             mock.patch(
-                "cstar.system.environment.CSTAR_USER_ENV_PATH",
-                dotenv_path,
+                "cstar.system.environment.CStarEnvironment.user_env_path",
+                new_callable=mock.PropertyMock,
+                return_value=dotenv_path,
             ),
         ):
             self.marbl_codebase.get(target=tmp_path)
