@@ -473,11 +473,9 @@ class TestROMSRuntimeSettings:
         with pytest.raises(FileNotFoundError, match="does not exist"):
             ROMSRuntimeSettings._load_raw_sections(Path("not_a_file.in"))
 
-
     def test_to_file(
         self, fake_romsruntimesettings: ROMSRuntimeSettings, tmp_path: Path
     ) -> None:
-
         """Test the ROMSRuntimeSettings.to_file method.
 
         This test writes the example ROMSRuntimeSettings instance
@@ -522,9 +520,7 @@ class TestROMSRuntimeSettings:
             lns = f.readlines()
         assert all(["climatology" not in s for s in lns])
 
-
     def test_from_file(self, fake_romsruntimesettings: ROMSRuntimeSettings) -> None:
-
         """Test the ROMSRuntimeSettings.from_file method.
 
         This test compares the ROMSRuntimeSettings instance created from
@@ -610,11 +606,9 @@ class TestROMSRuntimeSettings:
         with pytest.raises(ValueError, match="Required field missing from file."):
             ROMSRuntimeSettings.from_file(modified_file)
 
-
     def test_file_roundtrip(
         self, fake_romsruntimesettings: ROMSRuntimeSettings, tmp_path: Path
     ) -> None:
-
         """Tests that the `to_file`/`from_file` roundtrip results in a functionally
         indentical ROMSRuntimeSettings instance.
 
@@ -667,7 +661,6 @@ class TestStrAndRepr:
     """
 
     def test_str(self, fake_romsruntimesettings: ROMSRuntimeSettings) -> None:
-
         """Test that the __str__ function of ROMSRuntimeSettings matches an expected
         string for the example instance.
 
@@ -729,13 +722,11 @@ Open boundary binding velocity (`ROMSRuntimeSettings.ubind`, m/s) = 0.1
 Maximum sponge layer viscosity (`ROMSRuntimeSettings.v_sponge`, m2/s) = 0.0
 Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
 
-
         assert str(fake_romsruntimesettings) == expected_str, (
             f"expected \n{expected_str}\n, got\n{fake_romsruntimesettings!s}"
         )
 
     def test_repr(self, fake_romsruntimesettings: ROMSRuntimeSettings) -> None:
-
         """Test that the __repr__ function of ROMSRuntimeSettings matches an expected
         string for the example instance.
 

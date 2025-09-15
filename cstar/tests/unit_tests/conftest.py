@@ -1,28 +1,20 @@
 import functools
 import logging
-import pathlib
 from collections.abc import Callable, Generator
-
 from pathlib import Path
 from unittest import mock
 
+import dotenv
 import numpy as np
 import pytest
 
-from cstar.base import AdditionalCode, Discretization
-from cstar.base.datasource import DataSource
-from cstar.base.log import get_logger
-from cstar.marbl import MARBLExternalCodeBase
-from cstar.roms import ROMSDiscretization, ROMSExternalCodeBase, ROMSSimulation
-import dotenv
-import pytest
-
+from cstar.base import Discretization
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.datasource import DataSource
 from cstar.base.log import get_logger
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
-
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSForcingCorrections,
@@ -32,8 +24,8 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.simulation import ROMSSimulation
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
+from cstar.roms.simulation import ROMSSimulation
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -517,7 +509,6 @@ def fake_romssimulation(
 
 
 ################################################################################
-
 
 
 @pytest.fixture

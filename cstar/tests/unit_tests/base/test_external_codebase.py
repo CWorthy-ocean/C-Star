@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 from unittest import mock
 
@@ -75,7 +74,6 @@ def test_codebase_str(fake_externalcodebase):
         )
 
 
-
 def test_codebase_repr(fake_externalcodebase):
     """Test the repr representation of the `ExternalCodeBase` class."""
     with mock.patch(
@@ -83,16 +81,16 @@ def test_codebase_repr(fake_externalcodebase):
         new_callable=mock.PropertyMock,
         return_value={},
     ):
-      result_repr = repr(fake_externalcodebase)
-      expected_repr = (
-          "FakeExternalCodeBase("
-          + "\nsource_repo = 'https://github.com/test/repo.git',"
-          + "\ncheckout_target = 'test_target'"
-          + "\n)"
-          + "\nState: <local_config_status = 3>"
-      )
+        result_repr = repr(fake_externalcodebase)
+        expected_repr = (
+            "FakeExternalCodeBase("
+            + "\nsource_repo = 'https://github.com/test/repo.git',"
+            + "\ncheckout_target = 'test_target'"
+            + "\n)"
+            + "\nState: <local_config_status = 3>"
+        )
 
-      assert result_repr == expected_repr
+        assert result_repr == expected_repr
 
 
 class TestExternalCodeBaseConfig:
@@ -166,7 +164,6 @@ class TestExternalCodeBaseConfig:
             assert fake_externalcodebase.local_config_status == 0
             assert fake_externalcodebase.is_setup
 
-
     def test_local_config_status_wrong_remote(self, fake_externalcodebase):
         self.mock_get_repo_remote.return_value = (
             "https://github.com/test/wrong_repo.git"
@@ -179,7 +176,6 @@ class TestExternalCodeBaseConfig:
         ):
             assert fake_externalcodebase.local_config_status == 1
 
-
     def test_local_config_status_wrong_checkout(self, fake_externalcodebase):
         self.mock_get_repo_remote.return_value = "https://github.com/test/repo.git"
         self.mock_get_repo_head_hash.return_value = "wrong123"
@@ -190,7 +186,6 @@ class TestExternalCodeBaseConfig:
             clear=True,
         ):
             assert fake_externalcodebase.local_config_status == 2
-
 
     def test_local_config_status_no_env_var(self, fake_externalcodebase):
         self.mock_environment.return_value.environment_variables = {}
