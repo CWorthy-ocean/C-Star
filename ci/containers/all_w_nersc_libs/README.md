@@ -17,7 +17,7 @@ podman-hpc migrate runner_built_w_nersc_libs:latest
 
 And then at runtime:
 
-```
+```commandline
 salloc --nodes 2 --qos interactive --time 00:30:00 --constraint cpu --account m4632
 
 export IMG_NAME=<your img from above build, migrated>

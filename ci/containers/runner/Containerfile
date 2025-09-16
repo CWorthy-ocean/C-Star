@@ -67,6 +67,8 @@ RUN mkdir -p $INSTALL_BASE_DIR/work_internal/compile_time_code
 # add these to end of roms compile if you need debug outputs:
 # BUILD_MODE=debug KEEP_PPSRC=true"
 
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 COPY run.sh /run.sh
 RUN chmod +x /run.sh

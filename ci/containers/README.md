@@ -66,7 +66,7 @@ For the multistage, built-from-source version, you should be able to clone this 
 
 With a built and migrated runner image, the following command worked at runtime:
 
-```
+```commandline
 salloc --nodes 2 --qos interactive --time 00:30:00 --constraint cpu --account m4632
 
 export IMG_NAME=<your img from above build, migrated>
