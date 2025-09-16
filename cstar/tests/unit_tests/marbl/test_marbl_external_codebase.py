@@ -9,43 +9,32 @@ from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.system.manager import cstar_sysmgr
 
 
-@pytest.fixture
-def marbl_codebase():
-    """Fixture providing a configured instance of `MARBLExternalCodeBase` for
-    testing.
-    """
-    source_repo = "https://github.com/marbl-ecosys/MARBL.git"
-    checkout_target = "marbl0.45.0"
-    return MARBLExternalCodeBase(
-        source_repo=source_repo, checkout_target=checkout_target
-    )
+class TestMARBLExternalCodeBaseInit:
+    """Test initialization of MARBLExternalCodeBase"""
 
+    def test_init_with_args(self):
+        """Test that MARBLExternalCodeBase is initialized correctly with user args"""
+        source_repo = "https://github.com/dafyddstephenson/MARBL.git"
+        checkout_target = "main"
+        marbl_codebase = MARBLExternalCodeBase(
+            source_repo=source_repo, checkout_target=checkout_target
+        )
+        assert marbl_codebase.source_repo == source_repo
+        assert marbl_codebase.checkout_target == checkout_target
+        assert (
+            marbl_codebase.default_source_repo
+            == "https://github.com/marbl-ecosys/MARBL.git"
+        )
+        assert marbl_codebase.default_checkout_target == "marbl0.45.0"
+        assert marbl_codebase.expected_env_var == "MARBL_ROOT"
 
-def test_default_source_repo(marbl_codebase):
-    """Test if the default source repo is set correctly."""
-    assert (
-        marbl_codebase.default_source_repo
-        == "https://github.com/marbl-ecosys/MARBL.git"
-    )
-
-
-def test_default_checkout_target(marbl_codebase):
-    """Test if the default checkout target is set correctly."""
-    assert marbl_codebase.default_checkout_target == "marbl0.45.0"
-
-
-def test_expected_env_var(marbl_codebase):
-    """Test if the expected environment variable is set correctly."""
-    assert marbl_codebase.expected_env_var == "MARBL_ROOT"
-
-
-def test_defaults_are_set():
-    """Test that the defaults are set correctly if MARBLExternalCodeBase initialized
-    without args.
-    """
-    marbl_codebase = MARBLExternalCodeBase()
-    assert marbl_codebase.source_repo == "https://github.com/marbl-ecosys/MARBL.git"
-    assert marbl_codebase.checkout_target == "marbl0.45.0"
+    def test_init_without_args(self):
+        """Test that the defaults are set correctly if MARBLExternalCodeBase initialized
+        without args.
+        """
+        marbl_codebase = MARBLExternalCodeBase()
+        assert marbl_codebase.source_repo == marbl_codebase.default_source_repo
+        assert marbl_codebase.checkout_target == marbl_codebase.default_checkout_target
 
 
 class TestMARBLExternalCodeBaseGet:
@@ -62,9 +51,6 @@ class TestMARBLExternalCodeBaseGet:
 
     Fixtures
     --------
-    marbl_codebase : MARBLExternalCodeBase
-        Provides a mock instance of `MARBLExternalCodeBase` with the default repository and
-        checkout target.
     tmp_path : pathlib.Path
         Supplies a temporary directory for isolated file operations during testing.
 
@@ -85,7 +71,7 @@ class TestMARBLExternalCodeBaseGet:
         self.mock_clone_and_checkout = mock.patch(
             "cstar.marbl.external_codebase._clone_and_checkout"
         ).start()
-
+        self.marbl_codebase = MARBLExternalCodeBase()
         # Clear environment variables
         self.env_patch = mock.patch.dict(os.environ, {}, clear=True)
         self.env_patch.start()
@@ -98,14 +84,13 @@ class TestMARBLExternalCodeBaseGet:
         self,
         dotenv_path: pathlib.Path,
         marbl_path: pathlib.Path,
-        marbl_codebase: MARBLExternalCodeBase,
     ):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
         ## Mock success of calls to subprocess.run:
         self.mock_subprocess_run.return_value.returncode = 0
 
-        key = marbl_codebase.expected_env_var
+        key = self.marbl_codebase.expected_env_var
         value = str(marbl_path)
 
         with mock.patch(
@@ -115,7 +100,7 @@ class TestMARBLExternalCodeBaseGet:
         ):
             # Test
             ## Call the get method
-            marbl_codebase.get(target=marbl_path)
+            self.marbl_codebase.get(target=marbl_path)
 
             # Assertions:
             ## Check environment variables
@@ -123,9 +108,9 @@ class TestMARBLExternalCodeBaseGet:
 
             ## Check that _clone_and_checkout was (mock) called correctly
             self.mock_clone_and_checkout.assert_called_once_with(
-                source_repo=marbl_codebase.source_repo,
+                source_repo=self.marbl_codebase.source_repo,
                 local_path=marbl_path,
-                checkout_target=marbl_codebase.checkout_target,
+                checkout_target=self.marbl_codebase.checkout_target,
             )
 
             ## Check that environment was updated correctly
@@ -140,7 +125,7 @@ class TestMARBLExternalCodeBaseGet:
                 shell=True,
             )
 
-    def test_make_failure(self, marbl_codebase, tmp_path):
+    def test_make_failure(self, tmp_path):
         """Test that the get method raises an error when 'make' fails."""
         ## There are two subprocess calls, we'd like one fail, one pass:
         dotenv_path = tmp_path / ".cstar.env"
@@ -164,4 +149,4 @@ class TestMARBLExternalCodeBaseGet:
                 return_value=dotenv_path,
             ),
         ):
-            marbl_codebase.get(target=tmp_path)
+            self.marbl_codebase.get(target=tmp_path)

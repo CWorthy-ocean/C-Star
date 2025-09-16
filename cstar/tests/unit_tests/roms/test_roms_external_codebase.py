@@ -9,39 +9,28 @@ from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.system.manager import cstar_sysmgr
 
 
-@pytest.fixture
-def roms_codebase():
-    """Fixture providing a configured instance of `ROMSExternalCodeBase` for testing."""
-    source_repo = "https://github.com/CWorthy-ocean/ucla-roms.git"
-    checkout_target = "246c11fa537145ba5868f2256dfb4964aeb09a25"
-    return ROMSExternalCodeBase(
-        source_repo=source_repo, checkout_target=checkout_target
-    )
+class TestROMSExternalCodeBaseInit:
+    def test_init_with_args(self):
+        """Test ROMSExternalCodeBase initializes correctly with arguments."""
+        source_repo = "https://github.com/ucla-roms/ucla-roms.git"
+        checkout_target = "246c11fa537145ba5868f2256dfb4964aeb09a25"
+        roms_codebase = ROMSExternalCodeBase(
+            source_repo=source_repo, checkout_target=checkout_target
+        )
+        assert roms_codebase.source_repo == source_repo
+        assert roms_codebase.checkout_target == checkout_target
+        assert (
+            roms_codebase.default_source_repo
+            == "https://github.com/CWorthy-ocean/ucla-roms.git"
+        )
+        assert roms_codebase.default_checkout_target == "main"
+        assert roms_codebase.expected_env_var == "ROMS_ROOT"
 
-
-def test_default_source_repo(roms_codebase):
-    """Test if the default source repo is set correctly."""
-    assert (
-        roms_codebase.default_source_repo
-        == "https://github.com/CWorthy-ocean/ucla-roms.git"
-    )
-
-
-def test_default_checkout_target(roms_codebase):
-    """Test if the default checkout target is set correctly."""
-    assert roms_codebase.default_checkout_target == "main"
-
-
-def test_expected_env_var(roms_codebase):
-    """Test if the expected environment variable is set correctly."""
-    assert roms_codebase.expected_env_var == "ROMS_ROOT"
-
-
-def test_defaults_are_set():
-    """Test that the defaults are set correctly."""
-    roms_codebase = ROMSExternalCodeBase()
-    assert roms_codebase.source_repo == "https://github.com/CWorthy-ocean/ucla-roms.git"
-    assert roms_codebase.checkout_target == "main"
+    def test_init_without_args(self):
+        """Test ROMSExternalCodeBase uses defaults when no args provided."""
+        roms_codebase = ROMSExternalCodeBase()
+        assert roms_codebase.checkout_target == roms_codebase.default_checkout_target
+        assert roms_codebase.source_repo == roms_codebase.default_source_repo
 
 
 class TestROMSExternalCodeBaseGet:
@@ -68,9 +57,6 @@ class TestROMSExternalCodeBaseGet:
 
     Fixtures
     --------
-    roms_codebase : ROMSExternalCodeBase
-        A configured instance of `ROMSExternalCodeBase` for testing purposes, with predefined
-        source repository and checkout target.
     tmp_path : pathlib.Path
         A temporary directory for isolating filesystem operations.
 
@@ -97,7 +83,7 @@ class TestROMSExternalCodeBaseGet:
         ).start()
 
         self.mock_copytree = mock.patch("shutil.copytree").start()
-
+        self.roms_codebase = ROMSExternalCodeBase()
         # Clear environment variables
         self.env_patch = mock.patch.dict(os.environ, {}, clear=True)
         self.env_patch.start()
@@ -110,7 +96,6 @@ class TestROMSExternalCodeBaseGet:
         self,
         dotenv_path: pathlib.Path,
         roms_path: pathlib.Path,
-        roms_codebase: ROMSExternalCodeBase,
     ):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
@@ -124,7 +109,7 @@ class TestROMSExternalCodeBaseGet:
 
             # Test
             ## Call the get method
-            roms_codebase.get(target=roms_path)
+            self.roms_codebase.get(target=roms_path)
 
             # Assertions:
             ## Check environment variables
@@ -133,17 +118,17 @@ class TestROMSExternalCodeBaseGet:
             exp_roms_value = str(roms_path)
             exp_roms_tools_value = f":{roms_path / 'Tools-Roms'}"
 
-            assert os.environ[roms_codebase.expected_env_var] == exp_roms_value
+            assert os.environ[self.roms_codebase.expected_env_var] == exp_roms_value
             assert exp_roms_tools_value in os.environ["PATH"]
 
             ## Check that _clone_and_checkout was (mock) called correctly
             self.mock_clone_and_checkout.assert_called_once_with(
-                source_repo=roms_codebase.source_repo,
+                source_repo=self.roms_codebase.source_repo,
                 local_path=roms_path,
-                checkout_target=roms_codebase.checkout_target,
+                checkout_target=self.roms_codebase.checkout_target,
             )
 
-            k0, v0 = roms_codebase.expected_env_var, str(roms_path)
+            k0, v0 = self.roms_codebase.expected_env_var, str(roms_path)
             k1, v1 = "PATH", f"${{PATH}}{exp_roms_tools_value}"
 
             cfg = dotenv.dotenv_values(dotenv_path)
@@ -172,7 +157,7 @@ class TestROMSExternalCodeBaseGet:
                 shell=True,
             )
 
-    def test_make_nhmg_failure(self, roms_codebase, tmp_path):
+    def test_make_nhmg_failure(self, tmp_path):
         """Test that the get method raises an error when 'make nhmg' fails."""
         ## There are two subprocess calls, we'd like one fail, one pass:
         self.mock_subprocess_run.side_effect = [
@@ -195,13 +180,13 @@ class TestROMSExternalCodeBaseGet:
                 return_value=dotenv_path,
             ),
         ):
-            roms_codebase.get(target=tmp_path)
+            self.roms_codebase.get(target=tmp_path)
 
         # Assertions:
         ## Check that subprocess.run was called only once due to failure
         assert self.mock_subprocess_run.call_count == 1
 
-    def test_make_tools_roms_failure(self, roms_codebase, tmp_path):
+    def test_make_tools_roms_failure(self, tmp_path):
         """Test that the get method raises an error when 'make Tools-Roms' fails."""
         # Simulate success for `make nhmg` and failure for `make Tools-Roms`
         self.mock_subprocess_run.side_effect = [
@@ -215,7 +200,7 @@ class TestROMSExternalCodeBaseGet:
         with pytest.raises(
             RuntimeError, match="Compiling Tools-Roms failed successfully"
         ):
-            roms_codebase.get(target=tmp_path)
+            self.roms_codebase.get(target=tmp_path)
 
         # Check that subprocess.run was called twice
         assert self.mock_subprocess_run.call_count == 2
