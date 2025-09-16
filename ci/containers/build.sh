@@ -141,10 +141,10 @@ perform_build() {
 
     if [ -z "$BUILD_ARGS" ]; then
         log_info "Building '$LOCAL_TAG' in '$CONTEXT_PATH'"
-        $RUNTIME_ENGINE build -t "$LOCAL_TAG" --build-arg ACCT=$ACCOUNT  "$CONTEXT_PATH"
+        $RUNTIME_ENGINE build -t "$LOCAL_TAG" --build-arg ACCT=$ACCOUNT --build-arg FROM_TAG=$CSTAR_CI_TAG_VERSION  "$CONTEXT_PATH"
     else
         log_info "Building parameterized '$LOCAL_TAG' in '$CONTEXT_PATH' with build-args '$BUILD_ARGS'"
-        $RUNTIME_ENGINE build -t "$LOCAL_TAG" --build-arg "$BUILD_ARGS" --build-arg ACCT=$ACCOUNT "$CONTEXT_PATH"
+        $RUNTIME_ENGINE build -t "$LOCAL_TAG" --build-arg "$BUILD_ARGS" --build-arg ACCT=$ACCOUNT --build-arg FROM_TAG=$CSTAR_CI_TAG_VERSION "$CONTEXT_PATH"
     fi
 
     if [[ "$RUNTIME_ENGINE" =~ "hpc" ]]; then

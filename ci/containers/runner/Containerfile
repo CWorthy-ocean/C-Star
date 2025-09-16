@@ -1,9 +1,10 @@
 ARG ACCT="C-Worthy"
-ARG IMG_NCDF="$ACCT/cstar-netcdf:latest"
-ARG IMG_ROMS="$ACCT/cstar-roms:latest"
-ARG IMG_MARBL="$ACCT/cstar-roms-marbl:latest"
-ARG IMG_CSTAR="$ACCT/cstar-python:latest"
-ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:latest"
+ARG FROM_TAG="latest"
+ARG IMG_NCDF="$ACCT/cstar-netcdf:$FROM_TAG"
+ARG IMG_ROMS="$ACCT/cstar-roms:$FROM_TAG"
+ARG IMG_MARBL="$ACCT/cstar-roms-marbl:$FROM_TAG"
+ARG IMG_CSTAR="$ACCT/cstar-python:$FROM_TAG"
+ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:$FROM_TAG"
 
 ARG INSTALL_BASE_DIR="/opt"
 ARG PROFILE_DIR="/etc/profile.d"
@@ -35,7 +36,14 @@ COPY --from=stage_roms $PROFILE_DIR/*roms*.sh $PROFILE_DIR/
 COPY --from=stage_marbl $PROFILE_DIR/*marbl*.sh $PROFILE_DIR/
 COPY --from=stage_cstar $PROFILE_DIR/*cstar*.sh $PROFILE_DIR/
 
-COPY --from=stage_netcdf $INSTALL_BASE_DIR/openmpi-5.0.7/ $INSTALL_BASE_DIR/openmpi-5.0.7/
+# use these if you built netcdf off of the NERSC mpich containerfile
+COPY --from=stage_netcdf /usr/local/bin/*  /usr/local/bin/
+COPY --from=stage_netcdf /usr/local/lib/*  /usr/local/lib/
+COPY --from=stage_netcdf /usr/local/include/*  /usr/local/include/
+
+# use this one if you built netcdf with our openmpi containerfile
+#COPY --from=stage_netcdf $INSTALL_BASE_DIR/openmpi-5.0.7/ $INSTALL_BASE_DIR/openmpi-5.0.7/
+
 COPY --from=stage_netcdf $INSTALL_BASE_DIR/hdf5-1.14.6-install/ $INSTALL_BASE_DIR/hdf5-1.14.6-install/
 COPY --from=stage_netcdf $INSTALL_BASE_DIR/netcdf-4.9.3-install/ $INSTALL_BASE_DIR/netcdf-4.9.3-install/
 COPY --from=stage_netcdf $INSTALL_BASE_DIR/netcdf-fortran-4.6.2-install/ $INSTALL_BASE_DIR/netcdf-fortran-4.6.2-install/
@@ -45,6 +53,19 @@ COPY --from=stage_marbl $INSTALL_BASE_DIR/marbl0.45.0/ $INSTALL_BASE_DIR/marbl0.
 COPY --from=stage_cstar $INSTALL_BASE_DIR/venv/ $INSTALL_BASE_DIR/venv/
 
 WORKDIR $INSTALL_BASE_DIR
+RUN mkdir -p $INSTALL_BASE_DIR/work_internal/compile_time_code
+
+# this is a bit of a hack, to bypass the build portion of the c-star workflow, for initial testing.
+# basically, you can copy your compile_time_code (e.g. opt files) into this build directory, and rebuild ROMS now instead of later at runtime.
+# COPY * $INSTALL_BASE_DIR/work_internal/compile_time_code
+# RUN bash -c "source /etc/profile &&  \
+#     cd $INSTALL_BASE_DIR/work_internal/compile_time_code  \
+#     && make compile_clean &&  \
+#     make tools-roms &&  \
+#     make"
+
+# add these to end of roms compile if you need debug outputs:
+# BUILD_MODE=debug KEEP_PPSRC=true"
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

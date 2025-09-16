@@ -1,5 +1,6 @@
 ARG ACCT="C-Worthy"
-ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:latest"
+ARG FROM_TAG="latest"
+ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:$FROM_TAG"
 
 FROM $IMG_BUILDBASE as main
 

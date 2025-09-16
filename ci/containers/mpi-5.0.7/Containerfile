@@ -1,5 +1,6 @@
 ARG ACCT="C-Worthy"
-ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:latest"
+ARG FROM_TAG="latest"
+ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:$FROM_TAG"
 ARG MAIN_STAGE="main"  # pass `add_test` to build the test program /runtest
 
 FROM $IMG_BUILDBASE as main
@@ -16,17 +17,22 @@ ARG MPI_PROFILE="/etc/profile.d/ompi-5.0.7.sh"
 RUN mkdir -p "$SRC_DIR"
 
 WORKDIR "$SRC_DIR"
+
+
 RUN wget -q "$OPENMPI_URI" && \
     tar xvf "$OMPI_TGZ_NAME" && \
     cd "$OMPI_TGZ_OUT_DIR" && \
     ./configure \
         --prefix="$MPIHOME" --with-pic \
         --with-slurm \
-        --with-pmix=internal && \
+        --with-prrte \
+        --enable-mpirun-prefix-by-default \
+        --with-pmix \
+        --with-libfabric && \
     make -j $(nproc) && make install && cd "$SRC_DIR" && \
     rm "$OMPI_TGZ_NAME" && \
     rm -rf "$OMPI_TGZ_OUT_DIR" && \
-    ldconfig
+    ldconfig 
 
 ENV PATH="$MPIHOME/bin:$PATH"
 ENV LD_LIBRARY_PATH="$MPIHOME/lib:$LD_LIBRARY_PATH"
