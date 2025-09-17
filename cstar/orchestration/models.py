@@ -1,17 +1,15 @@
 import typing as t
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum, auto
 from pathlib import Path
 
 from pydantic import (
     BaseModel,
     ConfigDict,
-    DirectoryPath,
     Field,
     FilePath,
     HttpUrl,
-    PastDatetime,
     PlainSerializer,
     PositiveInt,
     StringConstraints,
@@ -39,69 +37,44 @@ TargetDirectoryPath = t.Annotated[
 """Path to a directory that may not exist until runtime."""
 
 
-class Forcing(BaseModel): ...
+class ConfiguredBaseModel(BaseModel):
+    """BaseModel with configuration options that we want as default for other models."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    """Pydantic ConfigDict with options we want changed."""
 
 
-class ForcingConfiguration(BaseModel):
-    """Configuration of the forcing parameters of the model."""
-
-    boundary: Forcing
-    """Boundary forcing."""
-
-    surface: Forcing
-    """Surface forcing"""
-
-    wind: Forcing
-    """Wind forcing."""
-
-    tidal: Forcing | None = Field(None, validate_default=False)
-    """Tidal forcing."""
-
-    river: Forcing | None = Field(None, validate_default=False)
-    """River forcing."""
+class Resource(ConfiguredBaseModel):
+    location: FilePath | HttpUrl
+    """Location of the file to retrieve."""
 
 
-class Grid(BaseModel):
-    """Specify the geographical boundary of the area of interest.
-
-    NOTE: this is a temporary placeholder...
-
-    Latitude Range:
-    - -90 is the South Pole
-    -   0 is the equator
-    -  90 is the North Pole
-
-    Longitude Range:
-    - -180 is west
-    -    0 is the prime meridian (Greenwich, London)
-    -  180 is east
-    """
-
-    min_latitude: float = Field(ge=-90.0, le=90.0)
-    """The minimum latitude value of the area."""
-
-    max_latitude: float = Field(ge=-90.0, le=90.0)
-    """The maximum latitude value of the area."""
-
-    min_longitude: float = Field(ge=-180.0, le=180.0)
-    """The minimum longitude value of the area."""
-
-    max_longitude: float = Field(ge=-180.0, le=180.0)
-    """The maximum longitude value of the area."""
+class VersionedResource(Resource):
+    hash: RequiredString
+    """Expected hash of the file."""
 
 
-class PathDatasource(BaseModel):
-    category: t.Literal["path"]
-    """The datasource category used as a type discriminator."""
+class DocLocMixin(ConfiguredBaseModel):
+    """Mixin model for documentation and locking fields that are used throughout the schema."""
 
-    path: FilePath | DirectoryPath
-    """The path to the file or directory containg data."""
+    documentation: str = Field(default="", validate_default=False)
+    """Description of input data provenance; used in provenance roll-up."""
+
+    locked: bool = Field(default=False, init=False, frozen=True)
+    """Mutability of the parameter set."""
 
 
-class PathFilter(BaseModel):
+DataResource: t.TypeAlias = Resource | VersionedResource
+
+_T = t.TypeVar("_T", DataResource, list[DataResource])
+
+
+class Dataset(DocLocMixin, t.Generic[_T]):
+    data: _T
+
+
+class PathFilter(ConfiguredBaseModel):
     """A filter used to specify a subset of files."""
-
-    category: t.Literal["path-filter"]
 
     directory: str | None = Field(default="", validate_default=False)
     """Subdirectory that should be searched or kept."""
@@ -113,12 +86,33 @@ class PathFilter(BaseModel):
     is provided."""
 
 
-class CodeRepository(BaseModel):
+class ForcingConfiguration(ConfiguredBaseModel):
+    """Configuration of the forcing parameters of the model."""
+
+    boundary: Dataset[list[DataResource]]
+    """Boundary forcing."""
+
+    surface: Dataset[list[DataResource]]
+    """Surface forcing"""
+
+    tidal: Dataset[DataResource] | None = Field(default=None, validate_default=False)
+    """Tidal forcing."""
+
+    river: Dataset[DataResource] | None = Field(default=None, validate_default=False)
+    """River forcing."""
+
+    corrections: Dataset[list[DataResource]] | None = Field(
+        default=None, validate_default=False
+    )
+    """Wind or other forcing corrections."""
+
+
+class CodeRepository(DocLocMixin, ConfiguredBaseModel):
     """Reference to a remote code repository with optional path filtering
     and point-in-time specification.
     """
 
-    url: HttpUrl | str
+    location: HttpUrl | str
     """Location of the remote code repository."""
 
     commit: str = Field(default="", min_length=1, validate_default=False)
@@ -129,6 +123,11 @@ class CodeRepository(BaseModel):
 
     filter: PathFilter | None = Field(default=None, validate_default=False)
     """A filter specifying the files to be retrieved and persisted from the repository."""
+
+    @property
+    def checkout_target(self) -> str:
+        """Return the commit if specified, else the branch"""
+        return self.commit or self.branch
 
     @model_validator(mode="after")
     def _model_validator(self) -> "CodeRepository":
@@ -147,7 +146,7 @@ class CodeRepository(BaseModel):
         return self
 
 
-class ROMSCompositeCodeRepository(BaseModel):
+class ROMSCompositeCodeRepository(ConfiguredBaseModel):
     """Collection of repositories used to build, configure, and execute ROMS."""
 
     roms: CodeRepository
@@ -167,6 +166,8 @@ class BlueprintState(StrEnum):
     """The allowed states for a work plan."""
 
     # TODO: determine if unique states for Bp/WP are being considered, if not. discard.
+    # SJE to Chris: I don't think we're planning custom user inputs here, just these two, or others
+    # that we would specifically add later.
     NotSet = auto()
     """Default, unset value."""
 
@@ -188,21 +189,11 @@ class Application(StrEnum):
     """A call to the hostname executable to simplify testing."""
 
 
-class ParameterSet(BaseModel):
-    documentation: str = Field(default="", validate_default=False)
-    """Description of input data provenance; used in provenance roll-up."""
-
+class ParameterSet(DocLocMixin, ConfiguredBaseModel):
     # TODO: 1. Consider an empty string default hash to avoid nulls
     # TODO: 2. Consider another model so the draft version doesn't have a hash.
     hash: str | None = Field(default=None, init=False, validate_default=False)
     """Hash used to verify the parameters are unchanged."""
-
-    locked: bool = Field(default=False, init=False, frozen=True)
-    """Mutability of the parameter set."""
-
-    # NOTE: this doesn't support parameters without values (e.g. --no-truncate)
-    model_config: t.ClassVar[ConfigDict] = ConfigDict(extra="allow")
-    """Enable the model to parse user-defined attributes."""
 
     @model_validator(mode="after")
     def _model_validator(self) -> "ParameterSet":
@@ -214,45 +205,28 @@ class ParameterSet(BaseModel):
             msg = "A locked parameter set must include a hash"
             raise ValueError(msg)
 
-        if self.model_extra:
-            for k, v in self.model_extra.items():
-                stripped = k.strip()
-
-                if " " in stripped or not stripped:
-                    msg = f"Parameter name `{k}` cannot include whitespace"
-                    raise ValueError(msg)
-                if not v.strip():
-                    msg = f"Parameter `{k}` does not have a value"
-                    raise ValueError(msg)
-
-                # re-write dynamic property keys without leading or trailing whitespace
-                if " " in k:
-                    # TODO: go see if this actually works in a test or if delattr is required
-                    self.model_extra.pop(k)
-                    self.model_extra.update({stripped: v})
-
         return self
 
 
 class RuntimeParameterSet(ParameterSet):
     """Parameters for the execution of the model.
 
-    Supports user-defined attributes to enable customization.
+    These parameters can be varied (within bounds defined elsewhere in the blueprint, e.g. valid_start/end_date),
+    without changing the validity of the model solution.
     """
 
-    start_date: PastDatetime = datetime(1, 1, 1, tzinfo=timezone.utc)
+    start_date: datetime
     """Start of data time range to be used in the simulation."""
 
-    end_date: PastDatetime = datetime(2, 1, 1, tzinfo=timezone.utc)
+    end_date: datetime
     """End of data time range to be used in the simulation."""
 
-    # restart_freq: str
     checkpoint_frequency: str = Field(
         default="1d",
         min_length=2,
         pattern="(?P<scalar>[1-9][0-9]*)(?P<unit>[hdwmy])",
     )
-    """Time period allowed between creation of a checkpoint file.
+    """Time period between creation of checkpoint files.
 
     Supply a string representing the desired time period, such as:
     - every day: "1d"
@@ -298,21 +272,28 @@ class RuntimeParameterSet(ParameterSet):
 
 
 class PartitioningParameterSet(ParameterSet):
-    """Parameters for the partitioning of the model.
+    """Parameters for the partitioning of the model."""
 
-    Supports user-defined attributes to enable customization.
-    """
-
-    # todo: adding defaults to consume a 128 core node. consider removing.
-    n_procs_x: PositiveInt = 16
+    n_procs_x: PositiveInt
     """Number of processes used to subdivide the domain on the x-axis."""
 
-    # todo: adding defaults to consume a 128 core node. consider removing.
-    n_procs_y: PositiveInt = 8
+    n_procs_y: PositiveInt
     """Number of processes used to subdivide the domain on the y-axis."""
 
 
-class Blueprint(BaseModel):
+class ModelParameterSet(ParameterSet):
+    """
+    Parameters that can override ROMS.in values. Unlike RuntimeParameters, these affect the validity of the
+    model solution, and should be locked for validated blueprints.
+    """
+
+    time_step: PositiveInt
+    """The time step the model integrates over."""
+
+
+class Blueprint(ConfiguredBaseModel):
+    """Common elements of all blueprints."""
+
     name: RequiredString
     """A unique, user-friendly name for this blueprint."""
 
@@ -325,36 +306,53 @@ class Blueprint(BaseModel):
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
 
-    valid_start_date: PastDatetime
+
+class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
+    """Blueprint schema for running a ROMS-MARBL simulation."""
+
+    valid_start_date: datetime
     """Beginning of the time range for the available data."""
 
-    valid_end_date: PastDatetime
+    valid_end_date: datetime
     """End of the time range for the available data."""
 
     code: ROMSCompositeCodeRepository
     """Code repositories used to build, configure, and execute the ROMS simulation."""
 
+    initial_conditions: Dataset[DataResource]
+    """File containing the starting conditions of the simulation."""
+
+    grid: Dataset[DataResource]
+    """File defining the grid geometry."""
+
     forcing: ForcingConfiguration
     """Forcing configuration."""
 
-    partitioning: PartitioningParameterSet = PartitioningParameterSet()
+    partitioning: PartitioningParameterSet
     """User-defined partitioning parameters."""
 
-    model_params: ParameterSet = ParameterSet()
+    model_params: ModelParameterSet
     """User-defined model parameters."""
 
-    # should this be nullable instead of a union with a default?
-    runtime_params: RuntimeParameterSet = RuntimeParameterSet()
+    runtime_params: RuntimeParameterSet
     """User-defined runtime parameters."""
 
-    grid: Grid = Grid(min_latitude=0, max_latitude=0, min_longitude=0, max_longitude=0)
-    """TEMPORARY placeholder for the grid..."""
+    cdr_input: Dataset[DataResource] | None = Field(default=None)
+    """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
 
     @model_validator(mode="after")
-    def _model_validator(self) -> "Blueprint":
+    def _model_validator(self) -> "RomsMarblBlueprint":
         """Perform validation on the model after field-level validation is complete."""
         if self.valid_end_date <= self.valid_start_date:
             msg = "valid_start_date must precede valid_end_date"
+            raise ValueError(msg)
+
+        if self.runtime_params.end_date > self.valid_end_date:
+            msg = "end_date is outside the valid range"
+            raise ValueError(msg)
+
+        if self.runtime_params.start_date < self.valid_start_date:
+            msg = "start_date is outside the valid range"
             raise ValueError(msg)
 
         return self

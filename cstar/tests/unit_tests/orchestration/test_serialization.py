@@ -6,7 +6,7 @@ from unittest import mock
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from cstar.orchestration.models import Application, Blueprint, Workplan
+from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
 from cstar.orchestration.orchestrator import (
     Launcher,
     Orchestrator,
@@ -220,7 +220,10 @@ def test_serial_planner(
     wp_path = tmp_path / "workplan.yaml"
     wp_path.write_text(wp_yaml)
 
-    blueprint = t.cast("Blueprint", deserialize_model(bp_path, Blueprint))
+    blueprint = t.cast(
+        "RomsMarblBlueprint",
+        deserialize_model(bp_path, RomsMarblBlueprint),
+    )
     workplan = t.cast("Workplan", deserialize_model(wp_path, Workplan))
 
     for step in workplan.steps:

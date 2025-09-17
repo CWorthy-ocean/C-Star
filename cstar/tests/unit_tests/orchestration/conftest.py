@@ -13,8 +13,8 @@ from pydantic import BaseModel
 
 from cstar.orchestration.models import (
     Application,
-    Blueprint,
     BlueprintState,
+    RomsMarblBlueprint,
     Step,
     Workplan,
     WorkplanState,
@@ -61,6 +61,9 @@ def model_to_yaml(model: BaseModel) -> str:
         return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
 
     dumper = yaml.Dumper
+    dumper.ignore_aliases = (
+        lambda *_args: True
+    )  # pyright: ignore[reportAttributeAccessIssue]
 
     dumper.add_representer(pathlib.PosixPath, path_representer)
     dumper.add_representer(WorkplanState, workplanstate_representer)
@@ -96,8 +99,8 @@ def yaml_to_model(yaml_doc: str, cls: type[_T]) -> _T:
 @pytest.fixture
 def serialize_blueprint(
     blueprint_schema_path: Path,
-) -> t.Callable[[Blueprint, Path], str]:
-    def _inner(model: Blueprint, path: Path) -> str:
+) -> t.Callable[[RomsMarblBlueprint, Path], str]:
+    def _inner(model: RomsMarblBlueprint, path: Path) -> str:
         yaml_doc = model_to_yaml(model)
 
         schema_directive = (
@@ -198,13 +201,13 @@ def load_workplan() -> t.Callable[[Path], Workplan]:
 
 
 @pytest.fixture
-def load_blueprint() -> t.Callable[[Path], Blueprint]:
+def load_blueprint() -> t.Callable[[Path], RomsMarblBlueprint]:
     """Create a function to load workplan yaml."""
 
-    def _data_loader(path: Path) -> Blueprint:
+    def _data_loader(path: Path) -> RomsMarblBlueprint:
         """Deserialize a yaml file and return the resulting Workplan."""
         yaml_doc = path.read_text(encoding="utf-8")
-        return yaml_to_model(yaml_doc, Blueprint)
+        return yaml_to_model(yaml_doc, RomsMarblBlueprint)
 
     return _data_loader
 
@@ -290,7 +293,7 @@ def blueprint_schema_path(tmp_path: Path) -> Path:
     """Create a schema file that can be referenced in a yaml document."""
     # yaml-language-server: $schema=/this/path.json
     path = tmp_path / "schema.json"
-    schema = json.dumps(Blueprint.model_json_schema())
+    schema = json.dumps(RomsMarblBlueprint.model_json_schema())
     path.write_text(schema)
     return path
 
@@ -442,24 +445,51 @@ def fill_blueprint_template(
             valid_end_date: 2020-02-01 00:00:00
             code:
               roms:
-                url: http://github.com/ankona/ucla-roms
+                location: http://github.com/ankona/ucla-roms
                 branch: main
                 filter: null
               run_time:
-                url: http://github.com/ankona/ucla-roms
+                location: http://github.com/ankona/ucla-roms
                 branch: main
                 filter: null
               compile_time:
-                url: http://github.com/ankona/ucla-roms
+                location: http://github.com/ankona/ucla-roms
                 branch: main
                 filter: null
               marbl: null
             forcing:
-              boundary: {{}}
-              surface: {{}}
-              wind: {{}}
-              tidal: {{}}
-              river: {{}}
+              boundary:
+                data:
+                  - location: http://mockdoc.com/partitioning1.nc
+                    hash: abc
+                  - location: http://mockdoc.com/partitioning2.nc
+                    hash: pqr
+                  - location: http://mockdoc.com/partitioning3.nc
+                    hash: xyz
+              surface:
+                documentation: http://mockdoc.com/partitioning
+                locked: false
+                data:
+                  - location: http://mockdoc.com/partitioning.nc
+                    hash: abc123
+              corrections:
+                documentation: http://mockdoc.com/partitioning
+                locked: false
+                data:
+                  - location: http://mockdoc.com/partitioning.nc
+                    hash: abc123
+              tidal:
+                documentation: http://mockdoc.com/partitioning
+                locked: false
+                data:
+                  location: http://mockdoc.com/partitioning.nc
+                  hash: abc123
+              river:
+                documentation: http://mockdoc.com/partitioning
+                locked: false
+                data:
+                  location: http://mockdoc.com/partitioning.nc
+                  hash: abc123
             partitioning:
               documentation: http://mockdoc.com/partitioning
               hash: null
@@ -474,15 +504,19 @@ def fill_blueprint_template(
               documentation: http://mockdoc.com/runtime-params
               hash: null
               locked: false
-              start_date: 0001-01-01 00:00:00+00:00
-              end_date: 0002-01-01 00:00:00+00:00
+              start_date: 2020-01-01 00:00:00
+              end_date: 2020-01-02 00:00:00
               checkpoint_frequency: 1d
               output_dir: .
             grid:
-              min_latitude: 0.0
-              max_latitude: 10.0
-              min_longitude: 0.0
-              max_longitude: 10.0
+              documentation: http://mockdoc.com/model-params
+              data:
+                location: http://mockdoc.com/grid
+            initial_conditions:
+              data:
+                location: http://mockdoc.com/grid
+            model_params:
+              time_step: 1
             """,
         )
 
