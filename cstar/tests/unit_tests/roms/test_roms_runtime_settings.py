@@ -343,7 +343,7 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         handler = MagicMock(return_value="fallback")
         result = self.MockSingleEntrySection.single_entry_validator(
             "not a float", handler
-        )
+        )  # type: ignore[operator]
 
         handler.assert_called_once_with("not a float")
         assert result == "fallback"
