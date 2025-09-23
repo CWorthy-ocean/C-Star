@@ -457,6 +457,8 @@ def test_start_runner(
         health_check_frequency=0,
         log_level=logging.DEBUG,
         name="test_start_runner",
+        loop_delay=0,
+        health_check_log_threshold=10,
     )
     job_config = JobConfig()
 
