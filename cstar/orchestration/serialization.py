@@ -83,9 +83,6 @@ def deserialize(
         The deserialized Simulation instance.
 
     """
-    # TODO (ankona, http://none): Deserializing to a simulation will LOSE information about
-    # the state of the blueprint (e.g. locked fields, draft mode). This might
-    # only be useful at the very last moment when execution is desired?
     if not path.exists():
         msg = f"The blueprint file could not be found at the path `{path}`"
         raise FileNotFoundError(msg)
@@ -104,11 +101,5 @@ def deserialize(
     if model is None:
         msg = f"Unable to deserialize the blueprint at `{path}` as `{mode}`"
         raise ValueError(msg)
-
-    # TODO (ankona, http://none): doing this generic is kind of a kludge - In the case of a single simulation,
-    # e.g. blueprint, I need to return a single item. When using a Workplan, this will
-    # should return more than one.
-    #
-    # TODONT: Do NOT build a DAG at this level? again, info loss on conversion?
 
     return model

@@ -165,9 +165,6 @@ class ROMSCompositeCodeRepository(ConfiguredBaseModel):
 class BlueprintState(StrEnum):
     """The allowed states for a work plan."""
 
-    # TODO: determine if unique states for Bp/WP are being considered, if not. discard.
-    # SJE to Chris: I don't think we're planning custom user inputs here, just these two, or others
-    # that we would specifically add later.
     NotSet = auto()
     """Default, unset value."""
 
@@ -190,8 +187,6 @@ class Application(StrEnum):
 
 
 class ParameterSet(DocLocMixin, ConfiguredBaseModel):
-    # TODO: 1. Consider an empty string default hash to avoid nulls
-    # TODO: 2. Consider another model so the draft version doesn't have a hash.
     hash: str | None = Field(default=None, init=False, validate_default=False)
     """Hash used to verify the parameters are unchanged."""
 
@@ -424,17 +419,6 @@ class Step(BaseModel):
         frozen=True,
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
-
-    # @computed_field
-    # @property
-    # def slug(self) -> str:
-    #     """Return a URL safe version of the step name."""
-    #     return re.sub(r"\s+", "-", self.name.strip())
-
-    # @computed_field
-    # @property
-    # def depends_on_slugs(self) -> t.Sequence[str]:
-    #     return [re.sub(r"\s+", "-", step.strip()) for step in self.depends_on]
 
 
 class Workplan(BaseModel):

@@ -22,9 +22,6 @@ from cstar.roms.input_dataset import (
 _Tin = t.TypeVar("_Tin", bound=BaseModel)
 _Tout_co = t.TypeVar("_Tout_co", covariant=True)
 
-# TODO: consider doing a straight up JSON conversion of the model to a format
-# that would deserialize into the target "native" object instead of this?
-
 
 class ModelAdapter(t.Generic[_Tin, _Tout_co], t.Protocol):
     """Contract exposing a mechanism to adapt a source model to a target type."""
@@ -219,10 +216,9 @@ class SurfaceForcingAdapter(
 
 
 class CdrInputAdapter(ModelAdapter[models.RomsMarblBlueprint, InputDataset]):
-    # TODO this is not implemented on the Simulation side yet...
     @t.override
     def adapt(self) -> InputDataset:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class ForcingCorrectionAdapter(
