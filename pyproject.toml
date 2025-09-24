@@ -28,6 +28,7 @@ dependencies = [
     "python-dotenv",
     "PyYAML==6.0.2",
     "pydantic>=2.11",
+    "pytimeparse>=1.1.8",
     "pooch>=1.8.1",
     "roms_tools[dask]==3.1.2",
 ]
