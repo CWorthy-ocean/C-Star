@@ -817,4 +817,4 @@ class ROMSRuntimeSettings(BaseModel):
             Path where the output file will be written.
         """
         with Path(filepath).open("w") as f:
-            f.write(self.model_dump_json())
+            f.write(str(self.model_dump()))
