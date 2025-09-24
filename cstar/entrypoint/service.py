@@ -37,11 +37,11 @@ class ServiceConfiguration(BaseModel):
     log_level: int = logging.INFO
     """The logging level used by the service."""
     health_check_log_threshold: int = Field(10, ge=3)
-    """The number of health-checks that may be missed before logging."""
+    """The number of health-checks tht may be missed before logging."""
     name: str = "Service"
     """A user-friendly name for logging."""
 
-    @property
+    @property  # type: ignore[misc]
     @computed_field
     def max_health_check_latency(self) -> float:
         """Get the max latency allowed before missed health checks should be logged.
