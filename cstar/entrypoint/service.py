@@ -10,7 +10,7 @@ from threading import Thread
 from types import FrameType
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field
 
 from cstar.base.log import LoggingMixin
 
@@ -42,7 +42,6 @@ class ServiceConfiguration(BaseModel):
     """A user-friendly name for logging."""
 
     @property  # type: ignore[misc]
-    @computed_field
     def max_health_check_latency(self) -> float:
         """Get the max latency allowed before missed health checks should be logged.
 
