@@ -61,9 +61,7 @@ def model_to_yaml(model: BaseModel) -> str:
         return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
 
     dumper = yaml.Dumper
-    dumper.ignore_aliases = (
-        lambda *_args: True
-    )  # pyright: ignore[reportAttributeAccessIssue]
+    dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
 
     dumper.add_representer(pathlib.PosixPath, path_representer)
     dumper.add_representer(WorkplanState, workplanstate_representer)
@@ -358,7 +356,7 @@ def fill_workplan_template(
             runtime_vars: {fill_vals.get("runtime_vars", "")}
             steps:
                 - name: Test Step
-                  application: hostname
+                  application: sleep
                   depends_on: []
                   blueprint: {__file__}
                   blueprint_overrides: {{}}
@@ -368,7 +366,7 @@ def fill_workplan_template(
                       walltime: 00:10:00
                       num_nodes: 4
                 - name: Test Another Step
-                  application: hostname
+                  application: sleep
                   depends_on: []
                   blueprint: {__file__}
                   blueprint_overrides: {{}}
@@ -439,7 +437,7 @@ def fill_blueprint_template(
             # yaml-language-server: $schema={blueprint_schema_path.as_posix()}
             name: {fill_vals["name"]}
             description: This is the description of my test blueprint
-            application: hostname
+            application: sleep
             state: draft
             valid_start_date: 2020-01-01 00:00:00
             valid_end_date: 2020-02-01 00:00:00

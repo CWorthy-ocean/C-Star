@@ -89,10 +89,14 @@ def test_make_a_minimum_blueprint_yaml(
     blueprint = RomsMarblBlueprint(
         name="Test Blueprint Name",
         description="This is the description of my test blueprint",
-        application=Application.HOSTNAME,
+        application=Application.SLEEP,
         state=BlueprintState.Draft,
-        valid_start_date=datetime.datetime(2020, 1, 1, 0, 0, 0),
-        valid_end_date=datetime.datetime(2020, 2, 1, 0, 0, 0),
+        valid_start_date=datetime.datetime(
+            2020, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        ),
+        valid_end_date=datetime.datetime(
+            2020, 2, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        ),
         code=ROMSCompositeCodeRepository(
             roms=CodeRepository(
                 location="http://github.com/ankona/ucla-roms",

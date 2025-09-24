@@ -185,7 +185,7 @@ class Application(StrEnum):
     """A UCLA-ROMS simulation that will not make use of biogeochemical data."""
     ROMS_MARBL = auto()
     """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
-    HOSTNAME = auto()
+    SLEEP = auto()
     """A call to the hostname executable to simplify testing."""
 
 
