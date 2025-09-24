@@ -332,7 +332,7 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     runtime_params: RuntimeParameterSet
     """User-defined runtime parameters."""
 
-    cdr_input: Dataset[DataResource] | None = Field(default=None)
+    cdr_forcing: Dataset[DataResource] | None = Field(default=None)
     """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
 
     @model_validator(mode="after")

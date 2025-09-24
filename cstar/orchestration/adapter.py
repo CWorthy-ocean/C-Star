@@ -1,6 +1,5 @@
 import typing as t
 
-from base import InputDataset
 from pydantic import BaseModel
 
 from cstar.base.additional_code import AdditionalCode
@@ -11,6 +10,7 @@ from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
+    ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSModelGrid,
@@ -215,10 +215,20 @@ class SurfaceForcingAdapter(
         ]
 
 
-class CdrInputAdapter(ModelAdapter[models.RomsMarblBlueprint, InputDataset]):
+class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing]):
     @t.override
-    def adapt(self) -> InputDataset:
-        raise NotImplementedError
+    def adapt(self) -> ROMSCdrForcing | None:
+        if self.model.cdr_forcing is None:
+            return None
+
+        return ROMSCdrForcing(
+            location=str(self.model.cdr_forcing.data.location),
+            file_hash=self.model.cdr_forcing.data.hash
+            if isinstance(self.model.cdr_forcing.data, models.VersionedResource)
+            else None,
+            start_date=self.model.valid_start_date,
+            end_date=self.model.valid_end_date,
+        )
 
 
 class ForcingCorrectionAdapter(
@@ -265,4 +275,5 @@ class BlueprintAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSSimulation]):
             forcing_corrections=ForcingCorrectionAdapter(self.model).adapt(),
             boundary_forcing=BoundaryForcingAdapter(self.model).adapt(),
             surface_forcing=SurfaceForcingAdapter(self.model).adapt(),
+            cdr_forcing=CdrForcingAdapter(self.model).adapt(),
         )
