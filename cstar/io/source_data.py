@@ -164,10 +164,12 @@ class _SourceInspector:
 class SourceData:
     def __init__(self, location: str | Path, identifier: str | None = None):
         self._location = str(location)
+        # NOTE : likely don't need to store _inspector; just use
+        # self._classification to access source_type
         self._inspector = _SourceInspector(self._location)
         self._identifier = identifier
         self._classification = self._inspector.classify()
-        self._stager = self._select_stager()
+        self._stager = None
 
     @property
     def location(self) -> str:
@@ -201,6 +203,12 @@ class SourceData:
             return self.identifier
         return None
 
+    @property
+    def stager(self) -> "Stager":
+        if not self._stager:
+            self._stager = self._select_stager()
+        return self._stager
+
     # Staging logic
     def _select_stager(self) -> "Stager":
         """Logic to determine the correct stager based on the above
@@ -223,7 +231,7 @@ class SourceData:
                 )
 
     def stage(self, target_dir: str | Path) -> "StagedData":
-        return self._stager.stage(target_dir=Path(target_dir), source=self)
+        return self.stager.stage(target_dir=Path(target_dir), source=self)
 
 
 class SourceDataCollection:

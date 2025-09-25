@@ -31,38 +31,6 @@ class MARBLExternalCodeBase(ExternalCodeBase):
     def root_env_var(self) -> str:
         return "MARBL_ROOT"
 
-    # def get(self, target: str | Path) -> None:
-    #     """Clone MARBL code to local machine, set environment, compile libraries.
-
-    #     This method:
-    #     1. clones MARBL from `source_repo`
-    #     2. checks out the correct commit from `checkout_target`
-    #     3. Sets environment variable MARBL_ROOT
-    #     4. Compiles MARBL
-
-    #     Parameters:
-    #     -----------
-    #     target: str
-    #         The local path where MARBL will be cloned and compiled
-    #     """
-    #     _clone_and_checkout(
-    #         source_repo=self.source_repo,
-    #         local_path=Path(target),
-    #         checkout_target=self.checkout_target,
-    #     )
-    #     # Set environment variables for this session:
-    #     cstar_sysmgr.environment.set_env_var(self.root_env_var, str(target))
-
-    #     # Make things
-    #     _run_cmd(
-    #         f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
-    #         cwd=Path(target) / "src",
-    #         msg_pre="Compiling MARBL...",
-    #         msg_post=f"MARBL successfully installed at {target}",
-    #         msg_err="Error when compiling MARBL.",
-    #         raise_on_error=True,
-    #     )
-
     def _configure(self) -> None:
         assert self.working_copy is not None  # Has been verified by `configure()``
         marbl_root = self.working_copy.path
