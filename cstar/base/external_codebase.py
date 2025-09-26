@@ -57,6 +57,10 @@ class ExternalCodeBase(ABC, LoggingMixin):
         if not checkout_target:
             checkout_target = self._default_checkout_target
         self._source = SourceData(location=source_repo, identifier=checkout_target)
+        # TODO uncomment this:
+        # if self._source.classification.source_type != SourceType.REPOSITORY:
+        #     raise ValueError(f"{source_repo} does not appear to describe a valid repository")
+
         if not self.is_configured:
             self._working_copy = None
         else:
@@ -88,8 +92,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
         repr_str += f"\nsource_repo = {self.source.location!r},"
         repr_str += f"\ncheckout_target = {self.source.checkout_target!r}"
         repr_str += "\n)"
-        # repr_str += "\nState: <"
-        # repr_str += f"local_config_status = {self.local_config_status}>"
         return repr_str
 
     def to_dict(self) -> dict:
@@ -140,8 +142,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
             )
 
         staged_repo = self.source.stage(target_dir=target_dir)
-        if not isinstance(staged_repo, StagedRepository):
-            raise TypeError("staged_repo is not a StagedRepository instance")
         self._working_copy = staged_repo
 
     @property

@@ -14,6 +14,8 @@ from cstar.io.constants import (
     SourceClassification,
 )
 from cstar.io.source_data import SourceData, _SourceInspector
+from cstar.io.staged_data import StagedData
+from cstar.io.stager import Stager
 from cstar.marbl import MARBLExternalCodeBase
 from cstar.roms import ROMSDiscretization, ROMSExternalCodeBase, ROMSSimulation
 from cstar.roms.input_dataset import (
@@ -38,9 +40,37 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 ################################################################################
 
 
+class MockStager(Stager):
+    def stage(self, target_dir: Path, source: "MockSourceData"):
+        return MockStagedData(source=source, path=target_dir)
+
+    @property
+    def retriever(self):
+        return None
+
+
+class MockStagedData(StagedData):
+    def __init__(
+        self, source: "SourceData", path: "Path", mock_changed_from_source: bool = False
+    ):
+        super().__init__(source, path)
+        self._mock_changed_from_source = mock_changed_from_source
+
+    @property
+    def changed_from_source(self) -> bool:
+        return self._mock_changed_from_source
+
+    def unstage(self):
+        pass
+
+    def reset(self):
+        pass
+
+
 class MockSourceInspector(_SourceInspector):
     def __init__(self, location: str, classification: SourceClassification):
         self._location = location
+        # Specifically for this mock, user chooses classification
         self._source_type = classification.value.source_type
         self._location_type = classification.value.location_type
         self._file_encoding = classification.value.file_encoding
@@ -51,6 +81,7 @@ class MockSourceData(SourceData):
         self,
         location: str | Path,
         identifier: str | None = None,
+        # Specifically for this mock, user chooses classification
         classification: SourceClassification | None = None,
     ):
         self._location = str(location)
@@ -60,6 +91,8 @@ class MockSourceData(SourceData):
             location=location, classification=classification
         )
         self._classification = classification
+
+        self._stager = MockStager()
 
     # def __getattr__(self, name):
     #     try:
@@ -190,8 +223,9 @@ def fake_externalcodebase(mock_sourcedata_remote_repo):
     )
     patch_source_data.start()
     fecb = FakeExternalCodeBase()
-    patch_source_data.stop()
+    patch_source_data.stop()  # TODO this is unsafe and should come after yield
     fecb._source = source
+
     yield fecb
 
 
@@ -200,7 +234,6 @@ def fake_romsexternalcodebase(mock_sourcedata_remote_repo):
     source_data = mock_sourcedata_remote_repo(
         location="https://github.com/roms/repo.git", identifier="roms_branch"
     )
-
     patch_source_data = mock.patch(
         "cstar.base.external_codebase.SourceData", return_value=source_data
     )
