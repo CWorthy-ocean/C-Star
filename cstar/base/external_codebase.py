@@ -57,9 +57,10 @@ class ExternalCodeBase(ABC, LoggingMixin):
         if not checkout_target:
             checkout_target = self._default_checkout_target
         self._source = SourceData(location=source_repo, identifier=checkout_target)
-        # TODO uncomment this:
-        # if self._source.classification.source_type != SourceType.REPOSITORY:
-        #     raise ValueError(f"{source_repo} does not appear to describe a valid repository")
+        # if self._source._classification.value.source_type != SourceType.REPOSITORY:
+        #     raise ValueError(
+        #         f"{source_repo} does not appear to describe a valid repository"
+        #     )
 
         if not self.is_configured:
             self._working_copy = None
@@ -142,6 +143,10 @@ class ExternalCodeBase(ABC, LoggingMixin):
             )
 
         staged_repo = self.source.stage(target_dir=target_dir)
+        if not isinstance(staged_repo, StagedRepository):
+            raise ValueError(
+                f"Could not retrieve {self.source.location} as a local repository"
+            )
         self._working_copy = staged_repo
 
     @property
@@ -173,6 +178,10 @@ class ExternalCodeBase(ABC, LoggingMixin):
     @abstractmethod
     def _configure(self) -> None:
         """Must be implemented by subclasses"""
+
+    def setup(self, target_dir: Path | None = None) -> None:
+        self.get(target_dir)
+        self.configure()
 
     def remove(self):
         raise NotImplementedError("TODO")

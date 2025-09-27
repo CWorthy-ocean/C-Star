@@ -1065,8 +1065,9 @@ class ROMSSimulation(Simulation):
         for codebase in filter(lambda x: x is not None, self.codebases):
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
             # codebase.handle_config_status()
-            codebase.get()
-            codebase.configure()
+            codebase.setup()
+            # codebase.get()
+            # codebase.configure()
 
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")

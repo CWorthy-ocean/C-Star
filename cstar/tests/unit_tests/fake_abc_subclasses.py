@@ -23,9 +23,11 @@ class FakeExternalCodeBase(ExternalCodeBase):
     def _default_checkout_target(self):
         return "test_target"
 
-    def _configure(self, target: str | Path):
-        self.log.info(f"mock installing ExternalCodeBase at {target}")
-        pass
+    def get(self, target_dir: Path | None = None) -> None:
+        self.log.info(f"mock installing ExternalCodeBase at {target_dir}")
+
+    def _configure(self) -> None:
+        return
 
     @property
     def is_configured(self):

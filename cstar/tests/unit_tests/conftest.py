@@ -41,7 +41,7 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 class MockStager(Stager):
-    def stage(self, target_dir: Path, source: "MockSourceData"):
+    def stage(self, target_dir: Path, source: "SourceData"):
         return MockStagedData(source=source, path=target_dir)
 
     @property
@@ -68,12 +68,18 @@ class MockStagedData(StagedData):
 
 
 class MockSourceInspector(_SourceInspector):
-    def __init__(self, location: str, classification: SourceClassification):
-        self._location = location
+    def __init__(
+        self, location: str | Path, classification: SourceClassification | None = None
+    ):
+        self._location = str(location)
         # Specifically for this mock, user chooses classification
-        self._source_type = classification.value.source_type
-        self._location_type = classification.value.location_type
-        self._file_encoding = classification.value.file_encoding
+        self._source_type = classification.value.source_type if classification else None
+        self._location_type = (
+            classification.value.location_type if classification else None
+        )
+        self._file_encoding = (
+            classification.value.file_encoding if classification else None
+        )
 
 
 class MockSourceData(SourceData):
@@ -82,7 +88,7 @@ class MockSourceData(SourceData):
         location: str | Path,
         identifier: str | None = None,
         # Specifically for this mock, user chooses classification
-        classification: SourceClassification | None = None,
+        classification: SourceClassification = SourceClassification.LOCAL_TEXT_FILE,
     ):
         self._location = str(location)
         self._identifier = identifier
@@ -93,12 +99,6 @@ class MockSourceData(SourceData):
         self._classification = classification
 
         self._stager = MockStager()
-
-    # def __getattr__(self, name):
-    #     try:
-    #         return self._mocked_properties[name]
-    #     except KeyError:
-    #         raise AttributeError(f"{type(self).__name__} has no attribute '{name}'")
 
 
 @pytest.fixture

@@ -35,8 +35,8 @@ def get_remote_header(location, n_bytes):
 
 
 class _SourceInspector:
-    def __init__(self, location: str):
-        self._location = location
+    def __init__(self, location: str | Path):
+        self._location = str(location)
         self._location_type: LocationType | None = None
         self._source_type: SourceType | None = None
         self._file_encoding: FileEncoding | None = None
@@ -166,10 +166,10 @@ class SourceData:
         self._location = str(location)
         # NOTE : likely don't need to store _inspector; just use
         # self._classification to access source_type
-        self._inspector = _SourceInspector(self._location)
-        self._identifier = identifier
-        self._classification = self._inspector.classify()
-        self._stager = None
+        self._inspector: _SourceInspector = _SourceInspector(self._location)
+        self._identifier: str | None = identifier
+        self._classification: SourceClassification = self._inspector.classify()
+        self._stager: Stager | None = None
 
     @property
     def location(self) -> str:

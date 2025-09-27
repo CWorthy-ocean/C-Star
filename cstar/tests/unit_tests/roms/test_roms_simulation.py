@@ -1534,10 +1534,10 @@ class TestProcessingAndExecution:
 
     @patch.object(ROMSInputDataset, "get")
     @patch.object(AdditionalCode, "get")
-    @patch.object(ExternalCodeBase, "configure")
+    @patch.object(ExternalCodeBase, "setup")
     def test_setup(
         self,
-        mock_externalcodebase_configure,
+        mock_externalcodebase_setup,
         mock_additionalcode_get,
         mock_inputdataset_get,
         fake_romssimulation,
@@ -1566,7 +1566,7 @@ class TestProcessingAndExecution:
 
         sim.setup()
         # assert mock_handle_config_status.call_count == 2
-        assert mock_externalcodebase_configure.call_count == 2
+        assert mock_externalcodebase_setup.call_count == 2
         assert mock_additionalcode_get.call_count == 2
         assert mock_inputdataset_get.call_count == 7
 
