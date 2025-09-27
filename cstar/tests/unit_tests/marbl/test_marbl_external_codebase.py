@@ -13,26 +13,20 @@ class TestMARBLExternalCodeBaseInit:
     )
     @mock.patch("cstar.base.external_codebase.SourceData.__init__")
     def test_init_with_args(self, mock_source_init, mock_is_configured):
+        """Test Initialization with provided source_repo and checkout_target args
+
+        Asserts SourceData is instantiated with the correct parameters.
+        """
         mock_source_init.return_value = None  # __init__ should return None
 
         source_repo = "https://github.com/dafyddstephenson/MARBL.git"
         checkout_target = "main"
 
-        marbl_codebase = MARBLExternalCodeBase(
-            source_repo=source_repo, checkout_target=checkout_target
-        )
+        MARBLExternalCodeBase(source_repo=source_repo, checkout_target=checkout_target)
 
         mock_source_init.assert_called_once_with(
             location=source_repo, identifier=checkout_target
         )
-
-        assert (
-            marbl_codebase._default_source_repo
-            == "https://github.com/marbl-ecosys/MARBL.git"
-        )
-
-        assert marbl_codebase._default_checkout_target == "marbl0.45.0"
-        assert marbl_codebase.root_env_var == "MARBL_ROOT"
 
     @mock.patch(
         "cstar.marbl.external_codebase.MARBLExternalCodeBase.is_configured",
@@ -51,6 +45,13 @@ class TestMARBLExternalCodeBaseInit:
             location=marbl_codebase._default_source_repo,
             identifier=marbl_codebase._default_checkout_target,
         )
+        assert (
+            marbl_codebase._default_source_repo
+            == "https://github.com/marbl-ecosys/MARBL.git"
+        )
+
+        assert marbl_codebase._default_checkout_target == "marbl0.45.0"
+        assert marbl_codebase.root_env_var == "MARBL_ROOT"
 
 
 class TestMARBLExternalCodeBaseConfigure:

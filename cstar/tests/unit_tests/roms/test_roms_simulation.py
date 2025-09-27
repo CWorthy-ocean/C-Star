@@ -1062,12 +1062,12 @@ class TestToAndFromDictAndBlueprint:
 
         Mocks & Fixtures
         ---------------------
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `Fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         """
         sim = fake_romssimulation
         sim_dict = self.example_simulation_dict
-        # sim_dict["runtime_code"]["location"] = sim.directory.parent
-        # sim_dict["compile_time_code"]["location"] = sim.directory.parent
 
         marbl_codebase_sourcedata = mock_source_data_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
@@ -1125,6 +1125,7 @@ class TestToAndFromDictAndBlueprint:
 
         Mocks & Fixtures
         ----------------
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `tmp_path`: A pytest fixture providing a temporary directory for testing.
         """
         sim_dict = self.example_simulation_dict.copy()
@@ -1192,6 +1193,7 @@ class TestToAndFromDictAndBlueprint:
         Mocks & Fixtures
         ----------------
         - `fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         """
         sim = fake_romssimulation
         sim_to_dict = sim.to_dict()
@@ -1373,6 +1375,7 @@ class TestToAndFromDictAndBlueprint:
         ----------------
         - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
         - `mock_requests_get`: Mocks `requests.get()` to return a simulated YAML blueprint response.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `tmp_path`: A temporary directory provided by `pytest` to simulate the simulation directory.
         """
         sim_dict = self.example_simulation_dict
@@ -1430,6 +1433,7 @@ class TestToAndFromDictAndBlueprint:
         Mocks & Fixtures
         ----------------
         - `fake_romssimulation`: A fixture providing a sample `ROMSSimulation` instance.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `tmp_path`: A temporary directory provided by `pytest` to store the blueprint file.
         """
         sim = fake_romssimulation
@@ -1552,9 +1556,9 @@ class TestProcessingAndExecution:
         Mocks & Fixtures
         ---------------
         - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_handle_config_status` : Mocks `handle_config_status` for external codebases.
         - `mock_additionalcode_get` : Mocks `get()` for runtime and compile-time code.
         - `mock_inputdataset_get` : Mocks `get()` for input datasets.
+        - `mock_externalcodebase_setup` : Mocks `setup` for external codebases.
 
         Assertions
         ----------
@@ -1600,7 +1604,7 @@ class TestProcessingAndExecution:
         ---------------
         - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
         - `mock_exists_locally` : Mocks `exists_locally` for additional code components.
-        - `codebase_status` : Parameterized mock return value for `ROMSExternalCodeBase.local_config_status`.
+        - `codebase_status` : Parameterized mock return value for `ROMSExternalCodeBase.is_configured`.
         - `marbl_status` : Parameterized mock return value for `MARBLExternalCodeBase.local_config_status`.
 
         Assertions

@@ -14,20 +14,21 @@ class ExternalCodeBase(ABC, LoggingMixin):
     -----------
     source: SourceData:
         Information about the external codebase source repository
-    checkout_hash: str
-        The git hash associated with `checkout_target`
-    repo_basename: str
-        The basename of the repository, e.g. "repo" for "https://github.com/dev-team/repo.git
-    expected_env_var: str
+    root_env_var: str
         Environment variable pointing to the root of the external codebase
-        indicating that the external codebase has been installed and configured on the local machine.
+    working_copy: StagedRepository
+        Local clone of the codebase
+    is_configured: bool
+        True if the codebase has been retrieved and configured locally
 
     Methods
     -------
-    get()
-        Obtain and configure the external codebase on this machine if it is not already.
-        handle_local_config_status() prompts the user to run get() if the model cannot be found.
-    TODO : update here
+    get(target_dir: Path) -> StagedRepository:
+        Clone the codebase locally at the intended checkout target. Updates `working_copy`
+    configure():
+        Perform any actions necessary to configure this codebase locally for use
+    setup(target_dir: Path):
+        Calls both `get()` and `configure()` in sequence
     """
 
     _working_copy: StagedRepository | None = None  # updated by self.get()
@@ -57,10 +58,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
         if not checkout_target:
             checkout_target = self._default_checkout_target
         self._source = SourceData(location=source_repo, identifier=checkout_target)
-        # if self._source._classification.value.source_type != SourceType.REPOSITORY:
-        #     raise ValueError(
-        #         f"{source_repo} does not appear to describe a valid repository"
-        #     )
 
         if not self.is_configured:
             self._working_copy = None
@@ -96,6 +93,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
         return repr_str
 
     def to_dict(self) -> dict:
+        """Return this ExternalCodeBase as a dictionary of kwargs to ExternalCodeBase.__init__"""
         return {
             "source_repo": self.source.location,
             "checkout_target": self.source.checkout_target,
@@ -103,6 +101,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def source(self) -> SourceData:
+        """The SourceData instance associated with this ExternalCodeBase"""
         return self._source
 
     @property
@@ -124,10 +123,19 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def working_copy(self) -> StagedRepository | None:
+        """StagedRepository instance describing the local clone of this codebase (if it exists)"""
         return self._working_copy
 
     def get(self, target_dir: Path | None = None) -> None:
-        """Retrieve and stage this ExternalCodeBase"""
+        """Retrieve and stage this ExternalCodeBase
+
+        Parameters
+        ----------
+        target_dir: Path or None
+            The directory to clone the codebase to on the local filesystem. Defaults to an internal
+            directory in the C-Star package root.
+
+        """
         if self.working_copy:
             self.log.info(
                 f"ExternalCodeBase is already staged at {self.working_copy.path}. Skipping get() call"
@@ -154,14 +162,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
     def is_configured(self) -> bool:
         """Returns True if this ExternalCodeBase exists locally and is correctly configured"""
 
-        # Checks previously done:
-        # Does X_ROOT point to a repo whose remote matches the source?
-        # Does X_ROOT point to the correct repo, checked out at the wrong target?
-        # Is X_ROOT defined at all?
-        #
-        # New checks: self.working_copy.changed_from_source() covers repo checks
-        # other subclasses should implement their own checks.
-
     def configure(self) -> None:
         """Configure (set environment, compile, etc.) the external codebase on your local machine."""
         if not self.working_copy:
@@ -180,13 +180,6 @@ class ExternalCodeBase(ABC, LoggingMixin):
         """Must be implemented by subclasses"""
 
     def setup(self, target_dir: Path | None = None) -> None:
+        """Retrieve and configure this codebase in a single call"""
         self.get(target_dir)
         self.configure()
-
-    def remove(self):
-        raise NotImplementedError("TODO")
-        # self.log.info(f"Removing local ExternalCodeBase from {self.working_copy.path}")
-        # if self.working_copy:
-        #     self.working_copy.unstage()
-        #     self.working_copy = None
-        # if self.

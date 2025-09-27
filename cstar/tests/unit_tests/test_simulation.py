@@ -172,6 +172,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
+        - `fake_externalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -202,6 +203,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
+        - `fake_externalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -232,6 +234,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
+        - `fake_externalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -313,6 +316,7 @@ class TestSimulationInitialization:
         ----------------
         - `patch.object(StubSimulation, "_validate_simulation_directory")`: Mocks directory validation.
         - `patch.object(StubSimulation, "_validate_date_range")`: Mocks date range validation.
+        - `fake_externalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -362,6 +366,8 @@ class TestSimulationInitialization:
             Temporary directory for simulation setup.
         caplog (pytest.LogCaptureFixture)
             builtin fixture for capturing logged messages
+        fake_externalcodebase
+            An ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -399,6 +405,8 @@ class TestSimulationInitialization:
             Temporary directory for simulation setup.
         caplog (pytest.LogCaptureFixture)
             builtin fixture for capturing logged messages
+        fake_externalcodebase
+            an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------

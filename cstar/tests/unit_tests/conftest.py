@@ -41,6 +41,8 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 class MockStager(Stager):
+    """Mock subclass of Stager to skip any staging and retrieval logic"""
+
     def stage(self, target_dir: Path, source: "SourceData"):
         return MockStagedData(source=source, path=target_dir)
 
@@ -50,6 +52,12 @@ class MockStager(Stager):
 
 
 class MockStagedData(StagedData):
+    """Mock subclass of StagedData to skip any filesystem and network logic.
+
+    Can be initialized with 'mock_changed_from_source' param to set the value of
+    the 'changed_from_source' property
+    """
+
     def __init__(
         self, source: "SourceData", path: "Path", mock_changed_from_source: bool = False
     ):
@@ -68,6 +76,11 @@ class MockStagedData(StagedData):
 
 
 class MockSourceInspector(_SourceInspector):
+    """Mock subclass of _SourceInspector to skip any classification logic.
+
+    Tests can initialize with 'classification' parameter to set the desired classification manually.
+    """
+
     def __init__(
         self, location: str | Path, classification: SourceClassification | None = None
     ):
@@ -83,6 +96,11 @@ class MockSourceInspector(_SourceInspector):
 
 
 class MockSourceData(SourceData):
+    """Mock subclass of SourceData to skip any filesystem or network logic.
+
+    Tests can provide 'classification' parameter to set desired classification manually.
+    """
+
     def __init__(
         self,
         location: str | Path,
@@ -93,9 +111,6 @@ class MockSourceData(SourceData):
         self._location = str(location)
         self._identifier = identifier
 
-        self._inspector = MockSourceInspector(
-            location=location, classification=classification
-        )
         self._classification = classification
 
         self._stager = MockStager()
@@ -103,7 +118,24 @@ class MockSourceData(SourceData):
 
 @pytest.fixture
 def mock_source_data_factory():
-    # with mock.patch("cstar.io.source_data.SourceData") as source_data_patch:
+    """
+    Fixture that returns a MockSourceData instance with chosen attributes
+
+    Parameters
+    ----------
+    classification (SourceClassification):
+        The desired classification to be set manually, avoiding complex classification logic
+    location (str or Path):
+        The desired location attribute associated with the mock data source
+    identifier (str, default None)
+        The desired identifier attribute associated with the mock data source
+
+    Returns
+    -------
+    MockSourceData
+        A populated SourceData subclass with the specified characteristics
+    """
+
     def factory(
         classification: SourceClassification,
         location: str | Path,
@@ -122,7 +154,8 @@ def mock_source_data_factory():
 
 @pytest.fixture
 def mock_sourcedata_remote_repo():
-    # def mock_sourcedata_remote_repo(mock_source_data_factory):
+    """Fixture to create a MockSourceData instance with remote repository-like characteristics"""
+
     def _create(location="https://github.com/test/repo.git", identifier="test_target"):
         return MockSourceData(
             classification=SourceClassification.REMOTE_REPOSITORY,
@@ -131,22 +164,6 @@ def mock_sourcedata_remote_repo():
         )
 
     return _create
-
-
-# @pytest.fixture
-# def mock_sourcedata_remote_repo(mock_source_data_factory):
-#     source = mock_source_data_factory(
-#         #Params
-#         location = "https://github.com/test/repo.git",
-#         identifier="test_target",
-#         # Properties
-#         source_type=SourceType.REPOSITORY,
-#         location_type=LocationType.HTTP,
-#         file_encoding=FileEncoding.NA,
-#         stager = RemoteRepositoryStager(),
-#         checkout_target = "test_target"
-#     )
-#     return source
 
 
 ################################################################################
@@ -217,20 +234,25 @@ def fake_additionalcode_local():
 
 @pytest.fixture
 def fake_externalcodebase(mock_sourcedata_remote_repo):
+    """Pytest fixutre that provides an instance of the ExternalCodeBase class
+    with a mocked SourceData instance.
+    """
     source = mock_sourcedata_remote_repo()
     patch_source_data = mock.patch(
         "cstar.base.external_codebase.SourceData", return_value=source
     )
     patch_source_data.start()
     fecb = FakeExternalCodeBase()
-    patch_source_data.stop()  # TODO this is unsafe and should come after yield
     fecb._source = source
-
     yield fecb
+    patch_source_data.stop()
 
 
 @pytest.fixture
 def fake_romsexternalcodebase(mock_sourcedata_remote_repo):
+    """Pytest fixutre that provides an instance of the ROMSExternalCodeBase class
+    with a mocked SourceData instance.
+    """
     source_data = mock_sourcedata_remote_repo(
         location="https://github.com/roms/repo.git", identifier="roms_branch"
     )
@@ -239,15 +261,18 @@ def fake_romsexternalcodebase(mock_sourcedata_remote_repo):
     )
     patch_source_data.start()
     recb = ROMSExternalCodeBase()
-    patch_source_data.stop()
     recb._source = source_data
     yield recb
+    patch_source_data.stop()
 
     # patch_source_data.stop()
 
 
 @pytest.fixture
 def fake_marblexternalcodebase(mock_sourcedata_remote_repo):
+    """Pytest fixutre that provides an instance of the MARBLExternalCodeBase class
+    with a mocked SourceData instance.
+    """
     source_data = mock_sourcedata_remote_repo(
         location="https://marbl.com/repo.git", identifier="v1"
     )
@@ -257,11 +282,11 @@ def fake_marblexternalcodebase(mock_sourcedata_remote_repo):
 
     patch_source_data.start()
     mecb = MARBLExternalCodeBase()
-    patch_source_data.stop()
+    # patch_source_data.stop()
 
     mecb._source = source_data
     yield mecb
-    # patch_source_data.stop()
+    patch_source_data.stop()
 
 
 ################################################################################

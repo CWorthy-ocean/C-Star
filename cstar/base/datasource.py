@@ -65,7 +65,6 @@ class DataSource:
         loc = Path(self.location).expanduser()
 
         if (loc.suffix.lower() == ".git") or ((loc / ".git").is_dir()):
-            # TODO: a remote repository might not have a .git suffix, more advanced handling needed
             return "repository"
         elif loc.is_dir():
             return "directory"

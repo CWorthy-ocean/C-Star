@@ -13,7 +13,10 @@ class TestROMSExternalCodeBaseInit:
     )
     @mock.patch("cstar.base.external_codebase.SourceData.__init__")
     def test_init_with_args(self, mock_source_init, mock_is_configured):
-        """Test ROMSExternalCodeBase initializes correctly with arguments."""
+        """Test Initialization with provided source_repo and checkout_target args
+
+        Asserts SourceData is instantiated with the correct parameters.
+        """
         mock_source_init.return_value = None
 
         source_repo = "https://www.github.com/CESR-lab/ucla-roms.git"
@@ -41,7 +44,9 @@ class TestROMSExternalCodeBaseInit:
     )
     @mock.patch("cstar.base.external_codebase.SourceData.__init__")
     def test_init_without_args(self, mock_source_init, mock_is_configured):
-        """Test ROMSExternalCodeBase uses defaults when no args provided."""
+        """Test that the defaults are set correctly if ROMSExternalCodeBase initialized
+        without args.
+        """
         mock_source_init.return_value = None
         roms_codebase = ROMSExternalCodeBase()
 
