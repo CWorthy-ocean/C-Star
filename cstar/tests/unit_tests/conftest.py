@@ -504,6 +504,7 @@ def fake_romssimulation(
                 location="http://my.files/sw_corr.nc", file_hash="890"
             ),
         ],
+        cdr_forcing=ROMSCdrForcing(location="http://my.files/cdr.nc", file_hash="542"),
     )
 
     yield sim  # Ensures pytest can handle resource cleanup if needed
