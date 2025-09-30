@@ -85,7 +85,7 @@ class HostNameEvaluator:
         if self.lmod_hostname:
             return self.lmod_hostname
 
-        if os.getenv("RCAC_CLUSTER"):
+        if os.getenv("RCAC_CLUSTER") == "anvil":
             return "anvil"
 
         if self.platform_hostname:
