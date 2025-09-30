@@ -1,114 +1,15 @@
 # ruff: noqa: S101
 
+import json
 import pathlib
 import typing as t
 import uuid
 from pathlib import Path
 
 import pytest
-import yaml
 from pydantic import BaseModel, ValidationError
 
-from cstar.orchestration.models import KeyValueStore, Step, WorkPlan, WorkPlanState
-
-
-def model_to_yaml(model: BaseModel) -> str:
-    """Serialize a model to yaml.
-
-    Parameters
-    ----------
-    model : BaseModel
-        The model to be serialized
-
-    Returns
-    -------
-    str
-        The serialized model
-    """
-    dumped = model.model_dump()
-
-    def path_representer(
-        dumper: yaml.Dumper,
-        data: pathlib.PosixPath,
-    ) -> yaml.ScalarNode:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
-
-    def workplanstate_representer(
-        dumper: yaml.Dumper,
-        data: WorkPlanState,
-    ) -> yaml.ScalarNode:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
-
-    dumper = yaml.Dumper
-
-    dumper.add_representer(pathlib.PosixPath, path_representer)
-    dumper.add_representer(WorkPlanState, workplanstate_representer)
-
-    return yaml.dump(dumped, sort_keys=False)
-
-
-_T = t.TypeVar("_T", bound=BaseModel)
-
-
-def yaml_to_model(yaml_doc: str, cls: type[_T]) -> _T:
-    """Deserialize yaml to a model.
-
-    Parameters
-    ----------
-    yaml_doc : str
-        The serialized model
-    cls : type
-        The type to deserialize to
-
-    Returns
-    -------
-    _T
-        The deserialized model instance
-    """
-    loaded_dict = yaml.safe_load(yaml_doc)
-
-    return cls.model_validate(loaded_dict)
-
-
-@pytest.fixture
-def fake_blueprint_path(tmp_path: Path) -> Path:
-    """Create an empty blueprint yaml file.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Unique path for test-specific files
-    """
-    path = tmp_path / "blueprint.yml"
-    path.touch()
-    return path
-
-
-@pytest.fixture
-def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step, None, None]]:
-    """Create fake steps for testing purposes.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Unique path for test-specific files
-    """
-
-    def _gen_fake_steps(num_steps: int) -> t.Generator[Step, None, None]:
-        """Create `num_steps` fake steps."""
-        for _ in range(num_steps):
-            step_name = f"test-step-{uuid.uuid4()}"
-            app_name = f"test-app-{uuid.uuid4()}"
-            path = tmp_path / f"dummy-blueprint-{uuid.uuid4()}.yml"
-            path.touch()
-
-            yield Step(
-                name=step_name,
-                application=app_name,
-                blueprint=path,
-            )
-
-    return _gen_fake_steps
+from cstar.orchestration.models import KeyValueStore, Step, Workplan, WorkplanState
 
 
 def test_step_defaults(fake_blueprint_path: Path) -> None:
@@ -169,7 +70,7 @@ def test_step_name_validation(
 
     with pytest.raises(ValidationError) as error:
         _ = Step(
-            name=invalid_value,  # type: ignore[reportArgumentType]
+            name=invalid_value,  # type: ignore[arg-type]
             application=app_name,
             blueprint=fake_blueprint_path,
         )
@@ -205,7 +106,7 @@ def test_step_application_validation(
     with pytest.raises(ValidationError) as error:
         _ = Step(
             name=step_name,
-            application=invalid_value,  # type: ignore[reportArgumentType]
+            application=invalid_value,  # type: ignore[arg-type]
             blueprint=fake_blueprint_path,
         )
 
@@ -234,7 +135,7 @@ def test_step_path_validation(invalid_value: Path | None) -> None:
         _ = Step(
             name=step_name,
             application=app_name,
-            blueprint=invalid_value,  # type: ignore[reportArgumentType]
+            blueprint=invalid_value,  # type: ignore[arg-type]
         )
 
     assert "blueprint" in str(error)
@@ -270,7 +171,7 @@ def test_step_dependson_validation(
             name="test-step",
             application="test-app",
             blueprint=fake_blueprint_path,
-            depends_on=invalid_value,  # type: ignore[reportUndefinedVariable]
+            depends_on=invalid_value,  # type: ignore[arg-type]
         )
 
     assert "depends_on" in str(error)
@@ -393,7 +294,7 @@ def test_step_dependson_copy(
 )
 def test_step_blueprint_overrides(
     fake_blueprint_path: Path,
-    overrides: dict[str, str | int],
+    overrides: KeyValueStore,
 ) -> None:
     """Verify that step blueprint overrides value is stored as expected.
 
@@ -425,7 +326,7 @@ def test_step_blueprint_overrides(
 )
 def test_step_compute_overrides(
     fake_blueprint_path: Path,
-    overrides: dict[str, str | int],
+    overrides: KeyValueStore,
 ) -> None:
     """Verify that step compute overrides value is stored as expected.
 
@@ -465,7 +366,7 @@ def test_step_compute_overrides_set(
         name=step_name,
         application=app_name,
         blueprint=fake_blueprint_path,
-        compute_overrides=overrides,
+        compute_overrides=overrides,  # type: ignore[arg-type]
     )
 
     new_values: KeyValueStore = {"CSTAR_XYZ": 42, "CSTAR_PQR": "xxx"}
@@ -488,7 +389,7 @@ def test_step_compute_overrides_set(
 )
 def test_step_workflow_overrides(
     fake_blueprint_path: Path,
-    overrides: dict[str, str | int],
+    overrides: KeyValueStore,
 ) -> None:
     """Verify that step workflow overrides value is stored as expected.
 
@@ -520,7 +421,7 @@ def test_step_workflow_overrides_set(
         A path to a file that meets minimum expectations (it exists).
 
     """
-    overrides = {"a": 1, "b": 2, "c": "xyz"}
+    overrides: KeyValueStore = {"a": 1, "b": 2, "c": "xyz"}
 
     step_name = f"test-step-{uuid.uuid4()}"
     app_name = f"test-app-{uuid.uuid4()}"
@@ -562,7 +463,7 @@ def test_step_all_overrides_copy(
         The name of the attribute on the Step object that should be tested.
 
     """
-    overrides = {"a": 1, "b": 2, "c": "xyz"}
+    overrides: dict[str, str | int] = {"a": 1, "b": 2, "c": "xyz"}
 
     step_name = f"test-step-{uuid.uuid4()}"
     app_name = f"test-app-{uuid.uuid4()}"
@@ -571,12 +472,12 @@ def test_step_all_overrides_copy(
         application=app_name,
         blueprint=fake_blueprint_path,
         **{
-            dict_prop: overrides,
-        },  # type: ignore[reportArgumentType]
+            dict_prop: overrides,  # type: ignore[arg-type]
+        },
     )
 
     og_env = dict(**overrides)
-    new_values = {"CSTAR_XYZ": 42, "CSTAR_PQR": "xxx"}
+    new_values: dict[str, str | int] = {"CSTAR_XYZ": 42, "CSTAR_PQR": "xxx"}
 
     overrides.update(new_values)
 
@@ -602,7 +503,7 @@ def test_step_blueprint_overrides_set(
         A path to a file that meets minimum expectations (it exists).
 
     """
-    overrides = {"a": 1, "b": 2, "c": "xyz"}
+    overrides: KeyValueStore = {"a": 1, "b": 2, "c": "xyz"}
 
     step_name = f"test-step-{uuid.uuid4()}"
     app_name = f"test-app-{uuid.uuid4()}"
@@ -636,17 +537,18 @@ def test_workplan_defaults(
     name = f"test-plan-{uuid.uuid4()}"
     description = f"test-desc-{uuid.uuid4()}"
 
-    plan = WorkPlan(
+    plan = Workplan(
         name=name,
         description=description,
         steps=steps,
+        state=WorkplanState.Draft,
     )
 
     assert plan.name == name
     assert plan.description == description
     assert len(plan.steps) == len(steps)
     assert {step.name for step in plan.steps} == {step.name for step in steps}
-    assert plan.state == WorkPlanState.Draft
+    assert plan.state == WorkplanState.Draft
 
     assert not plan.compute_environment
     assert "foo" not in plan.compute_environment  # ensure non-null
@@ -679,8 +581,8 @@ def test_workplan_name_validation(
     description = f"test-desc-{uuid.uuid4()}"
 
     with pytest.raises(ValidationError) as error:
-        _ = WorkPlan(
-            name=invalid_value,  # type: ignore[reportArgumentType]
+        _ = Workplan(
+            name=invalid_value,  # type: ignore[arg-type]
             description=description,
             steps=steps,
         )
@@ -713,9 +615,9 @@ def test_workplan_description_validation(
     name = f"test-plan-{uuid.uuid4()}"
 
     with pytest.raises(ValidationError) as error:
-        _ = WorkPlan(
+        _ = Workplan(
             name=name,
-            description=invalid_value,  # type: ignore[reportArgumentType]
+            description=invalid_value,  # type: ignore[arg-type]
             steps=steps,
         )
 
@@ -737,11 +639,11 @@ def test_workplan_state_validation(
     description = f"test-desc-{uuid.uuid4()}"
 
     with pytest.raises(ValidationError) as error:
-        _ = WorkPlan(
+        _ = Workplan(
             name=name,
             description=description,
             steps=steps,
-            state=f"{WorkPlanState.Draft}y",  # type: ignore[reportArgumentType]
+            state=f"{WorkplanState.Draft}y",  # type: ignore[arg-type]
         )
 
     assert "state" in str(error)
@@ -767,10 +669,10 @@ def test_workplan_steps_validation(invalid_value: list | None) -> None:
     description = f"test-desc-{uuid.uuid4()}"
 
     with pytest.raises(ValidationError) as error:
-        _ = WorkPlan(
+        _ = Workplan(
             name=name,
             description=description,
-            steps=invalid_value,  # type: ignore[reportArgumentType]
+            steps=invalid_value,  # type: ignore[arg-type]
         )
 
     assert "steps" in str(error)
@@ -786,7 +688,7 @@ def test_workplan_steps_validation(invalid_value: list | None) -> None:
     ],
 )
 def test_workplan_compute_environment(
-    compute_env: dict[str, str | int],
+    compute_env: KeyValueStore,
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify the compute environment of the workplan is set as expected.
@@ -799,7 +701,7 @@ def test_workplan_compute_environment(
         A generator function to produce minimally valid test steps
     """
     steps = list(gen_fake_steps(5))
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=steps,
@@ -809,7 +711,7 @@ def test_workplan_compute_environment(
     assert plan.compute_environment == compute_env
 
 
-def test_json_serialize(
+def test_workplan_json_serialize(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
     """Verify that the model is json serializable.
@@ -821,7 +723,7 @@ def test_json_serialize(
 
     """
     fake_steps = list(gen_fake_steps(1))
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=fake_steps,
@@ -842,9 +744,10 @@ def test_json_serialize(
     assert "workflow_overrides" in json
 
 
-def test_yaml_serialize(
+def test_workplan_yaml_serialize(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
     tmp_path: pathlib.Path,
+    serialize_workplan: t.Callable[[Workplan, Path], str],
 ) -> None:
     """Verify that the model serializes to YAML without errors.
 
@@ -856,35 +759,39 @@ def test_yaml_serialize(
         Temporarily write a yaml document to disk for manual test review of failures.
 
     """
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(1)),
+        state=WorkplanState.Draft,
     )
 
-    yaml_doc = model_to_yaml(plan)
-    yaml_path = tmp_path / "test.yaml"
+    schema = Workplan.model_json_schema()
+    schema_path = tmp_path / "schema.json"
+    with schema_path.open("w") as fp:
+        fp.write(json.dumps(schema))
 
-    print(f"Writing test yaml document to: {yaml_path}")
-    with yaml_path.open("w") as fp:
-        fp.write(yaml_doc)
+    yaml_path = tmp_path / "test.yaml"
+    yaml_doc = serialize_workplan(plan, yaml_path)
 
     assert "name" in yaml_doc
     assert "description" in yaml_doc
     assert "steps" in yaml_doc
     assert "state" in yaml_doc
-    assert "compute_environment" in yaml_doc
+    assert "compute_environment" not in yaml_doc
     assert "application" in yaml_doc
     assert "blueprint" in yaml_doc
-    assert "depends_on" in yaml_doc
-    assert "blueprint_overrides" in yaml_doc
-    assert "compute_overrides" in yaml_doc
-    assert "workflow_overrides" in yaml_doc
+    assert "depends_on" not in yaml_doc
+    assert "blueprint_overrides" not in yaml_doc
+    assert "compute_overrides" not in yaml_doc
+    assert "workflow_overrides" not in yaml_doc
 
 
-def test_yaml_deserialize(
+def test_workplan_yaml_deserialize(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
     tmp_path: pathlib.Path,
+    serialize_workplan: t.Callable[[BaseModel, Path], str],
+    deserialize_model: t.Callable[[Path, type], BaseModel],
 ) -> None:
     """Verify that the model deserializes from YAML without errors.
 
@@ -896,21 +803,16 @@ def test_yaml_deserialize(
         Temporarily write a yaml document to disk to ensure deserialization.
 
     """
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(1)),
     )
 
-    yaml_doc = model_to_yaml(plan)
     yaml_path = tmp_path / "test.yaml"
+    _ = serialize_workplan(plan, yaml_path)
 
-    print(f"Writing test yaml document to: {yaml_path}")
-    with yaml_path.open("w") as fp:
-        fp.write(yaml_doc)
-
-    written = yaml_path.read_text()
-    plan2 = yaml_to_model(written, WorkPlan)
+    plan2 = t.cast("Workplan", deserialize_model(yaml_path, Workplan))
 
     assert plan == plan2
 
@@ -918,7 +820,7 @@ def test_yaml_deserialize(
 def test_workplan_step_copy(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
-    """Verify that the WorkPlan deep-copies steps.
+    """Verify that the Workplan deep-copies steps.
 
     Parameters
     ----------
@@ -927,7 +829,7 @@ def test_workplan_step_copy(
 
     """
     steps = list(gen_fake_steps(2))
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=steps,
@@ -954,7 +856,7 @@ def test_workplan_step_copy(
 def test_workplan_step_set(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
-    """Verify that the WorkPlan does not allow the steps list reference to change.
+    """Verify that the Workplan does not allow the steps list reference to change.
 
     Parameters
     ----------
@@ -963,7 +865,7 @@ def test_workplan_step_set(
 
     """
     steps = list(gen_fake_steps(2))
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(1)),
@@ -978,7 +880,7 @@ def test_workplan_step_set(
 def test_workplan_runtimevars_copy(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
-    """Verify that the WorkPlan copy of runtime_vars is distinct
+    """Verify that the Workplan copy of runtime_vars is distinct
 
     Parameters
     ----------
@@ -988,7 +890,7 @@ def test_workplan_runtimevars_copy(
     """
     runtime_vars = ["a", "b", "c"]
 
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(2)),
@@ -1013,7 +915,7 @@ def test_workplan_runtimevars_copy(
 def test_workplan_runtimevars_set(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
-    """Verify that the WorkPlan does not allow the runtime_vars list reference to change.
+    """Verify that the Workplan does not allow the runtime_vars list reference to change.
 
     Parameters
     ----------
@@ -1023,7 +925,7 @@ def test_workplan_runtimevars_set(
     """
     runtime_vars = ["a", "b", "c"]
 
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(2)),
@@ -1035,10 +937,10 @@ def test_workplan_runtimevars_set(
     assert "runtime_vars" in str(error)
 
 
-def test_workplan_computeenv_copy(
+def test_workplan_runtimevars_duplicates(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
-    """Verify that the WorkPlan copy of compute_environment is distinct
+    """Verify that the Workplan identifies duplicate runtime_vars
 
     Parameters
     ----------
@@ -1046,9 +948,33 @@ def test_workplan_computeenv_copy(
         A generator function to produce minimally valid test steps
 
     """
-    compute_env = {"a": 1, "b": 2, "c": "xyz"}
+    runtime_vars = ["a", "a", "c"]
 
-    plan = WorkPlan(
+    with pytest.raises(ValidationError) as error:
+        _ = Workplan(
+            name="test-plan",
+            description="test-description",
+            steps=list(gen_fake_steps(2)),
+            runtime_vars=runtime_vars,
+        )
+
+    assert "runtime_vars" in str(error)
+
+
+def test_workplan_computeenv_copy(
+    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
+) -> None:
+    """Verify that the Workplan copy of compute_environment is distinct
+
+    Parameters
+    ----------
+    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
+        A generator function to produce minimally valid test steps
+
+    """
+    compute_env: KeyValueStore = {"a": 1, "b": 2, "c": "xyz"}
+
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(2)),
@@ -1056,7 +982,7 @@ def test_workplan_computeenv_copy(
     )
 
     og_env = dict(**compute_env)
-    new_values = {"CSTAR_XYZ": 42, "CSTAR_PQR": "xxx"}
+    new_values: KeyValueStore = {"CSTAR_XYZ": 42, "CSTAR_PQR": "xxx"}
 
     compute_env.update(new_values)
 
@@ -1073,7 +999,7 @@ def test_workplan_computeenv_copy(
 def test_workplan_computeenv_set(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
 ) -> None:
-    """Verify that the WorkPlan does not allow the compute env reference to change.
+    """Verify that the Workplan does not allow the compute env reference to change.
 
     Parameters
     ----------
@@ -1083,7 +1009,7 @@ def test_workplan_computeenv_set(
     """
     compute_env: KeyValueStore = {"a": 1, "b": 2, "c": "xyz"}
 
-    plan = WorkPlan(
+    plan = Workplan(
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(2)),

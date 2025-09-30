@@ -614,7 +614,7 @@ class ROMSRuntimeSettings(BaseModel):
                 "\n- bottom_drag"
                 "\n- output_root_name"
             )
-        return cls(**sections)
+        return cls(**sections)  # type: ignore[arg-type]
 
     def __str__(self) -> str:
         """Returns a string representation of the input settings.
@@ -773,17 +773,17 @@ class ROMSRuntimeSettings(BaseModel):
             "s_coord": dict(self.s_coord) if self.s_coord else None,
             "rho0": self.rho0,
             "lin_rho_eos": dict(self.lin_rho_eos) if self.lin_rho_eos else None,
-            "marbl_biogeochemistry": dict(self.marbl_biogeochemistry)
-            if self.marbl_biogeochemistry
-            else None,
+            "marbl_biogeochemistry": (
+                dict(self.marbl_biogeochemistry) if self.marbl_biogeochemistry else None
+            ),
             "lateral_visc": self.lateral_visc,
             "gamma2": self.gamma2,
-            "tracer_diff2": self.tracer_diff2
-            if self.tracer_diff2 is not None
-            else None,
-            "vertical_mixing": dict(self.vertical_mixing)
-            if self.vertical_mixing
-            else None,
+            "tracer_diff2": (
+                self.tracer_diff2 if self.tracer_diff2 is not None else None
+            ),
+            "vertical_mixing": (
+                dict(self.vertical_mixing) if self.vertical_mixing else None
+            ),
             "my_bak_mixing": dict(self.my_bak_mixing) if self.my_bak_mixing else None,
             "sss_correction": self.sss_correction,
             "sst_correction": self.sst_correction,
@@ -800,7 +800,7 @@ class ROMSRuntimeSettings(BaseModel):
         found in a ROMS-compatible `.in` file.
         """
         output = ""
-        for field_name, field_info in type(self).model_fields.items():
+        for field_name in type(self).model_fields:
             section = getattr(self, field_name)
             if section is None:
                 continue
@@ -817,4 +817,4 @@ class ROMSRuntimeSettings(BaseModel):
             Path where the output file will be written.
         """
         with Path(filepath).open("w") as f:
-            f.write(self.model_dump())
+            f.write(str(self.model_dump()))

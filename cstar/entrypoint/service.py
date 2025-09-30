@@ -41,7 +41,8 @@ class ServiceConfiguration(BaseModel):
     name: str = "Service"
     """A user-friendly name for logging."""
 
-    @computed_field
+    @computed_field  # type: ignore[misc]
+    @property
     def max_health_check_latency(self) -> float:
         """Get the max latency allowed before missed health checks should be logged.
 
