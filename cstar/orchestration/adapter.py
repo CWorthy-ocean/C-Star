@@ -116,6 +116,12 @@ class GridAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSModelGrid]):
             ),
             start_date=self.model.valid_start_date,
             end_date=self.model.valid_end_date,
+            source_np_xi=self.model.partitioning.n_procs_x
+            if self.model.grid.data.partitioned
+            else None,
+            source_np_eta=self.model.partitioning.n_procs_y
+            if self.model.grid.data.partitioned
+            else None,
         )
 
 
@@ -137,6 +143,12 @@ class InitialConditionAdapter(
             ),
             start_date=self.model.valid_start_date,
             end_date=self.model.valid_end_date,
+            source_np_xi=self.model.partitioning.n_procs_x
+            if self.model.initial_conditions.data.partitioned
+            else None,
+            source_np_eta=self.model.partitioning.n_procs_y
+            if self.model.initial_conditions.data.partitioned
+            else None,
         )
 
 
@@ -156,6 +168,12 @@ class TidalForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSTidalForci
             ),
             start_date=self.model.valid_start_date,
             end_date=self.model.valid_end_date,
+            source_np_xi=self.model.partitioning.n_procs_x
+            if self.model.forcing.tidal.data.partitioned
+            else None,
+            source_np_eta=self.model.partitioning.n_procs_y
+            if self.model.forcing.tidal.data.partitioned
+            else None,
         )
 
 
@@ -176,6 +194,12 @@ class RiverForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSRiverForci
             ),
             start_date=self.model.valid_start_date,
             end_date=self.model.valid_end_date,
+            source_np_xi=self.model.partitioning.n_procs_x
+            if self.model.forcing.river.data.partitioned
+            else None,
+            source_np_eta=self.model.partitioning.n_procs_y
+            if self.model.forcing.river.data.partitioned
+            else None,
         )
 
 
@@ -192,6 +216,12 @@ class BoundaryForcingAdapter(
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=self.model.valid_start_date,
                 end_date=self.model.valid_end_date,
+                source_np_xi=self.model.partitioning.n_procs_x
+                if f.partitioned
+                else None,
+                source_np_eta=self.model.partitioning.n_procs_y
+                if f.partitioned
+                else None,
             )
             for f in self.model.forcing.boundary.data
         ]
@@ -210,6 +240,12 @@ class SurfaceForcingAdapter(
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=self.model.valid_start_date,
                 end_date=self.model.valid_end_date,
+                source_np_xi=self.model.partitioning.n_procs_x
+                if f.partitioned
+                else None,
+                source_np_eta=self.model.partitioning.n_procs_y
+                if f.partitioned
+                else None,
             )
             for f in self.model.forcing.surface.data
         ]
@@ -244,6 +280,12 @@ class ForcingCorrectionAdapter(
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=self.model.valid_start_date,
                 end_date=self.model.valid_end_date,
+                source_np_xi=self.model.partitioning.n_procs_x
+                if f.partitioned
+                else None,
+                source_np_eta=self.model.partitioning.n_procs_y
+                if f.partitioned
+                else None,
             )
             for f in self.model.forcing.corrections.data
         ]

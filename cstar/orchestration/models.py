@@ -48,6 +48,8 @@ class Resource(ConfiguredBaseModel):
     location: FilePath | HttpUrl
     """Location of the file to retrieve."""
 
+    partitioned: bool = Field(default=False, init=False)
+
 
 class VersionedResource(Resource):
     hash: RequiredString
