@@ -88,6 +88,8 @@ class SlurmQueue(Queue, ABC):
         str
             The formatted walltime string in the "HH:MM:SS" format.
         """
+        if walltime_str == "infinite":
+            return "infinite"
         if walltime_str.count("-") == 1:  # D-HH:MM:SS
             mw_d = int(walltime_str.split("-")[0])
             mw_hms = walltime_str.split("-")[1]

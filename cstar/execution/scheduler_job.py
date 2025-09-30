@@ -256,7 +256,7 @@ class SchedulerJob(ExecutionHandler, ABC):
                 + f"and C-Star cannot default to the max walltime for the queue {queue_name} "
                 + " as it cannot be determined"
             )
-        elif self.queue.max_walltime is None:
+        elif self.queue.max_walltime is None or self.queue.max_walltime == "infinite":
             self.log.warning(
                 f"Unable to determine the maximum allowed walltime for chosen queue {queue_name}. "
                 + f"If your chosen walltime {walltime} exceeds the (unknown) limit, this job may be "

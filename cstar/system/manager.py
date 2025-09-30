@@ -85,6 +85,9 @@ class HostNameEvaluator:
         if self.lmod_hostname:
             return self.lmod_hostname
 
+        if os.getenv("RCAC_CLUSTER"):
+            return "anvil"
+
         if self.platform_hostname:
             return self.platform_hostname
 
@@ -176,6 +179,36 @@ class _PerlmutterSystemContext(_SystemContext):
             queues=[per_regular_q, per_shared_q, per_debug_q],
             primary_queue_name="regular",
             other_scheduler_directives={"-C": "cpu"},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
+        )
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _AnvilSystemContext(_SystemContext):
+    """The contextual dependencies for the Perlmutter system."""
+
+    name: ClassVar[str] = "anvil"
+    """The unique name identifying the Anvil system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Anvil."""
+    mpi_prefix: ClassVar[str] = "srun"
+    """The MPI prefix used on Anvil."""
+    docs: ClassVar[str] = "https://www.rcac.purdue.edu/knowledge/anvil/architecture"
+    """URI for documentation of the Anvil system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        per_regular_q = SlurmPartition(name="wholenode")
+        per_shared_q = SlurmPartition(name="shared")
+        per_debug_q = SlurmPartition(name="debug")
+
+        return SlurmScheduler(
+            queues=[per_regular_q, per_shared_q, per_debug_q],
+            primary_queue_name="wholenode",
+            other_scheduler_directives={},
             requires_task_distribution=False,
             documentation=cls.docs,
             max_cpus_per_node=128,
