@@ -57,7 +57,7 @@ def query_max_walltime_via_sinfo(name: str) -> str | None:
 
 
 def query_max_walltime_via_sacctmgr(name: str) -> str | None:
-    """Retrieve the maximum walltime for the SLURM QOS.
+    """Retrieve the maximum walltime using sacctmgr.
 
     Queries the SLURM accounting manager (`sacctmgr`) to fetch the maximum walltime
     associated with this QOS. The walltime is returned in the format "HH:MM:SS".
@@ -104,6 +104,9 @@ class Queue(ABC):
         query_name : str, optional
             An alternative name used for querying the queue. If not provided, it defaults
             to the value of `name`.
+        max_walltime_method : Callable | None, optional
+            An alternative method for determining the maximum walltime. If not provided,
+            defaults to a method specified by the subclass.
         """
         self.name = name
         self.query_name = query_name if query_name is not None else name
@@ -112,7 +115,7 @@ class Queue(ABC):
         )
 
     def __repr__(self) -> str:
-        """Return a string represention of this queue instance."""
+        """Return a string representation of this queue instance."""
         return f"{self.__class__.__name__}(name={self.name!r}, query_name={self.query_name!r})"
 
     @property
@@ -122,6 +125,7 @@ class Queue(ABC):
 
     @property
     def max_walltime(self):
+        """Return the maximum walltime for the queue."""
         return self._max_walltime_method(self.query_name)
 
 
@@ -142,21 +146,9 @@ class SlurmQueue(Queue, ABC):
     query_name : str
         The name of the queue used for system accounting, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
-    max_walltime : str
-        The maximum walltime allowed for jobs in this queue, formatted as "HH:MM:SS".
+    max_walltime: str
+        The maximum walltime allowed for the queue.
     """
-
-    def __init__(
-        self,
-        name: str,
-        query_name: str | None = None,
-        max_walltime_method: Callable | None = None,
-    ):
-        super().__init__(
-            name=name,
-            query_name=query_name,
-            max_walltime_method=max_walltime_method or query_max_walltime_via_sacctmgr,
-        )
 
     def __str__(self) -> str:
         """String representation of this SlurmQueue instance."""
@@ -241,7 +233,7 @@ class PBSQueue(Queue):
         query_name : str, optional
             An alternative name used for querying the queue. Defaults to the value of `name`.
         """
-        super().__init__(name)
+        super().__init__(name, query_name)
         self._max_walltime = max_walltime
 
     @property
@@ -249,7 +241,8 @@ class PBSQueue(Queue):
         return self._max_walltime
 
     def _default_max_walltime_method(self) -> Callable:
-        return lambda x: None
+        """Irrelevant for PBSQueue."""
+        raise NotImplementedError()
 
     def __str__(self) -> str:
         """Return a readable string representation of the PBSQueue instance."""
