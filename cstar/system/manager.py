@@ -13,6 +13,7 @@ from cstar.system.scheduler import (
     SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
+    query_max_walltime_via_sacctmgr,
 )
 
 
@@ -201,12 +202,24 @@ class _AnvilSystemContext(_SystemContext):
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
-        per_regular_q = SlurmPartition(name="wholenode")
-        per_shared_q = SlurmPartition(name="shared")
-        per_debug_q = SlurmPartition(name="debug")
+        regular_q = SlurmPartition(
+            name="wholenode",
+            query_name="part-standard",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        shared_q = SlurmPartition(
+            name="shared",
+            query_name="part-shared",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        debug_q = SlurmPartition(
+            name="debug",
+            query_name="part-debug",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
 
         return SlurmScheduler(
-            queues=[per_regular_q, per_shared_q, per_debug_q],
+            queues=[regular_q, shared_q, debug_q],
             primary_queue_name="wholenode",
             other_scheduler_directives={},
             requires_task_distribution=False,

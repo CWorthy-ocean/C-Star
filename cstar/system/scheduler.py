@@ -1,9 +1,80 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import _run_cmd
 
-################################################################################
+
+def _parse_walltime(walltime_str) -> str:
+    """Parse and format a SLURM walltime string into the format "HH:MM:SS".
+
+    Parameters
+    ----------
+    walltime_str : str
+        The walltime string to parse. This can be in one of the following formats:
+        - "D-HH:MM:SS" (days, hours, minutes, seconds)
+        - "HH:MM:SS" (hours, minutes, seconds)
+        - "MM:SS" (minutes, seconds)
+
+    Returns
+    -------
+    str
+        The formatted walltime string in the "HH:MM:SS" format.
+    """
+    if walltime_str.count("-") == 1:  # D-HH:MM:SS
+        mw_d = int(walltime_str.split("-")[0])
+        mw_hms = walltime_str.split("-")[1]
+    else:
+        mw_d = 0
+        mw_hms = walltime_str
+    if mw_hms.count(":") == 1:  # MM:SS
+        mw_h = 0
+        mw_m, mw_s = map(int, mw_hms.split(":"))
+    elif mw_hms.count(":") == 2:  # HH:MM:SS
+        mw_h, mw_m, mw_s = map(int, mw_hms.split(":"))
+    return f"{mw_d * 24 + mw_h:02}:{mw_m:02}:{mw_s:02}"
+
+
+def query_max_walltime_via_sinfo(name: str) -> str | None:
+    """Retrieve the maximum walltime for the SLURM queue via sinfo.
+
+    Queries the SLURM scheduler (`sinfo`) to fetch the maximum walltime
+    associated with this partition/queue. The walltime is returned in the format "HH:MM:SS".
+
+    Returns
+    -------
+    str or None
+        The maximum walltime in the format "HH:MM:SS", or `None` if no walltime is set.
+
+    Raises
+    ------
+    RuntimeError
+        If the command to query the SLURM scheduler (`sinfo`) fails.
+    """
+    sp_cmd = f"sinfo -h -o '%l' -p {name}"
+    mw = _run_cmd(sp_cmd)
+    return _parse_walltime(mw) if mw else None
+
+
+def query_max_walltime_via_sacctmgr(name: str) -> str | None:
+    """Retrieve the maximum walltime for the SLURM QOS.
+
+    Queries the SLURM accounting manager (`sacctmgr`) to fetch the maximum walltime
+    associated with this QOS. The walltime is returned in the format "HH:MM:SS".
+
+    Returns
+    -------
+    str or None
+        The maximum walltime in the format "HH:MM:SS", or `None` if no walltime is set.
+
+    Raises
+    ------
+    RuntimeError
+        If the command to query the SLURM accounting manager (`sacctmgr`) fails.
+    """
+    sp_cmd = f"sacctmgr show qos {name} format=MaxWall --noheader"
+    mw = _run_cmd(sp_cmd)
+    return _parse_walltime(mw) if mw else None
 
 
 class Queue(ABC):
@@ -18,7 +89,12 @@ class Queue(ABC):
         Defaults to the value of `name` (as the two are usually the same).
     """
 
-    def __init__(self, name: str, query_name: str | None = None):
+    def __init__(
+        self,
+        name: str,
+        query_name: str | None = None,
+        max_walltime_method: Callable | None = None,
+    ):
         """Initialize a Queue instance.
 
         Parameters
@@ -31,6 +107,9 @@ class Queue(ABC):
         """
         self.name = name
         self.query_name = query_name if query_name is not None else name
+        self._max_walltime_method = (
+            max_walltime_method or self._default_max_walltime_method
+        )
 
     def __repr__(self) -> str:
         """Return a string represention of this queue instance."""
@@ -38,8 +117,12 @@ class Queue(ABC):
 
     @property
     @abstractmethod
-    def max_walltime(self):
+    def _default_max_walltime_method(self) -> Callable:
         pass
+
+    @property
+    def max_walltime(self):
+        return self._max_walltime_method(self.query_name)
 
 
 class SlurmQueue(Queue, ABC):
@@ -63,50 +146,26 @@ class SlurmQueue(Queue, ABC):
         The maximum walltime allowed for jobs in this queue, formatted as "HH:MM:SS".
     """
 
+    def __init__(
+        self,
+        name: str,
+        query_name: str | None = None,
+        max_walltime_method: Callable | None = None,
+    ):
+        super().__init__(
+            name=name,
+            query_name=query_name,
+            max_walltime_method=max_walltime_method or query_max_walltime_via_sacctmgr,
+        )
+
     def __str__(self) -> str:
-        """String represention of this SlurmQueue instance."""
+        """String representation of this SlurmQueue instance."""
         return (
             f"{self.__class__.__name__}:\n"
             f"{'-' * len(self.__class__.__name__)}\n"
             f"name: {self.name}\n"
             f"max_walltime: {self.max_walltime}\n"
         )
-
-    def _parse_walltime(self, walltime_str) -> str:
-        """Parse and format a SLURM walltime string into the format "HH:MM:SS".
-
-        Parameters
-        ----------
-        walltime_str : str
-            The walltime string to parse. This can be in one of the following formats:
-            - "D-HH:MM:SS" (days, hours, minutes, seconds)
-            - "HH:MM:SS" (hours, minutes, seconds)
-            - "MM:SS" (minutes, seconds)
-
-        Returns
-        -------
-        str
-            The formatted walltime string in the "HH:MM:SS" format.
-        """
-        if walltime_str == "infinite":
-            return "infinite"
-        if walltime_str.count("-") == 1:  # D-HH:MM:SS
-            mw_d = int(walltime_str.split("-")[0])
-            mw_hms = walltime_str.split("-")[1]
-        else:
-            mw_d = 0
-            mw_hms = walltime_str
-        if mw_hms.count(":") == 1:  # MM:SS
-            mw_h = 0
-            mw_m, mw_s = map(int, mw_hms.split(":"))
-        elif mw_hms.count(":") == 2:  # HH:MM:SS
-            mw_h, mw_m, mw_s = map(int, mw_hms.split(":"))
-        return f"{mw_d * 24 + mw_h:02}:{mw_m:02}:{mw_s:02}"
-
-    @property
-    @abstractmethod
-    def max_walltime(self) -> str | None:
-        pass
 
 
 class SlurmQOS(SlurmQueue):
@@ -127,25 +186,8 @@ class SlurmQOS(SlurmQueue):
     """
 
     @property
-    def max_walltime(self) -> str | None:
-        """Retrieve the maximum walltime for the SLURM QOS.
-
-        Queries the SLURM accounting manager (`sacctmgr`) to fetch the maximum walltime
-        associated with this QOS. The walltime is returned in the format "HH:MM:SS".
-
-        Returns
-        -------
-        str or None
-            The maximum walltime in the format "HH:MM:SS", or `None` if no walltime is set.
-
-        Raises
-        ------
-        RuntimeError
-            If the command to query the SLURM accounting manager (`sacctmgr`) fails.
-        """
-        sp_cmd = f"sacctmgr show qos {self.name} format=MaxWall --noheader"
-        mw = _run_cmd(sp_cmd)
-        return self._parse_walltime(mw) if mw else None
+    def _default_max_walltime_method(self) -> Callable:
+        return query_max_walltime_via_sacctmgr
 
 
 class SlurmPartition(SlurmQueue):
@@ -166,25 +208,8 @@ class SlurmPartition(SlurmQueue):
     """
 
     @property
-    def max_walltime(self) -> str | None:
-        """Retrieve the maximum walltime for the SLURM partition.
-
-        Queries the SLURM scheduler (`sinfo`) to fetch the maximum walltime
-        associated with this partition. The walltime is returned in the format "HH:MM:SS".
-
-        Returns
-        -------
-        str or None
-            The maximum walltime in the format "HH:MM:SS", or `None` if no walltime is set.
-
-        Raises
-        ------
-        RuntimeError
-            If the command to query the SLURM scheduler (`sinfo`) fails.
-        """
-        sp_cmd = f"sinfo -h -o '%l' -p {self.name}"
-        mw = _run_cmd(sp_cmd)
-        return self._parse_walltime(mw) if mw else None
+    def _default_max_walltime_method(self) -> Callable:
+        return query_max_walltime_via_sinfo
 
 
 class PBSQueue(Queue):
@@ -222,6 +247,9 @@ class PBSQueue(Queue):
     @property
     def max_walltime(self):
         return self._max_walltime
+
+    def _default_max_walltime_method(self) -> Callable:
+        return lambda x: None
 
     def __str__(self) -> str:
         """Return a readable string representation of the PBSQueue instance."""
