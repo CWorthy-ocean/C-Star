@@ -189,7 +189,7 @@ class _PerlmutterSystemContext(_SystemContext):
 @register_sys_context
 @dataclass(frozen=True)
 class _AnvilSystemContext(_SystemContext):
-    """The contextual dependencies for the Perlmutter system."""
+    """The contextual dependencies for the Anvil system."""
 
     name: ClassVar[str] = "anvil"
     """The unique name identifying the Anvil system."""
