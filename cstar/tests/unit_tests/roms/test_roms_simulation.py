@@ -1,4 +1,5 @@
 import logging
+import pickle
 import re
 from datetime import datetime
 from pathlib import Path
@@ -947,67 +948,7 @@ class TestToAndFromDictAndBlueprint:
         reconstructed with `from_blueprint()` retains all properties.
     """
 
-    def setup_method(self):
-        """Sets a common dictionary representation of the ROMSSimulation instance
-        associated with the `fake_romssimulation` fixture to be used across tests in
-        this class.
-        """
-        self.example_simulation_dict = {
-            "name": "ROMSTest",
-            "valid_start_date": datetime(2024, 1, 1, 0, 0),
-            "valid_end_date": datetime(2026, 1, 1, 0, 0),
-            "codebase": {
-                "source_repo": "https://github.com/roms/repo.git",
-                "checkout_target": "roms_branch",
-            },
-            "discretization": {"time_step": 60, "n_procs_x": 2, "n_procs_y": 3},
-            "runtime_code": {
-                "location": "some/dir",
-                "subdir": "subdir/",
-                "checkout_target": "main",
-                "files": [
-                    "file1",
-                    "file2.in",
-                    "marbl_in",
-                    "marbl_tracer_output_list",
-                    "marbl_diagnostic_output_list",
-                ],
-            },
-            "compile_time_code": {
-                "location": "some/dir",
-                "subdir": "subdir/",
-                "checkout_target": "main",
-                "files": ["file1.h", "file2.opt"],
-            },
-            "marbl_codebase": {
-                "source_repo": "https://marbl.com/repo.git",
-                "checkout_target": "v1",
-            },
-            "model_grid": {"location": "http://my.files/grid.nc", "file_hash": "123"},
-            "initial_conditions": {
-                "location": "http://my.files/initial.nc",
-                "file_hash": "234",
-            },
-            "tidal_forcing": {
-                "location": "http://my.files/tidal.nc",
-                "file_hash": "345",
-            },
-            "river_forcing": {
-                "location": "http://my.files/river.nc",
-                "file_hash": "543",
-            },
-            "surface_forcing": [
-                {"location": "http://my.files/surface.nc", "file_hash": "567"}
-            ],
-            "boundary_forcing": [
-                {"location": "http://my.files/boundary.nc", "file_hash": "456"},
-            ],
-            "forcing_corrections": [
-                {"location": "http://my.files/sw_corr.nc", "file_hash": "890"}
-            ],
-        }
-
-    def test_to_dict(self, fake_romssimulation):
+    def test_to_dict(self, fake_romssimulation, fake_romssimulation_dict):
         """Tests that `to_dict()` correctly represents a `ROMSSimulation` instance in a
         dictionary.
 
@@ -1026,30 +967,23 @@ class TestToAndFromDictAndBlueprint:
         - `fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
         """
         sim = fake_romssimulation
-        test_dict = sim.to_dict()
+        tested_dict = sim.to_dict()
+        target_dict = fake_romssimulation_dict
 
-        assert (
-            test_dict["marbl_codebase"]
-            == self.example_simulation_dict["marbl_codebase"]
+        assert tested_dict.get("marbl_codebase") == target_dict.get("marbl_codebase")
+        assert tested_dict.get("model_grid") == target_dict.get("model_grid")
+        assert tested_dict.get("initial_conditions") == target_dict.get(
+            "initial_conditions"
         )
-        assert test_dict["model_grid"] == self.example_simulation_dict["model_grid"]
-        assert (
-            test_dict["initial_conditions"]
-            == self.example_simulation_dict["initial_conditions"]
+        assert tested_dict.get("tidal_forcing") == target_dict.get("tidal_forcing")
+        assert tested_dict.get("boundary_forcing") == target_dict.get(
+            "boundary_forcing"
         )
-        assert (
-            test_dict["tidal_forcing"] == self.example_simulation_dict["tidal_forcing"]
-        )
-        assert (
-            test_dict["boundary_forcing"]
-            == self.example_simulation_dict["boundary_forcing"]
-        )
-        assert (
-            test_dict["surface_forcing"]
-            == self.example_simulation_dict["surface_forcing"]
-        )
+        assert tested_dict.get("surface_forcing") == target_dict.get("surface_forcing")
 
-    def test_from_dict(self, fake_romssimulation, mock_source_data_factory):
+    def test_from_dict(
+        self, fake_romssimulation, fake_romssimulation_dict, mock_source_data_factory
+    ):
         """Tests that `from_dict()` correctly reconstructs a `ROMSSimulation` instance.
 
         This test verifies that calling `from_dict()` with a valid simulation dictionary
@@ -1067,7 +1001,7 @@ class TestToAndFromDictAndBlueprint:
         - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         """
         sim = fake_romssimulation
-        sim_dict = self.example_simulation_dict
+        sim_dict = fake_romssimulation_dict
 
         marbl_codebase_sourcedata = mock_source_data_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
@@ -1079,6 +1013,14 @@ class TestToAndFromDictAndBlueprint:
             location=sim_dict["codebase"]["source_repo"],
             identifier=sim_dict["codebase"]["checkout_target"],
         )
+
+        sim2 = ROMSSimulation.from_dict(
+            sim_dict,
+            directory=sim.directory,
+            start_date=sim.start_date,
+            end_date=sim.end_date,
+        )
+
         with patch(
             "cstar.base.external_codebase.SourceData",
             side_effect=[roms_codebase_sourcedata, marbl_codebase_sourcedata],
@@ -1091,20 +1033,15 @@ class TestToAndFromDictAndBlueprint:
             )
 
             assert sim2.to_dict() == sim_dict
-
-            # assert pickle.dumps(sim2) == pickle.dumps(sim), "Instances are not identical"
-            # NOTE:
-            # 1.
-            # As more classes utilise SourceData to manage their sources, mocks for this
-            # test will become more complex. It may be worth moving it to an integration test.
-            # 2.
-            # The pickle.dumps comparison is commented due to the use of a mock on SourceData
-            # realistically only _SourceInspector needs to be mocked, as it holds the
-            # majority of the logic, but ir is still stored
-            # as an attribute on SourceData anyway.  Perhaps that should not be the case.
+            assert pickle.dumps(sim2) == pickle.dumps(sim), (
+                "Instances are not identical"
+            )
 
     def test_from_dict_with_single_forcing_entries(
-        self, mock_source_data_factory, tmp_path
+        self,
+        fake_romssimulation_dict_no_forcing_lists,
+        mock_source_data_factory,
+        tmp_path,
     ):
         """Tests that `from_dict()` works with single surface and boundary forcing or
         forcing correction entries.
@@ -1128,7 +1065,7 @@ class TestToAndFromDictAndBlueprint:
         - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `tmp_path`: A pytest fixture providing a temporary directory for testing.
         """
-        sim_dict = self.example_simulation_dict.copy()
+        sim_dict = fake_romssimulation_dict_no_forcing_lists
         sim_dict["surface_forcing"] = {
             "location": "http://my.files/surface.nc",
             "file_hash": "567",
@@ -1139,7 +1076,7 @@ class TestToAndFromDictAndBlueprint:
         }
         sim_dict["forcing_corrections"] = {
             "location": "http://my.files/sw_corr.nc",
-            "file_hash": "345",
+            "file_hash": "890",
         }
         marbl_codebase_sourcedata = mock_source_data_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
@@ -1177,7 +1114,7 @@ class TestToAndFromDictAndBlueprint:
         assert (
             sim.forcing_corrections[0].source.location == "http://my.files/sw_corr.nc"
         )
-        assert sim.forcing_corrections[0].source.file_hash == "345"
+        assert sim.forcing_corrections[0].source.file_hash == "890"
 
     def test_dict_roundtrip(self, fake_romssimulation, mock_source_data_factory):
         """Tests that `to_dict()` and `from_dict()` produce consistent results.
@@ -1257,7 +1194,12 @@ class TestToAndFromDictAndBlueprint:
     @patch("pathlib.Path.exists", return_value=True)
     @patch("builtins.open", new_callable=mock_open)
     def test_from_blueprint_valid_file(
-        self, mock_open_file, mock_path_exists, tmp_path, mock_source_data_factory
+        self,
+        mock_open_file,
+        mock_path_exists,
+        tmp_path,
+        mock_source_data_factory,
+        fake_romssimulation_dict,
     ):
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
         YAML file.
@@ -1276,7 +1218,7 @@ class TestToAndFromDictAndBlueprint:
          - `mock_path_exists`: Mocks `Path.exists()` to return `True`, ensuring the test bypasses file existence checks.
          - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint file's location.
         """
-        sim_dict = self.example_simulation_dict
+        sim_dict = fake_romssimulation_dict
         blueprint_path = tmp_path / "roms_blueprint.yaml"
         marbl_codebase_sourcedata = mock_source_data_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
@@ -1325,7 +1267,7 @@ class TestToAndFromDictAndBlueprint:
         read_data="name: TestROMS\ndiscretization:\n  time_step: 60",
     )
     def test_from_blueprint_invalid_filetype(
-        self, mock_open_file, mock_path_exists, tmp_path
+        self, mock_open_file, mock_path_exists, tmp_path, fake_romssimulation_dict
     ):
         """Tests that `from_blueprint()` raises a `ValueError` when given a non-YAML
         file.
@@ -1345,7 +1287,7 @@ class TestToAndFromDictAndBlueprint:
         """
         blueprint_path = tmp_path / "roms_blueprint.nc"
 
-        with patch("yaml.safe_load", return_value=self.example_simulation_dict):
+        with patch("yaml.safe_load", return_value=fake_romssimulation_dict):
             with pytest.raises(
                 ValueError, match="C-Star expects blueprint in '.yaml' format"
             ):
@@ -1359,7 +1301,12 @@ class TestToAndFromDictAndBlueprint:
     @patch("requests.get")
     @patch("pathlib.Path.exists", return_value=True)
     def test_from_blueprint_url(
-        self, mock_path_exists, mock_requests_get, mock_source_data_factory, tmp_path
+        self,
+        mock_path_exists,
+        mock_requests_get,
+        mock_source_data_factory,
+        fake_romssimulation_dict,
+        tmp_path,
     ):
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a URL.
 
@@ -1378,7 +1325,7 @@ class TestToAndFromDictAndBlueprint:
         - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `tmp_path`: A temporary directory provided by `pytest` to simulate the simulation directory.
         """
-        sim_dict = self.example_simulation_dict
+        sim_dict = fake_romssimulation_dict
         mock_response = MagicMock()
         mock_response.text = yaml.dump(sim_dict)
         mock_requests_get.return_value = mock_response
@@ -1418,7 +1365,11 @@ class TestToAndFromDictAndBlueprint:
         mock_requests_get.assert_called_once()
 
     def test_blueprint_roundtrip(
-        self, fake_romssimulation, mock_source_data_factory, tmp_path
+        self,
+        fake_romssimulation,
+        fake_romssimulation_dict,
+        mock_source_data_factory,
+        tmp_path,
     ):
         """Tests that a `ROMSSimulation` can be serialized to a YAML blueprint and
         reconstructed correctly using `from_blueprint()`.
@@ -1437,9 +1388,9 @@ class TestToAndFromDictAndBlueprint:
         - `tmp_path`: A temporary directory provided by `pytest` to store the blueprint file.
         """
         sim = fake_romssimulation
+        sim_dict = fake_romssimulation_dict
         output_file = tmp_path / "test.yaml"
         sim.to_blueprint(filename=output_file)
-        sim_dict = self.example_simulation_dict
         marbl_codebase_sourcedata = mock_source_data_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
             location=sim_dict["marbl_codebase"]["source_repo"],
