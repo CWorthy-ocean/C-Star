@@ -140,6 +140,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
             self.log.info(
                 f"ExternalCodeBase is already staged at {self.working_copy.path}. Skipping get() call"
             )
+            return
 
         if not target_dir:
             target_dir = Path(
@@ -151,10 +152,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
             )
 
         staged_repo = self.source.stage(target_dir=target_dir)
-        if not isinstance(staged_repo, StagedRepository):
-            raise ValueError(
-                f"Could not retrieve {self.source.location} as a local repository"
-            )
+        assert isinstance(staged_repo, StagedRepository)
         self._working_copy = staged_repo
 
     @property

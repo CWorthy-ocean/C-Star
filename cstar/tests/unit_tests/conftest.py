@@ -635,9 +635,6 @@ def fake_romssimulation(
         directory=directory,
         discretization=ROMSDiscretization(time_step=60, n_procs_x=2, n_procs_y=3),
         codebase=fake_romsexternalcodebase,
-        # codebase=ROMSExternalCodeBase(
-        #     source_repo="http://my.code/repo.git", checkout_target="dev"
-        # ),
         runtime_code=AdditionalCode(
             location=directory.parent,
             subdir="subdir/",
@@ -660,9 +657,6 @@ def fake_romssimulation(
         end_date="2025-12-31",
         valid_start_date="2024-01-01",
         valid_end_date="2026-01-01",
-        # marbl_codebase=MARBLExternalCodeBase(
-        #     source_repo="http://marbl.com/repo.git", checkout_target="v1"
-        # ),
         marbl_codebase=fake_marblexternalcodebase,
         model_grid=ROMSModelGrid(location="http://my.files/grid.nc", file_hash="123"),
         initial_conditions=ROMSInitialConditions(
