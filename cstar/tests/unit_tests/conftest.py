@@ -1,6 +1,6 @@
 import logging
 import pathlib
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
 
@@ -104,7 +104,9 @@ class MockSourceData(SourceData):
 
 
 @pytest.fixture
-def mock_source_data_factory():
+def mock_source_data_factory() -> Callable[
+    [SourceClassification, str | Path, str | None], MockSourceData
+]:
     """
     Fixture that returns a MockSourceData instance with chosen attributes
 
@@ -127,7 +129,7 @@ def mock_source_data_factory():
         classification: SourceClassification,
         location: str | Path,
         identifier: str | None = None,
-    ):
+    ) -> MockSourceData:
         instance = MockSourceData(
             classification=classification,
             location=location,
@@ -135,12 +137,11 @@ def mock_source_data_factory():
         )
         return instance
 
-    # source_data_patch.side_effect = factory
-    yield factory
+    return factory
 
 
 @pytest.fixture
-def mock_sourcedata_remote_repo():
+def mock_sourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
     """Fixture to create a MockSourceData instance with remote repository-like characteristics"""
 
     def _create(location="https://github.com/test/repo.git", identifier="test_target"):
@@ -230,19 +231,20 @@ def fake_externalcodebase(
     patch_source_data = mock.patch(
         "cstar.base.external_codebase.SourceData", return_value=source
     )
-    patch_source_data.start()
-    fecb = FakeExternalCodeBase()
-    fecb._source = source
-    yield fecb
-    patch_source_data.stop()
+
+    with patch_source_data:
+        fecb = FakeExternalCodeBase()
+        fecb._source = source
+        yield fecb
 
 
 @pytest.fixture
 def fake_marblexternalcodebase(
     mock_sourcedata_remote_repo,
 ) -> Generator[MARBLExternalCodeBase, None, None]:
-    """Pytest fixutre that provides an instance of the MARBLExternalCodeBase class
-    with a mocked SourceData instance.
+    """Fixture providing a `MARBLExternalCodeBase` instance for testing.
+
+    Patches `SourceData` calls to avoid network and filesystem interaction.
     """
     source_data = mock_sourcedata_remote_repo(
         location="https://marbl.com/repo.git", identifier="v1"

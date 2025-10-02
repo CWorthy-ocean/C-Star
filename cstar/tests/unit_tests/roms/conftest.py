@@ -1,4 +1,5 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -446,3 +447,42 @@ def fake_romssimulation_dict_no_forcing_lists(
     for k in ["surface_forcing", "boundary_forcing", "forcing_corrections"]:
         sim_dict[k] = sim_dict[k][0]
     return sim_dict
+
+
+@pytest.fixture
+def patch_romssimulation_init_sourcedata(
+    fake_romssimulation, mock_sourcedata_remote_repo
+) -> Callable[[], AbstractContextManager[None]]:
+    """Fixture returning a contextmanager patching all ROMSSimulation.__init__ SourceData calls.
+
+    Used in tests that create a new ROMSSimulation instance.
+    """
+    sim = fake_romssimulation
+    # ExternalCodeBase
+    mock_externalcodebase_sourcedata = mock_sourcedata_remote_repo(
+        location=sim.codebase.source.location, identifier=sim.codebase.source.identifier
+    )
+    mock_marbl_externalcodebase_sourcedata = mock_sourcedata_remote_repo(
+        location=sim.marbl_codebase.source.location,
+        identifier=sim.marbl_codebase.source.identifier,
+    )
+
+    @contextmanager
+    def _context():
+        with (
+            mock.patch(
+                "cstar.base.external_codebase.SourceData",
+                side_effect=[
+                    mock_externalcodebase_sourcedata,
+                    mock_marbl_externalcodebase_sourcedata,
+                ],
+            ),
+            mock.patch(
+                "cstar.roms.simulation.ROMSExternalCodeBase.is_configured",
+                new_callable=mock.PropertyMock,
+                return_value=False,
+            ),
+        ):
+            yield
+
+    return _context
