@@ -5,6 +5,7 @@ import pytest
 
 from cstar.base.exceptions import CstarError
 from cstar.system.manager import (
+    _AnvilSystemContext,
     _DerechoSystemContext,
     _ExpanseSystemContext,
     _get_system_context,
@@ -29,6 +30,7 @@ def test_unique_context_names() -> None:
         _DerechoSystemContext,
         _ExpanseSystemContext,
         _LinuxSystemContext,
+        _AnvilSystemContext,
     )
 
     registered_names = set(_registry.keys())
