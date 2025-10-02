@@ -6,6 +6,8 @@ from pathlib import Path
 
 from cstar.base.log import LoggingMixin
 
+STATUS_RECHECK_SECONDS = 30
+
 
 class ExecutionStatus(Enum):
     """Enum representing possible states of a process to be executed.
@@ -103,7 +105,7 @@ class ExecutionHandler(ABC, LoggingMixin):
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
-        specified duration. If the task is not running, a message will
+        specified duration. If the task is not running or pending, a message will
         indicate the inability to provide updates. If the output file
         exists and the task has already finished, the method provides a
         reference to the output file for review.
@@ -126,14 +128,15 @@ class ExecutionHandler(ABC, LoggingMixin):
         - When streaming indefinitely (`seconds=0`), user confirmation is
           required before proceeding.
         """
-        if self.status != ExecutionStatus.RUNNING:
-            error_msg = f"This job is currently not running ({self.status}). Live updates cannot be provided."
-            is_complete = self.status in {
+        _status = self.status
+        if _status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
+            error_msg = f"This job is currently not running ({_status}). Live updates cannot be provided."
+            is_complete = _status in {
                 ExecutionStatus.FAILED,
                 ExecutionStatus.COMPLETED,
             }
             is_cancelled = (
-                self.status == ExecutionStatus.CANCELLED and self.output_file.exists()
+                _status == ExecutionStatus.CANCELLED and self.output_file.exists()
             )
 
             if is_complete or is_cancelled:
@@ -155,6 +158,18 @@ class ExecutionHandler(ABC, LoggingMixin):
             )
             if confirmation not in {"y", "yes"}:
                 return
+
+        if _status == ExecutionStatus.PENDING:
+            start_time = time.time()
+            msg = "This job is still pending. Updates will be available after it starts running."
+            while seconds == 0 or (time.time() - start_time < seconds):
+                self.log.info(msg)
+                time.sleep(STATUS_RECHECK_SECONDS)
+                _status = self.status
+                if _status != ExecutionStatus.PENDING:
+                    msg = f"Job status is now {_status}"
+                    self.log.info(msg)
+                    break
 
         try:
             with open(self.output_file) as f:
