@@ -1569,7 +1569,7 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
 
         sim.setup()
-        # assert mock_handle_config_status.call_count == 2
+
         assert mock_externalcodebase_setup.call_count == 2
         assert mock_additionalcode_get.call_count == 2
         assert mock_inputdataset_get.call_count == 7
