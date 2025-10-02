@@ -1,11 +1,12 @@
 import logging
 import pathlib
+from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from cstar.base import AdditionalCode, Discretization
+from cstar.base import AdditionalCode, Discretization, ExternalCodeBase, InputDataset
 from cstar.base.datasource import DataSource
 from cstar.base.log import get_logger
 from cstar.io.constants import (
@@ -103,7 +104,9 @@ class MockSourceData(SourceData):
 
 
 @pytest.fixture
-def mock_source_data_factory():
+def mock_source_data_factory() -> Callable[
+    [SourceClassification, str | Path, str | None], MockSourceData
+]:
     """
     Fixture that returns a MockSourceData instance with chosen attributes
 
@@ -126,7 +129,7 @@ def mock_source_data_factory():
         classification: SourceClassification,
         location: str | Path,
         identifier: str | None = None,
-    ):
+    ) -> MockSourceData:
         instance = MockSourceData(
             classification=classification,
             location=location,
@@ -134,12 +137,11 @@ def mock_source_data_factory():
         )
         return instance
 
-    # source_data_patch.side_effect = factory
-    yield factory
+    return factory
 
 
 @pytest.fixture
-def mock_sourcedata_remote_repo():
+def mock_sourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
     """Fixture to create a MockSourceData instance with remote repository-like characteristics"""
 
     def _create(location="https://github.com/test/repo.git", identifier="test_target"):
@@ -158,7 +160,7 @@ def mock_sourcedata_remote_repo():
 
 
 @pytest.fixture
-def fake_additionalcode_remote():
+def fake_additionalcode_remote() -> AdditionalCode:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     a remote repository.
 
@@ -187,7 +189,7 @@ def fake_additionalcode_remote():
 
 
 @pytest.fixture
-def fake_additionalcode_local():
+def fake_additionalcode_local() -> AdditionalCode:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     code located on the local filesystem.
 
@@ -219,7 +221,9 @@ def fake_additionalcode_local():
 
 
 @pytest.fixture
-def fake_externalcodebase(mock_sourcedata_remote_repo):
+def fake_externalcodebase(
+    mock_sourcedata_remote_repo,
+) -> Generator[ExternalCodeBase, None, None]:
     """Pytest fixutre that provides an instance of the ExternalCodeBase class
     with a mocked SourceData instance.
     """
@@ -227,19 +231,20 @@ def fake_externalcodebase(mock_sourcedata_remote_repo):
     patch_source_data = mock.patch(
         "cstar.base.external_codebase.SourceData", return_value=source
     )
-    patch_source_data.start()
-    fecb = FakeExternalCodeBase()
-    fecb._source = source
-    yield fecb
-    patch_source_data.stop()
 
-    # patch_source_data.stop()
+    with patch_source_data:
+        fecb = FakeExternalCodeBase()
+        fecb._source = source
+        yield fecb
 
 
 @pytest.fixture
-def fake_marblexternalcodebase(mock_sourcedata_remote_repo):
-    """Pytest fixutre that provides an instance of the MARBLExternalCodeBase class
-    with a mocked SourceData instance.
+def fake_marblexternalcodebase(
+    mock_sourcedata_remote_repo,
+) -> Generator[MARBLExternalCodeBase, None, None]:
+    """Fixture providing a `MARBLExternalCodeBase` instance for testing.
+
+    Patches `SourceData` calls to avoid network and filesystem interaction.
     """
     source_data = mock_sourcedata_remote_repo(
         location="https://marbl.com/repo.git", identifier="v1"
@@ -263,7 +268,7 @@ def fake_marblexternalcodebase(mock_sourcedata_remote_repo):
 
 
 @pytest.fixture
-def fake_inputdataset_local():
+def fake_inputdataset_local() -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock local InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a local dataset,
@@ -304,7 +309,7 @@ def fake_inputdataset_local():
 
 
 @pytest.fixture
-def fake_inputdataset_remote():
+def fake_inputdataset_remote() -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock remote InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a remote dataset,
@@ -355,7 +360,7 @@ def fake_inputdataset_remote():
 
 
 @pytest.fixture
-def stub_simulation(fake_externalcodebase, tmp_path):
+def stub_simulation(fake_externalcodebase, tmp_path) -> StubSimulation:
     """Fixture providing a `StubSimulation` instance for testing.
 
     This fixture sets up a minimal `StubSimulation` instance with a mock external
@@ -390,7 +395,7 @@ def stub_simulation(fake_externalcodebase, tmp_path):
         valid_start_date="2024-01-01",
         valid_end_date="2026-01-01",
     )
-    yield sim
+    return sim
 
 
 ################################################################################

@@ -1,5 +1,7 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import numpy as np
@@ -12,6 +14,7 @@ from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
+    ROMSInputDataset,
     ROMSModelGrid,
     ROMSRiverForcing,
     ROMSSurfaceForcing,
@@ -24,28 +27,28 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 @pytest.fixture
-def fake_romsexternalcodebase(mock_sourcedata_remote_repo):
-    """Pytest fixutre that provides an instance of the ROMSExternalCodeBase class
-    with a mocked SourceData instance.
+def fake_romsexternalcodebase(
+    mock_sourcedata_remote_repo,
+) -> Generator[ROMSExternalCodeBase, None, None]:
+    """Fixture providing a `ROMSExternalCodeBase` instance for testing.
+
+    Patches `SourceData` calls to avoid network and filesystem interaction.
     """
-    source_data = mock_sourcedata_remote_repo(
-        location="https://github.com/roms/repo.git", identifier="roms_branch"
-    )
+    location = "https://github.com/roms/repo.git"
+    identifier = "roms_branch"
+    source_data = mock_sourcedata_remote_repo(location=location, identifier=identifier)
     patch_source_data = mock.patch(
         "cstar.base.external_codebase.SourceData", return_value=source_data
     )
-    patch_source_data.start()
-    recb = ROMSExternalCodeBase()
-    recb._source = source_data
-    yield recb
-    patch_source_data.stop()
+    with patch_source_data:
+        yield ROMSExternalCodeBase(source_repo=location, checkout_target=identifier)
 
 
 ################################################################################
 # ROMSRuntimeSettings
 ################################################################################
 @pytest.fixture
-def fake_romsruntimesettings():
+def fake_romsruntimesettings() -> ROMSRuntimeSettings:
     """Fixture providing a `ROMSRuntimeSettings` instance for testing.
 
     The example instance corresponds to the file `fixtures/example_runtime_settings.in`
@@ -53,12 +56,12 @@ def fake_romsruntimesettings():
 
     Paths do not correspond to real files.
 
-    Yields
-    ------
+    Returns
+    -------
     ROMSRuntimeSettings
        The example ROMSRuntimeSettings instance
     """
-    yield ROMSRuntimeSettings(
+    return ROMSRuntimeSettings(
         title="Example runtime settings",
         time_stepping={"ntimes": 360, "dt": 60, "ndtfast": 60, "ninfo": 1},
         bottom_drag={
@@ -107,7 +110,8 @@ def fake_romsruntimesettings():
 # Runtime and compile-time code
 ################################################################################
 @pytest.fixture
-def fake_roms_runtime_code(tmp_path):
+def fake_roms_runtime_code(tmp_path) -> AdditionalCode:
+    """Provides an example of ROMSSimulation.runtime_code with fake values for testing"""
     directory = tmp_path
     rc = AdditionalCode(
         location=directory.parent,
@@ -125,7 +129,8 @@ def fake_roms_runtime_code(tmp_path):
 
 
 @pytest.fixture
-def fake_roms_compile_time_code(tmp_path):
+def fake_roms_compile_time_code(tmp_path) -> AdditionalCode:
+    """Provides an example of ROMSSimulation.compile_time_code with fake values for testing"""
     directory = tmp_path
     cc = AdditionalCode(
         location=directory.parent,
@@ -140,7 +145,7 @@ def fake_roms_compile_time_code(tmp_path):
 # ROMSInputDataset
 ################################################################################
 @pytest.fixture
-def fake_romsinputdataset_netcdf_local():
+def fake_romsinputdataset_netcdf_local() -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
 
     Mocks:
@@ -174,7 +179,7 @@ def fake_romsinputdataset_netcdf_local():
 
 
 @pytest.fixture
-def fake_romsinputdataset_yaml_local():
+def fake_romsinputdataset_yaml_local() -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local YAML source.
 
     Mocks:
@@ -212,7 +217,7 @@ def fake_romsinputdataset_yaml_local():
 
 
 @pytest.fixture
-def fake_romsinputdataset_yaml_remote():
+def fake_romsinputdataset_yaml_remote() -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a remote YAML source.
 
     Mocks:
@@ -250,37 +255,44 @@ def fake_romsinputdataset_yaml_remote():
 
 
 @pytest.fixture
-def fake_model_grid():
+def fake_model_grid() -> ROMSModelGrid:
+    """Provides a ROMSModelGrid instance with fake attrs for testing"""
     return ROMSModelGrid(location="http://my.files/grid.nc", file_hash="123")
 
 
 @pytest.fixture
-def fake_initial_conditions():
+def fake_initial_conditions() -> ROMSInitialConditions:
+    """Provides a ROMSInitialConditions instance with fake attrs for testing"""
     return ROMSInitialConditions(location="http://my.files/initial.nc", file_hash="234")
 
 
 @pytest.fixture
-def fake_tidal_forcing():
+def fake_tidal_forcing() -> ROMSTidalForcing:
+    """Provides a ROMSTidalForcing instance with fake attrs for testing"""
     return ROMSTidalForcing(location="http://my.files/tidal.nc", file_hash="345")
 
 
 @pytest.fixture
-def fake_river_forcing():
+def fake_river_forcing() -> ROMSRiverForcing:
+    """Provides a ROMSRiverForcing instance with fake attrs for testing"""
     return ROMSRiverForcing(location="http://my.files/river.nc", file_hash="543")
 
 
 @pytest.fixture
-def fake_boundary_forcing():
+def fake_boundary_forcing() -> ROMSBoundaryForcing:
+    """Provides a ROMSBoundaryForcing instance with fake attrs for testing"""
     return ROMSBoundaryForcing(location="http://my.files/boundary.nc", file_hash="456")
 
 
 @pytest.fixture
-def fake_surface_forcing():
+def fake_surface_forcing() -> ROMSSurfaceForcing:
+    """Provides a ROMSSurfaceForcing instance with fake attrs for testing"""
     return ROMSSurfaceForcing(location="http://my.files/surface.nc", file_hash="567")
 
 
 @pytest.fixture
-def fake_forcing_corrections():
+def fake_forcing_corrections() -> ROMSForcingCorrections:
+    """Provides a ROMSForcingCorrections  instance with fake attrs for testing"""
     return ROMSForcingCorrections(
         location="http://my.files/sw_corr.nc", file_hash="890"
     )
@@ -305,7 +317,7 @@ def fake_romssimulation(
     fake_surface_forcing,
     fake_forcing_corrections,
     tmp_path,
-) -> Generator[ROMSSimulation, None, None]:
+) -> ROMSSimulation:
     """Fixture providing a `ROMSSimulation` instance for testing.
 
     This fixture initializes a `ROMSSimulation` with a comprehensive configuration,
@@ -334,9 +346,6 @@ def fake_romssimulation(
         end_date="2025-12-31",
         valid_start_date="2024-01-01",
         valid_end_date="2026-01-01",
-        # marbl_codebase=MARBLExternalCodeBase(
-        #     source_repo="http://marbl.com/repo.git", checkout_target="v1"
-        # ),
         marbl_codebase=fake_marblexternalcodebase,
         model_grid=fake_model_grid,
         initial_conditions=fake_initial_conditions,
@@ -353,11 +362,15 @@ def fake_romssimulation(
         ],
     )
 
-    yield sim  # Ensures pytest can handle resource cleanup if needed
+    return sim
 
 
 @pytest.fixture
-def fake_romssimulation_dict(fake_romssimulation):
+def fake_romssimulation_dict(fake_romssimulation) -> dict[str, Any]:
+    """Fixture returning the dictionary associated with the `fake_romssimulation` fixture.
+
+    Used for independently testing to/from_dict methods.
+    """
     sim = fake_romssimulation
     return_dict = {
         "name": sim.name,
@@ -427,8 +440,50 @@ def fake_romssimulation_dict(fake_romssimulation):
 
 
 @pytest.fixture
-def fake_romssimulation_dict_no_forcing_lists(fake_romssimulation_dict):
+def fake_romssimulation_dict_no_forcing_lists(
+    fake_romssimulation_dict,
+) -> dict[str, Any]:
+    """As fake_romssimulation_dict, but without list values for certain forcing types."""
     sim_dict = fake_romssimulation_dict
     for k in ["surface_forcing", "boundary_forcing", "forcing_corrections"]:
         sim_dict[k] = sim_dict[k][0]
     return sim_dict
+
+
+@pytest.fixture
+def patch_romssimulation_init_sourcedata(
+    fake_romssimulation, mock_sourcedata_remote_repo
+) -> Callable[[], AbstractContextManager[None]]:
+    """Fixture returning a contextmanager patching all ROMSSimulation.__init__ SourceData calls.
+
+    Used in tests that create a new ROMSSimulation instance.
+    """
+    sim = fake_romssimulation
+    # ExternalCodeBase
+    mock_externalcodebase_sourcedata = mock_sourcedata_remote_repo(
+        location=sim.codebase.source.location, identifier=sim.codebase.source.identifier
+    )
+    mock_marbl_externalcodebase_sourcedata = mock_sourcedata_remote_repo(
+        location=sim.marbl_codebase.source.location,
+        identifier=sim.marbl_codebase.source.identifier,
+    )
+
+    @contextmanager
+    def _context():
+        with (
+            mock.patch(
+                "cstar.base.external_codebase.SourceData",
+                side_effect=[
+                    mock_externalcodebase_sourcedata,
+                    mock_marbl_externalcodebase_sourcedata,
+                ],
+            ),
+            mock.patch(
+                "cstar.roms.simulation.ROMSExternalCodeBase.is_configured",
+                new_callable=mock.PropertyMock,
+                return_value=False,
+            ),
+        ):
+            yield
+
+    return _context
