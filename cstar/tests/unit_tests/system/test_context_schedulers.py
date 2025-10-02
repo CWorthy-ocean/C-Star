@@ -1,6 +1,7 @@
 import pytest
 
 from cstar.system.manager import (
+    _AnvilSystemContext,
     _DerechoSystemContext,
     _ExpanseSystemContext,
     _LinuxSystemContext,
@@ -17,6 +18,7 @@ DEFAULT_MOCK_HOST_NAME = "mock_system"
 @pytest.mark.parametrize(
     ("wrapped_class", "exp_sched_type", "exp_queue_names"),
     [
+        (_AnvilSystemContext, SlurmScheduler, {"wholenode", "shared", "debug"}),
         (_PerlmutterSystemContext, SlurmScheduler, {"regular", "shared", "debug"}),
         (_MacOSSystemContext, None, None),
         (_DerechoSystemContext, PBSScheduler, {"main", "preempt", "develop"}),

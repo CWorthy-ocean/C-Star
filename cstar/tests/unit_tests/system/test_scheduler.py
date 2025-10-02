@@ -18,7 +18,7 @@ from cstar.system.scheduler import (
 class MockQueue(Queue):
     """Mock subclass of the Queue ABC used for testing."""
 
-    def max_walltime(self):
+    def _default_max_walltime_method(self):
         """Mock implementation of the max_walltime abstractmethod for Queue."""
         pass
 
