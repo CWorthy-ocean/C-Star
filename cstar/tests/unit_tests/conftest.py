@@ -10,6 +10,12 @@ import pytest
 from cstar.base import AdditionalCode, Discretization
 from cstar.base.datasource import DataSource
 from cstar.base.log import get_logger
+from cstar.io.constants import (
+    SourceClassification,
+)
+from cstar.io.source_data import SourceData, _SourceInspector
+from cstar.io.staged_data import StagedData
+from cstar.io.stager import Stager
 from cstar.marbl import MARBLExternalCodeBase
 from cstar.roms import ROMSDiscretization, ROMSExternalCodeBase, ROMSSimulation
 from cstar.roms.input_dataset import (
@@ -28,6 +34,137 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeROMSInputDataset,
     StubSimulation,
 )
+
+################################################################################
+# SourceData
+################################################################################
+
+
+class MockStager(Stager):
+    """Mock subclass of Stager to skip any staging and retrieval logic"""
+
+    def stage(self, target_dir: Path, source: "SourceData"):
+        return MockStagedData(source=source, path=target_dir)
+
+    @property
+    def retriever(self):
+        return None
+
+
+class MockStagedData(StagedData):
+    """Mock subclass of StagedData to skip any filesystem and network logic.
+
+    Can be initialized with 'mock_changed_from_source' param to set the value of
+    the 'changed_from_source' property
+    """
+
+    def __init__(
+        self, source: "SourceData", path: "Path", mock_changed_from_source: bool = False
+    ):
+        super().__init__(source, path)
+        self._mock_changed_from_source = mock_changed_from_source
+
+    @property
+    def changed_from_source(self) -> bool:
+        return self._mock_changed_from_source
+
+    def unstage(self):
+        pass
+
+    def reset(self):
+        pass
+
+
+class MockSourceInspector(_SourceInspector):
+    """Mock subclass of _SourceInspector to skip any classification logic.
+
+    Tests can initialize with 'classification' parameter to set the desired classification manually.
+    """
+
+    def __init__(
+        self, location: str | Path, classification: SourceClassification | None = None
+    ):
+        self._location = str(location)
+        # Specifically for this mock, user chooses classification
+        self._source_type = classification.value.source_type if classification else None
+        self._location_type = (
+            classification.value.location_type if classification else None
+        )
+        self._file_encoding = (
+            classification.value.file_encoding if classification else None
+        )
+
+
+class MockSourceData(SourceData):
+    """Mock subclass of SourceData to skip any filesystem or network logic.
+
+    Tests can provide 'classification' parameter to set desired classification manually.
+    """
+
+    def __init__(
+        self,
+        location: str | Path,
+        identifier: str | None = None,
+        # Specifically for this mock, user chooses classification
+        classification: SourceClassification = SourceClassification.LOCAL_TEXT_FILE,
+    ):
+        self._location = str(location)
+        self._identifier = identifier
+
+        self._classification = classification
+
+        self._stager = MockStager()
+
+
+@pytest.fixture
+def mock_source_data_factory():
+    """
+    Fixture that returns a MockSourceData instance with chosen attributes
+
+    Parameters
+    ----------
+    classification (SourceClassification):
+        The desired classification to be set manually, avoiding complex classification logic
+    location (str or Path):
+        The desired location attribute associated with the mock data source
+    identifier (str, default None)
+        The desired identifier attribute associated with the mock data source
+
+    Returns
+    -------
+    MockSourceData
+        A populated SourceData subclass with the specified characteristics
+    """
+
+    def factory(
+        classification: SourceClassification,
+        location: str | Path,
+        identifier: str | None = None,
+    ):
+        instance = MockSourceData(
+            classification=classification,
+            location=location,
+            identifier=identifier,
+        )
+        return instance
+
+    # source_data_patch.side_effect = factory
+    yield factory
+
+
+@pytest.fixture
+def mock_sourcedata_remote_repo():
+    """Fixture to create a MockSourceData instance with remote repository-like characteristics"""
+
+    def _create(location="https://github.com/test/repo.git", identifier="test_target"):
+        return MockSourceData(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=location,
+            identifier=identifier,
+        )
+
+    return _create
+
 
 ################################################################################
 # AdditionalCode
@@ -93,17 +230,63 @@ def fake_additionalcode_local():
 ################################################################################
 # ExternalCodeBase
 ################################################################################
+
+
 @pytest.fixture
-def fake_externalcodebase(log: logging.Logger):
-    """Yields a fake codebase (instance of FakeExternalCodeBase) for
-    use in testing.
+def fake_externalcodebase(mock_sourcedata_remote_repo):
+    """Pytest fixutre that provides an instance of the ExternalCodeBase class
+    with a mocked SourceData instance.
     """
-    # Correctly patch the imported _get_hash_from_checkout_target in the ExternalCodeBase's module
-    with mock.patch(
-        "cstar.base.external_codebase._get_hash_from_checkout_target",
-        return_value="test123",
-    ):
-        yield FakeExternalCodeBase()
+    source = mock_sourcedata_remote_repo()
+    patch_source_data = mock.patch(
+        "cstar.base.external_codebase.SourceData", return_value=source
+    )
+    patch_source_data.start()
+    fecb = FakeExternalCodeBase()
+    fecb._source = source
+    yield fecb
+    patch_source_data.stop()
+
+
+@pytest.fixture
+def fake_romsexternalcodebase(mock_sourcedata_remote_repo):
+    """Pytest fixutre that provides an instance of the ROMSExternalCodeBase class
+    with a mocked SourceData instance.
+    """
+    source_data = mock_sourcedata_remote_repo(
+        location="https://github.com/roms/repo.git", identifier="roms_branch"
+    )
+    patch_source_data = mock.patch(
+        "cstar.base.external_codebase.SourceData", return_value=source_data
+    )
+    patch_source_data.start()
+    recb = ROMSExternalCodeBase()
+    recb._source = source_data
+    yield recb
+    patch_source_data.stop()
+
+    # patch_source_data.stop()
+
+
+@pytest.fixture
+def fake_marblexternalcodebase(mock_sourcedata_remote_repo):
+    """Pytest fixutre that provides an instance of the MARBLExternalCodeBase class
+    with a mocked SourceData instance.
+    """
+    source_data = mock_sourcedata_remote_repo(
+        location="https://marbl.com/repo.git", identifier="v1"
+    )
+    patch_source_data = mock.patch(
+        "cstar.base.external_codebase.SourceData", return_value=source_data
+    )
+
+    patch_source_data.start()
+    mecb = MARBLExternalCodeBase()
+    # patch_source_data.stop()
+
+    mecb._source = source_data
+    yield mecb
+    patch_source_data.stop()
 
 
 ################################################################################
@@ -381,7 +564,7 @@ def fake_romsinputdataset_yaml_remote():
 
 
 @pytest.fixture
-def stub_simulation(tmp_path):
+def stub_simulation(fake_externalcodebase, tmp_path):
     """Fixture providing a `StubSimulation` instance for testing.
 
     This fixture sets up a minimal `StubSimulation` instance with a mock external
@@ -397,7 +580,7 @@ def stub_simulation(tmp_path):
     sim = StubSimulation(
         name="TestSim",
         directory=tmp_path,
-        codebase=FakeExternalCodeBase(),
+        codebase=fake_externalcodebase,
         runtime_code=AdditionalCode(
             location=tmp_path.parent,
             subdir="subdir/",
@@ -426,6 +609,8 @@ def stub_simulation(tmp_path):
 
 @pytest.fixture
 def fake_romssimulation(
+    fake_marblexternalcodebase,
+    fake_romsexternalcodebase,
     tmp_path,
 ) -> Generator[ROMSSimulation, None, None]:
     """Fixture providing a `ROMSSimulation` instance for testing.
@@ -443,14 +628,13 @@ def fake_romssimulation(
         - `ROMSSimulation` instance with fully configured attributes.
         - The temporary directory where the simulation is stored.
     """
+    print(fake_romsexternalcodebase.source)
     directory = tmp_path
     sim = ROMSSimulation(
         name="ROMSTest",
         directory=directory,
         discretization=ROMSDiscretization(time_step=60, n_procs_x=2, n_procs_y=3),
-        codebase=ROMSExternalCodeBase(
-            source_repo="http://my.code/repo.git", checkout_target="dev"
-        ),
+        codebase=fake_romsexternalcodebase,
         runtime_code=AdditionalCode(
             location=directory.parent,
             subdir="subdir/",
@@ -473,9 +657,7 @@ def fake_romssimulation(
         end_date="2025-12-31",
         valid_start_date="2024-01-01",
         valid_end_date="2026-01-01",
-        marbl_codebase=MARBLExternalCodeBase(
-            source_repo="http://marbl.com/repo.git", checkout_target="v1"
-        ),
+        marbl_codebase=fake_marblexternalcodebase,
         model_grid=ROMSModelGrid(location="http://my.files/grid.nc", file_hash="123"),
         initial_conditions=ROMSInitialConditions(
             location="http://my.files/initial.nc", file_hash="234"

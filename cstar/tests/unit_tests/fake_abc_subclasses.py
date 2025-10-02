@@ -12,20 +12,26 @@ class FakeExternalCodeBase(ExternalCodeBase):
     """
 
     @property
-    def expected_env_var(self):
+    def root_env_var(self):
         return "TEST_ROOT"
 
     @property
-    def default_source_repo(self):
+    def _default_source_repo(self):
         return "https://github.com/test/repo.git"
 
     @property
-    def default_checkout_target(self):
+    def _default_checkout_target(self):
         return "test_target"
 
-    def get(self, target: str | Path):
-        self.log.info(f"mock installing ExternalCodeBase at {target}")
-        pass
+    def get(self, target_dir: Path | None = None) -> None:
+        self.log.info(f"mock installing ExternalCodeBase at {target_dir}")
+
+    def _configure(self) -> None:
+        return
+
+    @property
+    def is_configured(self):
+        return False
 
 
 class FakeROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):

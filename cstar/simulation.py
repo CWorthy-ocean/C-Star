@@ -137,8 +137,8 @@ class Simulation(ABC, LoggingMixin):
             self.log.warning(
                 f"Creating {self.__class__.__name__} instance without a specified "
                 "ExternalCodeBase, default codebase will be used:\n"
-                f"          • Source location: {self.codebase.source_repo}\n"
-                f"          • Checkout target: {self.codebase.checkout_target}\n"
+                f"          • Source location: {self.codebase._default_source_repo}\n"
+                f"          • Checkout target: {self.codebase._default_checkout_target}\n"
             )
         else:
             self.codebase = codebase
@@ -444,10 +444,7 @@ class Simulation(ABC, LoggingMixin):
         simulation_dict["valid_end_date"] = self.valid_end_date
 
         # ExternalCodeBases:
-        codebase_info = {}
-        codebase_info["source_repo"] = self.codebase.source_repo
-        codebase_info["checkout_target"] = self.codebase.checkout_target
-        simulation_dict["codebase"] = codebase_info
+        simulation_dict["codebase"] = self.codebase.to_dict()
 
         # discretization
         simulation_dict["discretization"] = self.discretization.__dict__

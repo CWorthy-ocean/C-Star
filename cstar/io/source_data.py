@@ -28,37 +28,59 @@ from cstar.io.stager import (
 
 @lru_cache(maxsize=16)
 def get_remote_header(location, n_bytes):
+    """Get the header from a HTTP location, do determine the kind of data at the location."""
     response = requests.get(location, stream=True, allow_redirects=True)
     response.raw.decode_content = True
     header_bytes = response.raw.read(n_bytes)
     return header_bytes
 
 
+def _location_as_path(location: str | Path) -> Path:
+    """Return 'location' as a Path for parsing, whether it is a path, url, or str"""
+    return Path(urlparse(str(location)).path)
+
+
 class _SourceInspector:
-    def __init__(self, location: str):
-        self._location = location
+    """
+    Class for inspecting a location pointing to data and determining the classification of the data.
+
+    Attributes
+    ----------
+    location (str)
+       The location of the data, e.g. a URL or path
+    suffix (str)
+       The extension associated with 'location'
+    location_type (LocationType)
+       The type of 'location', e.g. path or URL
+    source_type (SourceType)
+       The type of source described by location, e.g. repository, directory
+    file_encoding (FileEncoding)
+       The encoding of the file (if any) described by location, e.g. text, binary
+    characteristics (SourceCharacteristics):
+        Enum combining source_type, location_type, and file_encoding
+
+    Methods
+    -------
+    classify() -> SourceClassification:
+        The classification of the data at this location, e.g. remote repository
+    """
+
+    def __init__(self, location: str | Path):
+        """Initialize this _SourceInspector with a location"""
+        self._location = str(location)
         self._location_type: LocationType | None = None
         self._source_type: SourceType | None = None
         self._file_encoding: FileEncoding | None = None
 
     @property
-    def location(self):
+    def location(self) -> str:
+        """The location associated with this _SourceInspector"""
         return self._location
-
-    @property
-    def _location_as_path(self) -> Path:
-        """Return self.location as a Path for parsing, whether it is a path, url, or str"""
-        return Path(urlparse(self.location).path)
-
-    @property
-    def basename(self) -> str:
-        """Get the basename from `location`"""
-        return self._location_as_path.name
 
     @property
     def suffix(self) -> str:
         """Get the extension from `location`"""
-        return self._location_as_path.suffix
+        return _location_as_path(self.location).suffix
 
     @property
     def location_type(self) -> LocationType:
@@ -69,7 +91,7 @@ class _SourceInspector:
             urlparsed_location = urlparse(self.location)
             if all([urlparsed_location.scheme, urlparsed_location.netloc]):
                 self._location_type = LocationType.HTTP
-            elif self._location_as_path.exists():
+            elif _location_as_path(self.location).exists():
                 self._location_type = LocationType.PATH
             else:
                 raise ValueError(
@@ -151,6 +173,7 @@ class _SourceInspector:
 
     @property
     def characteristics(self) -> SourceCharacteristics:
+        """Collect the source type, location type, and file encoding into a single Enum value"""
         return SourceCharacteristics(
             source_type=self.source_type,
             location_type=self.location_type,
@@ -158,38 +181,79 @@ class _SourceInspector:
         )
 
     def classify(self) -> SourceClassification:
+        """Determine the classification of the data at 'location'"""
         return SourceClassification(self.characteristics)
 
 
 class SourceData:
+    """Class for obtaining information about and acting on a source of data
+
+    Attributes
+    ----------
+    location: str
+        The location of the data source
+    basename: str
+        The basename of 'location', e.g. a filename
+    identifier: str
+        The identifier of the data, e.g. commit hash or checksum
+    checkout_target: str or None
+        Equivalent to 'identifier' if source is a repository
+    checkout hash: str or None
+        The hash associated with 'checkout_target', if source is a repository
+    file_hash: str or None
+        Equivalent to 'identifier' if source is a file
+    stager: Stager
+        The Stager subclass with which to handle staging of this data
+
+    Methods
+    -------
+    stage(target_dir: str | Path) -> StagedData
+        stages the data, making it available to C-Star
+    """
+
     def __init__(self, location: str | Path, identifier: str | None = None):
+        """Initialize a SourceData instance from a location
+
+        Parameters
+        ----------
+        location (str or Path):
+            The location of this data source
+        identifier (str, optional, default None):
+            The identifier of the data, e.g. commit hash or checksum
+        """
         self._location = str(location)
-        self._inspector = _SourceInspector(self._location)
-        self._identifier = identifier
-        self._classification = self._inspector.classify()
-        self._stager = self._select_stager()
+        self._identifier: str | None = identifier
+        self._classification: SourceClassification = _SourceInspector(
+            location
+        ).classify()
+        self._stager: Stager | None = None
 
     @property
     def location(self) -> str:
+        """The location of the data source"""
         return self._location
 
     @property
     def basename(self) -> str:
-        return self._inspector.basename
+        """The basename of 'location', e.g. a filename"""
+        return _location_as_path(self.location).name
 
     @property
     def identifier(self) -> str | None:
+        """The identifier of the data, e.g. commit hash or checksum"""
         return self._identifier
 
     @property
     def checkout_target(self) -> str | None:
-        if self._inspector.source_type is SourceType.REPOSITORY:
+        """Equivalent to 'identifier' if source is a repository"""
+        if self._classification.value.source_type is SourceType.REPOSITORY:
             return self.identifier
         return None
 
     @property
     def checkout_hash(self) -> str | None:
-        if (self._inspector.source_type is SourceType.REPOSITORY) and (
+        """Equivalent to 'identifier' if source is a repository"""
+        if (self._classification.value.source_type is SourceType.REPOSITORY) and (
             self.checkout_target
         ):
             return _get_hash_from_checkout_target(self.location, self.checkout_target)
@@ -197,9 +261,17 @@ class SourceData:
 
     @property
     def file_hash(self) -> str | None:
-        if self._inspector.source_type is SourceType.FILE:
+        """Equivalent to 'identifier' if source is a file"""
+        if self._classification.value.source_type is SourceType.FILE:
             return self.identifier
         return None
+
+    @property
+    def stager(self) -> "Stager":
+        """The Stager subclass with which to handle staging of this data"""
+        if not self._stager:
+            self._stager = self._select_stager()
+        return self._stager
 
     # Staging logic
     def _select_stager(self) -> "Stager":
@@ -223,15 +295,20 @@ class SourceData:
                 )
 
     def stage(self, target_dir: str | Path) -> "StagedData":
-        return self._stager.stage(target_dir=Path(target_dir), source=self)
+        """Stages the data, making it available to C-Star"""
+        return self.stager.stage(target_dir=Path(target_dir), source=self)
 
 
 class SourceDataCollection:
+    """Single class to hold a collection of related SourceData instances"""
+
     def __init__(self, sources: Iterable[SourceData] = ()):
+        """Initialize the SourceDataCollection from a list of SourceData instances"""
         self._sources: list[SourceData] = list(sources)
         self._validate()
 
     def _validate(self):
+        """Confirm that the SourceData instances in this collection are valid"""
         for s in self._sources:
             if s.source_type in [SourceType.DIRECTORY, SourceType.REPOSITORY]:
                 raise TypeError(
@@ -253,6 +330,7 @@ class SourceDataCollection:
 
     @property
     def locations(self) -> list[str]:
+        """Return the list of locations associated with this SourceDataCollection"""
         return [s.location for s in self._sources]
 
     @classmethod
@@ -278,9 +356,11 @@ class SourceDataCollection:
 
     @property
     def sources(self) -> list[SourceData]:
+        """Returns the list of SourceData instances associated with this SourceDataCollection"""
         return self._sources
 
     def stage(self, target_dir: str | Path) -> StagedDataCollection:
+        """Stages each SourceData instance in this collection"""
         staged_data_instances = []
         for s in self.sources:
             staged_data = s.stage(target_dir=target_dir)

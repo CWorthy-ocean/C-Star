@@ -1,5 +1,4 @@
 import logging
-import pickle
 import re
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +11,7 @@ import yaml
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.execution.handler import ExecutionStatus
+from cstar.io.constants import SourceClassification
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms import ROMSRuntimeSettings
 from cstar.roms.discretization import ROMSDiscretization
@@ -88,8 +88,8 @@ class TestROMSSimulationInitialization:
             "n_procs_y": 3,
         }
 
-        assert sim.codebase.source_repo == "http://my.code/repo.git"
-        assert sim.codebase.checkout_target == "dev"
+        assert sim.codebase.source.location == "https://github.com/roms/repo.git"
+        assert sim.codebase.source.checkout_target == "roms_branch"
         assert sim.runtime_code.source.location == str(sim.directory.parent)
         assert sim.runtime_code.subdir == "subdir/"
         assert sim.runtime_code.checkout_target == "main"
@@ -105,8 +105,8 @@ class TestROMSSimulationInitialization:
         assert sim.compile_time_code.checkout_target == "main"
         assert sim.compile_time_code.files == ["file1.h", "file2.opt"]
 
-        assert sim.marbl_codebase.source_repo == "http://marbl.com/repo.git"
-        assert sim.marbl_codebase.checkout_target == "v1"
+        assert sim.marbl_codebase.source.location == "https://marbl.com/repo.git"
+        assert sim.marbl_codebase.source.checkout_target == "v1"
 
         assert sim.start_date == datetime(2025, 1, 1)
         assert sim.end_date == datetime(2025, 12, 31)
@@ -275,16 +275,12 @@ class TestROMSSimulationInitialization:
 
         assert isinstance(sim.codebase, ROMSExternalCodeBase)
         assert (
-            sim.codebase.source_repo == "https://github.com/CWorthy-ocean/ucla-roms.git"
+            sim.codebase.source.location
+            == "https://github.com/CWorthy-ocean/ucla-roms.git"
         )
-        assert sim.codebase.checkout_target == "main"
+        assert sim.codebase.source.checkout_target == "main"
 
-        assert isinstance(sim.marbl_codebase, MARBLExternalCodeBase)
-        assert (
-            sim.marbl_codebase.source_repo
-            == "https://github.com/marbl-ecosys/MARBL.git"
-        )
-        assert sim.marbl_codebase.checkout_target == "marbl0.45.0"
+        assert sim.marbl_codebase is None
 
     def test_find_dotin_file(self, fake_romssimulation):
         """Test that the `_find_dotin_file` helper function correctly finds and sets the
@@ -961,8 +957,8 @@ class TestToAndFromDictAndBlueprint:
             "valid_start_date": datetime(2024, 1, 1, 0, 0),
             "valid_end_date": datetime(2026, 1, 1, 0, 0),
             "codebase": {
-                "source_repo": "http://my.code/repo.git",
-                "checkout_target": "dev",
+                "source_repo": "https://github.com/roms/repo.git",
+                "checkout_target": "roms_branch",
             },
             "discretization": {"time_step": 60, "n_procs_x": 2, "n_procs_y": 3},
             "runtime_code": {
@@ -984,7 +980,7 @@ class TestToAndFromDictAndBlueprint:
                 "files": ["file1.h", "file2.opt"],
             },
             "marbl_codebase": {
-                "source_repo": "http://marbl.com/repo.git",
+                "source_repo": "https://marbl.com/repo.git",
                 "checkout_target": "v1",
             },
             "model_grid": {"location": "http://my.files/grid.nc", "file_hash": "123"},
@@ -1053,7 +1049,7 @@ class TestToAndFromDictAndBlueprint:
             == self.example_simulation_dict["surface_forcing"]
         )
 
-    def test_from_dict(self, fake_romssimulation):
+    def test_from_dict(self, fake_romssimulation, mock_source_data_factory):
         """Tests that `from_dict()` correctly reconstructs a `ROMSSimulation` instance.
 
         This test verifies that calling `from_dict()` with a valid simulation dictionary
@@ -1066,22 +1062,50 @@ class TestToAndFromDictAndBlueprint:
 
         Mocks & Fixtures
         ---------------------
-        - `fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
+        - `Fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         """
         sim = fake_romssimulation
         sim_dict = self.example_simulation_dict
-        sim_dict["runtime_code"]["location"] = sim.directory.parent
-        sim_dict["compile_time_code"]["location"] = sim.directory.parent
-        sim2 = ROMSSimulation.from_dict(
-            sim_dict,
-            directory=sim.directory,
-            start_date=sim.start_date,
-            end_date=sim.end_date,
+
+        marbl_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["marbl_codebase"]["source_repo"],
+            identifier=sim_dict["marbl_codebase"]["checkout_target"],
         )
+        roms_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["codebase"]["source_repo"],
+            identifier=sim_dict["codebase"]["checkout_target"],
+        )
+        with patch(
+            "cstar.base.external_codebase.SourceData",
+            side_effect=[roms_codebase_sourcedata, marbl_codebase_sourcedata],
+        ):
+            sim2 = ROMSSimulation.from_dict(
+                sim_dict,
+                directory=sim.directory,
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+            )
 
-        assert pickle.dumps(sim2) == pickle.dumps(sim), "Instances are not identical"
+            assert sim2.to_dict() == sim_dict
 
-    def test_from_dict_with_single_forcing_entries(self, tmp_path):
+            # assert pickle.dumps(sim2) == pickle.dumps(sim), "Instances are not identical"
+            # NOTE:
+            # 1.
+            # As more classes utilise SourceData to manage their sources, mocks for this
+            # test will become more complex. It may be worth moving it to an integration test.
+            # 2.
+            # The pickle.dumps comparison is commented due to the use of a mock on SourceData
+            # realistically only _SourceInspector needs to be mocked, as it holds the
+            # majority of the logic, but ir is still stored
+            # as an attribute on SourceData anyway.  Perhaps that should not be the case.
+
+    def test_from_dict_with_single_forcing_entries(
+        self, mock_source_data_factory, tmp_path
+    ):
         """Tests that `from_dict()` works with single surface and boundary forcing or
         forcing correction entries.
 
@@ -1101,6 +1125,7 @@ class TestToAndFromDictAndBlueprint:
 
         Mocks & Fixtures
         ----------------
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `tmp_path`: A pytest fixture providing a temporary directory for testing.
         """
         sim_dict = self.example_simulation_dict.copy()
@@ -1116,10 +1141,26 @@ class TestToAndFromDictAndBlueprint:
             "location": "http://my.files/sw_corr.nc",
             "file_hash": "345",
         }
-
-        sim = ROMSSimulation.from_dict(
-            sim_dict, directory=tmp_path, start_date="2024-01-01", end_date="2024-01-02"
+        marbl_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["marbl_codebase"]["source_repo"],
+            identifier=sim_dict["marbl_codebase"]["checkout_target"],
         )
+        roms_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["codebase"]["source_repo"],
+            identifier=sim_dict["codebase"]["checkout_target"],
+        )
+        with patch(
+            "cstar.base.external_codebase.SourceData",
+            side_effect=[roms_codebase_sourcedata, marbl_codebase_sourcedata],
+        ):
+            sim = ROMSSimulation.from_dict(
+                sim_dict,
+                directory=tmp_path,
+                start_date="2024-01-01",
+                end_date="2024-01-02",
+            )
 
         assert isinstance(sim.boundary_forcing, list)
         assert [isinstance(x, ROMSBoundaryForcing) for x in sim.boundary_forcing]
@@ -1138,7 +1179,7 @@ class TestToAndFromDictAndBlueprint:
         )
         assert sim.forcing_corrections[0].source.file_hash == "345"
 
-    def test_dict_roundtrip(self, fake_romssimulation):
+    def test_dict_roundtrip(self, fake_romssimulation, mock_source_data_factory):
         """Tests that `to_dict()` and `from_dict()` produce consistent results.
 
         This test ensures that converting a `ROMSSimulation` instance to a dictionary
@@ -1152,15 +1193,30 @@ class TestToAndFromDictAndBlueprint:
         Mocks & Fixtures
         ----------------
         - `fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         """
         sim = fake_romssimulation
         sim_to_dict = sim.to_dict()
-        sim_from_dict = sim.from_dict(
-            simulation_dict=sim_to_dict,
-            directory=sim.directory,
-            start_date=sim.start_date,
-            end_date=sim.end_date,
+        marbl_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_to_dict["marbl_codebase"]["source_repo"],
+            identifier=sim_to_dict["marbl_codebase"]["checkout_target"],
         )
+        roms_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_to_dict["codebase"]["source_repo"],
+            identifier=sim_to_dict["codebase"]["checkout_target"],
+        )
+        with patch(
+            "cstar.base.external_codebase.SourceData",
+            side_effect=[roms_codebase_sourcedata, marbl_codebase_sourcedata],
+        ):
+            sim_from_dict = sim.from_dict(
+                simulation_dict=sim_to_dict,
+                directory=sim.directory,
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+            )
 
         assert sim_from_dict.to_dict() == sim_to_dict
 
@@ -1199,13 +1255,9 @@ class TestToAndFromDictAndBlueprint:
             )
 
     @patch("pathlib.Path.exists", return_value=True)
-    @patch(
-        "builtins.open",
-        new_callable=mock_open,
-        read_data="name: TestROMS\ndiscretization:\n  time_step: 60",
-    )
+    @patch("builtins.open", new_callable=mock_open)
     def test_from_blueprint_valid_file(
-        self, mock_open_file, mock_path_exists, tmp_path
+        self, mock_open_file, mock_path_exists, tmp_path, mock_source_data_factory
     ):
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
         YAML file.
@@ -1224,9 +1276,37 @@ class TestToAndFromDictAndBlueprint:
          - `mock_path_exists`: Mocks `Path.exists()` to return `True`, ensuring the test bypasses file existence checks.
          - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint file's location.
         """
+        sim_dict = self.example_simulation_dict
         blueprint_path = tmp_path / "roms_blueprint.yaml"
+        marbl_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["marbl_codebase"]["source_repo"],
+            identifier=sim_dict["marbl_codebase"]["checkout_target"],
+        )
 
-        with patch("yaml.safe_load", return_value=self.example_simulation_dict):
+        roms_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["codebase"]["source_repo"],
+            identifier=sim_dict["codebase"]["checkout_target"],
+        )
+
+        with (
+            patch("yaml.safe_load", return_value=sim_dict),
+            patch(
+                "cstar.base.external_codebase.SourceData",
+                side_effect=[roms_codebase_sourcedata, marbl_codebase_sourcedata],
+            ),
+            patch(
+                "cstar.roms.simulation.ROMSExternalCodeBase.is_configured",
+                new_callable=PropertyMock,
+                return_value=False,
+            ),
+            patch(
+                "cstar.roms.simulation.MARBLExternalCodeBase.is_configured",
+                new_callable=PropertyMock,
+                return_value=False,
+            ),
+        ):
             sim = ROMSSimulation.from_blueprint(
                 blueprint=str(blueprint_path),
                 directory=tmp_path,
@@ -1278,7 +1358,9 @@ class TestToAndFromDictAndBlueprint:
 
     @patch("requests.get")
     @patch("pathlib.Path.exists", return_value=True)
-    def test_from_blueprint_url(self, mock_path_exists, mock_requests_get, tmp_path):
+    def test_from_blueprint_url(
+        self, mock_path_exists, mock_requests_get, mock_source_data_factory, tmp_path
+    ):
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a URL.
 
         This test ensures that when given a valid URL to a YAML blueprint file,
@@ -1293,24 +1375,51 @@ class TestToAndFromDictAndBlueprint:
         ----------------
         - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
         - `mock_requests_get`: Mocks `requests.get()` to return a simulated YAML blueprint response.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `tmp_path`: A temporary directory provided by `pytest` to simulate the simulation directory.
         """
+        sim_dict = self.example_simulation_dict
         mock_response = MagicMock()
-        mock_response.text = yaml.dump(self.example_simulation_dict)
+        mock_response.text = yaml.dump(sim_dict)
         mock_requests_get.return_value = mock_response
         blueprint_path = "http://sketchyamlfiles4u.ru/roms_blueprint.yaml"
 
-        sim = ROMSSimulation.from_blueprint(
-            blueprint=blueprint_path,
-            directory=tmp_path,
-            start_date="2024-01-01",
-            end_date="2025-01-01",
+        marbl_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["marbl_codebase"]["source_repo"],
+            identifier=sim_dict["marbl_codebase"]["checkout_target"],
         )
+
+        roms_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["codebase"]["source_repo"],
+            identifier=sim_dict["codebase"]["checkout_target"],
+        )
+
+        with (
+            patch(
+                "cstar.base.external_codebase.SourceData",
+                side_effect=[roms_codebase_sourcedata, marbl_codebase_sourcedata],
+            ),
+            patch(
+                "cstar.roms.simulation.ROMSExternalCodeBase.is_configured",
+                new_callable=PropertyMock,
+                return_value=False,
+            ),
+        ):
+            sim = ROMSSimulation.from_blueprint(
+                blueprint=blueprint_path,
+                directory=tmp_path,
+                start_date="2024-01-01",
+                end_date="2025-01-01",
+            )
 
         assert isinstance(sim, ROMSSimulation)
         mock_requests_get.assert_called_once()
 
-    def test_blueprint_roundtrip(self, fake_romssimulation, tmp_path):
+    def test_blueprint_roundtrip(
+        self, fake_romssimulation, mock_source_data_factory, tmp_path
+    ):
         """Tests that a `ROMSSimulation` can be serialized to a YAML blueprint and
         reconstructed correctly using `from_blueprint()`.
 
@@ -1324,17 +1433,42 @@ class TestToAndFromDictAndBlueprint:
         Mocks & Fixtures
         ----------------
         - `fake_romssimulation`: A fixture providing a sample `ROMSSimulation` instance.
+        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
         - `tmp_path`: A temporary directory provided by `pytest` to store the blueprint file.
         """
         sim = fake_romssimulation
         output_file = tmp_path / "test.yaml"
         sim.to_blueprint(filename=output_file)
-        sim2 = ROMSSimulation.from_blueprint(
-            blueprint=output_file,
-            directory=tmp_path / "sim2",
-            start_date=sim.start_date,
-            end_date=sim.end_date,
+        sim_dict = self.example_simulation_dict
+        marbl_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["marbl_codebase"]["source_repo"],
+            identifier=sim_dict["marbl_codebase"]["checkout_target"],
         )
+
+        roms_codebase_sourcedata = mock_source_data_factory(
+            classification=SourceClassification.REMOTE_REPOSITORY,
+            location=sim_dict["codebase"]["source_repo"],
+            identifier=sim_dict["codebase"]["checkout_target"],
+        )
+
+        with (
+            patch(
+                "cstar.base.external_codebase.SourceData",
+                side_effect=[roms_codebase_sourcedata, marbl_codebase_sourcedata],
+            ),
+            patch(
+                "cstar.roms.simulation.ROMSExternalCodeBase.is_configured",
+                new_callable=PropertyMock,
+                return_value=False,
+            ),
+        ):
+            sim2 = ROMSSimulation.from_blueprint(
+                blueprint=output_file,
+                directory=tmp_path / "sim2",
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+            )
         assert sim.to_dict() == sim2.to_dict()
 
 
@@ -1404,10 +1538,10 @@ class TestProcessingAndExecution:
 
     @patch.object(ROMSInputDataset, "get")
     @patch.object(AdditionalCode, "get")
-    @patch.object(ExternalCodeBase, "handle_config_status")
+    @patch.object(ExternalCodeBase, "setup")
     def test_setup(
         self,
-        mock_handle_config_status,
+        mock_externalcodebase_setup,
         mock_additionalcode_get,
         mock_inputdataset_get,
         fake_romssimulation,
@@ -1422,9 +1556,9 @@ class TestProcessingAndExecution:
         Mocks & Fixtures
         ---------------
         - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_handle_config_status` : Mocks `handle_config_status` for external codebases.
         - `mock_additionalcode_get` : Mocks `get()` for runtime and compile-time code.
         - `mock_inputdataset_get` : Mocks `get()` for input datasets.
+        - `mock_externalcodebase_setup` : Mocks `setup` for external codebases.
 
         Assertions
         ----------
@@ -1433,18 +1567,20 @@ class TestProcessingAndExecution:
         - Ensures `get()` is called once per input dataset.
         """
         sim = fake_romssimulation
+
         sim.setup()
-        assert mock_handle_config_status.call_count == 2
+
+        assert mock_externalcodebase_setup.call_count == 2
         assert mock_additionalcode_get.call_count == 2
         assert mock_inputdataset_get.call_count == 7
 
     @pytest.mark.parametrize(
         "codebase_status, marbl_status, expected",
         [
-            (0, 0, True),  # T Both correctly configured → should return True
-            (1, 0, False),  # F Codebase not configured
-            (0, 1, False),  # F MARBL codebase not configured
-            (1, 1, False),  # F Both not configured
+            (True, True, True),  # T Both correctly configured → should return True
+            (True, False, False),  # F Codebase not configured
+            (False, True, False),  # F MARBL codebase not configured
+            (False, False, False),  # F Both not configured
         ],
     )
     @patch.object(
@@ -1468,7 +1604,7 @@ class TestProcessingAndExecution:
         ---------------
         - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
         - `mock_exists_locally` : Mocks `exists_locally` for additional code components.
-        - `codebase_status` : Parameterized mock return value for `ROMSExternalCodeBase.local_config_status`.
+        - `codebase_status` : Parameterized mock return value for `ROMSExternalCodeBase.is_configured`.
         - `marbl_status` : Parameterized mock return value for `MARBLExternalCodeBase.local_config_status`.
 
         Assertions
@@ -1480,10 +1616,10 @@ class TestProcessingAndExecution:
 
         with (
             patch.object(
-                ROMSExternalCodeBase, "local_config_status", new_callable=PropertyMock
+                ROMSExternalCodeBase, "is_configured", new_callable=PropertyMock
             ) as mock_codebase_status,
             patch.object(
-                MARBLExternalCodeBase, "local_config_status", new_callable=PropertyMock
+                MARBLExternalCodeBase, "is_configured", new_callable=PropertyMock
             ) as mock_marbl_status,
             patch.object(
                 type(sim), "input_datasets", new_callable=PropertyMock, return_value=[]
@@ -1503,17 +1639,10 @@ class TestProcessingAndExecution:
             (False, False, False),  # F Both missing
         ],
     )
-    @patch.object(
-        ExternalCodeBase,
-        "local_config_status",
-        new_callable=PropertyMock,
-        return_value=0,
-    )
     @patch.object(AdditionalCode, "exists_locally", new_callable=PropertyMock)
     def test_is_setup_additional_code(
         self,
         mock_additionalcode_exists,
-        mock_local_config_status,
         runtime_exists,
         compile_exists,
         expected,
@@ -1542,11 +1671,23 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
 
         mock_additionalcode_exists.side_effect = [runtime_exists, compile_exists]
-
-        with patch.object(
-            ROMSSimulation, "input_datasets", new_callable=PropertyMock, return_value=[]
+        with (
+            patch.object(
+                ROMSExternalCodeBase, "is_configured", new_callable=PropertyMock
+            ) as mock_codebase_status,
+            patch.object(
+                MARBLExternalCodeBase, "is_configured", new_callable=PropertyMock
+            ) as mock_marbl_status,
+            patch.object(
+                type(sim), "input_datasets", new_callable=PropertyMock, return_value=[]
+            ),
         ):
+            mock_codebase_status.return_value = True
+            mock_marbl_status.return_value = True
             assert sim.is_setup == expected
+
+        # 1 call if one False, 2 if both True, but never 0 or 3+
+        assert mock_additionalcode_exists.call_count in [1, 2]
 
     @pytest.mark.parametrize(
         "dataset_exists, dataset_start, dataset_end, sim_start, sim_end, expected",
@@ -1573,18 +1714,11 @@ class TestProcessingAndExecution:
         ],
     )
     @patch.object(
-        ExternalCodeBase,
-        "local_config_status",
-        new_callable=PropertyMock,
-        return_value=0,
-    )
-    @patch.object(
         AdditionalCode, "exists_locally", new_callable=PropertyMock, return_value=True
     )
     def test_is_setup_input_datasets(
         self,
         mock_additionalcode_exists,
-        mock_local_config_status,
         dataset_exists,
         dataset_start,
         dataset_end,
@@ -1630,7 +1764,16 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
 
         # Create a mock dataset
-        with patch("cstar.roms.input_dataset.ROMSInputDataset") as MockDataset:
+        with (
+            patch.object(
+                ROMSExternalCodeBase, "is_configured", new_callable=PropertyMock
+            ),
+            patch.object(
+                MARBLExternalCodeBase, "is_configured", new_callable=PropertyMock
+            ),
+            patch("cstar.roms.input_dataset.ROMSInputDataset") as MockDataset,
+        ):
+            #
             # mock_dataset = patch("cstar.roms.input_dataset.ROMSInputDataset", autospec=True).start()
             mock_dataset = MockDataset()
             mock_dataset.exists_locally = dataset_exists
