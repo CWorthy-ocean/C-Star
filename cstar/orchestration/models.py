@@ -71,8 +71,12 @@ DataResource: t.TypeAlias = Resource | VersionedResource
 _T = t.TypeVar("_T", DataResource, list[DataResource])
 
 
-class Dataset(DocLocMixin, t.Generic[_T]):
-    data: _T
+class Dataset(DocLocMixin):
+    data: list[DataResource]
+
+
+class SingleItemDataset(Dataset):
+    data: list[DataResource] = Field(min_length=1, max_length=1)
 
 
 class PathFilter(ConfiguredBaseModel):
@@ -91,21 +95,19 @@ class PathFilter(ConfiguredBaseModel):
 class ForcingConfiguration(ConfiguredBaseModel):
     """Configuration of the forcing parameters of the model."""
 
-    boundary: Dataset[list[DataResource]]
+    boundary: Dataset
     """Boundary forcing."""
 
-    surface: Dataset[list[DataResource]]
+    surface: Dataset
     """Surface forcing"""
 
-    tidal: Dataset[DataResource] | None = Field(default=None, validate_default=False)
+    tidal: Dataset | None = Field(default=None, validate_default=False)
     """Tidal forcing."""
 
-    river: Dataset[DataResource] | None = Field(default=None, validate_default=False)
+    river: Dataset | None = Field(default=None, validate_default=False)
     """River forcing."""
 
-    corrections: Dataset[list[DataResource]] | None = Field(
-        default=None, validate_default=False
-    )
+    corrections: Dataset | None = Field(default=None, validate_default=False)
     """Wind or other forcing corrections."""
 
 
@@ -316,10 +318,10 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     code: ROMSCompositeCodeRepository
     """Code repositories used to build, configure, and execute the ROMS simulation."""
 
-    initial_conditions: Dataset[DataResource]
+    initial_conditions: SingleItemDataset
     """File containing the starting conditions of the simulation."""
 
-    grid: Dataset[DataResource]
+    grid: SingleItemDataset
     """File defining the grid geometry."""
 
     forcing: ForcingConfiguration
@@ -334,7 +336,7 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     runtime_params: RuntimeParameterSet
     """User-defined runtime parameters."""
 
-    cdr_forcing: Dataset[DataResource] | None = Field(default=None)
+    cdr_forcing: Dataset | None = Field(default=None)
     """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
 
     @model_validator(mode="after")
