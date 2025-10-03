@@ -481,7 +481,7 @@ class TestROMSRuntimeSettings:
         This test writes the example ROMSRuntimeSettings instance
         defined by the fake_romsruntimesettings fixture to a temporary
         file and compares each non-commented line in the example `.in`
-        file `fixtures/fake_romsruntimesettings.in` with those in the
+        file `fixtures/example_runtime_settings.in` with those in the
         temporary file.
 
         Mocks and Fixtures
@@ -495,15 +495,15 @@ class TestROMSRuntimeSettings:
         -------
         - The lines in the written file match those in the reference file
         """
-        fake_romsruntimesettings.to_file(
-            Path(__file__).parent / "fixtures/fake_romsruntimesettings.in"
+        fake_romsruntimesettings.from_file(
+            Path(__file__).parent / "fixtures/example_runtime_settings.in"
         )
         fake_romsruntimesettings.to_file(tmp_path / "test.in")
 
         with (
             open(tmp_path / "test.in") as out_f,
             open(
-                Path(__file__).parent / "fixtures/fake_romsruntimesettings.in"
+                Path(__file__).parent / "fixtures/example_runtime_settings.in"
             ) as ref_f,
         ):
             ref = [
@@ -524,7 +524,7 @@ class TestROMSRuntimeSettings:
         """Test the ROMSRuntimeSettings.from_file method.
 
         This test compares the ROMSRuntimeSettings instance created from
-        the reference file `fixtures/fake_romsruntimesettings.in` with the
+        the reference file `fixtures/example_runtime_settings.in` with the
         example instance returned by the `fake_romsruntimesettings` fixture.
 
         Mocks and Fixtures
@@ -538,7 +538,7 @@ class TestROMSRuntimeSettings:
           instances and checks for equality.
         """
         tested_settings = ROMSRuntimeSettings.from_file(
-            Path(__file__).parent / "fixtures/fake_romsruntimesettings.in"
+            Path(__file__).parent / "fixtures/example_runtime_settings.in"
         )
         expected_settings = fake_romsruntimesettings
 
@@ -571,7 +571,7 @@ class TestROMSRuntimeSettings:
         """Confirms that ROMSRuntimeSettings.from_file sets the attributes corresponding
         to settings that are not present in the file to None.
 
-        This test copies the reference file in `fixtures/fake_romsruntimesettings.in`
+        This test copies the reference file in `fixtures/example_runtime_settings.in`
         to a temporary path and modifies it to remove the value of the `climatology`
         entry, then confirms that `ROMSRuntimeSettings.from_file(tmp_file).climatology
         is None
@@ -588,7 +588,7 @@ class TestROMSRuntimeSettings:
         """
         modified_file = tmp_path / "modified_example_settings.in"
         shutil.copy2(
-            Path(__file__).parent / "fixtures/fake_romsruntimesettings.in",
+            Path(__file__).parent / "fixtures/example_runtime_settings.in",
             modified_file,
         )
         _replace_text_in_file(modified_file, "climfile2.nc", "")
@@ -598,7 +598,7 @@ class TestROMSRuntimeSettings:
     def test_from_file_raises_if_missing_section(self, tmp_path: Path) -> None:
         modified_file = tmp_path / "modified_example_settings.in"
         shutil.copy2(
-            Path(__file__).parent / "fixtures/fake_romsruntimesettings.in",
+            Path(__file__).parent / "fixtures/example_runtime_settings.in",
             modified_file,
         )
         _replace_text_in_file(modified_file, "title: title", "")
