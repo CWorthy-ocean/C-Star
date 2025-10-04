@@ -73,11 +73,12 @@ class LocalBinaryFileStager(Stager):
     # Used for e.g. a local netCDF InputDataset
     def stage(self, target_dir: "Path", source: "SourceData") -> "StagedFile":
         """Create a local symlink to a binary file on the current filesystem."""
+        target_dir.mkdir(parents=True, exist_ok=True)
         target_path = target_dir / source.basename
         target_path.symlink_to(source.location)
 
         return StagedFile(
-            source=source, path=target_dir, sha256=(source.file_hash or None)
+            source=source, path=target_path, sha256=(source.file_hash or None)
         )
 
 

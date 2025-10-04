@@ -19,6 +19,7 @@ from cstar.base.utils import (
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
+from cstar.io.constants import FileEncoding
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
@@ -320,7 +321,7 @@ class ROMSSimulation(Simulation):
     def _check_inputdataset_dates(self) -> None:
         """Ensure input dataset date ranges align with the simulation date range.
 
-        For each input dataset with `source_type='yaml'`, this method verifies that
+        For each input dataset with a plaintext (yaml) source, this method verifies that
         its `start_date` and `end_date` match the simulation’s `start_date` and
         `end_date`. If they do not match, a warning is issued and the dataset's
         dates are overwritten to enforce alignment.
@@ -334,7 +335,7 @@ class ROMSSimulation(Simulation):
 
         Notes
         -----
-        - Only datasets with a `source_type` of `"yaml"` are modified.
+        - Only datasets with a `yaml` source are modified.
         - `ROMSInitialConditions` datasets only have their `start_date` checked;
           `end_date` is not required or enforced for initial conditions.
         """
@@ -344,7 +345,9 @@ class ROMSSimulation(Simulation):
             *self.surface_forcing,
             *self.boundary_forcing,
         ]:
-            if (inp is not None) and (inp.source.source_type == "yaml"):
+            if (inp is not None) and (
+                inp.source._classification.value.file_encoding == FileEncoding.TEXT
+            ):
                 if (
                     hasattr(inp, "start_date")
                     and (inp.start_date is not None)
@@ -506,7 +509,7 @@ class ROMSSimulation(Simulation):
     def _forcing_paths(self) -> list[Path]:
         """Collect and return all local paths to ROMS forcing input datasets.
 
-        This internal property gathers the `working_path` attributes of all forcing-related
+        This internal property gathers the `working_copy` attributes of all forcing-related
         datasets attached to the simulation — including tidal, river, surface, boundary, and
         correction datasets — and returns a flat list of resolved file paths.
 
@@ -527,7 +530,7 @@ class ROMSSimulation(Simulation):
           is included individually.
         - This property is used to populate `runtime_settings.forcing`.
         """
-        forcing_sources = chain(
+        input_forcings = chain(
             [self.tidal_forcing, self.river_forcing],
             self.surface_forcing,
             self.boundary_forcing,
@@ -536,13 +539,13 @@ class ROMSSimulation(Simulation):
 
         forcing_paths: list[Path] = []
 
-        for source in filter(None, forcing_sources):
-            paths = source.path_for_roms
+        for forcing in filter(None, input_forcings):
+            paths = forcing.path_for_roms
             if not paths:
                 raise ValueError(
-                    f"{source.__class__.__name__} does not have "
+                    f"{forcing.__class__.__name__} does not have "
                     + "a local working_path. Call ROMSSimulation.setup() or "
-                    + f"{source.__class__.__name__}.get() and try again."
+                    + f"{forcing.__class__.__name__}.get() and try again."
                 )
 
             elif isinstance(paths, list):
@@ -1568,8 +1571,6 @@ class ROMSSimulation(Simulation):
 
         # Reset cached data for input datasets
         for inp in new_sim.input_datasets:
-            inp._local_file_hash_cache = None
-            inp._local_file_stat_cache = None
-            inp.working_path = None
+            inp.working_copy = None
 
         return new_sim

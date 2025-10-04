@@ -225,7 +225,7 @@ class SourceData:
         self._identifier: str | None = identifier
         self._classification: SourceClassification = _SourceInspector(
             location
-        ).classify()
+        ).classify()  # TODO public property
         self._stager: Stager | None = None
 
     @property

@@ -49,6 +49,7 @@ class MARBLExternalCodeBase(ExternalCodeBase):
 
     @property
     def is_configured(self) -> bool:
+        # TODO this should use self.working_copy.changed_from_source
         # Check MARBL_ROOT env var is set:
         marbl_root = cstar_sysmgr.environment.environment_variables.get(
             self.root_env_var

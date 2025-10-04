@@ -5,12 +5,14 @@ from abc import ABC
 from pathlib import Path
 from typing import Any
 
-import requests
 import roms_tools
 import yaml
 
 from cstar.base.input_dataset import InputDataset
-from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
+from cstar.base.utils import _list_to_concise_str, coerce_datetime
+from cstar.io.constants import FileEncoding
+from cstar.io.source_data import SourceData, SourceDataCollection
+from cstar.io.staged_data import StagedDataCollection, StagedFile
 
 
 class ROMSPartitioning:
@@ -45,8 +47,6 @@ class ROMSPartitioning:
         self.np_xi = np_xi
         self.np_eta = np_eta
         self.files = files
-        self._local_file_hash_cache: dict = {}
-        self._local_file_stat_cache: dict = {}
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files, pad=43)})"
@@ -80,16 +80,28 @@ class ROMSInputDataset(InputDataset, ABC):
         source_np_xi: int | None = None,
         source_np_eta: int | None = None,
     ):
-        super().__init__(
-            location=location,
-            file_hash=file_hash,
-            start_date=start_date,
-            end_date=end_date,
-        )
+        self.start_date = coerce_datetime(start_date) if start_date else None
+        self.end_date = coerce_datetime(start_date) if start_date else None
 
         self.source_np_xi = source_np_xi
         self.source_np_eta = source_np_eta
         self.partitioning: ROMSPartitioning | None = None
+        self.source = SourceData(location=location, identifier=file_hash)
+
+        if self.source_partitioning:
+            if file_hash:
+                raise NotImplementedError(
+                    "Cannot use hash verification with partitioned source files"
+                )
+            n_source_partitions = self.source_np_xi * self.source_np_eta  # type: ignore[operator]
+            ndigits = len(str(n_source_partitions))
+            locations = []
+            for i in range(n_source_partitions):
+                old_suffix = f".{0:0{ndigits}d}.nc"
+                new_suffix = f".{i:0{ndigits}d}.nc"
+                locations.append(location.replace(old_suffix, new_suffix))
+            self.partitioned_source = SourceDataCollection.from_locations(locations)
+        self._working_copy = None
 
     @property
     def source_partitioning(self) -> tuple[int, int] | None:
@@ -168,31 +180,32 @@ class ROMSInputDataset(InputDataset, ABC):
 
             if not self.exists_locally:
                 raise ValueError(
-                    f"working_path of InputDataset \n {self.working_path}, "
-                    + "refers to a non-existent file"
+                    f"local path(s) to InputDataset \n {self._local}, "
+                    + "refers to a non-existent file(s)"
                     + "\n call InputDataset.get() and try again."
                 )
             return True
 
         def get_files_to_partition():
-            """Helper function to obtain a list of files associated with this
-            ROMSInputDataset to partition.
-            """
-            if isinstance(self.working_path, list):
+            """Helper function to obtain a list of files associated with this ROMSInputDataset to partition."""
+            if isinstance(self.working_copy, StagedDataCollection):
                 # if single InputDataset corresponds to many files, check they're colocated
                 if not all(
-                    [d.parent == self.working_path[0].parent for d in self.working_path]
+                    [
+                        d.parent == self.working_copy[0].path.parent
+                        for d in self.working_copy.paths
+                    ]
                 ):
                     raise ValueError(
-                        f"A single input dataset exists in multiple directories: {self.working_path}."
+                        f"A single input dataset exists in multiple directories: {self.working_copy.paths}."
                     )
 
                 # If they are, we want to partition them all in the same place
-                id_files_to_partition = self.working_path[:]
+                id_files_to_partition = self.working_copy.paths
 
             else:
                 id_files_to_partition = [
-                    self.working_path,
+                    self.working_copy.path,
                 ]
             return id_files_to_partition
 
@@ -275,89 +288,33 @@ class ROMSInputDataset(InputDataset, ABC):
         local_dir = Path(local_dir).expanduser().resolve()
         local_dir.mkdir(parents=True, exist_ok=True)
 
-        # If `working_path` is set, determine we're not fetching to the same parent dir:
-        if self.working_path is None:
-            working_path_parent = None
-        elif isinstance(self.working_path, list):
-            working_path_parent = self.working_path[0].parent
-        else:
-            working_path_parent = self.working_path.parent
-
-        if (self.exists_locally) and (working_path_parent == local_dir):
-            self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
+        # partitioned source
+        if self.source_partitioning:
+            for i, s in enumerate(self.partitioned_source):
+                target_path = local_dir / s.basename
+                if self.working_copy and self.working_copy[i].path == target_path:  # type: ignore[index]
+                    self.log.info(f"⏭️ {target_path} already exists, skipping.")
+                    continue
+                else:
+                    self._working_copy.append(s.stage(local_dir))  # type: ignore[union-attr]
             return
 
-        if self.source.source_type == "yaml":
-            self._get_from_yaml(local_dir=local_dir)
-        elif self.source_partitioning is not None:
-            self._get_from_partitioned_source(
-                local_dir=local_dir,
-                source_np_xi=self.source_partitioning[0],
-                source_np_eta=self.source_partitioning[1],
-            )
+        # roms-tools yaml source
+        elif self.source._classification.value.file_encoding == FileEncoding.TEXT:
+            if self.exists_locally:
+                self.log.info(f"⏭️ {self._local} already exists, skipping.")
+                return
+            #
+            self._working_copy = self._get_from_yaml(local_dir)
+        # regular (netCDF) source
         else:
             super().get(local_dir=local_dir)
 
-    def _get_from_partitioned_source(
-        self, local_dir: Path, source_np_xi: int, source_np_eta: int
-    ) -> None:
-        n_source_partitions = source_np_xi * source_np_eta
-        ndigits = len(str(n_source_partitions))
-        parted_files: list[Path] = []
+    def _get_from_yaml(self, local_dir: Path) -> StagedFile | StagedDataCollection:
+        retriever = self.source.stager.retriever
+        raw_yaml_text = retriever.read(self.source).decode("utf-8")
+        # NOTE maybe refactor to self.source.retriever?
 
-        for i in range(n_source_partitions):
-            old_suffix = f".{0:0{ndigits}d}.nc"
-            new_suffix = f".{i:0{ndigits}d}.nc"
-            source = self.source.location.replace(old_suffix, new_suffix)
-            source_basename = self.source.basename.replace(old_suffix, new_suffix)
-
-            self._symlink_or_download_from_source(
-                source_location=source,
-                location_type=self.source.location_type,
-                expected_file_hash=None,
-                target_path=local_dir / source_basename,
-                logger=self.log,
-            )
-
-            parted_files.append(local_dir / source_basename)
-
-        self._update_partitioning_attribute(
-            new_np_xi=source_np_xi, new_np_eta=source_np_eta, parted_files=parted_files
-        )
-        self.working_path = parted_files
-        assert self.partitioning is not None
-        self._local_file_stat_cache.update(self.partitioning._local_file_stat_cache)
-        self._local_file_hash_cache.update(self.partitioning._local_file_hash_cache)
-
-    def _get_from_yaml(self, local_dir: str | Path) -> None:
-        """Handle the special case where the input dataset source is a `roms-tools`
-        compatible YAML file.
-
-        This method:
-        - Fetches and optionally modifies the YAML based on start/end dates,
-        - Creates a `roms-tools` instance from a modified temporary copy of the YAML
-        - Saves this `roms-tools` class instance to a netCDF file in `local_dir`
-        - Updates `working_path` and caches file metadata.
-
-        Parameters:
-        -----------
-        local_dir (Path):
-            Directory where the resulting NetCDF files should be saved.
-        """
-        # Ensure we're working with a Path object
-        local_dir = Path(local_dir).expanduser().resolve()
-        local_dir.mkdir(parents=True, exist_ok=True)
-
-        if self.source.source_type != "yaml":
-            raise ValueError(
-                "_get_from_yaml requires a ROMSInputDataset whose source_type is yaml"
-            )
-
-        if self.source.location_type == "path":
-            with open(Path(self.source.location).expanduser()) as F:
-                raw_yaml_text = F.read()
-        elif self.source.location_type == "url":
-            raw_yaml_text = requests.get(self.source.location).text
         _, header, yaml_data = raw_yaml_text.split("---", 2)
 
         yaml_dict = yaml.safe_load(yaml_data)
@@ -413,12 +370,13 @@ class ROMSInputDataset(InputDataset, ABC):
         )
 
         savepath = roms_tools_class_instance.save(**save_kwargs)
-        self.working_path = savepath[0] if len(savepath) == 1 else savepath
-
-        self._local_file_hash_cache.update(
-            {path: _get_sha256_hash(path.resolve()) for path in savepath}
-        )  # 27
-        self._local_file_stat_cache.update({path: path.stat() for path in savepath})
+        staged = []
+        for p in savepath:
+            staged.append(StagedFile(source=self.source, path=p))
+        if len(staged) == 1:
+            return staged[0]
+        else:
+            return StagedDataCollection(items=staged)
 
     def _update_partitioning_attribute(
         self, new_np_xi: int, new_np_eta: int, parted_files: list[Path]
@@ -426,13 +384,6 @@ class ROMSInputDataset(InputDataset, ABC):
         self.partitioning = ROMSPartitioning(
             np_xi=new_np_xi, np_eta=new_np_eta, files=parted_files
         )
-
-        self.partitioning._local_file_hash_cache = {
-            path: _get_sha256_hash(path.resolve()) for path in parted_files
-        }  # 27
-        self.partitioning._local_file_stat_cache = {
-            path: path.stat() for path in parted_files
-        }
 
     @property
     def path_for_roms(self) -> list[Path]:
