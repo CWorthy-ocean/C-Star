@@ -51,7 +51,7 @@ class InputDataset(ABC, LoggingMixin):
         """
         self.source: SourceData = SourceData(location=location, identifier=file_hash)
         self.start_date = coerce_datetime(start_date) if start_date else None
-        self.end_date = coerce_datetime(start_date) if start_date else None
+        self.end_date = coerce_datetime(end_date) if end_date else None
 
         # assert self.start_date is None or isinstance(self.start_date, dt.datetime)
         # assert self.end_date is None or isinstance(self.end_date, dt.datetime)

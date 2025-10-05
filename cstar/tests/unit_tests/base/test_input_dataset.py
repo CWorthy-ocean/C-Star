@@ -1,5 +1,6 @@
 import logging
 import stat
+from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
 from unittest import mock
@@ -35,15 +36,15 @@ class TestInputDatasetInit:
         - The `basename` is "local_file.nc".
         - The dataset is an instance of FakeInputDataset.
         """
-        assert fake_inputdataset_local.source.location_type == "path", (
-            "Expected location_type to be 'path'"
-        )
-        assert fake_inputdataset_local.source.basename == "local_file.nc", (
+        ind = fake_inputdataset_local
+        assert ind.source.basename == "local_file.nc", (
             "Expected basename to be 'local_file.nc'"
         )
-        assert isinstance(fake_inputdataset_local, FakeInputDataset), (
+        assert isinstance(ind, FakeInputDataset), (
             "Expected an instance of FakeInputDataset"
         )
+        assert ind.start_date == datetime(2024, 10, 22, 12, 34, 56)
+        assert ind.end_date == datetime(2024, 12, 31, 23, 59, 59)
 
     def test_remote_init(self, fake_inputdataset_remote):
         """Test initialization of an InputDataset with a remote source.
@@ -59,44 +60,15 @@ class TestInputDatasetInit:
         - The `file_hash` is set to "abc123".
         - The dataset is an instance of FakeInputDataset.
         """
-        assert fake_inputdataset_remote.source.location_type == "url", (
-            "Expected location_type to be 'url'"
-        )
-        assert fake_inputdataset_remote.source.basename == "remote_file.nc", (
+        ind = fake_inputdataset_remote
+        assert ind.source.basename == "remote_file.nc", (
             "Expected basename to be 'remote_file.nc'"
         )
-        assert fake_inputdataset_remote.source.file_hash == "abc123", (
-            "Expected file_hash to be 'abc123'"
-        )
-        assert isinstance(fake_inputdataset_remote, FakeInputDataset), (
+        assert ind.source.file_hash == "abc123", "Expected file_hash to be 'abc123'"
+        assert isinstance(ind, FakeInputDataset), (
             "Expected an instance of FakeInputDataset"
         )
-
-    def test_remote_requires_file_hash(self, fake_inputdataset_remote):
-        """Test that a remote InputDataset raises an error when the file hash is
-        missing.
-
-        This test confirms that a ValueError is raised if a remote dataset is created without a required file hash.
-
-        Fixtures
-        --------
-        fake_inputdataset_remote: FakeInputDataset instance for remote files.
-
-        Asserts
-        -------
-        - A ValueError is raised if the `file_hash` is missing for a remote dataset.
-        - The exception message matches the expected error message.
-        """
-        with pytest.raises(ValueError) as exception_info:
-            FakeInputDataset("http://example.com/remote_file.nc")
-
-        expected_message = (
-            "Cannot create InputDataset for \n http://example.com/remote_file.nc:\n "
-            + "InputDataset.source.file_hash cannot be None if InputDataset.source.location_type is 'url'.\n"
-            + "A file hash is required to verify non-plaintext files downloaded from remote sources."
-        )
-
-        assert str(exception_info.value) == expected_message
+        assert ind
 
 
 class TestStrAndRepr:
@@ -126,10 +98,12 @@ class TestStrAndRepr:
     FakeInputDataset
     ----------------
     Source location: some/local/source/path/local_file.nc
-    start_date: 2024-10-22 12:34:56
-    end_date: 2024-12-31 23:59:59
-    Working path: None ( does not yet exist. Call InputDataset.get() )"""
+    Source file hash: test_target
+    start date: 2024-10-22 12:34:56
+    end date: 2024-12-31 23:59:59
+    Local copy: None"""
         )
+
         assert str(fake_inputdataset_local) == expected_str
 
     def test_local_repr(self, fake_inputdataset_local):
@@ -138,7 +112,7 @@ class TestStrAndRepr:
             """\
     FakeInputDataset(
     location = 'some/local/source/path/local_file.nc',
-    file_hash = None,
+    file_hash = 'test_target',
     start_date = datetime.datetime(2024, 10, 22, 12, 34, 56),
     end_date = datetime.datetime(2024, 12, 31, 23, 59, 59)
     )"""
@@ -167,9 +141,9 @@ class TestStrAndRepr:
     ----------------
     Source location: http://example.com/remote_file.nc
     Source file hash: abc123
-    start_date: 2024-10-22 12:34:56
-    end_date: 2024-12-31 23:59:59
-    Working path: None ( does not yet exist. Call InputDataset.get() )"""
+    start date: 2024-10-22 12:34:56
+    end date: 2024-12-31 23:59:59
+    Local copy: None"""
         )
         assert str(fake_inputdataset_remote) == expected_str
 

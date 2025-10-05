@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 
 from cstar.base import AdditionalCode
-from cstar.base.datasource import DataSource
 from cstar.roms import ROMSDiscretization, ROMSExternalCodeBase, ROMSSimulation
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
@@ -145,7 +144,9 @@ def fake_roms_compile_time_code(tmp_path) -> AdditionalCode:
 # ROMSInputDataset
 ################################################################################
 @pytest.fixture
-def fake_romsinputdataset_netcdf_local() -> Generator[ROMSInputDataset, None, None]:
+def fake_romsinputdataset_netcdf_local(
+    mock_sourcedata_local_file,
+) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
 
     Mocks:
@@ -158,19 +159,14 @@ def fake_romsinputdataset_netcdf_local() -> Generator[ROMSInputDataset, None, No
     -------
         FakeROMSInputDataset: A mock dataset pointing to a local NetCDF file.
     """
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-    ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "netcdf"
-
+    fake_location = "some/local/source/path/local_file.nc"
+    source_data = mock_sourcedata_local_file(location=fake_location)
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
         dataset = FakeROMSInputDataset(
-            location="some/local/source/path/local_file.nc",
+            location=fake_location,
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
         )
@@ -179,7 +175,9 @@ def fake_romsinputdataset_netcdf_local() -> Generator[ROMSInputDataset, None, No
 
 
 @pytest.fixture
-def fake_romsinputdataset_yaml_local() -> Generator[ROMSInputDataset, None, None]:
+def fake_romsinputdataset_yaml_local(
+    mock_sourcedata_local_file,
+) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local YAML source.
 
     Mocks:
@@ -192,23 +190,14 @@ def fake_romsinputdataset_yaml_local() -> Generator[ROMSInputDataset, None, None
     -------
         FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
     """
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
-    ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "yaml"
-        mock_basename.return_value = "local_file.yaml"
-
+    fake_location = "some/local/source/path/local_file.yaml"
+    source_data = mock_sourcedata_local_file(location=fake_location)
+    patch_source_data = mock.patch(
+        "cstar.base.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
         dataset = FakeROMSInputDataset(
-            location="some/local/source/path/local_file.yaml",
+            location=fake_location,
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
         )
@@ -217,7 +206,9 @@ def fake_romsinputdataset_yaml_local() -> Generator[ROMSInputDataset, None, None
 
 
 @pytest.fixture
-def fake_romsinputdataset_yaml_remote() -> Generator[ROMSInputDataset, None, None]:
+def fake_romsinputdataset_yaml_remote(
+    mock_sourcedata_remote_file,
+) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a remote YAML source.
 
     Mocks:
@@ -230,23 +221,16 @@ def fake_romsinputdataset_yaml_remote() -> Generator[ROMSInputDataset, None, Non
     -------
         FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
     """
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
-    ):
-        mock_location_type.return_value = "url"
-        mock_source_type.return_value = "yaml"
-        mock_basename.return_value = "remote_file.yaml"
-
+    fake_location = "https://dodgyfakeyamlfiles.ru/all/remote_file.yaml"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+    )
+    patch_source_data = mock.patch(
+        "cstar.base.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
         dataset = FakeROMSInputDataset(
-            location="https://dodgyfakeyamlfiles.ru/all/remote_file.yaml",
+            location=fake_location,
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
         )
@@ -255,47 +239,115 @@ def fake_romsinputdataset_yaml_remote() -> Generator[ROMSInputDataset, None, Non
 
 
 @pytest.fixture
-def fake_model_grid() -> ROMSModelGrid:
+def fake_model_grid(mock_sourcedata_remote_file) -> ROMSModelGrid:
     """Provides a ROMSModelGrid instance with fake attrs for testing"""
-    return ROMSModelGrid(location="http://my.files/grid.nc", file_hash="123")
-
-
-@pytest.fixture
-def fake_initial_conditions() -> ROMSInitialConditions:
-    """Provides a ROMSInitialConditions instance with fake attrs for testing"""
-    return ROMSInitialConditions(location="http://my.files/initial.nc", file_hash="234")
-
-
-@pytest.fixture
-def fake_tidal_forcing() -> ROMSTidalForcing:
-    """Provides a ROMSTidalForcing instance with fake attrs for testing"""
-    return ROMSTidalForcing(location="http://my.files/tidal.nc", file_hash="345")
-
-
-@pytest.fixture
-def fake_river_forcing() -> ROMSRiverForcing:
-    """Provides a ROMSRiverForcing instance with fake attrs for testing"""
-    return ROMSRiverForcing(location="http://my.files/river.nc", file_hash="543")
-
-
-@pytest.fixture
-def fake_boundary_forcing() -> ROMSBoundaryForcing:
-    """Provides a ROMSBoundaryForcing instance with fake attrs for testing"""
-    return ROMSBoundaryForcing(location="http://my.files/boundary.nc", file_hash="456")
-
-
-@pytest.fixture
-def fake_surface_forcing() -> ROMSSurfaceForcing:
-    """Provides a ROMSSurfaceForcing instance with fake attrs for testing"""
-    return ROMSSurfaceForcing(location="http://my.files/surface.nc", file_hash="567")
-
-
-@pytest.fixture
-def fake_forcing_corrections() -> ROMSForcingCorrections:
-    """Provides a ROMSForcingCorrections  instance with fake attrs for testing"""
-    return ROMSForcingCorrections(
-        location="http://my.files/sw_corr.nc", file_hash="890"
+    fake_location = "http://my.files/grid.nc"
+    fake_hash = "123"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
     )
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
+        return ROMSModelGrid(location=fake_location, file_hash=fake_hash)
+
+
+@pytest.fixture
+def fake_initial_conditions(mock_sourcedata_remote_file) -> ROMSInitialConditions:
+    """Provides a ROMSInitialConditions instance with fake attrs for testing"""
+    fake_location = "http://my.files/initial.nc"
+    fake_hash = "234"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
+    )
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
+        return ROMSInitialConditions(location=fake_location, file_hash=fake_hash)
+
+
+@pytest.fixture
+def fake_tidal_forcing(mock_sourcedata_remote_file) -> ROMSTidalForcing:
+    """Provides a ROMSTidalForcing instance with fake attrs for testing"""
+    fake_location = "http://my.files/tidal.nc"
+    fake_hash = "345"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
+    )
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
+        return ROMSTidalForcing(location=fake_location, file_hash=fake_hash)
+
+
+@pytest.fixture
+def fake_river_forcing(mock_sourcedata_remote_file) -> ROMSRiverForcing:
+    """Provides a ROMSRiverForcing instance with fake attrs for testing"""
+    fake_location = "http://my.files/river.nc"
+    fake_hash = "543"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
+    )
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
+        return ROMSRiverForcing(location=fake_location, file_hash=fake_hash)
+
+
+@pytest.fixture
+def fake_boundary_forcing(mock_sourcedata_remote_file) -> ROMSBoundaryForcing:
+    """Provides a ROMSBoundaryForcing instance with fake attrs for testing"""
+    fake_location = "http://my.files/boundary.nc"
+    fake_hash = "456"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
+    )
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
+        return ROMSBoundaryForcing(location=fake_location, file_hash=fake_hash)
+
+
+@pytest.fixture
+def fake_surface_forcing(mock_sourcedata_remote_file) -> ROMSSurfaceForcing:
+    """Provides a ROMSSurfaceForcing instance with fake attrs for testing"""
+    fake_location = "http://my.files/surface.nc"
+    fake_hash = "567"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
+    )
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
+        return ROMSSurfaceForcing(location=fake_location, file_hash=fake_hash)
+
+
+@pytest.fixture
+def fake_forcing_corrections(mock_sourcedata_remote_file) -> ROMSForcingCorrections:
+    """Provides a ROMSForcingCorrections  instance with fake attrs for testing"""
+    fake_location = "http://my.files/sw_corr.nc"
+    fake_hash = "890"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
+    )
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
+        return ROMSForcingCorrections(location=fake_location, file_hash=fake_hash)
 
 
 ################################################################################
@@ -416,17 +468,17 @@ def fake_romssimulation_dict(fake_romssimulation) -> dict[str, Any]:
             "location": sim.river_forcing.source.location,
             "file_hash": sim.river_forcing.source.file_hash,
         },
-        "surface_forcing": [
-            {
-                "location": sim.surface_forcing[0].source.location,
-                "file_hash": sim.surface_forcing[0].source.file_hash,
-            }
-        ],
         "boundary_forcing": [
             {
                 "location": sim.boundary_forcing[0].source.location,
                 "file_hash": sim.boundary_forcing[0].source.file_hash,
             },
+        ],
+        "surface_forcing": [
+            {
+                "location": sim.surface_forcing[0].source.location,
+                "file_hash": sim.surface_forcing[0].source.file_hash,
+            }
         ],
         "forcing_corrections": [
             {
@@ -481,6 +533,18 @@ def patch_romssimulation_init_sourcedata(
                 "cstar.roms.simulation.ROMSExternalCodeBase.is_configured",
                 new_callable=mock.PropertyMock,
                 return_value=False,
+            ),
+            mock.patch(
+                "cstar.roms.input_dataset.SourceData",
+                side_effect=[
+                    fake_model_grid,
+                    fake_initial_conditions,
+                    fake_tidal_forcing,
+                    fake_river_forcing,
+                    fake_boundary_forcing,
+                    fake_surface_forcing,
+                    fake_forcing_corrections,
+                ],
             ),
         ):
             yield

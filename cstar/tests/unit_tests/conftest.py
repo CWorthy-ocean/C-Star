@@ -7,7 +7,6 @@ from unittest import mock
 import pytest
 
 from cstar.base import AdditionalCode, Discretization, ExternalCodeBase, InputDataset
-from cstar.base.datasource import DataSource
 from cstar.base.log import get_logger
 from cstar.io.constants import (
     SourceClassification,
@@ -154,6 +153,36 @@ def mock_sourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
     return _create
 
 
+@pytest.fixture
+def mock_sourcedata_local_file() -> Callable[[str, str], MockSourceData]:
+    """Fixture to create a MockSourceData instance with remote repository-like characteristics"""
+
+    def _create(
+        location="some/local/source/path/local_file.nc", identifier="test_target"
+    ):
+        return MockSourceData(
+            classification=SourceClassification.LOCAL_BINARY_FILE,
+            location=location,
+            identifier=identifier,
+        )
+
+    return _create
+
+
+@pytest.fixture
+def mock_sourcedata_remote_file() -> Callable[[str, str], MockSourceData]:
+    """Fixture to create a MockSourceData instance with remote repository-like characteristics"""
+
+    def _create(location="http://example.com/remote_file.nc", identifier="abc123"):
+        return MockSourceData(
+            classification=SourceClassification.REMOTE_BINARY_FILE,
+            location=location,
+            identifier=identifier,
+        )
+
+    return _create
+
+
 ################################################################################
 # AdditionalCode
 ################################################################################
@@ -263,7 +292,9 @@ def fake_marblexternalcodebase(
 
 
 @pytest.fixture
-def fake_inputdataset_local() -> Generator[InputDataset, None, None]:
+def fake_inputdataset_local(
+    mock_sourcedata_local_file,
+) -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock local InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a local dataset,
@@ -279,23 +310,14 @@ def fake_inputdataset_local() -> Generator[InputDataset, None, None]:
     ------
     FakeInputDataset: Instance representing a local input dataset for testing.
     """
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
-    ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "netcdf"
-        mock_basename.return_value = "local_file.nc"
-
+    fake_location = "some/local/source/path/local_file.nc"
+    source_data = mock_sourcedata_local_file(location=fake_location)
+    patch_source_data = mock.patch(
+        "cstar.base.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
         dataset = FakeInputDataset(
-            location="some/local/source/path/local_file.nc",
+            location=fake_location,
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
         )
@@ -304,42 +326,32 @@ def fake_inputdataset_local() -> Generator[InputDataset, None, None]:
 
 
 @pytest.fixture
-def fake_inputdataset_remote() -> Generator[InputDataset, None, None]:
+def fake_inputdataset_remote(
+    mock_sourcedata_remote_file,
+) -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock remote InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a remote dataset,
     initializing it with attributes such as URL location, file hash, and date range.
-
-    Mocks
-    -----
-    - Mocked DataSource.location_type property returning 'url'
-    - Mocked DataSource.source_type property returning 'netcdf'
-    - Mocked DataSource.basename property returning 'remote_file.nc'
 
     Yields
     ------
     FakeInputDataset: Instance representing a remote input dataset for testing.
     """
     # Using context managers to patch properties on DataSource
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
-    ):
-        # Mock property return values for a remote file (URL)
-        mock_location_type.return_value = "url"
-        mock_source_type.return_value = "netcdf"
-        mock_basename.return_value = "remote_file.nc"
-
+    fake_location = "http://example.com/remote_file.nc"
+    fake_hash = "abc123"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
+    )
+    patch_source_data = mock.patch(
+        "cstar.base.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
         # Create the InputDataset instance; it will use the mocked DataSource
         dataset = FakeInputDataset(
-            location="http://example.com/remote_file.nc",
+            location=fake_location,
             file_hash="abc123",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",

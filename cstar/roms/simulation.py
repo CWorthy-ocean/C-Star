@@ -1,7 +1,7 @@
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, TypeVar, cast
 
 import requests
 import yaml
@@ -224,30 +224,35 @@ class ROMSSimulation(Simulation):
             valid_end_date=valid_end_date,
         )
 
+        self._validate_input(model_grid)
         self.model_grid = model_grid
-        self.initial_conditions = initial_conditions
-        self.tidal_forcing = tidal_forcing
-        self.river_forcing = river_forcing
-        self.surface_forcing = [] if surface_forcing is None else surface_forcing
-        self._check_forcing_collection_types(self.surface_forcing, ROMSSurfaceForcing)
 
+        self._validate_input(initial_conditions)
+        self.initial_conditions = initial_conditions
+
+        self._validate_input(tidal_forcing)
+        self.tidal_forcing = tidal_forcing
+
+        self._validate_input(river_forcing)
+        self.river_forcing = river_forcing
+
+        self._validate_input(surface_forcing, ROMSSurfaceForcing)
+        self.surface_forcing: list[ROMSSurfaceForcing] = (
+            [] if surface_forcing is None else surface_forcing
+        )
+
+        self._validate_input(boundary_forcing, typecheck=ROMSBoundaryForcing)
         self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
-        self._check_forcing_collection_types(self.boundary_forcing, ROMSBoundaryForcing)
+        self._validate_input(forcing_corrections, typecheck=ROMSForcingCorrections)
         self.forcing_corrections = (
             [] if forcing_corrections is None else forcing_corrections
         )
-        self._check_forcing_collection_types(
-            self.forcing_corrections, ROMSForcingCorrections
-        )
-        self._check_inputdataset_partitioning()
-        self._check_inputdataset_dates()
 
         self.marbl_codebase = marbl_codebase
 
         # Determine which runtime_code file corresponds to the `.in` runtime settings
         # And set the in_file attribute to be used internally
         self._find_dotin_file()
-
         # roms-specific
         self.exe_path: Path | None = None
         self._exe_hash: str | None = None
@@ -276,7 +281,33 @@ class ROMSSimulation(Simulation):
 
         self._in_file = in_files[0]
 
-    def _check_forcing_collection_types(self, collection: list, expected_class: type):
+    T = TypeVar("T", bound=ROMSInputDataset)
+
+    def _validate_input(
+        self, inp: T | list[T] | None, typecheck: type[T] | None = None
+    ) -> None:
+        if not inp:
+            return
+
+        # Check if InputDataset has dates to validate:
+        undated = any(
+            [isinstance(inp, d) for d in [ROMSModelGrid, ROMSForcingCorrections]]
+        )
+
+        self._check_inputdataset_partitioning(inp)
+
+        if not undated:
+            self._check_inputdataset_dates(inp)
+
+        if typecheck:
+            self._check_inputdataset_types(inp, expected_type=typecheck)
+        return
+
+    def _check_inputdataset_types(
+        self,
+        inputdatasets: T | list[T],
+        expected_type: type[T],
+    ):
         """Validate the types of input datasets in a forcing collection.
 
         For forcing types that may correspond to multiple ROMSInputDataset instances
@@ -295,30 +326,34 @@ class ROMSSimulation(Simulation):
         TypeError
             If any item in the list is not an instance of `expected_class`.
         """
-        if not all([isinstance(ind, expected_class) for ind in collection]):
+        if not isinstance(inputdatasets, list):
+            inputdatasets = [
+                inputdatasets,
+            ]
+        if not all([isinstance(ind, expected_type) for ind in inputdatasets]):
             raise TypeError(
-                f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
+                f"At least one of {[type(i) for i in inputdatasets]} is not {expected_type}."
             )
 
-    def _check_inputdataset_partitioning(self) -> None:
+    def _check_inputdataset_partitioning(self, inp: T | list[T]) -> None:
         """If a ROMSInputDataset's source is already partitioned, confirm that the
         partitioning matches the processor distribution of the simulation and raise a
         ValueError if not.
         """
-        for inp in self.input_datasets:
-            if inp.source_partitioning:
-                if (inp.source_np_xi != self.discretization.n_procs_x) or (
-                    inp.source_np_eta != self.discretization.n_procs_y
+        for i in inp if isinstance(inp, list) else [inp]:
+            if i.source_partitioning:
+                if (i.source_np_xi != self.discretization.n_procs_x) or (
+                    i.source_np_eta != self.discretization.n_procs_y
                 ):
                     raise ValueError(
                         f"Cannot instantiate ROMSSimulation with "
                         f"n_procs_x={self.discretization.n_procs_x}, "
                         f"n_procs_y={self.discretization.n_procs_y} "
                         "when {inp.__class__.__name__} has partitioning "
-                        f"({inp.source_np_xi},{inp.source_np_eta}) at source."
+                        f"({i.source_np_xi},{i.source_np_eta}) at source."
                     )
 
-    def _check_inputdataset_dates(self) -> None:
+    def _check_inputdataset_dates(self, inp: T | list[T]) -> None:
         """Ensure input dataset date ranges align with the simulation date range.
 
         For each input dataset with a plaintext (yaml) source, this method verifies that
@@ -339,41 +374,70 @@ class ROMSSimulation(Simulation):
         - `ROMSInitialConditions` datasets only have their `start_date` checked;
           `end_date` is not required or enforced for initial conditions.
         """
-        for inp in [
-            self.initial_conditions,
-            self.river_forcing,
-            *self.surface_forcing,
-            *self.boundary_forcing,
-        ]:
-            if (inp is not None) and (
-                inp.source._classification.value.file_encoding == FileEncoding.TEXT
+
+        def is_correctable(inp: ROMSInputDataset) -> bool:
+            return inp.source._classification.value.file_encoding == FileEncoding.TEXT
+
+        def correct_date_bound_or_raise(inp: ROMSInputDataset, bound: str):
+            sim_bound = getattr(self, bound)
+
+            inp_bound = getattr(inp, bound, None)
+            if inp_bound == sim_bound:
+                return
+            if is_correctable(inp):
+                if inp_bound is not None:
+                    self.log.warning(
+                        f"{inp.__class__.__name__} has a date attribute {bound} "
+                        f"whose value {inp_bound} does not match that of ROMSSimulation ({sim_bound}). "
+                        f"C-Star will enforce {sim_bound} as the date"
+                    )
+                setattr(inp, bound, getattr(self, bound))
+                return
+            if inp_bound is None:
+                return
+            raise ValueError(
+                f"Uncorrectable mismatch between {bound} in {inp.__class__.__name__} and ROMSSimulation"
+            )
+
+        # For a single ROMSInputDataset, start and end must match simulation
+        if not isinstance(inp, list):
+            correct_date_bound_or_raise(inp, "start_date")
+            if not isinstance(inp, ROMSInitialConditions):
+                correct_date_bound_or_raise(inp, "end_date")
+            return
+
+        # For a list, depends on context: could be a list of sequential files or a list of different vars
+        start_dates: list[datetime] = list(
+            filter(None, [getattr(i, "start_date", None) for i in inp])
+        )
+        end_dates: list[datetime] = list(
+            filter(None, [getattr(i, "start_date", None) for i in inp])
+        )
+        for i in inp:
+            # If a file is yaml, it always covers the whole simulation:
+            if is_correctable(i):
+                correct_date_bound_or_raise(i, "start_date")
+                correct_date_bound_or_raise(i, "end_date")
+                continue
+            # if it's netCDF, check it either matches bounds of simulation OR another InputDataset:
+            if (
+                hasattr(i, "start_date")
+                and (i.start_date not in [self.start_date, None])
+                and not any([ed == i.start_date for ed in end_dates])
             ):
-                if (
-                    hasattr(inp, "start_date")
-                    and (inp.start_date is not None)
-                    and (inp.start_date != self.start_date)
-                ):
-                    self.log.warning(
-                        f"{inp.__class__.__name__} has start date attribute {inp.start_date} "
-                        + f"that does not match ROMSSimulation.start_date {self.start_date}. "
-                        f"C-Star will enforce {self.start_date} as the start date"
-                    )
-                inp.start_date = self.start_date
-
-                if isinstance(inp, ROMSInitialConditions):
-                    continue
-
-                if (
-                    hasattr(inp, "end_date")
-                    and (inp.end_date is not None)
-                    and (inp.end_date != self.end_date)
-                ):
-                    self.log.warning(
-                        f"{inp.__class__.__name__} has end date attribute {inp.end_date} "
-                        + f"that does not match ROMSSimulation.end_date {self.end_date}. "
-                        f"C-Star will enforce {self.end_date} as the end date"
-                    )
-                inp.end_date = self.end_date
+                raise ValueError(
+                    f"Start date of {i.__class__.__name__} ({i.start_date}) does not match that of Simulation "
+                    f"{self.start_date} or any corresponding InputDataset's 'end_date': \n {i}"
+                )
+            if (
+                hasattr(i, "end_date")
+                and (i.end_date not in [self.end_date, None])
+                and not any([sd == i.end_date for sd in start_dates])
+            ):
+                raise ValueError(
+                    f"End date of InputDataset {i.end_date} does not match that of Simulation "
+                    f"{self.end_date} or any corresponding InputDataset's 'start_date': \n {i}"
+                )
 
     def __str__(self) -> str:
         """Returns a string representation of the simulation.
