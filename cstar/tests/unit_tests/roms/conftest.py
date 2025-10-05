@@ -503,20 +503,54 @@ def fake_romssimulation_dict_no_forcing_lists(
 
 @pytest.fixture
 def patch_romssimulation_init_sourcedata(
-    fake_romssimulation, mock_sourcedata_remote_repo
+    fake_romssimulation,
+    mock_sourcedata_remote_repo,
+    mock_sourcedata_remote_file,
 ) -> Callable[[], AbstractContextManager[None]]:
     """Fixture returning a contextmanager patching all ROMSSimulation.__init__ SourceData calls.
 
     Used in tests that create a new ROMSSimulation instance.
     """
     sim = fake_romssimulation
-    # ExternalCodeBase
+
+    # External codebase SourceData mocks
     mock_externalcodebase_sourcedata = mock_sourcedata_remote_repo(
-        location=sim.codebase.source.location, identifier=sim.codebase.source.identifier
+        location=sim.codebase.source.location,
+        identifier=sim.codebase.source.identifier,
     )
     mock_marbl_externalcodebase_sourcedata = mock_sourcedata_remote_repo(
         location=sim.marbl_codebase.source.location,
         identifier=sim.marbl_codebase.source.identifier,
+    )
+
+    # ROMS input dataset SourceData mocks
+    mock_model_grid_sourcedata = mock_sourcedata_remote_file(
+        location=sim.model_grid.source.location,
+        identifier=sim.model_grid.source.identifier,
+    )
+    mock_initial_conditions_sourcedata = mock_sourcedata_remote_file(
+        location=sim.initial_conditions.source.location,
+        identifier=sim.initial_conditions.source.identifier,
+    )
+    mock_tidal_forcing_sourcedata = mock_sourcedata_remote_file(
+        location=sim.tidal_forcing.source.location,
+        identifier=sim.tidal_forcing.source.identifier,
+    )
+    mock_river_forcing_sourcedata = mock_sourcedata_remote_file(
+        location=sim.river_forcing.source.location,
+        identifier=sim.river_forcing.source.identifier,
+    )
+    mock_boundary_forcing_sourcedata = mock_sourcedata_remote_file(
+        location=sim.boundary_forcing[0].source.location,
+        identifier=sim.boundary_forcing[0].source.identifier,
+    )
+    mock_surface_forcing_sourcedata = mock_sourcedata_remote_file(
+        location=sim.surface_forcing[0].source.location,
+        identifier=sim.surface_forcing[0].source.identifier,
+    )
+    mock_forcing_corrections_sourcedata = mock_sourcedata_remote_file(
+        location=sim.forcing_corrections[0].source.location,
+        identifier=sim.forcing_corrections[0].source.identifier,
     )
 
     @contextmanager
@@ -537,13 +571,13 @@ def patch_romssimulation_init_sourcedata(
             mock.patch(
                 "cstar.roms.input_dataset.SourceData",
                 side_effect=[
-                    fake_model_grid,
-                    fake_initial_conditions,
-                    fake_tidal_forcing,
-                    fake_river_forcing,
-                    fake_boundary_forcing,
-                    fake_surface_forcing,
-                    fake_forcing_corrections,
+                    mock_model_grid_sourcedata,
+                    mock_initial_conditions_sourcedata,
+                    mock_tidal_forcing_sourcedata,
+                    mock_river_forcing_sourcedata,
+                    mock_boundary_forcing_sourcedata,
+                    mock_surface_forcing_sourcedata,
+                    mock_forcing_corrections_sourcedata,
                 ],
             ),
         ):
