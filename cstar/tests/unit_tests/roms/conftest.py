@@ -193,7 +193,7 @@ def fake_romsinputdataset_yaml_local(
     fake_location = "some/local/source/path/local_file.yaml"
     source_data = mock_sourcedata_local_file(location=fake_location)
     patch_source_data = mock.patch(
-        "cstar.base.input_dataset.SourceData", return_value=source_data
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
     )
     with patch_source_data:
         dataset = FakeROMSInputDataset(
@@ -226,7 +226,7 @@ def fake_romsinputdataset_yaml_remote(
         location=fake_location,
     )
     patch_source_data = mock.patch(
-        "cstar.base.input_dataset.SourceData", return_value=source_data
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
     )
     with patch_source_data:
         dataset = FakeROMSInputDataset(

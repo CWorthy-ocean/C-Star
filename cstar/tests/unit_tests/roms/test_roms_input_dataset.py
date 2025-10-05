@@ -241,14 +241,12 @@ class TestROMSInputDatasetGet:
         """Stop all patches."""
         mock.patch.stopall()
 
-    @mock.patch("cstar.roms.input_dataset._get_sha256_hash", return_value="mocked_hash")
     @mock.patch("pathlib.Path.stat", autospec=True)
     @mock.patch("requests.get", autospec=True)
     def test_get_grid_from_remote_yaml(
         self,
         mock_request,
         mock_stat,
-        mock_get_hash,
         fake_romsinputdataset_yaml_remote,
         mock_path_resolve,
     ):
@@ -266,7 +264,6 @@ class TestROMSInputDatasetGet:
         Mocks
         -----
         - `Path.stat`: Simulates retrieving file metadata for file.
-        - `_get_sha256_hash`: Simulates computing the hash of the file.
         - `yaml.safe_load`: Simulates loading YAML content from a file.
         - `roms_tools.Grid.from_yaml`: Simulates creating a Grid object from the YAML file.
         - `roms_tools.Grid.save`: Simulates saving Grid data as a NetCDF file.
@@ -277,7 +274,6 @@ class TestROMSInputDatasetGet:
         - Ensures `yaml.safe_load` processes the YAML content as expected.
         - Validates `roms_tools.Grid.from_yaml` creates the Grid object from the YAML file.
         - Verifies `roms_tools.Grid.save` saves files with correct parameters.
-        - Ensures metadata and checksums for saved file is cached via `stat` and `_get_sha256_hash`.
         """
         # Mock the stat result
         mock_stat_result = mock.Mock(

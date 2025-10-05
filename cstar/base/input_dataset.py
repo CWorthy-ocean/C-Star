@@ -81,7 +81,7 @@ class InputDataset(ABC, LoggingMixin):
         return False
 
     @property
-    def _local(self) -> list[Path] | None:
+    def _local(self) -> list[Path]:
         """Returns any paths associated with working_copy as a list"""
         if self.working_copy:
             if isinstance(self.working_copy, StagedDataCollection):
@@ -89,7 +89,7 @@ class InputDataset(ABC, LoggingMixin):
             return [
                 self.working_copy.path,
             ]
-        return None
+        return []
 
     def __str__(self) -> str:
         name = self.__class__.__name__
@@ -104,7 +104,8 @@ class InputDataset(ABC, LoggingMixin):
             base_str += f"\nstart date: {self.start_date}"
         if self.end_date is not None:
             base_str += f"\nend date: {self.end_date}"
-        base_str += f"\nLocal copy: {self._local}"
+        strlocal = " ".join([str(p) for p in self._local]) if self._local else None
+        base_str += f"\nLocal copy: {strlocal}"
         return base_str
 
     def __repr__(self) -> str:
@@ -120,7 +121,7 @@ class InputDataset(ABC, LoggingMixin):
         info_str = ""
         # if self.working_path is not None:
         if self.working_copy:
-            info_str += f"working_copy = {self.working_copy}"
+            info_str += f"working_copy = {' '.join([str(p) for p in self._local])}"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         # Additional info
