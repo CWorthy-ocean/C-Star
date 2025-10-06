@@ -11,6 +11,7 @@ from cstar.base.datasource import DataSource
 from cstar.roms import ROMSDiscretization, ROMSExternalCodeBase, ROMSSimulation
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
+    ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSInputDataset,
@@ -267,6 +268,12 @@ def fake_tidal_forcing() -> ROMSTidalForcing:
 
 
 @pytest.fixture
+def fake_cdr_forcing() -> ROMSCdrForcing:
+    """Provides a ROMSTidalForcing instance with fake attrs for testing"""
+    return ROMSCdrForcing(location="http://my.files/cdr.nc", file_hash="542")
+
+
+@pytest.fixture
 def fake_river_forcing() -> ROMSRiverForcing:
     """Provides a ROMSRiverForcing instance with fake attrs for testing"""
     return ROMSRiverForcing(location="http://my.files/river.nc", file_hash="543")
@@ -310,6 +317,7 @@ def fake_romssimulation(
     fake_boundary_forcing,
     fake_surface_forcing,
     fake_forcing_corrections,
+    fake_cdr_forcing,
     tmp_path,
 ) -> ROMSSimulation:
     """Fixture providing a `ROMSSimulation` instance for testing.
@@ -353,6 +361,7 @@ def fake_romssimulation(
         forcing_corrections=[
             fake_forcing_corrections,
         ],
+        cdr_forcing=fake_cdr_forcing,
     )
 
     return sim
@@ -428,6 +437,10 @@ def fake_romssimulation_dict(fake_romssimulation) -> dict[str, Any]:
                 "file_hash": sim.forcing_corrections[0].source.file_hash,
             }
         ],
+        "cdr_forcing": {
+            "location": sim.cdr_forcing.source.location,
+            "file_hash": sim.cdr_forcing.source.file_hash,
+        },
     }
     return return_dict
 
