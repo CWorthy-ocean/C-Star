@@ -8,8 +8,7 @@ import dotenv
 import numpy as np
 import pytest
 
-from cstar.base import Discretization
-from cstar.base.additional_code import AdditionalCode
+from cstar.base import AdditionalCode, Discretization, ExternalCodeBase, InputDataset
 from cstar.base.datasource import DataSource
 from cstar.base.log import get_logger
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -30,7 +29,6 @@ from cstar.roms.simulation import ROMSSimulation
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
-    FakeROMSInputDataset,
     StubSimulation,
 )
 
@@ -40,7 +38,7 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 @pytest.fixture
-def fake_additionalcode_remote():
+def fake_additionalcode_remote() -> AdditionalCode:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     a remote repository.
 
@@ -69,7 +67,7 @@ def fake_additionalcode_remote():
 
 
 @pytest.fixture
-def fake_additionalcode_local():
+def fake_additionalcode_local() -> AdditionalCode:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     code located on the local filesystem.
 
@@ -99,7 +97,9 @@ def fake_additionalcode_local():
 # ExternalCodeBase
 ################################################################################
 @pytest.fixture
-def fake_externalcodebase(log: logging.Logger):
+def fake_externalcodebase(
+    log: logging.Logger,
+) -> Generator[ExternalCodeBase, None, None]:
     """Yields a fake codebase (instance of FakeExternalCodeBase) for
     use in testing.
     """
@@ -109,6 +109,21 @@ def fake_externalcodebase(log: logging.Logger):
         return_value="test123",
     ):
         yield FakeExternalCodeBase()
+
+
+@pytest.fixture
+def fake_marblexternalcodebase(
+    log: logging.Logger,
+) -> Generator[MARBLExternalCodeBase, None, None]:
+    """Fixture providing a `MARBLExternalCodeBase` instance for testing."""
+    # Correctly patch the imported _get_hash_from_checkout_target in the ExternalCodeBase's module
+    with mock.patch(
+        "cstar.base.external_codebase._get_hash_from_checkout_target",
+        return_value="test123",
+    ):
+        yield MARBLExternalCodeBase(
+            source_repo="https://marbl.com/repo.git", checkout_target="v1"
+        )
 
 
 ################################################################################
@@ -179,7 +194,7 @@ def fake_romsruntimesettings():
 
 
 @pytest.fixture
-def fake_inputdataset_local():
+def fake_inputdataset_local() -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock local InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a local dataset,
@@ -220,7 +235,7 @@ def fake_inputdataset_local():
 
 
 @pytest.fixture
-def fake_inputdataset_remote():
+def fake_inputdataset_remote() -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock remote InputDataset instance.
 
     This fixture patches properties of the DataSource class to simulate a remote dataset,
@@ -266,127 +281,12 @@ def fake_inputdataset_remote():
 
 
 ################################################################################
-# ROMSInputDataset
-################################################################################
-
-
-@pytest.fixture
-def fake_romsinputdataset_netcdf_local():
-    """Fixture to provide a ROMSInputDataset with a local NetCDF source.
-
-    Mocks:
-    ------
-    - DataSource.location_type: Property mocked as 'path'
-    - DataSource.source_type: Property mocked as 'netcdf'
-    - DataSource.basename: Property mocked as 'local_file.nc'
-
-    Yields:
-    -------
-        FakeROMSInputDataset: A mock dataset pointing to a local NetCDF file.
-    """
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-    ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "netcdf"
-
-        dataset = FakeROMSInputDataset(
-            location="some/local/source/path/local_file.nc",
-            start_date="2024-10-22 12:34:56",
-            end_date="2024-12-31 23:59:59",
-        )
-
-        yield dataset
-
-
-@pytest.fixture
-def fake_romsinputdataset_yaml_local():
-    """Fixture to provide a ROMSInputDataset with a local YAML source.
-
-    Mocks:
-    ------
-    - DataSource.location_type: Property mocked as 'path'
-    - DataSource.source_type: Property mocked as 'yaml'
-    - DataSource.basename: Property mocked as 'local_file.yaml'
-
-    Yields:
-    -------
-        FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
-    """
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
-    ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "yaml"
-        mock_basename.return_value = "local_file.yaml"
-
-        dataset = FakeROMSInputDataset(
-            location="some/local/source/path/local_file.yaml",
-            start_date="2024-10-22 12:34:56",
-            end_date="2024-12-31 23:59:59",
-        )
-
-        yield dataset
-
-
-@pytest.fixture
-def fake_romsinputdataset_yaml_remote():
-    """Fixture to provide a ROMSInputDataset with a remote YAML source.
-
-    Mocks:
-    ------
-    - DataSource.location_type: Property mocked as 'url'
-    - DataSource.source_type: Property mocked as 'yaml'
-    - DataSource.basename: Property mocked as 'remote_file.yaml'
-
-    Yields:
-    -------
-        FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
-    """
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
-    ):
-        mock_location_type.return_value = "url"
-        mock_source_type.return_value = "yaml"
-        mock_basename.return_value = "remote_file.yaml"
-
-        dataset = FakeROMSInputDataset(
-            location="https://dodgyfakeyamlfiles.ru/all/remote_file.yaml",
-            start_date="2024-10-22 12:34:56",
-            end_date="2024-12-31 23:59:59",
-        )
-
-        yield dataset
-
-
-################################################################################
 # Simulation
 ################################################################################
 
 
 @pytest.fixture
-def stub_simulation(tmp_path):
+def stub_simulation(fake_externalcodebase, tmp_path) -> StubSimulation:
     """Fixture providing a `StubSimulation` instance for testing.
 
     This fixture sets up a minimal `StubSimulation` instance with a mock external
@@ -421,95 +321,11 @@ def stub_simulation(tmp_path):
         valid_start_date="2024-01-01",
         valid_end_date="2026-01-01",
     )
-    yield sim
+    return sim
 
 
 ################################################################################
 # ROMSSimulation
-################################################################################
-
-
-@pytest.fixture
-def fake_romssimulation(
-    tmp_path,
-) -> Generator[ROMSSimulation, None, None]:
-    """Fixture providing a `ROMSSimulation` instance for testing.
-
-    This fixture initializes a `ROMSSimulation` with a comprehensive configuration,
-    including discretization settings, mock external ROMS and MARBL codebases.
-    runtime and compile-time code, and multiple input datasets (grid, initial
-    conditions, tidal forcing, boundary forcing, and surface forcing). The
-    temporary directory (`tmp_path`) is used as the working directory.
-
-    Yields
-    ------
-    tuple[ROMSSimulation, Path]
-        A tuple containing:
-        - `ROMSSimulation` instance with fully configured attributes.
-        - The temporary directory where the simulation is stored.
-    """
-    directory = tmp_path
-    sim = ROMSSimulation(
-        name="ROMSTest",
-        directory=directory,
-        discretization=ROMSDiscretization(time_step=60, n_procs_x=2, n_procs_y=3),
-        codebase=ROMSExternalCodeBase(
-            source_repo="http://my.code/repo.git", checkout_target="dev"
-        ),
-        runtime_code=AdditionalCode(
-            location=directory.parent,
-            subdir="subdir/",
-            checkout_target="main",
-            files=[
-                "file1",
-                "file2.in",
-                "marbl_in",
-                "marbl_tracer_output_list",
-                "marbl_diagnostic_output_list",
-            ],
-        ),
-        compile_time_code=AdditionalCode(
-            location=directory.parent,
-            subdir="subdir/",
-            checkout_target="main",
-            files=["file1.h", "file2.opt"],
-        ),
-        start_date="2025-01-01",
-        end_date="2025-12-31",
-        valid_start_date="2024-01-01",
-        valid_end_date="2026-01-01",
-        marbl_codebase=MARBLExternalCodeBase(
-            source_repo="http://marbl.com/repo.git", checkout_target="v1"
-        ),
-        model_grid=ROMSModelGrid(location="http://my.files/grid.nc", file_hash="123"),
-        initial_conditions=ROMSInitialConditions(
-            location="http://my.files/initial.nc", file_hash="234"
-        ),
-        tidal_forcing=ROMSTidalForcing(
-            location="http://my.files/tidal.nc", file_hash="345"
-        ),
-        river_forcing=ROMSRiverForcing(
-            location="http://my.files/river.nc", file_hash="543"
-        ),
-        boundary_forcing=[
-            ROMSBoundaryForcing(
-                location="http://my.files/boundary.nc", file_hash="456"
-            ),
-        ],
-        surface_forcing=[
-            ROMSSurfaceForcing(location="http://my.files/surface.nc", file_hash="567"),
-        ],
-        forcing_corrections=[
-            ROMSForcingCorrections(
-                location="http://my.files/sw_corr.nc", file_hash="890"
-            ),
-        ],
-        cdr_forcing=ROMSCdrForcing(location="http://my.files/cdr.nc", file_hash="542"),
-    )
-
-    yield sim  # Ensures pytest can handle resource cleanup if needed
-
-
 ################################################################################
 
 

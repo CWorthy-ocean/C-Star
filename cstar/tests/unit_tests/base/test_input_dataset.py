@@ -560,7 +560,6 @@ class TestInputDatasetGet:
 
             # Assert that working_path is updated to the resolved target path
             expected_target_path = self.target_dir / "local_file.nc"
-
             assert fake_inputdataset_local.working_path == expected_target_path, (
                 f"Expected working_path to be {expected_target_path}, but got {fake_inputdataset_local.working_path}"
             )
