@@ -43,7 +43,7 @@ def fake_romsexternalcodebase() -> Generator[ROMSExternalCodeBase, None, None]:
 # ROMSRuntimeSettings
 ################################################################################
 @pytest.fixture
-def fake_romsruntimesettings() -> ROMSRuntimeSettings:
+def fake_romsruntimesettings():
     """Fixture providing a `ROMSRuntimeSettings` instance for testing.
 
     The example instance corresponds to the file `fixtures/example_runtime_settings.in`
@@ -56,7 +56,7 @@ def fake_romsruntimesettings() -> ROMSRuntimeSettings:
     ROMSRuntimeSettings
        The example ROMSRuntimeSettings instance
     """
-    return ROMSRuntimeSettings(
+    yield ROMSRuntimeSettings(
         title="Example runtime settings",
         time_stepping={"ntimes": 360, "dt": 60, "ndtfast": 60, "ninfo": 1},
         bottom_drag={
