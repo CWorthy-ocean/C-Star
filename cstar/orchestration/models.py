@@ -68,15 +68,17 @@ class DocLocMixin(ConfiguredBaseModel):
 
 DataResource: t.TypeAlias = Resource | VersionedResource
 
-_T = t.TypeVar("_T", DataResource, list[DataResource])
-
 
 class Dataset(DocLocMixin):
+    """A dataset contains a data block alongside documentation and locking fields."""
+
     data: list[DataResource]
+    """A list of one or more data resources."""
 
-
-class SingleItemDataset(Dataset):
-    data: list[DataResource] = Field(min_length=1, max_length=1)
+    def __len__(self) -> int:
+        if isinstance(self.data, list):
+            return len(self.data)
+        return 1 if self.data else 0
 
 
 class PathFilter(ConfiguredBaseModel):
@@ -318,10 +320,10 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     code: ROMSCompositeCodeRepository
     """Code repositories used to build, configure, and execute the ROMS simulation."""
 
-    initial_conditions: SingleItemDataset
+    initial_conditions: Dataset = Field(min_length=1, max_length=1)
     """File containing the starting conditions of the simulation."""
 
-    grid: SingleItemDataset
+    grid: Dataset = Field(min_length=1, max_length=1)
     """File defining the grid geometry."""
 
     forcing: ForcingConfiguration
