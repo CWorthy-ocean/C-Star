@@ -97,7 +97,7 @@ class TestROMSRuntimeSettingsSection:
             val1: float
             val2: str
 
-        section = TestSection(5.0, "hello")
+        section = TestSection(val1=5.0, val2="hello")
         assert section.val1 == 5
         assert section.val2 == "hello"
 
@@ -327,7 +327,7 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         """Tests that the `single_entry_validator` method passes a correctly typed value
         to cls() without requiring a dict or kwargs for initialization.
         """
-        result = self.MockSingleEntrySection(3.14)
+        result = self.MockSingleEntrySection(value=3.14)
 
         assert isinstance(
             result, TestSingleEntryROMSRuntimeSettingsSection.MockSingleEntrySection
@@ -343,7 +343,7 @@ class TestSingleEntryROMSRuntimeSettingsSection:
         handler = MagicMock(return_value="fallback")
         result = self.MockSingleEntrySection.single_entry_validator(
             "not a float", handler
-        )
+        )  # type: ignore[operator]
 
         handler.assert_called_once_with("not a float")
         assert result == "fallback"
@@ -371,14 +371,14 @@ class TestSingleEntryROMSRuntimeSettingsSection:
             value: annotation
 
         with context:
-            assert MyTestClass(obj).value == obj
+            assert MyTestClass(value=obj).value == obj
 
     def test_str_and_repr_return_value(self) -> None:
         """Tests that the `str` and `repr` functions for
         SingleEntryROMSRuntimeSettingsSection simply return a string of the single
         entry's value.
         """
-        section = self.MockSingleEntrySection(1.0)
+        section = self.MockSingleEntrySection(value=1.0)
         assert str(section) == "1.0"
         assert repr(section) == "1.0"
 

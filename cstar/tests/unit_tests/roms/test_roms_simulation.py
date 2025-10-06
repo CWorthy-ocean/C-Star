@@ -18,6 +18,7 @@ from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
+    ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSInputDataset,
@@ -124,6 +125,10 @@ class TestROMSSimulationInitialization:
         assert isinstance(sim.tidal_forcing, ROMSTidalForcing)
         assert sim.tidal_forcing.source.location == "http://my.files/tidal.nc"
         assert sim.tidal_forcing.source.file_hash == "345"
+
+        assert isinstance(sim.cdr_forcing, ROMSCdrForcing)
+        assert sim.cdr_forcing.source.location == "http://my.files/cdr.nc"
+        assert sim.cdr_forcing.source.file_hash == "542"
 
         assert isinstance(sim.boundary_forcing, list)
         assert [isinstance(x, ROMSBoundaryForcing) for x in sim.boundary_forcing]
@@ -999,6 +1004,10 @@ class TestToAndFromDictAndBlueprint:
             "river_forcing": {
                 "location": "http://my.files/river.nc",
                 "file_hash": "543",
+            },
+            "cdr_forcing": {
+                "location": "http://my.files/cdr.nc",
+                "file_hash": "542",
             },
             "surface_forcing": [
                 {"location": "http://my.files/surface.nc", "file_hash": "567"}

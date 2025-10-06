@@ -17,6 +17,7 @@ from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
+    ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSModelGrid,
@@ -503,6 +504,7 @@ def fake_romssimulation(
                 location="http://my.files/sw_corr.nc", file_hash="890"
             ),
         ],
+        cdr_forcing=ROMSCdrForcing(location="http://my.files/cdr.nc", file_hash="542"),
     )
 
     yield sim  # Ensures pytest can handle resource cleanup if needed
@@ -761,6 +763,7 @@ def example_roms_simulation(
                 location="http://my.files/sw_corr.nc", file_hash="890"
             ),
         ],
+        cdr_forcing=ROMSCdrForcing(location="http://my.files/cdr.nc", file_hash="542"),
     )
 
     yield sim, directory  # Ensures pytest can handle resource cleanup if needed

@@ -515,3 +515,9 @@ class ROMSForcingCorrections(ROMSInputDataset):
                 f"{self.__class__.__name__} cannot be initialized with a source YAML file. "
                 "Please provide a direct path or URL to a dataset (e.g., NetCDF)."
             )
+
+
+class ROMSCdrForcing(ROMSInputDataset):
+    """An implementation of the ROMSInputDataset class for CDR forcing files."""
+
+    pass
