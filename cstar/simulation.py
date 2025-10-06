@@ -169,15 +169,15 @@ class Simulation(ABC, LoggingMixin):
             If the specified directory already exists and is not empty.
         """
         resolved_directory = Path(directory).resolve()
-        if resolved_directory.exists() and (
-            not resolved_directory.is_dir() or any(resolved_directory.iterdir())
-        ):
-            raise FileExistsError(
-                f"Your chosen directory {directory} exists and is not an empty directory."
-                "\nIf you have previously created this case, use "
-                f"\nmy_sim = {self.__class__.__name__}.restore(directory={directory!r})"
-                "\n to restore it"
-            )
+        # if resolved_directory.exists() and (
+        #     not resolved_directory.is_dir() or any(resolved_directory.iterdir())
+        # ):
+        #     raise FileExistsError(
+        #         f"Your chosen directory {directory} exists and is not an empty directory."
+        #         "\nIf you have previously created this case, use "
+        #         f"\nmy_sim = {self.__class__.__name__}.restore(directory={directory!r})"
+        #         "\n to restore it"
+        #     )
 
         return resolved_directory
 

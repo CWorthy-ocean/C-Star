@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
@@ -1408,7 +1409,10 @@ class ROMSSimulation(Simulation):
             f"{final_runtime_settings_file}"
         )
 
-        if cstar_sysmgr.scheduler is not None:
+        if (
+            os.getenv("CSTAR_ORCHESTRATED") != "1"
+            and cstar_sysmgr.scheduler is not None
+        ):
             if account_key is None:
                 raise ValueError(
                     "please call Simulation.run() with a value for account_key"

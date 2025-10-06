@@ -14,6 +14,9 @@ from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.adapter import BlueprintAdapter
+from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.orchestration.serialization import deserialize
 from cstar.roms import ROMSSimulation
 from cstar.system.manager import cstar_sysmgr
 
@@ -116,14 +119,11 @@ class SimulationRunner(Service):
         super().__init__(service_cfg)
 
         self._blueprint_uri = request.blueprint_uri
-        self._output_root = request.output_dir.expanduser()
+
+        bp = deserialize(pathlib.Path(self._blueprint_uri), RomsMarblBlueprint)
+        self._output_root = bp.runtime_params.output_dir.expanduser()
         self._output_dir = self._get_unique_path(self._output_root)
-        self._simulation: ROMSSimulation = ROMSSimulation.from_blueprint(
-            blueprint=self._blueprint_uri,
-            directory=self._output_dir,
-            start_date=request.start_date,
-            end_date=request.end_date,
-        )
+        self._simulation: ROMSSimulation = BlueprintAdapter(bp).adapt()
         self._stages = tuple(request.stages)
 
         roms_root = os.environ.get("ROMS_ROOT", None)
@@ -165,7 +165,7 @@ class SimulationRunner(Service):
             None,
         )
 
-        if self._output_root.exists() and outputs:
+        if self._output_dir.exists() and outputs:
             msg = f"Output directory {self._output_root} is not empty."
             raise ValueError(msg)
 
@@ -533,12 +533,12 @@ async def main(raw_args: list[str]) -> int:
         blueprint_req = get_request(args)
         job_cfg = JobConfig()  # use default HPC config
 
-    log_file = (
-        blueprint_req.output_dir
-        / LOGS_DIRECTORY
-        / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
-    )
-    log = get_logger(__name__, level=service_cfg.log_level, filename=log_file)
+    # log_file = (
+    #     blueprint_req.output_dir
+    #     / LOGS_DIRECTORY
+    #     / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
+    # )
+    log = get_logger(__name__, level=service_cfg.log_level)  # , filename=log_file)
 
     try:
         configure_environment(log)
