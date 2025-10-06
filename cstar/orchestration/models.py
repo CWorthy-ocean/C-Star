@@ -48,6 +48,8 @@ class Resource(ConfiguredBaseModel):
     location: FilePath | HttpUrl
     """Location of the file to retrieve."""
 
+    partitioned: bool = Field(default=False, init=False)
+
 
 class VersionedResource(Resource):
     hash: RequiredString
@@ -66,11 +68,17 @@ class DocLocMixin(ConfiguredBaseModel):
 
 DataResource: t.TypeAlias = Resource | VersionedResource
 
-_T = t.TypeVar("_T", DataResource, list[DataResource])
 
+class Dataset(DocLocMixin):
+    """A dataset contains a data block alongside documentation and locking fields."""
 
-class Dataset(DocLocMixin, t.Generic[_T]):
-    data: _T
+    data: list[DataResource]
+    """A list of one or more data resources."""
+
+    def __len__(self) -> int:
+        if isinstance(self.data, list):
+            return len(self.data)
+        return 1 if self.data else 0
 
 
 class PathFilter(ConfiguredBaseModel):
@@ -89,21 +97,19 @@ class PathFilter(ConfiguredBaseModel):
 class ForcingConfiguration(ConfiguredBaseModel):
     """Configuration of the forcing parameters of the model."""
 
-    boundary: Dataset[list[DataResource]]
+    boundary: Dataset
     """Boundary forcing."""
 
-    surface: Dataset[list[DataResource]]
+    surface: Dataset
     """Surface forcing"""
 
-    tidal: Dataset[DataResource] | None = Field(default=None, validate_default=False)
+    tidal: Dataset | None = Field(default=None, validate_default=False)
     """Tidal forcing."""
 
-    river: Dataset[DataResource] | None = Field(default=None, validate_default=False)
+    river: Dataset | None = Field(default=None, validate_default=False)
     """River forcing."""
 
-    corrections: Dataset[list[DataResource]] | None = Field(
-        default=None, validate_default=False
-    )
+    corrections: Dataset | None = Field(default=None, validate_default=False)
     """Wind or other forcing corrections."""
 
 
@@ -314,10 +320,10 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     code: ROMSCompositeCodeRepository
     """Code repositories used to build, configure, and execute the ROMS simulation."""
 
-    initial_conditions: Dataset[DataResource]
+    initial_conditions: Dataset = Field(min_length=1, max_length=1)
     """File containing the starting conditions of the simulation."""
 
-    grid: Dataset[DataResource]
+    grid: Dataset = Field(min_length=1, max_length=1)
     """File defining the grid geometry."""
 
     forcing: ForcingConfiguration
@@ -332,7 +338,7 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     runtime_params: RuntimeParameterSet
     """User-defined runtime parameters."""
 
-    cdr_forcing: Dataset[DataResource] | None = Field(default=None)
+    cdr_forcing: Dataset | None = Field(default=None)
     """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
 
     @model_validator(mode="after")
