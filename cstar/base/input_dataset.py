@@ -59,6 +59,7 @@ class InputDataset(ABC, LoggingMixin):
         # Initialize object state:
         self._working_copy: StagedFile | StagedDataCollection | None = None
         # Subclass-specific  confirmation that everything is set up correctly:
+
         self.validate()
 
     def validate(self):

@@ -175,8 +175,91 @@ def fake_romsinputdataset_netcdf_local(
 
 
 @pytest.fixture
+def fake_romsinputdataset_netcdf_remote(
+    mock_sourcedata_remote_file,
+) -> Generator[ROMSInputDataset, None, None]:
+    """Fixture to provide a ROMSInputDataset with a local NetCDF source.
+
+    Mocks:
+    ------
+    - DataSource.location_type: Property mocked as 'path'
+    - DataSource.source_type: Property mocked as 'netcdf'
+    - DataSource.basename: Property mocked as 'local_file.nc'
+
+    Yields:
+    -------
+        FakeROMSInputDataset: A mock dataset pointing to a local NetCDF file.
+    """
+    fake_location = "http://example.com/local_file.nc"
+    source_data = mock_sourcedata_remote_file(location=fake_location)
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
+        dataset = FakeROMSInputDataset(
+            location=fake_location,
+            start_date="2024-10-22 12:34:56",
+            end_date="2024-12-31 23:59:59",
+        )
+
+        yield dataset
+
+
+@pytest.fixture
+def fake_romsinputdataset_partitioned_source_remote(
+    mock_sourcedata_remote_file,
+    mock_sourcedatacollection_remote_files,
+) -> Generator[ROMSInputDataset, None, None]:
+    """Fixture to provide a ROMSInputDataset with a local NetCDF source.
+
+    Mocks:
+    ------
+    - DataSource.location_type: Property mocked as 'path'
+    - DataSource.source_type: Property mocked as 'netcdf'
+    - DataSource.basename: Property mocked as 'local_file.nc'
+
+    Yields:
+    -------
+        FakeROMSInputDataset: A mock dataset pointing to a local NetCDF file.
+    """
+    fake_location = "http://example.com//local_file_00.nc"
+    fake_np_xi = 5
+    fake_np_eta = 2
+
+    nparts = fake_np_xi * fake_np_eta
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location, identifier="unusedhash"
+    )
+    patch_source_data = mock.patch(
+        "cstar.roms.input_dataset.SourceData", return_value=source_data
+    )
+    parted_locations = [
+        fake_location.replace("00", str(i).zfill(2)) for i in range(nparts)
+    ]
+    unused_identifiers = [f"unusedhash{i}" for i in range(nparts)]
+    source_data_collection = mock_sourcedatacollection_remote_files(
+        locations=parted_locations, identifiers=unused_identifiers
+    )
+    patch_source_data_collection = mock.patch(
+        "cstar.roms.input_dataset.SourceDataCollection.from_locations",
+        return_value=source_data_collection,
+    )
+
+    with patch_source_data, patch_source_data_collection:
+        dataset = FakeROMSInputDataset(
+            location=fake_location,
+            source_np_xi=5,
+            source_np_eta=2,
+            start_date="2024-10-22 12:34:56",
+            end_date="2024-12-31 23:59:59",
+        )
+
+        yield dataset
+
+
+@pytest.fixture
 def fake_romsinputdataset_yaml_local(
-    mock_sourcedata_local_file,
+    mock_sourcedata_local_text_file,
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local YAML source.
 
@@ -191,7 +274,7 @@ def fake_romsinputdataset_yaml_local(
         FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
     """
     fake_location = "some/local/source/path/local_file.yaml"
-    source_data = mock_sourcedata_local_file(location=fake_location)
+    source_data = mock_sourcedata_local_text_file(location=fake_location)
     patch_source_data = mock.patch(
         "cstar.roms.input_dataset.SourceData", return_value=source_data
     )
@@ -207,7 +290,7 @@ def fake_romsinputdataset_yaml_local(
 
 @pytest.fixture
 def fake_romsinputdataset_yaml_remote(
-    mock_sourcedata_remote_file,
+    mock_sourcedata_remote_text_file,
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a remote YAML source.
 
@@ -222,7 +305,7 @@ def fake_romsinputdataset_yaml_remote(
         FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
     """
     fake_location = "https://dodgyfakeyamlfiles.ru/all/remote_file.yaml"
-    source_data = mock_sourcedata_remote_file(
+    source_data = mock_sourcedata_remote_text_file(
         location=fake_location,
     )
     patch_source_data = mock.patch(

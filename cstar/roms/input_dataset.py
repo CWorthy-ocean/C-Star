@@ -81,7 +81,7 @@ class ROMSInputDataset(InputDataset, ABC):
         source_np_eta: int | None = None,
     ):
         self.start_date = coerce_datetime(start_date) if start_date else None
-        self.end_date = coerce_datetime(start_date) if start_date else None
+        self.end_date = coerce_datetime(end_date) if end_date else None
 
         self.source_np_xi = source_np_xi
         self.source_np_eta = source_np_eta
@@ -102,6 +102,7 @@ class ROMSInputDataset(InputDataset, ABC):
                 locations.append(location.replace(old_suffix, new_suffix))
             self.partitioned_source = SourceDataCollection.from_locations(locations)
         self._working_copy = None
+        self.validate()
 
     @property
     def source_partitioning(self) -> tuple[int, int] | None:
@@ -290,6 +291,19 @@ class ROMSInputDataset(InputDataset, ABC):
 
         # partitioned source
         if self.source_partitioning:
+            self._get_from_partitioned_source(local_dir)
+
+        # roms-tools yaml source
+        elif self.source._classification.value.file_encoding == FileEncoding.TEXT:
+            self._get_from_yaml(local_dir)
+
+        # regular (netCDF) source
+        else:
+            super().get(local_dir=local_dir)
+
+    def _get_from_partitioned_source(self, local_dir: Path) -> None:
+        # If some (or all) files exist, go through and check which ones (if any) to stage:
+        if self.working_copy:
             for i, s in enumerate(self.partitioned_source):
                 target_path = local_dir / s.basename
                 if self.working_copy and self.working_copy[i].path == target_path:  # type: ignore[index]
@@ -298,23 +312,19 @@ class ROMSInputDataset(InputDataset, ABC):
                 else:
                     self._working_copy.append(s.stage(local_dir))  # type: ignore[union-attr]
             return
-
-        # roms-tools yaml source
-        elif self.source._classification.value.file_encoding == FileEncoding.TEXT:
-            if self.exists_locally:
-                self.log.info(f"⏭️ {self._local} already exists, skipping.")
-                return
-            #
-            self._working_copy = self._get_from_yaml(local_dir)
-        # regular (netCDF) source
+        # Otherwise stage them all:
         else:
-            super().get(local_dir=local_dir)
+            self._working_copy = self.partitioned_source.stage(local_dir)
 
-    def _get_from_yaml(self, local_dir: Path) -> StagedFile | StagedDataCollection:
+    def _get_from_yaml(self, local_dir: Path) -> None:
+        if self.exists_locally:
+            # Can't know where roms-tools will save so have to do a less advanced check
+            self.log.info(f"⏭️ {self._local} already exists, skipping.")
+            return
+
         retriever = self.source.stager.retriever
         raw_yaml_text = retriever.read(self.source).decode("utf-8")
         # NOTE maybe refactor to self.source.retriever?
-
         _, header, yaml_data = raw_yaml_text.split("---", 2)
 
         yaml_dict = yaml.safe_load(yaml_data)
@@ -373,10 +383,13 @@ class ROMSInputDataset(InputDataset, ABC):
         staged = []
         for p in savepath:
             staged.append(StagedFile(source=self.source, path=p))
+
+        final_staged: StagedFile | StagedDataCollection
         if len(staged) == 1:
-            return staged[0]
+            final_staged = staged[0]
         else:
-            return StagedDataCollection(items=staged)
+            final_staged = StagedDataCollection(items=staged)
+        self._working_copy = final_staged
 
     def _update_partitioning_attribute(
         self, new_np_xi: int, new_np_eta: int, parted_files: list[Path]
@@ -391,7 +404,7 @@ class ROMSInputDataset(InputDataset, ABC):
         read by ROMS.
 
         Useful in the case of partitioned
-        source files, where the `working_path` is a list of partitioned files
+        source files, where the `working_copy` is a list of partitioned files
         e.g., `my_grid.0.nc`, `my_grid.1.nc`, etc., but ROMS
         expects to see `my_grid.nc`
         """
@@ -460,9 +473,8 @@ class ROMSForcingCorrections(ROMSInputDataset):
     """
 
     def validate(self):
-        if self.source.source_type == "yaml":
+        if self.source._classification.value.file_encoding == FileEncoding.TEXT:
             raise TypeError(
-                "Hey, you! we said no funny business! -Scotty E."
                 f"{self.__class__.__name__} cannot be initialized with a source YAML file. "
                 "Please provide a direct path or URL to a dataset (e.g., NetCDF)."
             )

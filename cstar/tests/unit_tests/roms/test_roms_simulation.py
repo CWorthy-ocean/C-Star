@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock, PropertyMock, mock_open, patch
+from unittest import mock
 
 import pytest
 import yaml
@@ -308,7 +308,7 @@ class TestROMSSimulationInitialization:
             ("forcing_corrections", "ROMSForcingCorrections"),
         ],
     )
-    def test_check_forcing_collection(
+    def test_check_inputdataset_types(
         self, tmp_path: Path, attrname: str, expected_type_name: str
     ) -> None:
         """Ensure a TypeError is raised when attributes of ROMSSimulation that should be
@@ -379,7 +379,7 @@ class TestROMSSimulationInitialization:
         assert sim.codebases[0] == sim.codebase
         assert sim.codebases[1] == sim.marbl_codebase
 
-    @patch.object(ROMSInputDataset, "path_for_roms")
+    @mock.patch.object(ROMSInputDataset, "path_for_roms")
     def test_forcing_paths(self, mock_path_for_roms, fake_romssimulation):
         """Test that the `_forcing_paths` property correctly takes any forcing-related
         InputDatasets associated with the ROMSSimulation and returns a list of paths to
@@ -426,10 +426,12 @@ class TestROMSSimulationInitialization:
         assert sim._n_time_steps == 524160
         pass
 
-    @patch("cstar.roms.simulation.ROMSRuntimeSettings.from_file")
-    @patch.object(ROMSSimulation, "_forcing_paths", new_callable=PropertyMock)
-    @patch.object(ROMSInitialConditions, "path_for_roms", new_callable=PropertyMock)
-    @patch.object(ROMSModelGrid, "path_for_roms", new_callable=PropertyMock)
+    @mock.patch("cstar.roms.simulation.ROMSRuntimeSettings.from_file")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
     def test_roms_runtime_settings(
         self,
         mock_grid_path,
@@ -457,7 +459,7 @@ class TestROMSSimulationInitialization:
 
         Mocks
         -----
-        mock_forcing_paths: PropertyMock
+        mock_forcing_paths: mock.PropertyMock
            Mocks the output of the `ROMSSimulation._forcing_paths` property to return a
            list of imitation forcing filepaths
         mock_from_file: unittest.mock.MagicMock
@@ -657,82 +659,78 @@ class TestROMSSimulationInitialization:
             assert substring in str(exception_info.value)
 
     def test_check_inputdataset_dates_warns_and_sets_start_date(
-        self, fake_romssimulation, caplog
-    ):
-        """Test that `_check_inputdataset_dates` warns and overrides mismatched
-        `start_date`.
-
-        This test ensures that when an input dataset (with `source_type='yaml'`) defines a
-        `start_date` that differs from the simulation's `start_date`, a `UserWarning` is issued,
-        and the input dataset's `start_date` is overwritten.
-
-        Mocks & Fixtures
-        ----------------
-        fake_romssimulation (cstar.roms.ROMSSimulation)
-            Provides a `ROMSSimulation` instance.
-        caplog (pytest.LogCaptureFixture)
-            Builtin fixture to capture log messages
-
-        Assertions
-        ----------
-        - A warning is logged
-        - The input dataset's `start_date` is set to match the simulation's `start_date`.
-        """
-        sim = fake_romssimulation
-        caplog.set_level(logging.INFO, logger=sim.log.name)
-
-        sim.river_forcing = ROMSInitialConditions(
-            location="http://dodgyyamls4u.ru/riv.yaml", start_date="1999-01-01"
-        )
-
-        sim._check_inputdataset_dates()
-
-        assert sim.river_forcing.start_date == sim.start_date
-        assert "does not match ROMSSimulation.start_date" in caplog.text
-
-    def test_check_inputdataset_dates_warns_and_sets_end_date(
-        self, fake_romssimulation, caplog
+        self, fake_romssimulation, mock_sourcedata_remote_text_file, caplog
     ):
         """Test that `_check_inputdataset_dates` warns and overrides mismatched
         `end_date`.
 
-        This test ensures that for non-initial-condition datasets with `source_type='yaml'`,
-        a `UserWarning` is issued and the `end_date` is corrected if it differs from the
-        simulation's `end_date`.
-
-        Mocks & Fixtures
-        ----------------
-        fake_romssimulation (cstar.roms.ROMSSimulation)
-            Provides a `ROMSSimulation` instance.
-        caplog (pytest.LogCaptureFixture)
-            Builtin fixture capturing output logs
-
-        Assertions
-        ----------
-        - An appropriate warning message is logged
-        - The input dataset's `end_date` is updated to match the simulation's `end_date`.
+        This test ensures that when an input dataset (with `source_type='yaml'`) defines a
+        `end_date` that differs from the simulation's `end_date`, a warning is issued,
+        and the input dataset's `end_date` is overwritten.
         """
         sim = fake_romssimulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
-        sim.river_forcing = ROMSRiverForcing(
-            location="http://dodgyyamls4u.ru/riv.yaml", end_date="1999-12-31"
-        )
 
-        sim._check_inputdataset_dates()
-        assert "does not match ROMSSimulation.end_date" in caplog.text
+        # TODO update `fake_river_forcing` fixture to accept args, should not be creating instances in tests
+
+        location = "http://dodgyyamls4u.ru/riv.yaml"
+        source_data = mock_sourcedata_remote_text_file(location=location)
+        with mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=source_data
+        ):
+            sim.river_forcing = ROMSRiverForcing(
+                location=location, start_date="1999-01-01"
+            )
+
+        sim._check_inputdataset_dates(sim.river_forcing)
+
+        assert sim.river_forcing.start_date == sim.start_date
+        assert "does not match that of ROMSSimulation" in caplog.text
+
+    def test_check_inputdataset_dates_warns_and_sets_end_date(
+        self, fake_romssimulation, mock_sourcedata_remote_text_file, caplog
+    ):
+        """Test that `_check_inputdataset_dates` warns and overrides mismatched
+        `end_date`.
+
+        This test ensures that when an input dataset (with `source_type='yaml'`) defines a
+        `end_date` that differs from the simulation's `end_date`, a warning is issued,
+        and the input dataset's `end_date` is overwritten.
+        """
+        sim = fake_romssimulation
+        caplog.set_level(logging.INFO, logger=sim.log.name)
+
+        # TODO update `fake_river_forcing` fixture to accept args, should not be creating instances in tests
+
+        location = "http://dodgyyamls4u.ru/riv.yaml"
+        source_data = mock_sourcedata_remote_text_file(location=location)
+        with mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=source_data
+        ):
+            sim.river_forcing = ROMSRiverForcing(
+                location=location, end_date="1999-12-31"
+            )
+
+        sim._check_inputdataset_dates(sim.river_forcing)
+
         assert sim.river_forcing.end_date == sim.end_date
+        assert "does not match that of ROMSSimulation" in caplog.text
 
-    @patch(
+    @mock.patch(
         "cstar.roms.simulation.ROMSInputDataset.source_partitioning",
-        new_callable=PropertyMock,
+        new_callable=mock.PropertyMock,
     )
     def test_check_inputdataset_partitioning(
         self, mock_source_partitioning, fake_romssimulation
     ):
+        """
+        Test that ROMSSimulation fails to initialize if one of its input datasets
+        has a different partitioning to the simulation
+        """
         mock_source_partitioning.return_value = (120, 360)
         with pytest.raises(ValueError, match="Cannot instantiate ROMSSimulation"):
             sim = fake_romssimulation
-            sim._check_inputdataset_partitioning()
+            sim._check_inputdataset_partitioning(sim.model_grid)
 
 
 class TestStrAndRepr:
@@ -758,8 +756,10 @@ class TestStrAndRepr:
       instance with a populated directory structure.
     """
 
-    @patch.object(AdditionalCode, "exists_locally", new_callable=PropertyMock)
-    @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
+    @mock.patch.object(AdditionalCode, "exists_locally", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
     def test_str(self, mock_runtime_settings, mock_exists_locally, fake_romssimulation):
         """Test the `__str__` method of `ROMSSimulation`.
 
@@ -1125,8 +1125,8 @@ class TestToAndFromDictAndBlueprint:
 
         # Mock `open` and `yaml.dump`
         with (
-            patch("builtins.open", mock_open()) as mock_file,
-            patch("yaml.dump") as mock_yaml_dump,
+            mock.patch("builtins.open", mock.mock_open()) as mock_file,
+            mock.patch("yaml.dump") as mock_yaml_dump,
         ):
             sim.to_blueprint(mock_file_path)
 
@@ -1136,8 +1136,8 @@ class TestToAndFromDictAndBlueprint:
                 sim.to_dict(), mock_file(), default_flow_style=False, sort_keys=False
             )
 
-    @patch("pathlib.Path.exists", return_value=True)
-    @patch("builtins.open", new_callable=mock_open)
+    @mock.patch("pathlib.Path.exists", return_value=True)
+    @mock.patch("builtins.open", new_callable=mock.mock_open)
     def test_from_blueprint_valid_file(
         self,
         mock_open_file,
@@ -1166,16 +1166,16 @@ class TestToAndFromDictAndBlueprint:
         sim_dict = fake_romssimulation_dict
         blueprint_path = tmp_path / "roms_blueprint.yaml"
         with (
-            patch("yaml.safe_load", return_value=sim_dict),
+            mock.patch("yaml.safe_load", return_value=sim_dict),
             patch_romssimulation_init_sourcedata(),
-            patch(
+            mock.patch(
                 "cstar.roms.simulation.ROMSExternalCodeBase.is_configured",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=False,
             ),
-            patch(
+            mock.patch(
                 "cstar.roms.simulation.MARBLExternalCodeBase.is_configured",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=False,
             ),
         ):
@@ -1190,10 +1190,10 @@ class TestToAndFromDictAndBlueprint:
         assert isinstance(sim, ROMSSimulation)
         mock_open_file.assert_called_once_with(str(blueprint_path))
 
-    @patch("pathlib.Path.exists", return_value=True)
-    @patch(
+    @mock.patch("pathlib.Path.exists", return_value=True)
+    @mock.patch(
         "builtins.open",
-        new_callable=mock_open,
+        new_callable=mock.mock_open,
         read_data="name: TestROMS\ndiscretization:\n  time_step: 60",
     )
     def test_from_blueprint_invalid_filetype(
@@ -1217,7 +1217,7 @@ class TestToAndFromDictAndBlueprint:
         """
         blueprint_path = tmp_path / "roms_blueprint.nc"
 
-        with patch("yaml.safe_load", return_value=fake_romssimulation_dict):
+        with mock.patch("yaml.safe_load", return_value=fake_romssimulation_dict):
             with pytest.raises(
                 ValueError, match="C-Star expects blueprint in '.yaml' format"
             ):
@@ -1228,8 +1228,8 @@ class TestToAndFromDictAndBlueprint:
                     end_date="2025-01-01",
                 )
 
-    @patch("requests.get")
-    @patch("pathlib.Path.exists", return_value=True)
+    @mock.patch("requests.get")
+    @mock.patch("pathlib.Path.exists", return_value=True)
     def test_from_blueprint_url(
         self,
         mock_path_exists,
@@ -1256,7 +1256,7 @@ class TestToAndFromDictAndBlueprint:
         - `tmp_path`: A temporary directory provided by `pytest` to simulate the simulation directory.
         """
         sim_dict = fake_romssimulation_dict
-        mock_response = MagicMock()
+        mock_response = mock.MagicMock()
         mock_response.text = yaml.dump(sim_dict)
         mock_requests_get.return_value = mock_response
         blueprint_path = "http://sketchyamlfiles4u.ru/roms_blueprint.yaml"
@@ -1372,9 +1372,9 @@ class TestProcessingAndExecution:
         Ensures that `post_run()` raises an error if `ncjoin` fails during merging.
     """
 
-    @patch.object(ROMSInputDataset, "get")
-    @patch.object(AdditionalCode, "get")
-    @patch.object(ExternalCodeBase, "setup")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
     def test_setup(
         self,
         mock_externalcodebase_setup,
@@ -1419,8 +1419,11 @@ class TestProcessingAndExecution:
             (False, False, False),  # F Both not configured
         ],
     )
-    @patch.object(
-        AdditionalCode, "exists_locally", new_callable=PropertyMock, return_value=True
+    @mock.patch.object(
+        AdditionalCode,
+        "exists_locally",
+        new_callable=mock.PropertyMock,
+        return_value=True,
     )
     def test_is_setup_external_codebases(
         self,
@@ -1451,14 +1454,17 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
 
         with (
-            patch.object(
-                ROMSExternalCodeBase, "is_configured", new_callable=PropertyMock
+            mock.patch.object(
+                ROMSExternalCodeBase, "is_configured", new_callable=mock.PropertyMock
             ) as mock_codebase_status,
-            patch.object(
-                MARBLExternalCodeBase, "is_configured", new_callable=PropertyMock
+            mock.patch.object(
+                MARBLExternalCodeBase, "is_configured", new_callable=mock.PropertyMock
             ) as mock_marbl_status,
-            patch.object(
-                type(sim), "input_datasets", new_callable=PropertyMock, return_value=[]
+            mock.patch.object(
+                type(sim),
+                "input_datasets",
+                new_callable=mock.PropertyMock,
+                return_value=[],
             ),
         ):
             mock_codebase_status.return_value = codebase_status
@@ -1475,7 +1481,7 @@ class TestProcessingAndExecution:
             (False, False, False),  # F Both missing
         ],
     )
-    @patch.object(AdditionalCode, "exists_locally", new_callable=PropertyMock)
+    @mock.patch.object(AdditionalCode, "exists_locally", new_callable=mock.PropertyMock)
     def test_is_setup_additional_code(
         self,
         mock_additionalcode_exists,
@@ -1508,14 +1514,17 @@ class TestProcessingAndExecution:
 
         mock_additionalcode_exists.side_effect = [runtime_exists, compile_exists]
         with (
-            patch.object(
-                ROMSExternalCodeBase, "is_configured", new_callable=PropertyMock
+            mock.patch.object(
+                ROMSExternalCodeBase, "is_configured", new_callable=mock.PropertyMock
             ) as mock_codebase_status,
-            patch.object(
-                MARBLExternalCodeBase, "is_configured", new_callable=PropertyMock
+            mock.patch.object(
+                MARBLExternalCodeBase, "is_configured", new_callable=mock.PropertyMock
             ) as mock_marbl_status,
-            patch.object(
-                type(sim), "input_datasets", new_callable=PropertyMock, return_value=[]
+            mock.patch.object(
+                type(sim),
+                "input_datasets",
+                new_callable=mock.PropertyMock,
+                return_value=[],
             ),
         ):
             mock_codebase_status.return_value = True
@@ -1549,8 +1558,11 @@ class TestProcessingAndExecution:
             ),
         ],
     )
-    @patch.object(
-        AdditionalCode, "exists_locally", new_callable=PropertyMock, return_value=True
+    @mock.patch.object(
+        AdditionalCode,
+        "exists_locally",
+        new_callable=mock.PropertyMock,
+        return_value=True,
     )
     def test_is_setup_input_datasets(
         self,
@@ -1601,13 +1613,13 @@ class TestProcessingAndExecution:
 
         # Create a mock dataset
         with (
-            patch.object(
-                ROMSExternalCodeBase, "is_configured", new_callable=PropertyMock
+            mock.patch.object(
+                ROMSExternalCodeBase, "is_configured", new_callable=mock.PropertyMock
             ),
-            patch.object(
-                MARBLExternalCodeBase, "is_configured", new_callable=PropertyMock
+            mock.patch.object(
+                MARBLExternalCodeBase, "is_configured", new_callable=mock.PropertyMock
             ),
-            patch("cstar.roms.input_dataset.ROMSInputDataset") as MockDataset,
+            mock.patch("cstar.roms.input_dataset.ROMSInputDataset") as MockDataset,
         ):
             #
             # mock_dataset = patch("cstar.roms.input_dataset.ROMSInputDataset", autospec=True).start()
@@ -1617,18 +1629,18 @@ class TestProcessingAndExecution:
             mock_dataset.end_date = dataset_end
 
             # Patch input_datasets list
-            with patch.object(
+            with mock.patch.object(
                 ROMSSimulation,
                 "input_datasets",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=[mock_dataset],
             ):
                 sim.start_date = sim_start
                 sim.end_date = sim_end
                 assert sim.is_setup == expected
 
-    @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
-    @patch("subprocess.run")
+    @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @mock.patch("subprocess.run")
     def test_build(self, mock_subprocess, mock_get_hash, fake_romssimulation):
         """Tests that `build` correctly compiles the ROMS executable.
 
@@ -1654,7 +1666,7 @@ class TestProcessingAndExecution:
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
         sim.compile_time_code.working_path = build_dir
 
-        mock_subprocess.return_value = MagicMock(returncode=0, stderr="")
+        mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
         sim.build()
@@ -1677,10 +1689,10 @@ class TestProcessingAndExecution:
         assert sim.exe_path == build_dir / "roms"
         assert sim._exe_hash == "mockhash123"
 
-    @patch(
+    @mock.patch(
         "cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash"
     )  # Mock hash function
-    @patch("subprocess.run")  # Mock subprocess (should not be called)
+    @mock.patch("subprocess.run")  # Mock subprocess (should not be called)
     def test_build_no_rebuild(
         self,
         mock_subprocess,
@@ -1714,13 +1726,13 @@ class TestProcessingAndExecution:
         build_dir = sim.directory / "ROMS/compile_time_code"
         # Mock properties for early exit conditions
         with (
-            patch.object(
+            mock.patch.object(
                 AdditionalCode,
                 "exists_locally",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=True,
             ),
-            patch.object(Path, "exists", return_value=True),
+            mock.patch.object(Path, "exists", return_value=True),
         ):
             # Pretend the executable exists
             sim._exe_hash = "dummy_hash"
@@ -1740,8 +1752,8 @@ class TestProcessingAndExecution:
             # Ensure subprocess.run was *not* called
             mock_subprocess.assert_not_called()
 
-    @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
-    @patch("subprocess.run")
+    @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @mock.patch("subprocess.run")
     def test_build_raises_if_make_clean_error(
         self, mock_subprocess, mock_get_hash, fake_romssimulation
     ):
@@ -1766,7 +1778,7 @@ class TestProcessingAndExecution:
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
         sim.compile_time_code.working_path = build_dir
 
-        mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
+        mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
         with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
@@ -1780,8 +1792,8 @@ class TestProcessingAndExecution:
             text=True,
         )
 
-    @patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
-    @patch("subprocess.run")
+    @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @mock.patch("subprocess.run")
     def test_build_raises_if_make_error(
         self, mock_subprocess, mock_get_hash, fake_romssimulation
     ):
@@ -1805,7 +1817,7 @@ class TestProcessingAndExecution:
         build_dir = sim.directory / "ROMS/compile_time_code"
         sim.compile_time_code.working_path = build_dir
 
-        mock_subprocess.return_value = MagicMock(returncode=1, stderr="")
+        mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
         with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
@@ -1838,7 +1850,7 @@ class TestProcessingAndExecution:
         with pytest.raises(ValueError, match="Unable to compile ROMSSimulation"):
             sim.build()
 
-    @patch.object(ROMSInputDataset, "partition")  # Mock partition method
+    @mock.patch.object(ROMSInputDataset, "partition")  # Mock partition method
     def test_pre_run(self, mock_partition, fake_romssimulation):
         """Tests that `pre_run` partitions any locally available input datasets.
 
@@ -1858,13 +1870,13 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
 
         # Mock some input datasets
-        dataset_1 = MagicMock(spec=ROMSInputDataset, exists_locally=True)
-        dataset_2 = MagicMock(
+        dataset_1 = mock.MagicMock(spec=ROMSInputDataset, exists_locally=True)
+        dataset_2 = mock.MagicMock(
             spec=ROMSInputDataset, exists_locally=False
         )  # Should be ignored
-        dataset_3 = MagicMock(spec=ROMSInputDataset, exists_locally=True)
-        with patch.object(
-            ROMSSimulation, "input_datasets", new_callable=PropertyMock
+        dataset_3 = mock.MagicMock(spec=ROMSInputDataset, exists_locally=True)
+        with mock.patch.object(
+            ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
         ) as mock_input_datasets:
             mock_input_datasets.return_value = [dataset_1, dataset_2, dataset_3]
 
@@ -1927,9 +1939,9 @@ class TestProcessingAndExecution:
         """
         sim = fake_romssimulation
         sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
-        with patch(
+        with mock.patch(
             "cstar.roms.simulation.ROMSDiscretization.n_procs_tot",
-            new_callable=PropertyMock,
+            new_callable=mock.PropertyMock,
             return_value=None,
         ):
             with pytest.raises(
@@ -1937,8 +1949,10 @@ class TestProcessingAndExecution:
             ):
                 sim.run()
 
-    @patch("cstar.roms.ROMSSimulation.persist")
-    @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
+    @mock.patch("cstar.roms.ROMSSimulation.persist")
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
     def test_run_local_execution(
         self, mock_runtime_settings, mock_persist, fake_romssimulation
     ):
@@ -1965,16 +1979,16 @@ class TestProcessingAndExecution:
 
         # Mock no scheduler
         with (
-            patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
-            patch(
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch(
                 "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=None,
             ),
         ):
             sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
             sim.runtime_code.working_path = sim.directory / "ROMS/runtime_code/"
-            mock_process_instance = MagicMock()
+            mock_process_instance = mock.MagicMock()
             mock_local_process.return_value = mock_process_instance
 
             execution_handler = sim.run()
@@ -2002,8 +2016,10 @@ class TestProcessingAndExecution:
             ["perlmutter", "srun"],
         ],
     )
-    @patch("cstar.roms.ROMSSimulation.persist")
-    @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
+    @mock.patch("cstar.roms.ROMSSimulation.persist")
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
     def test_run_with_scheduler(
         self,
         mock_runtime_settings,
@@ -2022,7 +2038,7 @@ class TestProcessingAndExecution:
         - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
         - `patch("cstar.roms.simulation.create_scheduler_job")` : Mocks `create_scheduler_job`
           to verify job creation.
-        - `patch("cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock)` :
+        - `patch("cstar.system.manager.CStarSystemManager.scheduler", new_callable=mock.PropertyMock)` :
           Mocks `cstar_sysmgr.scheduler` to simulate a scheduler environment.
 
         Assertions
@@ -2036,23 +2052,23 @@ class TestProcessingAndExecution:
         sim.runtime_code.working_path = sim.directory / "ROMS/runtime_code/"
 
         # Mock scheduler object
-        mock_scheduler = MagicMock()
+        mock_scheduler = mock.MagicMock()
         mock_scheduler.primary_queue_name = "default_queue"
         mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
 
         with (
-            patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
-            patch(
+            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
+            mock.patch(
                 "cstar.system.environment.CStarEnvironment.uses_lmod",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=False,
             ),
-            patch(
+            mock.patch(
                 "cstar.system.manager.CStarSystemManager.name",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=mock_system_name,
             ),
-            patch(
+            mock.patch(
                 "cstar.system.manager.CStarSystemManager.environment",
                 CStarEnvironment(
                     system_name=mock_system_name,
@@ -2060,14 +2076,14 @@ class TestProcessingAndExecution:
                     compiler="mock-compiler",
                 ),
             ),
-            patch(
+            mock.patch(
                 "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=mock_scheduler,
             ),
         ):
             sim.exe_path = build_dir / "roms"
-            mock_job_instance = MagicMock()
+            mock_job_instance = mock.MagicMock()
             mock_create_job.return_value = mock_job_instance
 
             # Call `run()` without explicitly passing `queue_name` and `walltime`
@@ -2088,7 +2104,9 @@ class TestProcessingAndExecution:
 
             mock_persist.assert_called_once()
 
-    @patch.object(ROMSSimulation, "roms_runtime_settings", new_callable=PropertyMock)
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
     def test_run_with_scheduler_raises_if_no_account_key(
         self, mock_runtime_settings, fake_romssimulation
     ):
@@ -2102,7 +2120,7 @@ class TestProcessingAndExecution:
         ----------------
         - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
         - `patch("cstar.roms.simulation.create_scheduler_job")` : Mocks job creation to prevent real execution.
-        - `patch("cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock)` :
+        - `patch("cstar.system.manager.CStarSystemManager.scheduler", new_callable=mock.PropertyMock)` :
           Mocks `cstar_sysmgr.scheduler` to simulate a scheduler environment.
 
         Assertions
@@ -2115,15 +2133,15 @@ class TestProcessingAndExecution:
         sim.runtime_code.working_path = sim.directory / "ROMS/runtime_code/"
 
         # Mock scheduler object
-        mock_scheduler = MagicMock()
+        mock_scheduler = mock.MagicMock()
         mock_scheduler.primary_queue_name = "default_queue"
         mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
 
         with (
-            patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
-            patch(
+            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
+            mock.patch(
                 "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=PropertyMock,
+                new_callable=mock.PropertyMock,
                 return_value=mock_scheduler,
             ),
         ):
@@ -2184,7 +2202,7 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
 
         # Mock `_execution_handler` and set its `status` attribute to something *not* COMPLETED
-        sim._execution_handler = MagicMock()
+        sim._execution_handler = mock.MagicMock()
         sim._execution_handler.status = ExecutionStatus.RUNNING
 
         # Ensure RuntimeError is raised
@@ -2196,8 +2214,8 @@ class TestProcessingAndExecution:
         ):
             sim.post_run()
 
-    @patch("cstar.roms.ROMSSimulation.persist")
-    @patch("subprocess.run")  # Mock ncjoin execution
+    @mock.patch("cstar.roms.ROMSSimulation.persist")
+    @mock.patch("subprocess.run")  # Mock ncjoin execution
     def test_post_run_merges_netcdf_files(
         self, mock_subprocess, mock_persist, fake_romssimulation
     ):
@@ -2230,12 +2248,12 @@ class TestProcessingAndExecution:
         (output_dir / "ocean_rst.20240101000000.001.nc").touch()
 
         # Mock execution handler
-        sim._execution_handler = MagicMock()
+        sim._execution_handler = mock.MagicMock()
         sim._execution_handler.status = (
             ExecutionStatus.COMPLETED
         )  # Ensure run is complete
 
-        mock_subprocess.return_value = MagicMock(returncode=0, stderr="")
+        mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
         # Call post_run
         sim.post_run()
 
@@ -2264,8 +2282,8 @@ class TestProcessingAndExecution:
 
         mock_persist.assert_called_once()
 
-    @patch("cstar.roms.ROMSSimulation.persist")
-    @patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
+    @mock.patch("cstar.roms.ROMSSimulation.persist")
+    @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
     def test_post_run_prints_message_if_no_files(
         self,
         mock_glob,
@@ -2292,7 +2310,7 @@ class TestProcessingAndExecution:
         """
         # Setup
         sim = fake_romssimulation
-        sim._execution_handler = MagicMock()
+        sim._execution_handler = mock.MagicMock()
         sim._execution_handler.status = (
             ExecutionStatus.COMPLETED
         )  # Ensure simulation is complete
@@ -2310,8 +2328,8 @@ class TestProcessingAndExecution:
 
         mock_persist.assert_called_once()
 
-    @patch("subprocess.run")  # Mock subprocess.run to simulate a failure
-    @patch.object(Path, "glob")  # Mock glob to return fake files
+    @mock.patch("subprocess.run")  # Mock subprocess.run to simulate a failure
+    @mock.patch.object(Path, "glob")  # Mock glob to return fake files
     def test_post_run_raises_error_if_ncjoin_fails(
         self, mock_glob, mock_subprocess, fake_romssimulation
     ):
@@ -2350,7 +2368,7 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value.stderr = "ncjoin error message"
 
         # Mock execution handler
-        sim._execution_handler = MagicMock()
+        sim._execution_handler = mock.MagicMock()
         sim._execution_handler.status = (
             ExecutionStatus.COMPLETED
         )  # Ensure run is complete
@@ -2388,9 +2406,11 @@ class TestROMSSimulationRestart:
       `ValueError` if multiple restart files are found, preventing ambiguity.
     """
 
-    @patch.object(Path, "glob")  # Mock file search
-    @patch.object(Path, "exists", return_value=True)
-    def test_restart(self, mock_exists, mock_glob, fake_romssimulation):
+    @mock.patch.object(Path, "glob")  # Mock file search
+    @mock.patch.object(Path, "exists", return_value=True)
+    def test_restart(
+        self, mock_exists, mock_glob, fake_romssimulation, mock_sourcedata_local_file
+    ):
         """Test that `restart` creates a new `ROMSSimulation` instance with updated
         initial conditions.
 
@@ -2425,15 +2445,19 @@ class TestROMSSimulationRestart:
         mock_glob.return_value = [restart_file]
 
         # Call method
-        new_sim = sim.restart(new_end_date=new_end_date)
+        restart_source = mock_sourcedata_local_file(location=restart_file)
+        with mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=restart_source
+        ):
+            new_sim = sim.restart(new_end_date=new_end_date)
 
         # Verify restart logic
         mock_glob.assert_called_once_with("*_rst.20251231000000.nc")
         assert isinstance(new_sim.initial_conditions, ROMSInitialConditions)
         assert new_sim.initial_conditions.source.location == str(restart_file.resolve())
 
-    @patch.object(Path, "glob")  # Mock file search
-    @patch.object(Path, "exists", return_value=True)
+    @mock.patch.object(Path, "glob")  # Mock file search
+    @mock.patch.object(Path, "exists", return_value=True)
     def test_restart_raises_if_no_restart_files(
         self, mock_exists, mock_glob, fake_romssimulation
     ):
@@ -2472,7 +2496,7 @@ class TestROMSSimulationRestart:
 
         mock_glob.assert_called_once_with("*_rst.20251231000000.nc")
 
-    @patch.object(Path, "glob")
+    @mock.patch.object(Path, "glob")
     def test_restart_raises_if_multiple_restarts_found(
         self, mock_glob, fake_romssimulation
     ):

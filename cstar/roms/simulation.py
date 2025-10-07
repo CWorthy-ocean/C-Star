@@ -289,18 +289,19 @@ class ROMSSimulation(Simulation):
         if not inp:
             return
 
+        if typecheck:
+            self._check_inputdataset_types(inp, expected_type=typecheck)
+
         # Check if InputDataset has dates to validate:
         undated = any(
             [isinstance(inp, d) for d in [ROMSModelGrid, ROMSForcingCorrections]]
         )
 
-        self._check_inputdataset_partitioning(inp)
-
         if not undated:
             self._check_inputdataset_dates(inp)
 
-        if typecheck:
-            self._check_inputdataset_types(inp, expected_type=typecheck)
+        self._check_inputdataset_partitioning(inp)
+
         return
 
     def _check_inputdataset_types(
@@ -1635,6 +1636,6 @@ class ROMSSimulation(Simulation):
 
         # Reset cached data for input datasets
         for inp in new_sim.input_datasets:
-            inp.working_copy = None
+            inp._working_copy = None
 
         return new_sim
