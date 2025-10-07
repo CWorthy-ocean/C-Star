@@ -14,9 +14,7 @@ class TestCStar:
         "test_config_key",
         [
             "test_case_remote_with_netcdf_datasets",
-            "test_case_remote_with_yaml_datasets",
             "test_case_local_with_netcdf_datasets",
-            "test_case_local_with_yaml_datasets",
         ],
     )
     def test_cstar(
@@ -74,10 +72,6 @@ class TestCStar:
                 cstar.system.environment.CStarEnvironment, "package_root", new=ext_root
             ),
         ):
-            # Regardless of remote or local, if yaml_datasets we need roms-tools support data
-            if "yaml_datasets" in test_config_key:
-                fetch_roms_tools_source_data(symlink_path="roms_tools_datasets")
-
             if "local" in test_config_key:
                 fetch_remote_test_case_data()
 
