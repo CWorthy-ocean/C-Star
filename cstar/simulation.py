@@ -106,7 +106,7 @@ class Simulation(ABC, LoggingMixin):
         valid_end_date : str or datetime, optional
             The latest allowed end date, based on, e.g., the availability of input data.
         """
-        self.directory: Path = self._validate_simulation_directory(directory)
+        self.directory = Path(directory).resolve()
         self.name = name
 
         # Process valid date ranges
@@ -147,43 +147,8 @@ class Simulation(ABC, LoggingMixin):
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization
 
-    def _validate_simulation_directory(self, directory: str | Path) -> Path:
-        """Validates and resolves the simulation directory.
-
-        This method ensures that the provided directory is valid and resolves its absolute path.
-        If the directory already exists and is not empty, an error is raised.
-
-        Parameters
-        ----------
-        directory : str or Path
-            The path to the simulation directory.
-
-        Returns
-        -------
-        Path
-            The resolved absolute path of the simulation directory.
-
-        Raises
-        ------
-        FileExistsError
-            If the specified directory already exists and is not empty.
-        """
-        resolved_directory = Path(directory).resolve()
-        # if resolved_directory.exists() and (
-        #     not resolved_directory.is_dir() or any(resolved_directory.iterdir())
-        # ):
-        #     raise FileExistsError(
-        #         f"Your chosen directory {directory} exists and is not an empty directory."
-        #         "\nIf you have previously created this case, use "
-        #         f"\nmy_sim = {self.__class__.__name__}.restore(directory={directory!r})"
-        #         "\n to restore it"
-        #     )
-
-        return resolved_directory
-
-    def _parse_date(
-        self, date: str | datetime | None, field_name: str
-    ) -> datetime | None:
+    @staticmethod
+    def _parse_date(date: str | datetime | None, field_name: str) -> datetime | None:
         """Converts a date string to a datetime object if it's not None.
 
         If the input is a string, it attempts to parse it into a `datetime` object.
