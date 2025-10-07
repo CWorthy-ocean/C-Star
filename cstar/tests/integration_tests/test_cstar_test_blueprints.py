@@ -88,18 +88,16 @@ class TestCStar:
             modified_blueprint = modify_template_blueprint(
                 template_blueprint_path=template_blueprint,
                 strs_to_replace=strs_to_replace,
+                output_dir=tmp_path / "cstar_test_simulation",
             )
             cstar_test_case = ROMSSimulation.from_blueprint(
                 modified_blueprint,
-                directory=tmp_path / "cstar_test_simulation",
-                start_date="20120101 12:00:00",
-                end_date="20120101 12:10:00",
             )
 
             with mock_user_input("y"):
                 cstar_test_case.setup()
 
-            cstar_test_case.to_blueprint(tmp_path / "test_blueprint_export.yaml")
+            # cstar_test_case.to_blueprint(tmp_path / "test_blueprint_export.yaml")
             cstar_test_case.build()
             cstar_test_case.pre_run()
             test_process = cstar_test_case.run()

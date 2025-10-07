@@ -14,9 +14,6 @@ from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
-from cstar.orchestration.adapter import BlueprintAdapter
-from cstar.orchestration.models import RomsMarblBlueprint
-from cstar.orchestration.serialization import deserialize
 from cstar.roms import ROMSSimulation
 from cstar.system.manager import cstar_sysmgr
 
@@ -54,12 +51,6 @@ class BlueprintRequest:
 
     blueprint_uri: str
     """The path to the blueprint."""
-    output_dir: pathlib.Path
-    """The directory where simulation outputs will be written."""
-    start_date: datetime
-    """The date on which to begin the simulation."""
-    end_date: datetime
-    """The date on which to end the simulation."""
     stages: tuple[SimulationStages, ...] = dc.field(default=())
     """The simulation stages to execute."""
 
@@ -120,10 +111,13 @@ class SimulationRunner(Service):
 
         self._blueprint_uri = request.blueprint_uri
 
-        bp = deserialize(pathlib.Path(self._blueprint_uri), RomsMarblBlueprint)
-        self._output_root = bp.runtime_params.output_dir.expanduser()
+        # bp = deserialize(pathlib.Path(self._blueprint_uri), RomsMarblBlueprint)
+
+        self._simulation: ROMSSimulation = ROMSSimulation.from_blueprint(
+            self._blueprint_uri
+        )
+        self._output_root = self._simulation.directory.expanduser()
         self._output_dir = self._get_unique_path(self._output_root)
-        self._simulation: ROMSSimulation = BlueprintAdapter(bp).adapt()
         self._stages = tuple(request.stages)
 
         roms_root = os.environ.get("ROMS_ROOT", None)
@@ -476,9 +470,6 @@ def get_request(args: argparse.Namespace) -> BlueprintRequest:
     """
     return BlueprintRequest(
         blueprint_uri=args.blueprint_uri,
-        output_dir=pathlib.Path(args.output_dir),
-        start_date=_format_date(args.start_date),
-        end_date=_format_date(args.end_date),
         stages=args.stages,
     )
 

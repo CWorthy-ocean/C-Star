@@ -30,6 +30,21 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
     StubSimulation,
 )
 
+
+@pytest.fixture
+def blueprint_path() -> Path:
+    """Fixture that creates and returns a blueprint yaml location.
+
+    Returns
+    -------
+    Path
+        The path to the valid, complete blueprint yaml file.
+    """
+    tests_root = Path(__file__).parent.parent
+    bp_path = tests_root / "integration_tests" / "blueprints" / "new_bp.yaml"
+    return bp_path
+
+
 ################################################################################
 # AdditionalCode
 ################################################################################
@@ -485,10 +500,10 @@ def example_roms_simulation(
             checkout_target="main",
             files=["file1.h", "file2.opt"],
         ),
-        start_date="2025-01-01",
-        end_date="2025-12-31",
-        valid_start_date="2024-01-01",
-        valid_end_date="2026-01-01",
+        start_date="2012-01-02 12:00:00",
+        end_date="2012-01-02 12:30:00",
+        valid_start_date="2012-01-01 12:00:00",
+        valid_end_date="2012-01-31 12:00:00",
         marbl_codebase=MARBLExternalCodeBase(
             source_repo="http://marbl.com/repo.git", checkout_target="v1"
         ),

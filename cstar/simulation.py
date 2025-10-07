@@ -455,7 +455,6 @@ class Simulation(ABC, LoggingMixin):
     def from_blueprint(
         cls,
         blueprint: str,
-        directory: str | Path,
     ) -> "Simulation":
         """Abstract method to create a Simulation instance from a blueprint file.
 
@@ -467,8 +466,6 @@ class Simulation(ABC, LoggingMixin):
         ----------
         blueprint : str
             The path or URL of a YAML file containing the blueprint for the simulation.
-        directory : str or Path
-            The local directory where the simulation will be set up.
 
         Returns
         -------

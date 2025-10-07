@@ -21,6 +21,21 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.adapter import (
+    AddtlCodeAdapter,
+    BoundaryForcingAdapter,
+    CdrForcingAdapter,
+    CodebaseAdapter,
+    DiscretizationAdapter,
+    ForcingCorrectionAdapter,
+    GridAdapter,
+    InitialConditionAdapter,
+    MARBLAdapter,
+    RiverForcingAdapter,
+    SurfaceForcingAdapter,
+    TidalForcingAdapter,
+)
+from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -907,9 +922,6 @@ class ROMSSimulation(Simulation):
     def from_blueprint(
         cls,
         blueprint: str,
-        directory: str | Path,
-        start_date: str | datetime | None = None,
-        end_date: str | datetime | None = None,
     ):
         """Create a `ROMSSimulation` instance from a YAML blueprint.
 
@@ -920,14 +932,6 @@ class ROMSSimulation(Simulation):
         ----------
         blueprint : str
             The path or URL to the YAML blueprint file.
-        directory : str or Path
-            The directory where the simulation will be stored.
-        start_date : str or datetime, optional
-            The start date for the simulation. If not provided, defaults to the
-            `valid_start_date` specified in the blueprint.
-        end_date : str or datetime, optional
-            The end date for the simulation. If not provided, defaults to the
-            `valid_end_date` specified in the blueprint.
 
         Returns
         -------
@@ -955,8 +959,27 @@ class ROMSSimulation(Simulation):
         elif source.location_type == "url":
             bp_dict = yaml.safe_load(requests.get(source.location).text)
 
-        return cls.from_dict(
-            bp_dict, directory=directory, start_date=start_date, end_date=end_date
+        bp = RomsMarblBlueprint.model_validate(bp_dict)
+        return cls(
+            name=bp.name,
+            directory=bp.runtime_params.output_dir,
+            discretization=DiscretizationAdapter(bp).adapt(),
+            runtime_code=AddtlCodeAdapter(bp, "run_time").adapt(),
+            compile_time_code=AddtlCodeAdapter(bp, "compile_time").adapt(),
+            codebase=CodebaseAdapter(bp).adapt(),
+            start_date=bp.runtime_params.start_date,
+            end_date=bp.runtime_params.end_date,
+            valid_start_date=bp.valid_start_date,
+            valid_end_date=bp.valid_end_date,
+            marbl_codebase=(MARBLAdapter(bp).adapt() if bp.code.marbl else None),
+            model_grid=GridAdapter(bp).adapt(),
+            initial_conditions=InitialConditionAdapter(bp).adapt(),
+            tidal_forcing=TidalForcingAdapter(bp).adapt(),
+            river_forcing=RiverForcingAdapter(bp).adapt(),
+            forcing_corrections=ForcingCorrectionAdapter(bp).adapt(),
+            boundary_forcing=BoundaryForcingAdapter(bp).adapt(),
+            surface_forcing=SurfaceForcingAdapter(bp).adapt(),
+            cdr_forcing=CdrForcingAdapter(bp).adapt(),
         )
 
     def to_blueprint(self, filename: str | Path) -> None:
@@ -980,6 +1003,7 @@ class ROMSSimulation(Simulation):
         from_blueprint : Creates a `ROMSSimulation` instance from a YAML blueprint.
         to_dict : Converts the instance into a dictionary representation.
         """
+        raise NotImplementedError()
         with open(filename, "w") as yaml_file:
             yaml.dump(
                 self.to_dict(), yaml_file, default_flow_style=False, sort_keys=False

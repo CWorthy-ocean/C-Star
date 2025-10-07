@@ -5,7 +5,8 @@ from pydantic import BaseModel
 from cstar.base.additional_code import AdditionalCode
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration import models
-from cstar.roms import ROMSSimulation
+
+# from cstar.roms import ROMSSimulation
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -295,31 +296,32 @@ class ForcingCorrectionAdapter(
         ]
 
 
-class BlueprintAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSSimulation]):
-    """Create a ROMSSimulation from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> ROMSSimulation:
-        return ROMSSimulation(
-            name=self.model.name,
-            directory=self.model.runtime_params.output_dir,
-            discretization=DiscretizationAdapter(self.model).adapt(),
-            runtime_code=AddtlCodeAdapter(self.model, "run_time").adapt(),
-            compile_time_code=AddtlCodeAdapter(self.model, "compile_time").adapt(),
-            codebase=CodebaseAdapter(self.model).adapt(),
-            start_date=self.model.runtime_params.start_date,
-            end_date=self.model.runtime_params.end_date,
-            valid_start_date=self.model.valid_start_date,
-            valid_end_date=self.model.valid_end_date,
-            marbl_codebase=(
-                MARBLAdapter(self.model).adapt() if self.model.code.marbl else None
-            ),
-            model_grid=GridAdapter(self.model).adapt(),
-            initial_conditions=InitialConditionAdapter(self.model).adapt(),
-            tidal_forcing=TidalForcingAdapter(self.model).adapt(),
-            river_forcing=RiverForcingAdapter(self.model).adapt(),
-            forcing_corrections=ForcingCorrectionAdapter(self.model).adapt(),
-            boundary_forcing=BoundaryForcingAdapter(self.model).adapt(),
-            surface_forcing=SurfaceForcingAdapter(self.model).adapt(),
-            cdr_forcing=CdrForcingAdapter(self.model).adapt(),
-        )
+#
+# class BlueprintAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSSimulation]):
+#     """Create a ROMSSimulation from a blueprint model."""
+#
+#     @t.override
+#     def adapt(self) -> ROMSSimulation:
+#         return ROMSSimulation(
+#             name=self.model.name,
+#             directory=self.model.runtime_params.output_dir,
+#             discretization=DiscretizationAdapter(self.model).adapt(),
+#             runtime_code=AddtlCodeAdapter(self.model, "run_time").adapt(),
+#             compile_time_code=AddtlCodeAdapter(self.model, "compile_time").adapt(),
+#             codebase=CodebaseAdapter(self.model).adapt(),
+#             start_date=self.model.runtime_params.start_date,
+#             end_date=self.model.runtime_params.end_date,
+#             valid_start_date=self.model.valid_start_date,
+#             valid_end_date=self.model.valid_end_date,
+#             marbl_codebase=(
+#                 MARBLAdapter(self.model).adapt() if self.model.code.marbl else None
+#             ),
+#             model_grid=GridAdapter(self.model).adapt(),
+#             initial_conditions=InitialConditionAdapter(self.model).adapt(),
+#             tidal_forcing=TidalForcingAdapter(self.model).adapt(),
+#             river_forcing=RiverForcingAdapter(self.model).adapt(),
+#             forcing_corrections=ForcingCorrectionAdapter(self.model).adapt(),
+#             boundary_forcing=BoundaryForcingAdapter(self.model).adapt(),
+#             surface_forcing=SurfaceForcingAdapter(self.model).adapt(),
+#             cdr_forcing=CdrForcingAdapter(self.model).adapt(),
+#         )

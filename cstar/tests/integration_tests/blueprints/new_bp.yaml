@@ -1,0 +1,86 @@
+name: roms_marbl_example_new_bp
+description: this is to test the new blueprint schema, here's "a few" weird characters.
+application: roms_marbl
+state: draft
+valid_start_date: 2012-01-01 12:00:00
+valid_end_date: 2012-01-31 12:00:00
+
+
+code:
+  roms:
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    branch: main
+    documentation: cworthy fork
+  marbl:
+    location: https://github.com/marbl-ecosys/MARBL.git
+    branch: marbl0.45.0
+
+  run_time:
+    location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
+    branch: main
+    filter:
+      files:
+        - roms.in
+        - marbl_in
+        - marbl_tracer_output_list
+        - marbl_diagnostic_output_list
+      directory: roms_runtime_code
+  compile_time:
+    location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
+    branch: main
+    filter:
+      directory: roms_compile_time_code
+      files:
+      - bgc.opt
+      - bulk_frc.opt
+      - cppdefs.opt
+      - diagnostics.opt
+      - ocean_vars.opt
+      - param.opt
+      - tracers.opt
+      - Makefile
+      - Make.depend
+
+grid:
+  documentation: my favorite grid
+  data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/netcdf_inputs/input_datasets_netcdf/roms_grd.nc
+      hash: 41397c80fd00536dc414f6b8039b08fbe5d9f234aec66c3fc9b5a8e13353502a
+
+
+initial_conditions:
+  data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/netcdf_inputs/input_datasets_netcdf/roms_ini.nc
+      hash: c8eda3bab223d8f247055da5afe6a69234833733c75cba7dc6b5a85b06263d52
+
+forcing:
+  tidal:
+    data:
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/netcdf_inputs/input_datasets_netcdf/roms_tides.nc
+        hash: 9466a6cacf33f3b3cbfaa87044c70cc8ef12e963f42ce3e72e30b564541afef1
+  surface:
+    documentation: best forcing ever
+    locked: true
+    data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/netcdf_inputs/input_datasets_netcdf/roms_frc.nc
+      hash: b9d1884c5175c8e690ad372d0585583ccaa04baa35bb1e8f3c0d2f2b37666829
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/netcdf_inputs/input_datasets_netcdf/roms_frc_bgc.nc
+      hash: f78fce51e2178adcd128ea8d92bf091a450e4245dcb023027faae8e2d3963e72
+  boundary:
+    data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/netcdf_inputs/input_datasets_netcdf/roms_bry.nc
+      hash: 3b51a46b1bd50d8a0e7c7f96c7b153c9d2c7fb26a8e9d97ce957d43210944909
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/netcdf_inputs/input_datasets_netcdf/roms_bry_bgc.nc
+      hash: 366af33acf309c7644fab8f7bd5385c99123634c82d5c15f09d2033ec7103a6e
+
+partitioning:
+  n_procs_x: 3
+  n_procs_y: 3
+
+model_params:
+  time_step: 360
+
+runtime_params:
+  start_date: "2012-01-02 12:00:00"
+  end_date: "2012-01-02 12:30:00"
+  output_dir: "temp_out_dir"
