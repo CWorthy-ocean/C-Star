@@ -23,7 +23,6 @@ class TestCStar:
         mock_user_input,
         mock_lmod_path: Path,
         modify_template_blueprint,
-        fetch_roms_tools_source_data,
         fetch_remote_test_case_data,
         test_config_key,
         log: logging.Logger,
@@ -88,7 +87,7 @@ class TestCStar:
             modified_blueprint = modify_template_blueprint(
                 template_blueprint_path=template_blueprint,
                 strs_to_replace=strs_to_replace,
-                output_dir=tmp_path / "cstar_test_simulation",
+                out_dir=tmp_path / "cstar_test_simulation",
             )
             cstar_test_case = ROMSSimulation.from_blueprint(
                 modified_blueprint,

@@ -17,7 +17,7 @@ code:
 
   run_time:
     location: <additional_code_location>
-    branch: main
+    branch: roms_tools_3_1_2
     filter:
       files:
         - roms.in
@@ -27,7 +27,7 @@ code:
       directory: additional_code/ROMS/runtime_code
   compile_time:
     location: <additional_code_location>
-    branch: main
+    branch: roms_tools_3_1_2
     filter:
       directory: additional_code/ROMS/compile_time_code
       files:
@@ -44,42 +44,42 @@ grid:
   documentation: my favorite grid
   data:
     - location: <input_datasets_location>/roms_grd.nc
-      hash: 41397c80fd00536dc414f6b8039b08fbe5d9f234aec66c3fc9b5a8e13353502a
+      hash: 73a15442870db4c22a626c19ec6764d2cd1214bb15795c46983ec0f3030aea5c
 
 
 initial_conditions:
   data:
     - location: <input_datasets_location>/roms_ini.nc
-      hash: c8eda3bab223d8f247055da5afe6a69234833733c75cba7dc6b5a85b06263d52
+      hash: 5f37c42b538dfe9963a6dd9e6887b9aaf537562eda086d2f2538a2e70d7f3606
 
 forcing:
   tidal:
     data:
       - location: <input_datasets_location>/roms_tides.nc
-        hash: 9466a6cacf33f3b3cbfaa87044c70cc8ef12e963f42ce3e72e30b564541afef1
+        hash: 2db437f0cdaadec0e9eaa15f00cb077f1b2b384dc1abe5c8ec2d38f07a3418c0
   surface:
     documentation: best forcing ever
     locked: true
     data:
     - location: <input_datasets_location>/roms_frc.nc
-      hash: b9d1884c5175c8e690ad372d0585583ccaa04baa35bb1e8f3c0d2f2b37666829
+      hash: 096f0b19aa27e99a92ac2b76b534e59051f76846b62dc7d41c607da2a2517e16
     - location: <input_datasets_location>/roms_frc_bgc.nc
-      hash: f78fce51e2178adcd128ea8d92bf091a450e4245dcb023027faae8e2d3963e72
+      hash: 142b19c66f9e37d3c24a858424ad01b3448b563c89f0fecaabc398c88458b0de
   boundary:
     data:
     - location: <input_datasets_location>/roms_bry.nc
-      hash: 3b51a46b1bd50d8a0e7c7f96c7b153c9d2c7fb26a8e9d97ce957d43210944909
+      hash: 5946f6aba0093a1123aa9f247a6f78270fa05228e5e33c56053a6efada2be0a0
     - location: <input_datasets_location>/roms_bry_bgc.nc
-      hash: 366af33acf309c7644fab8f7bd5385c99123634c82d5c15f09d2033ec7103a6e
+      hash: d3bdf070100e9ed3ddca15ca37cd3c6ecbae93b9425aa5bafb4b37418efae43c
 
 partitioning:
-  n_procs_x: 3
-  n_procs_y: 3
+  n_procs_x: 2
+  n_procs_y: 2
 
 model_params:
-  time_step: 360
+  time_step: 60
 
 runtime_params:
-  start_date: 20120101 12:00:00
-  end_date: 20120101 12:10:00
+  start_date: "2012-01-01 12:00:00"
+  end_date: "2012-01-01 12:10:00"
   output_dir: <output_dir>

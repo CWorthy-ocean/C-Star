@@ -98,8 +98,8 @@ def sim_runner(
     )
     job_config = JobConfig()
     sim = SimulationRunner(request, service_config, job_config)
-    sim._output_root = output_path
-    sim._output_dir = output_path / sim._output_dir.name
+    sim._output_root = output_path  # type: ignore[misc]
+    sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
     sim._simulation.directory = sim._output_dir
     return sim
 
