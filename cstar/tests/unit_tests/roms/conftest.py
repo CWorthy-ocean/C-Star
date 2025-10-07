@@ -56,7 +56,7 @@ def fake_romsruntimesettings():
     ROMSRuntimeSettings
        The example ROMSRuntimeSettings instance
     """
-    yield ROMSRuntimeSettings(
+    return ROMSRuntimeSettings(
         title="Example runtime settings",
         time_stepping={"ntimes": 360, "dt": 60, "ndtfast": 60, "ninfo": 1},
         bottom_drag={
@@ -269,7 +269,7 @@ def fake_tidal_forcing() -> ROMSTidalForcing:
 
 @pytest.fixture
 def fake_cdr_forcing() -> ROMSCdrForcing:
-    """Provides a ROMSTidalForcing instance with fake attrs for testing"""
+    """Provides a ROMSCdrForcing instance with fake attrs for testing"""
     return ROMSCdrForcing(location="http://my.files/cdr.nc", file_hash="542")
 
 
