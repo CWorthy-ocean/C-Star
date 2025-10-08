@@ -3,9 +3,11 @@ import logging
 from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
+from unittest.mock import PropertyMock, patch
 
 import dotenv
 import pytest
+from _pytest.tmpdir import TempPathFactory
 
 from cstar.base import AdditionalCode, Discretization, ExternalCodeBase, InputDataset
 from cstar.base.datasource import DataSource
@@ -41,7 +43,9 @@ def blueprint_path() -> Path:
         The path to the valid, complete blueprint yaml file.
     """
     tests_root = Path(__file__).parent.parent
-    bp_path = tests_root / "integration_tests" / "blueprints" / "new_bp.yaml"
+    bp_path = (
+        tests_root / "integration_tests" / "blueprints" / "blueprint_complete.yaml"
+    )
     return bp_path
 
 
@@ -310,7 +314,7 @@ def mock_system_name() -> str:
     return "mock_system"
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def mock_user_env_name() -> str:
     """Return a unique name for a temporary user .env config file.
 
@@ -418,6 +422,16 @@ def custom_user_env(
         A function that will write a new env config file.
     """
     return functools.partial(_write_custom_env, dotenv_path)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def dont_touch_user_env(tmp_path_factory: TempPathFactory, mock_user_env_name: str):
+    with patch(
+        "cstar.system.environment.CStarEnvironment.user_env_path",
+        new_callable=PropertyMock,
+        return_value=tmp_path_factory.mktemp("user_env") / mock_user_env_name,
+    ):
+        yield
 
 
 @pytest.fixture
