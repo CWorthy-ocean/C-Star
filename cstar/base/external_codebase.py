@@ -237,6 +237,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
                 )
                 return
             case 1:
+                local_root.mkdir(parents=True, exist_ok=True)
                 env_var_repo_remote = _get_repo_remote(local_root)
 
                 raise OSError(

@@ -157,7 +157,7 @@ def test_register_fh_no_filename(
     initial_count = len(log.handlers)
 
     with pytest.raises(ValueError):
-        _ = register_file_handler(log, logging.DEBUG, "%(msg)s", filepath)
+        _ = register_file_handler(log, filepath, logging.DEBUG, "%(msg)s")
 
     assert len(log.handlers) == initial_count
 
@@ -180,7 +180,7 @@ def test_register_fh_dir_exists(
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
     with mock.patch("pathlib.Path.mkdir", new_callable=mock.Mock) as mock_mkdir:
-        fh = register_file_handler(log, logging.DEBUG, "%(msg)s", filepath)
+        fh = register_file_handler(log, filepath, logging.DEBUG, "%(msg)s")
 
     assert fh
     assert mock_mkdir.called
@@ -203,7 +203,7 @@ def test_register_fh_dir_not_exist(
     filepath = tmp_path / "subdir" / "foo.log"
     initial_count = len(log.handlers)
 
-    fh = register_file_handler(log, logging.DEBUG, "%(msg)s", filepath)
+    fh = register_file_handler(log, filepath, logging.DEBUG, "%(msg)s")
 
     assert fh
     assert filepath.parent.exists()
@@ -229,14 +229,14 @@ def test_register_fh_resolution(
 
     initial_count = len(log.handlers)
 
-    fh = register_file_handler(log, logging.DEBUG, "%(msg)s", filepath)
+    fh = register_file_handler(log, filepath, logging.DEBUG, "%(msg)s")
 
     assert fh
     assert filepath.parent.exists()
     assert len(log.handlers) == initial_count + 1
 
     # the symlinked path must be resolved to avoid this dupe
-    fh = register_file_handler(log, logging.DEBUG, "%(msg)s", str(filepath_sym))
+    fh = register_file_handler(log, str(filepath_sym), logging.DEBUG, "%(msg)s")
 
     assert fh
     assert filepath_sym.parent.exists()
@@ -261,10 +261,10 @@ def test_register_fh_dupe_level(
     filepath_sym.parent.symlink_to(filepath.parent)
 
     initial_level = logging.DEBUG
-    fh0 = register_file_handler(log, initial_level, "%(msg)s", filepath)
+    fh0 = register_file_handler(log, filepath, initial_level, "%(msg)s")
     assert fh0.level == initial_level
 
     # confirm a dupe doesn't change the log level
     update_level = logging.INFO
-    fh1 = register_file_handler(log, update_level, "%(msg)s", filepath_sym)
+    fh1 = register_file_handler(log, filepath_sym, update_level, "%(msg)s")
     assert fh1.level != update_level

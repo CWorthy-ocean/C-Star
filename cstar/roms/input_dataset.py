@@ -3,11 +3,8 @@ import shutil
 import tempfile
 from abc import ABC
 from pathlib import Path
-from typing import Any
 
-import requests
 import roms_tools
-import yaml
 
 from cstar.base.input_dataset import InputDataset
 from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
@@ -60,9 +57,6 @@ class ROMSInputDataset(InputDataset, ABC):
         (
             """
     ROMS-specific implementation of `InputDataset` (doc below)
-
-    Extends `get()` method to generate dataset using roms-tools in the case that `source`
-    points to a yaml file.
 
     Docstring for InputDataset:
     ---------------------------
@@ -287,9 +281,7 @@ class ROMSInputDataset(InputDataset, ABC):
             self.log.info(f"⏭️ {self.working_path} already exists, skipping.")
             return
 
-        if self.source.source_type == "yaml":
-            self._get_from_yaml(local_dir=local_dir)
-        elif self.source_partitioning is not None:
+        if self.source_partitioning is not None:
             self._get_from_partitioned_source(
                 local_dir=local_dir,
                 source_np_xi=self.source_partitioning[0],
@@ -328,97 +320,6 @@ class ROMSInputDataset(InputDataset, ABC):
         assert self.partitioning is not None
         self._local_file_stat_cache.update(self.partitioning._local_file_stat_cache)
         self._local_file_hash_cache.update(self.partitioning._local_file_hash_cache)
-
-    def _get_from_yaml(self, local_dir: str | Path) -> None:
-        """Handle the special case where the input dataset source is a `roms-tools`
-        compatible YAML file.
-
-        This method:
-        - Fetches and optionally modifies the YAML based on start/end dates,
-        - Creates a `roms-tools` instance from a modified temporary copy of the YAML
-        - Saves this `roms-tools` class instance to a netCDF file in `local_dir`
-        - Updates `working_path` and caches file metadata.
-
-        Parameters:
-        -----------
-        local_dir (Path):
-            Directory where the resulting NetCDF files should be saved.
-        """
-        # Ensure we're working with a Path object
-        local_dir = Path(local_dir).expanduser().resolve()
-        local_dir.mkdir(parents=True, exist_ok=True)
-
-        if self.source.source_type != "yaml":
-            raise ValueError(
-                "_get_from_yaml requires a ROMSInputDataset whose source_type is yaml"
-            )
-
-        if self.source.location_type == "path":
-            with open(Path(self.source.location).expanduser()) as F:
-                raw_yaml_text = F.read()
-        elif self.source.location_type == "url":
-            raw_yaml_text = requests.get(self.source.location).text
-        _, header, yaml_data = raw_yaml_text.split("---", 2)
-
-        yaml_dict = yaml.safe_load(yaml_data)
-        yaml_keys = list(yaml_dict.keys())
-        if len(yaml_keys) == 1:
-            roms_tools_class_name = yaml_keys[0]
-        elif len(yaml_keys) == 2:
-            roms_tools_class_name = [y for y in yaml_keys if y != "Grid"][0]
-        else:
-            raise ValueError(
-                f"roms tools yaml file has {len(yaml_keys)} sections. "
-                + "Expected 'Grid' and one other class"
-            )
-        start_time = (
-            self.start_date.isoformat() if self.start_date is not None else None
-        )
-        end_time = self.end_date.isoformat() if self.end_date is not None else None
-
-        yaml_entries_to_modify = {
-            "start_time": start_time,
-            "ini_time": start_time,
-            "end_time": end_time,
-        }
-
-        for key, value in yaml_entries_to_modify.items():
-            if key in yaml_dict[roms_tools_class_name].keys():
-                yaml_dict[roms_tools_class_name][key] = value
-
-        roms_tools_class = getattr(roms_tools, roms_tools_class_name)
-
-        # Create a temporary file that deletes itself when closed
-        with tempfile.NamedTemporaryFile(mode="w", delete=True) as temp_file:
-            from_yaml_kwargs: dict[Any, Any] = {}
-            temp_file.write(f"---{header}---\n" + yaml.dump(yaml_dict))
-            temp_file.flush()  # Ensure data is written to disk
-
-            from_yaml_kwargs["filepath"] = temp_file.name
-            # roms-tools currently requires dask for every class except Grid,RiverForcing
-            # in order to use wildcards in filepaths (known xarray issue):
-            if roms_tools_class_name not in ["Grid", "RiverForcing"]:
-                from_yaml_kwargs["use_dask"] = True
-
-            roms_tools_class_instance = roms_tools_class.from_yaml(**from_yaml_kwargs)
-        ##
-
-        # ... and save:
-        self.log.info(
-            f"💾 Saving roms-tools dataset created from {self.source.location}..."
-        )
-        save_kwargs: dict[Any, Any] = {}
-        save_kwargs["filepath"] = Path(
-            f"{local_dir / Path(self.source.location).stem}.nc"
-        )
-
-        savepath = roms_tools_class_instance.save(**save_kwargs)
-        self.working_path = savepath[0] if len(savepath) == 1 else savepath
-
-        self._local_file_hash_cache.update(
-            {path: _get_sha256_hash(path.resolve()) for path in savepath}
-        )  # 27
-        self._local_file_stat_cache.update({path: path.stat() for path in savepath})
 
     def _update_partitioning_attribute(
         self, new_np_xi: int, new_np_eta: int, parted_files: list[Path]

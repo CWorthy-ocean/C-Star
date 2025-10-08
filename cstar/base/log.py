@@ -8,9 +8,9 @@ DEFAULT_LOG_FORMAT = "[%(levelname)s] %(message)s"
 
 def register_file_handler(
     logger: logging.Logger,
-    level: int,
-    fmt: str,
     filename: str | Path | None,
+    level: int = DEFAULT_LOG_LEVEL,
+    fmt: str = DEFAULT_LOG_FORMAT,
 ) -> logging.FileHandler:
     """Register a file handler on the logger.
 
@@ -21,12 +21,12 @@ def register_file_handler(
     ----------
     logger : logging.Logger
         The logger to modify
+    filename : str or Path or None
+        The desired log file path
     level : int
         The log level for a new handler
     fmt : str
         The log format to apply to the handler.
-    filename : str or Path or None
-        The desired log file path
 
     Returns
     -------
@@ -130,7 +130,7 @@ def get_logger(
         logger.addHandler(stdout_handler)
 
     if filename:
-        register_file_handler(logger, level, fmt, filename)
+        register_file_handler(logger, filename, level, fmt)
 
     # Re-enable propagation on final logger
     logger.propagate = True

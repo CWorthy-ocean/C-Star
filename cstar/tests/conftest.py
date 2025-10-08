@@ -1,0 +1,27 @@
+from pathlib import Path
+from unittest.mock import PropertyMock, patch
+
+import pytest
+
+
+@pytest.fixture(scope="session")
+def mock_user_env_name() -> str:
+    """Return a unique name for a temporary user .env config file.
+
+    Returns
+    -------
+    str
+        The name of the .env file
+    """
+    return ".mock.env"
+
+
+@pytest.fixture(autouse=True)
+def never_touch_user_env(tmp_path: Path, mock_user_env_name: str):
+    """Autouse fixture to always replace user env path with a temp path"""
+    with patch(
+        "cstar.system.environment.CStarEnvironment.user_env_path",
+        new_callable=PropertyMock,
+        return_value=tmp_path / mock_user_env_name,
+    ):
+        yield
