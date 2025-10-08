@@ -10,6 +10,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Final, override
 
+from base.log import register_file_handler
+
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
 from cstar.entrypoint.service import Service, ServiceConfiguration
@@ -111,11 +113,16 @@ class SimulationRunner(Service):
 
         self._blueprint_uri = request.blueprint_uri
 
-        # bp = deserialize(pathlib.Path(self._blueprint_uri), RomsMarblBlueprint)
-
         self._simulation: ROMSSimulation = ROMSSimulation.from_blueprint(
             self._blueprint_uri
         )
+        log_file = (
+            self._simulation.directory
+            / LOGS_DIRECTORY
+            / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
+        )
+        register_file_handler(self.log, log_file)
+        self.log.addHandler(logging.FileHandler(log_file))
         self._output_root = self._simulation.directory.expanduser()
         self._output_dir = self._get_unique_path(self._output_root)
         self._stages = tuple(request.stages)
@@ -524,12 +531,7 @@ async def main(raw_args: list[str]) -> int:
         blueprint_req = get_request(args)
         job_cfg = JobConfig()  # use default HPC config
 
-    # log_file = (
-    #     blueprint_req.output_dir
-    #     / LOGS_DIRECTORY
-    #     / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
-    # )
-    log = get_logger(__name__, level=service_cfg.log_level)  # , filename=log_file)
+    log = get_logger(__name__, level=service_cfg.log_level)
 
     try:
         configure_environment(log)
