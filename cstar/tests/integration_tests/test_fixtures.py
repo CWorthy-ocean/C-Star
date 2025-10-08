@@ -34,7 +34,7 @@ def test_modify_template_blueprint(modify_template_blueprint, tmp_path):
     """
     test_blueprint = modify_template_blueprint(
         template_blueprint_path=TEST_DIRECTORY
-        / "integration_tests/blueprints/new_bp_template.yaml",
+        / "integration_tests/blueprints/blueprint_template.yaml",
         strs_to_replace={
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
         },
