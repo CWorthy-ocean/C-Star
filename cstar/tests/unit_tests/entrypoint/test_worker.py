@@ -31,6 +31,10 @@ DEFAULT_HEALTH_CHECK_FREQUENCY = 10
 
 @pytest.fixture(scope="module", autouse=True)
 def clean_up_logs():
+    """
+    SimulationRunner sets up a log file during init. I could try to mock it out, but
+    it's a bit hard to get at. For now, just clean things up after the module is done.
+    """
     yield
     shutil.rmtree("temp_out_dir")
 
