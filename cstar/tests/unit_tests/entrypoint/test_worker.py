@@ -40,10 +40,7 @@ def valid_args() -> dict[str, str]:
     """Fixture to provide valid arguments for the SimulationRunner."""
     return {
         "--blueprint-uri": "blueprint.yaml",
-        "--output-dir": "output",
         "--log-level": "INFO",
-        "--start-date": "2012-01-03 12:00:00",
-        "--end-date": "2012-01-04 12:00:00",
     }
 
 
@@ -52,20 +49,8 @@ def valid_args_short() -> dict[str, str]:
     """Fixture to provide valid arguments for the SimulationRunner."""
     return {
         "-b": "blueprint.yaml",
-        "-o": "output",
         "-l": "INFO",
-        "-s": "2012-01-03 12:00:00",
-        "-e": "2012-01-04 12:00:00",
     }
-
-
-def test_create_parser_help() -> None:
-    """Verify that a help argument is present in the parser."""
-    parser = create_parser()
-
-    # no help argument present
-    with pytest.raises(ValueError):  # noqa: PT011
-        _ = parser.parse_args(["--help"])
 
 
 @pytest.fixture
@@ -118,10 +103,7 @@ def test_create_parser_happy_path() -> None:
 
     # ruff: noqa: SLF001
     assert "--blueprint-uri" in parser._option_string_actions
-    assert "--output-dir" in parser._option_string_actions
     assert "--log-level" in parser._option_string_actions
-    assert "--start-date" in parser._option_string_actions
-    assert "--end-date" in parser._option_string_actions
 
 
 @pytest.mark.parametrize(
@@ -205,50 +187,32 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("blueprint_uri", "output_dir", "start_date", "end_date", "log_level"),
+    ("blueprint_uri", "log_level"),
     [
         (
             "-b blueprint1.yaml",
-            "-o output1",
-            "-s 2012-01-01 12:00:00",
-            "-e 2012-02-04 12:00:00",
             "-l DEBUG",
         ),
         (
             "--blueprint-uri blueprint2.yaml",
-            "--output-dir output2",
-            "--start-date 2020-02-01 00:00:00",
-            "--end-date 2020-03-02 00:00:00",
             "--log-level INFO",
         ),
         (
             "--blueprint-uri blueprint3.yaml",
-            "--output-dir output3",
-            "--start-date 2021-03-01 08:30:00",
-            "--end-date 2021-04-16 09:30:00",
             "--log-level WARNING",
         ),
         (
             "-b blueprint1.yaml",
-            "-o output1",
-            "-s 2012-01-01 12:00:00",
-            "-e 2012-02-04 12:00:00",
             "-l ERROR",
         ),
     ],
 )
 def test_get_service_config(
     blueprint_uri: str,
-    output_dir: str,
-    start_date: str,
-    end_date: str,
     log_level: str,
 ) -> None:
     """Verify that the expected values are set on the service config."""
     arg_b, val_b = blueprint_uri.split(" ", maxsplit=1)
-    arg_o, val_o = output_dir.split(" ", maxsplit=1)
-    arg_s, val_s = start_date.split(" ", maxsplit=1)
-    arg_e, val_e = end_date.split(" ", maxsplit=1)
     arg_l, val_l = log_level.split(" ", maxsplit=1)
 
     parser = create_parser()
@@ -256,14 +220,8 @@ def test_get_service_config(
         [
             arg_b,
             val_b,
-            arg_o,
-            val_o,
             arg_l,
             val_l,
-            arg_s,
-            val_s,
-            arg_e,
-            val_e,
         ],
     )
 

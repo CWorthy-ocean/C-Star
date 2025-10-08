@@ -382,30 +382,6 @@ def create_parser() -> argparse.ArgumentParser:
         ],
     )
     parser.add_argument(
-        "-o",
-        "--output-dir",
-        default="~/code/cstar/examples/",
-        type=str,
-        required=False,
-        help="Local path to write simulation outputs to.",
-    )
-    parser.add_argument(
-        "-s",
-        "--start-date",
-        default="2012-01-03 12:00:00",
-        type=str,
-        required=False,
-        help=(f"Simulation start date, formatted `{DATE_FORMAT}`"),
-    )
-    parser.add_argument(
-        "-e",
-        "--end-date",
-        default="2012-01-04 12:00:00",
-        type=str,
-        required=False,
-        help=(f"Simulation end date, formatted `{DATE_FORMAT}`"),
-    )
-    parser.add_argument(
         "-g",
         "--stage",
         default=tuple(x for x in SimulationStages),
