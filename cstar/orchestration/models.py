@@ -310,6 +310,10 @@ class Blueprint(ConfiguredBaseModel, ABC):
 
     @property
     def cpus_needed(self) -> int:
+        """The number of CPUs needed to run this blueprint.
+
+        Defaults to 1. Can be overridden by subclasses.
+        """
         return 1
 
 
@@ -365,6 +369,7 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
 
     @property
     def cpus_needed(self) -> int:
+        """Number of CPUS needed for ROMS is derived from the partitioning parameters."""
         return self.partitioning.n_procs_x * self.partitioning.n_procs_y
 
 

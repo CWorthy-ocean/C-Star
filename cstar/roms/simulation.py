@@ -1003,11 +1003,9 @@ class ROMSSimulation(Simulation):
         from_blueprint : Creates a `ROMSSimulation` instance from a YAML blueprint.
         to_dict : Converts the instance into a dictionary representation.
         """
-        raise NotImplementedError()
-        with open(filename, "w") as yaml_file:
-            yaml.dump(
-                self.to_dict(), yaml_file, default_flow_style=False, sort_keys=False
-            )
+        raise NotImplementedError(
+            "This functionality has been deprecated but may be re-implemented in the future."
+        )
 
     def tree(self):
         """Display a tree-style representation of the ROMS simulation structure.
@@ -1433,6 +1431,8 @@ class ROMSSimulation(Simulation):
             f"{final_runtime_settings_file}"
         )
 
+        # If this simulation is already being orchestrated or there is no scheduler,
+        # don't create a scheduler job, just run it locally.
         if (
             os.getenv("CSTAR_ORCHESTRATED") != "1"
             and cstar_sysmgr.scheduler is not None
