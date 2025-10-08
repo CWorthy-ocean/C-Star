@@ -10,10 +10,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Final, override
 
-from base.log import register_file_handler
-
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import get_logger
+from cstar.base.log import get_logger, register_file_handler
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
