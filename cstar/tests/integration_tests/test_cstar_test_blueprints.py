@@ -38,12 +38,6 @@ class TestCStar:
         modify_template_blueprint:
            Fixture to modify the contents of a template blueprint and save to a
            temporary file (from which the ROMSSimulation instance is created)
-        fetch_roms_tools_source_data:
-           Fixture to fetch source data needed by roms-tools to generate input
-           datasets for ROMS. Source data are saved to the system cache at the
-           location specified by ROMS_TOOLS_DATA_DIRECTORY in the config.py module.
-           A symlink to this cache directory containing this source data is
-           created wherever this test is run and deleted on exit.
         fetch_remote_test_case_data:
            Fixture to fetch data needed for the C-Star test case, such as additional
            code for compiling ROMS, yaml files to supply to roms-tools, etc.

@@ -28,7 +28,6 @@ def _get_test_directory():
 
 
 TEST_DIRECTORY = _get_test_directory()
-ROMS_TOOLS_DATA_DIRECTORY = Path(os_cache("roms_tools_datasets_for_cstar_test_case"))
 CSTAR_TEST_DATA_DIRECTORY = Path(os_cache("cstar_test_case_data"))
 
 ## Configuration of different cases to test

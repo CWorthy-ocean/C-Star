@@ -59,55 +59,6 @@ class TestFetchData:
     file.
     """
 
-    # def test_fetch_roms_tools_source_data(
-    #     self, request, tmpdir, fetch_roms_tools_source_data
-    # ):
-    #     """Test the fetch_roms_tools_source_data fixture by validating data fetching and
-    #     symlink creation.
-    #
-    #     This test checks that the fetch_roms_tools_source_data fixture correctly fetches the
-    #     expected data files, creates a symlink to the data directory, and ensures all expected
-    #     files are present and accessible through the symlink.
-    #
-    #     Parameters
-    #     ----------
-    #     request : FixtureRequest
-    #         Pytest's request object used by the fixture for cleanup (symlink removal)
-    #     tmpdir : Path
-    #        Built-in pytest fixture for creating a temporary directory during the test
-    #     fetch_roms_tools_source_data : Callable
-    #         A fixture that fetches ROMS tools data and sets up a temporary symlink to the data directory
-    #
-    #     Asserts
-    #     -------
-    #     - The symlink points to the correct data directory
-    #     - The symlink exists and is valid
-    #     - All expected data files are present in the symlinked directory
-    #     """
-    #     test_data_directory = Path(tmpdir / "test_data_directory")
-    #     fetch_roms_tools_source_data(test_data_directory)
-    #
-    #     assert test_data_directory.resolve() == ROMS_TOOLS_DATA_DIRECTORY.resolve(), (
-    #         f"{test_data_directory} links to {test_data_directory.resolve}, not {ROMS_TOOLS_DATA_DIRECTORY}"
-    #     )
-    #     assert test_data_directory.exists(), f"{test_data_directory} does not exist"
-    #     assert test_data_directory.is_symlink(), (
-    #         f"{test_data_directory} is not a symbolic link as expected"
-    #     )
-    #
-    #     file_list = [f.name for f in test_data_directory.glob("*")]
-    #     expected_files = [
-    #         "GLORYS_NA_2012.nc",
-    #         "ERA5_NA_2012.nc",
-    #         "global_grid_tpxo10.v2.nc",
-    #         "global_h_tpxo10.v2.nc",
-    #         "global_u_tpxo10.v2.nc",
-    #         "CESM_BGC_2012.nc",
-    #         "CESM_BGC_SURFACE_2012.nc",
-    #     ]
-    #     missing_files = [f for f in expected_files if f not in file_list]
-    #     assert not missing_files, f"missing expected files {missing_files}"
-
     def test_fetch_remote_test_case_data(self, fetch_remote_test_case_data):
         """Test the fetch_remote_test_case_data fixture.
 
@@ -137,8 +88,6 @@ class TestFetchData:
             "additional_code/ROMS/compile_time_code/Makefile",
             "input_datasets/ROMS/roms_bry.nc",
             "input_datasets/ROMS/roms_frc.nc",
-            "roms_tools_yaml_files/roms_bry.yaml",
-            "roms_tools_yaml_files/roms_ini.yaml",
         ]
 
         missing_items = []
