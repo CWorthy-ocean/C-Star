@@ -158,11 +158,6 @@ class TestSetupEnvironmentFromFiles:
         )  # fmt: skip
         # Patch the root path and expanduser to point to our temporary files
         with (
-            patch(
-                "cstar.system.environment.CStarEnvironment.user_env_path",
-                new_callable=PropertyMock,
-                return_value=dotenv_path,
-            ),
             patch.object(
                 cstar.system.environment.CStarEnvironment, "package_root", new=tmp_path
             ),
@@ -231,11 +226,6 @@ class TestSetupEnvironmentFromFiles:
                 "cstar.system.environment.CStarEnvironment.system_env_path",
                 new_callable=PropertyMock,
                 return_value=system_dotenv_path,
-            ),
-            patch(
-                "cstar.system.environment.CStarEnvironment.user_env_path",
-                new_callable=PropertyMock,
-                return_value=dotenv_path,
             ),
         ):
             # Instantiate the environment to trigger loading the environment variables
@@ -426,11 +416,13 @@ class TestSetupEnvironmentFromFiles:
         env1 = ChainMap(env0, updates)
 
         # patch the _load function so we can show loads only occur after updates
-        with patch(
-            "cstar.system.environment.CStarEnvironment._load_env",
-            new_callable=Mock,
-            side_effect=[env0, env1],
-        ) as loader:
+        with (
+            patch(
+                "cstar.system.environment.CStarEnvironment._load_env",
+                new_callable=Mock,
+                side_effect=[env0, env1],
+            ) as loader,
+        ):
             # Instantiate the environment to trigger loading the environment variables
             env = CStarEnvironment(
                 system_name=mock_system_name,

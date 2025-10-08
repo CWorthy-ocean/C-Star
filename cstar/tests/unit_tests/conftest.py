@@ -343,21 +343,9 @@ def system_dotenv_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def mock_system_name() -> str:
+def mock_system_name(scope="session") -> str:
     # A name for the mock system/platform executing the tests.
     return "mock_system"
-
-
-@pytest.fixture
-def mock_user_env_name() -> str:
-    """Return a unique name for a temporary user .env config file.
-
-    Returns
-    -------
-    str
-        The name of the .env file
-    """
-    return ".mock.env"
 
 
 @pytest.fixture
@@ -458,7 +446,7 @@ def custom_user_env(
     return functools.partial(_write_custom_env, dotenv_path)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def mock_lmod_filename() -> str:
     """Return a complete path to an empty, temporary .lmod config file for tests.
 
