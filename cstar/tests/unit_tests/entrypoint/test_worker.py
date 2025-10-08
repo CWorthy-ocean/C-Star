@@ -503,12 +503,7 @@ def test_runner_directory_prep(
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with mock.patch(
-        "cstar.system.environment.CStarEnvironment.user_env_path",
-        new_callable=mock.PropertyMock,
-        return_value=dotenv_path,
-    ):
-        sim_runner._prepare_file_system()
+    sim_runner._prepare_file_system()
 
     # Confirm a user env file is not removed
     assert dotenv_path.exists()
