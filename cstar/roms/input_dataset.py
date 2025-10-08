@@ -58,9 +58,6 @@ class ROMSInputDataset(InputDataset, ABC):
             """
     ROMS-specific implementation of `InputDataset` (doc below)
 
-    Extends `get()` method to generate dataset using roms-tools in the case that `source`
-    points to a yaml file.
-
     Docstring for InputDataset:
     ---------------------------
     """

@@ -38,7 +38,7 @@ class SimulationStages(enum.StrEnum):
     SETUP = enum.auto()
     """Execute simulation setup. See `Simulation.setup`"""
     BUILD = enum.auto()
-    """Execute builds of simulation depdencies. See `Simulation.build`"""
+    """Execute builds of simulation dependencies. See `Simulation.build`"""
     PRE_RUN = enum.auto()
     """Execute hooks before the simulation starts. See `Simulation.pre_run`"""
     RUN = enum.auto()
