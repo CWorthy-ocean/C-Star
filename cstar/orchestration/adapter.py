@@ -5,8 +5,6 @@ from pydantic import BaseModel
 from cstar.base.additional_code import AdditionalCode
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration import models
-
-# from cstar.roms import ROMSSimulation
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (

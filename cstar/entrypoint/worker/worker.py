@@ -119,8 +119,8 @@ class SimulationRunner(Service):
             / LOGS_DIRECTORY
             / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
         )
-        register_file_handler(self.log, log_file)
-        self.log.addHandler(logging.FileHandler(log_file))
+        register_file_handler(self.log, log_file, level=service_cfg.log_level)
+        self.log.setLevel(service_cfg.log_level)
         self._output_root = self._simulation.directory.expanduser()
         self._output_dir = self._get_unique_path(self._output_root)
         self._stages = tuple(request.stages)

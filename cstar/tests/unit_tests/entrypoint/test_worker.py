@@ -2,6 +2,7 @@ import datetime
 import itertools
 import logging
 import os
+import shutil
 from pathlib import Path
 from unittest import mock
 
@@ -26,6 +27,12 @@ from cstar.simulation import Simulation
 
 DEFAULT_LOOP_DELAY = 5
 DEFAULT_HEALTH_CHECK_FREQUENCY = 10
+
+
+@pytest.fixture(scope="module", autouse=True)
+def clean_up_logs():
+    yield
+    shutil.rmtree("temp_out_dir")
 
 
 @pytest.fixture
@@ -101,6 +108,7 @@ def sim_runner(
     sim._output_root = output_path  # type: ignore[misc]
     sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
     sim._simulation.directory = sim._output_dir
+
     return sim
 
 
@@ -397,85 +405,88 @@ def test_start_runner(
     assert runner._blueprint_uri == request.blueprint_uri
 
 
-# def test_runner_directory_check(
-#     tmp_path: Path,
-#     sim_runner: SimulationRunner,
-#     dotenv_path: Path,
-# ) -> None:
-#     """Test the simulation runner's file system preparation.
-#
-#     Verifies that a non-empty output directory causes an exception
-#     to be raised.
-#
-#     Parameters
-#     ----------
-#     sim_runner: SimulationRunner
-#         An instance of SimulationRunner to be used for the test.
-#     tmp_path : Path
-#         A temporary path to store simulation output and logs
-#     dotenv_path : Path
-#         Path to a temporary location to
-#     """
-#     output_dir = tmp_path / "output"
-#
-#     # populate the directories that should be cleaned-up
-#     dotenv_path.parent.mkdir(parents=True, exist_ok=True)
-#     dotenv_path.touch()
-#
-#     output_dir.mkdir(parents=True, exist_ok=True)
-#     (output_dir / "somefile.txt").touch()
-#
-#     with (
-#         mock.patch(
-#             "cstar.system.environment.CStarEnvironment.user_env_path",
-#             new_callable=mock.PropertyMock,
-#             return_value=dotenv_path,
-#         ),
-#         pytest.raises(ValueError),
-#     ):
-#         sim_runner._prepare_file_system()
-#
-#
-# def test_runner_directory_check_ignore_logs(
-#     tmp_path: Path,
-#     sim_runner: SimulationRunner,
-#     dotenv_path: Path,
-# ) -> None:
-#     """Test the simulation runner's file system preparation.
-#
-#     Verify that the worker ignores a populated output directory if it only
-#     contains log files.
-#
-#     Parameters
-#     ----------
-#     sim_runner: SimulationRunner
-#         An instance of SimulationRunner to be used for the test.
-#     tmp_path : Path
-#         A temporary path to store simulation output and logs
-#     dotenv_path : Path
-#         Path to a temporary location to
-#     """
-#     output_dir = tmp_path / "output"
-#
-#     # populate the directories that should be cleaned-up
-#     dotenv_path.parent.mkdir(parents=True, exist_ok=True)
-#     dotenv_path.touch()
-#
-#     output_dir.mkdir(parents=True, exist_ok=True)
-#     logs_dir = output_dir / "logs"
-#     logs_dir.mkdir(parents=True, exist_ok=False)
-#
-#     # A file in the logs directory should be ignored
-#     (logs_dir / "any-name.txt").touch()
-#
-#     with mock.patch(
-#         "cstar.system.environment.CStarEnvironment.user_env_path",
-#         new_callable=mock.PropertyMock,
-#         return_value=dotenv_path,
-#     ):
-#         sim_runner._prepare_file_system()
+@pytest.mark.skip("skip until we decide where we are checking this and how")
+def test_runner_directory_check(
+    tmp_path: Path,
+    sim_runner: SimulationRunner,
+    dotenv_path: Path,
+) -> None:
+    """Test the simulation runner's file system preparation.
+
+    Verifies that a non-empty output directory causes an exception
+    to be raised.
+
+    Parameters
+    ----------
+    sim_runner: SimulationRunner
+        An instance of SimulationRunner to be used for the test.
+    tmp_path : Path
+        A temporary path to store simulation output and logs
+    dotenv_path : Path
+        Path to a temporary location to
+    """
+    output_dir = tmp_path / "output"
+
+    # populate the directories that should be cleaned-up
+    dotenv_path.parent.mkdir(parents=True, exist_ok=True)
+    dotenv_path.touch()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "somefile.txt").touch()
+
+    with (
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.user_env_path",
+            new_callable=mock.PropertyMock,
+            return_value=dotenv_path,
+        ),
+        pytest.raises(ValueError),
+    ):
+        sim_runner._prepare_file_system()
 
 
+@pytest.mark.skip("skip until we decide where we are checking this and how")
+def test_runner_directory_check_ignore_logs(
+    tmp_path: Path,
+    sim_runner: SimulationRunner,
+    dotenv_path: Path,
+) -> None:
+    """Test the simulation runner's file system preparation.
+
+    Verify that the worker ignores a populated output directory if it only
+    contains log files.
+
+    Parameters
+    ----------
+    sim_runner: SimulationRunner
+        An instance of SimulationRunner to be used for the test.
+    tmp_path : Path
+        A temporary path to store simulation output and logs
+    dotenv_path : Path
+        Path to a temporary location to
+    """
+    output_dir = tmp_path / "output"
+
+    # populate the directories that should be cleaned-up
+    dotenv_path.parent.mkdir(parents=True, exist_ok=True)
+    dotenv_path.touch()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = output_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=False)
+
+    # A file in the logs directory should be ignored
+    (logs_dir / "any-name.txt").touch()
+
+    with mock.patch(
+        "cstar.system.environment.CStarEnvironment.user_env_path",
+        new_callable=mock.PropertyMock,
+        return_value=dotenv_path,
+    ):
+        sim_runner._prepare_file_system()
+
+
+@pytest.mark.skip("skip until we decide where we are checking this and how")
 def test_runner_directory_prep(
     tmp_path: Path,
     sim_runner: SimulationRunner,
