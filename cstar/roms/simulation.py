@@ -885,6 +885,8 @@ class ROMSSimulation(Simulation):
             simulation_dict["tidal_forcing"] = self.tidal_forcing.to_dict()
         if self.river_forcing is not None:
             simulation_dict["river_forcing"] = self.river_forcing.to_dict()
+        if self.cdr_forcing is not None:
+            simulation_dict["cdr_forcing"] = self.cdr_forcing.to_dict()
         if len(self.surface_forcing) > 0:
             simulation_dict["surface_forcing"] = [
                 sf.to_dict() for sf in self.surface_forcing

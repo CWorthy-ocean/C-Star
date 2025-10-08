@@ -13,6 +13,7 @@ from cstar.system.scheduler import (
     SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
+    query_max_walltime_via_sacctmgr,
 )
 
 
@@ -84,6 +85,9 @@ class HostNameEvaluator:
         """
         if self.lmod_hostname:
             return self.lmod_hostname
+
+        if os.getenv("RCAC_CLUSTER") == "anvil":
+            return "anvil"
 
         if self.platform_hostname:
             return self.platform_hostname
@@ -176,6 +180,48 @@ class _PerlmutterSystemContext(_SystemContext):
             queues=[per_regular_q, per_shared_q, per_debug_q],
             primary_queue_name="regular",
             other_scheduler_directives={"-C": "cpu"},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
+        )
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _AnvilSystemContext(_SystemContext):
+    """The contextual dependencies for the Anvil system."""
+
+    name: ClassVar[str] = "anvil"
+    """The unique name identifying the Anvil system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Anvil."""
+    mpi_prefix: ClassVar[str] = "srun"
+    """The MPI prefix used on Anvil."""
+    docs: ClassVar[str] = "https://www.rcac.purdue.edu/knowledge/anvil/architecture"
+    """URI for documentation of the Anvil system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        regular_q = SlurmPartition(
+            name="wholenode",
+            query_name="part-standard",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        shared_q = SlurmPartition(
+            name="shared",
+            query_name="part-shared",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        debug_q = SlurmPartition(
+            name="debug",
+            query_name="part-debug",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+
+        return SlurmScheduler(
+            queues=[regular_q, shared_q, debug_q],
+            primary_queue_name="wholenode",
+            other_scheduler_directives={},
             requires_task_distribution=False,
             documentation=cls.docs,
             max_cpus_per_node=128,
