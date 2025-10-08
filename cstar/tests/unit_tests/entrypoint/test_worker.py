@@ -363,7 +363,6 @@ def test_start_runner(
     assert runner._blueprint_uri == request.blueprint_uri
 
 
-@pytest.mark.skip("skip until we decide where we are checking this and how")
 def test_runner_directory_check(
     tmp_path: Path,
     sim_runner: SimulationRunner,
@@ -383,27 +382,15 @@ def test_runner_directory_check(
     dotenv_path : Path
         Path to a temporary location to
     """
-    output_dir = tmp_path / "output"
-
-    # populate the directories that should be cleaned-up
-    dotenv_path.parent.mkdir(parents=True, exist_ok=True)
-    dotenv_path.touch()
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
+    sim_runner._output_dir.mkdir(parents=True, exist_ok=True)
+    (sim_runner._output_dir / "somefile.txt").touch()
 
     with (
-        mock.patch(
-            "cstar.system.environment.CStarEnvironment.user_env_path",
-            new_callable=mock.PropertyMock,
-            return_value=dotenv_path,
-        ),
         pytest.raises(ValueError),
     ):
         sim_runner._prepare_file_system()
 
 
-@pytest.mark.skip("skip until we decide where we are checking this and how")
 def test_runner_directory_check_ignore_logs(
     tmp_path: Path,
     sim_runner: SimulationRunner,
@@ -444,7 +431,6 @@ def test_runner_directory_check_ignore_logs(
         sim_runner._prepare_file_system()
 
 
-@pytest.mark.skip("skip until we decide where we are checking this and how")
 def test_runner_directory_prep(
     tmp_path: Path,
     sim_runner: SimulationRunner,
