@@ -37,29 +37,6 @@ class TestROMSSimulationInitialization:
     This test class verifies that the `ROMSSimulation` object is correctly initialized
     with required and optional parameters, handles errors appropriately, and assigns
     default values where necessary.
-
-    Tests
-    -----
-    - `test_init`: Ensures correct assignment of attributes when all required parameters
-      are provided.
-    - `test_init_raises_if_no_discretization`: Verifies that a `ValueError` is raised
-      if `discretization` is not provided.
-    - `test_init_raises_if_no_runtime_code`: Verifies that a `ValueError` is raised
-      if `runtime_code` is not provided.
-    - `test_init_raises_if_no_compile_time_code`: Ensures a `NotImplementedError`
-      is raised when `compile_time_code` is missing.
-    - `test_default_codebase_assignment`: Confirms that default external codebases
-      are correctly assigned if not explicitly provided.
-    - `test_check_forcing_collection`: Confirms that an error is raised if forcing
-      attributes corresponding to lists are incorrectly typed
-    - `test_codebases`: Ensures the `codebases` property correctly returns the list
-      of external codebases associated with the simulation.
-    - `test_input_datasets`: Ensures the `input_datasets` property correctly returns
-      a list of `ROMSInputDataset` instances.
-    - `test_check_inputdataset_dates_warns_and_sets_start_date`:
-      Test that `_check_inputdataset_dates` warns and overrides mismatched `start_date`
-    - `test_check_inputdataset_dates_warns_and_sets_end_date`:
-      Test that `_check_inputdataset_dates` warns and overrides mismatched `end_date`
     """
 
     def test_init(self, fake_romssimulation):
@@ -321,17 +298,6 @@ class TestROMSSimulationInitialization:
             The attribute being checked (e.g., "surface_forcing").
         expected_type_name : str
             The name of the expected input dataset class for elements of the attribute.
-
-        Assertions
-        ----------
-        - A `TypeError` is raised when attributes that should be lists of ROMSInputDatasets
-          are incorrectly set to other types.
-
-        Mocks & Fixtures
-        ----------------
-        tmp_path : Path
-            Temporary directory fixture provided by `pytest` for safely
-            testing file system interactions.
         """
         expected_msg = f"must be a list of {expected_type_name} instances"
         test_args = cast(dict[str, Any], {attrname: ["this", "is", "not", "valid"]})
@@ -444,36 +410,11 @@ class TestROMSSimulationInitialization:
         modified ROMSRuntimeSettings instance containing a combination of parameters
         (mock) read from a file and those overriden by the ROMSSimulation itself (e.g.
         number of timesteps).
-
-        Assertions
-        ----------
-        - Asserts any parameters overriden by ROMSSimulation attributes are correctly set
-        - Asserts that the `marbl_biogeochemistry` entry is None for an alternate
-          ROMSSimulation instance where the `runtime_code` attribute corresponds to a single
-          (`.in`) file
-
-        Fixtures
-        --------
-        fake_romssimulation: ROMSSimulation
-           A pytest fixture returning a common, example ROMSSimulation instance.
-
-        Mocks
-        -----
-        mock_forcing_paths: mock.PropertyMock
-           Mocks the output of the `ROMSSimulation._forcing_paths` property to return a
-           list of imitation forcing filepaths
-        mock_from_file: unittest.mock.MagicMock
-           Mock the output of ROMSRuntimeSettings.from_file to return a basic, mocked
-           ROMSRuntimeSettings instance.
         """
         sim = fake_romssimulation
 
         # Stop complaints about missing local paths:
         sim.runtime_code.working_path = Path("my_code/")
-        # sim.model_grid.working_path = Path("grid.nc")
-        # sim.initial_conditions.working_path = Path("ini.nc")
-
-        # mock_roms_path.side_effect = [[Path("grid.nc"),],[Path("ini.nc"),]]
         mock_grid_path.return_value = [
             Path("grid.nc"),
         ]
@@ -915,36 +856,9 @@ class TestToAndFromDictAndBlueprint:
     """Tests for the `to_dict`, `from_dict`, `to_blueprint`, and `from_blueprint`
     methods of `ROMSSimulation`.
 
-    This test suite ensures that `ROMSSimulation` instances can be correctly serialized
+    This test class ensures that `ROMSSimulation` instances can be correctly serialized
     to dictionaries and YAML blueprints, and that they can be reconstructed accurately
     from these representations.
-
-    Tests
-    -----
-    - `test_to_dict`:
-        Ensures that calling `to_dict()` produces a dictionary with the correct structure
-        and expected key-value pairs.
-    - `test_from_dict`:
-        Verifies that `from_dict()` reconstructs a `ROMSSimulation` instance that matches
-        the original.
-    - `test_from_dict_with_single_forcing_entries`:
-        Tests that `from_dict()` correctly handles boundary and surface forcing data
-        when they are represented as dictionaries instead of lists.
-    - `test_dict_roundtrip`:
-        Ensures that a `ROMSSimulation` instance serialized with `to_dict()` and
-        reconstructed with `from_dict()` retains all properties.
-    - `test_to_blueprint`:
-        Verifies that `to_blueprint()` correctly writes a YAML file with the expected
-        simulation data.
-    - `test_from_blueprint_valid_file`:
-        Tests `from_blueprint()` with a valid local YAML file.
-    - `test_from_blueprint_invalid_filetype`:
-        Ensures `from_blueprint()` raises an error when given a non-YAML file.
-    - `test_from_blueprint_url`:
-        Verifies that `from_blueprint()` correctly loads a YAML blueprint from a URL.
-    - `test_blueprint_roundtrip`:
-        Ensures that a `ROMSSimulation` instance serialized with `to_blueprint()` and
-        reconstructed with `from_blueprint()` retains all properties.
     """
 
     def test_to_dict(self, fake_romssimulation, fake_romssimulation_dict):
@@ -954,16 +868,6 @@ class TestToAndFromDictAndBlueprint:
         This test ensures that the dictionary returned by `to_dict()` contains all expected
         key-value pairs unique to `ROMSSimulation` (excluding those inherited from `Simulation`,
         which are tested separately).
-
-        Assertions
-        --------------
-        - The dictionary contains the correct MARBL codebase information.
-        - The model grid, initial conditions, tidal forcing, boundary forcing, and
-          surface forcing data match the expected values.
-
-        Mocks & Fixtures
-        ---------------------
-        - `fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
         """
         sim = fake_romssimulation
         tested_dict = sim.to_dict()
@@ -1108,17 +1012,6 @@ class TestToAndFromDictAndBlueprint:
 
         This test verifies that the `to_blueprint()` method writes a YAML file with
         the expected dictionary representation of the `ROMSSimulation` instance.
-
-        Assertions
-        ----------
-        - `open()` is called once with the correct filename and write mode.
-        - `yaml.dump()` is called with the dictionary representation of the simulation
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
-        - `mock_open`: A mock for Python's built-in `open()` function.
-        - `mock_yaml_dump`: A mock for `yaml.dump()` to intercept and verify the YAML writing operation.
         """
         sim = fake_romssimulation
         mock_file_path = "mock_path.yaml"
@@ -1151,17 +1044,6 @@ class TestToAndFromDictAndBlueprint:
 
         This test mocks the output of yaml.safe_load to return the expected dictionary
         and then verifies that this output is properly processed.
-
-         Assertions
-         ----------
-         - The returned object is an instance of `ROMSSimulation`.
-         - `open()` is called exactly once with the expected file path in read mode.
-
-         Mocks & Fixtures
-         ----------------
-         - `mock_open_file`: Mocks the built-in `open()` function to simulate reading a YAML file.
-         - `mock_path_exists`: Mocks `Path.exists()` to return `True`, ensuring the test bypasses file existence checks.
-         - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint file's location.
         """
         sim_dict = fake_romssimulation_dict
         blueprint_path = tmp_path / "roms_blueprint.yaml"
@@ -1201,19 +1083,6 @@ class TestToAndFromDictAndBlueprint:
     ):
         """Tests that `from_blueprint()` raises a `ValueError` when given a non-YAML
         file.
-
-        This test ensures that `from_blueprint()` enforces the expected file format by
-        raising an error if the blueprint file does not have a `.yaml` extension.
-
-        Assertions
-        ----------
-        - A `ValueError` is raised with the expected message.
-
-        Mocks & Fixtures
-        ----------------
-        - `mock_open_file`: Mocks the built-in `open()` function to simulate reading a non-YAML file.
-        - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
-        - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint's location.
         """
         blueprint_path = tmp_path / "roms_blueprint.nc"
 
@@ -1242,18 +1111,6 @@ class TestToAndFromDictAndBlueprint:
 
         This test ensures that when given a valid URL to a YAML blueprint file,
         `from_blueprint()` retrieves, parses, and constructs a `ROMSSimulation` instance.
-
-        Assertions
-        ----------
-        - The returned object is an instance of `ROMSSimulation`.
-        - The request to fetch the blueprint is made exactly once.
-
-        Mocks & Fixtures
-        ----------------
-        - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
-        - `mock_requests_get`: Mocks `requests.get()` to return a simulated YAML blueprint response.
-        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
-        - `tmp_path`: A temporary directory provided by `pytest` to simulate the simulation directory.
         """
         sim_dict = fake_romssimulation_dict
         mock_response = mock.MagicMock()
@@ -1314,62 +1171,6 @@ class TestProcessingAndExecution:
     This test class covers functionality related to modifying runtime code,
     preparing input datasets, executing the simulation, and handling post-run
     processes.
-
-    Tests
-    -----
-    - `test_setup`
-        Ensures that `setup()` correctly configures external codebases, runtime
-        code, and input datasets.
-    - `test_is_setup_external_codebases`
-        Validates that `is_setup` returns False if external codebases are not
-        configured properly.
-    - `test_is_setup_additional_code`
-        Ensures that `is_setup` returns False when required runtime or compile-time
-        code is missing.
-    - `test_is_setup_input_datasets`
-        Verifies that `is_setup` correctly considers input dataset availability and
-        date ranges.
-    - `test_build`
-        Tests that `build()` correctly compiles the ROMS executable.
-    - `test_build_no_rebuild`
-        Ensures that `build()` does not recompile if the source code and executable
-        remain unchanged.
-    - `test_build_raises_if_make_clean_error`
-        Checks that an error is raised when the `make compile_clean` step fails.
-    - `test_build_raises_if_make_error`
-        Ensures that a runtime error is raised when the `make` step fails during
-        compilation.
-    - `test_build_raises_if_no_build_dir`
-        Verifies that `build()` raises an error when no compile-time code directory
-        is set.
-    - `test_pre_run`
-        Ensures that `pre_run()` correctly partitions input datasets before execution.
-    - `test_run_raises_if_no_executable`
-        Checks that `run()` raises an error when no executable is found.
-    - `test_run_raises_if_no_node_distribution`
-        Verifies that `run()` raises an error when the node distribution is not set.
-    - `test_run_raises_if_no_runtime_code_working_path`
-        Verifies that `run()` raises an error when the runtime code is not fetched.
-    - `test_run_local_execution`
-        Ensures that `run()` correctly starts a local process when no scheduler is
-        available.
-    - `test_run_with_scheduler`
-        Tests that `run()` submits a job with scheduler defaults when queue and
-        walltime are not specified.
-    - `test_run_with_scheduler_raises_if_no_account_key`
-        Ensures that `run()` raises an error when executed with a scheduler but no
-        account key is provided.
-    - `test_post_run_raises_if_called_before_run`
-        Checks that `post_run()` raises an error if called before `run()`.
-    - `test_post_run_raises_if_still_running`
-        Ensures that `post_run()` raises an error if execution is not yet completed.
-    - `test_post_run_merges_netcdf_files`
-        Tests that `post_run()` correctly merges NetCDF output files after execution.
-    - `test_post_run_prints_message_if_no_files`
-        Verifies that `post_run()` prints a message and exits when no output files
-        are found.
-    - `test_post_run_raises_error_if_ncjoin_fails`
-        Ensures that `post_run()` raises an error if `ncjoin` fails during merging.
     """
 
     @mock.patch.object(ROMSInputDataset, "get")
@@ -1382,26 +1183,7 @@ class TestProcessingAndExecution:
         mock_inputdataset_get,
         fake_romssimulation,
     ):
-        """Tests that `setup` correctly fetches and organizes simulation components.
-
-        This test verifies that `setup` correctly:
-        - Configures external codebases.
-        - Retrieves and organizes compile-time and runtime code.
-        - Fetches input datasets.
-
-        Mocks & Fixtures
-        ---------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_additionalcode_get` : Mocks `get()` for runtime and compile-time code.
-        - `mock_inputdataset_get` : Mocks `get()` for input datasets.
-        - `mock_externalcodebase_setup` : Mocks `setup` for external codebases.
-
-        Assertions
-        ----------
-        - Ensures `handle_config_status` is called twice (ROMS & MARBL codebases).
-        - Ensures `get()` is called twice for compile-time and runtime code.
-        - Ensures `get()` is called once per input dataset.
-        """
+        """Tests that `setup` correctly fetches and organizes simulation components."""
         sim = fake_romssimulation
 
         sim.setup()
@@ -1438,18 +1220,6 @@ class TestProcessingAndExecution:
         This test verifies that `is_setup` correctly evaluates the setup status based
         on the configuration of the ROMS and MARBL external codebases. It parametrizes
         the configuration status of each codebase and verifies different combinations.
-
-        Mocks & Fixtures
-        ---------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_exists_locally` : Mocks `exists_locally` for additional code components.
-        - `codebase_status` : Parameterized mock return value for `ROMSExternalCodeBase.is_configured`.
-        - `marbl_status` : Parameterized mock return value for `MARBLExternalCodeBase.local_config_status`.
-
-        Assertions
-        ----------
-        - Ensures that `is_setup` returns `True` only when both codebases are configured.
-        - Ensures that `is_setup` returns `False` if either codebase is not configured.
         """
         sim = fake_romssimulation
 
@@ -1496,19 +1266,6 @@ class TestProcessingAndExecution:
         This test ensures that `is_setup` evaluates the setup status correctly based on whether
         runtime and compile-time code components exist locally. It parametrizes the `exists_locally`
         property on different AdditionalCode instances and checks different combinations.
-
-        Mocks & Fixtures
-        ---------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_additionalcode_exists` : Mocks `exists_locally` for runtime and compile-time code.
-        - `mock_local_config_status` : Mocks external codebase configuration status.
-        - `runtime_exists` : Parameterized mock return value indicating if runtime code exists.
-        - `compile_exists` : Parameterized mock return value indicating if compile-time code exists.
-
-        Assertions
-        ----------
-        - Ensures `is_setup` returns `True` only when both runtime and compile-time code exist.
-        - Ensures `is_setup` returns `False` when either component is missing.
         """
         sim = fake_romssimulation
 
@@ -1648,18 +1405,6 @@ class TestProcessingAndExecution:
         - Cleans the build directory if necessary.
         - Calls `make compile_clean` and `make` to compile the executable.
         - Stores the executable path and hash after a successful build.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_subprocess` : Mocks subprocess calls for compilation.
-        - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
-
-        Assertions
-        ----------
-        - Ensures `make compile_clean` and `make` commands are executed in sequence.
-        - Ensures the executable path is correctly stored in `exe_path`.
-        - Ensures the executable hash is stored in `_exe_hash` after successful compilation.
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
@@ -1708,18 +1453,6 @@ class TestProcessingAndExecution:
         - The compile-time code exists locally.
         - The hash of the existing executable matches the stored hash.
         - `rebuild` is set to `False`.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_subprocess` : Mocks subprocess calls for compilation (should not be called).
-        - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
-        - `caplog` : Captures log outputs to verify early exit message.
-
-        Assertions
-        ----------
-        - Ensures `build` exits early without calling `make compile_clean` or `make`.
-        - Ensures an informational message is logged about skipping recompilation.
         """
         sim = fake_romssimulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
@@ -1761,17 +1494,6 @@ class TestProcessingAndExecution:
 
         This test ensures that if `make compile_clean` returns a nonzero exit code,
         a `RuntimeError` is raised with the appropriate error message.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_subprocess` : Mocks subprocess calls for compilation.
-        - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
-
-        Assertions
-        ----------
-        - Ensures `make compile_clean` is called before compilation.
-        - Verifies that a `RuntimeError` is raised when `make compile_clean` fails.
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
@@ -1801,17 +1523,6 @@ class TestProcessingAndExecution:
 
         This test ensures that if `make` returns a nonzero exit code during the ROMS
         compilation process, a `RuntimeError` is raised with the appropriate error message.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_subprocess` : Mocks subprocess calls for compilation.
-        - `mock_get_hash` : Mocks checksum retrieval for the compiled executable.
-
-        Assertions
-        ----------
-        - Ensures `make` is called for ROMS compilation.
-        - Verifies that a `RuntimeError` is raised when `make` fails.
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
@@ -1856,16 +1567,6 @@ class TestProcessingAndExecution:
 
         This test verifies that `pre_run` correctly calls `partition()` on input datasets
         that exist locally, while skipping those that do not.
-
-        Mocks & Fixtures
-        ----------------
-        - `mock_partition` : Mocks the `partition` method of `ROMSInputDataset`.
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-
-        Assertions
-        ----------
-        - Ensures that `partition()` is called only on datasets that exist locally.
-        - Ensures that datasets not found locally are not partitioned.
         """
         sim = fake_romssimulation
 
@@ -1927,15 +1628,6 @@ class TestProcessingAndExecution:
 
         This test ensures that if `n_procs_tot` is `None`, calling `run` will
         raise a `ValueError`, preventing execution without a valid node distribution.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - ROMSDiscretization.n_procs_tot: Mocks `n_procs_tot` to return `None`.
-
-        Assertions
-        ----------
-        - Ensures `ValueError` is raised with the expected error message when `n_procs_tot` is `None`.
         """
         sim = fake_romssimulation
         sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
@@ -1962,18 +1654,6 @@ class TestProcessingAndExecution:
         This test verifies that if a scheduler is not present, `run` initiates
         local execution using `LocalProcess`. The method should construct the appropriate
         command and set the execution handler correctly.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `patch("cstar.roms.simulation.LocalProcess")` : Mocks `LocalProcess` to track its instantiation.
-        - CStarSystemManager.scheduler: Mocks `cstar_sysmgr.scheduler` to return `None`
-
-        Assertions
-        ----------
-        - Ensures `LocalProcess` is instantiated with the correct command and run path.
-        - Ensures `LocalProcess.start()` is called.
-        - Ensures the returned execution handler matches the mocked `LocalProcess` instance.
         """
         sim = fake_romssimulation
 
@@ -2032,20 +1712,6 @@ class TestProcessingAndExecution:
 
         This test verifies that if a scheduler is present, `run` creates a scheduler job
         with the appropriate parameters and submits it.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `patch("cstar.roms.simulation.create_scheduler_job")` : Mocks `create_scheduler_job`
-          to verify job creation.
-        - `patch("cstar.system.manager.CStarSystemManager.scheduler", new_callable=mock.PropertyMock)` :
-          Mocks `cstar_sysmgr.scheduler` to simulate a scheduler environment.
-
-        Assertions
-        ----------
-        - Ensures `create_scheduler_job` is called with the correct arguments.
-        - Ensures the scheduler job's `submit()` method is called.
-        - Ensures the returned execution handler matches the created job instance.
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
@@ -2115,18 +1781,6 @@ class TestProcessingAndExecution:
 
         This test ensures that if a scheduler is available but `account_key` is not provided,
         the method raises an appropriate error instead of submitting a job.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `patch("cstar.roms.simulation.create_scheduler_job")` : Mocks job creation to prevent real execution.
-        - `patch("cstar.system.manager.CStarSystemManager.scheduler", new_callable=mock.PropertyMock)` :
-          Mocks `cstar_sysmgr.scheduler` to simulate a scheduler environment.
-
-        Assertions
-        ----------
-        - Ensures `create_scheduler_job` is never called if `account_key` is missing.
-        - Confirms that the expected `ValueError` is raised with an appropriate message.
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
@@ -2187,17 +1841,6 @@ class TestProcessingAndExecution:
 
         This test ensures that calling `post_run` while the execution status is not `COMPLETED`
         results in an appropriate error, preventing premature post-processing.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - Mocks `_execution_handler` to simulate an active (non-completed) execution state.
-
-        Assertions
-        ----------
-        - Confirms that calling `post_run` while the execution handler's status is `RUNNING`
-          raises `RuntimeError`.
-        - Validates that the error message correctly informs the user of the issue.
         """
         sim = fake_romssimulation
 
@@ -2225,17 +1868,6 @@ class TestProcessingAndExecution:
         `ncjoin` to merge them, and moves the partitioned files to the `PARTITIONED`
         subdirectory. It creates mock netCDF files in a temporary directory (using
         touch) and then checks these are correctly handled.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_subprocess` : Mocks `subprocess.run` to simulate successful `ncjoin` execution.
-
-        Assertions
-        ----------
-        - Ensures `ncjoin` is called correctly for each set of partitioned files.
-        - Confirms that the partitioned files are moved to `PARTITIONED` after merging.
-        - Validates that the `post_run` process completes without errors.
         """
         # Setup
         sim = fake_romssimulation
@@ -2291,22 +1923,11 @@ class TestProcessingAndExecution:
         fake_romssimulation,
         caplog: pytest.LogCaptureFixture,
     ):
-        """Tests that `post_run` prints a message and exits early if no output files are
+        """Tests that `post_run` prints a log message and exits early if no output files are
         found.
 
         This test ensures that when `post_run` is called and no partitioned NetCDF files
-        exist, a message is printed indicating that no suitable output was found.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_glob` : Mocks `Path.glob` to return an empty list, simulating no files.
-        - `caplog` : Capture logging output to verify the correct message is displayed.
-
-        Assertions
-        ----------
-        - Ensures `logger.info()` is called with the expected message.
-        - Confirms that `Path.glob` is called once to check for output files.
+        exist, a log message is printed indicating that no suitable output was found.
         """
         # Setup
         sim = fake_romssimulation
@@ -2339,17 +1960,6 @@ class TestProcessingAndExecution:
         This test verifies that when `ncjoin` encounters an error while attempting to join
         partitioned NetCDF output files, a `RuntimeError` is raised, ensuring the failure
         is correctly handled.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance.
-        - `mock_glob` : Mocks `Path.glob` to return a list of fake NetCDF files.
-        - `mock_subprocess` : Mocks `subprocess.run` to simulate a failed `ncjoin` execution.
-
-        Assertions
-        ----------
-        - Ensures `ncjoin` is executed with the correct file pattern.
-        - Confirms that a `RuntimeError` is raised when `ncjoin` returns a non-zero exit code.
         """
         # Setup
         sim = fake_romssimulation
@@ -2395,15 +2005,6 @@ class TestROMSSimulationRestart:
     `ROMSSimulation` instance from an existing simulation's restart file. It ensures
     that the new instance properly inherits the configuration and updates its
     initial conditions.
-
-    Tests
-    -----
-    - `test_restart` : Verifies that `restart` creates a new `ROMSSimulation` instance
-      and correctly sets the initial conditions from the restart file.
-    - `test_restart_raises_if_no_restart_files` : Ensures `restart` raises a
-      `FileNotFoundError` when no restart files matching the expected pattern are found.
-    - `test_restart_raises_if_multiple_restarts_found` : Confirms `restart` raises a
-      `ValueError` if multiple restart files are found, preventing ambiguity.
     """
 
     @mock.patch.object(Path, "glob")  # Mock file search
@@ -2418,23 +2019,6 @@ class TestROMSSimulationRestart:
         - Creates a new `ROMSSimulation` instance.
         - Searches for the appropriate restart file in the output directory.
         - Assigns the found restart file as the new instance’s initial conditions.
-
-        Mocks & Fixtures
-        ----------------
-        mock_exists : Mock
-            Mocks `Path.exists` to return `True`, ensuring that the output directory is
-            considered present.
-        mock_glob : Mock
-            Mocks `Path.glob` to return a list containing the expected restart file.
-        fake_romssimulation : Fixture
-            Provides an instance of `ROMSSimulation` and a temporary directory for testing.
-
-        Assertions
-        ----------
-        - The method searches for a restart file matching the expected timestamp format.
-        - A new `ROMSSimulation` instance is returned.
-        - The new instance's `initial_conditions` attribute is correctly assigned the
-          detected restart file.
         """
         # Setup mock simulation
         sim = fake_romssimulation

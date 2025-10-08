@@ -149,15 +149,9 @@ def fake_romsinputdataset_netcdf_local(
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
 
-    Mocks:
-    ------
-    - DataSource.location_type: Property mocked as 'path'
-    - DataSource.source_type: Property mocked as 'netcdf'
-    - DataSource.basename: Property mocked as 'local_file.nc'
-
     Yields:
     -------
-        FakeROMSInputDataset: A mock dataset pointing to a local NetCDF file.
+        FakeROMSInputDataset: A dataset instance pointing to a local NetCDF file.
     """
     fake_location = "some/local/source/path/local_file.nc"
     source_data = mock_sourcedata_local_file(location=fake_location)
@@ -180,15 +174,9 @@ def fake_romsinputdataset_netcdf_remote(
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
 
-    Mocks:
-    ------
-    - DataSource.location_type: Property mocked as 'path'
-    - DataSource.source_type: Property mocked as 'netcdf'
-    - DataSource.basename: Property mocked as 'local_file.nc'
-
     Yields:
     -------
-        FakeROMSInputDataset: A mock dataset pointing to a local NetCDF file.
+        FakeROMSInputDataset: A dataset instance pointing to a local NetCDF file.
     """
     fake_location = "http://example.com/local_file.nc"
     source_data = mock_sourcedata_remote_file(location=fake_location)
@@ -210,17 +198,11 @@ def fake_romsinputdataset_partitioned_source_remote(
     mock_sourcedata_remote_file,
     mock_sourcedatacollection_remote_files,
 ) -> Generator[ROMSInputDataset, None, None]:
-    """Fixture to provide a ROMSInputDataset with a local NetCDF source.
-
-    Mocks:
-    ------
-    - DataSource.location_type: Property mocked as 'path'
-    - DataSource.source_type: Property mocked as 'netcdf'
-    - DataSource.basename: Property mocked as 'local_file.nc'
+    """Fixture to provide a ROMSInputDataset with a remote, partitioned NetCDF source.
 
     Yields:
     -------
-        FakeROMSInputDataset: A mock dataset pointing to a local NetCDF file.
+        FakeROMSInputDataset: A dataset instance pointing to remote, partitioned NetCDF data.
     """
     fake_location = "http://example.com//local_file_00.nc"
     fake_np_xi = 5
@@ -263,15 +245,9 @@ def fake_romsinputdataset_yaml_local(
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local YAML source.
 
-    Mocks:
-    ------
-    - DataSource.location_type: Property mocked as 'path'
-    - DataSource.source_type: Property mocked as 'yaml'
-    - DataSource.basename: Property mocked as 'local_file.yaml'
-
     Yields:
     -------
-        FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
+        FakeROMSInputDataset: A dataset instance pointing to a local YAML file.
     """
     fake_location = "some/local/source/path/local_file.yaml"
     source_data = mock_sourcedata_local_text_file(location=fake_location)
@@ -294,15 +270,9 @@ def fake_romsinputdataset_yaml_remote(
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a remote YAML source.
 
-    Mocks:
-    ------
-    - DataSource.location_type: Property mocked as 'url'
-    - DataSource.source_type: Property mocked as 'yaml'
-    - DataSource.basename: Property mocked as 'remote_file.yaml'
-
     Yields:
     -------
-        FakeROMSInputDataset: A mock dataset pointing to a local YAML file.
+        FakeROMSInputDataset: A dataset instance pointing to a remote YAML file.
     """
     fake_location = "https://dodgyfakeyamlfiles.ru/all/remote_file.yaml"
     source_data = mock_sourcedata_remote_text_file(

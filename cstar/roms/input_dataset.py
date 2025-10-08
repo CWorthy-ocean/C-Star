@@ -187,8 +187,10 @@ class ROMSInputDataset(InputDataset, ABC):
                 )
             return True
 
-        def get_files_to_partition():
+        def list_files_to_partition() -> list[Path]:
             """Helper function to obtain a list of files associated with this ROMSInputDataset to partition."""
+            if not self.working_copy:
+                return []
             if isinstance(self.working_copy, StagedDataCollection):
                 # if single InputDataset corresponds to many files, check they're colocated
                 if not all(
@@ -248,7 +250,7 @@ class ROMSInputDataset(InputDataset, ABC):
         if not validate_partitioning_request():
             return
 
-        id_files_to_partition = get_files_to_partition()
+        id_files_to_partition = list_files_to_partition()
         existing_files = self.partitioning.files if self.partitioning else None
         tempdir_obj, backupdir, partitioning_succeeded = None, None, False
 
@@ -274,11 +276,9 @@ class ROMSInputDataset(InputDataset, ABC):
         self,
         local_dir: str | Path,
     ) -> None:
-        """Ensure this input dataset is available as a NetCDF file in `local_dir`.
+        """Obtain and stage this ROMSInputDataset, making it locally available to C-Star.
 
-        If the source is not a YAML file, this method delegates to the base class
-        `InputDataset.get()`. Otherwise, it processes the YAML using `roms-tools`
-        to create the dataset.
+        This method updates the `ROMSInputDataset.working_copy` attribute.
 
         Parameters:
         -----------
@@ -302,6 +302,7 @@ class ROMSInputDataset(InputDataset, ABC):
             super().get(local_dir=local_dir)
 
     def _get_from_partitioned_source(self, local_dir: Path) -> None:
+        """Stages partitioned source files, checking pre-existence individually."""
         # If some (or all) files exist, go through and check which ones (if any) to stage:
         if self.working_copy:
             for i, s in enumerate(self.partitioned_source):
@@ -317,6 +318,7 @@ class ROMSInputDataset(InputDataset, ABC):
             self._working_copy = self.partitioned_source.stage(local_dir)
 
     def _get_from_yaml(self, local_dir: Path) -> None:
+        """Creates (with roms-tools) and stages local netCDF datasets from compatible yaml instructions."""
         if self.exists_locally:
             # Can't know where roms-tools will save so have to do a less advanced check
             self.log.info(f"⏭️ {self._local} already exists, skipping.")
@@ -404,7 +406,7 @@ class ROMSInputDataset(InputDataset, ABC):
         read by ROMS.
 
         Useful in the case of partitioned
-        source files, where the `working_copy` is a list of partitioned files
+        source files, where the `working_copy` lists individual partitioned files
         e.g., `my_grid.0.nc`, `my_grid.1.nc`, etc., but ROMS
         expects to see `my_grid.nc`
         """

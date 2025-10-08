@@ -18,17 +18,15 @@ class InputDataset(ABC, LoggingMixin):
 
     Attributes:
     -----------
-    source: DataSource
-        Describes the location and type of the source data
-    file_hash: str, default None
-        The 256 bit SHA sum associated with a (remote) file for verifying downloads
-    working_path: Path or list of Paths, default None
-        The path(s) where the input dataset is being worked with locally, set when `get()` is called.
+    source: SourceData
+        Describes the location of and classifies the source data
+    working_copy: StagedFile or StagedDataCollection or None
+        Describes the locally staged version (if any) of the data
 
     Methods:
     --------
-    get(local_dir)
-        Fetch the file containing this input dataset and save it to `local_dir`
+    get(local_dir) -> StagedFile | StagedDataCollection
+        Stage this InputDataset for local use by C-Star
     """
 
     def __init__(
@@ -38,28 +36,24 @@ class InputDataset(ABC, LoggingMixin):
         start_date: str | dt.datetime | None = None,
         end_date: str | dt.datetime | None = None,
     ):
-        """Initialize an InputDataset object associated with a model simulation using a
-        source URL and file hash.
+        """Initialize an InputDataset object associated with a model simulation.
 
         Parameters:
         -----------
         location: str
             URL or path pointing to a file either containing this dataset or instructions for creating it.
             Used to set the `source` attribute.
-        file_hash: str, optional
-            The 256 bit SHA sum associated with the file for verification if remote
+        file_hash: str, optional, recommended for remote files
+            The 256 bit SHA sum associated with the file for secure download verification
         """
         self.source: SourceData = SourceData(location=location, identifier=file_hash)
         self.start_date = coerce_datetime(start_date) if start_date else None
         self.end_date = coerce_datetime(end_date) if end_date else None
 
-        # assert self.start_date is None or isinstance(self.start_date, dt.datetime)
-        # assert self.end_date is None or isinstance(self.end_date, dt.datetime)
-
         # Initialize object state:
         self._working_copy: StagedFile | StagedDataCollection | None = None
-        # Subclass-specific  confirmation that everything is set up correctly:
 
+        # Subclass-specific  confirmation that everything is set up correctly:
         self.validate()
 
     def validate(self):
@@ -67,11 +61,18 @@ class InputDataset(ABC, LoggingMixin):
 
     @property
     def working_copy(self) -> StagedFile | StagedDataCollection | None:
+        """Describes the (if any) locally available copy of this InputDataset.
+
+        Returns
+        -------
+        StagedFile | StagedDataCollection:
+            Object tracking locally staged data associated with this InputDataset
+        """
         return self._working_copy
 
     @property
     def exists_locally(self) -> bool:
-        """Check if this InputDataset exists on the local filesystem.
+        """Check if an unmodified version of this InputDataset exists on the local filesystem.
 
         Returns
         -------
@@ -83,7 +84,7 @@ class InputDataset(ABC, LoggingMixin):
 
     @property
     def _local(self) -> list[Path]:
-        """Returns any paths associated with working_copy as a list"""
+        """Returns any paths associated with working_copy as a list."""
         if self.working_copy:
             if isinstance(self.working_copy, StagedDataCollection):
                 return self.working_copy.paths
@@ -149,14 +150,9 @@ class InputDataset(ABC, LoggingMixin):
         return input_dataset_dict
 
     def get(self, local_dir: str | Path) -> None:
-        """Make the file containing this input dataset available in `local_dir`
+        """Make this InputDataset locally available in `local_dir`.
 
-        If InputDataset.source.location_type is...
-           - ...a local path: create a symbolic link to the file in `local_dir`.
-           - ...a URL: fetch the file to `local_dir` using Pooch
-
-        This method updates the `InputDataset.working_path` attribute with the new location,
-        and caches file metadata and checksum values.
+        This method updates the `InputDataset.working_copy` attribute,
 
         Parameters:
         -----------

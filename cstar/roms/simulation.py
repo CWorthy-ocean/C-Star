@@ -286,6 +286,17 @@ class ROMSSimulation(Simulation):
     def _validate_input(
         self, inp: T | list[T] | None, typecheck: type[T] | None = None
     ) -> None:
+        """Validates supplied input datasets in the context of this simulation.
+
+        See subfunction docstrings for particulars on each check.
+
+        Parameters
+        ----------
+        inp: ROMSInputDataset or list of ROMSInputDatasets
+            datasets to be validated in the context of this simulation
+        typecheck: type, optional, default None
+            Used to confirm that datasets are all of expected type, e.g. if in a list
+        """
         if not inp:
             return
 
@@ -309,7 +320,7 @@ class ROMSSimulation(Simulation):
         inputdatasets: T | list[T],
         expected_type: type[T],
     ):
-        """Validate the types of input datasets in a forcing collection.
+        """Validate the types of input datasets.
 
         For forcing types that may correspond to multiple ROMSInputDataset instances
         (ROMSSurfaceForcing, ROMSBoundaryForcing, ROMSForcingCorrections), ensure that
@@ -319,13 +330,13 @@ class ROMSSimulation(Simulation):
         ----------
         collection : list
             A list of dataset objects to validate.
-        expected_class : type
-            The expected class (e.g., `ROMSSurfaceForcing`).
+        expected_type : type
+            The expected type (e.g., `ROMSSurfaceForcing`).
 
         Raises
         ------
         TypeError
-            If any item in the list is not an instance of `expected_class`.
+            If any item in the list is not an instance of `expected_type`.
         """
         if not isinstance(inputdatasets, list):
             inputdatasets = [
@@ -364,10 +375,8 @@ class ROMSSimulation(Simulation):
 
         Raises
         ------
-        AttributeError
-            If any dataset is missing expected date attributes.
-        Warning
-            A warning is issued (not raised) when mismatched dates are corrected.
+        ValueError
+            If a mismatched date range cannot be corrected (e.g. for netCDF inputs)
 
         Notes
         -----
@@ -377,9 +386,11 @@ class ROMSSimulation(Simulation):
         """
 
         def is_correctable(inp: ROMSInputDataset) -> bool:
+            """roms-tools yaml files' dates can be meaningfully corrected, netCDF dates cannot"""
             return inp.source._classification.value.file_encoding == FileEncoding.TEXT
 
         def correct_date_bound_or_raise(inp: ROMSInputDataset, bound: str):
+            """Correct (if possible) a mismatched date value between this ROMSSimulation and dataset, or raise."""
             sim_bound = getattr(self, bound)
 
             inp_bound = getattr(inp, bound, None)
@@ -572,11 +583,12 @@ class ROMSSimulation(Simulation):
 
     @property
     def _forcing_paths(self) -> list[Path]:
-        """Collect and return all local paths to ROMS forcing input datasets.
+        """Collect and return all local paths to ROMS forcing input datasets in ROMS format.
 
-        This internal property gathers the `working_copy` attributes of all forcing-related
-        datasets attached to the simulation — including tidal, river, surface, boundary, and
-        correction datasets — and returns a flat list of resolved file paths.
+        Calls `ROMSInputDataset.path_for_roms` to strip any partitioning information from the
+        local path, in accordance with ROMS' expectations.
+
+        This property is used to populate ROMSRuntimeSettings.forcing
 
         Returns
         -------
@@ -586,14 +598,9 @@ class ROMSSimulation(Simulation):
         Raises
         ------
         ValueError
-            If any required forcing dataset does not have a `working_path` set,
-            indicating it has not been retrieved or prepared.
+            If any required forcing dataset does not have `working_copy` set,
+            indicating it has not been staged for use by C-Star.
 
-        Notes
-        -----
-        - If any `working_path` is a list of files (e.g., multiple NetCDFs), each path
-          is included individually.
-        - This property is used to populate `runtime_settings.forcing`.
         """
         input_forcings = chain(
             [self.tidal_forcing, self.river_forcing],
@@ -1575,8 +1582,8 @@ class ROMSSimulation(Simulation):
         Returns
         -------
         ROMSSimulation
-            A new instance of `ROMSSimulation` that starts from `end_date`.
-            file and runs until `new_end_date`.
+            A new instance of `ROMSSimulation` that starts from `end_date`
+            and runs until `new_end_date`.
 
         Raises
         ------
