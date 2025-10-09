@@ -271,7 +271,9 @@ class ROMSSimulation(Simulation):
         ValueError
             If no `.in` file or more than one is found in the runtime code files.
         """
-        in_files = [f for f in self.runtime_code.files if f.endswith(".in")]
+        in_files = [
+            f.basename for f in self.runtime_code.source if f.basename.endswith(".in")
+        ]
 
         if not in_files:
             raise RuntimeError("No .in file was provided")
@@ -677,7 +679,7 @@ class ROMSSimulation(Simulation):
         - If MARBL configuration files are present in `runtime_code.files`, their paths
           are also included.
         """
-        if self.runtime_code.working_path is None:
+        if self.runtime_code.working_copy is None:
             raise ValueError(
                 "Cannot access runtime settings without local "
                 + "`.in` file. Call ROMSSimulation.setup() or "
@@ -685,7 +687,7 @@ class ROMSSimulation(Simulation):
             )
 
         simulation_runtime_settings = ROMSRuntimeSettings.from_file(
-            self.runtime_code.working_path / self._in_file
+            self.runtime_code.working_copy[0].path.parent / self._in_file
         )
 
         # Modify each relevant section in the runtime settings object based on blueprint values
@@ -707,20 +709,23 @@ class ROMSSimulation(Simulation):
         simulation_runtime_settings.forcing.filenames = self._forcing_paths
 
         # all MARBL files must be present to enable MARBL
+        runtime_code_filenames = [f.basename for f in self.runtime_code.source]
         if all(
-            f in self.runtime_code.files
+            f in runtime_code_filenames
             for f in [
                 "marbl_in",
                 "marbl_tracer_output_list",
                 "marbl_diagnostic_output_list",
             ]
         ):
+            # TODO [0] below isn't the best
+            runtime_code_path = self.runtime_code.working_copy[0].path
             simulation_runtime_settings.marbl_biogeochemistry = (
                 cstar.roms.runtime_settings.MARBLBiogeochemistry(
-                    marbl_namelist_fname=self.runtime_code.working_path / "marbl_in",
-                    marbl_tracer_list_fname=self.runtime_code.working_path
+                    marbl_namelist_fname=runtime_code_path / "marbl_in",
+                    marbl_tracer_list_fname=runtime_code_path
                     / "marbl_tracer_output_list",
-                    marbl_diag_list_fname=self.runtime_code.working_path
+                    marbl_diag_list_fname=runtime_code_path
                     / "marbl_diagnostic_output_list",
                 )
             )
@@ -1085,14 +1090,18 @@ class ROMSSimulation(Simulation):
         if hasattr(self, "runtime_code") and (self.runtime_code is not None):
             simulation_tree_dict.setdefault("runtime_code", {})
             simulation_tree_dict["runtime_code"] = [
-                runtime_code.split("/")[-1] for runtime_code in self.runtime_code.files
+                codefile.basename
+                for codefile in self.runtime_code.source
+                # runtime_code.split("/")[-1] for runtime_code in self.runtime_code.files
             ]
 
         if hasattr(self, "compile_time_code") and (self.compile_time_code is not None):
             simulation_tree_dict.setdefault("compile_time_code", {})
             simulation_tree_dict["compile_time_code"] = [
-                compile_time_code.split("/")[-1]
-                for compile_time_code in self.compile_time_code.files
+                codefile.basename
+                for codefile in self.compile_time_code.source
+                # compile_time_code.split("/")[-1]
+                # for compile_time_code in self.compile_time_code.files
             ]
         print_dict = {}
         print_dict["ROMS"] = simulation_tree_dict
@@ -1272,13 +1281,13 @@ class ROMSSimulation(Simulation):
         run : Executes the compiled ROMS model.
         """
         self.compile_time_code = cast(AdditionalCode, self.compile_time_code)
-        build_dir = self.compile_time_code.working_path
-        if build_dir is None:
+        if not self.compile_time_code.working_copy:
             raise ValueError(
                 "Unable to compile ROMSSimulation: "
-                + "\nROMSSimulation.compile_time_code.working_path is None."
+                + "\nROMSSimulation.compile_time_code is not staged locally."
                 + "\n Call ROMSSimulation.compile_time_code.get() and try again"
             )
+        build_dir = self.compile_time_code.working_copy[0].path.parent
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())
@@ -1442,7 +1451,7 @@ class ROMSSimulation(Simulation):
                 "Simulation.n_procs_tot is not set"
             )
 
-        if self.runtime_code.working_path is None:
+        if not self.runtime_code.working_copy:
             raise FileNotFoundError(
                 "Local copy of ROMSSimulation.runtime_code does not exist. "
                 "Call ROMSSimulation.setup() or ROMSSimulation.runtime_code.get() "
@@ -1458,7 +1467,7 @@ class ROMSSimulation(Simulation):
         run_path = self.directory / "output"
 
         final_runtime_settings_file = (
-            self.runtime_code.working_path.resolve() / f"{self.name}.in"
+            self.runtime_code.working_copy[0].path.parent / f"{self.name}.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
         run_path.mkdir(parents=True, exist_ok=True)

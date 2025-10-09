@@ -1,11 +1,10 @@
-import shutil
-import tempfile
 from pathlib import Path
 
-from cstar.base.datasource import DataSource
-from cstar.base.gitutils import _clone_and_checkout
+from cstar.base.gitutils import git_location_to_raw
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import _get_sha256_hash, _list_to_concise_str
+from cstar.io.constants import SourceClassification
+from cstar.io.source_data import SourceDataCollection, _SourceInspector
+from cstar.io.staged_data import StagedDataCollection
 
 
 class AdditionalCode(LoggingMixin):
@@ -47,8 +46,8 @@ class AdditionalCode(LoggingMixin):
         self,
         location: str,
         subdir: str = "",
-        checkout_target: str | None = None,
-        files: list[str] | None = None,
+        checkout_target: str = "",
+        files: list[str] = [],
     ):
         """Initialize an AdditionalCode object from a DataSource  and a list of code
         files.
@@ -71,23 +70,29 @@ class AdditionalCode(LoggingMixin):
         AdditionalCode
             An initialized AdditionalCode object
         """
-        self.source: DataSource = DataSource(location)
-        self.subdir: str = subdir
-        self._checkout_target = checkout_target
-        self.files: list[str] | None = [] if files is None else files
+        if (
+            _SourceInspector(location).classify()
+            == SourceClassification.REMOTE_REPOSITORY
+        ):
+            source = SourceDataCollection.from_locations(
+                locations=[
+                    git_location_to_raw(location, checkout_target, f, subdir)
+                    for f in files
+                ]
+            )
+        else:
+            source = SourceDataCollection.from_locations(
+                locations=[f"{location}/{subdir}/{f}" for f in files]
+            )
+        self.source: SourceDataCollection = source
         # Initialize object state
-        self.working_path: Path | None = None
-        self._local_file_hash_cache: dict = {}
+        self.working_copy: StagedDataCollection | None = None
 
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
-        base_str += f"\nLocation: {self.source.location}"
-        if self.subdir is not None:
-            base_str += f"\nSubdirectory: {self.subdir}"
-        if self.checkout_target is not None:
-            base_str += f"\nCheckout target: {self.checkout_target}"
-        base_str += f"\nWorking path: {self.working_path}"
+        base_str += f"\nLocations: {self.source.locations}"
+        base_str += f"\nWorking copy: {self.working_copy}"
         base_str += f"\nExists locally: {self.exists_locally}"
         if not self.exists_locally:
             base_str += " (get with AdditionalCode.get())"
@@ -100,120 +105,32 @@ class AdditionalCode(LoggingMixin):
     def __repr__(self) -> str:
         # Constructor-style section:
         repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\nlocation = {self.source.location!r},"
-        repr_str += f"\nsubdir = {self.subdir!r}"
-        if hasattr(self, "checkout_target"):
-            repr_str += f"\ncheckout_target = {self.checkout_target!r},"
-        if hasattr(self, "files") and self.files is not None:
-            repr_str += "\nfiles = " + _list_to_concise_str(self.files, pad=9)
+        repr_str += f"\nlocations = {self.source.locations!r},"
         repr_str += "\n)"
         # Additional info:
         info_str = ""
-        if self.working_path is not None:
-            info_str += f"working_path = {self.working_path},"
+        if self.working_copy is not None:
+            info_str += f"working_copy = {self.working_copy},"
             info_str += f"exists_locally = {self.exists_locally}"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
         return repr_str
 
     @property
-    def checkout_target(self) -> str | None:
-        return self._checkout_target
-
-    @property
     def exists_locally(self):
         """Determine whether a local working copy of the AdditionalCode exists at
         self.working_path (bool)
         """
-        if (self.working_path is None) or (self._local_file_hash_cache is None):
-            return False
-
-        for f in self.files:
-            path = self.working_path / f
-            if not path.exists():
-                return False
-
-            current_hash = _get_sha256_hash(path.resolve())
-            if self._local_file_hash_cache.get(path) != current_hash:
-                return False
-
-        return True
+        if (self.working_copy) and not (self.working_copy.changed_from_source):
+            return True
+        return False
 
     def get(self, local_dir: str | Path) -> None:
-        """Copy the required AdditionalCode files to `local_dir`
-
-        If AdditionalCode.source describes a remote repository,
-        this is cloned into a temporary directory first.
+        """Stage the AdditionalCode files to `local_dir`
 
         Parameters:
         -----------
         local_dir: str | Path
-            The local directory (typically `Case.caseroot`) in which to fetch the additional code.
+            The local directory to stage the AdditionalCode in
         """
-        if len(self.files) == 0:
-            raise ValueError(
-                "Cannot `get` an AdditionalCode object when AdditionalCode.files is empty"
-            )
-
-        local_dir = Path(local_dir).expanduser().resolve()
-        try:
-            tmp_dir = None  # initialise the tmp_dir variable in case we need it later
-            # CASE 1: Additional code is in a remote repository:
-            if (self.source.location_type == "url") and (
-                self.source.source_type == "repository"
-            ):
-                if self.checkout_target is None:
-                    raise ValueError(
-                        "AdditionalCode.source points to a repository but AdditionalCode.checkout_target is None"
-                    )
-                else:
-                    assert isinstance(self.checkout_target, str), (
-                        "We have just verified checkout_target is not None"
-                    )
-                tmp_dir = tempfile.mkdtemp()
-                _clone_and_checkout(
-                    source_repo=self.source.location,
-                    local_path=tmp_dir,
-                    checkout_target=self.checkout_target,
-                )
-                source_dir = Path(f"{tmp_dir}/{self.subdir}")
-            # CASE 2: Additional code is in a local directory/repository
-            elif (self.source.location_type == "path") and (
-                (self.source.source_type == "directory")
-                or (self.source.source_type == "repository")
-            ):
-                source_dir = Path(self.source.location).expanduser() / self.subdir
-
-            else:
-                raise ValueError(
-                    "Invalid source for AdditionalCode. "
-                    + "AdditionalCode.source.location_type and "
-                    + "AdditionalCode.source.source_type should be "
-                    + "'url' and 'repository', or 'path' and 'repository', or"
-                    + "'path' and 'directory', not"
-                    + f"'{self.source.location_type}' and '{self.source.source_type}'"
-                )
-
-            # Now go through the file and copy them to local_dir
-            local_dir.mkdir(parents=True, exist_ok=True)
-            for i, f in enumerate(self.files):
-                src_file_path = source_dir / f
-                tgt_file_path = local_dir / Path(f).name
-
-                self.log.info(
-                    f"• Copying {src_file_path.relative_to(source_dir)} to {tgt_file_path.parent}"
-                )
-                if src_file_path.exists():
-                    shutil.copy(src_file_path, tgt_file_path)
-                    self._local_file_hash_cache[tgt_file_path] = _get_sha256_hash(
-                        tgt_file_path
-                    )
-
-                else:
-                    raise FileNotFoundError(f"Error: {src_file_path} does not exist.")
-
-            self.log.info("✅ All files copied successfully")
-            self.working_path = local_dir
-        finally:
-            if tmp_dir:
-                shutil.rmtree(tmp_dir)
+        self.working_copy = self.source.stage(local_dir)

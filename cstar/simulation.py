@@ -324,12 +324,12 @@ class Simulation(ABC, LoggingMixin):
 
         # Runtime code:
         if self.runtime_code is not None:
-            NN = len(self.runtime_code.files)
+            NN = len(self.runtime_code.source)
             base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
 
         # Compile-time code:
         if self.compile_time_code is not None:
-            NN = len(self.compile_time_code.files)
+            NN = len(self.compile_time_code.source)
             base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
 
         if hasattr(self, "exe_path") and self.exe_path is not None:
@@ -453,13 +453,8 @@ class Simulation(ABC, LoggingMixin):
         runtime_code = getattr(self, "runtime_code")
         if runtime_code is not None:
             runtime_code_info = {}
-            runtime_code_info["location"] = runtime_code.source.location
-            if runtime_code.subdir is not None:
-                runtime_code_info["subdir"] = runtime_code.subdir
-            if runtime_code.checkout_target is not None:
-                runtime_code_info["checkout_target"] = runtime_code.checkout_target
-            if runtime_code.files is not None:
-                runtime_code_info["files"] = runtime_code.files
+            runtime_code_info["locations"] = runtime_code.source.locations
+            # TODO can't reconstruct AdditionalCode from this dictionary
 
             simulation_dict["runtime_code"] = runtime_code_info
 
@@ -467,16 +462,8 @@ class Simulation(ABC, LoggingMixin):
         compile_time_code = getattr(self, "compile_time_code")
         if compile_time_code is not None:
             compile_time_code_info = {}
-            compile_time_code_info["location"] = compile_time_code.source.location
-            if compile_time_code.subdir is not None:
-                compile_time_code_info["subdir"] = compile_time_code.subdir
-            if compile_time_code.checkout_target is not None:
-                compile_time_code_info["checkout_target"] = (
-                    compile_time_code.checkout_target
-                )
-            if compile_time_code.files is not None:
-                compile_time_code_info["files"] = compile_time_code.files
-
+            compile_time_code_info["locations"] = compile_time_code.source.locations
+            # TODO can't reconstruct AdditionalCode from this dictionary
             simulation_dict["compile_time_code"] = compile_time_code_info
 
         return simulation_dict
