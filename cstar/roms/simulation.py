@@ -719,7 +719,7 @@ class ROMSSimulation(Simulation):
             ]
         ):
             # TODO [0] below isn't the best
-            runtime_code_path = self.runtime_code.working_copy[0].path
+            runtime_code_path = self.runtime_code.working_copy[0].path.parent
             simulation_runtime_settings.marbl_biogeochemistry = (
                 cstar.roms.runtime_settings.MARBLBiogeochemistry(
                     marbl_namelist_fname=runtime_code_path / "marbl_in",
@@ -1465,9 +1465,8 @@ class ROMSSimulation(Simulation):
 
         # we run ROMS in the output dir
         run_path = self.directory / "output"
-
         final_runtime_settings_file = (
-            self.runtime_code.working_copy[0].path.parent / f"{self.name}.in"
+            Path(self.runtime_code.working_copy[0].path).parent / f"{self.name}.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
         run_path.mkdir(parents=True, exist_ok=True)

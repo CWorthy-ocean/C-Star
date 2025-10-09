@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from cstar.base import AdditionalCode
+from cstar.io.constants import SourceClassification
 from cstar.roms import ROMSDiscretization, ROMSExternalCodeBase, ROMSSimulation
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
@@ -109,13 +110,11 @@ def fake_romsruntimesettings() -> ROMSRuntimeSettings:
 # Runtime and compile-time code
 ################################################################################
 @pytest.fixture
-def fake_roms_runtime_code(tmp_path) -> AdditionalCode:
+def fake_roms_runtime_code(fake_additionalcode_local) -> AdditionalCode:
     """Provides an example of ROMSSimulation.runtime_code with fake values for testing"""
-    directory = tmp_path
-    rc = AdditionalCode(
-        location=directory.parent,
+    rc = fake_additionalcode_local(
+        location="/some/local/dir",
         subdir="subdir/",
-        checkout_target="main",
         files=[
             "file1",
             "file2.in",
@@ -128,13 +127,11 @@ def fake_roms_runtime_code(tmp_path) -> AdditionalCode:
 
 
 @pytest.fixture
-def fake_roms_compile_time_code(tmp_path) -> AdditionalCode:
+def fake_roms_compile_time_code(fake_additionalcode_local) -> AdditionalCode:
     """Provides an example of ROMSSimulation.compile_time_code with fake values for testing"""
-    directory = tmp_path
-    cc = AdditionalCode(
-        location=directory.parent,
+    cc = fake_additionalcode_local(
+        location="/some/local/dir",
         subdir="subdir/",
-        checkout_target="main",
         files=["file1.h", "file2.opt"],
     )
     return cc
@@ -196,7 +193,7 @@ def fake_romsinputdataset_netcdf_remote(
 @pytest.fixture
 def fake_romsinputdataset_partitioned_source_remote(
     mock_sourcedata_remote_file,
-    mock_sourcedatacollection_remote_files,
+    mock_sourcedatacollection,
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a remote, partitioned NetCDF source.
 
@@ -219,8 +216,10 @@ def fake_romsinputdataset_partitioned_source_remote(
         fake_location.replace("00", str(i).zfill(2)) for i in range(nparts)
     ]
     unused_identifiers = [f"unusedhash{i}" for i in range(nparts)]
-    source_data_collection = mock_sourcedatacollection_remote_files(
-        locations=parted_locations, identifiers=unused_identifiers
+    source_data_collection = mock_sourcedatacollection(
+        locations=parted_locations,
+        identifiers=unused_identifiers,
+        classification=SourceClassification.REMOTE_BINARY_FILE,
     )
     patch_source_data_collection = mock.patch(
         "cstar.roms.input_dataset.SourceDataCollection.from_locations",

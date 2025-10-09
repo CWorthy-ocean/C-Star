@@ -86,20 +86,17 @@ class AdditionalCode(LoggingMixin):
             )
         self.source: SourceDataCollection = source
         # Initialize object state
-        self.working_copy: StagedDataCollection | None = None
+        self._working_copy: StagedDataCollection | None = None
 
     def __str__(self) -> str:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
-        base_str += f"\nLocations: {self.source.locations}"
+        base_str += "\nLocations:\n   "
+        base_str += "\n   ".join(self.source.locations)
         base_str += f"\nWorking copy: {self.working_copy}"
         base_str += f"\nExists locally: {self.exists_locally}"
         if not self.exists_locally:
             base_str += " (get with AdditionalCode.get())"
-        if self.files is not None:
-            base_str += "\nFiles:"
-            for filename in self.files:
-                base_str += f"\n    {filename}"
         return base_str
 
     def __repr__(self) -> str:
@@ -117,7 +114,11 @@ class AdditionalCode(LoggingMixin):
         return repr_str
 
     @property
-    def exists_locally(self):
+    def working_copy(self) -> StagedDataCollection | None:
+        return self._working_copy
+
+    @property
+    def exists_locally(self) -> bool:
         """Determine whether a local working copy of the AdditionalCode exists at
         self.working_path (bool)
         """
@@ -133,4 +134,4 @@ class AdditionalCode(LoggingMixin):
         local_dir: str | Path
             The local directory to stage the AdditionalCode in
         """
-        self.working_copy = self.source.stage(local_dir)
+        self._working_copy = self.source.stage(local_dir)

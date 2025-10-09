@@ -315,7 +315,7 @@ class SourceDataCollection:
                 SourceType.REPOSITORY,
             ]:
                 raise TypeError(
-                    f"Cannot create SourceDataCollection with data of source type '{s.source_type.value}'"
+                    f"Cannot create SourceDataCollection with data of source type '{s._classification.value.source_type.value}'"
                 )
 
     def __len__(self) -> int:

@@ -473,8 +473,8 @@ Discretization: Discretization(time_step = 60)
 
 Code:
 Codebase: FakeExternalCodeBase instance (query using StubSimulation.codebase)
-Runtime code: AdditionalCode instance with 2 files (query using StubSimulation.runtime_code)
-Compile-time code: AdditionalCode instance with 2 files (query using StubSimulation.compile_time_code)
+Runtime code: AdditionalCode instance with 3 files (query using StubSimulation.runtime_code)
+Compile-time code: AdditionalCode instance with 3 files (query using StubSimulation.compile_time_code)
 Is compiled: True
 Executable path: {sim_dir}"""
 
