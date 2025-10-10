@@ -262,7 +262,7 @@ class ROMSSimulation(Simulation):
     def _find_dotin_file(self) -> None:
         """Identify the runtime settings (.in) file from runtime code.
 
-        This internal method checks the `ROMSSimulation.runtime_code.files`
+        This internal method checks the `ROMSSimulation.runtime_code.source`
         list for exactly one file ending in `.in`, which is required to
         configure ROMS runtime settings.
 
@@ -1280,8 +1280,7 @@ class ROMSSimulation(Simulation):
         setup : Ensures necessary files are available before compilation.
         run : Executes the compiled ROMS model.
         """
-        self.compile_time_code = cast(AdditionalCode, self.compile_time_code)
-        if not self.compile_time_code.working_copy:
+        if (not self.compile_time_code) or (not self.compile_time_code.working_copy):
             raise ValueError(
                 "Unable to compile ROMSSimulation: "
                 + "\nROMSSimulation.compile_time_code is not staged locally."

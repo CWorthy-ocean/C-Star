@@ -15,29 +15,17 @@ class AdditionalCode(LoggingMixin):
 
     Attributes:
     -----------
-    source: DataSource
-        Describes the location and type of source data (e.g. repository,directory)
-    subdir: str
-        Subdirectory of source.location in which the additional code is kept
-        (used if, e.g., source.location is a remote repository)
-    checkout_target: Optional, str
-        Used if source.source_type is 'repository'.
-        A tag, git hash, or other target to check out.
-    files: Optional, list of strs
-        Path(s) relative to the subdirectory `subdir` of `source.location`
-        to the additional code files
-    working_path: Path, default None
+    source: SourceData
+        Describes the location of and classifies the source data
+    working_copy: Path, default None
         The local path to the additional code. Set when `get()` method is called.
+    exists_locally: bool
+        True if this AdditionalCode has been staged for use locally
 
     Methods:
     --------
     get(local_dir):
-       Fetch the directory containing this additional code and copy it to `local_dir`.
-       If source.source_type is 'repository', and source.location_type is 'url',
-       clone repository to a temporary directory, checkout `checkout_target`,
-       and move files in `subdir` associated with this AdditionalCode instance to `local_dir`.
-    check_exists_locally(local_dir):
-       Verify whether the files associated with this AdditionalCode instance can be found at `local_dir`
+        Stage this InputDataset for local use by C-Star
     """
 
     files: list[str]
@@ -60,10 +48,9 @@ class AdditionalCode(LoggingMixin):
            Subdirectory of `location` in which to look for files
            (e.g. if `location` points to a remote repository)
         checkout_target: Optional, str
-            Used if source.source_type is 'repository'. A tag, git hash, or other target to check out.
+            Used if the source is a remote repository. A tag, git hash, or other target to check out.
         files: Optional, list of strs
-            Path(s) relative to the subdirectory `subdir` of `source.location`
-            to the additional code files
+            Path(s) to the additional code files relative to the subdirectory `subdir` of `location`
 
         Returns:
         --------
@@ -124,13 +111,15 @@ class AdditionalCode(LoggingMixin):
 
     @property
     def working_copy(self) -> StagedDataCollection | None:
+        """The staged, local version of this AdditionalCode (if available).
+
+        Set by AdditionalCode.get()
+        """
         return self._working_copy
 
     @property
     def exists_locally(self) -> bool:
-        """Determine whether a local working copy of the AdditionalCode exists at
-        self.working_path (bool)
-        """
+        """Determine whether an unmodified local working copy of the AdditionalCode is available"""
         if (self.working_copy) and not (self.working_copy.changed_from_source):
             return True
         return False

@@ -22,6 +22,8 @@ class InputDataset(ABC, LoggingMixin):
         Describes the location of and classifies the source data
     working_copy: StagedFile or StagedDataCollection or None
         Describes the locally staged version (if any) of the data
+    exists_locally: bool
+        True if this InputDataset has been staged for use locally
 
     Methods:
     --------
@@ -98,7 +100,6 @@ class InputDataset(ABC, LoggingMixin):
         base_str = f"{name}"
         base_str = "-" * len(name) + "\n" + base_str
         base_str += "\n" + "-" * len(name)
-
         base_str += f"\nSource location: {self.source.location}"
         if self.source.file_hash is not None:
             base_str += f"\nSource file hash: {self.source.file_hash}"

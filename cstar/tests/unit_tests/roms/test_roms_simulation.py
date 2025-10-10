@@ -44,16 +44,6 @@ class TestROMSSimulationInitialization:
 
         This test ensures that a `ROMSSimulation` object is properly instantiated
         when provided with all required parameters.
-
-        Assertions
-        ----------
-        - Verifies that attributes match expected values.
-        - Checks that private attributes related to execution remain `None` initially.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance
-          and its corresponding directory.
         """
         sim = fake_romssimulation
 
@@ -134,15 +124,6 @@ class TestROMSSimulationInitialization:
 
         This test verifies that an attempt to instantiate `ROMSSimulation` without
         a required `discretization` parameter results in a `ValueError`.
-
-        Assertions
-        ----------
-        - Ensures that a `ValueError` is raised when `discretization=None`.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for
-          safely testing file system interactions.
         """
         with pytest.raises(ValueError, match="could not find 'discretization' entry"):
             ROMSSimulation(
@@ -163,15 +144,6 @@ class TestROMSSimulationInitialization:
 
         This test checks that instantiating `ROMSSimulation` without a `runtime_code`
         parameter results in a `ValueError` with an expected message substring.
-
-        Assertions
-        ----------
-        - Ensures that a `ValueError` is raised when `runtime_code=None`.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for
-          safely testing file system interactions.
         """
         with pytest.raises(ValueError, match="could not find 'runtime_code' entry"):
             ROMSSimulation(
@@ -195,15 +167,6 @@ class TestROMSSimulationInitialization:
         This test verifies that attempting to instantiate `ROMSSimulation` without a
         `compile_time_code` parameter results in a `NotImplementedError`. The error message
         should indicate that the `compile_time_code` entry is missing.
-
-        Assertions
-        ----------
-        - Ensures that a `NotImplementedError` is raised when `compile_time_code=None`.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for
-          safely testing file system interactions.
         """
         with pytest.raises(
             NotImplementedError, match="could not find a 'compile_time_code' entry"
@@ -501,15 +464,6 @@ class TestROMSSimulationInitialization:
         """Test that the ROMSSimulation.runtime_settings property correctly raises a
         ValueError if there is no local `.in` file from which to create a base
         ROMSRuntimeSettings instance.
-
-        Assertions
-        ----------
-        - A ValueError is raised if the `.in` file is missing
-
-        Fixtures
-        --------
-        fake_romssimulation: ROMSSimulation
-           A pytest fixture returning a common, example ROMSSimulation instance.
         """
         sim = fake_romssimulation
         with pytest.raises(
@@ -1646,7 +1600,7 @@ class TestProcessingAndExecution:
                 np_xi=2, np_eta=3, overwrite_existing_files=False
             )
 
-    def test_run_raises_if_no_runtime_code_working_copyh(self, fake_romssimulation):
+    def test_run_raises_if_no_runtime_code_working_copy(self, fake_romssimulation):
         """Confirm that ROMSSimulation.run() raises a FileNotFoundError if
         ROMSSimulation.runtime_code does not exist locally.
         """

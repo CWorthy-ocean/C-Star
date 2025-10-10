@@ -50,29 +50,7 @@ class TestInit:
 
 
 class TestStrAndRepr:
-    """Test class for the `__str__` and `__repr__` methods of the AdditionalCode class.
-
-    The `__str__` and `__repr__` methods provide string representations of AdditionalCode
-    instances, which include key attributes such as location, subdirectory, and associated files.
-
-    Tests
-    -----
-    test_repr_remote
-        Verifies that the `__repr__` method returns the correct string for a remote AdditionalCode instance.
-    test_repr_local
-        Verifies that the `__repr__` method returns the correct string for a local AdditionalCode instance.
-    test_repr_with_working_path
-        Verifies that the `__repr__` method includes additional state information when `working_path` is set.
-    test_str_remote
-        Verifies that the `__str__` method returns the correct string for a remote AdditionalCode instance.
-    test_str_local
-        Verifies that the `__str__` method returns the correct string for a local AdditionalCode instance.
-
-    Mocks
-    -----
-    exists_locally
-        Patches the `exists_locally` property to simulate the existence or non-existence of files.
-    """
+    """Test class for the `__str__` and `__repr__` methods of the AdditionalCode class."""
 
     def test_repr_remote(self, fake_additionalcode_remote):
         """Test that the __repr__ method returns the correct string for the example
@@ -143,7 +121,7 @@ class TestExistsLocallyAndGet:
     def test_exists_locally_when_exists(
         self, fake_additionalcode_remote, fake_stageddatacollection_remote_files
     ):
-        """Test exists_locally property when `working_path` attr set and `changed_from_source` is `False`."""
+        """Test exists_locally property when `working_copy` attr set and `changed_from_source` is `False`."""
         ac = fake_additionalcode_remote()
         ac._working_copy = fake_stageddatacollection_remote_files(
             paths=[f"/some/local/dir/{s.basename}" for s in ac.source],
@@ -156,7 +134,7 @@ class TestExistsLocallyAndGet:
     def test_exists_locally_when_modified(
         self, fake_additionalcode_remote, fake_stageddatacollection_remote_files
     ):
-        """Test exists_locally property when `working_path` attr set and `changed_from_source` is `True`."""
+        """Test exists_locally property when `working_copy` attr set and `changed_from_source` is `True`."""
         ac = fake_additionalcode_remote()
         ac._working_copy = fake_stageddatacollection_remote_files(
             paths=[f"/some/local/dir/{s.basename}" for s in ac.source],
@@ -166,7 +144,7 @@ class TestExistsLocallyAndGet:
         assert not ac.exists_locally
 
     def test_exists_locally_when_no_working_copy(self, fake_additionalcode_remote):
-        """Test exists_locally property when `working_path` attr unset."""
+        """Test exists_locally property when `working_copy` attr unset."""
         with mock.patch(
             "cstar.base.additional_code.AdditionalCode.working_copy",
             new_callable=mock.PropertyMock,
@@ -177,6 +155,7 @@ class TestExistsLocallyAndGet:
     def test_get(
         self, fake_additionalcode_remote, fake_stageddatacollection_remote_files
     ):
+        """Tests that the `get` method correctly calls `stage` and sets `working_copy`"""
         ac = fake_additionalcode_remote()
         staged = fake_stageddatacollection_remote_files()
 

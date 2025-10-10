@@ -263,7 +263,7 @@ def mock_sourcedata_remote_text_file() -> Callable[[str, str], MockSourceData]:
 
 @pytest.fixture
 def mock_sourcedatacollection() -> Callable[[str, str], SourceDataCollection]:
-    """Fixture to create a MockSourceDataCollection instance with characteristics of remote binary files.
+    """Factory fixture to create a MockSourceDataCollection instance with user-supplied classification.
 
     Parameters
     ----------
@@ -271,6 +271,8 @@ def mock_sourcedatacollection() -> Callable[[str, str], SourceDataCollection]:
         The desired locations associated with each SourceData in the collection
     identifiers, list[str], optional:
         The desired identifiers associated with each SourceData in the collection
+    classification, SourceClassification, optional:
+        The desired classification this SourceDataCollection should assume
     """
     default_location = "http://example.com/"
     default_locations = [
@@ -308,7 +310,7 @@ def mock_sourcedatacollection() -> Callable[[str, str], SourceDataCollection]:
 def fake_stagedfile_remote_source(
     mock_sourcedata_remote_file,
 ) -> Generator[Callable[[Path, "MockSourceData", bool], "StagedFile"], None, None]:
-    """Yield a factory that builds a StagedFile with a per-instance patched property.
+    """Factory fixture to produce a fake StagedFile from a remote source.
 
     Parameters
     ----------
@@ -352,7 +354,7 @@ def fake_stagedfile_remote_source(
 def fake_stageddatacollection_remote_files(
     mock_sourcedatacollection, fake_stagedfile_remote_source
 ) -> Callable[[str, str], StagedDataCollection]:
-    """Fixture to create a MockSourceDataCollection instance with characteristics of local binary files
+    """Fixture to create a MockStagedDataCollection instance with characteristics of remote binary files.
 
     Parameters
     ----------
@@ -394,22 +396,6 @@ def fake_additionalcode_remote(
 ) -> Callable[[str, str, str, list[str]], AdditionalCode]:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     a remote repository.
-
-    This fixture simulates additional code retrieved from a remote Git
-    repository. It sets up the following attributes:
-
-    - `location`: The URL of the remote repository
-    - `checkout_target`: The specific branch, tag, or commit to checkout
-    - `subdir`: A subdirectory within the repository where files are located
-    - `files`: A list of files to be included from the repository
-
-    This fixture can be used in tests that involve handling or manipulating code
-    fetched from a remote Git repository.
-
-    Returns
-    -------
-        AdditionalCode: An instance of the AdditionalCode class with preset
-        remote repository details.
     """
     default_location = "https://github.com/test/repo.git"
     default_checkout_target = "test123"
@@ -462,21 +448,6 @@ def fake_additionalcode_local(
 ) -> Callable[[str, str, list[str]], AdditionalCode]:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     code located on the local filesystem.
-
-    This fixture simulates additional code stored in a local directory. It sets
-    up the following attributes:
-
-    - `location`: The path to the local directory containing the code
-    - `subdir`: A subdirectory within the local directory where the files are located
-    - `files`: A list of files to be included from the local directory
-
-    This fixture can be used in tests that involve handling or manipulating
-    code that resides on the local filesystem.
-
-    Returns
-    --------
-        AdditionalCode: An instance of the AdditionalCode class with preset
-        local directory details.
     """
     default_location = "/some/local/directory"
     default_subdir = "some/subdirectory"

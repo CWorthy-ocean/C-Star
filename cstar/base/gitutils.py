@@ -181,7 +181,7 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
 def git_location_to_raw(
     repo_url: str, checkout_target: str, filename: str, subdir: str = ""
 ) -> str:
-    """Converts a repository file at a remote git service address to a downloadable filepath.
+    """Returns a downloadable file address given information about that file in a remote repository.
 
     Parameters
     ----------
