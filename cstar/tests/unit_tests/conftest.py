@@ -429,6 +429,11 @@ def fake_additionalcode_remote(
             identifiers=["fake_hash" for i in range(len(files))],
             classification=SourceClassification.REMOTE_TEXT_FILE,
         )
+        mock_classify_side_effect = [
+            SourceClassification.REMOTE_REPOSITORY,
+        ]
+        for i in range(len(files)):
+            mock_classify_side_effect.append(SourceClassification.REMOTE_TEXT_FILE)
         with (
             mock.patch(
                 "cstar.base.additional_code.SourceDataCollection.from_locations",
@@ -436,12 +441,7 @@ def fake_additionalcode_remote(
             ),
             mock.patch(
                 "cstar.base.additional_code._SourceInspector.classify",
-                side_effect=[
-                    SourceClassification.REMOTE_REPOSITORY,
-                    SourceClassification.REMOTE_TEXT_FILE,
-                    SourceClassification.REMOTE_TEXT_FILE,
-                    SourceClassification.REMOTE_TEXT_FILE,
-                ],
+                side_effect=mock_classify_side_effect,
             ),
         ):
             ac = AdditionalCode(
@@ -488,6 +488,11 @@ def fake_additionalcode_local(
             identifiers=["fake_hash" for i in range(len(files))],
             classification=SourceClassification.LOCAL_TEXT_FILE,
         )
+        mock_classify_side_effect = [
+            SourceClassification.LOCAL_DIRECTORY,
+        ]
+        for i in range(len(files)):
+            mock_classify_side_effect.append(SourceClassification.LOCAL_TEXT_FILE)
         with (
             mock.patch(
                 "cstar.base.additional_code.SourceDataCollection.from_locations",
@@ -495,12 +500,7 @@ def fake_additionalcode_local(
             ),
             mock.patch(
                 "cstar.base.additional_code._SourceInspector.classify",
-                side_effect=[
-                    SourceClassification.LOCAL_DIRECTORY,
-                    SourceClassification.LOCAL_TEXT_FILE,
-                    SourceClassification.LOCAL_TEXT_FILE,
-                    SourceClassification.LOCAL_TEXT_FILE,
-                ],
+                side_effect=mock_classify_side_effect,
             ),
         ):
             ac = AdditionalCode(location=location, subdir=subdir, files=files)

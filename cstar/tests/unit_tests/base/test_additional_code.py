@@ -80,9 +80,11 @@ class TestStrAndRepr:
         """
         ac = fake_additionalcode_remote()
         expected_repr = dedent("""\
-        AdditionalCode(
-        locations = ['https://raw.githubusercontent.com/test/repo/test123/test/subdir/test_file_1.F', 'https://raw.githubusercontent.com/test/repo/test123/test/subdir/test_file_2.py', 'https://raw.githubusercontent.com/test/repo/test123/test/subdir/test_file_3.opt'],
-        )""")
+AdditionalCode(
+location=https://github.com/test/repo.git,
+subdir=test/subdir,
+checkout_target=test123,
+files=['test_file_1.F', 'test_file_2.py', 'test_file_3.opt')""")
         assert repr(ac) == expected_repr, (
             f"expected \n{repr(ac)}\n, got \n{expected_repr}"
         )
@@ -92,9 +94,11 @@ class TestStrAndRepr:
         local AdditionalCode instance defined in the above fixture.
         """
         expected_repr = dedent("""\
-        AdditionalCode(
-        locations = ['/some/local/directory/some/subdirectory/test_file_1.F', '/some/local/directory/some/subdirectory/test_file_2.py', '/some/local/directory/some/subdirectory/test_file_3.opt'],
-        )""")
+AdditionalCode(
+location=/some/local/directory,
+subdir=some/subdirectory,
+checkout_target=,
+files=['test_file_1.F', 'test_file_2.py', 'test_file_3.opt')""")
         assert repr(fake_additionalcode_local()) == expected_repr
 
     def test_str_remote(self, fake_additionalcode_remote):

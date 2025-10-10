@@ -85,6 +85,13 @@ class AdditionalCode(LoggingMixin):
                 locations=[f"{location}/{subdir}/{f}" for f in files]
             )
         self.source: SourceDataCollection = source
+
+        self._constructor_args = {
+            "location": location,
+            "subdir": subdir,
+            "checkout_target": checkout_target,
+            "files": files,
+        }
         # Initialize object state
         self._working_copy: StagedDataCollection | None = None
 
@@ -102,8 +109,10 @@ class AdditionalCode(LoggingMixin):
     def __repr__(self) -> str:
         # Constructor-style section:
         repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\nlocations = {self.source.locations!r},"
-        repr_str += "\n)"
+        for k, v in self._constructor_args.items():
+            repr_str += f"\n{k}={v},"
+        repr_str = repr_str[:-2] + ")"
+
         # Additional info:
         info_str = ""
         if self.working_copy is not None:
@@ -135,3 +144,6 @@ class AdditionalCode(LoggingMixin):
             The local directory to stage the AdditionalCode in
         """
         self._working_copy = self.source.stage(local_dir)
+
+    def to_dict(self) -> dict:
+        return self._constructor_args

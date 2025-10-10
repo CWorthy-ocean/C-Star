@@ -804,13 +804,19 @@ def test_to_dict(stub_simulation):
     assert test_dict["discretization"] == {"time_step": 60}
     assert test_dict["codebase"]["source_repo"] == "https://github.com/test/repo.git"
     assert test_dict["codebase"]["checkout_target"] == "test_target"
-    assert test_dict["runtime_code"]["location"] == str(sim.directory.parent)
-    assert test_dict["runtime_code"]["files"] == ["file1", "file2"]
-    assert test_dict["runtime_code"]["subdir"] == "subdir/"
-    assert test_dict["runtime_code"]["checkout_target"] == "main"
-    assert test_dict["compile_time_code"]["location"] == str(sim.directory.parent)
-    assert test_dict["compile_time_code"]["subdir"] == "subdir/"
-    assert test_dict["compile_time_code"]["files"] == ["file1", "file2"]
-    assert test_dict["compile_time_code"]["checkout_target"] == "main"
+    assert test_dict["runtime_code"]["location"] == "/some/local/directory"
+    assert test_dict["runtime_code"]["files"] == [
+        "test_file_1.F",
+        "test_file_2.py",
+        "test_file_3.opt",
+    ]
+    assert test_dict["runtime_code"]["subdir"] == "some/subdirectory"
+    assert test_dict["compile_time_code"]["location"] == "/some/local/directory"
+    assert test_dict["compile_time_code"]["subdir"] == "some/subdirectory"
+    assert test_dict["compile_time_code"]["files"] == [
+        "test_file_1.F",
+        "test_file_2.py",
+        "test_file_3.opt",
+    ]
     assert test_dict["valid_start_date"] == datetime(2024, 1, 1, 0, 0)
     assert test_dict["valid_end_date"] == datetime(2026, 1, 1, 0, 0)

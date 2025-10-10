@@ -450,21 +450,12 @@ class Simulation(ABC, LoggingMixin):
         simulation_dict["discretization"] = self.discretization.__dict__
 
         # runtime code
-        runtime_code = getattr(self, "runtime_code")
-        if runtime_code is not None:
-            runtime_code_info = {}
-            runtime_code_info["locations"] = runtime_code.source.locations
-            # TODO can't reconstruct AdditionalCode from this dictionary
-
-            simulation_dict["runtime_code"] = runtime_code_info
+        if hasattr(self, "runtime_code") and self.runtime_code is not None:
+            simulation_dict["runtime_code"] = self.runtime_code.to_dict()
 
         # compile-time code
-        compile_time_code = getattr(self, "compile_time_code")
-        if compile_time_code is not None:
-            compile_time_code_info = {}
-            compile_time_code_info["locations"] = compile_time_code.source.locations
-            # TODO can't reconstruct AdditionalCode from this dictionary
-            simulation_dict["compile_time_code"] = compile_time_code_info
+        if hasattr(self, "compile_time_code") and self.compile_time_code is not None:
+            simulation_dict["compile_time_code"] = self.compile_time_code.to_dict()
 
         return simulation_dict
 

@@ -495,7 +495,7 @@ class TestROMSSimulationInitialization:
         sim.model_grid = None
         assert sim.roms_runtime_settings.grid is None
 
-    def test_roms_runtime_settings_raises_if_no_runtime_code_working_path(
+    def test_roms_runtime_settings_raises_if_no_runtime_code_working_copy(
         self, fake_romssimulation
     ):
         """Test that the ROMSSimulation.runtime_settings property correctly raises a
@@ -1476,6 +1476,7 @@ class TestProcessingAndExecution:
         mock_subprocess,
         mock_get_hash,
         fake_romssimulation,
+        fake_stageddatacollection_remote_files,
         caplog: pytest.LogCaptureFixture,
     ):
         """Tests that `build` does not recompile if the executable already exists and is
@@ -1490,6 +1491,7 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
         build_dir = sim.directory / "ROMS/compile_time_code"
+
         # Mock properties for early exit conditions
         with (
             mock.patch.object(
@@ -1502,7 +1504,12 @@ class TestProcessingAndExecution:
         ):
             # Pretend the executable exists
             sim._exe_hash = "dummy_hash"
-            sim.compile_time_code.working_path = build_dir
+            sim.compile_time_code._working_copy = (
+                fake_stageddatacollection_remote_files(
+                    paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+                )
+            )
+            sim.runtime_code._working_copy = fake_stageddatacollection_remote_files()
             sim.build(rebuild=False)
 
             # Ensure early exit exception was triggered
@@ -1639,7 +1646,7 @@ class TestProcessingAndExecution:
                 np_xi=2, np_eta=3, overwrite_existing_files=False
             )
 
-    def test_run_raises_if_no_runtime_code_working_path(self, fake_romssimulation):
+    def test_run_raises_if_no_runtime_code_working_copyh(self, fake_romssimulation):
         """Confirm that ROMSSimulation.run() raises a FileNotFoundError if
         ROMSSimulation.runtime_code does not exist locally.
         """
@@ -1833,7 +1840,10 @@ class TestProcessingAndExecution:
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
     def test_run_with_scheduler_raises_if_no_account_key(
-        self, mock_runtime_settings, fake_romssimulation
+        self,
+        mock_runtime_settings,
+        fake_romssimulation,
+        fake_stageddatacollection_remote_files,
     ):
         """Tests that `run` raises a `ValueError` if no account key is provided when
         using a scheduler.
@@ -1843,7 +1853,7 @@ class TestProcessingAndExecution:
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
-        sim.runtime_code.working_path = sim.directory / "ROMS/runtime_code/"
+        sim.runtime_code._working_copy = fake_stageddatacollection_remote_files()
 
         # Mock scheduler object
         mock_scheduler = mock.MagicMock()
