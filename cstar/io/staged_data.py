@@ -157,6 +157,7 @@ class StagedDataCollection:
         """Flattened list of all paths across all staged entries."""
         return [s.path for s in self._items]
 
+    @property
     def changed_from_source(self) -> bool:
         return any(s.changed_from_source for s in self._items)
 

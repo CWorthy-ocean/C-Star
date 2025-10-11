@@ -94,7 +94,7 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
 
     def _save(self, target_dir: Path, source: "SourceData") -> Path:
         hash_obj = hashlib.sha256()
-
+        target_dir.mkdir(parents=True, exist_ok=True)
         target_path = target_dir / source.basename
 
         with requests.get(source.location, stream=True, allow_redirects=True) as r:

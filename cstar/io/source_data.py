@@ -225,7 +225,7 @@ class SourceData:
         self._identifier: str | None = identifier
         self._classification: SourceClassification = _SourceInspector(
             location
-        ).classify()
+        ).classify()  # TODO public property
         self._stager: Stager | None = None
 
     @property
@@ -310,7 +310,10 @@ class SourceDataCollection:
     def _validate(self):
         """Confirm that the SourceData instances in this collection are valid"""
         for s in self._sources:
-            if s.source_type in [SourceType.DIRECTORY, SourceType.REPOSITORY]:
+            if s._classification.value.source_type in [
+                SourceType.DIRECTORY,
+                SourceType.REPOSITORY,
+            ]:
                 raise TypeError(
                     f"Cannot create SourceDataCollection with data of source type '{s.source_type.value}'"
                 )

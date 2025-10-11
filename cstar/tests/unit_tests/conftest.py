@@ -1,19 +1,20 @@
 import logging
+import os
 import pathlib
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from cstar.base import AdditionalCode, Discretization, ExternalCodeBase, InputDataset
-from cstar.base.datasource import DataSource
 from cstar.base.log import get_logger
 from cstar.io.constants import (
     SourceClassification,
 )
-from cstar.io.source_data import SourceData, _SourceInspector
-from cstar.io.staged_data import StagedData
+from cstar.io.retriever import Retriever
+from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector
+from cstar.io.staged_data import StagedData, StagedDataCollection, StagedFile
 from cstar.io.stager import Stager
 from cstar.marbl import MARBLExternalCodeBase
 from cstar.tests.unit_tests.fake_abc_subclasses import (
@@ -28,14 +29,19 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 class MockStager(Stager):
-    """Mock subclass of Stager to skip any staging and retrieval logic"""
+    """Mock subclass of Stager to skip any staging and retrieval logic.
 
-    def stage(self, target_dir: Path, source: "SourceData"):
-        return MockStagedData(source=source, path=target_dir)
+    `stage` returns a MockStagedData instance
+    """
 
     @property
     def retriever(self):
-        return None
+        if not hasattr(self, "_retriever"):
+            self._retriever = mock.Mock(spec=Retriever)
+        return self._retriever
+
+    def stage(self, target_dir: Path, source: "SourceData"):
+        return MockStagedData(source=source, path=target_dir / source.basename)
 
 
 class MockStagedData(StagedData):
@@ -104,7 +110,9 @@ class MockSourceData(SourceData):
 
 
 @pytest.fixture
-def mock_source_data_factory():
+def mock_source_data_factory() -> Callable[
+    [SourceClassification, str | Path, str | None], MockSourceData
+]:
     """
     Fixture that returns a MockSourceData instance with chosen attributes
 
@@ -127,7 +135,7 @@ def mock_source_data_factory():
         classification: SourceClassification,
         location: str | Path,
         identifier: str | None = None,
-    ):
+    ) -> MockSourceData:
         instance = MockSourceData(
             classification=classification,
             location=location,
@@ -135,13 +143,21 @@ def mock_source_data_factory():
         )
         return instance
 
-    # source_data_patch.side_effect = factory
-    yield factory
+    return factory
 
 
 @pytest.fixture
-def mock_sourcedata_remote_repo():
-    """Fixture to create a MockSourceData instance with remote repository-like characteristics"""
+def mock_sourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
+    """Fixture to create a MockSourceData instance with remote repository-like characteristics
+
+    Parameters
+    ----------
+    location, str, optional:
+        The desired location associated with this MockSourceData
+    identifier, optional:
+        The desired identifier associated with this MockSourceData
+
+    """
 
     def _create(location="https://github.com/test/repo.git", identifier="test_target"):
         return MockSourceData(
@@ -149,6 +165,209 @@ def mock_sourcedata_remote_repo():
             location=location,
             identifier=identifier,
         )
+
+    return _create
+
+
+@pytest.fixture
+def mock_sourcedata_local_file() -> Callable[[str, str], MockSourceData]:
+    """Fixture to create a MockSourceData instance with local-path-like characteristics
+
+    Parameters
+    ----------
+    location, str, optional:
+        The desired location associated with this MockSourceData
+    identifier, optional:
+        The desired identifier associated with this MockSourceData
+    """
+
+    def _create(
+        location="some/local/source/path/local_file.nc", identifier="test_target"
+    ):
+        return MockSourceData(
+            classification=SourceClassification.LOCAL_BINARY_FILE,
+            location=location,
+            identifier=identifier,
+        )
+
+    return _create
+
+
+@pytest.fixture
+def mock_sourcedata_local_text_file() -> Callable[[str, str], MockSourceData]:
+    """Fixture to create a MockSourceData instance with local-textfile-like characteristics
+
+    Parameters
+    ----------
+    location, str, optional:
+        The desired location associated with this MockSourceData
+    identifier, optional:
+        The desired identifier associated with this MockSourceData
+    """
+
+    def _create(
+        location="some/local/source/path/local_file.yaml", identifier="test_target"
+    ):
+        return MockSourceData(
+            classification=SourceClassification.LOCAL_TEXT_FILE,
+            location=location,
+            identifier=identifier,
+        )
+
+    return _create
+
+
+@pytest.fixture
+def mock_sourcedata_remote_file() -> Callable[[str, str], MockSourceData]:
+    """Fixture to create a MockSourceData instance with remote-binary-file-like characteristics
+
+    Parameters
+    ----------
+    location, str, optional:
+        The desired location associated with this MockSourceData
+    identifier, optional:
+        The desired identifier associated with this MockSourceData
+    """
+
+    def _create(location="http://example.com/remote_file.nc", identifier="abc123"):
+        return MockSourceData(
+            classification=SourceClassification.REMOTE_BINARY_FILE,
+            location=location,
+            identifier=identifier,
+        )
+
+    return _create
+
+
+@pytest.fixture
+def mock_sourcedata_remote_text_file() -> Callable[[str, str], MockSourceData]:
+    """Fixture to create a MockSourceData instance with remote textfile-like characteristics
+
+    Parameters
+    ----------
+    location, str, optional:
+        The desired location associated with this MockSourceData
+    identifier, optional:
+        The desired identifier associated with this MockSourceData
+    """
+
+    def _create(location="http://example.com/remote_file.yaml", identifier="abc123"):
+        return MockSourceData(
+            classification=SourceClassification.REMOTE_TEXT_FILE,
+            location=location,
+            identifier=identifier,
+        )
+
+    return _create
+
+
+@pytest.fixture
+def mock_sourcedatacollection_remote_files() -> Callable[
+    [str, str], SourceDataCollection
+]:
+    """Fixture to create a MockSourceDataCollection instance with characteristics of remote binary files.
+
+    Parameters
+    ----------
+    locations, list[str], optional:
+        The desired locations associated with each SourceData in the collection
+    identifiers, list[str], optional:
+        The desired identifiers associated with each SourceData in the collection
+    """
+    location = "http://example.com/"
+
+    def _create(
+        locations=[location + "remote_file_0.nc", location + "remote_file_1.nc"],
+        identifiers=["test_target0", "test_target1"],
+    ):
+        source_data_instances = []
+        for i in range(len(locations)):
+            identifier = identifiers[i] if identifiers else None
+            source_data_instances.append(
+                MockSourceData(
+                    classification=SourceClassification.REMOTE_BINARY_FILE,
+                    location=locations[i],
+                    identifier=identifier,
+                )
+            )
+        return SourceDataCollection(sources=source_data_instances)
+
+    return _create
+
+
+################################################################################
+# StagedData
+################################################################################
+@pytest.fixture
+def fake_stagedfile_remote_source(
+    mock_sourcedata_remote_file,
+) -> Generator[Callable[[Path, "MockSourceData", bool], "StagedFile"], None, None]:
+    """Yield a factory that builds a StagedFile with a per-instance patched property.
+
+    Parameters
+    ----------
+    path: Path
+        The path where this file is supposedly staged
+    source: SourceData
+        The SourceData from which this file was supposedly staged
+    changed_from_source: bool, optional, default False
+        User-specified override to the changed_from_source property
+    """
+    patchers: list[mock._patch] = []
+    local_dir = Path("some/local/dir")
+    default_source = mock_sourcedata_remote_file()
+    default_path = local_dir / default_source.basename
+
+    def _create(
+        path: Path = default_path,
+        source: "MockSourceData" = default_source,
+        changed_from_source: bool = False,
+    ) -> "StagedFile":
+        fake_stat: os.stat_result = mock.Mock(spec=os.stat_result)
+        sf: StagedFile = StagedFile(
+            source=source, path=Path(path), sha256=source.identifier, stat=fake_stat
+        )
+
+        patcher: mock._patch = mock.patch.object(
+            type(sf), "changed_from_source", new_callable=mock.PropertyMock
+        )
+        prop: mock.PropertyMock = patcher.start()
+        prop.return_value = changed_from_source
+        patchers.append(patcher)
+
+        return sf
+
+    yield _create  # generator fixture: pytest handles teardown afterward
+
+    for p in reversed(patchers):
+        p.stop()
+
+
+@pytest.fixture
+def fake_stageddatacollection_remote_files(
+    mock_sourcedatacollection_remote_files, fake_stagedfile_remote_source
+) -> Callable[[str, str], StagedDataCollection]:
+    """Fixture to create a MockSourceDataCollection instance with characteristics of local binary files
+
+    Parameters
+    ----------
+    paths: list[Path]
+        Paths of the locally staged data
+    sources: list[SourceData]
+        list of SourceData instances supposedly corresponding to `paths`
+    """
+    local_dir = Path("some/local/dir")
+    default_sources = mock_sourcedatacollection_remote_files()
+    default_paths = [local_dir / f.basename for f in default_sources.sources]
+
+    def _create(paths=default_paths, sources=default_sources):
+        staged_data_instances = []
+        for i in range(len(paths)):
+            source = sources[i] if sources else None
+            staged_data_instances.append(
+                fake_stagedfile_remote_source(path=paths[i], source=source)
+            )
+        return StagedDataCollection(items=staged_data_instances)
 
     return _create
 
@@ -230,19 +449,20 @@ def fake_externalcodebase(
     patch_source_data = mock.patch(
         "cstar.base.external_codebase.SourceData", return_value=source
     )
-    patch_source_data.start()
-    fecb = FakeExternalCodeBase()
-    fecb._source = source
-    yield fecb
-    patch_source_data.stop()
+
+    with patch_source_data:
+        fecb = FakeExternalCodeBase()
+        fecb._source = source
+        yield fecb
 
 
 @pytest.fixture
 def fake_marblexternalcodebase(
     mock_sourcedata_remote_repo,
 ) -> Generator[MARBLExternalCodeBase, None, None]:
-    """Pytest fixutre that provides an instance of the MARBLExternalCodeBase class
-    with a mocked SourceData instance.
+    """Fixture providing a `MARBLExternalCodeBase` instance for testing.
+
+    Patches `SourceData` calls to avoid network and filesystem interaction.
     """
     source_data = mock_sourcedata_remote_repo(
         location="https://marbl.com/repo.git", identifier="v1"
@@ -261,39 +481,22 @@ def fake_marblexternalcodebase(
 
 
 @pytest.fixture
-def fake_inputdataset_local() -> Generator[InputDataset, None, None]:
+def fake_inputdataset_local(
+    mock_sourcedata_local_file,
+) -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock local InputDataset instance.
 
-    This fixture patches properties of the DataSource class to simulate a local dataset,
+    This fixture patches properties of the SourceData class to simulate a local dataset,
     initializing it with relevant attributes like location, start date, and end date.
-
-    Mocks
-    -----
-    - Mocked DataSource.location_type property returning 'path'
-    - Mocked DataSource.source_type property returning 'netcdf'
-    - Mocked DataSource.basename property returning 'local_file.nc'
-
-    Yields
-    ------
-    FakeInputDataset: Instance representing a local input dataset for testing.
     """
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
-    ):
-        mock_location_type.return_value = "path"
-        mock_source_type.return_value = "netcdf"
-        mock_basename.return_value = "local_file.nc"
-
+    fake_location = "some/local/source/path/local_file.nc"
+    source_data = mock_sourcedata_local_file(location=fake_location)
+    patch_source_data = mock.patch(
+        "cstar.base.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
         dataset = FakeInputDataset(
-            location="some/local/source/path/local_file.nc",
+            location=fake_location,
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
         )
@@ -302,42 +505,32 @@ def fake_inputdataset_local() -> Generator[InputDataset, None, None]:
 
 
 @pytest.fixture
-def fake_inputdataset_remote() -> Generator[InputDataset, None, None]:
+def fake_inputdataset_remote(
+    mock_sourcedata_remote_file,
+) -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock remote InputDataset instance.
 
-    This fixture patches properties of the DataSource class to simulate a remote dataset,
+    This fixture patches properties of the SourceData class to simulate a remote dataset,
     initializing it with attributes such as URL location, file hash, and date range.
-
-    Mocks
-    -----
-    - Mocked DataSource.location_type property returning 'url'
-    - Mocked DataSource.source_type property returning 'netcdf'
-    - Mocked DataSource.basename property returning 'remote_file.nc'
 
     Yields
     ------
     FakeInputDataset: Instance representing a remote input dataset for testing.
     """
     # Using context managers to patch properties on DataSource
-    with (
-        mock.patch.object(
-            DataSource, "location_type", new_callable=mock.PropertyMock
-        ) as mock_location_type,
-        mock.patch.object(
-            DataSource, "source_type", new_callable=mock.PropertyMock
-        ) as mock_source_type,
-        mock.patch.object(
-            DataSource, "basename", new_callable=mock.PropertyMock
-        ) as mock_basename,
-    ):
-        # Mock property return values for a remote file (URL)
-        mock_location_type.return_value = "url"
-        mock_source_type.return_value = "netcdf"
-        mock_basename.return_value = "remote_file.nc"
-
+    fake_location = "http://example.com/remote_file.nc"
+    fake_hash = "abc123"
+    source_data = mock_sourcedata_remote_file(
+        location=fake_location,
+        identifier=fake_hash,
+    )
+    patch_source_data = mock.patch(
+        "cstar.base.input_dataset.SourceData", return_value=source_data
+    )
+    with patch_source_data:
         # Create the InputDataset instance; it will use the mocked DataSource
         dataset = FakeInputDataset(
-            location="http://example.com/remote_file.nc",
+            location=fake_location,
             file_hash="abc123",
             start_date="2024-10-22 12:34:56",
             end_date="2024-12-31 23:59:59",
