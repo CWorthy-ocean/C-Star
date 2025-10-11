@@ -66,7 +66,13 @@ class _SourceInspector:
     """
 
     def __init__(self, location: str | Path):
-        """Initialize this _SourceInspector with a location"""
+        """Initialize this _SourceInspector with a location.
+
+        Parameters
+        ----------
+        location (str or Path):
+           The location of the data (a local path or remote address)
+        """
         self._location = str(location)
         self._location_type: LocationType | None = None
         self._source_type: SourceType | None = None
@@ -343,7 +349,14 @@ class SourceDataCollection:
         identifiers: Sequence[str | None] | None = None,
     ) -> "SourceDataCollection":
         """Create a SourceDataCollection from a list of locations with optional
-        parallel identifier list.
+        corresponding list of identifiers identifier list.
+
+        Parameters
+        ----------
+        locations: list of str or Path
+            The locations of each item
+        identifiers: list of str
+            The identifiers of each item
         """
         n = len(locations)
         identifiers = identifiers or [None] * n
