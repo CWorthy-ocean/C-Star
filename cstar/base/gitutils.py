@@ -176,3 +176,44 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
         error_message += f"Available tags:\n{tag_names}\n"
 
     raise ValueError(error_message.strip())
+
+
+def git_location_to_raw(
+    repo_url: str, checkout_target: str, filename: str, subdir: str = ""
+) -> str:
+    """Returns a downloadable file address given information about that file in a remote repository.
+
+    Parameters
+    ----------
+    repo: str
+        The repository location
+    checkout_target: str
+        The tag, branch, or commit hash from which to get the file
+    filename: str
+        The name of the file (including extension)
+     subdir: str, optional
+        The subdirectory (from the repository top level) in which to find the file
+
+    Returns
+    -------
+    str:
+        A URL from which to retrieve the raw file directly
+    """
+    if "http" not in repo_url.lower():
+        raise ValueError(
+            f"Please provide a HTTP(S) address to the repository, not {repo_url}"
+        )
+
+    repo_url = repo_url.removesuffix(".git")
+
+    if "github.com" in repo_url:
+        raw_url_base = repo_url.replace("github.com", "raw.githubusercontent.com")
+        return f"{raw_url_base}/{checkout_target}/{subdir}/{filename}"
+    elif "gitlab.com" in repo_url:
+        return f"{repo_url}/-/raw/{checkout_target}/{subdir}/{filename}"
+    elif "bitbucket.org" in repo_url:
+        return f"{repo_url}/raw/{checkout_target}/{subdir}/{filename}"
+    else:
+        raise ValueError(
+            f"Git service at {repo_url} unsupported. Please use Github, Gitlab, or Bitbucket addresses"
+        )

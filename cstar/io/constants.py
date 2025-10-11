@@ -42,3 +42,7 @@ class SourceClassification(Enum):
     REMOTE_REPOSITORY = SourceCharacteristics(
         SourceType.REPOSITORY, LocationType.HTTP, FileEncoding.NA
     )
+
+    LOCAL_DIRECTORY = SourceCharacteristics(
+        SourceType.DIRECTORY, LocationType.PATH, FileEncoding.NA
+    )

@@ -115,7 +115,7 @@ class _SourceInspector:
             if self._is_repository:
                 self._source_type = SourceType.REPOSITORY
             elif self.location_type is LocationType.HTTP:
-                if (not self._http_is_html) and (self.suffix):
+                if not self._http_is_html:  # and (self.suffix):
                     self._source_type = SourceType.FILE
             elif self.location_type is LocationType.PATH:
                 resolved_path = Path(self.location).resolve()
@@ -128,7 +128,7 @@ class _SourceInspector:
             raise ValueError(
                 f"{self.location} does not appear to point to a valid source type. "
                 "Valid source types: \n"
-                "\n".join([value.value for value in SourceType])
+                + ("\n".join([value.value for value in SourceType]))
             )
 
         return self._source_type
@@ -315,7 +315,7 @@ class SourceDataCollection:
                 SourceType.REPOSITORY,
             ]:
                 raise TypeError(
-                    f"Cannot create SourceDataCollection with data of source type '{s.source_type.value}'"
+                    f"Cannot create SourceDataCollection with data of source type '{s._classification.value.source_type.value}'"
                 )
 
     def __len__(self) -> int:

@@ -1,5 +1,4 @@
 import logging
-import os
 import pathlib
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -8,6 +7,7 @@ from unittest import mock
 import pytest
 
 from cstar.base import AdditionalCode, Discretization, ExternalCodeBase, InputDataset
+from cstar.base.gitutils import git_location_to_raw
 from cstar.base.log import get_logger
 from cstar.io.constants import (
     SourceClassification,
@@ -262,10 +262,8 @@ def mock_sourcedata_remote_text_file() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mock_sourcedatacollection_remote_files() -> Callable[
-    [str, str], SourceDataCollection
-]:
-    """Fixture to create a MockSourceDataCollection instance with characteristics of remote binary files.
+def mock_sourcedatacollection() -> Callable[[str, str], SourceDataCollection]:
+    """Factory fixture to create a MockSourceDataCollection instance with user-supplied classification.
 
     Parameters
     ----------
@@ -273,23 +271,33 @@ def mock_sourcedatacollection_remote_files() -> Callable[
         The desired locations associated with each SourceData in the collection
     identifiers, list[str], optional:
         The desired identifiers associated with each SourceData in the collection
+    classification, SourceClassification, optional:
+        The desired classification this SourceDataCollection should assume
     """
-    location = "http://example.com/"
+    default_location = "http://example.com/"
+    default_locations = [
+        default_location + "remote_file_0.nc",
+        default_location + "remote_file_1.nc",
+    ]
+    default_identifiers = ["test_target0", "test_target1"]
+    default_classification = SourceClassification.REMOTE_BINARY_FILE
 
     def _create(
-        locations=[location + "remote_file_0.nc", location + "remote_file_1.nc"],
-        identifiers=["test_target0", "test_target1"],
+        locations=default_locations,
+        identifiers=default_identifiers,
+        classification=default_classification,
     ):
         source_data_instances = []
         for i in range(len(locations)):
             identifier = identifiers[i] if identifiers else None
             source_data_instances.append(
                 MockSourceData(
-                    classification=SourceClassification.REMOTE_BINARY_FILE,
+                    classification=classification,
                     location=locations[i],
                     identifier=identifier,
                 )
             )
+
         return SourceDataCollection(sources=source_data_instances)
 
     return _create
@@ -302,7 +310,7 @@ def mock_sourcedatacollection_remote_files() -> Callable[
 def fake_stagedfile_remote_source(
     mock_sourcedata_remote_file,
 ) -> Generator[Callable[[Path, "MockSourceData", bool], "StagedFile"], None, None]:
-    """Yield a factory that builds a StagedFile with a per-instance patched property.
+    """Factory fixture to produce a fake StagedFile from a remote source.
 
     Parameters
     ----------
@@ -323,10 +331,9 @@ def fake_stagedfile_remote_source(
         source: "MockSourceData" = default_source,
         changed_from_source: bool = False,
     ) -> "StagedFile":
-        fake_stat: os.stat_result = mock.Mock(spec=os.stat_result)
-        sf: StagedFile = StagedFile(
-            source=source, path=Path(path), sha256=source.identifier, stat=fake_stat
-        )
+        sf: StagedFile
+        with mock.patch("cstar.io.staged_data.os.stat", return_value=None):
+            sf = StagedFile(source=source, path=Path(path), sha256=source.identifier)
 
         patcher: mock._patch = mock.patch.object(
             type(sf), "changed_from_source", new_callable=mock.PropertyMock
@@ -345,9 +352,9 @@ def fake_stagedfile_remote_source(
 
 @pytest.fixture
 def fake_stageddatacollection_remote_files(
-    mock_sourcedatacollection_remote_files, fake_stagedfile_remote_source
+    mock_sourcedatacollection, fake_stagedfile_remote_source
 ) -> Callable[[str, str], StagedDataCollection]:
-    """Fixture to create a MockSourceDataCollection instance with characteristics of local binary files
+    """Fixture to create a MockStagedDataCollection instance with characteristics of remote binary files.
 
     Parameters
     ----------
@@ -357,15 +364,21 @@ def fake_stageddatacollection_remote_files(
         list of SourceData instances supposedly corresponding to `paths`
     """
     local_dir = Path("some/local/dir")
-    default_sources = mock_sourcedatacollection_remote_files()
+    default_sources = mock_sourcedatacollection()
     default_paths = [local_dir / f.basename for f in default_sources.sources]
 
-    def _create(paths=default_paths, sources=default_sources):
+    def _create(
+        paths=default_paths, sources=default_sources, changed_from_source: bool = False
+    ):
         staged_data_instances = []
         for i in range(len(paths)):
             source = sources[i] if sources else None
             staged_data_instances.append(
-                fake_stagedfile_remote_source(path=paths[i], source=source)
+                fake_stagedfile_remote_source(
+                    path=paths[i],
+                    source=source,
+                    changed_from_source=changed_from_source,
+                )
             )
         return StagedDataCollection(items=staged_data_instances)
 
@@ -378,59 +391,93 @@ def fake_stageddatacollection_remote_files(
 
 
 @pytest.fixture
-def fake_additionalcode_remote() -> AdditionalCode:
+def fake_additionalcode_remote(
+    mock_sourcedatacollection,
+) -> Callable[[str, str, str, list[str]], AdditionalCode]:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     a remote repository.
-
-    This fixture simulates additional code retrieved from a remote Git
-    repository. It sets up the following attributes:
-
-    - `location`: The URL of the remote repository
-    - `checkout_target`: The specific branch, tag, or commit to checkout
-    - `subdir`: A subdirectory within the repository where files are located
-    - `files`: A list of files to be included from the repository
-
-    This fixture can be used in tests that involve handling or manipulating code
-    fetched from a remote Git repository.
-
-    Returns
-    -------
-        AdditionalCode: An instance of the AdditionalCode class with preset
-        remote repository details.
     """
-    return AdditionalCode(
-        location="https://github.com/test/repo.git",
-        checkout_target="test123",
-        subdir="test/subdir",
-        files=["test_file_1.F", "test_file_2.py", "test_file_3.opt"],
-    )
+    default_location = "https://github.com/test/repo.git"
+    default_checkout_target = "test123"
+    default_subdir = "test/subdir"
+    default_files = ["test_file_1.F", "test_file_2.py", "test_file_3.opt"]
+
+    def _create(
+        location=default_location,
+        checkout_target=default_checkout_target,
+        subdir=default_subdir,
+        files=default_files,
+    ):
+        sd = mock_sourcedatacollection(
+            locations=[
+                git_location_to_raw(location, checkout_target, f, subdir) for f in files
+            ],
+            identifiers=["fake_hash" for i in range(len(files))],
+            classification=SourceClassification.REMOTE_TEXT_FILE,
+        )
+        mock_classify_side_effect = [
+            SourceClassification.REMOTE_REPOSITORY,
+        ]
+        for i in range(len(files)):
+            mock_classify_side_effect.append(SourceClassification.REMOTE_TEXT_FILE)
+        with (
+            mock.patch(
+                "cstar.base.additional_code.SourceDataCollection.from_locations",
+                return_value=sd,
+            ),
+            mock.patch(
+                "cstar.base.additional_code._SourceInspector.classify",
+                side_effect=mock_classify_side_effect,
+            ),
+        ):
+            ac = AdditionalCode(
+                location=location,
+                checkout_target=checkout_target,
+                subdir=subdir,
+                files=files,
+            )
+
+        return ac
+
+    return _create
 
 
 @pytest.fixture
-def fake_additionalcode_local() -> AdditionalCode:
+def fake_additionalcode_local(
+    mock_sourcedatacollection,
+) -> Callable[[str, str, list[str]], AdditionalCode]:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     code located on the local filesystem.
-
-    This fixture simulates additional code stored in a local directory. It sets
-    up the following attributes:
-
-    - `location`: The path to the local directory containing the code
-    - `subdir`: A subdirectory within the local directory where the files are located
-    - `files`: A list of files to be included from the local directory
-
-    This fixture can be used in tests that involve handling or manipulating
-    code that resides on the local filesystem.
-
-    Returns
-    --------
-        AdditionalCode: An instance of the AdditionalCode class with preset
-        local directory details.
     """
-    return AdditionalCode(
-        location="/some/local/directory",
-        subdir="some/subdirectory",
-        files=["test_file_1.F", "test_file_2.py", "test_file_3.opt"],
-    )
+    default_location = "/some/local/directory"
+    default_subdir = "some/subdirectory"
+    default_files = ["test_file_1.F", "test_file_2.py", "test_file_3.opt"]
+
+    def _create(location=default_location, subdir=default_subdir, files=default_files):
+        sd = mock_sourcedatacollection(
+            locations=[f"{location}/{subdir}/{f}" for f in files],
+            identifiers=["fake_hash" for i in range(len(files))],
+            classification=SourceClassification.LOCAL_TEXT_FILE,
+        )
+        mock_classify_side_effect = [
+            SourceClassification.LOCAL_DIRECTORY,
+        ]
+        for i in range(len(files)):
+            mock_classify_side_effect.append(SourceClassification.LOCAL_TEXT_FILE)
+        with (
+            mock.patch(
+                "cstar.base.additional_code.SourceDataCollection.from_locations",
+                return_value=sd,
+            ),
+            mock.patch(
+                "cstar.base.additional_code._SourceInspector.classify",
+                side_effect=mock_classify_side_effect,
+            ),
+        ):
+            ac = AdditionalCode(location=location, subdir=subdir, files=files)
+            return ac
+
+    return _create
 
 
 ################################################################################
@@ -546,7 +593,9 @@ def fake_inputdataset_remote(
 
 
 @pytest.fixture
-def stub_simulation(fake_externalcodebase, tmp_path) -> StubSimulation:
+def stub_simulation(
+    fake_externalcodebase, fake_additionalcode_local, tmp_path
+) -> StubSimulation:
     """Fixture providing a `StubSimulation` instance for testing.
 
     This fixture sets up a minimal `StubSimulation` instance with a mock external
@@ -563,18 +612,8 @@ def stub_simulation(fake_externalcodebase, tmp_path) -> StubSimulation:
         name="TestSim",
         directory=tmp_path,
         codebase=fake_externalcodebase,
-        runtime_code=AdditionalCode(
-            location=tmp_path.parent,
-            subdir="subdir/",
-            checkout_target="main",
-            files=["file1", "file2"],
-        ),
-        compile_time_code=AdditionalCode(
-            location=tmp_path.parent,
-            subdir="subdir/",
-            checkout_target="main",
-            files=["file1", "file2"],
-        ),
+        runtime_code=fake_additionalcode_local(),
+        compile_time_code=fake_additionalcode_local(),
         discretization=Discretization(time_step=60),
         start_date="2025-01-01",
         end_date="2025-12-31",
