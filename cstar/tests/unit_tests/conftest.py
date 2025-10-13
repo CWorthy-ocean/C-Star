@@ -483,6 +483,50 @@ def fake_additionalcode_local(
 ################################################################################
 # ExternalCodeBase
 ################################################################################
+class MockExternalCodeBase(ExternalCodeBase):
+    """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
+    purposes, with complex logic mocked out.
+    """
+
+    @property
+    def root_env_var(self):
+        return "TEST_ROOT"
+
+    @property
+    def _default_source_repo(self):
+        return "https://github.com/test/repo.git"
+
+    @property
+    def _default_checkout_target(self):
+        return "test_target"
+
+    def get(self, target_dir: Path | None = None) -> None:
+        self.log.info(f"mock installing ExternalCodeBase at {target_dir}")
+
+    def _configure(self) -> None:
+        return
+
+    @property
+    def is_configured(self):
+        return False
+
+
+@pytest.fixture
+def mock_externalcodebase(
+    mock_sourcedata_remote_repo,
+) -> Generator[ExternalCodeBase, None, None]:
+    """Pytest fixutre that provides an instance of the ExternalCodeBase class
+    with a mocked SourceData instance.
+    """
+    source = mock_sourcedata_remote_repo()
+    patch_source_data = mock.patch(
+        "cstar.base.external_codebase.SourceData", return_value=source
+    )
+
+    with patch_source_data:
+        mecb = MockExternalCodeBase()
+        mecb._source = source
+        yield mecb
 
 
 @pytest.fixture
@@ -498,9 +542,27 @@ def fake_externalcodebase(
     )
 
     with patch_source_data:
-        fecb = FakeExternalCodeBase()
-        fecb._source = source
-        yield fecb
+        mecb = FakeExternalCodeBase()
+        mecb._source = source
+        yield mecb
+
+
+@pytest.fixture
+def fake_externalcodebase_configured(
+    mock_sourcedata_remote_repo,
+) -> Generator[ExternalCodeBase, None, None]:
+    """Pytest fixutre that provides an instance of the ExternalCodeBase class
+    with a mocked SourceData instance.
+    """
+    source = mock_sourcedata_remote_repo()
+    patch_source_data = mock.patch(
+        "cstar.base.external_codebase.SourceData", return_value=source
+    )
+
+    with patch_source_data:
+        mecb = FakeExternalCodeBase(configured=True)
+        mecb._source = source
+        yield mecb
 
 
 @pytest.fixture
@@ -594,7 +656,7 @@ def fake_inputdataset_remote(
 
 @pytest.fixture
 def stub_simulation(
-    fake_externalcodebase, fake_additionalcode_local, tmp_path
+    mock_externalcodebase, fake_additionalcode_local, tmp_path
 ) -> StubSimulation:
     """Fixture providing a `StubSimulation` instance for testing.
 
@@ -611,7 +673,7 @@ def stub_simulation(
     sim = StubSimulation(
         name="TestSim",
         directory=tmp_path,
-        codebase=fake_externalcodebase,
+        codebase=mock_externalcodebase,
         runtime_code=fake_additionalcode_local(),
         compile_time_code=fake_additionalcode_local(),
         discretization=Discretization(time_step=60),

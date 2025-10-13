@@ -472,7 +472,7 @@ Valid end date: 2026-01-01 00:00:00
 Discretization: Discretization(time_step = 60)
 
 Code:
-Codebase: FakeExternalCodeBase instance (query using StubSimulation.codebase)
+Codebase: MockExternalCodeBase instance (query using StubSimulation.codebase)
 Runtime code: AdditionalCode instance with 3 files (query using StubSimulation.runtime_code)
 Compile-time code: AdditionalCode instance with 3 files (query using StubSimulation.compile_time_code)
 Is compiled: True
@@ -505,7 +505,7 @@ end_date = 2025-12-31 00:00:00,
 valid_start_date = 2024-01-01 00:00:00,
 valid_end_date = 2026-01-01 00:00:00,
 discretization = Discretization(time_step = 60),
-codebase = <FakeExternalCodeBase instance>,
+codebase = <MockExternalCodeBase instance>,
 runtime_code = <AdditionalCode instance>,
 compile_time_code = <AdditionalCode instance>)"""
 

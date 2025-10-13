@@ -7,9 +7,20 @@ from cstar.roms.runtime_settings import ROMSRuntimeSettingsSection
 
 
 class FakeExternalCodeBase(ExternalCodeBase):
-    """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
-    purposes.
+    """A minimal subclass of the `ExternalCodeBase` abstract base class used for testing
+    purposes, without mocking any logic..
     """
+
+    _configured: bool = False
+
+    def __init__(
+        self,
+        source_repo: str | None = None,
+        checkout_target: str | None = None,
+        configured: bool = False,
+    ):
+        self._configured = configured
+        super().__init__()
 
     @property
     def root_env_var(self):
@@ -23,15 +34,12 @@ class FakeExternalCodeBase(ExternalCodeBase):
     def _default_checkout_target(self):
         return "test_target"
 
-    def get(self, target_dir: Path | None = None) -> None:
-        self.log.info(f"mock installing ExternalCodeBase at {target_dir}")
-
     def _configure(self) -> None:
         return
 
     @property
     def is_configured(self):
-        return False
+        return self._configured
 
 
 class FakeROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
