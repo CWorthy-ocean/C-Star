@@ -290,7 +290,7 @@ class StagedDataCollection:
     def unstage(self) -> None:
         """Unstages each StagedData item in the collection"""
         for s in self._items:
-            s.unstage
+            s.unstage()
 
     @property
     def items(self) -> list[StagedData]:
