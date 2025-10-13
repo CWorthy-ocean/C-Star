@@ -64,11 +64,10 @@ class TestLocalProcess:
         - commands : str
             The shell command(s) to execute.
         """
-        self.patcher = patch("subprocess.Popen")
-        self.mock_popen = self.patcher.start()
-
         # Mock subprocess behavior
         self.mock_subprocess = MagicMock()
+        self.patcher = patch("subprocess.Popen")
+        self.mock_popen = self.patcher.start()
         self.mock_popen.return_value = self.mock_subprocess
 
     def test_initialization_defaults(self, tmp_path):
@@ -485,3 +484,6 @@ class TestLocalProcess:
             in captured
         )
         self.mock_subprocess.wait.assert_not_called()
+
+    def teardown_method(self):
+        patch.stopall()

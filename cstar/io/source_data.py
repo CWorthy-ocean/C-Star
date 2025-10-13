@@ -27,7 +27,7 @@ from cstar.io.stager import (
 
 
 @lru_cache(maxsize=16)
-def get_remote_header(location, n_bytes):
+def get_remote_header(location: str, n_bytes: int) -> bytes:
     """Get the header from a HTTP location, do determine the kind of data at the location."""
     response = requests.get(location, stream=True, allow_redirects=True)
     response.raw.decode_content = True
@@ -179,7 +179,7 @@ class _SourceInspector:
 
     @property
     def characteristics(self) -> SourceCharacteristics:
-        """Collect the source type, location type, and file encoding into a single Enum value"""
+        """Collect the source type, location type, and file encoding into a single Enum value."""
         return SourceCharacteristics(
             source_type=self.source_type,
             location_type=self.location_type,
@@ -187,7 +187,7 @@ class _SourceInspector:
         )
 
     def classify(self) -> SourceClassification:
-        """Determine the classification of the data at 'location'"""
+        """Determine the classification of the data at 'location'."""
         return SourceClassification(self.characteristics)
 
 
@@ -250,9 +250,9 @@ class SourceData:
         return self._identifier
 
     @property
-    def checkout_target(self) -> str | None:
-        """Equivalent to 'identifier' if source is a repository"""
-        if self._classification.value.source_type is SourceType.REPOSITORY:
+    def file_hash(self) -> str | None:
+        """Equivalent to 'identifier' if source is a file"""
+        if self._classification.value.source_type is SourceType.FILE:
             return self.identifier
         return None
 
@@ -266,9 +266,9 @@ class SourceData:
         return None
 
     @property
-    def file_hash(self) -> str | None:
-        """Equivalent to 'identifier' if source is a file"""
-        if self._classification.value.source_type is SourceType.FILE:
+    def checkout_target(self) -> str | None:
+        """Equivalent to 'identifier' if source is a repository"""
+        if self._classification.value.source_type is SourceType.REPOSITORY:
             return self.identifier
         return None
 
