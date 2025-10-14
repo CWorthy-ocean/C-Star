@@ -32,6 +32,10 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         return "MARBL_ROOT"
 
     def _configure(self) -> None:
+        """Configure the MARBL codebase on the local machine.
+
+        This method compiles MARBL and adds necessary  variables to the environment.
+        """
         assert self.working_copy is not None  # Has been verified by `configure()``
         marbl_root = self.working_copy.path
         # Set env var:
@@ -49,6 +53,13 @@ class MARBLExternalCodeBase(ExternalCodeBase):
 
     @property
     def is_configured(self) -> bool:
+        """Determine whether MARBL is configured locally.
+
+        This method confirms that:
+        - Necessary environment variables are set
+        - The repository has not changed from that described by `source`.
+        - MARBL's `lib` and `inc` dirs exist and are populated
+        """
         # Check MARBL_ROOT env var is set:
         marbl_root = cstar_sysmgr.environment.environment_variables.get(
             self.root_env_var

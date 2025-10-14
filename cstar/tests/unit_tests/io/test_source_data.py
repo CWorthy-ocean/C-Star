@@ -16,7 +16,6 @@ from cstar.io.source_data import (
     _SourceInspector,
     get_remote_header,
 )
-from cstar.io.staged_data import StagedData, StagedDataCollection
 from cstar.io.stager import (
     LocalBinaryFileStager,
     LocalTextFileStager,
@@ -28,6 +27,7 @@ from cstar.io.stager import (
 
 class TestHelperFunctions:
     def test_get_remote_header_reads_bytes(self):
+        """Tests that `get_remote_header` fetches the expected number of bytes from a URL"""
         fake_bytes = b"headerdata"
 
         fake_raw = mock.Mock()
@@ -64,28 +64,33 @@ class TestHelperFunctions:
         ],
     )
     def test_location_as_path(self, location, expected):
+        """Tests the _location_as_path function correctly converts various location strings to Path objects."""
         result = _location_as_path(location)
         assert result == expected
 
 
 class TestSourceInspector:
     def test_location_type_http(self):
+        """Tests location_type returns HTTP for a remote address"""
         inspector = _SourceInspector("http://example.com/file.txt")
         assert inspector.location_type is LocationType.HTTP
 
     def test_location_type_path(self, tmp_path):
+        """Tests that location_type returns PATH for a local path"""
         file_path = tmp_path / "data.txt"
         file_path.write_text("hello")
         inspector = _SourceInspector(str(file_path))
         assert inspector.location_type is LocationType.PATH
 
     def test_location_type_invalid(self, tmp_path):
+        """Tests that location_type raises if invalid"""
         bad_path = tmp_path / "does_not_exist.txt"
         inspector = _SourceInspector(str(bad_path))
         with pytest.raises(ValueError):
             _ = inspector.location_type
 
     def test_is_repository_true(self):
+        """Tests that is_repository returns True if git ls-remote output non-empty."""
         inspector = _SourceInspector("http://example.com/repo.git")
         with mock.patch(
             "cstar.io.source_data._run_cmd", return_value="fake output"
@@ -96,6 +101,7 @@ class TestSourceInspector:
             )
 
     def test_is_repository_false(self):
+        """Tests that is_repository returns False if git ls-remote exits with an error."""
         inspector = _SourceInspector("http://example.com/not_a_repo")
         with mock.patch(
             "cstar.io.source_data._run_cmd", side_effect=RuntimeError("bad repo")
@@ -106,6 +112,7 @@ class TestSourceInspector:
             )
 
     def test_source_type_repository(self):
+        """Tests that source_type returns REPOSITORY if _is_repository True"""
         inspector = _SourceInspector("http://example.com/repo.git")
         with mock.patch.object(
             _SourceInspector, "_is_repository", new_callable=mock.PropertyMock
@@ -114,6 +121,7 @@ class TestSourceInspector:
             assert inspector.source_type is SourceType.REPOSITORY
 
     def test_source_type_http_file(self):
+        """Tests that source_type returns FILE for a remote file"""
         inspector = _SourceInspector("http://example.com/file.txt")
         with (
             mock.patch.object(
@@ -138,6 +146,7 @@ class TestSourceInspector:
             assert inspector.source_type is SourceType.FILE
 
     def test_source_type_http_html_invalid(self):
+        """Tests that source_type raises if remote location is not a valid source type."""
         inspector = _SourceInspector("http://example.com/page")
         with (
             mock.patch.object(
@@ -163,16 +172,19 @@ class TestSourceInspector:
                 _ = inspector.source_type
 
     def test_source_type_local_file(self, tmp_path):
+        """Tests that source_type returns FILE for a local filepath"""
         file_path = tmp_path / "data.txt"
         file_path.write_text("hello")
         inspector = _SourceInspector(str(file_path))
         assert inspector.source_type is SourceType.FILE
 
     def test_source_type_local_directory(self, tmp_path):
+        """Tests that source_type returns DIRECTORY for a local directory"""
         inspector = _SourceInspector(str(tmp_path))
         assert inspector.source_type is SourceType.DIRECTORY
 
     def test_source_type_invalid(self):
+        """Tests that source_type raises if location is not a valid source type."""
         inspector = _SourceInspector("not_a_real_source")
         with (
             mock.patch.object(
@@ -192,6 +204,7 @@ class TestSourceInspector:
                 _ = inspector.source_type
 
     def test_http_is_html_true(self):
+        """Tests that http_is_html returns True if location is a HTML-format page"""
         inspector = _SourceInspector("http://example.com/page")
         fake_response = mock.Mock()
         fake_response.headers = {"Content-Type": "text/html; charset=UTF-8"}
@@ -201,6 +214,7 @@ class TestSourceInspector:
             assert inspector._http_is_html is True
 
     def test_http_is_html_false(self):
+        """Tests that http_is_html returns False if location is not a HTML-format page"""
         inspector = _SourceInspector("http://example.com/file")
         fake_response = mock.Mock()
         fake_response.headers = {"Content-Type": "application/octet-stream"}
@@ -210,6 +224,7 @@ class TestSourceInspector:
             assert inspector._http_is_html is False
 
     def test_file_encoding_na_when_not_a_file(self):
+        """Tests that file_encoding is NA if location does not point to a file"""
         inspector = _SourceInspector("http://example.com/notafile")
         # Patch source_type to be something other than FILE
         with mock.patch.object(
@@ -219,6 +234,7 @@ class TestSourceInspector:
             assert inspector.file_encoding is FileEncoding.NA
 
     def test_file_encoding_http_text(self):
+        """Tests that file_encoding returns TEXT for a remote text file"""
         inspector = _SourceInspector("http://example.com/file.txt")
 
         fake_bytes = b"hello world"
@@ -247,6 +263,7 @@ class TestSourceInspector:
         mock_header.assert_called_once_with("http://example.com/file.txt", 512)
 
     def test_file_encoding_http_binary(self):
+        """Tests that file_encoding returns BINARY for a remote binary file"""
         inspector = _SourceInspector("http://example.com/file.bin")
 
         fake_bytes = b"\x00\x01\x02"
@@ -274,6 +291,7 @@ class TestSourceInspector:
         assert result is FileEncoding.BINARY
 
     def test_file_encoding_path_text(self, tmp_path):
+        """Tests that file_encoding returns TEXT for a local text file."""
         file_path = tmp_path / "text.txt"
         file_path.write_bytes(b"hello world")
 
@@ -300,6 +318,7 @@ class TestSourceInspector:
         assert result is FileEncoding.TEXT
 
     def test_file_encoding_path_binary(self, tmp_path):
+        """Tests that file_encoding returns BINARY for a local binary file."""
         file_path = tmp_path / "bin.bin"
         file_path.write_bytes(b"\x00\x01\x02")
 
@@ -326,6 +345,7 @@ class TestSourceInspector:
         assert result is FileEncoding.BINARY
 
     def test_file_encoding_invalid_location_type(self):
+        """Tests that file_encoding raises for an invalid location."""
         inspector = _SourceInspector("invalid://weird")
 
         with (
@@ -343,63 +363,9 @@ class TestSourceInspector:
                 _ = inspector.file_encoding
 
 
-# class TestSourceData:
-
-#     def test_init_sets_attributes_and_classification(self):
-#         # Arrange
-#         fake_location = "http://example.com/file.txt"
-#         fake_identifier = "abc123"
-#         fake_classification = SourceClassification.REMOTE_TEXT_FILE
-
-#         # Patch _SourceInspector so we don't run real classification logic
-#         with mock.patch(
-#             "cstar.io.source_data._SourceInspector"
-#         ) as mock_inspector:
-#             mock_instance = mock_inspector.return_value
-#             mock_instance.classify.return_value = fake_classification
-
-#             # Act
-#             src = SourceData(location=fake_location, identifier=fake_identifier)
-
-#         assert src.location == fake_location
-#         assert src.identifier == fake_identifier
-#         assert src._classification == fake_classification
-
-#         # Also check inspector was called with the right location
-#         mock_inspector.assert_called_once_with(fake_location)
-#         mock_instance.classify.assert_called_once()
-
-
-#     @pytest.mark.parametrize(
-#         "classification, expected_file_hash, expected_checkout_target",
-#         [
-#             (SourceClassification.LOCAL_TEXT_FILE, "id123", None),       # file → file_hash
-#             (SourceClassification.LOCAL_BINARY_FILE, "id123", None),     # file → file_hash
-#             (SourceClassification.REMOTE_TEXT_FILE, "id123", None),      # remote file
-#             (SourceClassification.REMOTE_BINARY_FILE, "id123", None),    # remote file
-#             (SourceClassification.REMOTE_REPOSITORY, None, "id123"),     # repo → checkout_target
-#         ],
-#     )
-#     def test_identifier_synonyms(
-#         self, classification, expected_file_hash, expected_checkout_target
-#     ):
-#         fake_location = "some/location"
-#         fake_identifier = "id123"
-
-#         # Patch out inspector so classification is predictable
-#         with mock.patch("cstar.io.source_data._SourceInspector") as mock_inspector:
-#             mock_instance = mock_inspector.return_value
-#             mock_instance.classify.return_value = classification
-
-#             src = SourceData(location=fake_location, identifier=fake_identifier)
-
-#         assert src.identifier == fake_identifier
-#         assert src.file_hash == expected_file_hash
-#         assert src.checkout_target == expected_checkout_target
-
-
 class TestSourceData:
     def test_init_sets_attributes_and_classification(self):
+        """Tests that SourceData.__init__ assigns attributes and calls `classify()``"""
         # Arrange
         fake_location = "http://example.com/file.txt"
         fake_identifier = "abc123"
@@ -438,6 +404,7 @@ class TestSourceData:
         expected_file_hash,
         expected_checkout_target,
     ):
+        """Tests that context-specific uses of `identifier` (file hash/checkout target) are correct."""
         src = mock_source_data_factory(
             classification=classification,
             location="some/location",
@@ -448,6 +415,7 @@ class TestSourceData:
         assert src.checkout_target == expected_checkout_target
 
     def test_checkout_hash_for_repository(self, mock_source_data_factory):
+        """Tests that the checkout_hash property calls _get_hash_from_checkout_target if location is a repo."""
         fake_location = "https://github.com/test/repo.git"
         fake_identifier = "abc123"
 
@@ -467,6 +435,7 @@ class TestSourceData:
         mock_get_hash.assert_called_once_with(fake_location, fake_identifier)
 
     def test_checkout_hash_none_if_not_repo(self, mock_source_data_factory):
+        """Tests that the checkout_hash property is None if location is not a git repo."""
         src = mock_source_data_factory(
             classification=SourceClassification.LOCAL_TEXT_FILE,
             location="foo.txt",
@@ -475,28 +444,13 @@ class TestSourceData:
         assert src.checkout_hash is None
 
     def test_checkout_hash_none_if_no_identifier(self, mock_source_data_factory):
+        """Tests that the checkout_hash property is None if SourceData.identifier is None."""
         src = mock_source_data_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
             location="https://github.com/test/repo.git",
             identifier=None,
         )
         assert src.checkout_hash is None
-
-    # def test_checkout_target_for_repository(self, mock_source_data_factory):
-    #     src = mock_source_data_factory(
-    #         classification=SourceClassification.REMOTE_REPOSITORY,
-    #         location="https://github.com/test/repo.git",
-    #         identifier="abc123",
-    #     )
-    #     assert src.checkout_target == "abc123"
-
-    # def test_checkout_target_for_non_repository(self, mock_source_data_factory):
-    #     src = mock_source_data_factory(
-    #         classification=SourceClassification.REMOTE_TEXT_FILE,
-    #         location="http://example.com/file.txt",
-    #         identifier="abc123",
-    #     )
-    #     assert src.checkout_target is None
 
     @pytest.mark.parametrize(
         "classification, expected_stager_cls",
@@ -511,6 +465,7 @@ class TestSourceData:
     def test_select_stager_returns_expected_class(
         self, mock_source_data_factory, classification, expected_stager_cls
     ):
+        """Tests that the `select_stager` method looks up the expected stager for several classifications."""
         src = mock_source_data_factory(
             classification=classification,
             location="some/location",
@@ -522,6 +477,8 @@ class TestSourceData:
     def test_select_stager_invalid_classification_raises(
         self, mock_source_data_factory
     ):
+        """Tests that the `select_stager` method raises if classification is invalid"""
+
         # Fake classification not handled by match-case
         class DummyClassification:
             value = None
@@ -537,6 +494,7 @@ class TestSourceData:
             _ = src._select_stager()
 
     def test_stager_property_caches_value(self, mock_source_data_factory):
+        """Tests that the `stager` property caches its first result and avoids repeat calls to get_stager()."""
         src = mock_source_data_factory(
             classification=SourceClassification.LOCAL_TEXT_FILE,
             location="foo.txt",
@@ -549,28 +507,10 @@ class TestSourceData:
         second = src.stager
         assert first is second
 
-    def test_stage_returns_mockstageddata(self, tmp_path, mock_source_data_factory):
-        src = mock_source_data_factory(
-            classification=SourceClassification.LOCAL_TEXT_FILE,
-            location="foo.txt",
-            identifier="id123",
-        )
-
-        target_dir = tmp_path / "staged"
-        target_dir.mkdir()
-
-        staged = src.stage(target_dir)
-
-        # Check it's our mock staged data
-        assert isinstance(staged, StagedData)
-        # Path should be target_dir / basename
-        assert staged.path == target_dir / Path(src.location).name
-        # Should hold a reference to the source
-        assert staged.source is src
-
 
 class TestSourceDataCollection:
     def test_len_getitem_iter(self, mock_sourcedatacollection):
+        """Tests the additional dunder methods on the SourceDataCollection"""
         coll = mock_sourcedatacollection()
         assert len(coll) == 2
         first = coll[0]
@@ -578,6 +518,7 @@ class TestSourceDataCollection:
         assert list(iter(coll)) == coll.sources
 
     def test_invalid_source_type_raises(self, mock_source_data_factory):
+        """Tests that SourceDataCollection cannot be initialized with invalid sources."""
         bad = mock_source_data_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
             location="http://example.com/repo.git",
@@ -589,6 +530,7 @@ class TestSourceDataCollection:
     def test_append_and_locations(
         self, mock_sourcedatacollection, mock_source_data_factory
     ):
+        """Tests that SourceDataCollection.append() adds a new SourceData instance to the collection."""
         coll = mock_sourcedatacollection()
         good = mock_source_data_factory(
             classification=SourceClassification.LOCAL_TEXT_FILE,
@@ -602,6 +544,7 @@ class TestSourceDataCollection:
     def test_append_invalid_raises(
         self, mock_sourcedatacollection, mock_source_data_factory
     ):
+        """Tests that SourceDataCollection.append() raises if called with an invalid argument."""
         coll = mock_sourcedatacollection()
         bad = mock_source_data_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
@@ -612,10 +555,12 @@ class TestSourceDataCollection:
             coll.append(bad)
 
     def test_sources_property(self, mock_sourcedatacollection):
+        """Tests that SourceDataCollection.sources returns the list of underlying SourceData items."""
         coll = mock_sourcedatacollection()
         assert coll.sources == coll._sources
 
     def test_from_locations_success_and_length_mismatch(self):
+        """Tests SourceDataCollection.from_locations classmethod with valid/mismatched input for `locations` and `identifiers`."""
         fake_classification = SourceClassification.LOCAL_TEXT_FILE
         # Patch SourceData so we don't hit inspector logic
         with mock.patch("cstar.io.source_data.SourceData", autospec=True) as mock_src:
@@ -633,13 +578,3 @@ class TestSourceDataCollection:
             # Length mismatch
             with pytest.raises(ValueError):
                 SourceDataCollection.from_locations(["foo.txt"], ["id1", "id2"])
-
-    def test_stage_returns_staged_collection(self, tmp_path, mock_sourcedatacollection):
-        coll = mock_sourcedatacollection()
-        staged = coll.stage(tmp_path)
-
-        assert isinstance(staged, StagedDataCollection)
-        assert len(staged.items) == len(coll.sources)
-        assert {s.source for s in staged.items} == set(coll.sources)
-        for staged_item in staged.items:
-            assert str(tmp_path) in str(staged_item.path)

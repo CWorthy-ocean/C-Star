@@ -64,18 +64,6 @@ class TestROMSExternalCodeBaseInit:
 
 
 class TestROMSExternalCodeBaseConfigure:
-    """TODO Add tests for new .get() and .configure() methods. Previous tests:
-    test_get_success
-        Verifies that `get` completes successfully, setting environment variables and
-        calling necessary subprocesses when all commands succeed.
-    test_make_nhmg_failure
-        Ensures that `get` raises an error with a descriptive message when the `make nhmg`
-        command fails during installation.
-    test_make_tools_roms_failure
-        Confirms that `get` raises an error with an appropriate message if `make Tools-Roms`
-        fails after `make nhmg` succeeds.
-    """
-
     def test_configure_success(
         self, mock_romsexternalcodebase_staged, dotenv_path, tmp_path
     ):
@@ -118,10 +106,43 @@ class TestROMSExternalCodeBaseConfigure:
             )
 
     @mock.patch("cstar.base.utils.subprocess.run")
+    def test_make_nhmg_failure(
+        self, mock_subprocess, mock_romsexternalcodebase_staged, tmp_path, dotenv_path
+    ):
+        """Test that the _configure method raises an error when 'NHMG/make' fails."""
+        dotenv_path = tmp_path / ".cstar.env"
+        mock_subprocess.side_effect = [
+            subprocess.CompletedProcess(
+                args=["make nhmg"],
+                returncode=1,
+                stdout="",
+                stderr="Mocked ROMS Compilation Failure",
+            ),
+        ]
+        recb = mock_romsexternalcodebase_staged
+
+        # Test
+        with (
+            pytest.raises(
+                RuntimeError,
+                match=(
+                    "Error when compiling ROMS' NHMG library. Return Code: `1`. STDERR:\n"
+                    "Mocked ROMS Compilation Failure"
+                ),
+            ),
+            mock.patch(
+                "cstar.system.environment.CSTAR_USER_ENV_PATH",
+                dotenv_path,
+            ),
+        ):
+            recb._configure()
+        assert mock_subprocess.call_count == 1
+
+    @mock.patch("cstar.base.utils.subprocess.run")
     def test_make_tools_failure(
         self, mock_subprocess, mock_romsexternalcodebase_staged, tmp_path, dotenv_path
     ):
-        """Test that the _configure method raises an error when 'make' fails."""
+        """Test that the _configure method raises an error when 'Tools-Roms/make' fails."""
         dotenv_path = tmp_path / ".cstar.env"
         mock_subprocess.side_effect = [
             subprocess.CompletedProcess(
@@ -156,6 +177,14 @@ class TestROMSExternalCodeBaseConfigure:
     def test_is_configured_when_configured(
         self, mock_romsexternalcodebase_staged, tmp_path, dotenv_path
     ):
+        """Tests that the `is_configured` property returns True when all conditions met:
+
+        Conditions:
+        - environment variable is defined
+        - local repository clone is clean
+        - Tools-Roms/mpc program exists
+
+        """
         with (
             mock.patch(
                 "cstar.system.environment.CStarEnvironment.environment_variables",
@@ -195,6 +224,19 @@ class TestROMSExternalCodeBaseConfigure:
         mpc_exists,
         expected,
     ):
+        """Tests all possible combinations of conditions for `ROMSExternalCodeBase.is_configured`.
+
+        Parameters
+        ----------
+        env_var_defined (bool):
+            Whether the ROMS environment variable is defined
+        repo_changed (bool):
+            Whether the local repository clone is clean
+        mpc_exists (bool):
+            Whether the Tools-Roms/mpc program exists
+        expected (bool):
+            The expected outcome of the property with the other parameters.
+        """
         env_vars = {"ROMS_ROOT": str(tmp_path)} if env_var_defined else {}
 
         with (

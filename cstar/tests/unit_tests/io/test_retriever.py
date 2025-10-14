@@ -2,49 +2,48 @@ from unittest import mock
 
 import pytest
 
+from cstar.base.utils import _get_sha256_hash
 from cstar.io import retriever
 from cstar.io.constants import SourceClassification
 
 
+class DummyRetriever(retriever.Retriever):
+    """Example Retriever for testing"""
+
+    _classification = SourceClassification.LOCAL_TEXT_FILE
+
+    def read(self, source):
+        return b""
+
+    def _save(self, target_dir, source):
+        return target_dir / "out"
+
+
 class TestRegistry:
     def test_register_and_get_retriever(self):
-        class DummyRetriever(retriever.Retriever):
-            _classification = SourceClassification.LOCAL_TEXT_FILE
-
-            def read(self, source):
-                return b""
-
-            def _save(self, target_dir, source):
-                return target_dir / "dummy"
-
+        """Tests that a new retriever can be registered and fetched from the register"""
         retriever.register_retriever(DummyRetriever)
         r = retriever.get_retriever(SourceClassification.LOCAL_TEXT_FILE)
         assert isinstance(r, DummyRetriever)
 
     def test_get_retriever_not_registered(self):
+        """Tests that getting an unregistered retriever raises a ValueError"""
         with pytest.raises(ValueError):
             retriever.get_retriever(SourceClassification.LOCAL_DIRECTORY)
 
 
-class TestRetrieverBase:
-    def test_save_creates_dir_and_calls__save(self, tmp_path):
+class TestRetrieverABC:
+    def test_save_creates_dir_and_calls_subclass_save(self, tmp_path):
+        """Tests that parent class save ensures validity before calling subclass save()"""
         fake_source = mock.Mock()
-        dummy_path = tmp_path / "out"
-
-        class DummyRetriever(retriever.Retriever):
-            _classification = SourceClassification.LOCAL_TEXT_FILE
-
-            def read(self, source):
-                return b""
-
-            def _save(self, target_dir, source):
-                return dummy_path
-
         r = DummyRetriever()
         result = r.save(tmp_path / "newdir", fake_source)
-        assert result == dummy_path
+        assert result == tmp_path / "newdir/out", (
+            f"EXPECTED {tmp_path / 'newdir/out'} \nGOT {result}"
+        )
 
     def test_save_raises_if_not_directory(self, tmp_path):
+        """Tests that parent class save raises if target_dir is not a dir"""
         file_path = tmp_path / "afile"
         file_path.write_text("x")
 
@@ -55,6 +54,7 @@ class TestRetrieverBase:
 
 class TestRemoteFileRetriever:
     def test_read_returns_content(self):
+        """Tests that RemoteFileRetriever.read returns expected bytes"""
         fake_response = mock.Mock()
         fake_response.content = b"abc"
         fake_response.raise_for_status = mock.Mock()
@@ -68,6 +68,7 @@ class TestRemoteFileRetriever:
 
 class TestRemoteTextFileRetriever:
     def test_save_writes_file(self, tmp_path):
+        """Tests that RemoteTextFileRetriever.save takes `read` output and saves it to file"""
         fake_data = b"hello world"
         fake_source = mock.Mock(
             location="http://example.com/file.txt", basename="file.txt"
@@ -89,7 +90,8 @@ class TestRemoteTextFileRetriever:
 
 
 class TestRemoteBinaryFileRetriever:
-    def test_save_writes_file_and_checks_hash(self, tmp_path):
+    def test_save_writes_file(self, tmp_path):
+        """Tests that RemoteBinaryFileRetriever.save iterates over chunks and updates file correctly."""
         fake_source = mock.Mock(
             location="http://example.com/file",
             basename="file.bin",
@@ -110,10 +112,11 @@ class TestRemoteBinaryFileRetriever:
         assert path.read_bytes() == fake_chunk
 
     def test_save_raises_on_hash_mismatch(self, tmp_path):
+        """Tests that RemoteBinaryFileRetriever.save raises if the final calculated hash does not match `identifier`"""
         fake_source = mock.Mock(
             location="http://example.com/file",
             basename="file.bin",
-            identifier="deadbeef",  # deliberately wrong
+            identifier="deadtofu",
         )
         fake_chunk = b"abc"
 
@@ -124,15 +127,16 @@ class TestRemoteBinaryFileRetriever:
 
         with mock.patch("cstar.io.retriever.requests.get", return_value=fake_response):
             r = retriever.RemoteBinaryFileRetriever()
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="Hash mismatch"):
                 r._save(tmp_path, fake_source)
 
 
 class TestLocalFileRetriever:
     def test_read_and_save(self, tmp_path):
-        file = tmp_path / "f.txt"
-        file.write_text("hello")
-        src = mock.Mock(location=file, basename="f.txt")
+        """Tests that LocalFileRetriever.read and .save read and copy files, respectively"""
+        test_file = tmp_path / "f.txt"
+        test_file.write_text("hello")
+        src = mock.Mock(location=test_file, basename="f.txt")
 
         r = retriever.LocalFileRetriever()
         assert r.read(src) == b"hello"
@@ -141,16 +145,19 @@ class TestLocalFileRetriever:
         newdir.mkdir(parents=True)
         result = r._save(newdir, src)
         assert result.exists()
+        assert _get_sha256_hash(result) == _get_sha256_hash(test_file)
         assert result.read_text() == "hello"
 
 
 class TestRemoteRepositoryRetriever:
     def test_read_raises(self):
+        """Tests that RemoteRepositoryRetriever.read raises a NotImplementedError"""
         r = retriever.RemoteRepositoryRetriever()
         with pytest.raises(NotImplementedError):
             r.read(mock.Mock())
 
     def test_save_clones_and_checkouts(self, tmp_path):
+        """Tests that RemoteRepositoryRetriever.save() clones the repo and checks out the target."""
         src = mock.Mock(location="repo-url", checkout_target="main")
         with (
             mock.patch("cstar.io.retriever._clone") as mock_clone,
@@ -166,6 +173,7 @@ class TestRemoteRepositoryRetriever:
         assert result == tmp_path
 
     def test_save_raises_if_dir_not_empty(self, tmp_path):
+        """Tests that RemoteRepositoryRetriever.save raises a ValueError if target_dir is not empty."""
         (tmp_path / "afile").write_text("x")
         src = mock.Mock(location="repo-url")
         r = retriever.RemoteRepositoryRetriever()

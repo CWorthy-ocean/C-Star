@@ -101,9 +101,22 @@ def test_get_repo_head_hash():
         ),
     ],
 )
-def test_git_location_to_raw_success(
-    repo_url, checkout_target, filename, subdir, expected
-):
+def test_git_location_to_raw(repo_url, checkout_target, filename, subdir, expected):
+    """Tests that `git_location_to_raw` successfully converts parameters into raw file URL.
+
+    Parameters
+    ----------
+    repo_url:
+        The URL of the repository housing the file
+    checkout_target:
+        The point in the commit history to fetch the file from
+    filename:
+        The name of the file being addressed
+    subdir:
+        The subdirectory path within the repository to find the file
+    expected:
+        The expected raw file URL based on the other parameters
+    """
     result = git_location_to_raw(repo_url, checkout_target, filename, subdir)
     assert result == expected
 
@@ -126,6 +139,21 @@ def test_git_location_to_raw_success(
     ],
 )
 def test_git_location_to_raw_errors(repo_url, checkout_target, filename, expected_msg):
+    """Tests that `git_location_to_raw` raises if provided an incompatible URL or git service.
+
+    Parameters
+    ----------
+    repo_url:
+        The URL of the repository housing the file
+    checkout_target:
+        The point in the commit history to fetch the file from
+    filename:
+        The name of the file being addressed
+    subdir:
+        The subdirectory path within the repository to find the file
+    expected_msg:
+        The error message raised by the above parameter combination.
+    """
     with pytest.raises(ValueError, match=expected_msg):
         git_location_to_raw(repo_url, checkout_target, filename)
 

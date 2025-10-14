@@ -58,16 +58,18 @@ def test_codebase_repr(fake_externalcodebase):
 
 
 class TestToDict:
-    def test_roundtrip_to_dict(self, fake_externalcodebase):
+    def test_to_dict(self, fake_externalcodebase):
+        """Confirms that the correct key/value pairs are assigned by ExternalCodeBase.to_dict"""
         result = fake_externalcodebase.to_dict()
         assert result["source_repo"] == fake_externalcodebase.source.location
         assert result["checkout_target"] == fake_externalcodebase.source.checkout_target
 
 
-class TestGet:
+class TestSetup:
     def test_init_assigns_preconfigured_codebase_to_working_copy(
         self, mock_sourcedata_remote_repo, fake_stagedrepository, tmp_path
     ):
+        """Confirms that, if the codebase is already configured (e.g. in a different session), working_copy is set."""
         with (
             mock.patch(
                 "cstar.system.environment.CStarEnvironment.environment_variables",
@@ -87,6 +89,7 @@ class TestGet:
         assert fecb.working_copy.path == tmp_path
 
     def test_get_skips_if_already_staged(self, fake_externalcodebase, caplog):
+        """Confirms that `get()` skips its logic if the codebase is staged"""
         fake_externalcodebase._working_copy = mock.Mock(
             spec=external_codebase.StagedRepository
         )
@@ -99,6 +102,10 @@ class TestGet:
     def test_get_default_target_dir_and_stage_called(
         self, fake_externalcodebase, tmp_path, caplog
     ):
+        """Tests that `get()` invokes default staging location if no target provided.
+
+        The default location is <C-star's root directory>/<codebase repository's basename>
+        """
         staged_repo = mock.Mock(spec=external_codebase.StagedRepository)
         fake_externalcodebase.source.stage = mock.Mock(return_value=staged_repo)
 
@@ -117,11 +124,13 @@ class TestGet:
 
 class TestConfigure:
     def test_configure_raises_without_working_copy(self, mock_externalcodebase):
+        """Confirms the `configure` method raises if `working_copy` is None."""
         mock_externalcodebase._working_copy = None
         with pytest.raises(FileNotFoundError):
             mock_externalcodebase.configure()
 
     def test_configure_logs_if_already_configured(self, mock_externalcodebase, caplog):
+        """Confirms that a message is logged if `configure()` is called unnecessarily"""
         mock_externalcodebase._working_copy = mock.Mock(
             spec=external_codebase.StagedRepository
         )
@@ -134,7 +143,10 @@ class TestConfigure:
 
         assert "correctly configured" in caplog.text
 
-    def test_configure_calls__configure_if_not_configured(self, mock_externalcodebase):
+    def test_configure_calls_subclass_configure_if_not_configured(
+        self, mock_externalcodebase
+    ):
+        """Confirms that ExternalCodeBase defers to the abstractmethod `_configure` after validation."""
         mock_externalcodebase._working_copy = mock.Mock(
             spec=external_codebase.StagedRepository
         )
@@ -146,9 +158,8 @@ class TestConfigure:
                 mock_externalcodebase.configure()
         do_configure.assert_called_once()
 
-
-class TestSetup:
     def test_setup_calls_get_and_configure(self, mock_externalcodebase, tmp_path):
+        """Confirms that `setup` calls both methods it wraps."""
         with (
             mock.patch.object(mock_externalcodebase, "get") as fake_get,
             mock.patch.object(mock_externalcodebase, "configure") as fake_conf,

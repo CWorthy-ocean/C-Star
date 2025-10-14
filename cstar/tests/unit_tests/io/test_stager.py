@@ -8,36 +8,38 @@ from cstar.io import stager
 from cstar.io.constants import SourceClassification
 
 
+class DummyStager(stager.Stager):
+    """Stager example for testing"""
+
+    _classification = SourceClassification.LOCAL_TEXT_FILE
+
+
 class TestRegistry:
-    def test_register_and_get_stager_isolated(self):
+    def test_register_and_get_stager(self):
+        """Tests that new Stagers can be added and gotten from the registry"""
         with mock.patch.dict(stager._registry, {}, clear=True):
-
-            class DummyStager(stager.Stager):
-                _classification = SourceClassification.LOCAL_TEXT_FILE
-
             stager.register_stager(DummyStager)
             result = stager.get_stager(SourceClassification.LOCAL_TEXT_FILE)
             assert isinstance(result, DummyStager)
 
     def test_get_stager_not_registered(self):
+        """Tests that get_stager raises if there is no registry item."""
         with pytest.raises(ValueError):
             stager.get_stager(SourceClassification.LOCAL_DIRECTORY)
 
 
 class TestStagerABC:
     def test_retriever_property_calls_get_retriever(self):
+        """Tests that Stager.retriever calls `get_retriever()`"""
         with mock.patch("cstar.io.stager.get_retriever") as mock_get:
             mock_retriever = mock.Mock()
             mock_get.return_value = mock_retriever
-
-            class DummyStager(stager.Stager):
-                _classification = SourceClassification.REMOTE_BINARY_FILE
-
             s = DummyStager()
             assert s.retriever is mock_retriever
-            mock_get.assert_called_once_with(SourceClassification.REMOTE_BINARY_FILE)
+            mock_get.assert_called_once_with(SourceClassification.LOCAL_TEXT_FILE)
 
     def test_stage_calls_retriever_and_returns_stagedfile(self):
+        """Tests that Stager.stage() calls Stager.retriever.save() and returns a StagedFile"""
         fake_source = mock.Mock(file_hash="abc123")
         fake_target = Path("/fake/path")
 
@@ -66,6 +68,7 @@ class TestStagerABC:
 
 class TestStagerSubclasses:
     def test_registry_contains_all_stagers(self):
+        """Tests that all defined stagers are registered."""
         for cls in [
             stager.RemoteBinaryFileStager,
             stager.RemoteTextFileStager,
@@ -77,6 +80,7 @@ class TestStagerSubclasses:
             assert isinstance(inst, cls)
 
     def test_local_binary_file_stager_creates_symlink(self, tmp_path):
+        """Tests that LocalBinaryFileStager.stage() creates a symbolic link to the source file."""
         source_dir = tmp_path / "src"
         source_dir.mkdir()
         src_file = source_dir / "source.bin"
@@ -99,6 +103,7 @@ class TestStagerSubclasses:
         assert result.path == target
 
     def test_remote_repository_stager_returns_stagedrepo(self, tmp_path):
+        """Tests that RemoteRepositoryStager.stage calls .retriever.save returns a StagedRepository."""
         fake_source = mock.Mock()
         fake_path = tmp_path / "repo"
 

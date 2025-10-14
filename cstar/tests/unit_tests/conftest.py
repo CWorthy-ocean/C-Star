@@ -568,7 +568,7 @@ class MockExternalCodeBase(ExternalCodeBase):
 def mock_externalcodebase(
     mock_sourcedata_remote_repo,
 ) -> Generator[ExternalCodeBase, None, None]:
-    """Pytest fixutre that provides an instance of the ExternalCodeBase class
+    """Pytest fixutre that provides an instance of the MockExternalCodeBase class
     with a mocked SourceData instance.
     """
     source = mock_sourcedata_remote_repo()
@@ -586,7 +586,7 @@ def mock_externalcodebase(
 def fake_externalcodebase(
     mock_sourcedata_remote_repo,
 ) -> Generator[ExternalCodeBase, None, None]:
-    """Pytest fixutre that provides an instance of the ExternalCodeBase class
+    """Pytest fixutre that provides an instance of the FakeExternalCodeBase class
     with a mocked SourceData instance.
     """
     source = mock_sourcedata_remote_repo()
@@ -596,24 +596,6 @@ def fake_externalcodebase(
 
     with patch_source_data:
         mecb = FakeExternalCodeBase()
-        mecb._source = source
-        yield mecb
-
-
-@pytest.fixture
-def fake_externalcodebase_configured(
-    mock_sourcedata_remote_repo,
-) -> Generator[ExternalCodeBase, None, None]:
-    """Pytest fixutre that provides an instance of the ExternalCodeBase class
-    with a mocked SourceData instance.
-    """
-    source = mock_sourcedata_remote_repo()
-    patch_source_data = mock.patch(
-        "cstar.base.external_codebase.SourceData", return_value=source
-    )
-
-    with patch_source_data:
-        mecb = FakeExternalCodeBase(configured=True)
         mecb._source = source
         yield mecb
 
@@ -645,7 +627,6 @@ def mock_marblexternalcodebase_staged(
 ) -> Generator[MARBLExternalCodeBase, None, None]:
     """Fixture providing a staged `MARBLExternalCodeBase` instance for testing.
 
-    Patches `SourceData` calls to avoid network and filesystem interaction.
     Sets `working_copy` to a mock StagedRepository instance.
     """
     mecb = fake_marblexternalcodebase

@@ -8,7 +8,9 @@ from cstar.roms.runtime_settings import ROMSRuntimeSettingsSection
 
 class FakeExternalCodeBase(ExternalCodeBase):
     """A minimal subclass of the `ExternalCodeBase` abstract base class used for testing
-    purposes, without mocking any logic..
+    purposes, without mocking any logic.
+
+    Abstract methods are defined with simple no-op or user-specified return values.
     """
 
     _configured: bool = False

@@ -1,6 +1,7 @@
 import os
 import subprocess
 import unittest.mock as mock
+from pathlib import Path
 
 import dotenv
 import pytest
@@ -129,6 +130,14 @@ class TestMARBLExternalCodeBaseConfigure:
     def test_is_configured_when_configured(
         self, mock_marblexternalcodebase_staged, tmp_path, dotenv_path
     ):
+        """Tests that the `is_configured` property is True when all conditions met.
+
+        Conditions:
+        - environment variable is defined
+        - local repository clone is clean
+        - lib file exists
+        - inc dir is populated
+        """
         with (
             mock.patch(
                 "cstar.system.environment.CStarEnvironment.environment_variables",
@@ -163,14 +172,29 @@ class TestMARBLExternalCodeBaseConfigure:
     )
     def test_is_configured_variants(
         self,
-        mock_marblexternalcodebase_staged,
-        tmp_path,
-        env_var_defined,
-        repo_changed,
-        lib_exists,
-        inc_dir_contents,
-        expected,
+        mock_marblexternalcodebase_staged: MARBLExternalCodeBase,
+        tmp_path: Path,
+        env_var_defined: bool,
+        repo_changed: bool,
+        lib_exists: bool,
+        inc_dir_contents: list[str],
+        expected: bool,
     ):
+        """Tests all possible combinations of conditions for `MARBLExternalCodeBase.is_configured`.
+
+        Parameters
+        ----------
+        env_var_defined (bool):
+            Whether the MARBL environment variable is defined
+        repo_changed (bool):
+            Whether the local repository clone is clean
+        lib_exists (bool):
+            Whether the library file for this configuration exists
+        inc_dir_contents (list[str]):
+            The (mocked) contents of the include directory
+        expected (bool):
+            The expected outcome of the property with the other parameters.
+        """
         env_vars = {"MARBL_ROOT": str(tmp_path)} if env_var_defined else {}
 
         with (
