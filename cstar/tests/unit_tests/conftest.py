@@ -639,7 +639,7 @@ def fake_marblexternalcodebase(
 
 @pytest.fixture
 def mock_marblexternalcodebase_staged(
-    mock_sourcedata_remote_repo,
+    fake_marblexternalcodebase,
     fake_stagedrepository,
     tmp_path,
 ) -> Generator[MARBLExternalCodeBase, None, None]:
@@ -648,20 +648,12 @@ def mock_marblexternalcodebase_staged(
     Patches `SourceData` calls to avoid network and filesystem interaction.
     Sets `working_copy` to a mock StagedRepository instance.
     """
-    source_data = mock_sourcedata_remote_repo(
-        location="https://marbl.com/repo.git", identifier="v1"
-    )
-    patch_source_data = mock.patch(
-        "cstar.base.external_codebase.SourceData", return_value=source_data
-    )
+    mecb = fake_marblexternalcodebase
     staged_data = fake_stagedrepository(
-        path=tmp_path, source=source_data, changed_from_source=False
+        path=tmp_path, source=mecb.source, changed_from_source=False
     )
-
-    with patch_source_data:
-        mecb = MARBLExternalCodeBase()
-        mecb._working_copy = staged_data
-        yield mecb
+    mecb._working_copy = staged_data
+    yield mecb
 
 
 ################################################################################
