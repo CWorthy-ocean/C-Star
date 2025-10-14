@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 import cstar.base.external_codebase as external_codebase
+from cstar.tests.unit_tests.fake_abc_subclasses import FakeExternalCodeBase
 
 
 def test_codebase_str(fake_externalcodebase):
@@ -64,7 +65,26 @@ class TestToDict:
 
 
 class TestGet:
-    # TODO test that init with configured sets working_Copy
+    def test_init_assigns_preconfigured_codebase_to_working_copy(
+        self, mock_sourcedata_remote_repo, fake_stagedrepository, tmp_path
+    ):
+        with (
+            mock.patch(
+                "cstar.system.environment.CStarEnvironment.environment_variables",
+                new_callable=mock.PropertyMock,
+                return_value={"TEST_ROOT": tmp_path},
+            ),
+            mock.patch(
+                "cstar.base.external_codebase.StagedRepository",
+                return_value=fake_stagedrepository(path=tmp_path),
+            ),
+            mock.patch(
+                "cstar.base.external_codebase.SourceData",
+                return_value=mock_sourcedata_remote_repo(),
+            ),
+        ):
+            fecb = FakeExternalCodeBase(configured=True)
+        assert fecb.working_copy.path == tmp_path
 
     def test_get_skips_if_already_staged(self, fake_externalcodebase, caplog):
         fake_externalcodebase._working_copy = mock.Mock(

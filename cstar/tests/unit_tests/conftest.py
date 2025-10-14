@@ -14,7 +14,12 @@ from cstar.io.constants import (
 )
 from cstar.io.retriever import Retriever
 from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector
-from cstar.io.staged_data import StagedData, StagedDataCollection, StagedFile
+from cstar.io.staged_data import (
+    StagedData,
+    StagedDataCollection,
+    StagedFile,
+    StagedRepository,
+)
 from cstar.io.stager import Stager
 from cstar.marbl import MARBLExternalCodeBase
 from cstar.tests.unit_tests.fake_abc_subclasses import (
@@ -351,6 +356,54 @@ def fake_stagedfile_remote_source(
 
 
 @pytest.fixture
+def fake_stagedrepository(
+    mock_sourcedata_remote_repo,
+) -> Generator[
+    Callable[[Path, "MockSourceData", bool], "StagedRepository"], None, None
+]:
+    """Factory fixture to produce a fake StagedRepository from a remote source.
+
+    Parameters
+    ----------
+    path: Path
+        The path where this repository is supposedly staged
+    source: SourceData
+        The SourceData from which this repository was supposedly staged
+    changed_from_source: bool, optional, default False
+        User-specified override to the changed_from_source property
+    """
+    patchers: list[mock._patch] = []
+    default_path_parent = Path("some/local/dir")
+    default_source = mock_sourcedata_remote_repo()
+    default_path = default_path_parent / default_source.basename
+
+    def _create(
+        path: Path = default_path,
+        source: "MockSourceData" = default_source,
+        changed_from_source: bool = False,
+    ) -> "StagedRepository":
+        sr: StagedRepository
+        with mock.patch(
+            "cstar.io.staged_data._run_cmd", return_value=source.identifier
+        ):
+            sr = StagedRepository(source=source, path=path)
+
+        patcher: mock._patch = mock.patch.object(
+            type(sr), "changed_from_source", new_callable=mock.PropertyMock
+        )
+        prop: mock.PropertyMock = patcher.start()
+        prop.return_value = changed_from_source
+        patchers.append(patcher)
+
+        return sr
+
+    yield _create  # generator fixture: pytest handles teardown afterward
+
+    for p in reversed(patchers):
+        p.stop()
+
+
+@pytest.fixture
 def fake_stageddatacollection_remote_files(
     mock_sourcedatacollection, fake_stagedfile_remote_source
 ) -> Callable[[str, str], StagedDataCollection]:
@@ -582,6 +635,33 @@ def fake_marblexternalcodebase(
 
     with patch_source_data:
         yield MARBLExternalCodeBase()
+
+
+@pytest.fixture
+def mock_marblexternalcodebase_staged(
+    mock_sourcedata_remote_repo,
+    fake_stagedrepository,
+    tmp_path,
+) -> Generator[MARBLExternalCodeBase, None, None]:
+    """Fixture providing a staged `MARBLExternalCodeBase` instance for testing.
+
+    Patches `SourceData` calls to avoid network and filesystem interaction.
+    Sets `working_copy` to a mock StagedRepository instance.
+    """
+    source_data = mock_sourcedata_remote_repo(
+        location="https://marbl.com/repo.git", identifier="v1"
+    )
+    patch_source_data = mock.patch(
+        "cstar.base.external_codebase.SourceData", return_value=source_data
+    )
+    staged_data = fake_stagedrepository(
+        path=tmp_path, source=source_data, changed_from_source=False
+    )
+
+    with patch_source_data:
+        mecb = MARBLExternalCodeBase()
+        mecb._working_copy = staged_data
+        yield mecb
 
 
 ################################################################################
