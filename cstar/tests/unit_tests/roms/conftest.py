@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from cstar.base import AdditionalCode
+from cstar.io.constants import SourceClassification
 from cstar.roms import ROMSDiscretization, ROMSExternalCodeBase, ROMSSimulation
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
@@ -109,13 +110,11 @@ def fake_romsruntimesettings() -> ROMSRuntimeSettings:
 # Runtime and compile-time code
 ################################################################################
 @pytest.fixture
-def fake_roms_runtime_code(tmp_path) -> AdditionalCode:
+def fake_roms_runtime_code(fake_additionalcode_local) -> AdditionalCode:
     """Provides an example of ROMSSimulation.runtime_code with fake values for testing"""
-    directory = tmp_path
-    rc = AdditionalCode(
-        location=directory.parent,
+    rc = fake_additionalcode_local(
+        location="/some/local/dir",
         subdir="subdir/",
-        checkout_target="main",
         files=[
             "file1",
             "file2.in",
@@ -128,13 +127,11 @@ def fake_roms_runtime_code(tmp_path) -> AdditionalCode:
 
 
 @pytest.fixture
-def fake_roms_compile_time_code(tmp_path) -> AdditionalCode:
+def fake_roms_compile_time_code(fake_additionalcode_local) -> AdditionalCode:
     """Provides an example of ROMSSimulation.compile_time_code with fake values for testing"""
-    directory = tmp_path
-    cc = AdditionalCode(
-        location=directory.parent,
+    cc = fake_additionalcode_local(
+        location="/some/local/dir",
         subdir="subdir/",
-        checkout_target="main",
         files=["file1.h", "file2.opt"],
     )
     return cc
@@ -196,7 +193,7 @@ def fake_romsinputdataset_netcdf_remote(
 @pytest.fixture
 def fake_romsinputdataset_partitioned_source_remote(
     mock_sourcedata_remote_file,
-    mock_sourcedatacollection_remote_files,
+    mock_sourcedatacollection,
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a remote, partitioned NetCDF source.
 
@@ -219,8 +216,10 @@ def fake_romsinputdataset_partitioned_source_remote(
         fake_location.replace("00", str(i).zfill(2)) for i in range(nparts)
     ]
     unused_identifiers = [f"unusedhash{i}" for i in range(nparts)]
-    source_data_collection = mock_sourcedatacollection_remote_files(
-        locations=parted_locations, identifiers=unused_identifiers
+    source_data_collection = mock_sourcedatacollection(
+        locations=parted_locations,
+        identifiers=unused_identifiers,
+        classification=SourceClassification.REMOTE_BINARY_FILE,
     )
     patch_source_data_collection = mock.patch(
         "cstar.roms.input_dataset.SourceDataCollection.from_locations",
@@ -489,18 +488,8 @@ def fake_romssimulation_dict(fake_romssimulation) -> dict[str, Any]:
             "n_procs_x": sim.discretization.n_procs_x,
             "n_procs_y": sim.discretization.n_procs_y,
         },
-        "runtime_code": {
-            "location": sim.runtime_code.source.location,
-            "subdir": sim.runtime_code.subdir,
-            "checkout_target": sim.runtime_code.checkout_target,
-            "files": sim.runtime_code.files,
-        },
-        "compile_time_code": {
-            "location": sim.compile_time_code.source.location,
-            "subdir": sim.compile_time_code.subdir,
-            "checkout_target": sim.compile_time_code.checkout_target,
-            "files": sim.compile_time_code.files,
-        },
+        "runtime_code": sim.runtime_code._constructor_args,
+        "compile_time_code": sim.compile_time_code._constructor_args,
         "marbl_codebase": {
             "source_repo": sim.marbl_codebase.source.location,
             "checkout_target": sim.marbl_codebase.source.checkout_target,
@@ -559,6 +548,7 @@ def patch_romssimulation_init_sourcedata(
     fake_romssimulation,
     mock_sourcedata_remote_repo,
     mock_sourcedata_remote_file,
+    mock_sourcedatacollection,
 ) -> Callable[[], AbstractContextManager[None]]:
     """Fixture returning a contextmanager patching all ROMSSimulation.__init__ SourceData calls.
 
@@ -601,10 +591,38 @@ def patch_romssimulation_init_sourcedata(
         location=sim.surface_forcing[0].source.location,
         identifier=sim.surface_forcing[0].source.identifier,
     )
+    # TODO don't need to have separate fixtures for `remote_file` etc., see below
     mock_forcing_corrections_sourcedata = mock_sourcedata_remote_file(
         location=sim.forcing_corrections[0].source.location,
         identifier=sim.forcing_corrections[0].source.identifier,
     )
+
+    # AdditionalCode SourceData mocks
+    mock_runtime_code_sourcedata = mock_sourcedatacollection(
+        locations=sim.runtime_code.source.locations,
+        identifiers=["fake_hash" for i in sim.runtime_code.source],
+        classification=SourceClassification.LOCAL_TEXT_FILE,
+    )
+    mock_runtime_code_classify_side_effect = [
+        SourceClassification.LOCAL_DIRECTORY,
+    ]
+    for i in range(len(sim.runtime_code.source)):
+        mock_runtime_code_classify_side_effect.append(
+            SourceClassification.LOCAL_TEXT_FILE
+        )
+
+    mock_compile_time_code_sourcedata = mock_sourcedatacollection(
+        locations=sim.compile_time_code.source.locations,
+        identifiers=["fake_hash" for i in sim.compile_time_code.source],
+        classification=SourceClassification.LOCAL_TEXT_FILE,
+    )
+    mock_compile_time_code_classify_side_effect = [
+        SourceClassification.LOCAL_DIRECTORY,
+    ]
+    for i in range(len(sim.compile_time_code.source)):
+        mock_compile_time_code_classify_side_effect.append(
+            SourceClassification.LOCAL_TEXT_FILE
+        )
 
     @contextmanager
     def _context():
@@ -631,6 +649,20 @@ def patch_romssimulation_init_sourcedata(
                     mock_boundary_forcing_sourcedata,
                     mock_surface_forcing_sourcedata,
                     mock_forcing_corrections_sourcedata,
+                ],
+            ),
+            mock.patch(
+                "cstar.base.additional_code.SourceDataCollection.from_locations",
+                side_effect=[
+                    mock_runtime_code_sourcedata,
+                    mock_compile_time_code_sourcedata,
+                ],
+            ),
+            mock.patch(
+                "cstar.base.additional_code._SourceInspector.classify",
+                side_effect=[
+                    mock_runtime_code_classify_side_effect,
+                    mock_compile_time_code_classify_side_effect,
                 ],
             ),
         ):

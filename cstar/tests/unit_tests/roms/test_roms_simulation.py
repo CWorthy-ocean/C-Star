@@ -44,16 +44,6 @@ class TestROMSSimulationInitialization:
 
         This test ensures that a `ROMSSimulation` object is properly instantiated
         when provided with all required parameters.
-
-        Assertions
-        ----------
-        - Verifies that attributes match expected values.
-        - Checks that private attributes related to execution remain `None` initially.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation` : Provides a pre-configured `ROMSSimulation` instance
-          and its corresponding directory.
         """
         sim = fake_romssimulation
 
@@ -67,20 +57,29 @@ class TestROMSSimulationInitialization:
 
         assert sim.codebase.source.location == "https://github.com/roms/repo.git"
         assert sim.codebase.source.checkout_target == "roms_branch"
-        assert sim.runtime_code.source.location == str(sim.directory.parent)
-        assert sim.runtime_code.subdir == "subdir/"
-        assert sim.runtime_code.checkout_target == "main"
-        assert sim.runtime_code.files == [
+        assert all(
+            [
+                Path(s.location).parent == Path("/some/local/dir/subdir")
+                for s in sim.runtime_code.source
+            ]
+        )
+        assert [s.basename for s in sim.runtime_code.source] == [
             "file1",
             "file2.in",
             "marbl_in",
             "marbl_tracer_output_list",
             "marbl_diagnostic_output_list",
         ]
-        assert sim.compile_time_code.source.location == str(sim.directory.parent)
-        assert sim.compile_time_code.subdir == "subdir/"
-        assert sim.compile_time_code.checkout_target == "main"
-        assert sim.compile_time_code.files == ["file1.h", "file2.opt"]
+        assert all(
+            [
+                Path(s.location).parent == Path("/some/local/dir/subdir")
+                for s in sim.compile_time_code.source
+            ]
+        )
+        assert [s.basename for s in sim.compile_time_code.source] == [
+            "file1.h",
+            "file2.opt",
+        ]
 
         assert sim.marbl_codebase.source.location == "https://marbl.com/repo.git"
         assert sim.marbl_codebase.source.checkout_target == "v1"
@@ -117,50 +116,34 @@ class TestROMSSimulationInitialization:
         assert sim._exe_hash is None
         assert sim._execution_handler is None
 
-    def test_init_raises_if_no_discretization(self, tmp_path):
+    def test_init_raises_if_no_discretization(
+        self, fake_additionalcode_local, tmp_path
+    ):
         """Ensure that `ROMSSimulation` raises a `ValueError` if no discretization is
         provided.
 
         This test verifies that an attempt to instantiate `ROMSSimulation` without
         a required `discretization` parameter results in a `ValueError`.
-
-        Assertions
-        ----------
-        - Ensures that a `ValueError` is raised when `discretization=None`.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for
-          safely testing file system interactions.
         """
         with pytest.raises(ValueError, match="could not find 'discretization' entry"):
             ROMSSimulation(
                 name="test",
                 directory=tmp_path,
                 discretization=None,
-                runtime_code=AdditionalCode(location="some/dir"),
-                compile_time_code=AdditionalCode(location="some/dir"),
+                runtime_code=fake_additionalcode_local,
+                compile_time_code=fake_additionalcode_local,
                 start_date="2012-01-01",
                 end_date="2012-01-02",
                 valid_start_date="2012-01-01",
                 valid_end_date="2012-01-02",
             )
 
-    def test_init_raises_if_no_runtime_code(self, tmp_path):
+    def test_init_raises_if_no_runtime_code(self, fake_additionalcode_local, tmp_path):
         """Ensure that `ROMSSimulation` raises a `ValueError` if no runtime code is
         provided.
 
         This test checks that instantiating `ROMSSimulation` without a `runtime_code`
         parameter results in a `ValueError` with an expected message substring.
-
-        Assertions
-        ----------
-        - Ensures that a `ValueError` is raised when `runtime_code=None`.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for
-          safely testing file system interactions.
         """
         with pytest.raises(ValueError, match="could not find 'runtime_code' entry"):
             ROMSSimulation(
@@ -168,29 +151,22 @@ class TestROMSSimulationInitialization:
                 directory=tmp_path,
                 discretization=ROMSDiscretization(time_step=60),
                 runtime_code=None,
-                compile_time_code=AdditionalCode(location="some/dir"),
+                compile_time_code=fake_additionalcode_local,
                 start_date="2012-01-01",
                 end_date="2012-01-02",
                 valid_start_date="2012-01-01",
                 valid_end_date="2012-01-02",
             )
 
-    def test_init_raises_if_no_compile_time_code(self, tmp_path):
+    def test_init_raises_if_no_compile_time_code(
+        self, tmp_path, fake_additionalcode_local
+    ):
         """Test `ROMSSimulation` raises a `NotImplementedError` if no compile-time code
         is provided.
 
         This test verifies that attempting to instantiate `ROMSSimulation` without a
         `compile_time_code` parameter results in a `NotImplementedError`. The error message
         should indicate that the `compile_time_code` entry is missing.
-
-        Assertions
-        ----------
-        - Ensures that a `NotImplementedError` is raised when `compile_time_code=None`.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path` : A temporary directory fixture provided by `pytest` for
-          safely testing file system interactions.
         """
         with pytest.raises(
             NotImplementedError, match="could not find a 'compile_time_code' entry"
@@ -199,7 +175,7 @@ class TestROMSSimulationInitialization:
                 name="test",
                 directory=tmp_path,
                 discretization=ROMSDiscretization(time_step=60),
-                runtime_code=AdditionalCode(location="some/dir"),
+                runtime_code=fake_additionalcode_local,
                 compile_time_code=None,
                 start_date="2012-01-01",
                 end_date="2012-01-02",
@@ -207,7 +183,9 @@ class TestROMSSimulationInitialization:
                 valid_end_date="2012-01-02",
             )
 
-    def test_default_codebase_assignment(self, tmp_path, caplog):
+    def test_default_codebase_assignment(
+        self, fake_roms_runtime_code, fake_roms_compile_time_code, tmp_path, caplog
+    ):
         """Ensure `ROMSSimulation` reverts to default codebases when not provided.
 
         This test verifies that if no `codebase` or `marbl_codebase` is explicitly
@@ -235,13 +213,8 @@ class TestROMSSimulationInitialization:
             name="test",
             directory=tmp_path,
             discretization=ROMSDiscretization(time_step=60),
-            runtime_code=AdditionalCode(
-                location="some/dir",
-                files=[
-                    "roms.in",
-                ],
-            ),
-            compile_time_code=AdditionalCode(location="some/dir"),
+            runtime_code=fake_roms_runtime_code,
+            compile_time_code=fake_roms_compile_time_code,
             start_date="2012-01-01",
             end_date="2012-01-02",
             valid_start_date="2012-01-01",
@@ -266,12 +239,14 @@ class TestROMSSimulationInitialization:
         sim = fake_romssimulation
         assert sim._in_file == "file2.in"
 
-    def test_find_dotin_file_raises_if_no_dot_in_files(self, fake_romssimulation):
+    def test_find_dotin_file_raises_if_no_dot_in_files(
+        self, fake_romssimulation, fake_additionalcode_local
+    ):
         """Test that the `_find_dotin_file` helper function correctly raises a
         ValueError if a single `.in` file is not found.
         """
         sim = fake_romssimulation
-        sim.runtime_code = AdditionalCode(
+        sim.runtime_code = fake_additionalcode_local(
             location="some/dir", files=["no", "dotin.files", "here"]
         )
         with pytest.raises(RuntimeError):
@@ -286,7 +261,12 @@ class TestROMSSimulationInitialization:
         ],
     )
     def test_check_inputdataset_types(
-        self, tmp_path: Path, attrname: str, expected_type_name: str
+        self,
+        tmp_path: Path,
+        attrname: str,
+        expected_type_name: str,
+        fake_roms_runtime_code,
+        fake_roms_compile_time_code,
     ) -> None:
         """Ensure a TypeError is raised when attributes of ROMSSimulation that should be
         lists of ROMSInputDatasets (e.g., ROMSSurfaceForcing, ROMSBoundaryForcing,
@@ -308,8 +288,8 @@ class TestROMSSimulationInitialization:
                 directory=tmp_path,
                 discretization=ROMSDiscretization(time_step=60),
                 codebase=ROMSExternalCodeBase(),
-                runtime_code=AdditionalCode(location="some/dir"),
-                compile_time_code=AdditionalCode(location="some/dir"),
+                runtime_code=fake_roms_runtime_code,
+                compile_time_code=fake_roms_compile_time_code,
                 start_date="2012-01-01",
                 end_date="2012-01-02",
                 valid_start_date="2012-01-01",
@@ -405,6 +385,8 @@ class TestROMSSimulationInitialization:
         mock_forcing_paths,
         mock_from_file,
         fake_romssimulation,
+        fake_additionalcode_local,
+        fake_stageddatacollection_remote_files,
     ):
         """Test that the ROMSSimulation.runtime_settings property correctly returns a
         modified ROMSRuntimeSettings instance containing a combination of parameters
@@ -414,7 +396,7 @@ class TestROMSSimulationInitialization:
         sim = fake_romssimulation
 
         # Stop complaints about missing local paths:
-        sim.runtime_code.working_path = Path("my_code/")
+        sim.runtime_code._working_copy = fake_stageddatacollection_remote_files()
         mock_grid_path.return_value = [
             Path("grid.nc"),
         ]
@@ -446,43 +428,42 @@ class TestROMSSimulationInitialization:
             tested_settings.initial.ininame == sim.initial_conditions.path_for_roms[0]
         )
         assert tested_settings.forcing.filenames == sim._forcing_paths
+        runtime_parent = Path(sim.runtime_code.working_copy[0].path).parent
+
         assert (
             tested_settings.marbl_biogeochemistry.marbl_namelist_fname
-            == sim.runtime_code.working_path / "marbl_in"
+            == runtime_parent / "marbl_in"
         )
         assert (
             tested_settings.marbl_biogeochemistry.marbl_tracer_list_fname
-            == sim.runtime_code.working_path / "marbl_tracer_output_list"
+            == runtime_parent / "marbl_tracer_output_list"
         )
         assert (
             tested_settings.marbl_biogeochemistry.marbl_diag_list_fname
-            == sim.runtime_code.working_path / "marbl_diagnostic_output_list"
+            == runtime_parent / "marbl_diagnostic_output_list"
         )
 
         # Test with no MARBL files:
-        sim.runtime_code = AdditionalCode(location="nowhere", files="onefile.in")
-        sim.runtime_code.working_path = Path("my_code/")
+        sim.runtime_code = fake_additionalcode_local(
+            location="nowhere",
+            files=[
+                "onefile.in",
+            ],
+        )
+        sim.runtime_code._working_copy = fake_stageddatacollection_remote_files()
+
         assert sim.roms_runtime_settings.marbl_biogeochemistry is None
 
         # Test with no grid:
         sim.model_grid = None
         assert sim.roms_runtime_settings.grid is None
 
-    def test_roms_runtime_settings_raises_if_no_runtime_code_working_path(
+    def test_roms_runtime_settings_raises_if_no_runtime_code_working_copy(
         self, fake_romssimulation
     ):
         """Test that the ROMSSimulation.runtime_settings property correctly raises a
         ValueError if there is no local `.in` file from which to create a base
         ROMSRuntimeSettings instance.
-
-        Assertions
-        ----------
-        - A ValueError is raised if the `.in` file is missing
-
-        Fixtures
-        --------
-        fake_romssimulation: ROMSSimulation
-           A pytest fixture returning a common, example ROMSSimulation instance.
         """
         sim = fake_romssimulation
         with pytest.raises(
@@ -1398,7 +1379,13 @@ class TestProcessingAndExecution:
 
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @mock.patch("subprocess.run")
-    def test_build(self, mock_subprocess, mock_get_hash, fake_romssimulation):
+    def test_build(
+        self,
+        mock_subprocess,
+        mock_get_hash,
+        fake_romssimulation,
+        fake_stageddatacollection_remote_files,
+    ):
         """Tests that `build` correctly compiles the ROMS executable.
 
         This test ensures that the `build` method performs the following steps:
@@ -1409,11 +1396,11 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
-        sim.compile_time_code.working_path = build_dir
-
+        sim.compile_time_code._working_copy = fake_stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
         mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
         mock_get_hash.return_value = "mockhash123"
-
         sim.build()
         assert mock_subprocess.call_count == 2
         mock_subprocess.assert_any_call(
@@ -1443,6 +1430,7 @@ class TestProcessingAndExecution:
         mock_subprocess,
         mock_get_hash,
         fake_romssimulation,
+        fake_stageddatacollection_remote_files,
         caplog: pytest.LogCaptureFixture,
     ):
         """Tests that `build` does not recompile if the executable already exists and is
@@ -1457,6 +1445,7 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
         build_dir = sim.directory / "ROMS/compile_time_code"
+
         # Mock properties for early exit conditions
         with (
             mock.patch.object(
@@ -1469,7 +1458,12 @@ class TestProcessingAndExecution:
         ):
             # Pretend the executable exists
             sim._exe_hash = "dummy_hash"
-            sim.compile_time_code.working_path = build_dir
+            sim.compile_time_code._working_copy = (
+                fake_stageddatacollection_remote_files(
+                    paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+                )
+            )
+            sim.runtime_code._working_copy = fake_stageddatacollection_remote_files()
             sim.build(rebuild=False)
 
             # Ensure early exit exception was triggered
@@ -1488,7 +1482,11 @@ class TestProcessingAndExecution:
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @mock.patch("subprocess.run")
     def test_build_raises_if_make_clean_error(
-        self, mock_subprocess, mock_get_hash, fake_romssimulation
+        self,
+        mock_subprocess,
+        mock_get_hash,
+        fake_romssimulation,
+        fake_stageddatacollection_remote_files,
     ):
         """Tests that `build` raises an error if `make compile_clean` fails.
 
@@ -1498,7 +1496,9 @@ class TestProcessingAndExecution:
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
-        sim.compile_time_code.working_path = build_dir
+        sim.compile_time_code._working_copy = fake_stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
 
         mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
@@ -1517,7 +1517,11 @@ class TestProcessingAndExecution:
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @mock.patch("subprocess.run")
     def test_build_raises_if_make_error(
-        self, mock_subprocess, mock_get_hash, fake_romssimulation
+        self,
+        mock_subprocess,
+        mock_get_hash,
+        fake_romssimulation,
+        fake_stageddatacollection_remote_files,
     ):
         """Tests that `build` raises an error if `make` fails during compilation.
 
@@ -1526,7 +1530,10 @@ class TestProcessingAndExecution:
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
-        sim.compile_time_code.working_path = build_dir
+
+        sim.compile_time_code._working_copy = fake_stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
 
         mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
@@ -1593,7 +1600,7 @@ class TestProcessingAndExecution:
                 np_xi=2, np_eta=3, overwrite_existing_files=False
             )
 
-    def test_run_raises_if_no_runtime_code_working_path(self, fake_romssimulation):
+    def test_run_raises_if_no_runtime_code_working_copy(self, fake_romssimulation):
         """Confirm that ROMSSimulation.run() raises a FileNotFoundError if
         ROMSSimulation.runtime_code does not exist locally.
         """
@@ -1646,7 +1653,11 @@ class TestProcessingAndExecution:
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
     def test_run_local_execution(
-        self, mock_runtime_settings, mock_persist, fake_romssimulation
+        self,
+        mock_runtime_settings,
+        mock_persist,
+        fake_romssimulation,
+        fake_stageddatacollection_remote_files,
     ):
         """Tests that `run` correctly starts a local process when no scheduler is
         available.
@@ -1667,15 +1678,19 @@ class TestProcessingAndExecution:
             ),
         ):
             sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
-            sim.runtime_code.working_path = sim.directory / "ROMS/runtime_code/"
             mock_process_instance = mock.MagicMock()
             mock_local_process.return_value = mock_process_instance
+            runtime_code_dir = sim.directory / "ROMS/runtime_code"
+            sim.runtime_code._working_copy = fake_stageddatacollection_remote_files(
+                paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
+                sources=sim.runtime_code.source,
+            )
 
             execution_handler = sim.run()
 
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
-                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {sim.runtime_code.working_path}/ROMSTest.in",
+                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest.in",
                 run_path=sim.directory / "output",
             )
 
@@ -1705,6 +1720,7 @@ class TestProcessingAndExecution:
         mock_runtime_settings,
         mock_persist,
         fake_romssimulation,
+        fake_stageddatacollection_remote_files,
         mock_system_name: str,
         exp_mpi_prefix: str,
     ):
@@ -1715,7 +1731,11 @@ class TestProcessingAndExecution:
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
-        sim.runtime_code.working_path = sim.directory / "ROMS/runtime_code/"
+        runtime_code_dir = sim.directory / "ROMS/runtime_code"
+        sim.runtime_code._working_copy = fake_stageddatacollection_remote_files(
+            paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
+            sources=sim.runtime_code.source,
+        )
 
         # Mock scheduler object
         mock_scheduler = mock.MagicMock()
@@ -1755,7 +1775,7 @@ class TestProcessingAndExecution:
             # Call `run()` without explicitly passing `queue_name` and `walltime`
             execution_handler = sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
-                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {sim.runtime_code.working_path}/ROMSTest.in",
+                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/ROMSTest.in",
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
@@ -1774,7 +1794,10 @@ class TestProcessingAndExecution:
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
     def test_run_with_scheduler_raises_if_no_account_key(
-        self, mock_runtime_settings, fake_romssimulation
+        self,
+        mock_runtime_settings,
+        fake_romssimulation,
+        fake_stageddatacollection_remote_files,
     ):
         """Tests that `run` raises a `ValueError` if no account key is provided when
         using a scheduler.
@@ -1784,7 +1807,7 @@ class TestProcessingAndExecution:
         """
         sim = fake_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
-        sim.runtime_code.working_path = sim.directory / "ROMS/runtime_code/"
+        sim.runtime_code._working_copy = fake_stageddatacollection_remote_files()
 
         # Mock scheduler object
         mock_scheduler = mock.MagicMock()
