@@ -57,6 +57,13 @@ class AdditionalCode(LoggingMixin):
         AdditionalCode
             An initialized AdditionalCode object
         """
+        # TODO PR comment https://github.com/CWorthy-ocean/C-Star/pull/353#discussion_r2430051143:
+        """
+        This if/else branch "feels" like it should be handled by SourceDataCollection itself. Importing the private _SourceInspector is one reason why. I see the problem though with needed to formulate the locations based on git repos.
+
+        One solution is to add parameters to from_locations and just pass everything into it and let it sort it out. I think that's how I'd lean at the moment, in lieu of any better ideas. You could potentially have a separate helper function resolve_location(location, subdir, checkout_target) but that will still need to inspect/classify the source and should probably live in source_data.py as well.
+        """
+
         if (
             _SourceInspector(location).classify()
             == SourceClassification.REMOTE_REPOSITORY

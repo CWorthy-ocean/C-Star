@@ -121,7 +121,7 @@ class _SourceInspector:
             if self._is_repository:
                 self._source_type = SourceType.REPOSITORY
             elif self.location_type is LocationType.HTTP:
-                if not self._http_is_html:  # and (self.suffix):
+                if not self._http_is_html:
                     self._source_type = SourceType.FILE
             elif self.location_type is LocationType.PATH:
                 resolved_path = Path(self.location).resolve()
