@@ -9,12 +9,12 @@ import cstar.base.external_codebase as external_codebase
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeExternalCodeBase
 
 
-def test_codebase_str(fake_externalcodebase):
+def test_codebase_str(fake_externalcodebase_with_mock_source):
     """Test the string representation of the `ExternalCodeBase` class.
 
     Fixtures
     --------
-    fake_externalcodebase : FakeExternalCodeBase
+    fake_externalcodebase_with_mock_source : FakeExternalCodeBase
         A mock instance of `ExternalCodeBase` with a predefined environment and repository configuration.
 
     Mocks
@@ -38,14 +38,14 @@ def test_codebase_str(fake_externalcodebase):
     )
 
     # Compare the actual result with the expected result
-    assert expected_str in str(fake_externalcodebase), (
-        f"EXPECTED: \n{expected_str}, GOT: \n{str(fake_externalcodebase)}"
+    assert expected_str in str(fake_externalcodebase_with_mock_source), (
+        f"EXPECTED: \n{expected_str}, GOT: \n{str(fake_externalcodebase_with_mock_source)}"
     )
 
 
-def test_codebase_repr(fake_externalcodebase):
+def test_codebase_repr(fake_externalcodebase_with_mock_source):
     """Test the repr representation of the `ExternalCodeBase` class."""
-    result_repr = repr(fake_externalcodebase)
+    result_repr = repr(fake_externalcodebase_with_mock_source)
     expected_repr = (
         "FakeExternalCodeBase("
         + "\nsource_repo = 'https://github.com/test/repo.git',"
@@ -58,11 +58,17 @@ def test_codebase_repr(fake_externalcodebase):
 
 
 class TestToDict:
-    def test_to_dict(self, fake_externalcodebase):
+    def test_to_dict(self, fake_externalcodebase_with_mock_source):
         """Confirms that the correct key/value pairs are assigned by ExternalCodeBase.to_dict"""
-        result = fake_externalcodebase.to_dict()
-        assert result["source_repo"] == fake_externalcodebase.source.location
-        assert result["checkout_target"] == fake_externalcodebase.source.checkout_target
+        result = fake_externalcodebase_with_mock_source.to_dict()
+        assert (
+            result["source_repo"]
+            == fake_externalcodebase_with_mock_source.source.location
+        )
+        assert (
+            result["checkout_target"]
+            == fake_externalcodebase_with_mock_source.source.checkout_target
+        )
 
 
 class TestSetup:
@@ -88,82 +94,109 @@ class TestSetup:
             fecb = FakeExternalCodeBase(configured=True)
         assert fecb.working_copy.path == tmp_path
 
-    def test_get_skips_if_already_staged(self, fake_externalcodebase, caplog):
+    def test_get_skips_if_already_staged(
+        self, fake_externalcodebase_with_mock_source, caplog
+    ):
         """Confirms that `get()` skips its logic if the codebase is staged"""
-        fake_externalcodebase._working_copy = mock.Mock(
+        fake_externalcodebase_with_mock_source._working_copy = mock.Mock(
             spec=external_codebase.StagedRepository
         )
-        caplog.set_level(logging.INFO, logger=fake_externalcodebase.log.name)
-        fake_externalcodebase.get(target_dir=Path("/tmp/foo"))
+        caplog.set_level(
+            logging.INFO, logger=fake_externalcodebase_with_mock_source.log.name
+        )
+        fake_externalcodebase_with_mock_source.get(target_dir=Path("/tmp/foo"))
 
         assert "already staged" in caplog.text
-        assert fake_externalcodebase.working_copy is not None
+        assert fake_externalcodebase_with_mock_source.working_copy is not None
 
     def test_get_default_target_dir_and_stage_called(
-        self, fake_externalcodebase, tmp_path, caplog
+        self, fake_externalcodebase_with_mock_source, tmp_path, caplog
     ):
         """Tests that `get()` invokes default staging location if no target provided.
 
         The default location is <C-star's root directory>/<codebase repository's basename>
         """
         staged_repo = mock.Mock(spec=external_codebase.StagedRepository)
-        fake_externalcodebase.source.stage = mock.Mock(return_value=staged_repo)
+        fake_externalcodebase_with_mock_source.source.stage = mock.Mock(
+            return_value=staged_repo
+        )
 
         with mock.patch(
             "cstar.base.external_codebase.cstar_sysmgr._environment"
         ) as mock_env:
             mock_env.package_root = tmp_path
-            fake_externalcodebase._working_copy = None
-            caplog.set_level(logging.INFO, logger=fake_externalcodebase.log.name)
-            fake_externalcodebase.get()
+            fake_externalcodebase_with_mock_source._working_copy = None
+            caplog.set_level(
+                logging.INFO, logger=fake_externalcodebase_with_mock_source.log.name
+            )
+            fake_externalcodebase_with_mock_source.get()
 
-        assert fake_externalcodebase.working_copy == staged_repo
-        fake_externalcodebase.source.stage.assert_called_once()
+        assert fake_externalcodebase_with_mock_source.working_copy == staged_repo
+        fake_externalcodebase_with_mock_source.source.stage.assert_called_once()
         assert "defaulting to" in caplog.text
 
 
 class TestConfigure:
-    def test_configure_raises_without_working_copy(self, mock_externalcodebase):
+    def test_configure_raises_without_working_copy(
+        self, fake_externalcodebase_with_mock_source_and_get
+    ):
         """Confirms the `configure` method raises if `working_copy` is None."""
-        mock_externalcodebase._working_copy = None
+        fake_externalcodebase_with_mock_source_and_get._working_copy = None
         with pytest.raises(FileNotFoundError):
-            mock_externalcodebase.configure()
+            fake_externalcodebase_with_mock_source_and_get.configure()
 
-    def test_configure_logs_if_already_configured(self, mock_externalcodebase, caplog):
+    def test_configure_logs_if_already_configured(
+        self, fake_externalcodebase_with_mock_source_and_get, caplog
+    ):
         """Confirms that a message is logged if `configure()` is called unnecessarily"""
-        mock_externalcodebase._working_copy = mock.Mock(
+        fake_externalcodebase_with_mock_source_and_get._working_copy = mock.Mock(
             spec=external_codebase.StagedRepository
         )
         with mock.patch.object(
-            type(mock_externalcodebase), "is_configured", new_callable=mock.PropertyMock
+            type(fake_externalcodebase_with_mock_source_and_get),
+            "is_configured",
+            new_callable=mock.PropertyMock,
         ) as prop:
             prop.return_value = True
-            caplog.set_level(logging.INFO, logger=mock_externalcodebase.log.name)
-            mock_externalcodebase.configure()
+            caplog.set_level(
+                logging.INFO,
+                logger=fake_externalcodebase_with_mock_source_and_get.log.name,
+            )
+            fake_externalcodebase_with_mock_source_and_get.configure()
 
         assert "correctly configured" in caplog.text
 
     def test_configure_calls_subclass_configure_if_not_configured(
-        self, mock_externalcodebase
+        self, fake_externalcodebase_with_mock_source_and_get
     ):
         """Confirms that ExternalCodeBase defers to the abstractmethod `_configure` after validation."""
-        mock_externalcodebase._working_copy = mock.Mock(
+        fake_externalcodebase_with_mock_source_and_get._working_copy = mock.Mock(
             spec=external_codebase.StagedRepository
         )
         with mock.patch.object(
-            type(mock_externalcodebase), "is_configured", new_callable=mock.PropertyMock
+            type(fake_externalcodebase_with_mock_source_and_get),
+            "is_configured",
+            new_callable=mock.PropertyMock,
         ) as prop:
             prop.return_value = False
-            with mock.patch.object(mock_externalcodebase, "_configure") as do_configure:
-                mock_externalcodebase.configure()
+            with mock.patch.object(
+                fake_externalcodebase_with_mock_source_and_get, "_configure"
+            ) as do_configure:
+                fake_externalcodebase_with_mock_source_and_get.configure()
         do_configure.assert_called_once()
 
-    def test_setup_calls_get_and_configure(self, mock_externalcodebase, tmp_path):
+    def test_setup_calls_get_and_configure(
+        self, fake_externalcodebase_with_mock_source_and_get, tmp_path
+    ):
         """Confirms that `setup` calls both methods it wraps."""
         with (
-            mock.patch.object(mock_externalcodebase, "get") as fake_get,
-            mock.patch.object(mock_externalcodebase, "configure") as fake_conf,
+            mock.patch.object(
+                fake_externalcodebase_with_mock_source_and_get, "get"
+            ) as fake_get,
+            mock.patch.object(
+                fake_externalcodebase_with_mock_source_and_get, "configure"
+            ) as fake_conf,
         ):
-            mock_externalcodebase.setup(tmp_path)
+            fake_externalcodebase_with_mock_source_and_get.setup(tmp_path)
         fake_get.assert_called_once_with(tmp_path)
         fake_conf.assert_called_once()

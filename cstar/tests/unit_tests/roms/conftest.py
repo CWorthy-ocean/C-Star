@@ -27,7 +27,7 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 @pytest.fixture
-def fake_romsexternalcodebase(
+def romsexternalcodebase_with_mock_source(
     mock_sourcedata_remote_repo,
 ) -> Generator[ROMSExternalCodeBase, None, None]:
     """Fixture providing a `ROMSExternalCodeBase` instance for testing.
@@ -45,8 +45,8 @@ def fake_romsexternalcodebase(
 
 
 @pytest.fixture
-def mock_romsexternalcodebase_staged(
-    fake_romsexternalcodebase,
+def romsexternalcodebase_with_mock_source_and_working_copy(
+    romsexternalcodebase_with_mock_source,
     fake_stagedrepository,
     tmp_path,
 ) -> Generator[ROMSExternalCodeBase, None, None]:
@@ -54,7 +54,7 @@ def mock_romsexternalcodebase_staged(
 
     Sets `working_copy` to a mock StagedRepository instance.
     """
-    recb = fake_romsexternalcodebase
+    recb = romsexternalcodebase_with_mock_source
     staged_data = fake_stagedrepository(
         path=tmp_path, source=recb.source, changed_from_source=False
     )
@@ -159,7 +159,7 @@ def fake_roms_compile_time_code(fake_additionalcode_local) -> AdditionalCode:
 # ROMSInputDataset
 ################################################################################
 @pytest.fixture
-def fake_romsinputdataset_netcdf_local(
+def romsinputdataset_with_mock_local_netcdf_source(
     mock_sourcedata_local_file,
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
@@ -184,7 +184,7 @@ def fake_romsinputdataset_netcdf_local(
 
 
 @pytest.fixture
-def fake_romsinputdataset_netcdf_remote(
+def romsinputdataset_with_mock_remote_netcdf_source(
     mock_sourcedata_remote_file,
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
@@ -209,7 +209,7 @@ def fake_romsinputdataset_netcdf_remote(
 
 
 @pytest.fixture
-def fake_romsinputdataset_partitioned_source_remote(
+def romsinputdataset_with_mock_remote_partitioned_source(
     mock_sourcedata_remote_file,
     mock_sourcedatacollection,
 ) -> Generator[ROMSInputDataset, None, None]:
@@ -257,7 +257,7 @@ def fake_romsinputdataset_partitioned_source_remote(
 
 
 @pytest.fixture
-def fake_romsinputdataset_yaml_local(
+def romsinputdataset_with_mock_local_yaml_source(
     mock_sourcedata_local_text_file,
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a local YAML source.
@@ -282,7 +282,7 @@ def fake_romsinputdataset_yaml_local(
 
 
 @pytest.fixture
-def fake_romsinputdataset_yaml_remote(
+def romsinputdataset_with_mock_remote_yaml_source(
     mock_sourcedata_remote_text_file,
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a remote YAML source.
@@ -310,7 +310,7 @@ def fake_romsinputdataset_yaml_remote(
 
 @pytest.fixture
 def fake_model_grid(mock_sourcedata_remote_file) -> ROMSModelGrid:
-    """Provides a ROMSModelGrid instance with fake attrs for testing"""
+    """Provides a ROMSModelGrid instance with fake attrs for testing."""
     fake_location = "http://my.files/grid.nc"
     fake_hash = "123"
     source_data = mock_sourcedata_remote_file(
@@ -326,7 +326,7 @@ def fake_model_grid(mock_sourcedata_remote_file) -> ROMSModelGrid:
 
 @pytest.fixture
 def fake_initial_conditions(mock_sourcedata_remote_file) -> ROMSInitialConditions:
-    """Provides a ROMSInitialConditions instance with fake attrs for testing"""
+    """Provides a ROMSInitialConditions instance with fake attrs for testing."""
     fake_location = "http://my.files/initial.nc"
     fake_hash = "234"
     source_data = mock_sourcedata_remote_file(
@@ -342,7 +342,7 @@ def fake_initial_conditions(mock_sourcedata_remote_file) -> ROMSInitialCondition
 
 @pytest.fixture
 def fake_tidal_forcing(mock_sourcedata_remote_file) -> ROMSTidalForcing:
-    """Provides a ROMSTidalForcing instance with fake attrs for testing"""
+    """Provides a ROMSTidalForcing instance with fake attrs for testing."""
     fake_location = "http://my.files/tidal.nc"
     fake_hash = "345"
     source_data = mock_sourcedata_remote_file(
@@ -390,7 +390,7 @@ def fake_boundary_forcing(mock_sourcedata_remote_file) -> ROMSBoundaryForcing:
 
 @pytest.fixture
 def fake_surface_forcing(mock_sourcedata_remote_file) -> ROMSSurfaceForcing:
-    """Provides a ROMSSurfaceForcing instance with fake attrs for testing"""
+    """Provides a ROMSSurfaceForcing instance with fake attrs for testing."""
     fake_location = "http://my.files/surface.nc"
     fake_hash = "567"
     source_data = mock_sourcedata_remote_file(
@@ -427,8 +427,8 @@ def fake_forcing_corrections(mock_sourcedata_remote_file) -> ROMSForcingCorrecti
 
 @pytest.fixture
 def fake_romssimulation(
-    fake_marblexternalcodebase,
-    fake_romsexternalcodebase,
+    marblexternalcodebase_with_mock_source,
+    romsexternalcodebase_with_mock_source,
     fake_roms_runtime_code,
     fake_roms_compile_time_code,
     fake_model_grid,
@@ -460,14 +460,14 @@ def fake_romssimulation(
         name="ROMSTest",
         directory=directory,
         discretization=ROMSDiscretization(time_step=60, n_procs_x=2, n_procs_y=3),
-        codebase=fake_romsexternalcodebase,
+        codebase=romsexternalcodebase_with_mock_source,
         runtime_code=fake_roms_runtime_code,
         compile_time_code=fake_roms_compile_time_code,
         start_date="2025-01-01",
         end_date="2025-12-31",
         valid_start_date="2024-01-01",
         valid_end_date="2026-01-01",
-        marbl_codebase=fake_marblexternalcodebase,
+        marbl_codebase=marblexternalcodebase_with_mock_source,
         model_grid=fake_model_grid,
         initial_conditions=fake_initial_conditions,
         tidal_forcing=fake_tidal_forcing,
