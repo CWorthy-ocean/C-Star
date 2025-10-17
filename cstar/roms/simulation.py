@@ -3,13 +3,11 @@ from itertools import chain
 from pathlib import Path
 from typing import Any, Optional, TypeVar, cast
 
-import requests
 import yaml
 
 import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.datasource import DataSource
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
@@ -20,6 +18,7 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.constants import FileEncoding
+from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
@@ -1011,16 +1010,20 @@ class ROMSSimulation(Simulation):
         to_blueprint : Saves the simulation as a YAML blueprint.
         from_dict : Creates an instance from a dictionary representation.
         """
-        source = DataSource(location=blueprint)
-        if source.source_type != "yaml":
-            raise ValueError(
-                f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
-            )
-        if source.location_type == "path":
-            with open(blueprint) as file:
-                bp_dict = yaml.safe_load(file)
-        elif source.location_type == "url":
-            bp_dict = yaml.safe_load(requests.get(source.location).text)
+        source = SourceData(location=blueprint)
+        bp_dict = yaml.safe_load(
+            source.stager.retriever.read(source=source).decode("utf-8")
+        )
+        # source = DataSource(location=blueprint)
+        # if source.source_type != "yaml":
+        #     raise ValueError(
+        #         f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
+        #     )
+        # if source.location_type == "path":
+        #     with open(blueprint) as file:
+        #         bp_dict = yaml.safe_load(file)
+        # elif source.location_type == "url":
+        #     bp_dict = yaml.safe_load(requests.get(source.location).text)
 
         return cls.from_dict(
             bp_dict, directory=directory, start_date=start_date, end_date=end_date
