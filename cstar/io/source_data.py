@@ -281,18 +281,18 @@ class SourceData:
     def stager(self) -> "Stager":
         """The Stager subclass with which to handle staging of this data"""
         if not self._stager:
-            self._stager = get_stager(self.classification)
+            self._stager = get_stager(self)
         return self._stager
 
     @property
     def retriever(self) -> "Retriever":
         if not self._retriever:
-            self._retriever = get_retriever(self.classification)
+            self._retriever = get_retriever(self)
         return self._retriever
 
     def stage(self, target_dir: str | Path) -> "StagedData":
         """Stages the data, making it available to C-Star"""
-        return self.stager.stage(target_dir=Path(target_dir), source=self)
+        return self.stager.stage(target_dir=Path(target_dir))
 
 
 class SourceDataCollection:

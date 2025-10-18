@@ -324,9 +324,8 @@ class ROMSInputDataset(InputDataset, ABC):
             self.log.info(f"⏭️ {self._local} already exists, skipping.")
             return
 
-        retriever = self.source.stager.retriever
-        raw_yaml_text = retriever.read(self.source).decode("utf-8")
-        # NOTE maybe refactor to self.source.retriever?
+        retriever = self.source.retriever
+        raw_yaml_text = retriever.read().decode("utf-8")
         _, header, yaml_data = raw_yaml_text.split("---", 2)
 
         yaml_dict = yaml.safe_load(yaml_data)

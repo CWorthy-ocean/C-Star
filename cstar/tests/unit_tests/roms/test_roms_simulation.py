@@ -7,7 +7,6 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-import yaml
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
@@ -984,8 +983,10 @@ class TestToAndFromDictAndBlueprint:
                 start_date=sim.start_date,
                 end_date=sim.end_date,
             )
-
         assert sim_from_dict.to_dict() == sim_to_dict
+        assert pickle.dumps(sim_from_dict) == pickle.dumps(sim), (
+            "Instances are not identical"
+        )
 
     def test_to_blueprint(self, fake_romssimulation):
         """Tests that `to_blueprint()` writes a `ROMSSimulation` dictionary to a YAML
@@ -1010,140 +1011,34 @@ class TestToAndFromDictAndBlueprint:
                 sim.to_dict(), mock_file(), default_flow_style=False, sort_keys=False
             )
 
-    @mock.patch("pathlib.Path.exists", return_value=True)
-    @mock.patch("builtins.open", new_callable=mock.mock_open)
-    def test_from_blueprint_valid_file(
-        self,
-        mock_open_file,
-        mock_path_exists,
-        tmp_path,
-        patch_romssimulation_init_sourcedata,
-        fake_romssimulation_dict,
-    ):
-        """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
+    def test_from_blueprint(self, tmp_path):
+        """Tests that `from_blueprint()` correctly creates a `ROMSSimulation` from a valid
         YAML file.
 
-        This test mocks the output of yaml.safe_load to return the expected dictionary
-        and then verifies that this output is properly processed.
+        This test mocks the 'bytes' output of Retriever.read to represent yaml data
+        and asserts 'from_dict' is called with the correct dictionary.
         """
-        sim_dict = fake_romssimulation_dict
-        blueprint_path = tmp_path / "roms_blueprint.yaml"
         with (
-            mock.patch("yaml.safe_load", return_value=sim_dict),
-            patch_romssimulation_init_sourcedata(),
             mock.patch(
-                "cstar.roms.simulation.ROMSExternalCodeBase.is_configured",
-                new_callable=mock.PropertyMock,
-                return_value=False,
-            ),
-            mock.patch(
-                "cstar.roms.simulation.MARBLExternalCodeBase.is_configured",
-                new_callable=mock.PropertyMock,
-                return_value=False,
-            ),
+                "cstar.roms.simulation.ROMSSimulation.from_dict"
+            ) as mock_from_dict,
+            mock.patch("cstar.roms.simulation.SourceData") as mock_source_cls,
         ):
-            sim = ROMSSimulation.from_blueprint(
-                blueprint=str(blueprint_path),
-                directory=tmp_path,
-                start_date="2024-01-01",
-                end_date="2025-01-01",
+            # mock the SourceData instance
+            mock_source = mock.Mock()
+            mock_source.retriever.read.return_value = b"fake: yaml\ninput: 42\n"
+            mock_source_cls.return_value = mock_source
+
+            ROMSSimulation.from_blueprint(
+                tmp_path / "roms_blueprint.yaml", directory=tmp_path / "dir"
             )
 
-        # Assertions
-        assert isinstance(sim, ROMSSimulation)
-        mock_open_file.assert_called_once_with(str(blueprint_path))
-
-    @mock.patch("pathlib.Path.exists", return_value=True)
-    @mock.patch(
-        "builtins.open",
-        new_callable=mock.mock_open,
-        read_data="name: TestROMS\ndiscretization:\n  time_step: 60",
-    )
-    def test_from_blueprint_invalid_filetype(
-        self, mock_open_file, mock_path_exists, tmp_path, fake_romssimulation_dict
-    ):
-        """Tests that `from_blueprint()` raises a `ValueError` when given a non-YAML
-        file.
-        """
-        blueprint_path = tmp_path / "roms_blueprint.nc"
-
-        with mock.patch("yaml.safe_load", return_value=fake_romssimulation_dict):
-            with pytest.raises(
-                ValueError, match="C-Star expects blueprint in '.yaml' format"
-            ):
-                ROMSSimulation.from_blueprint(
-                    blueprint=str(blueprint_path),
-                    directory=tmp_path,
-                    start_date="2024-01-01",
-                    end_date="2025-01-01",
-                )
-
-    @mock.patch("requests.get")
-    @mock.patch("pathlib.Path.exists", return_value=True)
-    def test_from_blueprint_url(
-        self,
-        mock_path_exists,
-        mock_requests_get,
-        patch_romssimulation_init_sourcedata,
-        fake_romssimulation_dict,
-        tmp_path,
-    ):
-        """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a URL.
-
-        This test ensures that when given a valid URL to a YAML blueprint file,
-        `from_blueprint()` retrieves, parses, and constructs a `ROMSSimulation` instance.
-        """
-        sim_dict = fake_romssimulation_dict
-        mock_response = mock.MagicMock()
-        mock_response.text = yaml.dump(sim_dict)
-        mock_requests_get.return_value = mock_response
-        blueprint_path = "http://sketchyamlfiles4u.ru/roms_blueprint.yaml"
-
-        with patch_romssimulation_init_sourcedata():
-            sim = ROMSSimulation.from_blueprint(
-                blueprint=blueprint_path,
-                directory=tmp_path,
-                start_date="2024-01-01",
-                end_date="2025-01-01",
+            mock_from_dict.assert_called_once_with(
+                {"fake": "yaml", "input": 42},
+                directory=tmp_path / "dir",
+                start_date=None,
+                end_date=None,
             )
-
-        assert isinstance(sim, ROMSSimulation)
-        mock_requests_get.assert_called_once()
-
-    def test_blueprint_roundtrip(
-        self,
-        fake_romssimulation,
-        patch_romssimulation_init_sourcedata,
-        tmp_path,
-    ):
-        """Tests that a `ROMSSimulation` can be serialized to a YAML blueprint and
-        reconstructed correctly using `from_blueprint()`.
-
-        This test verifies that after saving a simulation instance to a YAML blueprint
-        and then reloading it, the reloaded instance matches the original.
-
-        Assertions
-        ----------
-        - The dictionary representation of the reloaded instance matches the original.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation`: A fixture providing a sample `ROMSSimulation` instance.
-        - mock_source_data_factory: A fixture to return a custom mocked SourceData instance
-        - `tmp_path`: A temporary directory provided by `pytest` to store the blueprint file.
-        """
-        sim = fake_romssimulation
-        output_file = tmp_path / "test.yaml"
-        sim.to_blueprint(filename=output_file)
-
-        with patch_romssimulation_init_sourcedata():
-            sim2 = ROMSSimulation.from_blueprint(
-                blueprint=output_file,
-                directory=tmp_path / "sim2",
-                start_date=sim.start_date,
-                end_date=sim.end_date,
-            )
-        assert sim.to_dict() == sim2.to_dict()
 
 
 class TestProcessingAndExecution:

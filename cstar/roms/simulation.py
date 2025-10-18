@@ -1011,19 +1011,7 @@ class ROMSSimulation(Simulation):
         from_dict : Creates an instance from a dictionary representation.
         """
         source = SourceData(location=blueprint)
-        bp_dict = yaml.safe_load(
-            source.stager.retriever.read(source=source).decode("utf-8")
-        )
-        # source = DataSource(location=blueprint)
-        # if source.source_type != "yaml":
-        #     raise ValueError(
-        #         f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
-        #     )
-        # if source.location_type == "path":
-        #     with open(blueprint) as file:
-        #         bp_dict = yaml.safe_load(file)
-        # elif source.location_type == "url":
-        #     bp_dict = yaml.safe_load(requests.get(source.location).text)
+        bp_dict = yaml.safe_load(source.retriever.read().decode("utf-8"))
 
         return cls.from_dict(
             bp_dict, directory=directory, start_date=start_date, end_date=end_date

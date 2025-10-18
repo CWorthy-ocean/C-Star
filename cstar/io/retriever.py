@@ -24,7 +24,7 @@ def register_retriever(
     return wrapped_cls
 
 
-def get_retriever(source_classification: SourceClassification) -> "Retriever":
+def get_retriever(source: "SourceData") -> "Retriever":
     """Get a retriever from the retriever registry.
 
     Returns
@@ -37,10 +37,11 @@ def get_retriever(source_classification: SourceClassification) -> "Retriever":
     ValueError
         if no registered retriever is associated with this classification
     """
-    if retriever := _registry.get(source_classification):
-        return retriever()
+    classification = source.classification
+    if retriever := _registry.get(classification):
+        return retriever(source=source)
 
-    raise ValueError(f"No retriever for {source_classification}")
+    raise ValueError(f"No retriever for {classification}")
 
 
 class Retriever(ABC):
@@ -56,12 +57,15 @@ class Retriever(ABC):
 
     _classification: ClassVar[SourceClassification]
 
+    def __init__(self, source: "SourceData"):
+        self.source = source
+
     @abstractmethod
-    def read(self, source: "SourceData") -> bytes:
+    def read(self) -> bytes:
         """Retrieve data to memory, if supported"""
         pass
 
-    def save(self, target_dir: Path, source: "SourceData") -> Path:
+    def save(self, target_dir: Path) -> Path:
         """
         Save this object to the given directory.
 
@@ -76,11 +80,11 @@ class Retriever(ABC):
         else:
             target_dir.mkdir(parents=True)
 
-        savepath = self._save(target_dir=target_dir, source=source)
+        savepath = self._save(target_dir=target_dir)
         return savepath
 
     @abstractmethod
-    def _save(self, target_dir: Path, source: "SourceData") -> Path:
+    def _save(self, target_dir: Path) -> Path:
         """Retrieve data to a local path"""
         pass
 
@@ -88,16 +92,16 @@ class Retriever(ABC):
 class RemoteFileRetriever(Retriever, ABC):
     """Retriever subclass for retrieving remote files."""
 
-    def read(self, source: "SourceData") -> bytes:
+    def read(self) -> bytes:
         """Reads this remote file's contents into memory using `requests`"""
-        response = requests.get(source.location, allow_redirects=True)
+        response = requests.get(self.source.location, allow_redirects=True)
         response.raise_for_status()
         data = response.content
 
         return data
 
     @abstractmethod
-    def _save(self, target_dir: Path, source: "SourceData") -> Path:
+    def _save(self, target_dir: Path) -> Path:
         pass
 
 
@@ -107,7 +111,7 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
 
     _classification = SourceClassification.REMOTE_BINARY_FILE
 
-    def _save(self, target_dir: Path, source: "SourceData") -> Path:
+    def _save(self, target_dir: Path) -> Path:
         """Saves this remote file's contents to `target_dir`.
 
         If the file's SourceData specifies a checksum as its `identifier`,
@@ -118,8 +122,6 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
         ----------
         target_dir: pathlib.Path
             The directory in which to save the file
-        source: SourceData
-            The SourceData instance tracking the file's source
 
         Returns
         -------
@@ -134,9 +136,9 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
         """
         hash_obj = hashlib.sha256()
         target_dir.mkdir(parents=True, exist_ok=True)
-        target_path = target_dir / source.basename
+        target_path = target_dir / self.source.basename
 
-        with requests.get(source.location, stream=True, allow_redirects=True) as r:
+        with requests.get(self.source.location, stream=True, allow_redirects=True) as r:
             r.raise_for_status()
             with open(target_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):  # Download in 8kB chunks
@@ -145,14 +147,14 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
                         hash_obj.update(chunk)
 
         # Hash verification if specified in "SourceData":
-        if source.identifier:
+        if self.source.identifier:
             actual_hash = hash_obj.hexdigest()
-            expected_hash = source.identifier.lower()
+            expected_hash = self.source.identifier.lower()
 
             if actual_hash != expected_hash:
                 target_path.unlink(missing_ok=True)  # Remove downloaded file
                 raise ValueError(
-                    f"Hash mismatch for {source.location} (saved file):\n"
+                    f"Hash mismatch for {self.source.location} (saved file):\n"
                     f"Expected: {expected_hash}\nActual:   {actual_hash}.\n"
                     f"File deleted for safety."
                 )
@@ -165,23 +167,21 @@ class RemoteTextFileRetriever(RemoteFileRetriever):
 
     _classification = SourceClassification.REMOTE_TEXT_FILE
 
-    def _save(self, target_dir: Path, source: "SourceData") -> Path:
+    def _save(self, target_dir: Path) -> Path:
         """Save this text file to `target_dir`.
 
         Parameters
         ----------
         target_dir, Path:
             The target directory in which to save the text file.
-        source, SourceData:
-            The SourceData instance tracking the file's source.
 
         Returns
         -------
         pathlib.Path:
             The path of the saved file
         """
-        data = self.read(source=source)
-        target_path = target_dir / source.basename
+        data = self.read()
+        target_path = target_dir / self.source.basename
         with open(target_path, "wb") as f:
             f.write(data)
         return target_path
@@ -190,23 +190,18 @@ class RemoteTextFileRetriever(RemoteFileRetriever):
 class LocalFileRetriever(Retriever):
     """Retriever subclass for retrieving local files."""
 
-    def read(self, source: "SourceData") -> bytes:
+    def read(self) -> bytes:
         """Read this file's contents into memory
-
-        Parameters
-        ----------
-        source, SourceData:
-            The SourceData instance tracking this file's origin.
 
         Returns
         -------
         bytes:
            raw bytes from the read
         """
-        with open(source.location, "rb") as f:
+        with open(self.source.location, "rb") as f:
             return f.read()
 
-    def _save(self, target_dir: Path, source: "SourceData") -> Path:
+    def _save(self, target_dir: Path) -> Path:
         """Save this file to `target_dir`
 
         Parameters
@@ -219,8 +214,8 @@ class LocalFileRetriever(Retriever):
         pathlib.Path:
             The path of the saved file
         """
-        target_path = target_dir / source.basename
-        shutil.copy2(src=Path(source.location).resolve(), dst=target_path)
+        target_path = target_dir / self.source.basename
+        shutil.copy2(src=Path(self.source.location).resolve(), dst=target_path)
         return target_path
 
 
@@ -244,7 +239,7 @@ class RemoteRepositoryRetriever(Retriever):
 
     _classification = SourceClassification.REMOTE_REPOSITORY
 
-    def read(self, source: "SourceData") -> bytes:
+    def read(self) -> bytes:
         """Unsupported method.
 
         Raises
@@ -254,15 +249,13 @@ class RemoteRepositoryRetriever(Retriever):
         """
         raise NotImplementedError("Cannot 'read' a remote repository to memory")
 
-    def _save(self, target_dir: Path, source: "SourceData") -> Path:
+    def _save(self, target_dir: Path) -> Path:
         """Clone this repository to `target_dir`
 
         Parameters
         ----------
         target_dir, pathlib.Path:
             The directory in which to clone this repository. Must be empty.
-        source, SourceData:
-            The SourceData instance tracking this repository's origin
 
         Returns
         -------
@@ -278,13 +271,13 @@ class RemoteRepositoryRetriever(Retriever):
             raise ValueError(f"cannot clone repository to {target_dir} - dir not empty")
 
         _clone(
-            source_repo=source.location,
+            source_repo=self.source.location,
             local_path=target_dir,
         )
-        if source.checkout_target:
+        if self.source.checkout_target:
             _checkout(
-                source_repo=source.location,
+                source_repo=self.source.location,
                 local_path=target_dir,
-                checkout_target=source.checkout_target,
+                checkout_target=self.source.checkout_target,
             )
         return target_dir

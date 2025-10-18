@@ -45,8 +45,25 @@ class MockStager(Stager):
             self._retriever = mock.Mock(spec=Retriever)
         return self._retriever
 
-    def stage(self, target_dir: Path, source: "SourceData"):
-        return MockStagedData(source=source, path=target_dir / source.basename)
+    def stage(self, target_dir: Path):
+        return MockStagedData(
+            source=self.source, path=target_dir / self.source.basename
+        )
+
+
+class MockRetriever(Retriever):
+    def read(self, bytes_to_have_read: bytes = b"fake_bytes") -> bytes:
+        return bytes_to_have_read
+
+    def _save(self, path_to_have_saved_to) -> Path:
+        return path_to_have_saved_to
+
+    # def _save(self, target_dir: Path) -> Path:
+    #     data = self.read()
+    #     target_path = self.source.basename
+    #     with open(target_path, "wb",) as f:
+    #         f.write(data)
+    #     return target_path
 
 
 class MockStagedData(StagedData):
@@ -111,11 +128,13 @@ class MockSourceData(SourceData):
 
         self._classification = classification
 
-        self._stager = MockStager()
+        self._stager = MockStager(source=self)
+        self._retriever = MockRetriever(source=self)
+        # self._retriever = mock.Mock(spec=Retriever)
 
 
 @pytest.fixture
-def mock_source_data_factory() -> Callable[
+def mock_sourcedata_factory() -> Callable[
     [SourceClassification, str | Path, str | None], MockSourceData
 ]:
     """

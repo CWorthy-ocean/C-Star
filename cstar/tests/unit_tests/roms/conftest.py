@@ -677,10 +677,10 @@ def patch_romssimulation_init_sourcedata(
                 ],
             ),
             mock.patch(
-                "cstar.base.additional_code._SourceInspector.classify",
+                "cstar.io.source_data._SourceInspector.classify",
                 side_effect=[
-                    mock_runtime_code_classify_side_effect,
-                    mock_compile_time_code_classify_side_effect,
+                    *mock_runtime_code_classify_side_effect,
+                    *mock_compile_time_code_classify_side_effect,
                 ],
             ),
         ):

@@ -221,11 +221,15 @@ class TestROMSInputDatasetGet:
         self.mock_yaml_dump.return_value = "mocked_yaml_content"
 
         # Mock raw yaml bytes coming out of .read:
-        romsinputdataset_with_mock_remote_yaml_source.source.stager.retriever.read.return_value = b"---\nheader---\ndata"
-        # Call the method under test
-        romsinputdataset_with_mock_remote_yaml_source.get(
-            local_dir=Path("some/local/dir")
-        )
+        with mock.patch.object(
+            romsinputdataset_with_mock_remote_yaml_source.source.retriever,
+            "read",
+            return_value=b"---\nheader---\ndata",
+        ):
+            # Call the method under test
+            romsinputdataset_with_mock_remote_yaml_source.get(
+                local_dir=Path("some/local/dir")
+            )
 
         # Check that the yaml.safe_load was called properly
         self.mock_yaml_load.assert_called_once()
@@ -272,11 +276,15 @@ class TestROMSInputDatasetGet:
             Path("some/local/dir/surface_forcing_file.nc")
         ]
         # Mock raw yaml bytes coming out of .read:
-        romsinputdataset_with_mock_local_yaml_source.source.stager.retriever.read.return_value = b"---\nheader---\ndata"
-        # Call the method under test
-        romsinputdataset_with_mock_local_yaml_source.get(
-            local_dir=Path("some/local/dir")
-        )
+        with mock.patch.object(
+            romsinputdataset_with_mock_local_yaml_source.source.retriever,
+            "read",
+            return_value=b"---\nheader---\ndata",
+        ):
+            #         # Call the method under test
+            romsinputdataset_with_mock_local_yaml_source.get(
+                local_dir=Path("some/local/dir")
+            )
 
         # Assert that start_time and end_time are updated in the YAML dictionary
 
@@ -322,10 +330,15 @@ class TestROMSInputDatasetGet:
             st_size=12345, st_mtime=1678901234, st_mode=0o100644
         )
         mock_stat.return_value = mock_stat_result
-        romsinputdataset_with_mock_local_yaml_source.source.stager.retriever.read.return_value = b"---\nheader---\ndata"
-
-        # Call the method under test and expect a ValueError
-        with pytest.raises(ValueError) as exception_info:
+        with (
+            mock.patch.object(
+                romsinputdataset_with_mock_local_yaml_source.source.retriever,
+                "read",
+                return_value=b"---\nheader---\ndata",
+            ),
+            # Call the method under test and expect a ValueError
+            pytest.raises(ValueError) as exception_info,
+        ):
             romsinputdataset_with_mock_local_yaml_source.get(local_dir="some/local/dir")
 
         # Define the expected error message
