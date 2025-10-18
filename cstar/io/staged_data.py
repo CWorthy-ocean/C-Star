@@ -296,3 +296,11 @@ class StagedDataCollection:
     def items(self) -> list[StagedData]:
         """Flattened list of all StagedData entries"""
         return list(self._items)
+
+    @property
+    def common_parent(self) -> Path:
+        """Returns the nearest shared parent of SourceDataCollection.paths"""
+        strpaths = [str(p) for p in self.paths]
+        if len(strpaths) == 1:
+            return self.paths[0].parent
+        return Path(os.path.commonpath(strpaths))

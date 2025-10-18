@@ -1,5 +1,6 @@
 import os
 import shutil
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -214,3 +215,36 @@ class TestStagedDataCollection:
             coll.unstage()
         mock_reset.assert_called_once()
         mock_unstage.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "paths, expected_relative",
+        [
+            (
+                ["dir1/file1.txt", "dir2/file2.txt"],
+                Path("."),
+            ),  # different subdirs -> tmp_path
+            (["dir/a.txt", "dir/b.txt"], Path("dir")),  # same dir -> tmp_path/dir
+            (["only.txt"], Path(".")),  # single path -> tmp_path
+            (
+                ["dir/sub1/file1.txt", "dir/sub2/file2.txt"],
+                Path("dir"),
+            ),  # nested -> tmp_path/dir
+        ],
+    )
+    def test_common_parent_patched_paths_property(
+        self, fake_stageddatacollection_remote_files, tmp_path, paths, expected_relative
+    ):
+        # Arrange: get a real SourceDataCollection from your fixture
+        collection = fake_stageddatacollection_remote_files()
+
+        # Build the Path objects rooted at tmp_path
+        real_paths = [tmp_path / p for p in paths]
+
+        # Patch the class property `paths` so all instances (including `collection`) see our test paths.
+        with mock.patch.object(
+            type(collection), "paths", new_callable=mock.PropertyMock
+        ) as mock_paths:
+            mock_paths.return_value = real_paths
+
+            # Act / Assert
+            assert collection.common_parent == tmp_path / expected_relative

@@ -686,7 +686,7 @@ class ROMSSimulation(Simulation):
             )
 
         simulation_runtime_settings = ROMSRuntimeSettings.from_file(
-            self.runtime_code.working_copy[0].path.parent / self._in_file
+            self.runtime_code.working_copy.common_parent / self._in_file
         )
 
         # Modify each relevant section in the runtime settings object based on blueprint values
@@ -717,8 +717,7 @@ class ROMSSimulation(Simulation):
                 "marbl_diagnostic_output_list",
             ]
         ):
-            # TODO [0] below isn't the best
-            runtime_code_path = self.runtime_code.working_copy[0].path.parent
+            runtime_code_path = self.runtime_code.working_copy.common_parent
             simulation_runtime_settings.marbl_biogeochemistry = (
                 cstar.roms.runtime_settings.MARBLBiogeochemistry(
                     marbl_namelist_fname=runtime_code_path / "marbl_in",
@@ -1274,7 +1273,7 @@ class ROMSSimulation(Simulation):
                 + "\nROMSSimulation.compile_time_code is not staged locally."
                 + "\n Call ROMSSimulation.compile_time_code.get() and try again"
             )
-        build_dir = self.compile_time_code.working_copy[0].path.parent
+        build_dir = self.compile_time_code.working_copy.common_parent
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())

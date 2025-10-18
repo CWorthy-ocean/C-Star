@@ -195,7 +195,7 @@ class ROMSInputDataset(InputDataset, ABC):
                 # if single InputDataset corresponds to many files, check they're colocated
                 if not all(
                     [
-                        d.parent == self.working_copy[0].path.parent
+                        d.parent == self.working_copy.common_parent
                         for d in self.working_copy.paths
                     ]
                 ):
