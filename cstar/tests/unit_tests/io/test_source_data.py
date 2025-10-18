@@ -16,13 +16,6 @@ from cstar.io.source_data import (
     _SourceInspector,
     get_remote_header,
 )
-from cstar.io.stager import (
-    LocalBinaryFileStager,
-    LocalTextFileStager,
-    RemoteBinaryFileStager,
-    RemoteRepositoryStager,
-    RemoteTextFileStager,
-)
 
 
 class TestHelperFunctions:
@@ -451,47 +444,6 @@ class TestSourceData:
             identifier=None,
         )
         assert src.checkout_hash is None
-
-    @pytest.mark.parametrize(
-        "classification, expected_stager_cls",
-        [
-            (SourceClassification.REMOTE_REPOSITORY, RemoteRepositoryStager),
-            (SourceClassification.REMOTE_BINARY_FILE, RemoteBinaryFileStager),
-            (SourceClassification.REMOTE_TEXT_FILE, RemoteTextFileStager),
-            (SourceClassification.LOCAL_BINARY_FILE, LocalBinaryFileStager),
-            (SourceClassification.LOCAL_TEXT_FILE, LocalTextFileStager),
-        ],
-    )
-    def test_select_stager_returns_expected_class(
-        self, mock_source_data_factory, classification, expected_stager_cls
-    ):
-        """Tests that the `select_stager` method looks up the expected stager for several classifications."""
-        src = mock_source_data_factory(
-            classification=classification,
-            location="some/location",
-            identifier="id123",
-        )
-        stager = src._select_stager()
-        assert isinstance(stager, expected_stager_cls)
-
-    def test_select_stager_invalid_classification_raises(
-        self, mock_source_data_factory
-    ):
-        """Tests that the `select_stager` method raises if classification is invalid"""
-
-        # Fake classification not handled by match-case
-        class DummyClassification:
-            value = None
-
-        src = mock_source_data_factory(
-            classification=None,  # override classification manually
-            location="some/location",
-            identifier="id123",
-        )
-        src._classification = "not-a-real-classification"
-
-        with pytest.raises(ValueError):
-            _ = src._select_stager()
 
     def test_stager_property_caches_value(self, mock_source_data_factory):
         """Tests that the `stager` property caches its first result and avoids repeat calls to get_stager()."""

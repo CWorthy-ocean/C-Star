@@ -27,6 +27,23 @@ class TestRegistry:
         with pytest.raises(ValueError):
             stager.get_stager(SourceClassification.LOCAL_DIRECTORY)
 
+    @pytest.mark.parametrize(
+        "classification, expected_stager_cls",
+        [
+            (SourceClassification.REMOTE_REPOSITORY, stager.RemoteRepositoryStager),
+            (SourceClassification.REMOTE_BINARY_FILE, stager.RemoteBinaryFileStager),
+            (SourceClassification.REMOTE_TEXT_FILE, stager.RemoteTextFileStager),
+            (SourceClassification.LOCAL_BINARY_FILE, stager.LocalBinaryFileStager),
+            (SourceClassification.LOCAL_TEXT_FILE, stager.LocalTextFileStager),
+        ],
+    )
+    def test_select_stager_returns_expected_class(
+        self, classification, expected_stager_cls
+    ):
+        """Tests that the `select_stager` method looks up the expected stager for several classifications."""
+        stgr = stager.get_stager(classification)
+        assert isinstance(stgr, expected_stager_cls)
+
 
 class TestStagerABC:
     def test_retriever_property_calls_get_retriever(self):
