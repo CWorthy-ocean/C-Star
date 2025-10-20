@@ -8,7 +8,7 @@ import pytest
 
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection
-from cstar.roms import ROMSForcingCorrections, ROMSPartitioning
+from cstar.roms import ROMSPartitioning
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
 
 
@@ -825,18 +825,17 @@ class TestROMSInputDatasetPartition:
             romsinputdataset_local_netcdf.path_for_roms
 
 
-# TODO update `roms_forcing_corrections` fixture to accept args, should not be creating instances in tests
-def test_correction_cannot_be_yaml(mocksourcedata_remote_text_file):
+def test_correction_cannot_be_yaml(
+    mocksourcedata_remote_text_file, roms_forcing_corrections
+):
     """Checks that the `validate()` method correctly raises a TypeError if
     `ROMSForcingCorrections.source.source_type` is `yaml` (unsupported)
     """
     location = "https://www.totallylegityamlfiles.pk/downloadme.yaml"
     source_data = mocksourcedata_remote_text_file(location=location)
+
     with pytest.raises(TypeError) as exception_info:
-        with mock.patch(
-            "cstar.roms.input_dataset.SourceData", return_value=source_data
-        ):
-            ROMSForcingCorrections(location)
+        roms_forcing_corrections(location=location, sourcedata=source_data)
     expected_msg = (
         "ROMSForcingCorrections cannot be initialized with a source YAML file."
     )

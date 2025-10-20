@@ -21,7 +21,6 @@ from cstar.roms.input_dataset import (
     ROMSInitialConditions,
     ROMSInputDataset,
     ROMSModelGrid,
-    ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
@@ -576,7 +575,11 @@ class TestROMSSimulationInitialization:
             assert substring in str(exception_info.value)
 
     def test_check_inputdataset_dates_warns_and_sets_start_date(
-        self, stub_romssimulation, mocksourcedata_remote_text_file, caplog
+        self,
+        stub_romssimulation,
+        roms_river_forcing,
+        mocksourcedata_remote_text_file,
+        caplog,
     ):
         """Test that `_check_inputdataset_dates` warns and overrides mismatched
         `end_date`.
@@ -588,16 +591,11 @@ class TestROMSSimulationInitialization:
         sim = stub_romssimulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
 
-        # TODO update `roms_river_forcing` fixture to accept args, should not be creating instances in tests
-
         location = "http://dodgyyamls4u.ru/riv.yaml"
         source_data = mocksourcedata_remote_text_file(location=location)
-        with mock.patch(
-            "cstar.roms.input_dataset.SourceData", return_value=source_data
-        ):
-            sim.river_forcing = ROMSRiverForcing(
-                location=location, start_date="1999-01-01"
-            )
+        sim.river_forcing = roms_river_forcing(
+            location=location, start_date="1999-01-01", sourcedata=source_data
+        )
 
         sim._check_inputdataset_dates(sim.river_forcing)
 
@@ -605,7 +603,11 @@ class TestROMSSimulationInitialization:
         assert "does not match that of ROMSSimulation" in caplog.text
 
     def test_check_inputdataset_dates_warns_and_sets_end_date(
-        self, stub_romssimulation, mocksourcedata_remote_text_file, caplog
+        self,
+        stub_romssimulation,
+        mocksourcedata_remote_text_file,
+        roms_river_forcing,
+        caplog,
     ):
         """Test that `_check_inputdataset_dates` warns and overrides mismatched
         `end_date`.
@@ -617,16 +619,11 @@ class TestROMSSimulationInitialization:
         sim = stub_romssimulation
         caplog.set_level(logging.INFO, logger=sim.log.name)
 
-        # TODO update `roms_river_forcing` fixture to accept args, should not be creating instances in tests
-
         location = "http://dodgyyamls4u.ru/riv.yaml"
         source_data = mocksourcedata_remote_text_file(location=location)
-        with mock.patch(
-            "cstar.roms.input_dataset.SourceData", return_value=source_data
-        ):
-            sim.river_forcing = ROMSRiverForcing(
-                location=location, end_date="1999-12-31"
-            )
+        sim.river_forcing = roms_river_forcing(
+            location=location, start_date="1999-01-01", sourcedata=source_data
+        )
 
         sim._check_inputdataset_dates(sim.river_forcing)
 

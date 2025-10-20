@@ -1,5 +1,6 @@
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -9,6 +10,7 @@ import pytest
 
 from cstar.base import AdditionalCode
 from cstar.io.constants import SourceClassification
+from cstar.io.source_data import SourceData
 from cstar.roms import ROMSDiscretization, ROMSExternalCodeBase, ROMSSimulation
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
@@ -309,115 +311,253 @@ def romsinputdataset_remote_yaml(
 
 
 @pytest.fixture
-def roms_model_grid(mocksourcedata_remote_file) -> ROMSModelGrid:
+def roms_model_grid(
+    mocksourcedata_remote_file,
+) -> Callable[[str, str, SourceData], ROMSModelGrid]:
     """Provides a ROMSModelGrid instance with fake attrs for testing."""
-    fake_location = "http://my.files/grid.nc"
-    fake_hash = "123"
-    source_data = mocksourcedata_remote_file(
-        location=fake_location,
-        identifier=fake_hash,
+    default_location = "http://my.files/grid.nc"
+    default_hash = "123"
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
     )
-    patch_source_data = mock.patch(
-        "cstar.roms.input_dataset.SourceData", return_value=source_data
-    )
-    with patch_source_data:
-        return ROMSModelGrid(location=fake_location, file_hash=fake_hash)
+
+    def _create(
+        location=default_location,
+        file_hash=default_hash,
+        sourcedata=default_sourcedata,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSModelGrid(
+                location=location,
+                file_hash=file_hash,
+            )
+
+    return _create
 
 
 @pytest.fixture
-def roms_initial_conditions(mocksourcedata_remote_file) -> ROMSInitialConditions:
+def roms_initial_conditions(
+    mocksourcedata_remote_file,
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSInitialConditions
+]:
     """Provides a ROMSInitialConditions instance with fake attrs for testing."""
-    fake_location = "http://my.files/initial.nc"
-    fake_hash = "234"
-    source_data = mocksourcedata_remote_file(
-        location=fake_location,
-        identifier=fake_hash,
+    default_location = "http://my.files/initial.nc"
+    default_hash = "234"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
     )
-    patch_source_data = mock.patch(
-        "cstar.roms.input_dataset.SourceData", return_value=source_data
-    )
-    with patch_source_data:
-        return ROMSInitialConditions(location=fake_location, file_hash=fake_hash)
+
+    def _create(
+        location=default_location,
+        file_hash=default_hash,
+        sourcedata=default_sourcedata,
+        start_date=default_start_date,
+        end_date=default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSInitialConditions(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+            )
+
+    return _create
 
 
 @pytest.fixture
-def roms_tidal_forcing(mocksourcedata_remote_file) -> ROMSTidalForcing:
+def roms_tidal_forcing(
+    mocksourcedata_remote_file,
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSTidalForcing
+]:
     """Provides a ROMSTidalForcing instance with fake attrs for testing."""
-    fake_location = "http://my.files/tidal.nc"
-    fake_hash = "345"
-    source_data = mocksourcedata_remote_file(
-        location=fake_location,
-        identifier=fake_hash,
+    default_location = "http://my.files/tidal.nc"
+    default_hash = "345"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
     )
-    patch_source_data = mock.patch(
-        "cstar.roms.input_dataset.SourceData", return_value=source_data
-    )
-    with patch_source_data:
-        return ROMSTidalForcing(location=fake_location, file_hash=fake_hash)
+
+    def _create(
+        location=default_location,
+        file_hash=default_hash,
+        sourcedata=default_sourcedata,
+        start_date=default_start_date,
+        end_date=default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSTidalForcing(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+    return _create
 
 
 @pytest.fixture
-def roms_river_forcing(mocksourcedata_remote_file) -> ROMSRiverForcing:
+def roms_river_forcing(
+    mocksourcedata_remote_file,
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSRiverForcing
+]:
     """Provides a ROMSRiverForcing instance with fake attrs for testing"""
-    fake_location = "http://my.files/river.nc"
-    fake_hash = "543"
-    source_data = mocksourcedata_remote_file(
-        location=fake_location,
-        identifier=fake_hash,
+    default_location = "http://my.files/river.nc"
+    default_hash = "543"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
     )
-    patch_source_data = mock.patch(
-        "cstar.roms.input_dataset.SourceData", return_value=source_data
-    )
-    with patch_source_data:
-        return ROMSRiverForcing(location=fake_location, file_hash=fake_hash)
+
+    def _create(
+        location=default_location,
+        file_hash=default_hash,
+        sourcedata=default_sourcedata,
+        start_date=default_start_date,
+        end_date=default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSRiverForcing(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+    return _create
 
 
 @pytest.fixture
-def roms_boundary_forcing(mocksourcedata_remote_file) -> ROMSBoundaryForcing:
+def roms_boundary_forcing(
+    mocksourcedata_remote_file,
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSBoundaryForcing
+]:
     """Provides a ROMSBoundaryForcing instance with fake attrs for testing"""
-    fake_location = "http://my.files/boundary.nc"
-    fake_hash = "456"
-    source_data = mocksourcedata_remote_file(
-        location=fake_location,
-        identifier=fake_hash,
+    default_location = "http://my.files/boundary.nc"
+    default_hash = "456"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
     )
-    patch_source_data = mock.patch(
-        "cstar.roms.input_dataset.SourceData", return_value=source_data
-    )
-    with patch_source_data:
-        return ROMSBoundaryForcing(location=fake_location, file_hash=fake_hash)
+
+    def _create(
+        location=default_location,
+        file_hash=default_hash,
+        sourcedata=default_sourcedata,
+        start_date=default_start_date,
+        end_date=default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSBoundaryForcing(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+    return _create
 
 
 @pytest.fixture
-def roms_surface_forcing(mocksourcedata_remote_file) -> ROMSSurfaceForcing:
+def roms_surface_forcing(
+    mocksourcedata_remote_file,
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSSurfaceForcing
+]:
     """Provides a ROMSSurfaceForcing instance with fake attrs for testing."""
-    fake_location = "http://my.files/surface.nc"
-    fake_hash = "567"
-    source_data = mocksourcedata_remote_file(
-        location=fake_location,
-        identifier=fake_hash,
+    default_location = "http://my.files/surface.nc"
+    default_hash = "567"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
     )
-    patch_source_data = mock.patch(
-        "cstar.roms.input_dataset.SourceData", return_value=source_data
-    )
-    with patch_source_data:
-        return ROMSSurfaceForcing(location=fake_location, file_hash=fake_hash)
+
+    def _create(
+        location=default_location,
+        file_hash=default_hash,
+        sourcedata=default_sourcedata,
+        start_date=default_start_date,
+        end_date=default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSSurfaceForcing(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+    return _create
 
 
 @pytest.fixture
-def roms_forcing_corrections(mocksourcedata_remote_file) -> ROMSForcingCorrections:
-    """Provides a ROMSForcingCorrections  instance with fake attrs for testing"""
-    fake_location = "http://my.files/sw_corr.nc"
-    fake_hash = "890"
-    source_data = mocksourcedata_remote_file(
-        location=fake_location,
-        identifier=fake_hash,
+def roms_forcing_corrections(
+    mocksourcedata_remote_file,
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSForcingCorrections
+]:
+    """Provides a ROMSForcingCorrections instance with fake attrs for testing"""
+    default_location = "http://my.files/sw_corr.nc"
+    default_hash = "890"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
     )
-    patch_source_data = mock.patch(
-        "cstar.roms.input_dataset.SourceData", return_value=source_data
-    )
-    with patch_source_data:
-        return ROMSForcingCorrections(location=fake_location, file_hash=fake_hash)
+
+    def _create(
+        location=default_location,
+        file_hash=default_hash,
+        sourcedata=default_sourcedata,
+        start_date=default_start_date,
+        end_date=default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSForcingCorrections(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+    return _create
 
 
 ################################################################################
@@ -468,18 +608,18 @@ def stub_romssimulation(
         valid_start_date="2024-01-01",
         valid_end_date="2026-01-01",
         marbl_codebase=marblexternalcodebase,
-        model_grid=roms_model_grid,
-        initial_conditions=roms_initial_conditions,
-        tidal_forcing=roms_tidal_forcing,
-        river_forcing=roms_river_forcing,
+        model_grid=roms_model_grid(),
+        initial_conditions=roms_initial_conditions(),
+        tidal_forcing=roms_tidal_forcing(),
+        river_forcing=roms_river_forcing(),
         boundary_forcing=[
-            roms_boundary_forcing,
+            roms_boundary_forcing(),
         ],
         surface_forcing=[
-            roms_surface_forcing,
+            roms_surface_forcing(),
         ],
         forcing_corrections=[
-            roms_forcing_corrections,
+            roms_forcing_corrections(),
         ],
     )
 
@@ -609,7 +749,6 @@ def patch_romssimulation_init_sourcedata(
         location=sim.surface_forcing[0].source.location,
         identifier=sim.surface_forcing[0].source.identifier,
     )
-    # TODO don't need to have separate fixtures for `remote_file` etc., see below
     mock_forcing_corrections_sourcedata = mocksourcedata_remote_file(
         location=sim.forcing_corrections[0].source.location,
         identifier=sim.forcing_corrections[0].source.identifier,
