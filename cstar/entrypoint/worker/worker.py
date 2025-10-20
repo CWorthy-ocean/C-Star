@@ -5,7 +5,6 @@ import enum
 import logging
 import os
 import pathlib
-import shutil
 import sys
 from datetime import datetime, timezone
 from typing import Final, override
@@ -15,7 +14,6 @@ from cstar.base.log import get_logger
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
-from cstar.system.manager import cstar_sysmgr
 
 DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
@@ -188,9 +186,13 @@ class SimulationRunner(Service):
         if disposition == ExecutionStatus.COMPLETED:
             self.log.info("Simulation completed successfully.")
         elif disposition == ExecutionStatus.FAILED:
-            self.log.error("Simulation failed.")
+            msg = "Simulation failed."
+            self.log.error(msg)
+            raise CstarError(msg)
         else:
-            self.log.warning(f"Simulation ended with status: {disposition}")
+            msg = f"Simulation ended with status: {disposition}."
+            self.log.warning(msg)
+            raise CstarError(msg)
 
     @override
     def _on_start(self) -> None:

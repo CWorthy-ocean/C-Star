@@ -1073,7 +1073,7 @@ class ROMSSimulation(Simulation):
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
-        for codebase in filter(lambda x: x is not None, self.codebases): # type: ExternalCodeBase
+        for codebase in filter(lambda x: x is not None, self.codebases):  # type: ExternalCodeBase
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
             if os.getenv("CSTAR_ORCHESTRATED", "0") == "1":
                 codebase_dir = codebases_dir / codebase.expected_env_var.split("_")[0]
