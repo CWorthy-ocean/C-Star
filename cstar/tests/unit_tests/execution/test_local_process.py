@@ -152,7 +152,6 @@ class TestLocalProcess:
         - That the subprocess is called with the correct arguments.
         - That the `status` property reflects the `RUNNING` state after startup.
         """
-        # mock_popen.return_value.poll.return_value = None  # Simulate running process
         self.mock_subprocess.poll.return_value = None  # Simulate running process
 
         with patch("builtins.open", MagicMock()) as mock_open:

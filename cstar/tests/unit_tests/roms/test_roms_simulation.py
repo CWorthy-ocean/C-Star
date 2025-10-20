@@ -1248,7 +1248,6 @@ class TestProcessingAndExecution:
             mock.patch("cstar.roms.input_dataset.ROMSInputDataset") as MockDataset,
         ):
             #
-            # mock_dataset = patch("cstar.roms.input_dataset.ROMSInputDataset", autospec=True).start()
             mock_dataset = MockDataset()
             mock_dataset.exists_locally = dataset_exists
             mock_dataset.start_date = dataset_start

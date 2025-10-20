@@ -160,7 +160,6 @@ class InputDataset(ABC, LoggingMixin):
         local_dir: str
             The local directory in which this input dataset will be saved.
         """
-        # Path(local_dir).expanduser().mkdir(parents=True, exist_ok=True)
         target_path = Path(local_dir).expanduser().resolve() / self.source.basename
 
         if self.exists_locally:

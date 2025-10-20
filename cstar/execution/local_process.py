@@ -112,7 +112,6 @@ class LocalProcess(ExecutionHandler):
         self._output_file_handle = open(self.output_file, "w")
         local_process = subprocess.Popen(
             self.commands.split(),
-            # shell=True,
             cwd=self.run_path,
             stdin=subprocess.PIPE,
             stdout=self._output_file_handle,

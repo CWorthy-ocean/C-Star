@@ -59,11 +59,7 @@ class MockRetriever(Retriever):
         return path_to_have_saved_to
 
     # def _save(self, target_dir: Path) -> Path:
-    #     data = self.read()
-    #     target_path = self.source.basename
     #     with open(target_path, "wb",) as f:
-    #         f.write(data)
-    #     return target_path
 
 
 class MockStagedData(StagedData):
@@ -130,7 +126,6 @@ class MockSourceData(SourceData):
 
         self._stager = MockStager(source=self)
         self._retriever = MockRetriever(source=self)
-        # self._retriever = mock.Mock(spec=Retriever)
 
 
 @pytest.fixture
