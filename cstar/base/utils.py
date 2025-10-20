@@ -261,7 +261,6 @@ def _run_cmd(
 
     result: subprocess.CompletedProcess[str] = fn(**kwargs)
     stdout = str(result.stdout).strip() if result.stdout is not None else ""
-
     if result.returncode != 0:
         rc_out = f"Return Code: `{result.returncode}`."
         stderr_out = f"STDERR:\n{result.stderr.strip()}"

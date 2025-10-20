@@ -1098,10 +1098,7 @@ class ROMSSimulation(Simulation):
         if hasattr(self, "compile_time_code") and (self.compile_time_code is not None):
             simulation_tree_dict.setdefault("compile_time_code", {})
             simulation_tree_dict["compile_time_code"] = [
-                codefile.basename
-                for codefile in self.compile_time_code.source
-                # compile_time_code.split("/")[-1]
-                # for compile_time_code in self.compile_time_code.files
+                codefile.basename for codefile in self.compile_time_code.source
             ]
         print_dict = {}
         print_dict["ROMS"] = simulation_tree_dict

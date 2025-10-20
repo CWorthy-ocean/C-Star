@@ -27,7 +27,7 @@ from cstar.io.stager import (
 
 
 @lru_cache(maxsize=16)
-def get_remote_header(location, n_bytes):
+def get_remote_header(location: str, n_bytes: int) -> bytes:
     """Get the header from a HTTP location, do determine the kind of data at the location."""
     response = requests.get(location, stream=True, allow_redirects=True)
     response.raw.decode_content = True
@@ -66,7 +66,13 @@ class _SourceInspector:
     """
 
     def __init__(self, location: str | Path):
-        """Initialize this _SourceInspector with a location"""
+        """Initialize this _SourceInspector with a location.
+
+        Parameters
+        ----------
+        location (str or Path):
+           The location of the data (a local path or remote address)
+        """
         self._location = str(location)
         self._location_type: LocationType | None = None
         self._source_type: SourceType | None = None
@@ -115,7 +121,7 @@ class _SourceInspector:
             if self._is_repository:
                 self._source_type = SourceType.REPOSITORY
             elif self.location_type is LocationType.HTTP:
-                if not self._http_is_html:  # and (self.suffix):
+                if not self._http_is_html:
                     self._source_type = SourceType.FILE
             elif self.location_type is LocationType.PATH:
                 resolved_path = Path(self.location).resolve()
@@ -173,7 +179,7 @@ class _SourceInspector:
 
     @property
     def characteristics(self) -> SourceCharacteristics:
-        """Collect the source type, location type, and file encoding into a single Enum value"""
+        """Collect the source type, location type, and file encoding into a single Enum value."""
         return SourceCharacteristics(
             source_type=self.source_type,
             location_type=self.location_type,
@@ -181,7 +187,7 @@ class _SourceInspector:
         )
 
     def classify(self) -> SourceClassification:
-        """Determine the classification of the data at 'location'"""
+        """Determine the classification of the data at 'location'."""
         return SourceClassification(self.characteristics)
 
 
@@ -244,9 +250,9 @@ class SourceData:
         return self._identifier
 
     @property
-    def checkout_target(self) -> str | None:
-        """Equivalent to 'identifier' if source is a repository"""
-        if self._classification.value.source_type is SourceType.REPOSITORY:
+    def file_hash(self) -> str | None:
+        """Equivalent to 'identifier' if source is a file"""
+        if self._classification.value.source_type is SourceType.FILE:
             return self.identifier
         return None
 
@@ -260,9 +266,9 @@ class SourceData:
         return None
 
     @property
-    def file_hash(self) -> str | None:
-        """Equivalent to 'identifier' if source is a file"""
-        if self._classification.value.source_type is SourceType.FILE:
+    def checkout_target(self) -> str | None:
+        """Equivalent to 'identifier' if source is a repository"""
+        if self._classification.value.source_type is SourceType.REPOSITORY:
             return self.identifier
         return None
 
@@ -343,7 +349,14 @@ class SourceDataCollection:
         identifiers: Sequence[str | None] | None = None,
     ) -> "SourceDataCollection":
         """Create a SourceDataCollection from a list of locations with optional
-        parallel identifier list.
+        corresponding list of identifiers identifier list.
+
+        Parameters
+        ----------
+        locations: list of str or Path
+            The locations of each item
+        identifiers: list of str
+            The identifiers of each item
         """
         n = len(locations)
         identifiers = identifiers or [None] * n

@@ -44,6 +44,24 @@ def fake_romsexternalcodebase(
         yield ROMSExternalCodeBase(source_repo=location, checkout_target=identifier)
 
 
+@pytest.fixture
+def mock_romsexternalcodebase_staged(
+    fake_romsexternalcodebase,
+    fake_stagedrepository,
+    tmp_path,
+) -> Generator[ROMSExternalCodeBase, None, None]:
+    """Fixture providing a staged `ROMSExternalCodeBase` instance for testing.
+
+    Sets `working_copy` to a mock StagedRepository instance.
+    """
+    recb = fake_romsexternalcodebase
+    staged_data = fake_stagedrepository(
+        path=tmp_path, source=recb.source, changed_from_source=False
+    )
+    recb._working_copy = staged_data
+    yield recb
+
+
 ################################################################################
 # ROMSRuntimeSettings
 ################################################################################

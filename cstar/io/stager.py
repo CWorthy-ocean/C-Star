@@ -15,7 +15,7 @@ _registry: dict[SourceClassification, type["Stager"]] = {}
 def register_stager(
     wrapped_cls: type["Stager"],
 ) -> type["Stager"]:
-    """Register the decorated type as an available Stager"""
+    """Decorator that registers the decorated type as an available Stager"""
     _registry[wrapped_cls._classification] = wrapped_cls
 
     return wrapped_cls
@@ -23,6 +23,11 @@ def register_stager(
 
 def get_stager(classification: SourceClassification) -> "Stager":
     """Retrieve a Stager from the registry given a source classification.
+
+    Parameters
+    ----------
+    classification (SourceClassification):
+       The classification of the data for which to retrieve the stager
 
     Returns
     -------
@@ -40,6 +45,19 @@ def get_stager(classification: SourceClassification) -> "Stager":
 
 
 class Stager(ABC):
+    """Class to handle the staging of data on the local filesystem for access by C-Star.
+
+    Attributes
+    ----------
+    retriever:
+       The Retriever associated with this Stager, for obtaining data before staging it
+
+    Methods
+    -------
+    stage:
+       Stages the data in a chosen local directory
+    """
+
     _classification: ClassVar[SourceClassification]
 
     def stage(
@@ -72,8 +90,15 @@ class LocalBinaryFileStager(Stager):
 
     # Used for e.g. a local netCDF InputDataset
     def stage(self, target_dir: "Path", source: "SourceData") -> "StagedFile":
-        """Create a local symlink to a binary file on the current filesystem."""
-        target_dir.mkdir(parents=True, exist_ok=True)
+        """Create a local symlink to a binary file on the current filesystem.
+
+        Parameters
+        ----------
+        target_dir, Path:
+            The local directory in which to stage the file
+        source, SourceData:
+            The SourceData instance tracking the file's source
+        """
         target_path = target_dir / source.basename
         target_path.symlink_to(source.location)
 
@@ -93,6 +118,14 @@ class RemoteRepositoryStager(Stager):
 
     # Used for e.g. an ExternalCodeBase
     def stage(self, target_dir: "Path", source: "SourceData") -> "StagedRepository":
-        """Clone and checkout a git repository at a given target."""
+        """Clone and checkout a git repository at a given target.
+
+        Parameters
+        ----------
+        target_dir, Path:
+            The local directory in which to stage the repository
+        source, SourceData:
+            The SourceData instance tracking the repository's source
+        """
         retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
         return StagedRepository(source=source, path=retrieved_path)
