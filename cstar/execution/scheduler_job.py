@@ -680,7 +680,7 @@ class SlurmJob(SchedulerJob):
             k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
         }
 
-        cmd = f"sbatch"
+        cmd = "sbatch"
         if self.depends_on:
             cmd += f" --dependency=afterok:{':'.join(str(d) for d in self.depends_on)}"
 
