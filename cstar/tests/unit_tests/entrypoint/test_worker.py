@@ -36,7 +36,7 @@ def clean_up_logs():
     it's a bit hard to get at. For now, just clean things up after the module is done.
     """
     yield
-    shutil.rmtree("temp_out_dir")
+    shutil.rmtree("temp_out_dir", ignore_errors=True)
 
 
 @pytest.fixture
