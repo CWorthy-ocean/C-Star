@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
@@ -982,31 +981,6 @@ class ROMSSimulation(Simulation):
             cdr_forcing=CdrForcingAdapter(bp).adapt(),
         )
 
-    def to_blueprint(self, filename: str | Path) -> None:
-        """Save the `ROMSSimulation` instance as a YAML blueprint.
-
-        This method converts the simulation instance into a dictionary representation
-        and writes it to a YAML file in a structured format.
-
-        Parameters
-        ----------
-        filename : str or Path
-            The name of the YAML file where the blueprint will be saved.
-
-        Raises
-        ------
-        OSError
-            If an issue occurs while writing to the file.
-
-        See Also
-        --------
-        from_blueprint : Creates a `ROMSSimulation` instance from a YAML blueprint.
-        to_dict : Converts the instance into a dictionary representation.
-        """
-        raise NotImplementedError(
-            "This functionality has been deprecated but may be re-implemented in the future."
-        )
-
     def tree(self):
         """Display a tree-style representation of the ROMS simulation structure.
 
@@ -1431,11 +1405,10 @@ class ROMSSimulation(Simulation):
             f"{final_runtime_settings_file}"
         )
 
-        # If this simulation is already being orchestrated or there is no scheduler,
-        # don't create a scheduler job, just run it locally.
+        # If this simulation is already in a scheduler job, don't create a new one, just run it locally.
         if (
-            os.getenv("CSTAR_ORCHESTRATED") != "1"
-            and cstar_sysmgr.scheduler is not None
+            cstar_sysmgr.scheduler is not None
+            and not cstar_sysmgr.scheduler.in_active_allocation
         ):
             if account_key is None:
                 raise ValueError(

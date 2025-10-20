@@ -306,8 +306,8 @@ def system_dotenv_dir(tmp_path: Path) -> Path:
     return tmp_path / "additional_files" / "env_files"
 
 
-@pytest.fixture
-def mock_system_name(scope="session") -> str:
+@pytest.fixture(scope="session")
+def mock_system_name() -> str:
     # A name for the mock system/platform executing the tests.
     return "mock_system"
 

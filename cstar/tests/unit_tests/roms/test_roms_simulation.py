@@ -1096,42 +1096,7 @@ class TestToAndFromDictAndBlueprint:
 
         assert sim_from_dict.to_dict() == sim_to_dict
 
-    @pytest.mark.skip("skip until we restore this functionality or delete it")
-    def test_to_blueprint(self, fake_romssimulation):
-        """Tests that `to_blueprint()` writes a `ROMSSimulation` dictionary to a YAML
-        file.
-
-        This test verifies that the `to_blueprint()` method writes a YAML file with
-        the expected dictionary representation of the `ROMSSimulation` instance.
-
-        Assertions
-        ----------
-        - `open()` is called once with the correct filename and write mode.
-        - `yaml.dump()` is called with the dictionary representation of the simulation
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation`: A fixture providing a pre-configured `ROMSSimulation` instance.
-        - `mock_open`: A mock for Python's built-in `open()` function.
-        - `mock_yaml_dump`: A mock for `yaml.dump()` to intercept and verify the YAML writing operation.
-        """
-        sim = fake_romssimulation
-        mock_file_path = "mock_path.yaml"
-
-        # Mock `open` and `yaml.dump`
-        with (
-            patch("builtins.open", mock_open()) as mock_file,
-            patch("yaml.dump") as mock_yaml_dump,
-        ):
-            sim.to_blueprint(mock_file_path)
-
-            mock_file.assert_called_once_with(mock_file_path, "w")
-
-            mock_yaml_dump.assert_called_once_with(
-                sim.to_dict(), mock_file(), default_flow_style=False, sort_keys=False
-            )
-
-    def test_from_blueprint_valid_file(self, blueprint_path):
+    def test_from_blueprint_valid_file(self, blueprint_path: Path) -> None:
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
         YAML file.
 
@@ -1192,9 +1157,9 @@ class TestToAndFromDictAndBlueprint:
         self,
         mock_path_exists,
         mock_requests_get,
-        tmp_path,
-        fake_romssimulation_dict,
-        blueprint_path,
+        tmp_path: Path,
+        fake_romssimulation_dict: dict[str, Any],
+        blueprint_path: Path,
     ):
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a URL.
 
@@ -1218,42 +1183,14 @@ class TestToAndFromDictAndBlueprint:
         mock_response = MagicMock()
         mock_response.text = bp_text
         mock_requests_get.return_value = mock_response
-        blueprint_path = "http://sketchyamlfiles4u.ru/roms_blueprint.yaml"
+        _blueprint_path = "http://sketchyamlfiles4u.ru/roms_blueprint.yaml"
 
         sim = ROMSSimulation.from_blueprint(
-            blueprint=blueprint_path,
+            blueprint=_blueprint_path,
         )
 
         assert isinstance(sim, ROMSSimulation)
         mock_requests_get.assert_called_once()
-
-    @pytest.mark.skip("skip until we restore this functionality or delete it")
-    def test_blueprint_roundtrip(self, fake_romssimulation, tmp_path):
-        """Tests that a `ROMSSimulation` can be serialized to a YAML blueprint and
-        reconstructed correctly using `from_blueprint()`.
-
-        This test verifies that after saving a simulation instance to a YAML blueprint
-        and then reloading it, the reloaded instance matches the original.
-
-        Assertions
-        ----------
-        - The dictionary representation of the reloaded instance matches the original.
-
-        Mocks & Fixtures
-        ----------------
-        - `fake_romssimulation`: A fixture providing a sample `ROMSSimulation` instance.
-        - `tmp_path`: A temporary directory provided by `pytest` to store the blueprint file.
-        """
-        sim = fake_romssimulation
-        output_file = tmp_path / "test.yaml"
-        sim.to_blueprint(filename=output_file)
-        sim2 = ROMSSimulation.from_blueprint(
-            blueprint=output_file,
-            directory=tmp_path / "sim2",
-            start_date=sim.start_date,
-            end_date=sim.end_date,
-        )
-        assert sim.to_dict() == sim2.to_dict()
 
 
 class TestProcessingAndExecution:
@@ -1980,6 +1917,7 @@ class TestProcessingAndExecution:
         mock_scheduler = MagicMock()
         mock_scheduler.primary_queue_name = "default_queue"
         mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
+        mock_scheduler.in_active_allocation = False
 
         with (
             patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
@@ -2059,6 +1997,7 @@ class TestProcessingAndExecution:
         mock_scheduler = MagicMock()
         mock_scheduler.primary_queue_name = "default_queue"
         mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
+        mock_scheduler.in_active_allocation = False
 
         with (
             patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,

@@ -1,5 +1,8 @@
 """Test suite to test fixtures defined in conftest.py and fixtures.py files."""
 
+from collections.abc import Callable
+from pathlib import Path
+
 import yaml
 from _pytest._py.path import LocalPath
 
@@ -15,7 +18,10 @@ def test_mock_input_fixture(mock_user_input):
         assert input("Enter your choice: ") == "yes"
 
 
-def test_modify_template_blueprint(modify_template_blueprint, tmp_path):
+def test_modify_template_blueprint(
+    modify_template_blueprint: Callable,
+    tmp_path: Path,
+):
     """This test verifies that the modify_template_blueprint fixture correctly reads a
     specified blueprint, performs string replacements, and returns a Simulation instance
     with the correct parameters corresponding to the string replacements.

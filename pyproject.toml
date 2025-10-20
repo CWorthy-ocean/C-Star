@@ -9,7 +9,7 @@ authors = [
     { name = "Nora Loose", email = "nora@cworthy.org" },
     { name = "Matt Long", email = "matt@cworthy.org" },
     { name = "Scott Eilerman", email = "scott.eilerman@cworthy.org" },
-    { name = "Chris McBride", email = "christopher.mcbride@cworthy.org" },
+    { name = "Chris McBride", email = "chris@cworthy.org" },
 ]
 license = { text = "Apache-2.0" }
 classifiers = [

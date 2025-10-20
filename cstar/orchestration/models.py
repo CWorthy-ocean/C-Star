@@ -369,7 +369,7 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
 
     @property
     def cpus_needed(self) -> int:
-        """Number of CPUS needed for ROMS is derived from the partitioning parameters."""
+        """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
         return self.partitioning.n_procs_x * self.partitioning.n_procs_y
 
 
