@@ -1,11 +1,10 @@
 import os
+import sys
 from pathlib import Path
 from time import sleep, time
-from uuid import uuid4
 
-from threading import Thread
 from prefect import flow, task
-from prefect.cache_policies import INPUTS
+from prefect.context import TaskRunContext
 from prefect.futures import wait
 
 from cstar.execution.handler import ExecutionStatus
@@ -15,6 +14,7 @@ from cstar.orchestration.serialization import deserialize
 
 JobId = str
 JobStatus = str
+
 
 # def create_scheduler_job(*args, **kwargs):
 #     class dummy:
@@ -31,9 +31,14 @@ JobStatus = str
 # def get_status_of_slurm_job(*args, **kwargs):
 #     sleep(30)
 #     return ExecutionStatus.COMPLETED
+def cache_func(context: TaskRunContext, params):
+    """Cache on a combination of the task name and user-assigned run id"""
+    cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
+    print(f"Cache check: {cache_key}")
+    return cache_key
 
 
-@task()#cache_policy=INPUTS)
+@task(persist_result=True, cache_key_fn=cache_func)
 def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
     bp_path = step.blueprint
     bp = deserialize(Path(bp_path), RomsMarblBlueprint)
@@ -57,7 +62,7 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
     return job.id
 
 
-@task()#cache_policy=INPUTS)
+@task(persist_result=True, cache_key_fn=cache_func)
 def check_job(step, job_id, deps: list[str] = []) -> ExecutionStatus:
     t_start = time()
     dur = 10 * 60
@@ -117,6 +122,9 @@ if __name__ == "__main__":
 
     wp_path = "/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml"
     wp_path = "/home/x-seilerman/wp_testing/workplan.yaml"
+
+    my_run_name = sys.argv[1]
+    os.environ["CSTAR_RUNID"] = my_run_name
     # t = Thread(target=check_job.serve)
     # t.start()
     build_and_run_dag(wp_path)

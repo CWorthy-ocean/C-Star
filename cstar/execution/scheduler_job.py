@@ -682,7 +682,7 @@ class SlurmJob(SchedulerJob):
 
         cmd = f"sbatch {self.script_path}"
         if self.depends_on:
-            cmd += f" --dependency=afterok:{':'.join(d for d in self.depends_on)}"
+            cmd += f" --dependency=afterok:{':'.join(str(d) for d in self.depends_on)}"
 
         stdout = _run_cmd(
             cmd,
