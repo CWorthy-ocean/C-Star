@@ -1,6 +1,7 @@
 from textwrap import dedent
 from unittest import mock
 
+import cstar
 from cstar.base import AdditionalCode
 from cstar.io.constants import SourceClassification
 from cstar.io.source_data import SourceDataCollection
@@ -26,8 +27,9 @@ class TestInit:
         """Test that an AdditionalCode object is initialized with the correct
         attributes.
         """
-        with mock.patch(
-            "cstar.base.additional_code._SourceInspector.classify",
+        with mock.patch.object(
+            cstar.io.source_data._SourceInspector,
+            "classify",
             side_effect=[
                 SourceClassification.REMOTE_REPOSITORY,
                 SourceClassification.REMOTE_TEXT_FILE,

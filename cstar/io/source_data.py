@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import charset_normalizer
 import requests
 
-from cstar.base.gitutils import _get_hash_from_checkout_target
+from cstar.base.gitutils import _get_hash_from_checkout_target, git_location_to_raw
 from cstar.base.utils import _run_cmd
 from cstar.io.constants import (
     FileEncoding,
@@ -359,6 +359,32 @@ class SourceDataCollection:
             for loc, idt in zip(locations, identifiers)
         ]
         return cls(sources)
+
+    @classmethod
+    def from_common_location(
+        cls,
+        common_location: str,
+        subdir: str = "",
+        checkout_target: str = "",
+        files: list[str] = [],
+    ):
+        common_location_classification = SourceData(common_location).classification
+        match common_location_classification:
+            case SourceClassification.REMOTE_REPOSITORY:
+                return cls.from_locations(
+                    locations=[
+                        git_location_to_raw(common_location, checkout_target, f, subdir)
+                        for f in files
+                    ]
+                )
+            case SourceClassification.LOCAL_DIRECTORY:
+                return cls.from_locations(
+                    locations=[f"{common_location}/{subdir}/{f}" for f in files]
+                )
+            case _:
+                raise ValueError(
+                    f"Cannot create SourceDataCollection from common location with classification {common_location_classification}"
+                )
 
     @property
     def sources(self) -> list[SourceData]:

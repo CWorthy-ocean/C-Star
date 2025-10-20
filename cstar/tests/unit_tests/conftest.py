@@ -492,15 +492,9 @@ def fake_additionalcode_remote(
         ]
         for i in range(len(files)):
             mock_classify_side_effect.append(SourceClassification.REMOTE_TEXT_FILE)
-        with (
-            mock.patch(
-                "cstar.base.additional_code.SourceDataCollection.from_locations",
-                return_value=sd,
-            ),
-            mock.patch(
-                "cstar.base.additional_code._SourceInspector.classify",
-                side_effect=mock_classify_side_effect,
-            ),
+        with mock.patch(
+            "cstar.base.additional_code.SourceDataCollection.from_common_location",
+            return_value=sd,
         ):
             ac = AdditionalCode(
                 location=location,
@@ -536,15 +530,9 @@ def fake_additionalcode_local(
         ]
         for i in range(len(files)):
             mock_classify_side_effect.append(SourceClassification.LOCAL_TEXT_FILE)
-        with (
-            mock.patch(
-                "cstar.base.additional_code.SourceDataCollection.from_locations",
-                return_value=sd,
-            ),
-            mock.patch(
-                "cstar.base.additional_code._SourceInspector.classify",
-                side_effect=mock_classify_side_effect,
-            ),
+        with mock.patch(
+            "cstar.base.additional_code.SourceDataCollection.from_common_location",
+            return_value=sd,
         ):
             ac = AdditionalCode(location=location, subdir=subdir, files=files)
             return ac

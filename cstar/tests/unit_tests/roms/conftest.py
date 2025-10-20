@@ -624,10 +624,6 @@ def patch_romssimulation_init_sourcedata(
     mock_runtime_code_classify_side_effect = [
         SourceClassification.LOCAL_DIRECTORY,
     ]
-    for i in range(len(sim.runtime_code.source)):
-        mock_runtime_code_classify_side_effect.append(
-            SourceClassification.LOCAL_TEXT_FILE
-        )
 
     mock_compile_time_code_sourcedata = mock_sourcedatacollection(
         locations=sim.compile_time_code.source.locations,
@@ -637,10 +633,6 @@ def patch_romssimulation_init_sourcedata(
     mock_compile_time_code_classify_side_effect = [
         SourceClassification.LOCAL_DIRECTORY,
     ]
-    for i in range(len(sim.compile_time_code.source)):
-        mock_compile_time_code_classify_side_effect.append(
-            SourceClassification.LOCAL_TEXT_FILE
-        )
 
     @contextmanager
     def _context():
