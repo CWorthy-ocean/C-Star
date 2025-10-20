@@ -30,6 +30,23 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
     StubSimulation,
 )
 
+
+@pytest.fixture
+def blueprint_path() -> Path:
+    """Fixture that creates and returns a blueprint yaml location.
+
+    Returns
+    -------
+    Path
+        The path to the valid, complete blueprint yaml file.
+    """
+    tests_root = Path(__file__).parent.parent
+    bp_path = (
+        tests_root / "integration_tests" / "blueprints" / "blueprint_complete.yaml"
+    )
+    return bp_path
+
+
 ################################################################################
 # AdditionalCode
 ################################################################################
@@ -289,22 +306,10 @@ def system_dotenv_dir(tmp_path: Path) -> Path:
     return tmp_path / "additional_files" / "env_files"
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def mock_system_name() -> str:
     # A name for the mock system/platform executing the tests.
     return "mock_system"
-
-
-@pytest.fixture
-def mock_user_env_name() -> str:
-    """Return a unique name for a temporary user .env config file.
-
-    Returns
-    -------
-    str
-        The name of the .env file
-    """
-    return ".mock.env"
 
 
 @pytest.fixture
@@ -405,7 +410,7 @@ def custom_user_env(
     return functools.partial(_write_custom_env, dotenv_path)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def mock_lmod_filename() -> str:
     """Return a complete path to an empty, temporary .lmod config file for tests.
 
@@ -485,10 +490,10 @@ def example_roms_simulation(
             checkout_target="main",
             files=["file1.h", "file2.opt"],
         ),
-        start_date="2025-01-01",
-        end_date="2025-12-31",
-        valid_start_date="2024-01-01",
-        valid_end_date="2026-01-01",
+        start_date="2012-01-02 12:00:00",
+        end_date="2012-01-02 12:30:00",
+        valid_start_date="2012-01-01 12:00:00",
+        valid_end_date="2012-01-31 12:00:00",
         marbl_codebase=MARBLExternalCodeBase(
             source_repo="http://marbl.com/repo.git", checkout_target="v1"
         ),

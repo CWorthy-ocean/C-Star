@@ -36,7 +36,7 @@ class SimulationStages(enum.StrEnum):
     SETUP = enum.auto()
     """Execute simulation setup. See `Simulation.setup`"""
     BUILD = enum.auto()
-    """Execute builds of simulation depdencies. See `Simulation.build`"""
+    """Execute builds of simulation dependencies. See `Simulation.build`"""
     PRE_RUN = enum.auto()
     """Execute hooks before the simulation starts. See `Simulation.pre_run`"""
     RUN = enum.auto()
@@ -51,12 +51,6 @@ class BlueprintRequest:
 
     blueprint_uri: str
     """The path to the blueprint."""
-    output_dir: pathlib.Path
-    """The directory where simulation outputs will be written."""
-    start_date: datetime
-    """The date on which to begin the simulation."""
-    end_date: datetime
-    """The date on which to end the simulation."""
     stages: tuple[SimulationStages, ...] = dc.field(default=())
     """The simulation stages to execute."""
 
@@ -116,14 +110,13 @@ class SimulationRunner(Service):
         super().__init__(service_cfg)
 
         self._blueprint_uri = request.blueprint_uri
-        self._output_root = request.output_dir.expanduser()
-        self._output_dir = self._get_unique_path(self._output_root)
+
         self._simulation: ROMSSimulation = ROMSSimulation.from_blueprint(
-            blueprint=self._blueprint_uri,
-            directory=self._output_dir,
-            start_date=request.start_date,
-            end_date=request.end_date,
+            self._blueprint_uri
         )
+
+        self._output_root = self._simulation.directory.expanduser()
+        self._output_dir = self._get_unique_path(self._output_root)
         self._stages = tuple(request.stages)
 
         roms_root = os.environ.get("ROMS_ROOT", None)
@@ -165,7 +158,7 @@ class SimulationRunner(Service):
             None,
         )
 
-        if self._output_root.exists() and outputs:
+        if self._output_dir.exists() and outputs:
             msg = f"Output directory {self._output_root} is not empty."
             raise ValueError(msg)
 
@@ -383,30 +376,6 @@ def create_parser() -> argparse.ArgumentParser:
         ],
     )
     parser.add_argument(
-        "-o",
-        "--output-dir",
-        default="~/code/cstar/examples/",
-        type=str,
-        required=False,
-        help="Local path to write simulation outputs to.",
-    )
-    parser.add_argument(
-        "-s",
-        "--start-date",
-        default="2012-01-03 12:00:00",
-        type=str,
-        required=False,
-        help=(f"Simulation start date, formatted `{DATE_FORMAT}`"),
-    )
-    parser.add_argument(
-        "-e",
-        "--end-date",
-        default="2012-01-04 12:00:00",
-        type=str,
-        required=False,
-        help=(f"Simulation end date, formatted `{DATE_FORMAT}`"),
-    )
-    parser.add_argument(
         "-g",
         "--stage",
         default=tuple(x for x in SimulationStages),
@@ -476,9 +445,6 @@ def get_request(args: argparse.Namespace) -> BlueprintRequest:
     """
     return BlueprintRequest(
         blueprint_uri=args.blueprint_uri,
-        output_dir=pathlib.Path(args.output_dir),
-        start_date=_format_date(args.start_date),
-        end_date=_format_date(args.end_date),
         stages=args.stages,
     )
 
@@ -533,12 +499,7 @@ async def main(raw_args: list[str]) -> int:
         blueprint_req = get_request(args)
         job_cfg = JobConfig()  # use default HPC config
 
-    log_file = (
-        blueprint_req.output_dir
-        / LOGS_DIRECTORY
-        / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
-    )
-    log = get_logger(__name__, level=service_cfg.log_level, filename=log_file)
+    log = get_logger(__name__, level=service_cfg.log_level)
 
     try:
         configure_environment(log)

@@ -7,7 +7,9 @@ authors = [
     { name = "Dafydd Stephenson", email = "dafydd@cworthy.org" },
     { name = "Thomas Nicholas", email = "tom@cworthy.org" },
     { name = "Nora Loose", email = "nora@cworthy.org" },
-    { name = "Matt Long", email = "matt@cworthy.org" }
+    { name = "Matt Long", email = "matt@cworthy.org" },
+    { name = "Scott Eilerman", email = "scott.eilerman@cworthy.org" },
+    { name = "Chris McBride", email = "chris@cworthy.org" },
 ]
 license = { text = "Apache-2.0" }
 classifiers = [
