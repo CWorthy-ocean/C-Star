@@ -19,6 +19,25 @@ from cstar.system.scheduler import (
 )
 
 
+def get_status_of_slurm_job(job_id: str) -> ExecutionStatus:
+    sacct_cmd = f"sacct -j {job_id} --format=State%20 --noheader"
+    msg_err = f"Failed to retrieve job status using {sacct_cmd}."
+    stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
+    # Map sacct states to ExecutionStatus enum
+    sacct_status_map = {
+        "PENDING": ExecutionStatus.PENDING,
+        "RUNNING": ExecutionStatus.RUNNING,
+        "COMPLETED": ExecutionStatus.COMPLETED,
+        "CANCELLED": ExecutionStatus.CANCELLED,
+        "FAILED": ExecutionStatus.FAILED,
+    }
+    for state, status in sacct_status_map.items():
+        if state in stdout:
+            return status
+    # Fallback if no known state is found
+    return ExecutionStatus.UNKNOWN
+
+
 def create_scheduler_job(
     commands: str,
     account_key: str,
@@ -32,6 +51,7 @@ def create_scheduler_job(
     queue_name: str | None = None,
     send_email: bool | None = True,
     walltime: str | None = None,
+    depends_on: list[str] | None = None,
 ) -> "SchedulerJob":
     """Create a scheduler job for either SLURM or PBS based on the system's active
     scheduler.
@@ -104,6 +124,7 @@ def create_scheduler_job(
         queue_name=queue_name,
         send_email=send_email,
         walltime=walltime,
+        depends_on=depends_on,
     )
 
 
@@ -178,6 +199,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         queue_name: str | None = None,
         send_email: bool | None = True,
         walltime: str | None = None,
+        depends_on: list[str] | None = None,
     ):
         """Initialize a SchedulerJob instance.
 
@@ -249,6 +271,8 @@ class SchedulerJob(ExecutionHandler, ABC):
             scheduler.primary_queue_name if queue_name is None else queue_name
         )
         self._walltime = walltime
+
+        self.depends_on = depends_on
 
         if (walltime is None) and (self.queue.max_walltime is None):
             raise ValueError(
@@ -585,27 +609,7 @@ class SlurmJob(SchedulerJob):
         RuntimeError
             If the command to retrieve the job status fails or returns an unexpected result.
         """
-        if self.id is None:
-            return ExecutionStatus.UNSUBMITTED
-        else:
-            sacct_cmd = f"sacct -j {self.id} --format=State%20 --noheader"
-            msg_err = f"Failed to retrieve job status using {sacct_cmd}."
-            stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
-
-        # Map sacct states to ExecutionStatus enum
-        sacct_status_map = {
-            "PENDING": ExecutionStatus.PENDING,
-            "RUNNING": ExecutionStatus.RUNNING,
-            "COMPLETED": ExecutionStatus.COMPLETED,
-            "CANCELLED": ExecutionStatus.CANCELLED,
-            "FAILED": ExecutionStatus.FAILED,
-        }
-        for state, status in sacct_status_map.items():
-            if state in stdout:
-                return status
-
-        # Fallback if no known state is found
-        return ExecutionStatus.UNKNOWN
+        return get_status_of_slurm_job(self.job_id)
 
     @property
     def script(self) -> str:
@@ -674,8 +678,12 @@ class SlurmJob(SchedulerJob):
             k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
         }
 
+        cmd = f"sbatch {self.script_path}"
+        if self.depends_on:
+            cmd += f" --dependency=afterok:{':'.join(d for d in self.depends_on)}"
+
         stdout = _run_cmd(
-            f"sbatch {self.script_path}",
+            cmd,
             cwd=self.run_path,
             env=slurm_env,
             msg_err="Non-zero exit code when submitting job.",

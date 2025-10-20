@@ -46,7 +46,7 @@ class ConfiguredBaseModel(BaseModel):
 
 
 class Resource(ConfiguredBaseModel):
-    location: FilePath | HttpUrl
+    location: FilePath | HttpUrl | str
     """Location of the file to retrieve."""
 
     partitioned: bool = Field(default=False, init=False)
