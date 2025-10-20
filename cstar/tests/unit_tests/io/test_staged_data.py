@@ -232,10 +232,10 @@ class TestStagedDataCollection:
         ],
     )
     def test_common_parent_patched_paths_property(
-        self, fake_stageddatacollection_remote_files, tmp_path, paths, expected_relative
+        self, stageddatacollection_remote_files, tmp_path, paths, expected_relative
     ):
         # Arrange: get a real SourceDataCollection from your fixture
-        collection = fake_stageddatacollection_remote_files()
+        collection = stageddatacollection_remote_files()
 
         # Build the Path objects rooted at tmp_path
         real_paths = [tmp_path / p for p in paths]

@@ -15,16 +15,16 @@ class DummyStager(stager.Stager):
 
 
 class TestRegistry:
-    def test_register_and_get_stager(self, mock_sourcedata_local_text_file):
+    def test_register_and_get_stager(self, mocksourcedata_local_text_file):
         """Tests that new Stagers can be added and gotten from the registry"""
         with mock.patch.dict(stager._registry, {}, clear=True):
             stager.register_stager(DummyStager)
-            result = stager.get_stager(mock_sourcedata_local_text_file())
+            result = stager.get_stager(mocksourcedata_local_text_file())
             assert isinstance(result, DummyStager)
 
-    def test_get_stager_not_registered(self, mock_sourcedata_factory):
+    def test_get_stager_not_registered(self, mocksourcedata_factory):
         """Tests that get_stager raises if there is no registry item."""
-        source = mock_sourcedata_factory(
+        source = mocksourcedata_factory(
             location="somewhere", classification=SourceClassification.LOCAL_DIRECTORY
         )
         with pytest.raises(ValueError):
@@ -41,10 +41,10 @@ class TestRegistry:
         ],
     )
     def test_get_stager_returns_expected_class(
-        self, classification, expected_stager_cls, mock_sourcedata_factory
+        self, classification, expected_stager_cls, mocksourcedata_factory
     ):
         """Tests that the `get_stager` method looks up the expected stager for several classifications."""
-        source = mock_sourcedata_factory(
+        source = mocksourcedata_factory(
             location="somewhere", classification=classification
         )
         stgr = stager.get_stager(source)
@@ -53,10 +53,10 @@ class TestRegistry:
 
 class TestStagerABC:
     def test_stage_calls_retriever_and_returns_stagedfile(
-        self, mock_sourcedata_remote_file
+        self, mocksourcedata_remote_file
     ):
         """Tests that Stager.stage() calls Stager.retriever.save() and returns a StagedFile"""
-        source = mock_sourcedata_remote_file()
+        source = mocksourcedata_remote_file()
 
         fake_target = Path("/fake/path")
 
@@ -83,7 +83,7 @@ class TestStagerABC:
 
 
 class TestStagerSubclasses:
-    def test_registry_contains_all_stagers(self, mock_sourcedata_factory):
+    def test_registry_contains_all_stagers(self, mocksourcedata_factory):
         """Tests that all defined stagers are registered."""
         for cls in [
             stager.RemoteBinaryFileStager,
@@ -92,21 +92,21 @@ class TestStagerSubclasses:
             stager.LocalTextFileStager,
             stager.RemoteRepositoryStager,
         ]:
-            source = mock_sourcedata_factory(
+            source = mocksourcedata_factory(
                 location="somewhere", classification=cls._classification
             )
             inst = stager.get_stager(source)
             assert isinstance(inst, cls)
 
     def test_local_binary_file_stager_creates_symlink(
-        self, tmp_path, mock_sourcedata_local_file
+        self, tmp_path, mocksourcedata_local_file
     ):
         """Tests that LocalBinaryFileStager.stage() creates a symbolic link to the source file."""
         source_dir = tmp_path / "src"
         source_dir.mkdir()
         src_file = source_dir / "source.bin"
         src_file.write_bytes(b"123")
-        source = mock_sourcedata_local_file(location=src_file, identifier=None)
+        source = mocksourcedata_local_file(location=src_file, identifier=None)
 
         staging_dir = tmp_path / "stage"
         staging_dir.mkdir()
@@ -121,10 +121,10 @@ class TestStagerSubclasses:
         assert result.path == target
 
     def test_remote_repository_stager_returns_stagedrepo(
-        self, tmp_path, mock_sourcedata_remote_repo
+        self, tmp_path, mocksourcedata_remote_repo
     ):
         """Tests that RemoteRepositoryStager.stage calls .retriever.save returns a StagedRepository."""
-        source = mock_sourcedata_remote_repo()
+        source = mocksourcedata_remote_repo()
         fake_path = tmp_path / "repo"
 
         fake_retriever = mock.Mock()

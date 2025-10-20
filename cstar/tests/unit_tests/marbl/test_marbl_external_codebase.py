@@ -65,12 +65,12 @@ class TestMARBLExternalCodeBaseInit:
 class TestMARBLExternalCodeBaseConfigure:
     def test_configure_success(
         self,
-        marblexternalcodebase_with_mock_source_and_working_copy,
+        marblexternalcodebase_staged,
         dotenv_path,
         tmp_path,
     ):
         """Test that the _configure method succeeds when subprocess calls succeed."""
-        mecb = marblexternalcodebase_with_mock_source_and_working_copy
+        mecb = marblexternalcodebase_staged
         marbl_path = tmp_path
         with (
             mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
@@ -102,7 +102,7 @@ class TestMARBLExternalCodeBaseConfigure:
     def test_make_failure(
         self,
         mock_subprocess,
-        marblexternalcodebase_with_mock_source_and_working_copy,
+        marblexternalcodebase_staged,
         tmp_path,
         dotenv_path,
     ):
@@ -116,7 +116,7 @@ class TestMARBLExternalCodeBaseConfigure:
                 stderr="Mocked MARBL Compilation Failure",
             )
         ]
-        mecb = marblexternalcodebase_with_mock_source_and_working_copy
+        mecb = marblexternalcodebase_staged
 
         # Test
         with (
@@ -136,7 +136,7 @@ class TestMARBLExternalCodeBaseConfigure:
 
     def test_is_configured_when_configured(
         self,
-        marblexternalcodebase_with_mock_source_and_working_copy,
+        marblexternalcodebase_staged,
         tmp_path,
         dotenv_path,
     ):
@@ -163,7 +163,7 @@ class TestMARBLExternalCodeBaseConfigure:
                 "pathlib.Path.iterdir", return_value=["fake", "files", "in", "dir"]
             ),
         ):
-            assert marblexternalcodebase_with_mock_source_and_working_copy.is_configured
+            assert marblexternalcodebase_staged.is_configured
 
     @pytest.mark.parametrize(
         "env_var_defined, repo_changed, lib_exists, inc_dir_contents, expected",
@@ -182,7 +182,7 @@ class TestMARBLExternalCodeBaseConfigure:
     )
     def test_is_configured_variants(
         self,
-        marblexternalcodebase_with_mock_source_and_working_copy: MARBLExternalCodeBase,
+        marblexternalcodebase_staged: MARBLExternalCodeBase,
         tmp_path: Path,
         env_var_defined: bool,
         repo_changed: bool,
@@ -220,7 +220,4 @@ class TestMARBLExternalCodeBaseConfigure:
             mock.patch("pathlib.Path.exists", return_value=lib_exists),
             mock.patch("pathlib.Path.iterdir", return_value=inc_dir_contents),
         ):
-            assert (
-                marblexternalcodebase_with_mock_source_and_working_copy.is_configured
-                is expected
-            )
+            assert marblexternalcodebase_staged.is_configured is expected

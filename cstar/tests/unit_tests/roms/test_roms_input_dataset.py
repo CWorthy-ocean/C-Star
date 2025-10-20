@@ -30,22 +30,20 @@ class TestStrAndRepr:
       correct format.
     """
 
-    def test_str_with_partitioned_files(
-        self, romsinputdataset_with_mock_local_netcdf_source
-    ):
+    def test_str_with_partitioned_files(self, romsinputdataset_local_netcdf):
         """Test the ROMSInputDataset string representation has correct substring for
         partitioned_files.
 
         Fixtures
         --------
-        - romsinputdataset_with_mock_local_netcdf_source: Provides a ROMSInputDataset with a local NetCDF source.
+        - romsinputdataset_local_netcdf: Provides a ROMSInputDataset with a local NetCDF source.
 
         Asserts
         -------
         - String representation of the dataset includes the list of
           partitioned files in the correct format.
         """
-        romsinputdataset_with_mock_local_netcdf_source.partitioning = ROMSPartitioning(
+        romsinputdataset_local_netcdf.partitioning = ROMSPartitioning(
             np_xi=1,
             np_eta=2,
             files=[
@@ -59,14 +57,12 @@ class TestStrAndRepr:
             + "'local_file.002.nc'])"
         )
 
-        actual_str = str(romsinputdataset_with_mock_local_netcdf_source).strip()
+        actual_str = str(romsinputdataset_local_netcdf).strip()
         assert expected_str in actual_str, (
             f"Expected:\n{expected_str}\nBut got:\n{actual_str}"
         )
 
-    def test_repr_with_partitioned_files(
-        self, romsinputdataset_with_mock_local_netcdf_source
-    ):
+    def test_repr_with_partitioned_files(self, romsinputdataset_local_netcdf):
         """Test the ROMSInputDataset repr includes `partitioned_files`.
 
         This test ensures that the `repr` output of a `ROMSInputDataset` object
@@ -74,7 +70,7 @@ class TestStrAndRepr:
 
         Fixtures
         --------
-        - `romsinputdataset_with_mock_local_netcdf_source`: Provides a mock ROMSInputDataset object
+        - `romsinputdataset_local_netcdf`: Provides a mock ROMSInputDataset object
           with a local NetCDF source.
 
         Asserts
@@ -82,7 +78,7 @@ class TestStrAndRepr:
         - The `partitioned_files` attribute is included in the repr output.
         - The format of the `partitioned_files` list matches the expected string output.
         """
-        romsinputdataset_with_mock_local_netcdf_source.partitioning = ROMSPartitioning(
+        romsinputdataset_local_netcdf.partitioning = ROMSPartitioning(
             np_xi=1,
             np_eta=2,
             files=[
@@ -95,7 +91,7 @@ class TestStrAndRepr:
             State: <partitioning = ROMSPartitioning(np_xi=1, np_eta=2, files=['local_file.001.nc', 'local_file.002.nc'])>
         """
         ).strip()
-        actual_repr = repr(romsinputdataset_with_mock_local_netcdf_source)
+        actual_repr = repr(romsinputdataset_local_netcdf)
 
         # Normalize whitespace for comparison
         expected_repr_normalized = " ".join(expected_repr.split())
@@ -107,13 +103,13 @@ class TestStrAndRepr:
 
     def test_repr_with_partitioned_files_and_working_copy(
         self,
-        fake_stagedfile_remote_source,
-        romsinputdataset_with_mock_remote_netcdf_source,
+        stagedfile_remote_source,
+        romsinputdataset_remote_netcdf,
     ):
         """Test the ROMSInputDataset repr includes `partitioned_files` and
         `working_copy`.
         """
-        romsinputdataset_with_mock_remote_netcdf_source.partitioning = ROMSPartitioning(
+        romsinputdataset_remote_netcdf.partitioning = ROMSPartitioning(
             np_xi=1,
             np_eta=2,
             files=[
@@ -122,15 +118,13 @@ class TestStrAndRepr:
             ],
         )
 
-        romsinputdataset_with_mock_remote_netcdf_source._working_copy = (
-            fake_stagedfile_remote_source()
-        )
+        romsinputdataset_remote_netcdf._working_copy = stagedfile_remote_source()
         expected_repr = dedent(
             """\
             State: <working_copy = some/local/dir/remote_file.nc, partitioning = ROMSPartitioning(np_xi=1, np_eta=2, files=['remote_file.001.nc', 'remote_file.002.nc']) >
         """
         ).strip()
-        actual_repr = repr(romsinputdataset_with_mock_remote_netcdf_source)
+        actual_repr = repr(romsinputdataset_remote_netcdf)
 
         # Normalize whitespace for comparison
         expected_repr_normalized = " ".join(expected_repr.split())
@@ -205,7 +199,7 @@ class TestROMSInputDatasetGet:
     def test_get_grid_from_remote_yaml(
         self,
         mock_staged_file,
-        romsinputdataset_with_mock_remote_yaml_source,
+        romsinputdataset_remote_yaml,
         mock_path_resolve,
     ):
         """Test the `get` method for ROMS grid files from a remote YAML source."""
@@ -222,14 +216,12 @@ class TestROMSInputDatasetGet:
 
         # Mock raw yaml bytes coming out of .read:
         with mock.patch.object(
-            romsinputdataset_with_mock_remote_yaml_source.source.retriever,
+            romsinputdataset_remote_yaml.source.retriever,
             "read",
             return_value=b"---\nheader---\ndata",
         ):
             # Call the method under test
-            romsinputdataset_with_mock_remote_yaml_source.get(
-                local_dir=Path("some/local/dir")
-            )
+            romsinputdataset_remote_yaml.get(local_dir=Path("some/local/dir"))
 
         # Check that the yaml.safe_load was called properly
         self.mock_yaml_load.assert_called_once()
@@ -248,7 +240,7 @@ class TestROMSInputDatasetGet:
     def test_get_surface_forcing_from_local_yaml(
         self,
         mock_staged_file,
-        romsinputdataset_with_mock_local_yaml_source,
+        romsinputdataset_local_yaml,
         mock_path_resolve,
     ):
         """Test the `get` method for creating a more complex dataset from a local YAML source."""
@@ -277,14 +269,12 @@ class TestROMSInputDatasetGet:
         ]
         # Mock raw yaml bytes coming out of .read:
         with mock.patch.object(
-            romsinputdataset_with_mock_local_yaml_source.source.retriever,
+            romsinputdataset_local_yaml.source.retriever,
             "read",
             return_value=b"---\nheader---\ndata",
         ):
             #         # Call the method under test
-            romsinputdataset_with_mock_local_yaml_source.get(
-                local_dir=Path("some/local/dir")
-            )
+            romsinputdataset_local_yaml.get(local_dir=Path("some/local/dir"))
 
         # Assert that start_time and end_time are updated in the YAML dictionary
 
@@ -310,7 +300,7 @@ class TestROMSInputDatasetGet:
 
     @mock.patch("pathlib.Path.stat", autospec=True)
     def test_get_from_yaml_raises_with_wrong_number_of_keys(
-        self, mock_stat, romsinputdataset_with_mock_local_yaml_source, mock_path_resolve
+        self, mock_stat, romsinputdataset_local_yaml, mock_path_resolve
     ):
         """Test that the `get` method raises a ValueError when the YAML file contains
         more than two sections.
@@ -332,14 +322,14 @@ class TestROMSInputDatasetGet:
         mock_stat.return_value = mock_stat_result
         with (
             mock.patch.object(
-                romsinputdataset_with_mock_local_yaml_source.source.retriever,
+                romsinputdataset_local_yaml.source.retriever,
                 "read",
                 return_value=b"---\nheader---\ndata",
             ),
             # Call the method under test and expect a ValueError
             pytest.raises(ValueError) as exception_info,
         ):
-            romsinputdataset_with_mock_local_yaml_source.get(local_dir="some/local/dir")
+            romsinputdataset_local_yaml.get(local_dir="some/local/dir")
 
         # Define the expected error message
         expected_message = (
@@ -362,19 +352,17 @@ class TestROMSInputDatasetGet:
     def test_get_skips_if_exists_locally_yaml(
         self,
         mock_exists_locally,
-        romsinputdataset_with_mock_local_yaml_source,
+        romsinputdataset_local_yaml,
         caplog: pytest.LogCaptureFixture,
         mock_path_resolve,
     ):
         """Test that yaml-based datasets are not regenerated by get() if they exist."""
-        caplog.set_level(
-            logging.INFO, logger=romsinputdataset_with_mock_local_yaml_source.log.name
-        )
+        caplog.set_level(logging.INFO, logger=romsinputdataset_local_yaml.log.name)
 
         # Mock the `exists_locally` property to return True
         mock_exists_locally.return_value = True
 
-        romsinputdataset_with_mock_local_yaml_source.get(local_dir="some/local/dir")
+        romsinputdataset_local_yaml.get(local_dir="some/local/dir")
 
         # Assert the skip message was printed
         captured = caplog.text
@@ -393,15 +381,15 @@ class TestROMSInputDatasetGet:
     def test_get_skips_if_files_exist_with_partitioned_source(
         self,
         mock_exists_locally,
-        romsinputdataset_with_mock_remote_partitioned_source,
-        fake_stageddatacollection_remote_files,
+        romsinputdataset_remote_partitioned_source,
+        stageddatacollection_remote_files,
         caplog: pytest.LogCaptureFixture,
         mock_path_resolve,
     ):
         """Test that get() skips already staged files from a partitioned_source"""
         caplog.set_level(
             logging.INFO,
-            logger=romsinputdataset_with_mock_remote_partitioned_source.log.name,
+            logger=romsinputdataset_remote_partitioned_source.log.name,
         )
 
         # Mock the `exists_locally` property to return True
@@ -409,24 +397,22 @@ class TestROMSInputDatasetGet:
 
         # Mock `working_path` to be a list pointing to files in `some/local/dir`
         staged_path_parent = Path("/some/local/dir")
-        fake_staged_paths = [
+        staged_paths = [
             staged_path_parent / f.basename
-            for f in romsinputdataset_with_mock_remote_partitioned_source.partitioned_source.sources
+            for f in romsinputdataset_remote_partitioned_source.partitioned_source.sources
         ]
 
-        fake_staged = fake_stageddatacollection_remote_files(
-            paths=fake_staged_paths,
-            sources=romsinputdataset_with_mock_remote_partitioned_source.partitioned_source.sources,
+        staged = stageddatacollection_remote_files(
+            paths=staged_paths,
+            sources=romsinputdataset_remote_partitioned_source.partitioned_source.sources,
         )
 
         with mock.patch.object(
             FakeROMSInputDataset,
             "working_copy",
-            new_callable=mock.PropertyMock(return_value=fake_staged),
+            new_callable=mock.PropertyMock(return_value=staged),
         ):
-            romsinputdataset_with_mock_remote_partitioned_source.get(
-                local_dir=staged_path_parent
-            )
+            romsinputdataset_remote_partitioned_source.get(local_dir=staged_path_parent)
 
         # Assert the skip message was printed
         assert "already exists, skipping." in caplog.text
@@ -444,7 +430,7 @@ class TestROMSInputDatasetGet:
     def test_get_with_partitioned_source(
         self,
         mock_get_from_partitioned_source,
-        romsinputdataset_with_mock_remote_partitioned_source,
+        romsinputdataset_remote_partitioned_source,
         mock_path_resolve,
     ):
         """Tests the 'get' method calls _get_from_partitioned_source when the
@@ -452,11 +438,9 @@ class TestROMSInputDatasetGet:
         """
         # Set source partitioning attributes
 
-        romsinputdataset_with_mock_remote_partitioned_source.get(
-            local_dir=Path("some/local/dir")
-        )
+        romsinputdataset_remote_partitioned_source.get(local_dir=Path("some/local/dir"))
         mock_get_from_partitioned_source.assert_called_once_with(
-            romsinputdataset_with_mock_remote_partitioned_source,
+            romsinputdataset_remote_partitioned_source,
             local_dir=Path("some/local/dir"),
         )
 
@@ -464,7 +448,7 @@ class TestROMSInputDatasetGet:
 
     def test_get_from_partitioned_source_calls_sourcedatacollection_stage(
         self,
-        romsinputdataset_with_mock_remote_partitioned_source,
+        romsinputdataset_remote_partitioned_source,
     ):
         """Tests the _get_from_partitioned_source helper method.
 
@@ -472,16 +456,16 @@ class TestROMSInputDatasetGet:
         12 files and calls `_get_from_partitioned_source` on it, verifying that `stage`
         is called once on the corresponding SourceDataCollection
         """
-        dataset = romsinputdataset_with_mock_remote_partitioned_source
+        dataset = romsinputdataset_remote_partitioned_source
         with mock.patch.object(SourceDataCollection, "stage") as mock_stage:
             dataset._get_from_partitioned_source(local_dir=Path("some/local/dir"))
             mock_stage.assert_called_once()
 
     def test_get_from_partitioned_source_updates_working_copy(
-        self, romsinputdataset_with_mock_remote_partitioned_source, mock_path_resolve
+        self, romsinputdataset_remote_partitioned_source, mock_path_resolve
     ):
         """Tests the `working_copy` attribute is updated by `get_from_partitioned_source`."""
-        dataset = romsinputdataset_with_mock_remote_partitioned_source  #
+        dataset = romsinputdataset_remote_partitioned_source  #
         dataset.get(local_dir=Path("some/local/dir"))
         assert isinstance(dataset.working_copy, StagedDataCollection)
         expected_paths = [
@@ -502,24 +486,22 @@ class TestROMSInputDatasetPartition:
         """Stop all patches."""
         mock.patch.stopall()
 
-    def test_source_partitioning(self, romsinputdataset_with_mock_local_netcdf_source):
+    def test_source_partitioning(self, romsinputdataset_local_netcdf):
         """Test the ROMSInputDataset.source_partitioning property."""
-        romsinputdataset_with_mock_local_netcdf_source.source_np_xi = 4
-        romsinputdataset_with_mock_local_netcdf_source.source_np_eta = 3
+        romsinputdataset_local_netcdf.source_np_xi = 4
+        romsinputdataset_local_netcdf.source_np_eta = 3
 
-        assert romsinputdataset_with_mock_local_netcdf_source.source_partitioning == (
+        assert romsinputdataset_local_netcdf.source_partitioning == (
             4,
             3,
         )
 
-    def test_to_dict_with_source_partitioning(
-        self, romsinputdataset_with_mock_local_netcdf_source
-    ):
+    def test_to_dict_with_source_partitioning(self, romsinputdataset_local_netcdf):
         """Test the ROMSInputDataset.to_dict() method with a partitioned source file."""
-        romsinputdataset_with_mock_local_netcdf_source.source_np_xi = 4
-        romsinputdataset_with_mock_local_netcdf_source.source_np_eta = 3
+        romsinputdataset_local_netcdf.source_np_xi = 4
+        romsinputdataset_local_netcdf.source_np_eta = 3
 
-        test_dict = romsinputdataset_with_mock_local_netcdf_source.to_dict()
+        test_dict = romsinputdataset_local_netcdf.to_dict()
         assert test_dict["source_np_xi"] == 4
         assert test_dict["source_np_eta"] == 3
 
@@ -532,16 +514,16 @@ class TestROMSInputDatasetPartition:
         self,
         mock_exists_locally,
         mock_partition_netcdf,
-        romsinputdataset_with_mock_remote_netcdf_source,
-        fake_stagedfile_remote_source,
+        romsinputdataset_remote_netcdf,
+        stagedfile_remote_source,
     ):
         """Ensures that a single NetCDF file is partitioned and tracked correctly."""
         np_xi, np_eta = 2, 3
         num_partitions = np_xi * np_eta
 
         # Spoof existing local files:
-        dataset = romsinputdataset_with_mock_remote_netcdf_source
-        dataset._working_copy = fake_stagedfile_remote_source()
+        dataset = romsinputdataset_remote_netcdf
+        dataset._working_copy = stagedfile_remote_source()
         # Mock the `exists_locally` property to return True
         mock_exists_locally.return_value = True
 
@@ -584,8 +566,8 @@ class TestROMSInputDatasetPartition:
         self,
         mock_exists_locally,
         mock_partition_netcdf,
-        romsinputdataset_with_mock_remote_netcdf_source,
-        fake_stageddatacollection_remote_files,
+        romsinputdataset_remote_netcdf,
+        stageddatacollection_remote_files,
     ):
         """Tests partitioning behavior when multiple files are provided to partition_netcdf"""
         np_xi, np_eta = 2, 2
@@ -593,8 +575,8 @@ class TestROMSInputDatasetPartition:
 
         # Spoof existing local files:
         mock_exists_locally.return_value = True
-        dataset = romsinputdataset_with_mock_remote_netcdf_source
-        dataset._working_copy = fake_stageddatacollection_remote_files(
+        dataset = romsinputdataset_remote_netcdf
+        dataset._working_copy = stageddatacollection_remote_files(
             paths=[
                 Path("some/local/dir/file1.nc"),
                 Path("some/local/dir/file2.nc"),
@@ -624,16 +606,14 @@ class TestROMSInputDatasetPartition:
             side_effect=expected_partitioned_files * 2,
         ):
             # Call the method under test
-            romsinputdataset_with_mock_remote_netcdf_source.partition(
-                np_xi=np_xi, np_eta=np_eta
-            )
+            romsinputdataset_remote_netcdf.partition(np_xi=np_xi, np_eta=np_eta)
 
             # Assert partition_netcdf is called for each file
             assert mock_partition_netcdf.call_count == len(
-                romsinputdataset_with_mock_remote_netcdf_source.working_copy.paths
+                romsinputdataset_remote_netcdf.working_copy.paths
             )
             assert (
-                romsinputdataset_with_mock_remote_netcdf_source.partitioning.files
+                romsinputdataset_remote_netcdf.partitioning.files
                 == expected_partitioned_files
             )
 
@@ -641,7 +621,7 @@ class TestROMSInputDatasetPartition:
     def test_partition_skips_if_already_partitioned(
         self,
         mock_partition_netcdf,
-        romsinputdataset_with_mock_local_netcdf_source,
+        romsinputdataset_local_netcdf,
         caplog: pytest.LogCaptureFixture,
     ):
         """Tests that no action is taken if a ROMSInputDataset has already been
@@ -651,7 +631,7 @@ class TestROMSInputDatasetPartition:
         ----------------
         mock_partition_netcdf (MagicMock)
             Mocks the roms_tools.partition_netcdf method to check whether it is called
-        romsinputdataset_with_mock_local_netcdf_source (ROMSInputDataset)
+        romsinputdataset_local_netcdf (ROMSInputDataset)
             Provides a dataset for testing
         caplog
             Builtin fixture to capture logging messages
@@ -661,11 +641,9 @@ class TestROMSInputDatasetPartition:
         - Confirms that an appropriate message is logged
         - Confirms that roms_tools.partition_netcdf is not called
         """
-        caplog.set_level(
-            logging.INFO, logger=romsinputdataset_with_mock_local_netcdf_source.log.name
-        )
+        caplog.set_level(logging.INFO, logger=romsinputdataset_local_netcdf.log.name)
 
-        romsinputdataset_with_mock_local_netcdf_source.partitioning = ROMSPartitioning(
+        romsinputdataset_local_netcdf.partitioning = ROMSPartitioning(
             np_xi=1,
             np_eta=2,
             files=[
@@ -673,14 +651,14 @@ class TestROMSInputDatasetPartition:
                 Path("/some/dir/local_file.1.nc"),
             ],
         )
-        romsinputdataset_with_mock_local_netcdf_source.partition(np_xi=1, np_eta=2)
+        romsinputdataset_local_netcdf.partition(np_xi=1, np_eta=2)
 
         assert "FakeROMSInputDataset already partitioned, skipping" in caplog.text
         mock_partition_netcdf.assert_not_called
 
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_raises_if_already_partitioned_differently(
-        self, mock_partition_netcdf, romsinputdataset_with_mock_local_netcdf_source
+        self, mock_partition_netcdf, romsinputdataset_local_netcdf
     ):
         """Test that a FileExistsError is raised if this ROMSInputDataset has been
         partitioned in a different arrangement to that requested.
@@ -692,7 +670,7 @@ class TestROMSInputDatasetPartition:
         ----------------
         mock_partition_netcdf (MagicMock)
             Mocks the roms_tools.partition_netcdf method to confirm it was not called
-        romsinputdataset_with_mock_local_netcdf_source (ROMSInputDataset)
+        romsinputdataset_local_netcdf (ROMSInputDataset)
             Provides an example ROMSInputDataset on which to call `partition`.
 
         Asserts
@@ -704,14 +682,12 @@ class TestROMSInputDatasetPartition:
             FileExistsError,
             match="The file has already been partitioned into a different arrangement",
         ):
-            romsinputdataset_with_mock_local_netcdf_source.partitioning = (
-                ROMSPartitioning(
-                    np_xi=1,
-                    np_eta=2,
-                    files=["/some/dir/local_file.0.nc", "/some/dir/local_file.1.nc"],
-                )
+            romsinputdataset_local_netcdf.partitioning = ROMSPartitioning(
+                np_xi=1,
+                np_eta=2,
+                files=["/some/dir/local_file.0.nc", "/some/dir/local_file.1.nc"],
             )
-            romsinputdataset_with_mock_local_netcdf_source.partition(np_xi=3, np_eta=4)
+            romsinputdataset_local_netcdf.partition(np_xi=3, np_eta=4)
 
         mock_partition_netcdf.assert_not_called
 
@@ -726,8 +702,8 @@ class TestROMSInputDatasetPartition:
         mock_partition_netcdf,
         mock_exists,
         mock_move,
-        romsinputdataset_with_mock_remote_netcdf_source,
-        fake_stagedfile_remote_source,
+        romsinputdataset_remote_netcdf,
+        stagedfile_remote_source,
     ):
         """Test that existing partitioned files are restored if _repeat_ partitioning
         fails.
@@ -740,8 +716,8 @@ class TestROMSInputDatasetPartition:
         the failure.
         """
         # Spoof existing local files:
-        dataset = romsinputdataset_with_mock_remote_netcdf_source
-        dataset._working_copy = fake_stagedfile_remote_source()
+        dataset = romsinputdataset_remote_netcdf
+        dataset._working_copy = stagedfile_remote_source()
 
         existing_files = [
             Path("/some/dir/local_file.0.nc"),
@@ -779,7 +755,7 @@ class TestROMSInputDatasetPartition:
     def test_partition_raises_when_not_local(
         self,
         mock_exists_locally,
-        romsinputdataset_with_mock_local_netcdf_source,
+        romsinputdataset_local_netcdf,
     ):
         """Confirms an error is raised when `ROMSInputDataset.exists_locally` is False"""
         # Simulate a dataset that does not exist locally
@@ -787,10 +763,10 @@ class TestROMSInputDatasetPartition:
         mock_exists_locally.return_value = False
 
         with pytest.raises(ValueError) as exception_info:
-            romsinputdataset_with_mock_local_netcdf_source.partition(np_xi=2, np_eta=3)
+            romsinputdataset_local_netcdf.partition(np_xi=2, np_eta=3)
 
         expected_message = (
-            f"local path(s) to InputDataset \n {romsinputdataset_with_mock_local_netcdf_source._local}, "
+            f"local path(s) to InputDataset \n {romsinputdataset_local_netcdf._local}, "
             + "refers to a non-existent file(s)"
             + "\n call InputDataset.get() and try again."
         )
@@ -803,13 +779,13 @@ class TestROMSInputDatasetPartition:
     def test_partition_raises_with_mismatched_directories(
         self,
         mock_exists_locally,
-        romsinputdataset_with_mock_remote_netcdf_source,
-        fake_stageddatacollection_remote_files,
+        romsinputdataset_remote_netcdf,
+        stageddatacollection_remote_files,
     ):
         """Tests partition_netcdf raises if files provided span multiple directories."""
         # Set up the dataset with files in different directories
-        dataset = romsinputdataset_with_mock_remote_netcdf_source
-        dataset._working_copy = fake_stageddatacollection_remote_files(
+        dataset = romsinputdataset_remote_netcdf
+        dataset._working_copy = stageddatacollection_remote_files(
             paths=[
                 Path("some/local/source/path/file1.nc"),
                 Path("some/other/source/path/file2.nc"),
@@ -819,43 +795,43 @@ class TestROMSInputDatasetPartition:
 
         # Expect a ValueError due to mismatched directories
         with pytest.raises(ValueError) as exception_info:
-            romsinputdataset_with_mock_remote_netcdf_source.partition(np_xi=2, np_eta=3)
+            romsinputdataset_remote_netcdf.partition(np_xi=2, np_eta=3)
 
         expected_message = (
             f"A single input dataset exists in multiple directories: "
-            f"{romsinputdataset_with_mock_remote_netcdf_source.working_copy.paths}."
+            f"{romsinputdataset_remote_netcdf.working_copy.paths}."
         )
         assert str(exception_info.value) == expected_message
 
-    def test_path_for_roms(self, romsinputdataset_with_mock_local_netcdf_source):
+    def test_path_for_roms(self, romsinputdataset_local_netcdf):
         """Test the `path_for_roms` property."""
         existing_files = [
             Path("/some/dir/local_file.0.nc"),
             Path("/some/dir/local_file.1.nc"),
         ]
-        romsinputdataset_with_mock_local_netcdf_source.partitioning = ROMSPartitioning(
+        romsinputdataset_local_netcdf.partitioning = ROMSPartitioning(
             np_xi=1, np_eta=2, files=existing_files
         )
-        assert romsinputdataset_with_mock_local_netcdf_source.path_for_roms == [
+        assert romsinputdataset_local_netcdf.path_for_roms == [
             Path("/some/dir/local_file.nc"),
         ]
 
     def test_path_for_roms_raises_if_no_partitioning(
-        self, romsinputdataset_with_mock_local_netcdf_source
+        self, romsinputdataset_local_netcdf
     ):
         with pytest.raises(
             FileNotFoundError, match="ROMS requires files to be partitioned for use"
         ):
-            romsinputdataset_with_mock_local_netcdf_source.path_for_roms
+            romsinputdataset_local_netcdf.path_for_roms
 
 
-# TODO update `fake_forcing_corrections` fixture to accept args, should not be creating instances in tests
-def test_correction_cannot_be_yaml(mock_sourcedata_remote_text_file):
+# TODO update `roms_forcing_corrections` fixture to accept args, should not be creating instances in tests
+def test_correction_cannot_be_yaml(mocksourcedata_remote_text_file):
     """Checks that the `validate()` method correctly raises a TypeError if
     `ROMSForcingCorrections.source.source_type` is `yaml` (unsupported)
     """
     location = "https://www.totallylegityamlfiles.pk/downloadme.yaml"
-    source_data = mock_sourcedata_remote_text_file(location=location)
+    source_data = mocksourcedata_remote_text_file(location=location)
     with pytest.raises(TypeError) as exception_info:
         with mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=source_data

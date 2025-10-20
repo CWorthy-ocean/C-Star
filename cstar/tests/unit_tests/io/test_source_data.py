@@ -392,13 +392,13 @@ class TestSourceData:
     )
     def test_identifier_synonyms(
         self,
-        mock_sourcedata_factory,
+        mocksourcedata_factory,
         classification,
         expected_file_hash,
         expected_checkout_target,
     ):
         """Tests that context-specific uses of `identifier` (file hash/checkout target) are correct."""
-        src = mock_sourcedata_factory(
+        src = mocksourcedata_factory(
             classification=classification,
             location="some/location",
             identifier="id123",
@@ -407,12 +407,12 @@ class TestSourceData:
         assert src.file_hash == expected_file_hash
         assert src.checkout_target == expected_checkout_target
 
-    def test_checkout_hash_for_repository(self, mock_sourcedata_factory):
+    def test_checkout_hash_for_repository(self, mocksourcedata_factory):
         """Tests that the checkout_hash property calls _get_hash_from_checkout_target if location is a repo."""
         fake_location = "https://github.com/test/repo.git"
         fake_identifier = "abc123"
 
-        src = mock_sourcedata_factory(
+        src = mocksourcedata_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
             location=fake_location,
             identifier=fake_identifier,
@@ -427,27 +427,27 @@ class TestSourceData:
         assert result == "deadtofu"
         mock_get_hash.assert_called_once_with(fake_location, fake_identifier)
 
-    def test_checkout_hash_none_if_not_repo(self, mock_sourcedata_factory):
+    def test_checkout_hash_none_if_not_repo(self, mocksourcedata_factory):
         """Tests that the checkout_hash property is None if location is not a git repo."""
-        src = mock_sourcedata_factory(
+        src = mocksourcedata_factory(
             classification=SourceClassification.LOCAL_TEXT_FILE,
             location="foo.txt",
             identifier="id123",
         )
         assert src.checkout_hash is None
 
-    def test_checkout_hash_none_if_no_identifier(self, mock_sourcedata_factory):
+    def test_checkout_hash_none_if_no_identifier(self, mocksourcedata_factory):
         """Tests that the checkout_hash property is None if SourceData.identifier is None."""
-        src = mock_sourcedata_factory(
+        src = mocksourcedata_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
             location="https://github.com/test/repo.git",
             identifier=None,
         )
         assert src.checkout_hash is None
 
-    def test_stager_property_caches_value(self, mock_sourcedata_factory):
+    def test_stager_property_caches_value(self, mocksourcedata_factory):
         """Tests that the `stager` property caches its first result and avoids repeat calls to get_stager()."""
-        src = mock_sourcedata_factory(
+        src = mocksourcedata_factory(
             classification=SourceClassification.LOCAL_TEXT_FILE,
             location="foo.txt",
             identifier="id123",
@@ -469,9 +469,9 @@ class TestSourceDataCollection:
         assert isinstance(first.location, str)
         assert list(iter(coll)) == coll.sources
 
-    def test_invalid_source_type_raises(self, mock_sourcedata_factory):
+    def test_invalid_source_type_raises(self, mocksourcedata_factory):
         """Tests that SourceDataCollection cannot be initialized with invalid sources."""
-        bad = mock_sourcedata_factory(
+        bad = mocksourcedata_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
             location="http://example.com/repo.git",
             identifier="id1",
@@ -480,11 +480,11 @@ class TestSourceDataCollection:
             SourceDataCollection([bad])
 
     def test_append_and_locations(
-        self, mock_sourcedatacollection, mock_sourcedata_factory
+        self, mock_sourcedatacollection, mocksourcedata_factory
     ):
         """Tests that SourceDataCollection.append() adds a new SourceData instance to the collection."""
         coll = mock_sourcedatacollection()
-        good = mock_sourcedata_factory(
+        good = mocksourcedata_factory(
             classification=SourceClassification.LOCAL_TEXT_FILE,
             location="foo.txt",
             identifier="idx",
@@ -494,11 +494,11 @@ class TestSourceDataCollection:
         assert "foo.txt" in coll.locations
 
     def test_append_invalid_raises(
-        self, mock_sourcedatacollection, mock_sourcedata_factory
+        self, mock_sourcedatacollection, mocksourcedata_factory
     ):
         """Tests that SourceDataCollection.append() raises if called with an invalid argument."""
         coll = mock_sourcedatacollection()
-        bad = mock_sourcedata_factory(
+        bad = mocksourcedata_factory(
             classification=SourceClassification.REMOTE_REPOSITORY,
             location="http://example.com/repo.git",
             identifier="badid",
