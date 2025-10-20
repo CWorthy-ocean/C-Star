@@ -59,6 +59,7 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
     )
 
     job.submit()
+    print(f"Submitted {step.name} with id {job.id}")
     return job.id
 
 
