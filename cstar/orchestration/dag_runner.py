@@ -1,9 +1,12 @@
 import os
 from pathlib import Path
 from time import sleep, time
+from uuid import uuid4
 
+from threading import Thread
 from prefect import flow, task
 from prefect.cache_policies import INPUTS
+from prefect.futures import wait
 
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import create_scheduler_job, get_status_of_slurm_job
@@ -12,7 +15,7 @@ from cstar.orchestration.serialization import deserialize
 
 JobId = str
 JobStatus = str
-#
+
 # def create_scheduler_job(*args, **kwargs):
 #     class dummy:
 #         def submit(self):
@@ -30,7 +33,7 @@ JobStatus = str
 #     return ExecutionStatus.COMPLETED
 
 
-@task(cache_policy=INPUTS)
+@task()#cache_policy=INPUTS)
 def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
     bp_path = step.blueprint
     bp = deserialize(Path(bp_path), RomsMarblBlueprint)
@@ -54,7 +57,7 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
     return job.id
 
 
-@task(cache_policy=INPUTS)
+@task()#cache_policy=INPUTS)
 def check_job(step, job_id, deps: list[str] = []) -> ExecutionStatus:
     t_start = time()
     dur = 10 * 60
@@ -89,7 +92,7 @@ def build_and_run_dag(workplan_path: Path):
 
     for step in no_dep_steps:
         id_dict[step.name] = submit_job(step)
-        status_dict[step.name] = check_job(step, id_dict[step.name])
+        status_dict[step.name] = check_job.submit(step, id_dict[step.name])
 
     while True:
         for step in follow_up_steps:
@@ -97,13 +100,13 @@ def build_and_run_dag(workplan_path: Path):
                 id_dict[step.name] = submit_job(
                     step, [id_dict[s] for s in step.depends_on]
                 )
-                status_dict[step.name] = check_job(
+                status_dict[step.name] = check_job.submit(
                     step, id_dict[step.name], [status_dict[s] for s in step.depends_on]
                 )
         if len(id_dict) == len(wp.steps):
             break
 
-    # check_job.serve()
+    wait(list(status_dict.values()))
 
 
 if __name__ == "__main__":
@@ -113,4 +116,8 @@ if __name__ == "__main__":
     os.environ["CSTAR_ORCHESTRATED"] = "1"
 
     wp_path = "/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml"
+    wp_path = "/home/x-seilerman/wp_testing/workplan.yaml"
+    # t = Thread(target=check_job.serve)
+    # t.start()
     build_and_run_dag(wp_path)
+    # t.join()
