@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Final, override
 
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import get_logger, register_file_handler
+from cstar.base.log import get_logger
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
@@ -114,13 +114,7 @@ class SimulationRunner(Service):
         self._simulation: ROMSSimulation = ROMSSimulation.from_blueprint(
             self._blueprint_uri
         )
-        log_file = (
-            self._simulation.directory
-            / LOGS_DIRECTORY
-            / WORKER_LOG_FILE_TPL.format(datetime.now(timezone.utc))
-        )
-        register_file_handler(self.log, log_file, level=service_cfg.log_level)
-        self.log.setLevel(service_cfg.log_level)
+
         self._output_root = self._simulation.directory.expanduser()
         self._output_dir = self._get_unique_path(self._output_root)
         self._stages = tuple(request.stages)
