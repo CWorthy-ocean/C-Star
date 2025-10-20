@@ -1,3 +1,8 @@
+"""
+This is a hacky POC and not a production-level solution, it should be removed or heavily improved
+before going into develop/main
+"""
+
 import os
 import sys
 from pathlib import Path
@@ -31,6 +36,8 @@ JobStatus = str
 # def get_status_of_slurm_job(*args, **kwargs):
 #     sleep(30)
 #     return ExecutionStatus.COMPLETED
+
+
 def cache_func(context: TaskRunContext, params):
     """Cache on a combination of the task name and user-assigned run id"""
     cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
@@ -45,7 +52,7 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
 
     job = create_scheduler_job(
         commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
-        account_key=os.getenv("CSTAR_ACCOUNT_KEY"),
+        account_key=os.getenv("CSTAR_ACCOUNT_KEY", ""),
         cpus=bp.cpus_needed,
         nodes=None,  # let existing logic handle this
         cpus_per_node=None,  # let existing logic handle this
@@ -60,7 +67,7 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
 
     job.submit()
     print(f"Submitted {step.name} with id {job.id}")
-    return job.id
+    return str(job.id)
 
 
 @task(persist_result=True, cache_key_fn=cache_func)
@@ -77,6 +84,7 @@ def check_job(step, job_id, deps: list[str] = []) -> ExecutionStatus:
         ]:
             return status
         sleep(10)
+    return status
 
 
 @flow

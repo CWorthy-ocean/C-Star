@@ -20,9 +20,16 @@ from cstar.system.scheduler import (
 
 
 def get_status_of_slurm_job(job_id: str) -> ExecutionStatus:
+    """
+    Check the status of a Slurm job using sacct.
+
+    :param job_id: the job_id to check
+    :return: the status of the job
+    """
     sacct_cmd = f"sacct -j {job_id} --format=State%20 --noheader"
     msg_err = f"Failed to retrieve job status using {sacct_cmd}."
     stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
+
     # Map sacct states to ExecutionStatus enum
     sacct_status_map = {
         "PENDING": ExecutionStatus.PENDING,
@@ -34,6 +41,7 @@ def get_status_of_slurm_job(job_id: str) -> ExecutionStatus:
     for state, status in sacct_status_map.items():
         if state in stdout:
             return status
+
     # Fallback if no known state is found
     return ExecutionStatus.UNKNOWN
 
@@ -87,6 +95,8 @@ def create_scheduler_job(
         Whether to send email notifications about job status. Defaults to True.
     walltime : str, optional
         The maximum walltime for the job, in the format "HH:MM:SS". Defaults to the queue's maximum.
+    depends_on: list[str], optional
+        A list of job ids to pass as dependencies to the scheduler. Defaults to [].
 
     Returns
     -------
@@ -610,7 +620,7 @@ class SlurmJob(SchedulerJob):
         RuntimeError
             If the command to retrieve the job status fails or returns an unexpected result.
         """
-        return get_status_of_slurm_job(self.job_id)
+        return get_status_of_slurm_job(str(self.id))
 
     @property
     def script(self) -> str:

@@ -160,6 +160,12 @@ class SimulationRunner(Service):
             msg = f"Output directory {self._output_root} is not empty."
             raise ValueError(msg)
 
+        # this kept tripping up my runs because it is checking the "default" path
+        # that is derived from package_root, rather than the path set by the user.
+        # probably we should just remove this and handle it elsewhere (as noted in
+        # previous PR, this whole method maybe belongs elsewhere), but for the moment,
+        # it's commented out til we think on it.
+
         # leftover external code folder causes non-empty repo errors; remove.
         # externals_path = cstar_sysmgr.environment.package_root / "externals"
         # if externals_path.exists():
