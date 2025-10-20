@@ -468,7 +468,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         Writes the generated job script to the file specified by the `script_path` attribute.
         The file can then be used to submit the job to the scheduler.
         """
-        self.script_path.mkdir(parents=True, exist_ok=True)
+        self.script_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.script_path, "w") as f:
             f.write(self.script)
 
