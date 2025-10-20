@@ -20,6 +20,7 @@ from cstar.orchestration.serialization import deserialize
 JobId = str
 JobStatus = str
 
+# these are little mocks you can uncomment if you want to run this locally and not on anvil
 
 # def create_scheduler_job(*args, **kwargs):
 #     class dummy:
