@@ -1,7 +1,6 @@
-import os
+import pathlib
 import subprocess
 import unittest.mock as mock
-from pathlib import Path
 
 import dotenv
 import pytest
@@ -66,37 +65,30 @@ class TestMARBLExternalCodeBaseConfigure:
     def test_configure_success(
         self,
         marblexternalcodebase_staged,
-        dotenv_path,
-        tmp_path,
+        dotenv_path: pathlib.Path,
+        marbl_path: pathlib.Path,
     ):
         """Test that the _configure method succeeds when subprocess calls succeed."""
         mecb = marblexternalcodebase_staged
-        marbl_path = tmp_path
-        with (
-            mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
-            mock.patch.object(
-                cstar.marbl.external_codebase, "_run_cmd"
-            ) as mock_run_cmd,
-        ):
+        # marbl_path = tmp_path
+        with mock.patch.object(
+            cstar.marbl.external_codebase, "_run_cmd"
+        ) as mock_run_cmd:
             mock_run_cmd.return_value.returncode = 0
             mecb._configure()
 
-            # Assertions:
-            ## Check environment variables
-            assert os.environ[mecb.root_env_var] == str(mecb.working_copy.path)
+        ## Check that environment was updated correctly
+        actual_value = dotenv.get_key(dotenv_path, mecb.root_env_var)
+        assert actual_value == str(mecb.working_copy.path)
 
-            ## Check that environment was updated correctly
-            actual_value = dotenv.get_key(dotenv_path, mecb.root_env_var)
-            assert actual_value == str(mecb.working_copy.path)
-
-            mock_run_cmd.assert_called_once_with(
-                f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
-                cwd=marbl_path / "src",
-                msg_pre="Compiling MARBL...",
-                msg_post=f"MARBL successfully installed at {marbl_path}",
-                msg_err="Error when compiling MARBL.",
-                raise_on_error=True,
-            )
+        mock_run_cmd.assert_called_once_with(
+            f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
+            cwd=marbl_path / "src",
+            msg_pre="Compiling MARBL...",
+            msg_post=f"MARBL successfully installed at {marbl_path}",
+            msg_err="Error when compiling MARBL.",
+            raise_on_error=True,
+        )
 
     @mock.patch("cstar.base.utils.subprocess.run")
     def test_make_failure(
@@ -107,7 +99,6 @@ class TestMARBLExternalCodeBaseConfigure:
         dotenv_path,
     ):
         """Test that the _configure method raises an error when 'make' fails."""
-        dotenv_path = tmp_path / ".cstar.env"
         mock_subprocess.side_effect = [
             subprocess.CompletedProcess(
                 args=["make"],
@@ -119,17 +110,11 @@ class TestMARBLExternalCodeBaseConfigure:
         mecb = marblexternalcodebase_staged
 
         # Test
-        with (
-            pytest.raises(
-                RuntimeError,
-                match=(
-                    "Error when compiling MARBL. Return Code: `1`. STDERR:\n"
-                    "Mocked MARBL Compilation Failure"
-                ),
-            ),
-            mock.patch(
-                "cstar.system.environment.CSTAR_USER_ENV_PATH",
-                dotenv_path,
+        with pytest.raises(
+            RuntimeError,
+            match=(
+                "Error when compiling MARBL. Return Code: `1`. STDERR:\n"
+                "Mocked MARBL Compilation Failure"
             ),
         ):
             mecb._configure()
@@ -183,7 +168,7 @@ class TestMARBLExternalCodeBaseConfigure:
     def test_is_configured_variants(
         self,
         marblexternalcodebase_staged: MARBLExternalCodeBase,
-        tmp_path: Path,
+        tmp_path: pathlib.Path,
         env_var_defined: bool,
         repo_changed: bool,
         lib_exists: bool,

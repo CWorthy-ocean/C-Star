@@ -23,6 +23,7 @@ class TestCStar:
         self,
         tmp_path: Path,
         modify_template_blueprint,
+        mock_lmod_path,
         fetch_roms_tools_source_data,
         fetch_remote_test_case_data,
         test_config_key,
@@ -54,13 +55,11 @@ class TestCStar:
         log (logging.Logger):
             Logger instance for logging messages during test execution.
         """
-        dotenv_path = tmp_path / ".cstar.env"
         ext_root = tmp_path / "externals"
 
         with (
             mock.patch(
-                "cstar.system.environment.CSTAR_USER_ENV_PATH",
-                dotenv_path,
+                "cstar.system.environment.CStarEnvironment.lmod_path", mock_lmod_path
             ),
             mock.patch.object(
                 cstar.system.environment.CStarEnvironment, "package_root", new=ext_root

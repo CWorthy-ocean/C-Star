@@ -50,7 +50,7 @@ def romsexternalcodebase(
 def romsexternalcodebase_staged(
     romsexternalcodebase,
     stagedrepository,
-    tmp_path,
+    roms_path,
 ) -> Generator[ROMSExternalCodeBase, None, None]:
     """Fixture providing a staged `ROMSExternalCodeBase` instance for testing.
 
@@ -58,7 +58,7 @@ def romsexternalcodebase_staged(
     """
     recb = romsexternalcodebase
     staged_data = stagedrepository(
-        path=tmp_path, source=recb.source, changed_from_source=False
+        path=roms_path, source=recb.source, changed_from_source=False
     )
     recb._working_copy = staged_data
     yield recb
