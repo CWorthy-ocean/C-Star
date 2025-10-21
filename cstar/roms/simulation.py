@@ -1,3 +1,4 @@
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -19,7 +20,7 @@ from cstar.base.utils import (
     _get_sha256_hash,
     _run_cmd,
 )
-from cstar.execution.handler import ExecutionHandler
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -39,11 +40,27 @@ from cstar.roms.input_dataset import (
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
 
-NPROCS_POST = int(os.getenv("CSTAR_NPROCS_POST", str(os.cpu_count() // 4)))  # type: ignore[operator]
+NPROCS_POST = int(os.getenv("CSTAR_NPROCS_POST", str(os.cpu_count() // 3)))  # type: ignore[operator]
 
 
-def _ncjoin_wildcard(logger, input_dir, output_dir, wildcard_pattern):
+def _ncjoin_wildcard(
+    wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
+) -> None:
+    """Spatially join netcdfs matching the wildcard pattern using ncjoin, and move the joined output to output_dir.
+
+    Parameters
+    ----------
+    wildcard_pattern: the wildcard pattern to match for files within input_dir
+    input_dir: location of the partitioned netcdfs to be joined
+    output_dir: location to move the joined output to
+    logger: logger object to post log messages to
+
+    Returns
+    -------
+    None
+    """
     logger.info(f"Joining netCDF files {wildcard_pattern}...")
+
     _run_cmd(
         f"ncjoin {wildcard_pattern}",
         cwd=input_dir,
@@ -51,22 +68,9 @@ def _ncjoin_wildcard(logger, input_dir, output_dir, wildcard_pattern):
     )
 
     out_file = input_dir / wildcard_pattern.replace("*.", "")
-
     out_file.rename(output_dir / out_file.name)
 
     logger.info(f"done spatially joining {out_file}")
-
-
-def _concat_wildcard(logger, input_dir, output_dir, wildcard_pattern):
-    logger.info(f"Time-concatenating netCDF files {wildcard_pattern}...")
-    out_file = output_dir / wildcard_pattern.replace("*.", "")
-    _run_cmd(
-        f"ncrcat {wildcard_pattern} -o {out_file}",
-        cwd=input_dir,
-        raise_on_error=True,
-    )
-
-    logger.info(f"done time-concatenating  {out_file}")
 
 
 class ROMSSimulation(Simulation):
@@ -1501,15 +1505,15 @@ class ROMSSimulation(Simulation):
         run : Executes the ROMS simulation.
         pre_run : Prepares the simulation before execution.
         """
-        # if self._execution_handler is None:
-        #     raise RuntimeError(
-        #         "Cannot call 'ROMSSimulation.post_run()' before calling 'ROMSSimulation.run()'"
-        #     )
-        # elif self._execution_handler.status != ExecutionStatus.COMPLETED:
-        #     raise RuntimeError(
-        #         "Cannot call 'ROMSSimulation.post_run()' until the ROMS run is completed, "
-        #         + f"but current execution status is '{self._execution_handler.status}'"
-        #     )
+        if self._execution_handler is None:
+            raise RuntimeError(
+                "Cannot call 'ROMSSimulation.post_run()' before calling 'ROMSSimulation.run()'"
+            )
+        elif self._execution_handler.status != ExecutionStatus.COMPLETED:
+            raise RuntimeError(
+                "Cannot call 'ROMSSimulation.post_run()' until the ROMS run is completed, "
+                + f"but current execution status is '{self._execution_handler.status}'"
+            )
 
         output_dir = self.directory / "output"
         files = list(output_dir.glob("*.??????????????.*.nc"))
@@ -1517,30 +1521,21 @@ class ROMSSimulation(Simulation):
         if not files:
             self.log.warning("No suitable output found")
         else:
-            spatial_output_dir = output_dir / "SPATIAL_JOINED"
             final_output_dir = output_dir.parent / "JOINED_OUTPUT"
-            spatial_output_dir.mkdir(exist_ok=True)
-            final_output_dir.mkdir(exist_ok=True)
+            final_output_dir.mkdir(exist_ok=True, parents=True)
 
             spatial_joiner = partial(
-                _ncjoin_wildcard, self.log, output_dir, spatial_output_dir
+                _ncjoin_wildcard,
+                logger=self.log,
+                input_dir=output_dir,
+                output_dir=final_output_dir,
             )
-            time_concatter = partial(
-                _concat_wildcard, self.log, spatial_output_dir, final_output_dir
-            )
+
             with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
                 results = executor.map(spatial_joiner, unique_wildcards)
                 _ = [r for r in results]  # exhaust iterator
 
-                joined_files = list(spatial_output_dir.glob("*.??????????????.nc"))
-                joined_unique_wildcards = {
-                    Path(fname.stem).stem + ".*.nc" for fname in joined_files
-                }
-
-                results = executor.map(time_concatter, joined_unique_wildcards)
-                _ = [r for r in results]  # exhaust iterator
-
-        # self.persist()
+        self.persist()
 
     def restart(self, new_end_date: str | datetime) -> "ROMSSimulation":
         """Restart the ROMS simulation from the end of the current simulation, if
