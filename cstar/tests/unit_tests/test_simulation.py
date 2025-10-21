@@ -162,7 +162,7 @@ class TestSimulationInitialization:
         sim._validate_date_range()  # Should not raise any error
 
     def test_validate_date_range_start_date_too_early(
-        self, tmp_path, fake_externalcodebase
+        self, tmp_path, fakeexternalcodebase
     ):
         """Test `_validate_date_range()` when `start_date` is before `valid_start_date`.
 
@@ -172,7 +172,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
-        - `fake_externalcodebase`: an ExternalCodeBase instance without filesystem or network logic
+        - `fakeexternalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -184,7 +184,7 @@ class TestSimulationInitialization:
             StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
-                codebase=fake_externalcodebase,
+                codebase=fakeexternalcodebase,
                 discretization=Discretization(time_step=60),
                 start_date="2023-12-31",  # Too early
                 end_date="2025-12-31",
@@ -193,7 +193,7 @@ class TestSimulationInitialization:
             )
 
     def test_validate_date_range_end_date_too_late(
-        self, fake_externalcodebase, tmp_path
+        self, fakeexternalcodebase, tmp_path
     ):
         """Test `_validate_date_range()` when `end_date` is after `valid_end_date`.
 
@@ -203,7 +203,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
-        - `fake_externalcodebase`: an ExternalCodeBase instance without filesystem or network logic
+        - `fakeexternalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -215,7 +215,7 @@ class TestSimulationInitialization:
             StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
-                codebase=fake_externalcodebase,
+                codebase=fakeexternalcodebase,
                 discretization=Discretization(time_step=60),
                 start_date="2025-01-01",
                 end_date="2026-02-01",  # Too late
@@ -224,7 +224,7 @@ class TestSimulationInitialization:
             )
 
     def test_simulation_raises_error_if_start_date_after_end_date(
-        self, fake_externalcodebase, tmp_path
+        self, fakeexternalcodebase, tmp_path
     ):
         """Test that an error is raised when `start_date` is after `end_date`.
 
@@ -234,7 +234,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
-        - `fake_externalcodebase`: an ExternalCodeBase instance without filesystem or network logic
+        - `fakeexternalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -244,7 +244,7 @@ class TestSimulationInitialization:
             StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
-                codebase=fake_externalcodebase,
+                codebase=fakeexternalcodebase,
                 discretization=Discretization(time_step=60),
                 start_date="2025-12-31",
                 end_date="2025-01-01",
@@ -305,7 +305,7 @@ class TestSimulationInitialization:
 
     # Test Initialisation directly:
 
-    def test_simulation_initialization_valid(self, fake_externalcodebase):
+    def test_simulation_initialization_valid(self, fakeexternalcodebase):
         """Test valid initialization of a `Simulation` instance.
 
         This test ensures that `Simulation` initializes correctly when provided
@@ -316,7 +316,7 @@ class TestSimulationInitialization:
         ----------------
         - `patch.object(StubSimulation, "_validate_simulation_directory")`: Mocks directory validation.
         - `patch.object(StubSimulation, "_validate_date_range")`: Mocks date range validation.
-        - `fake_externalcodebase`: an ExternalCodeBase instance without filesystem or network logic
+        - `fakeexternalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -334,7 +334,7 @@ class TestSimulationInitialization:
             sim = StubSimulation(
                 name="TestSim",
                 directory="some/dir",
-                codebase=fake_externalcodebase,
+                codebase=fakeexternalcodebase,
                 discretization=Discretization(time_step=60),
                 start_date="2025-01-01",
                 end_date="2025-12-31",
@@ -352,7 +352,7 @@ class TestSimulationInitialization:
             assert sim.valid_end_date == datetime(2026, 1, 1)
 
     def test_simulation_uses_fallback_dates(
-        self, fake_externalcodebase, tmp_path, caplog
+        self, fakeexternalcodebase, tmp_path, caplog
     ):
         """Test that missing `start_date` and `end_date` default to valid ranges.
 
@@ -366,7 +366,7 @@ class TestSimulationInitialization:
             Temporary directory for simulation setup.
         caplog (pytest.LogCaptureFixture)
             builtin fixture for capturing logged messages
-        fake_externalcodebase
+        fakeexternalcodebase
             An ExternalCodeBase instance without filesystem or network logic
 
         Assertions
@@ -378,7 +378,7 @@ class TestSimulationInitialization:
         sim = StubSimulation(
             name="FallbackSim",
             directory=tmp_path,
-            codebase=fake_externalcodebase,
+            codebase=fakeexternalcodebase,
             discretization=Discretization(time_step=60),
             valid_start_date="2025-01-01",
             valid_end_date="2025-12-31",
@@ -391,7 +391,7 @@ class TestSimulationInitialization:
         assert sim.end_date == datetime(2025, 12, 31)
 
     def test_simulation_warns_if_no_valid_dates(
-        self, fake_externalcodebase, tmp_path, caplog
+        self, fakeexternalcodebase, tmp_path, caplog
     ):
         """Test that a warning is issued when no valid date constraints are provided.
 
@@ -405,7 +405,7 @@ class TestSimulationInitialization:
             Temporary directory for simulation setup.
         caplog (pytest.LogCaptureFixture)
             builtin fixture for capturing logged messages
-        fake_externalcodebase
+        fakeexternalcodebase
             an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
@@ -414,7 +414,7 @@ class TestSimulationInitialization:
         """
         sim = StubSimulation(
             name="FallbackSim",
-            codebase=fake_externalcodebase,
+            codebase=fakeexternalcodebase,
             directory=tmp_path,
             discretization=Discretization(time_step=60),
             start_date="2025-01-01",
@@ -472,7 +472,7 @@ Valid end date: 2026-01-01 00:00:00
 Discretization: Discretization(time_step = 60)
 
 Code:
-Codebase: MockExternalCodeBase instance (query using StubSimulation.codebase)
+Codebase: FakeExternalCodeBase instance (query using StubSimulation.codebase)
 Runtime code: AdditionalCode instance with 3 files (query using StubSimulation.runtime_code)
 Compile-time code: AdditionalCode instance with 3 files (query using StubSimulation.compile_time_code)
 Is compiled: True
@@ -505,7 +505,7 @@ end_date = 2025-12-31 00:00:00,
 valid_start_date = 2024-01-01 00:00:00,
 valid_end_date = 2026-01-01 00:00:00,
 discretization = Discretization(time_step = 60),
-codebase = <MockExternalCodeBase instance>,
+codebase = <FakeExternalCodeBase instance>,
 runtime_code = <AdditionalCode instance>,
 compile_time_code = <AdditionalCode instance>)"""
 

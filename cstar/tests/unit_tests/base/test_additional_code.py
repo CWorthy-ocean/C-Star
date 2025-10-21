@@ -1,6 +1,7 @@
 from textwrap import dedent
 from unittest import mock
 
+import cstar
 from cstar.base import AdditionalCode
 from cstar.io.constants import SourceClassification
 from cstar.io.source_data import SourceDataCollection
@@ -26,8 +27,9 @@ class TestInit:
         """Test that an AdditionalCode object is initialized with the correct
         attributes.
         """
-        with mock.patch(
-            "cstar.base.additional_code._SourceInspector.classify",
+        with mock.patch.object(
+            cstar.io.source_data._SourceInspector,
+            "classify",
             side_effect=[
                 SourceClassification.REMOTE_REPOSITORY,
                 SourceClassification.REMOTE_TEXT_FILE,
@@ -52,11 +54,11 @@ class TestInit:
 class TestStrAndRepr:
     """Test class for the `__str__` and `__repr__` methods of the AdditionalCode class."""
 
-    def test_repr_remote(self, fake_additionalcode_remote):
+    def test_repr_remote(self, additionalcode_remote):
         """Test that the __repr__ method returns the correct string for the example
         remote AdditionalCode instance defined in the above fixture.
         """
-        ac = fake_additionalcode_remote()
+        ac = additionalcode_remote()
         expected_repr = dedent("""\
 AdditionalCode(
 location=https://github.com/test/repo.git,
@@ -67,7 +69,7 @@ files=['test_file_1.F', 'test_file_2.py', 'test_file_3.opt')""")
             f"expected \n{repr(ac)}\n, got \n{expected_repr}"
         )
 
-    def test_repr_local(self, fake_additionalcode_local):
+    def test_repr_local(self, additionalcode_local):
         """Test that the __repr__ method returns the correct string for the example
         local AdditionalCode instance defined in the above fixture.
         """
@@ -77,9 +79,9 @@ location=/some/local/directory,
 subdir=some/subdirectory,
 checkout_target=,
 files=['test_file_1.F', 'test_file_2.py', 'test_file_3.opt')""")
-        assert repr(fake_additionalcode_local()) == expected_repr
+        assert repr(additionalcode_local()) == expected_repr
 
-    def test_str_remote(self, fake_additionalcode_remote):
+    def test_str_remote(self, additionalcode_remote):
         """Test that the __str__ method returns the correct string for the example
         remote AdditionalCode instance defined in the above fixture.
         """
@@ -93,15 +95,15 @@ files=['test_file_1.F', 'test_file_2.py', 'test_file_3.opt')""")
         Working copy: None
         Exists locally: False (get with AdditionalCode.get())""")
 
-        assert str(fake_additionalcode_remote()) == expected_str, (
-            f"expected \n{str(fake_additionalcode_remote())}\n, got \n{expected_str}"
+        assert str(additionalcode_remote()) == expected_str, (
+            f"expected \n{str(additionalcode_remote())}\n, got \n{expected_str}"
         )
 
-    def test_str_local(self, fake_additionalcode_local):
+    def test_str_local(self, additionalcode_local):
         """Test that the __str__ method returns the correct string for the example local
         AdditionalCode instance defined in the above fixture.
         """
-        ac = fake_additionalcode_local()
+        ac = additionalcode_local()
         expected_str = dedent("""\
         AdditionalCode
         --------------
@@ -119,11 +121,11 @@ class TestExistsLocallyAndGet:
     """Test class for the `exists_locally` property of the AdditionalCode class."""
 
     def test_exists_locally_when_exists(
-        self, fake_additionalcode_remote, fake_stageddatacollection_remote_files
+        self, additionalcode_remote, stageddatacollection_remote_files
     ):
         """Test exists_locally property when `working_copy` attr set and `changed_from_source` is `False`."""
-        ac = fake_additionalcode_remote()
-        ac._working_copy = fake_stageddatacollection_remote_files(
+        ac = additionalcode_remote()
+        ac._working_copy = stageddatacollection_remote_files(
             paths=[f"/some/local/dir/{s.basename}" for s in ac.source],
             sources=ac.source.sources,
             changed_from_source=False,
@@ -132,32 +134,30 @@ class TestExistsLocallyAndGet:
         assert ac.exists_locally
 
     def test_exists_locally_when_modified(
-        self, fake_additionalcode_remote, fake_stageddatacollection_remote_files
+        self, additionalcode_remote, stageddatacollection_remote_files
     ):
         """Test exists_locally property when `working_copy` attr set and `changed_from_source` is `True`."""
-        ac = fake_additionalcode_remote()
-        ac._working_copy = fake_stageddatacollection_remote_files(
+        ac = additionalcode_remote()
+        ac._working_copy = stageddatacollection_remote_files(
             paths=[f"/some/local/dir/{s.basename}" for s in ac.source],
             sources=ac.source.sources,
             changed_from_source=True,
         )
         assert not ac.exists_locally
 
-    def test_exists_locally_when_no_working_copy(self, fake_additionalcode_remote):
+    def test_exists_locally_when_no_working_copy(self, additionalcode_remote):
         """Test exists_locally property when `working_copy` attr unset."""
         with mock.patch(
             "cstar.base.additional_code.AdditionalCode.working_copy",
             new_callable=mock.PropertyMock,
             return_value=None,
         ):
-            assert not fake_additionalcode_remote().exists_locally
+            assert not additionalcode_remote().exists_locally
 
-    def test_get(
-        self, fake_additionalcode_remote, fake_stageddatacollection_remote_files
-    ):
+    def test_get(self, additionalcode_remote, stageddatacollection_remote_files):
         """Tests that the `get` method correctly calls `stage` and sets `working_copy`"""
-        ac = fake_additionalcode_remote()
-        staged = fake_stageddatacollection_remote_files()
+        ac = additionalcode_remote()
+        staged = stageddatacollection_remote_files()
 
         with mock.patch.object(
             SourceDataCollection, "stage", return_value=staged

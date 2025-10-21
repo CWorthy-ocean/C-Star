@@ -1,12 +1,13 @@
 from collections.abc import Iterable, Iterator, Sequence
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import charset_normalizer
 import requests
 
-from cstar.base.gitutils import _get_hash_from_checkout_target
+from cstar.base.gitutils import _get_hash_from_checkout_target, git_location_to_raw
 from cstar.base.utils import _run_cmd
 from cstar.io.constants import (
     FileEncoding,
@@ -15,15 +16,13 @@ from cstar.io.constants import (
     SourceClassification,
     SourceType,
 )
+from cstar.io.retriever import get_retriever
 from cstar.io.staged_data import StagedData, StagedDataCollection
-from cstar.io.stager import (
-    LocalBinaryFileStager,
-    LocalTextFileStager,
-    RemoteBinaryFileStager,
-    RemoteRepositoryStager,
-    RemoteTextFileStager,
-    Stager,
-)
+from cstar.io.stager import get_stager
+
+if TYPE_CHECKING:
+    from cstar.io.retriever import Retriever
+    from cstar.io.stager import Stager
 
 
 @lru_cache(maxsize=16)
@@ -231,13 +230,19 @@ class SourceData:
         self._identifier: str | None = identifier
         self._classification: SourceClassification = _SourceInspector(
             location
-        ).classify()  # TODO public property
+        ).classify()
         self._stager: Stager | None = None
+        self._retriever: Retriever | None = None
 
     @property
     def location(self) -> str:
         """The location of the data source"""
         return self._location
+
+    @property
+    def classification(self) -> SourceClassification:
+        """The classification of the data source."""
+        return self._classification
 
     @property
     def basename(self) -> str:
@@ -252,14 +257,14 @@ class SourceData:
     @property
     def file_hash(self) -> str | None:
         """Equivalent to 'identifier' if source is a file"""
-        if self._classification.value.source_type is SourceType.FILE:
+        if self.classification.value.source_type is SourceType.FILE:
             return self.identifier
         return None
 
     @property
     def checkout_hash(self) -> str | None:
         """Equivalent to 'identifier' if source is a repository"""
-        if (self._classification.value.source_type is SourceType.REPOSITORY) and (
+        if (self.classification.value.source_type is SourceType.REPOSITORY) and (
             self.checkout_target
         ):
             return _get_hash_from_checkout_target(self.location, self.checkout_target)
@@ -268,7 +273,7 @@ class SourceData:
     @property
     def checkout_target(self) -> str | None:
         """Equivalent to 'identifier' if source is a repository"""
-        if self._classification.value.source_type is SourceType.REPOSITORY:
+        if self.classification.value.source_type is SourceType.REPOSITORY:
             return self.identifier
         return None
 
@@ -276,33 +281,18 @@ class SourceData:
     def stager(self) -> "Stager":
         """The Stager subclass with which to handle staging of this data"""
         if not self._stager:
-            self._stager = self._select_stager()
+            self._stager = get_stager(self)
         return self._stager
 
-    # Staging logic
-    def _select_stager(self) -> "Stager":
-        """Logic to determine the correct stager based on the above
-        characteristics.
-        """
-        match self._classification:
-            case SourceClassification.REMOTE_REPOSITORY:
-                return RemoteRepositoryStager()
-            case SourceClassification.REMOTE_BINARY_FILE:
-                return RemoteBinaryFileStager()
-            case SourceClassification.REMOTE_TEXT_FILE:
-                return RemoteTextFileStager()
-            case SourceClassification.LOCAL_BINARY_FILE:
-                return LocalBinaryFileStager()
-            case SourceClassification.LOCAL_TEXT_FILE:
-                return LocalTextFileStager()
-            case _:
-                raise ValueError(
-                    f"Unable to determine an appropriate stager for data at {self.location}"
-                )
+    @property
+    def retriever(self) -> "Retriever":
+        if not self._retriever:
+            self._retriever = get_retriever(self)
+        return self._retriever
 
     def stage(self, target_dir: str | Path) -> "StagedData":
         """Stages the data, making it available to C-Star"""
-        return self.stager.stage(target_dir=Path(target_dir), source=self)
+        return self.stager.stage(target_dir=Path(target_dir))
 
 
 class SourceDataCollection:
@@ -316,12 +306,12 @@ class SourceDataCollection:
     def _validate(self):
         """Confirm that the SourceData instances in this collection are valid"""
         for s in self._sources:
-            if s._classification.value.source_type in [
+            if s.classification.value.source_type in [
                 SourceType.DIRECTORY,
                 SourceType.REPOSITORY,
             ]:
                 raise TypeError(
-                    f"Cannot create SourceDataCollection with data of source type '{s._classification.value.source_type.value}'"
+                    f"Cannot create SourceDataCollection with data of source type '{s.classification.value.source_type.value}'"
                 )
 
     def __len__(self) -> int:
@@ -369,6 +359,32 @@ class SourceDataCollection:
             for loc, idt in zip(locations, identifiers)
         ]
         return cls(sources)
+
+    @classmethod
+    def from_common_location(
+        cls,
+        common_location: str,
+        subdir: str = "",
+        checkout_target: str = "",
+        files: list[str] = [],
+    ):
+        common_location_classification = SourceData(common_location).classification
+        match common_location_classification:
+            case SourceClassification.REMOTE_REPOSITORY:
+                return cls.from_locations(
+                    locations=[
+                        git_location_to_raw(common_location, checkout_target, f, subdir)
+                        for f in files
+                    ]
+                )
+            case SourceClassification.LOCAL_DIRECTORY:
+                return cls.from_locations(
+                    locations=[f"{common_location}/{subdir}/{f}" for f in files]
+                )
+            case _:
+                raise ValueError(
+                    f"Cannot create SourceDataCollection from common location with classification {common_location_classification}"
+                )
 
     @property
     def sources(self) -> list[SourceData]:

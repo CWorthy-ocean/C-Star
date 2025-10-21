@@ -65,10 +65,13 @@ class TestROMSExternalCodeBaseInit:
 
 class TestROMSExternalCodeBaseConfigure:
     def test_configure_success(
-        self, mock_romsexternalcodebase_staged, dotenv_path, tmp_path
+        self,
+        romsexternalcodebase_staged,
+        dotenv_path,
+        tmp_path,
     ):
         """Test that the _configure method succeeds when subprocess calls succeed."""
-        recb = mock_romsexternalcodebase_staged
+        recb = romsexternalcodebase_staged
         roms_path = tmp_path
         with (
             mock.patch("cstar.system.environment.CSTAR_USER_ENV_PATH", dotenv_path),
@@ -107,7 +110,11 @@ class TestROMSExternalCodeBaseConfigure:
 
     @mock.patch("cstar.base.utils.subprocess.run")
     def test_make_nhmg_failure(
-        self, mock_subprocess, mock_romsexternalcodebase_staged, tmp_path, dotenv_path
+        self,
+        mock_subprocess,
+        romsexternalcodebase_staged,
+        tmp_path,
+        dotenv_path,
     ):
         """Test that the _configure method raises an error when 'NHMG/make' fails."""
         dotenv_path = tmp_path / ".cstar.env"
@@ -119,7 +126,7 @@ class TestROMSExternalCodeBaseConfigure:
                 stderr="Mocked ROMS Compilation Failure",
             ),
         ]
-        recb = mock_romsexternalcodebase_staged
+        recb = romsexternalcodebase_staged
 
         # Test
         with (
@@ -140,7 +147,11 @@ class TestROMSExternalCodeBaseConfigure:
 
     @mock.patch("cstar.base.utils.subprocess.run")
     def test_make_tools_failure(
-        self, mock_subprocess, mock_romsexternalcodebase_staged, tmp_path, dotenv_path
+        self,
+        mock_subprocess,
+        romsexternalcodebase_staged,
+        tmp_path,
+        dotenv_path,
     ):
         """Test that the _configure method raises an error when 'Tools-Roms/make' fails."""
         dotenv_path = tmp_path / ".cstar.env"
@@ -155,7 +166,7 @@ class TestROMSExternalCodeBaseConfigure:
                 stderr="Mocked ROMS Compilation Failure",
             ),
         ]
-        recb = mock_romsexternalcodebase_staged
+        recb = romsexternalcodebase_staged
 
         # Test
         with (
@@ -175,7 +186,10 @@ class TestROMSExternalCodeBaseConfigure:
         assert mock_subprocess.call_count == 2
 
     def test_is_configured_when_configured(
-        self, mock_romsexternalcodebase_staged, tmp_path, dotenv_path
+        self,
+        romsexternalcodebase_staged,
+        tmp_path,
+        dotenv_path,
     ):
         """Tests that the `is_configured` property returns True when all conditions met:
 
@@ -200,7 +214,7 @@ class TestROMSExternalCodeBaseConfigure:
                 "pathlib.Path.iterdir", return_value=["fake", "files", "in", "dir"]
             ),
         ):
-            assert mock_romsexternalcodebase_staged.is_configured
+            assert romsexternalcodebase_staged.is_configured
 
     @pytest.mark.parametrize(
         "env_var_defined, repo_changed, mpc_exists, expected",
@@ -217,7 +231,7 @@ class TestROMSExternalCodeBaseConfigure:
     )
     def test_is_configured_variants(
         self,
-        mock_romsexternalcodebase_staged,
+        romsexternalcodebase_staged,
         tmp_path,
         env_var_defined,
         repo_changed,
@@ -251,4 +265,4 @@ class TestROMSExternalCodeBaseConfigure:
             ),
             mock.patch("pathlib.Path.exists", return_value=mpc_exists),
         ):
-            assert mock_romsexternalcodebase_staged.is_configured is expected
+            assert romsexternalcodebase_staged.is_configured is expected

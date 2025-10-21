@@ -3,13 +3,11 @@ from itertools import chain
 from pathlib import Path
 from typing import Any, Optional, TypeVar, cast
 
-import requests
 import yaml
 
 import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.datasource import DataSource
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
@@ -20,6 +18,7 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.constants import FileEncoding
+from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
@@ -687,7 +686,7 @@ class ROMSSimulation(Simulation):
             )
 
         simulation_runtime_settings = ROMSRuntimeSettings.from_file(
-            self.runtime_code.working_copy[0].path.parent / self._in_file
+            self.runtime_code.working_copy.common_parent / self._in_file
         )
 
         # Modify each relevant section in the runtime settings object based on blueprint values
@@ -718,8 +717,7 @@ class ROMSSimulation(Simulation):
                 "marbl_diagnostic_output_list",
             ]
         ):
-            # TODO [0] below isn't the best
-            runtime_code_path = self.runtime_code.working_copy[0].path.parent
+            runtime_code_path = self.runtime_code.working_copy.common_parent
             simulation_runtime_settings.marbl_biogeochemistry = (
                 cstar.roms.runtime_settings.MARBLBiogeochemistry(
                     marbl_namelist_fname=runtime_code_path / "marbl_in",
@@ -1011,16 +1009,8 @@ class ROMSSimulation(Simulation):
         to_blueprint : Saves the simulation as a YAML blueprint.
         from_dict : Creates an instance from a dictionary representation.
         """
-        source = DataSource(location=blueprint)
-        if source.source_type != "yaml":
-            raise ValueError(
-                f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
-            )
-        if source.location_type == "path":
-            with open(blueprint) as file:
-                bp_dict = yaml.safe_load(file)
-        elif source.location_type == "url":
-            bp_dict = yaml.safe_load(requests.get(source.location).text)
+        source = SourceData(location=blueprint)
+        bp_dict = yaml.safe_load(source.retriever.read().decode("utf-8"))
 
         return cls.from_dict(
             bp_dict, directory=directory, start_date=start_date, end_date=end_date
@@ -1283,7 +1273,7 @@ class ROMSSimulation(Simulation):
                 + "\nROMSSimulation.compile_time_code is not staged locally."
                 + "\n Call ROMSSimulation.compile_time_code.get() and try again"
             )
-        build_dir = self.compile_time_code.working_copy[0].path.parent
+        build_dir = self.compile_time_code.working_copy.common_parent
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())

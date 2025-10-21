@@ -4,7 +4,6 @@
 
 from importlib.metadata import version as _version
 
-# from cstar.case import Case
 from cstar.simulation import Simulation
 
 __all__ = [

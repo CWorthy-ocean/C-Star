@@ -45,8 +45,21 @@ class MockStager(Stager):
             self._retriever = mock.Mock(spec=Retriever)
         return self._retriever
 
-    def stage(self, target_dir: Path, source: "SourceData"):
-        return MockStagedData(source=source, path=target_dir / source.basename)
+    def stage(self, target_dir: Path):
+        return MockStagedData(
+            source=self.source, path=target_dir / self.source.basename
+        )
+
+
+class MockRetriever(Retriever):
+    def read(self, bytes_to_have_read: bytes = b"fake_bytes") -> bytes:
+        return bytes_to_have_read
+
+    def _save(self, path_to_have_saved_to) -> Path:
+        return path_to_have_saved_to
+
+    # def _save(self, target_dir: Path) -> Path:
+    #     with open(target_path, "wb",) as f:
 
 
 class MockStagedData(StagedData):
@@ -111,11 +124,12 @@ class MockSourceData(SourceData):
 
         self._classification = classification
 
-        self._stager = MockStager()
+        self._stager = MockStager(source=self)
+        self._retriever = MockRetriever(source=self)
 
 
 @pytest.fixture
-def mock_source_data_factory() -> Callable[
+def mocksourcedata_factory() -> Callable[
     [SourceClassification, str | Path, str | None], MockSourceData
 ]:
     """
@@ -152,7 +166,7 @@ def mock_source_data_factory() -> Callable[
 
 
 @pytest.fixture
-def mock_sourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
     """Fixture to create a MockSourceData instance with remote repository-like characteristics
 
     Parameters
@@ -175,7 +189,7 @@ def mock_sourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mock_sourcedata_local_file() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_local_file() -> Callable[[str, str], MockSourceData]:
     """Fixture to create a MockSourceData instance with local-path-like characteristics
 
     Parameters
@@ -199,7 +213,7 @@ def mock_sourcedata_local_file() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mock_sourcedata_local_text_file() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_local_text_file() -> Callable[[str, str], MockSourceData]:
     """Fixture to create a MockSourceData instance with local-textfile-like characteristics
 
     Parameters
@@ -223,7 +237,7 @@ def mock_sourcedata_local_text_file() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mock_sourcedata_remote_file() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_remote_file() -> Callable[[str, str], MockSourceData]:
     """Fixture to create a MockSourceData instance with remote-binary-file-like characteristics
 
     Parameters
@@ -245,7 +259,7 @@ def mock_sourcedata_remote_file() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mock_sourcedata_remote_text_file() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_remote_text_file() -> Callable[[str, str], MockSourceData]:
     """Fixture to create a MockSourceData instance with remote textfile-like characteristics
 
     Parameters
@@ -312,8 +326,8 @@ def mock_sourcedatacollection() -> Callable[[str, str], SourceDataCollection]:
 # StagedData
 ################################################################################
 @pytest.fixture
-def fake_stagedfile_remote_source(
-    mock_sourcedata_remote_file,
+def stagedfile_remote_source(
+    mocksourcedata_remote_file,
 ) -> Generator[Callable[[Path, "MockSourceData", bool], "StagedFile"], None, None]:
     """Factory fixture to produce a fake StagedFile from a remote source.
 
@@ -328,7 +342,7 @@ def fake_stagedfile_remote_source(
     """
     patchers: list[mock._patch] = []
     local_dir = Path("some/local/dir")
-    default_source = mock_sourcedata_remote_file()
+    default_source = mocksourcedata_remote_file()
     default_path = local_dir / default_source.basename
 
     def _create(
@@ -356,8 +370,8 @@ def fake_stagedfile_remote_source(
 
 
 @pytest.fixture
-def fake_stagedrepository(
-    mock_sourcedata_remote_repo,
+def stagedrepository(
+    mocksourcedata_remote_repo,
 ) -> Generator[
     Callable[[Path, "MockSourceData", bool], "StagedRepository"], None, None
 ]:
@@ -374,7 +388,7 @@ def fake_stagedrepository(
     """
     patchers: list[mock._patch] = []
     default_path_parent = Path("some/local/dir")
-    default_source = mock_sourcedata_remote_repo()
+    default_source = mocksourcedata_remote_repo()
     default_path = default_path_parent / default_source.basename
 
     def _create(
@@ -404,8 +418,8 @@ def fake_stagedrepository(
 
 
 @pytest.fixture
-def fake_stageddatacollection_remote_files(
-    mock_sourcedatacollection, fake_stagedfile_remote_source
+def stageddatacollection_remote_files(
+    mock_sourcedatacollection, stagedfile_remote_source
 ) -> Callable[[str, str], StagedDataCollection]:
     """Fixture to create a MockStagedDataCollection instance with characteristics of remote binary files.
 
@@ -427,7 +441,7 @@ def fake_stageddatacollection_remote_files(
         for i in range(len(paths)):
             source = sources[i] if sources else None
             staged_data_instances.append(
-                fake_stagedfile_remote_source(
+                stagedfile_remote_source(
                     path=paths[i],
                     source=source,
                     changed_from_source=changed_from_source,
@@ -444,7 +458,7 @@ def fake_stageddatacollection_remote_files(
 
 
 @pytest.fixture
-def fake_additionalcode_remote(
+def additionalcode_remote(
     mock_sourcedatacollection,
 ) -> Callable[[str, str, str, list[str]], AdditionalCode]:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
@@ -473,15 +487,9 @@ def fake_additionalcode_remote(
         ]
         for i in range(len(files)):
             mock_classify_side_effect.append(SourceClassification.REMOTE_TEXT_FILE)
-        with (
-            mock.patch(
-                "cstar.base.additional_code.SourceDataCollection.from_locations",
-                return_value=sd,
-            ),
-            mock.patch(
-                "cstar.base.additional_code._SourceInspector.classify",
-                side_effect=mock_classify_side_effect,
-            ),
+        with mock.patch(
+            "cstar.base.additional_code.SourceDataCollection.from_common_location",
+            return_value=sd,
         ):
             ac = AdditionalCode(
                 location=location,
@@ -496,7 +504,7 @@ def fake_additionalcode_remote(
 
 
 @pytest.fixture
-def fake_additionalcode_local(
+def additionalcode_local(
     mock_sourcedatacollection,
 ) -> Callable[[str, str, list[str]], AdditionalCode]:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
@@ -517,15 +525,9 @@ def fake_additionalcode_local(
         ]
         for i in range(len(files)):
             mock_classify_side_effect.append(SourceClassification.LOCAL_TEXT_FILE)
-        with (
-            mock.patch(
-                "cstar.base.additional_code.SourceDataCollection.from_locations",
-                return_value=sd,
-            ),
-            mock.patch(
-                "cstar.base.additional_code._SourceInspector.classify",
-                side_effect=mock_classify_side_effect,
-            ),
+        with mock.patch(
+            "cstar.base.additional_code.SourceDataCollection.from_common_location",
+            return_value=sd,
         ):
             ac = AdditionalCode(location=location, subdir=subdir, files=files)
             return ac
@@ -536,60 +538,16 @@ def fake_additionalcode_local(
 ################################################################################
 # ExternalCodeBase
 ################################################################################
-class MockExternalCodeBase(ExternalCodeBase):
-    """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
-    purposes, with complex logic mocked out.
-    """
-
-    @property
-    def root_env_var(self):
-        return "TEST_ROOT"
-
-    @property
-    def _default_source_repo(self):
-        return "https://github.com/test/repo.git"
-
-    @property
-    def _default_checkout_target(self):
-        return "test_target"
-
-    def get(self, target_dir: Path | None = None) -> None:
-        self.log.info(f"mock installing ExternalCodeBase at {target_dir}")
-
-    def _configure(self) -> None:
-        return
-
-    @property
-    def is_configured(self):
-        return False
 
 
 @pytest.fixture
-def mock_externalcodebase(
-    mock_sourcedata_remote_repo,
+def fakeexternalcodebase(
+    mocksourcedata_remote_repo,
 ) -> Generator[ExternalCodeBase, None, None]:
-    """Pytest fixutre that provides an instance of the MockExternalCodeBase class
+    """Pytest fixture that provides an instance of the FakeExternalCodeBase class
     with a mocked SourceData instance.
     """
-    source = mock_sourcedata_remote_repo()
-    patch_source_data = mock.patch(
-        "cstar.base.external_codebase.SourceData", return_value=source
-    )
-
-    with patch_source_data:
-        mecb = MockExternalCodeBase()
-        mecb._source = source
-        yield mecb
-
-
-@pytest.fixture
-def fake_externalcodebase(
-    mock_sourcedata_remote_repo,
-) -> Generator[ExternalCodeBase, None, None]:
-    """Pytest fixutre that provides an instance of the FakeExternalCodeBase class
-    with a mocked SourceData instance.
-    """
-    source = mock_sourcedata_remote_repo()
+    source = mocksourcedata_remote_repo()
     patch_source_data = mock.patch(
         "cstar.base.external_codebase.SourceData", return_value=source
     )
@@ -601,14 +559,39 @@ def fake_externalcodebase(
 
 
 @pytest.fixture
-def fake_marblexternalcodebase(
-    mock_sourcedata_remote_repo,
+def fakeexternalcodebase_with_mock_get(
+    mocksourcedata_remote_repo,
+) -> Generator[ExternalCodeBase, None, None]:
+    """Pytest fixutre that provides an instance of the MockExternalCodeBase class
+    with a mocked SourceData instance.
+    """
+    source = mocksourcedata_remote_repo()
+    patch_source_data = mock.patch(
+        "cstar.base.external_codebase.SourceData", return_value=source
+    )
+
+    def mock_get(target_dir: Path | None = None) -> None:
+        print(f"mock installing ExternalCodeBase at {target_dir}")
+
+    patch_get = mock.patch(
+        "cstar.base.external_codebase.ExternalCodeBase.get", mock_get
+    )
+
+    with patch_source_data, patch_get:
+        mecb = FakeExternalCodeBase()
+        mecb._source = source
+        yield mecb
+
+
+@pytest.fixture
+def marblexternalcodebase(
+    mocksourcedata_remote_repo,
 ) -> Generator[MARBLExternalCodeBase, None, None]:
     """Fixture providing a `MARBLExternalCodeBase` instance for testing.
 
     Patches `SourceData` calls to avoid network and filesystem interaction.
     """
-    source_data = mock_sourcedata_remote_repo(
+    source_data = mocksourcedata_remote_repo(
         location="https://marbl.com/repo.git", identifier="v1"
     )
     patch_source_data = mock.patch(
@@ -620,17 +603,17 @@ def fake_marblexternalcodebase(
 
 
 @pytest.fixture
-def mock_marblexternalcodebase_staged(
-    fake_marblexternalcodebase,
-    fake_stagedrepository,
+def marblexternalcodebase_staged(
+    marblexternalcodebase,
+    stagedrepository,
     tmp_path,
 ) -> Generator[MARBLExternalCodeBase, None, None]:
     """Fixture providing a staged `MARBLExternalCodeBase` instance for testing.
 
     Sets `working_copy` to a mock StagedRepository instance.
     """
-    mecb = fake_marblexternalcodebase
-    staged_data = fake_stagedrepository(
+    mecb = marblexternalcodebase
+    staged_data = stagedrepository(
         path=tmp_path, source=mecb.source, changed_from_source=False
     )
     mecb._working_copy = staged_data
@@ -643,8 +626,8 @@ def mock_marblexternalcodebase_staged(
 
 
 @pytest.fixture
-def fake_inputdataset_local(
-    mock_sourcedata_local_file,
+def fakeinputdataset_local(
+    mocksourcedata_local_file,
 ) -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock local InputDataset instance.
 
@@ -652,7 +635,7 @@ def fake_inputdataset_local(
     initializing it with relevant attributes like location, start date, and end date.
     """
     fake_location = "some/local/source/path/local_file.nc"
-    source_data = mock_sourcedata_local_file(location=fake_location)
+    source_data = mocksourcedata_local_file(location=fake_location)
     patch_source_data = mock.patch(
         "cstar.base.input_dataset.SourceData", return_value=source_data
     )
@@ -667,8 +650,8 @@ def fake_inputdataset_local(
 
 
 @pytest.fixture
-def fake_inputdataset_remote(
-    mock_sourcedata_remote_file,
+def fakeinputdataset_remote(
+    mocksourcedata_remote_file,
 ) -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock remote InputDataset instance.
 
@@ -682,7 +665,7 @@ def fake_inputdataset_remote(
     # Using context managers to patch properties on DataSource
     fake_location = "http://example.com/remote_file.nc"
     fake_hash = "abc123"
-    source_data = mock_sourcedata_remote_file(
+    source_data = mocksourcedata_remote_file(
         location=fake_location,
         identifier=fake_hash,
     )
@@ -709,7 +692,7 @@ def fake_inputdataset_remote(
 
 @pytest.fixture
 def stub_simulation(
-    mock_externalcodebase, fake_additionalcode_local, tmp_path
+    fakeexternalcodebase_with_mock_get, additionalcode_local, tmp_path
 ) -> StubSimulation:
     """Fixture providing a `StubSimulation` instance for testing.
 
@@ -726,9 +709,9 @@ def stub_simulation(
     sim = StubSimulation(
         name="TestSim",
         directory=tmp_path,
-        codebase=mock_externalcodebase,
-        runtime_code=fake_additionalcode_local(),
-        compile_time_code=fake_additionalcode_local(),
+        codebase=fakeexternalcodebase_with_mock_get,
+        runtime_code=additionalcode_local(),
+        compile_time_code=additionalcode_local(),
         discretization=Discretization(time_step=60),
         start_date="2025-01-01",
         end_date="2025-12-31",

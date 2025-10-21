@@ -6,7 +6,6 @@ if TYPE_CHECKING:
 
     from cstar.io.source_data import SourceData
 from cstar.io.constants import SourceClassification
-from cstar.io.retriever import Retriever, get_retriever
 from cstar.io.staged_data import StagedFile, StagedRepository
 
 _registry: dict[SourceClassification, type["Stager"]] = {}
@@ -21,13 +20,13 @@ def register_stager(
     return wrapped_cls
 
 
-def get_stager(classification: SourceClassification) -> "Stager":
-    """Retrieve a Stager from the registry given a source classification.
+def get_stager(source: "SourceData") -> "Stager":
+    """Retrieve a Stager from the registry given a SourceData instance.
 
     Parameters
     ----------
-    classification (SourceClassification):
-       The classification of the data for which to retrieve the stager
+    source (SourceData):
+       The data for which to retrieve the stager
 
     Returns
     -------
@@ -39,8 +38,9 @@ def get_stager(classification: SourceClassification) -> "Stager":
     ValueError
         if no registered stager is associated with this classification
     """
+    classification = source.classification
     if stager := _registry.get(classification):
-        return stager()
+        return stager(source=source)
     raise ValueError(f"No stager for {classification}")
 
 
@@ -60,18 +60,18 @@ class Stager(ABC):
 
     _classification: ClassVar[SourceClassification]
 
-    def stage(
-        self, target_dir: "Path", source: "SourceData"
-    ) -> StagedFile | StagedRepository:
-        """Stage this data using an appropriate strategy."""
-        retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
-        return StagedFile(
-            source=source, path=retrieved_path, sha256=source.file_hash, stat=None
-        )
+    def __init__(self, source: "SourceData"):
+        self.source = source
 
-    @property
-    def retriever(self) -> Retriever:
-        return get_retriever(self._classification)
+    def stage(self, target_dir: "Path") -> StagedFile | StagedRepository:
+        """Stage this data using an appropriate strategy."""
+        retrieved_path = self.source.retriever.save(target_dir=target_dir)
+        return StagedFile(
+            source=self.source,
+            path=retrieved_path,
+            sha256=self.source.file_hash,
+            stat=None,
+        )
 
 
 @register_stager
@@ -89,21 +89,19 @@ class LocalBinaryFileStager(Stager):
     _classification = SourceClassification.LOCAL_BINARY_FILE
 
     # Used for e.g. a local netCDF InputDataset
-    def stage(self, target_dir: "Path", source: "SourceData") -> "StagedFile":
+    def stage(self, target_dir: "Path") -> "StagedFile":
         """Create a local symlink to a binary file on the current filesystem.
 
         Parameters
         ----------
         target_dir, Path:
             The local directory in which to stage the file
-        source, SourceData:
-            The SourceData instance tracking the file's source
         """
-        target_path = target_dir / source.basename
-        target_path.symlink_to(source.location)
+        target_path = target_dir / self.source.basename
+        target_path.symlink_to(self.source.location)
 
         return StagedFile(
-            source=source, path=target_path, sha256=(source.file_hash or None)
+            source=self.source, path=target_path, sha256=(self.source.file_hash or None)
         )
 
 
@@ -117,15 +115,13 @@ class RemoteRepositoryStager(Stager):
     _classification = SourceClassification.REMOTE_REPOSITORY
 
     # Used for e.g. an ExternalCodeBase
-    def stage(self, target_dir: "Path", source: "SourceData") -> "StagedRepository":
+    def stage(self, target_dir: "Path") -> "StagedRepository":
         """Clone and checkout a git repository at a given target.
 
         Parameters
         ----------
         target_dir, Path:
             The local directory in which to stage the repository
-        source, SourceData:
-            The SourceData instance tracking the repository's source
         """
-        retrieved_path = self.retriever.save(source=source, target_dir=target_dir)
-        return StagedRepository(source=source, path=retrieved_path)
+        retrieved_path = self.source.retriever.save(target_dir=target_dir)
+        return StagedRepository(source=self.source, path=retrieved_path)
