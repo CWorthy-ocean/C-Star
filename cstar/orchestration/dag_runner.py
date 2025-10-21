@@ -46,7 +46,7 @@ def cache_func(context: TaskRunContext, params):
     return cache_key
 
 
-@task(persist_result=True, cache_key_fn=cache_func)
+@task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
 def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
     bp_path = step.blueprint
     bp = deserialize(Path(bp_path), RomsMarblBlueprint)
@@ -71,7 +71,7 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
     return str(job.id)
 
 
-@task(persist_result=True, cache_key_fn=cache_func)
+@task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
 def check_job(step, job_id, deps: list[str] = []) -> ExecutionStatus:
     t_start = time()
     dur = 10 * 60

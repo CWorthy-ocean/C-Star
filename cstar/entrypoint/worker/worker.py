@@ -193,11 +193,9 @@ class SimulationRunner(Service):
             self.log.info("Simulation completed successfully.")
         elif disposition == ExecutionStatus.FAILED:
             msg = "Simulation failed."
-            self.log.error(msg)
             raise CstarError(msg)
         else:
             msg = f"Simulation ended with status: {disposition}."
-            self.log.warning(msg)
             raise CstarError(msg)
 
     @override

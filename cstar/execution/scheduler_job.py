@@ -2,6 +2,7 @@ import json
 import os
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
@@ -20,11 +21,17 @@ from cstar.system.scheduler import (
 
 
 def get_status_of_slurm_job(job_id: str) -> ExecutionStatus:
-    """
-    Check the status of a Slurm job using sacct.
+    """Check the status of a Slurm job using sacct.
 
-    :param job_id: the job_id to check
-    :return: the status of the job
+    Parameters
+    ----------
+    job_id: str
+        The job_id to check
+
+    Returns
+    -------
+    status: ExecutionStatus
+        The status of the job
     """
     sacct_cmd = f"sacct -j {job_id} --format=State%20 --noheader"
     msg_err = f"Failed to retrieve job status using {sacct_cmd}."
@@ -59,7 +66,7 @@ def create_scheduler_job(
     queue_name: str | None = None,
     send_email: bool | None = True,
     walltime: str | None = None,
-    depends_on: list[str] | None = None,
+    depends_on: Iterable[str] = (),
 ) -> "SchedulerJob":
     """Create a scheduler job for either SLURM or PBS based on the system's active
     scheduler.
@@ -95,8 +102,8 @@ def create_scheduler_job(
         Whether to send email notifications about job status. Defaults to True.
     walltime : str, optional
         The maximum walltime for the job, in the format "HH:MM:SS". Defaults to the queue's maximum.
-    depends_on: list[str], optional
-        A list of job ids to pass as dependencies to the scheduler. Defaults to [].
+    depends_on: Iterable[str], optional
+        An iterable of job ids to pass as dependencies to the scheduler. Defaults to ().
 
     Returns
     -------
@@ -209,7 +216,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         queue_name: str | None = None,
         send_email: bool | None = True,
         walltime: str | None = None,
-        depends_on: list[str] | None = None,
+        depends_on: Iterable[str] = (),
     ):
         """Initialize a SchedulerJob instance.
 
@@ -249,6 +256,8 @@ class SchedulerJob(ExecutionHandler, ABC):
         walltime : str, optional
             The maximum walltime for the job, in the format "HH:MM:SS". If not provided,
             it defaults to the queue's maximum walltime.
+        depends_on: Iterable[str], optional
+            An iterable of job ids to pass as dependencies to the scheduler. Defaults to ().
 
         Raises
         ------
@@ -690,13 +699,12 @@ class SlurmJob(SchedulerJob):
             k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
         }
 
-        cmd = "sbatch"
-        if self.depends_on:
-            cmd += f" --dependency=afterok:{':'.join(str(d) for d in self.depends_on)}"
+        deps = ":".join(str(d) for d in self.depends_on)
+        dep_clause = f" --dependency=afterok:{deps}" if deps else ""
 
-        cmd += f" {self.script_path}"
+        cmd = f"sbatch {dep_clause} {self.script_path}"
 
-        print(cmd)
+        self.log.info(f"Submitting job: {cmd}")
         stdout = _run_cmd(
             cmd,
             cwd=self.run_path,
