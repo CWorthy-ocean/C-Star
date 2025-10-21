@@ -99,61 +99,58 @@ class TestROMSExternalCodeBaseGet:
     ):
         """Test that the get method succeeds when subprocess calls succeed."""
         # Setup:
-        with mock.patch(
-            "cstar.system.environment.CSTAR_USER_ENV_PATH",
-            dotenv_path,
-        ):
-            ## Mock success of calls to subprocess.run:
-            self.mock_subprocess_run.return_value.returncode = 0
+        ## Mock success of calls to subprocess.run:
+        self.mock_subprocess_run.return_value.returncode = 0
 
-            # Test
-            ## Call the get method
-            self.roms_codebase.get(target=roms_path)
+        # Test
+        ## Call the get method
+        self.roms_codebase.get(target=roms_path)
 
-            # Assertions:
-            ## Check environment variables
-            dotenv.load_dotenv(dotenv_path, override=True)
+        # Assertions:
+        ## Check environment variables
+        dotenv.load_dotenv(dotenv_path, override=True)
 
-            exp_roms_value = str(roms_path)
-            exp_roms_tools_value = f":{roms_path / 'Tools-Roms'}"
+        exp_roms_value = str(roms_path)
+        exp_roms_tools_value = f":{roms_path / 'Tools-Roms'}"
 
-            assert os.environ[self.roms_codebase.expected_env_var] == exp_roms_value
-            assert exp_roms_tools_value in os.environ["PATH"]
+        assert os.environ[self.roms_codebase.expected_env_var] == exp_roms_value
+        assert exp_roms_tools_value in os.environ["PATH"]
 
-            ## Check that _clone_and_checkout was (mock) called correctly
-            self.mock_clone_and_checkout.assert_called_once_with(
-                source_repo=self.roms_codebase.source_repo,
-                local_path=roms_path,
-                checkout_target=self.roms_codebase.checkout_target,
-            )
+        ## Check that _clone_and_checkout was (mock) called correctly
+        self.mock_clone_and_checkout.assert_called_once_with(
+            source_repo=self.roms_codebase.source_repo,
+            local_path=roms_path,
+            checkout_target=self.roms_codebase.checkout_target,
+        )
 
-            k0, v0 = self.roms_codebase.expected_env_var, str(roms_path)
-            k1, v1 = "PATH", f"${{PATH}}{exp_roms_tools_value}"
+        k0, v0 = self.roms_codebase.expected_env_var, str(roms_path)
+        k1, v1 = "PATH", f"${{PATH}}{exp_roms_tools_value}"
 
-            cfg = dotenv.dotenv_values(dotenv_path)
+        cfg = dotenv.dotenv_values(dotenv_path)
 
-            # confirm user environment file was updated
-            actual_value = cfg[k0]
-            assert v0 == actual_value
+        # confirm user environment file was updated
+        actual_value = cfg[k0]
+        assert v0 == actual_value
 
-            actual_value = cfg[k1]
-            assert v1.split(":")[1] in actual_value
+        actual_value = cfg[k1]
+        assert actual_value is not None
+        assert v1.split(":")[1] in actual_value
 
-            self.mock_subprocess_run.assert_any_call(
-                f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
-                cwd=roms_path / "Work",
-                capture_output=True,
-                text=True,
-                shell=True,
-            )
+        self.mock_subprocess_run.assert_any_call(
+            f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
+            cwd=roms_path / "Work",
+            capture_output=True,
+            text=True,
+            shell=True,
+        )
 
-            self.mock_subprocess_run.assert_any_call(
-                f"make COMPILER={cstar_sysmgr.environment.compiler}",
-                cwd=roms_path / "Tools-Roms",
-                capture_output=True,
-                text=True,
-                shell=True,
-            )
+        self.mock_subprocess_run.assert_any_call(
+            f"make COMPILER={cstar_sysmgr.environment.compiler}",
+            cwd=roms_path / "Tools-Roms",
+            capture_output=True,
+            text=True,
+            shell=True,
+        )
 
     def test_make_nhmg_failure(self, tmp_path):
         """Test that the get method raises an error when 'make nhmg' fails."""
@@ -164,17 +161,12 @@ class TestROMSExternalCodeBaseGet:
             ),  # Fail nhmg
             mock.Mock(returncode=0),  # Success for Tools-Roms (won't be reached)
         ]
-        dotenv_path = tmp_path / ".cstar.env"
 
         # Test
         with (
             pytest.raises(
                 RuntimeError,
                 match="Error when compiling ROMS' NHMG library. Return Code: `1`. STDERR:\nCompiling NHMG library failed successfully",
-            ),
-            mock.patch(
-                "cstar.system.environment.CSTAR_USER_ENV_PATH",
-                dotenv_path,
             ),
         ):
             self.roms_codebase.get(target=tmp_path)
