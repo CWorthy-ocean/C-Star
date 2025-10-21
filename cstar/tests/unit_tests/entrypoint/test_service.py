@@ -516,6 +516,11 @@ async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
             process.kill()
 
 
+@pytest.mark.skip(
+    "At the moment, we _want_ the service to crash if there is an error, because we"
+    "rely on that exit code to block dependent tasks from executing. Open to reconsideration"
+    "if there's a better way to do this."
+)
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "user_hook_name",

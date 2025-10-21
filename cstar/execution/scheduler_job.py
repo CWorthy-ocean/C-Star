@@ -629,6 +629,8 @@ class SlurmJob(SchedulerJob):
         RuntimeError
             If the command to retrieve the job status fails or returns an unexpected result.
         """
+        if self.id is None:
+            return ExecutionStatus.UNSUBMITTED
         return get_status_of_slurm_job(str(self.id))
 
     @property
@@ -702,7 +704,7 @@ class SlurmJob(SchedulerJob):
         deps = ":".join(str(d) for d in self.depends_on)
         dep_clause = f" --dependency=afterok:{deps}" if deps else ""
 
-        cmd = f"sbatch {dep_clause} {self.script_path}"
+        cmd = f"sbatch{dep_clause} {self.script_path}"
 
         self.log.info(f"Submitting job: {cmd}")
         stdout = _run_cmd(
