@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
@@ -1068,11 +1069,21 @@ class ROMSSimulation(Simulation):
         compile_time_code_dir = self.directory / "ROMS/compile_time_code"
         runtime_code_dir = self.directory / "ROMS/runtime_code"
         input_datasets_dir = self.directory / "ROMS/input_datasets"
+        codebases_dir = self.directory / "ROMS/codebases"
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
-        for codebase in filter(lambda x: x is not None, self.codebases):
+        for codebase in filter(lambda x: x is not None, self.codebases):  # type: ExternalCodeBase
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
+
+            # if we're running a workplan, for now, set up a code directory for each
+            # step, otherwise they may try to clobber each other or get tripped up on
+            # detecting existing directories.
+            if os.getenv("CSTAR_ORCHESTRATED", "0") == "1":
+                codebase_dir = codebases_dir / codebase.expected_env_var.split("_")[0]
+                codebase_dir.mkdir(parents=True, exist_ok=True)
+                codebase.get(codebase_dir)
+                os.environ[codebase.expected_env_var] = str(codebase_dir)
             codebase.handle_config_status()
 
         # Compile-time code

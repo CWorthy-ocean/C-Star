@@ -5,7 +5,6 @@ import enum
 import logging
 import os
 import pathlib
-import shutil
 import sys
 from datetime import datetime, timezone
 from typing import Final, override
@@ -15,7 +14,6 @@ from cstar.base.log import get_logger
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
-from cstar.system.manager import cstar_sysmgr
 
 DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
@@ -162,13 +160,19 @@ class SimulationRunner(Service):
             msg = f"Output directory {self._output_root} is not empty."
             raise ValueError(msg)
 
+        # this kept tripping up my runs because it is checking the "default" path
+        # that is derived from package_root, rather than the path set by the user.
+        # probably we should just remove this and handle it elsewhere (as noted in
+        # previous PR, this whole method maybe belongs elsewhere), but for the moment,
+        # it's commented out til we think on it.
+
         # leftover external code folder causes non-empty repo errors; remove.
-        externals_path = cstar_sysmgr.environment.package_root / "externals"
-        if externals_path.exists():
-            msg = f"Removing existing externals dir: {externals_path}"
-            self.log.debug(msg)
-            shutil.rmtree(externals_path)
-        externals_path.mkdir(parents=True, exist_ok=False)
+        # externals_path = cstar_sysmgr.environment.package_root / "externals"
+        # if externals_path.exists():
+        #     msg = f"Removing existing externals dir: {externals_path}"
+        #     self.log.debug(msg)
+        #     shutil.rmtree(externals_path)
+        # externals_path.mkdir(parents=True, exist_ok=False)
 
         # create a clean location to write outputs.
         if not self._output_dir.exists():
@@ -188,9 +192,11 @@ class SimulationRunner(Service):
         if disposition == ExecutionStatus.COMPLETED:
             self.log.info("Simulation completed successfully.")
         elif disposition == ExecutionStatus.FAILED:
-            self.log.error("Simulation failed.")
+            msg = "Simulation failed."
+            raise CstarError(msg)
         else:
-            self.log.warning(f"Simulation ended with status: {disposition}")
+            msg = f"Simulation ended with status: {disposition}."
+            raise CstarError(msg)
 
     @override
     def _on_start(self) -> None:
