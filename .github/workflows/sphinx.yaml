@@ -18,7 +18,7 @@ jobs:
           micromamba-version: 'latest'
           environment-file: ci/environment.yml
           create-args: |
-            python=${{ matrix.python-version }}
+            python=3.12
       - name: Install C-Star
         shell: micromamba-shell {0}
         run: |
