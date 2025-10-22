@@ -11,7 +11,6 @@ dependencies:
   - xarray
   - netCDF4
   - pydantic>=2.11
-  - pytimeparse>=1.1.8
   # tests
   - pytest
   - pip

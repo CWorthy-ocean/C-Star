@@ -9,7 +9,6 @@ dependencies:
   - netCDF4
   - pip
   - pydantic>=2.11
-  - pytimeparse>=1.1.8
   # testing
   - pre-commit==3.8.0
   - coverage
