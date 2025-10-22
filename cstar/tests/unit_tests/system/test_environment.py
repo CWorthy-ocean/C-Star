@@ -3,7 +3,6 @@ import subprocess
 from collections import ChainMap
 from collections.abc import Callable, Generator
 from pathlib import Path
-from unittest import mock
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
@@ -541,12 +540,11 @@ class TestStrAndReprMethods:
             "    VAR2: value2"
         )
 
-        with mock.patch(
-            "cstar.system.environment.CStarEnvironment._load_env",
-            new_callable=Mock,
+        with patch(
+            "cstar.system.environment.CStarEnvironment.environment_variables",
+            new_callable=PropertyMock,
             return_value={"VAR1": "value1", "VAR2": "value2"},
         ):
-            # Instantiate the environment to trigger loading the cstar environment variables
             env = MockEnvironment()
             assert str(env) == expected_str
 

@@ -29,6 +29,7 @@ class TestCStar:
         fetch_remote_test_case_data,
         test_config_key,
         log: logging.Logger,
+        dotenv_path: Path,
     ):
         """Run the C-Star minimal test case from a selection of different blueprints.
 
@@ -58,7 +59,6 @@ class TestCStar:
         log (logging.Logger):
             Logger instance for logging messages during test execution.
         """
-        dotenv_path = tmp_path / ".cstar.env"
         ext_root = tmp_path / "externals"
 
         with (
