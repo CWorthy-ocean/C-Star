@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=file://workplan-schema.json
+name: Sample Ensemble Workplan
+description: This is the description of my test workplan
+state: draft
+compute_environment:
+    num_nodes: 4
+    num_cpus_per_process: 16
+
+runtime_vars: [var1, var2]
+steps:
+    - name: Prepare
+      application: sleep
+      depends_on: []
+      blueprint: ./blueprint.yaml
+      blueprint_overrides: {}
+      workflow_overrides:
+          segment_length: 16
+      compute_overrides:
+          walltime: 00:10:00
+          num_nodes: 4
+    - name: Ensemble X
+      application: sleep
+      depends_on: ["Prepare"]
+      blueprint: ./blueprint.yaml
+      blueprint_overrides: {}
+      workflow_overrides:
+          segment_length: 16
+      compute_overrides:
+          walltime: 00:10:00
+          num_nodes: 4
+    - name: Ensemble Y
+      application: sleep
+      depends_on: ["Prepare"]
+      blueprint: ./blueprint.yaml
+      blueprint_overrides: {}
+      workflow_overrides:
+          segment_length: 16
+      compute_overrides:
+          walltime: 00:10:00
+          num_nodes: 4
+    - name: Aggregate Results
+      application: sleep
+      depends_on: ["Ensemble X", "Ensembly Y"]
+      blueprint: ./blueprint.yaml
+      blueprint_overrides: {}
+      workflow_overrides:
+          segment_length: 16
+      compute_overrides:
+          walltime: 00:10:00
+          num_nodes: 1

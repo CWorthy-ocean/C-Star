@@ -43,6 +43,9 @@ test = [
      ]
 dev =["ruff"]
 
+[project.scripts]
+cstar = "cstar.cli.cli:main"
+
 [build-system]
 requires = [
     "setuptools>=61.0.0",

@@ -231,6 +231,17 @@ class CStarEnvironment:
         return self.package_root / pkg_relative_path
 
     @property
+    def template_root(self) -> Path:
+        """The root directory containing CStar templates.
+
+        Returns
+        -------
+        Path
+        """
+        pkg_relative_path = "additional_files/templates"
+        return self.package_root / pkg_relative_path
+
+    @property
     def lmod_path(self) -> Path:
         """Identify the expected path to a .lmod file for the current system.
 
