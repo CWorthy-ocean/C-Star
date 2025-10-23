@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 
+import cstar
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.entrypoint.service import ServiceConfiguration
 from cstar.entrypoint.worker.worker import (
@@ -63,14 +64,12 @@ def test_create_parser_help() -> None:
 
 
 @pytest.fixture
-def blueprint_path(
-    example_roms_simulation: tuple[ROMSSimulation, Path], tmp_path: Path
-) -> Path:
+def blueprint_path(stub_romssimulation: ROMSSimulation, tmp_path: Path) -> Path:
     """Fixture that creates and returns a blueprint yaml for a  SimulationRunner.
 
     Parameters
     ----------
-    example_roms_simulation: tuple[ROMSSimulation, Path]
+    stub_romssimulation: ROMSSimulation
         An instance of ROMSSimulation to be used for the test and the path
         to a temporary directory where the simulatoin resources are stored.
     tmp_path : Path
@@ -81,7 +80,7 @@ def blueprint_path(
     Path
         The path to the created blueprint yaml file.
     """
-    simulation, _ = example_roms_simulation
+    simulation = stub_romssimulation
 
     blueprint_path = tmp_path / "blueprint.yaml"
     simulation.to_blueprint(str(blueprint_path))
@@ -91,14 +90,14 @@ def blueprint_path(
 
 @pytest.fixture
 def sim_runner(
-    example_roms_simulation: tuple[ROMSSimulation, Path],
+    stub_romssimulation: ROMSSimulation,
     tmp_path: Path,
 ) -> SimulationRunner:
     """Fixture to create a SimulationRunner instance.
 
     Parameters
     ----------
-    example_roms_simulation: tuple[ROMSSimulation, Path]
+    stub_romssimulation: ROMSSimulation
         An instance of ROMSSimulation to be used for the test and the path
         to a temporary directory where the simulation resources are stored.
     tmp_path : Path
@@ -109,7 +108,7 @@ def sim_runner(
     SimulationRunner
         An initialized instance of SimulationRunner, configured via blueprint.
     """
-    simulation, _ = example_roms_simulation
+    simulation = stub_romssimulation
     output_path = tmp_path / "output"
     bp_path = tmp_path / "blueprint.yaml"
 
@@ -132,8 +131,10 @@ def sim_runner(
         name="test_simulation_runner",
     )
     job_config = JobConfig()
-
-    return SimulationRunner(request, service_config, job_config)
+    with mock.patch.object(
+        cstar.roms.simulation.ROMSSimulation, "from_blueprint", return_value=simulation
+    ):
+        return SimulationRunner(request, service_config, job_config)
 
 
 def test_create_parser_happy_path() -> None:
@@ -427,7 +428,8 @@ def test_format_date_for_unique_path(
 def test_start_runner(
     blueprint_path: Path,
     tmp_path: Path,
-    example_roms_simulation: tuple[ROMSSimulation, Path],
+    stub_romssimulation: ROMSSimulation,
+    patch_romssimulation_init_sourcedata,
 ) -> None:
     """Test creating a SimulationRunner and starting it.
 
@@ -437,13 +439,13 @@ def test_start_runner(
         The path to the blueprint yaml file created by the fixture.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    example_roms_simulation: tuple[ROMSSimulation, Path]
+    stub_romssimulation: ROMSSimulation
         An instance of ROMSSimulation to be used for the test and the path
         to a temporary directory where the simulation resources are stored.
     """
     output_dir = tmp_path / "output"
     # load the simulation to simplify getting the start and end dates
-    og_sim = example_roms_simulation[0]
+    og_sim = stub_romssimulation
 
     request = BlueprintRequest(
         str(blueprint_path),
@@ -461,8 +463,10 @@ def test_start_runner(
         health_check_log_threshold=10,
     )
     job_config = JobConfig()
-
-    runner = SimulationRunner(request, service_config, job_config)
+    with mock.patch.object(
+        cstar.roms.simulation.ROMSSimulation, "from_blueprint", return_value=og_sim
+    ):
+        runner = SimulationRunner(request, service_config, job_config)
 
     assert runner._blueprint_uri == request.blueprint_uri
     assert runner._simulation.start_date == request.start_date
@@ -600,7 +604,7 @@ def test_runner_directory_prep(
 async def test_runner_can_shutdown_as_task(
     sim_runner: SimulationRunner,
     tmp_path: Path,
-    example_roms_simulation,
+    stub_romssimulation,
 ) -> None:
     """Test the shutdown override of the base Service class.
 
@@ -613,7 +617,7 @@ async def test_runner_can_shutdown_as_task(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    example_roms_simulation: tuple[ROMSSimulation, Path]
+    stub_romssimulation: ROMSSimulation
         An instance of ROMSSimulation to be used for the test and the path
         to a temporary directory where the simulation resources are stored.
     """
@@ -655,7 +659,7 @@ async def test_runner_can_shutdown_as_task_null_sim(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    example_roms_simulation: tuple[ROMSSimulation, Path]
+    stub_romssimulation: ROMSSimulation
         An instance of ROMSSimulation to be used for the test and the path
         to a temporary directory where the simulation resources are stored.
     """
@@ -1255,7 +1259,7 @@ async def test_runner_on_iteration(
 )
 @pytest.mark.asyncio
 async def test_runner_setup_stage(
-    example_roms_simulation: tuple[ROMSSimulation, ...],
+    stub_romssimulation: ROMSSimulation,
     tmp_path: Path,
     setup: bool,
     build: bool,
@@ -1286,7 +1290,7 @@ async def test_runner_setup_stage(
     mock_prep_fs = mock.Mock()
 
     # Use the fixture simulation to create a blueprint
-    simulation, _ = example_roms_simulation
+    simulation = stub_romssimulation
     output_path = tmp_path / "output"
     bp_path = tmp_path / "blueprint.yaml"
     simulation.to_blueprint(str(bp_path))
@@ -1320,7 +1324,10 @@ async def test_runner_setup_stage(
         name="test_simulation_runner",
     )
     job_config = JobConfig()
-    sim_runner = SimulationRunner(request, service_config, job_config)
+    with mock.patch.object(
+        cstar.roms.simulation.ROMSSimulation, "from_blueprint", return_value=simulation
+    ):
+        sim_runner = SimulationRunner(request, service_config, job_config)
 
     def _mock_run(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
         return mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
@@ -1387,7 +1394,7 @@ async def test_worker_main(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_worker_main_exec(
-    example_roms_simulation: tuple[ROMSSimulation, Path],
+    stub_romssimulation: ROMSSimulation,
     tmp_path: Path,
 ) -> None:
     """Test the main entrypoint of the worker service.
@@ -1397,7 +1404,7 @@ async def test_worker_main_exec(
     """
     mock_execute = mock.AsyncMock(return_code=0)
 
-    simulation, simulation_path = example_roms_simulation
+    simulation = stub_romssimulation
     output_path = tmp_path / "output"
     bp_path = tmp_path / "blueprint.yaml"
 
@@ -1430,6 +1437,11 @@ async def test_worker_main_exec(
             },
             clear=True,
         ),
+        mock.patch.object(
+            cstar.roms.simulation.ROMSSimulation,
+            "from_blueprint",
+            return_value=simulation,
+        ),
     ):
         # This should run the simulation and return a success code
         return_code = await main(args)
@@ -1444,7 +1456,7 @@ async def test_worker_main_exec(
 @pytest.mark.parametrize("exception_type", [CstarError, BlueprintError, Exception])
 @pytest.mark.asyncio
 async def test_worker_main_cstar_error(
-    example_roms_simulation: tuple[ROMSSimulation, Path],
+    stub_romssimulation: ROMSSimulation,
     tmp_path: Path,
     exception_type: type[Exception],
 ) -> None:
@@ -1455,7 +1467,7 @@ async def test_worker_main_cstar_error(
     """
     mock_execute = mock.AsyncMock(side_effect=exception_type("Mock error"))
 
-    simulation, simulation_path = example_roms_simulation
+    simulation = stub_romssimulation
     output_path = tmp_path / "output"
     bp_path = tmp_path / "blueprint.yaml"
 

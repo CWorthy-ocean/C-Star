@@ -35,6 +35,42 @@ def _clone_and_checkout(
     _checkout(source_repo, local_path, checkout_target)
 
 
+def _check_local_repo_changed_from_remote(
+    remote_repo: str, local_repo: str | Path, checkout_target: str
+):
+    """Returns True if a local repository has changed since being checked out from a remote at a given target"""
+    local_repo = Path(local_repo)
+
+    if (not local_repo.exists()) or (not (local_repo / ".git").exists()):
+        return True
+
+        try:
+            expected_hash = _get_hash_from_checkout_target(
+                repo_url=remote_repo, checkout_target=checkout_target
+            )
+
+            # 1. Check current HEAD commit hash
+            head_hash = _run_cmd(
+                cmd="git rev-parse HEAD", cwd=local_repo, raise_on_error=True
+            )
+
+            if head_hash != expected_hash:
+                return True  # HEAD is not at the expected hash
+
+            # if HEAD is at expected hash, check if dirty:
+            status_output = _run_cmd(
+                cmd="git diff-index HEAD", cwd=local_repo, raise_on_error=True
+            )
+
+            return bool(status_output.strip())  # True if any changes
+
+        except RuntimeError as e:
+            print(f"Git error: {e}")
+            return True
+
+        return False
+
+
 def _get_repo_remote(local_path: str | Path) -> str:
     """Take a local repository path string (local_path) and return as a string the
     remote URL.
@@ -140,3 +176,44 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
         error_message += f"Available tags:\n{tag_names}\n"
 
     raise ValueError(error_message.strip())
+
+
+def git_location_to_raw(
+    repo_url: str, checkout_target: str, filename: str, subdir: str = ""
+) -> str:
+    """Returns a downloadable file address given information about that file in a remote repository.
+
+    Parameters
+    ----------
+    repo: str
+        The repository location
+    checkout_target: str
+        The tag, branch, or commit hash from which to get the file
+    filename: str
+        The name of the file (including extension)
+     subdir: str, optional
+        The subdirectory (from the repository top level) in which to find the file
+
+    Returns
+    -------
+    str:
+        A URL from which to retrieve the raw file directly
+    """
+    if "http" not in repo_url.lower():
+        raise ValueError(
+            f"Please provide a HTTP(S) address to the repository, not {repo_url}"
+        )
+
+    repo_url = repo_url.removesuffix(".git")
+
+    if "github.com" in repo_url:
+        raw_url_base = repo_url.replace("github.com", "raw.githubusercontent.com")
+        return f"{raw_url_base}/{checkout_target}/{subdir}/{filename}"
+    elif "gitlab.com" in repo_url:
+        return f"{repo_url}/-/raw/{checkout_target}/{subdir}/{filename}"
+    elif "bitbucket.org" in repo_url:
+        return f"{repo_url}/raw/{checkout_target}/{subdir}/{filename}"
+    else:
+        raise ValueError(
+            f"Git service at {repo_url} unsupported. Please use Github, Gitlab, or Bitbucket addresses"
+        )

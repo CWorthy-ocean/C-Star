@@ -3,7 +3,6 @@ import subprocess
 from collections import ChainMap
 from collections.abc import Callable, Generator
 from pathlib import Path
-from unittest import mock
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
@@ -159,11 +158,6 @@ class TestSetupEnvironmentFromFiles:
         )  # fmt: skip
         # Patch the root path and expanduser to point to our temporary files
         with (
-            patch(
-                "cstar.system.environment.CStarEnvironment.user_env_path",
-                new_callable=PropertyMock,
-                return_value=dotenv_path,
-            ),
             patch.object(
                 cstar.system.environment.CStarEnvironment, "package_root", new=tmp_path
             ),
@@ -232,11 +226,6 @@ class TestSetupEnvironmentFromFiles:
                 "cstar.system.environment.CStarEnvironment.system_env_path",
                 new_callable=PropertyMock,
                 return_value=system_dotenv_path,
-            ),
-            patch(
-                "cstar.system.environment.CStarEnvironment.user_env_path",
-                new_callable=PropertyMock,
-                return_value=dotenv_path,
             ),
         ):
             # Instantiate the environment to trigger loading the environment variables
@@ -541,7 +530,7 @@ class TestStrAndReprMethods:
             "    VAR2: value2"
         )
 
-        with mock.patch(
+        with patch(
             "cstar.system.environment.CStarEnvironment._load_env",
             new_callable=Mock,
             return_value={"VAR1": "value1", "VAR2": "value2"},
