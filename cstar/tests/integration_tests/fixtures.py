@@ -61,7 +61,6 @@ def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
         if isinstance(symlink_path, str):
             symlink_path = Path(symlink_path)
 
-        # cache_dir = Path(pooch.os_cache("roms_tools_datasets_for_cstar_test_case"))
         pup_test_data = pooch.create(
             path=ROMS_TOOLS_DATA_DIRECTORY,
             base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
@@ -78,7 +77,6 @@ def fetch_roms_tools_source_data(request, log) -> Callable[[str | Path], None]:
             },
         )
         pup_test_data.fetch("GLORYS_NA_2012.nc")
-        # pup_test_data.fetch("TPXO_global_test_data.nc")
         pup_test_data.fetch("global_grid_tpxo10.v2.nc")
         pup_test_data.fetch("global_h_tpxo10.v2.nc")
         pup_test_data.fetch("global_u_tpxo10.v2.nc")
