@@ -1,5 +1,6 @@
 import typing as t
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import networkx as nx
 
@@ -94,16 +95,12 @@ class GraphPlanner(Planner):
 
     def _initialize_from_graph(self, graph: nx.DiGraph) -> None:
         """Prepare instance from the supplied graph."""
-        # note: the graph argument and `if graph` branch are a byproduct of
-        #  testing and are not 100% desired. we may need it for loading from
-        #  a serialized graph, though (e.g. if state is stored in the graph).
-        p = Path("step")
-        # TODO: ensure the task is serialized onto the nodes to use in place of this hack.
-        p.touch()
-
-        self.step_map = {
-            n: Step(name=n, application="no-app", blueprint=p) for n in graph.nodes()
-        }
+        with NamedTemporaryFile(delete=True) as fp:
+            # TODO: ensure the task is serialized onto the nodes to use in place of this hack.
+            self.step_map = {
+                n: Step(name=n, application="no-app", blueprint=Path(fp.name))
+                for n in graph.nodes()
+            }
         self.dep_map = {n: graph.out_edges(n) for n in graph.nodes()}
         self.name_map = {n: n for n in graph.nodes()}
         self.name_map.update({self.START_NODE: "start", self.TERMINAL_NODE: "end"})
