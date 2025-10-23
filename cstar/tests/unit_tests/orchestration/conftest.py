@@ -523,3 +523,138 @@ def fill_blueprint_template(
         return populated
 
     return _get_blueprint_template
+
+
+@pytest.fixture
+def mvp_workplan(tmp_path: Path) -> Workplan:
+    """Create the minimum possible workplan.
+
+    NOTE:
+    - 1 step
+    - blueprint files are empty
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+
+    Returns
+    -------
+    Workplan
+    """
+    blueprint_path = tmp_path / "blueprint.yaml"
+    blueprint_path.touch()
+
+    return Workplan(
+        name="test workplan",
+        description="minimum viable workplan",
+        steps=[
+            Step(
+                name="step 1",
+                application="sleep",
+                blueprint=blueprint_path,
+                depends_on=[],
+                blueprint_overrides={},
+                compute_overrides={},
+                workflow_overrides={},
+            )
+        ],
+        state=WorkplanState.Draft,
+        runtime_vars=[],
+    )
+
+
+@pytest.fixture
+def fanout_workplan(tmp_path: Path) -> Workplan:
+    """Create a two-step, fan-out workplan (no dependencies)
+
+    NOTE:
+    - 2 steps that occur in parallel
+    - blueprint files are empty
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+
+    Returns
+    -------
+    Workplan
+    """
+    blueprint_path = tmp_path / "blueprint.yaml"
+    blueprint_path.touch()
+
+    return Workplan(
+        name="test workplan",
+        description="minimum viable workplan",
+        steps=[
+            Step(
+                name="step A",
+                application="sleep",
+                blueprint=blueprint_path,
+                depends_on=[],
+                blueprint_overrides={},
+                compute_overrides={},
+                workflow_overrides={},
+            ),
+            Step(
+                name="step B",
+                application="sleep",
+                blueprint=blueprint_path,
+                depends_on=[],
+                blueprint_overrides={},
+                compute_overrides={},
+                workflow_overrides={},
+            ),
+        ],
+        state=WorkplanState.Draft,
+        runtime_vars=[],
+    )
+
+
+@pytest.fixture
+def linear_workplan(tmp_path: Path) -> Workplan:
+    """Create a two-step, linear workplan (dep from B to A)
+
+    NOTE:
+    - 2 steps that must occur in sequence
+    - blueprint files are empty
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+
+    Returns
+    -------
+    Workplan
+    """
+    blueprint_path = tmp_path / "blueprint.yaml"
+    blueprint_path.touch()
+
+    return Workplan(
+        name="test workplan",
+        description="minimum viable workplan",
+        steps=[
+            Step(
+                name="step A",
+                application="sleep",
+                blueprint=blueprint_path,
+                depends_on=["step B"],
+                blueprint_overrides={},
+                compute_overrides={},
+                workflow_overrides={},
+            ),
+            Step(
+                name="step B",
+                application="sleep",
+                blueprint=blueprint_path,
+                depends_on=[],
+                blueprint_overrides={},
+                compute_overrides={},
+                workflow_overrides={},
+            ),
+        ],
+        state=WorkplanState.Draft,
+        runtime_vars=[],
+    )
