@@ -5,7 +5,13 @@ from cstar.cli.core import RegistryResult, cli_activity
 
 
 def handle(ns: argparse.Namespace) -> None:
-    """The action handler for the workplan-run action."""
+    """The action handler for the workplan-run action.
+
+    Parameters
+    ----------
+    ns : argparse.Namespace
+        User inputs parsed by the CLI
+    """
     print("mock - running the workplan...")
 
     print(f"Received command: {ns}")

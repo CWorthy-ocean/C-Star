@@ -13,7 +13,13 @@ def handle(ns: argparse.Namespace) -> None:
 
 @cli_activity
 def create_action() -> RegistryResult:
-    """Integrate the blueprint-run command into the CLI."""
+    """Integrate the blueprint-run command into the CLI.
+
+    Parameters
+    ----------
+    ns : argparse.Namespace
+        User inputs parsed by the CLI
+    """
     command: t.Literal["blueprint"] = "blueprint"
     action: t.Literal["run"] = "run"
 

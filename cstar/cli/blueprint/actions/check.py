@@ -10,6 +10,11 @@ def handle(ns: argparse.Namespace) -> None:
     """The action handler for the blueprint-check action.
 
     Perform content validation on the blueprint supplied by the user.
+
+    Parameters
+    ----------
+    ns : argparse.Namespace
+        User inputs parsed by the CLI
     """
     try:
         model = deserialize(ns.path, RomsMarblBlueprint)

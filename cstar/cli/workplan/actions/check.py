@@ -10,6 +10,11 @@ def handle(ns: argparse.Namespace) -> None:
     """The action handler for the workplan-check action.
 
     Perform content validation on the workplan supplied by the user.
+
+    Parameters
+    ----------
+    ns : argparse.Namespace
+        User inputs parsed by the CLI
     """
     try:
         model = deserialize(ns.path, Workplan)
