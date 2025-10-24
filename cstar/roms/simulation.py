@@ -1152,12 +1152,12 @@ class ROMSSimulation(Simulation):
             # step, otherwise they may try to clobber each other or get tripped up on
             # detecting existing directories.
             if os.getenv("CSTAR_ORCHESTRATED", "0") == "1":
-                codebase_dir = codebases_dir / codebase.expected_env_var.split("_")[0]
+                codebase_dir = codebases_dir / codebase.root_env_var.split("_")[0]
                 codebase_dir.mkdir(parents=True, exist_ok=True)
                 codebase.get(codebase_dir)
-                os.environ[codebase.expected_env_var] = str(codebase_dir)
-
+                os.environ[codebase.root_env_var] = str(codebase_dir)
             codebase.setup()
+
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")
         if self.compile_time_code is not None:

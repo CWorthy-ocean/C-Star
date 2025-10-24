@@ -288,10 +288,6 @@ class ROMSInputDataset(InputDataset, ABC):
         if self.source_partitioning:
             self._get_from_partitioned_source(local_dir)
 
-        # roms-tools yaml source
-        elif self.source._classification.value.file_encoding == FileEncoding.TEXT:
-            self._get_from_yaml(local_dir)
-
         # regular (netCDF) source
         else:
             super().get(local_dir=local_dir)

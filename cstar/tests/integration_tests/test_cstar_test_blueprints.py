@@ -21,6 +21,7 @@ class TestCStar:
         self,
         tmp_path: Path,
         modify_template_blueprint,
+        mock_lmod_path: Path,
         fetch_remote_test_case_data,
         test_config_key,
         log: logging.Logger,
