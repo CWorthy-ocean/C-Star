@@ -105,7 +105,7 @@ def replace_schema_directive(template: str, schema_path: Path | None) -> str:
     return "\n".join(template_lines)
 
 
-def handle(ns: argparse.Namespace) -> None:
+async def handle(ns: argparse.Namespace) -> None:
     """The action handler for the template-create action.
 
     Triggers creation of a sample template.

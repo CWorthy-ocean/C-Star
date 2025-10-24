@@ -3,8 +3,10 @@ import typing as t
 
 from cstar.cli.core import RegistryResult, cli_activity
 
+# from cstar.system.manager import cstar_sysmgr
 
-def handle(ns: argparse.Namespace) -> None:
+
+async def handle(ns: argparse.Namespace) -> None:
     """The action handler for the workplan-run action.
 
     Parameters
@@ -13,7 +15,6 @@ def handle(ns: argparse.Namespace) -> None:
         User inputs parsed by the CLI
     """
     print("mock - running the workplan...")
-
     print(f"Received command: {ns}")
 
 

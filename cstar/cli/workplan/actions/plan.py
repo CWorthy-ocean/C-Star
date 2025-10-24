@@ -12,7 +12,7 @@ from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import slugify
 
 
-def render(
+async def render(
     planner: GraphPlanner,
     image_directory: Path,
     layout: str = "circular",
@@ -85,7 +85,7 @@ def render(
     return write_to
 
 
-def handle(ns: argparse.Namespace) -> None:
+async def handle(ns: argparse.Namespace) -> None:
     """Generate the execution plan for a workplan.
 
     Parameters
@@ -98,7 +98,7 @@ def handle(ns: argparse.Namespace) -> None:
     try:
         if workplan := deserialize(ns.path, Workplan):
             planner = GraphPlanner(workplan)
-            plan_path = render(
+            plan_path = await render(
                 planner,
                 ns.output_dir,
             )

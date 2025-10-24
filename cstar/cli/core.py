@@ -10,6 +10,9 @@ ParseItemKey: t.TypeAlias = tuple[str, str | None]
 CommandTree: t.TypeAlias = dict[str, t.Any | None]
 """The dictionary containing lookups to registered commands."""
 
+AsyncHandlerFn: t.TypeAlias = t.Callable[[Namespace], t.Awaitable[None]]
+"""An asynchronous function registered to process a CLI command."""
+
 ActionTree: t.TypeAlias = dict[ParseItemKey, list[t.Callable]]
 """The dictionary containing lookups to registered actions."""
 
@@ -24,7 +27,6 @@ RegistryResult: t.TypeAlias = tuple[ParseItemKey, ActionFn]
 
 RegistryFn: t.TypeAlias = t.Callable[[], RegistryResult]
 """A function that registers a command or action into the CLI."""
-
 
 _command_tree: CommandTree = defaultdict(lambda: None)
 _action_tree: ActionTree = defaultdict(lambda: [])

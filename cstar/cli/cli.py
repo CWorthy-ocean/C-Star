@@ -1,7 +1,8 @@
 import asyncio
 import sys
-import typing as t
 from argparse import Namespace
+
+from cstar.cli.core import AsyncHandlerFn
 
 
 async def invoke(args: Namespace) -> None:
@@ -12,8 +13,8 @@ async def invoke(args: Namespace) -> None:
     args : Namespace
         Arguments parsed from the CLI.
     """
-    handler: t.Callable[[Namespace], None] = args.handler
-    handler(args)
+    handler: AsyncHandlerFn = args.handler
+    await handler(args)
 
 
 def main() -> None:

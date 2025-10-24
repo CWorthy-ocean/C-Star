@@ -6,7 +6,7 @@ from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.serialization import deserialize
 
 
-def handle(ns: argparse.Namespace) -> None:
+async def handle(ns: argparse.Namespace) -> None:
     """The action handler for the blueprint-check action.
 
     Perform content validation on the blueprint supplied by the user.

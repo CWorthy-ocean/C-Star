@@ -6,7 +6,7 @@ from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize
 
 
-def handle(ns: argparse.Namespace) -> None:
+async def handle(ns: argparse.Namespace) -> None:
     """The action handler for the workplan-check action.
 
     Perform content validation on the workplan supplied by the user.

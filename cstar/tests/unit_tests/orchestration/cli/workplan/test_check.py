@@ -28,11 +28,12 @@ def parser() -> argparse.ArgumentParser:
     return parser
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "workplan_name",
     ["mvp_workplan", "fanout_workplan", "linear_workplan"],
 )
-def test_cli_workplan_check_action(
+async def test_cli_workplan_check_action(
     request: pytest.FixtureRequest,
     tmp_path: Path,
     workplan_name: str,
@@ -55,16 +56,17 @@ def test_cli_workplan_check_action(
     serialize(wp_path, workplan)
     ns = parser.parse_args(["workplan", "check", wp_path.as_posix()])
 
-    handle(ns)
+    await handle(ns)
     captured = capsys.readouterr().out
     assert " valid" in captured
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "template_file",
     ["fanout_workplan.yaml", "linear_workplan.yaml", "mvp_workplan.yaml"],
 )
-def test_cli_workplan_check_action_tpl(
+async def test_cli_workplan_check_action_tpl(
     # request: pytest.FixtureRequest,
     # tmp_path: Path,
     template_file: str,
@@ -90,6 +92,6 @@ def test_cli_workplan_check_action_tpl(
     assert workplan, "sanity-check deserialize failed."
 
     ns = parser.parse_args(["workplan", "check", wp_path.as_posix()])
-    handle(ns)
+    await handle(ns)
     captured = capsys.readouterr().out
     assert " valid" in captured
