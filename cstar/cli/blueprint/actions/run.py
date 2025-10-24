@@ -1,11 +1,15 @@
 import argparse
+import asyncio
 import typing as t
+from multiprocessing import Process
 from pathlib import Path
 
 from cstar.cli.core import PathConverterAction, RegistryResult, cli_activity
+from cstar.entrypoint.service import ServiceConfiguration
+from cstar.entrypoint.worker.worker import BlueprintRequest, JobConfig, SimulationRunner
 
 
-async def run_worker(path: Path) -> None:
+def run_worker(path: Path) -> None:
     """Execute a blueprint synchronously using the worker service.
 
     Parameters:
@@ -13,7 +17,19 @@ async def run_worker(path: Path) -> None:
     path : Path
         The path to the blueprint to execute
     """
-    print("running blocking worker...")
+    print("Executing blueprint via blocking worker service.")
+
+    account_id = "m4632"
+    walltime = "48:00:00"
+
+    request = BlueprintRequest(path.as_posix())
+    service_config = ServiceConfiguration(
+        loop_delay=0, health_check_frequency=300, health_check_log_threshold=25
+    )
+    job_config = JobConfig(account_id, walltime)
+    runner = SimulationRunner(request, service_config, job_config)
+
+    asyncio.run(runner.execute())
 
 
 async def run_worker_process(path: Path) -> None:
@@ -24,18 +40,24 @@ async def run_worker_process(path: Path) -> None:
     path : Path
         The path to the blueprint to execute
     """
-    print("running non-blocking worker...")
+    print("Executing blueprint via non-blocking worker service.")
+
+    process = Process(target=run_worker, kwargs={"path": path}, daemon=True)
+    process.start()
+
+    # delay briefly in case the process dies during startup
+    # NOTE: this stinks... they have _no_ output...
+    await asyncio.sleep(4)
+
+    print(f"Worker process started in PID: {process.pid}")
+    if process.exitcode:
+        print(f"Worker processs failed prematurely with code: {process.exitcode}")
 
 
 async def handle(ns: argparse.Namespace) -> None:
     """The action handler for the blueprint-run action."""
-    # TODO: consider just letting the worker do it's own validation instead.
-    # handle_check(ns)
-
-    print(f"Received command: {ns}")
-
     if ns.blocking:
-        await run_worker(ns.path)
+        run_worker(ns.path)
     else:
         await run_worker_process(ns.path)
 
