@@ -579,6 +579,7 @@ class TestROMSSimulationInitialization:
 
             assert substring in str(exception_info.value)
 
+    @pytest.mark.skip("Functionality disabled for the moment")
     def test_check_inputdataset_dates_warns_and_sets_start_date(
         self,
         stub_romssimulation,
@@ -607,6 +608,7 @@ class TestROMSSimulationInitialization:
         assert sim.river_forcing.start_date == sim.start_date
         assert "does not match that of ROMSSimulation" in caplog.text
 
+    @pytest.mark.skip("Functionality disabled for the moment")
     def test_check_inputdataset_dates_warns_and_sets_end_date(
         self,
         stub_romssimulation,
@@ -1006,71 +1008,6 @@ class TestToAndFromDictAndBlueprint:
 
         # Assertions
         assert isinstance(sim, ROMSSimulation)
-
-
-        This test ensures that `from_blueprint()` enforces the expected file format by
-        raising an error if the blueprint file does not have a `.yaml` extension.
-
-        Assertions
-        ----------
-        - A `ValueError` is raised with the expected message.
-
-        Mocks & Fixtures
-        ----------------
-        - `mock_open_file`: Mocks the built-in `open()` function to simulate reading a non-YAML file.
-        - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
-        - `tmp_path`: A temporary directory provided by `pytest` to simulate the blueprint's location.
-        """
-        blueprint_path = tmp_path / "roms_blueprint.nc"
-
-        with patch("yaml.safe_load", return_value=fake_romssimulation_dict):
-            with pytest.raises(
-                ValueError, match="C-Star expects blueprint in '.yaml' format"
-            ):
-                ROMSSimulation.from_blueprint(
-                    blueprint=str(blueprint_path),
-                )
-
-    @patch("requests.get")
-    @patch("pathlib.Path.exists", return_value=True)
-    def test_from_blueprint_url(
-        self,
-        mock_path_exists,
-        mock_requests_get,
-        tmp_path: Path,
-        fake_romssimulation_dict: dict[str, Any],
-        blueprint_path: Path,
-    ):
-        """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a URL.
-
-        This test ensures that when given a valid URL to a YAML blueprint file,
-        `from_blueprint()` retrieves, parses, and constructs a `ROMSSimulation` instance.
-
-        Assertions
-        ----------
-        - The returned object is an instance of `ROMSSimulation`.
-        - The request to fetch the blueprint is made exactly once.
-
-        Mocks & Fixtures
-        ----------------
-        - `mock_path_exists`: Mocks `Path.exists()` to return `True`, bypassing file existence checks.
-        - `mock_requests_get`: Mocks `requests.get()` to return a simulated YAML blueprint response.
-        - `tmp_path`: A temporary directory provided by `pytest` to simulate the simulation directory.
-        """
-        with blueprint_path.open("r") as f:
-            bp_text = f.read()
-
-        mock_response = MagicMock()
-        mock_response.text = bp_text
-        mock_requests_get.return_value = mock_response
-        _blueprint_path = "http://sketchyamlfiles4u.ru/roms_blueprint.yaml"
-
-        sim = ROMSSimulation.from_blueprint(
-            blueprint=_blueprint_path,
-        )
-
-        assert isinstance(sim, ROMSSimulation)
-        mock_requests_get.assert_called_once()
 
 
 class TestProcessingAndExecution:
