@@ -57,9 +57,11 @@ def cache_func(context: TaskRunContext, params) -> str:
 
 
 @task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
-def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
+def submit_job(step: Step, job_dep_ids: list[str] | None = None) -> JobId:
     bp_path = step.blueprint
     bp = deserialize(Path(bp_path), RomsMarblBlueprint)
+    if job_dep_ids is None:
+        job_dep_ids = []
 
     job = create_scheduler_job(
         commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
