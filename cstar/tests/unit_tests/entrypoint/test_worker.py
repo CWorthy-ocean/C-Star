@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from _pytest.tmpdir import TempPathFactory
 
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.entrypoint.service import ServiceConfiguration
@@ -64,14 +65,9 @@ def valid_args_short() -> dict[str, str]:
 @pytest.fixture(scope="module")
 def sim_runner_prep(
     blueprint_path: Path,
-    tmp_path_factory,
+    tmp_path_factory: TempPathFactory,
 ) -> SimulationRunner:
-    """Fixture to create a SimulationRunner instance.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        A temporary path to store the output directory for the simulation.
+    """Fixture to create a SimulationRunner instance. Module-scope to avoid slow initialization.
 
     Returns
     -------
@@ -98,6 +94,10 @@ def sim_runner_prep(
 
 @pytest.fixture(scope="function")
 def sim_runner(sim_runner_prep, tmp_path) -> SimulationRunner:
+    """
+    Takes the module-level simulation runner fixture, copies it to avoid state changes,
+    and creates a new output dir and attaches it for each individual test.
+    """
     sim = deepcopy(sim_runner_prep)
     output_path = tmp_path / "output"
 
