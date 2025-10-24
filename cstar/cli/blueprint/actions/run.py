@@ -9,16 +9,19 @@ from cstar.entrypoint.service import ServiceConfiguration
 from cstar.entrypoint.worker.worker import BlueprintRequest, JobConfig, SimulationRunner
 
 
-def run_worker(path: Path) -> None:
-    """Execute a blueprint synchronously using the worker service.
+def configure_simulation_runner(path: Path) -> SimulationRunner:
+    """Create a `SimulationRunner` to execute the blueprint.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     path : Path
         The path to the blueprint to execute
-    """
-    print("Executing blueprint via blocking worker service.")
 
+    Returns
+    -------
+    SimulationRunner
+        A simulation runner configured to execute the blueprint
+    """
     account_id = "m4632"
     walltime = "48:00:00"
 
@@ -27,8 +30,20 @@ def run_worker(path: Path) -> None:
         loop_delay=0, health_check_frequency=300, health_check_log_threshold=25
     )
     job_config = JobConfig(account_id, walltime)
-    runner = SimulationRunner(request, service_config, job_config)
 
+    return SimulationRunner(request, service_config, job_config)
+
+
+def run_worker(path: Path) -> None:
+    """Execute a blueprint synchronously using a worker service.
+
+    Parameters
+    ----------
+    path : Path
+        The path to the blueprint to execute
+    """
+    print("Executing blueprint via blocking worker service.")
+    runner = configure_simulation_runner(path)
     asyncio.run(runner.execute())
 
 
