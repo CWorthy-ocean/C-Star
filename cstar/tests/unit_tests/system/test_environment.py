@@ -3,7 +3,6 @@ import subprocess
 from collections import ChainMap
 from collections.abc import Callable, Generator
 from pathlib import Path
-from unittest import mock
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
@@ -532,7 +531,7 @@ class TestStrAndReprMethods:
             "    VAR2: value2"
         )
 
-        with mock.patch(
+        with patch(
             "cstar.system.environment.CStarEnvironment._load_env",
             new_callable=Mock,
             return_value={"VAR1": "value1", "VAR2": "value2"},

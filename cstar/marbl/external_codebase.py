@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from cstar.base import ExternalCodeBase
-from cstar.base.gitutils import _clone_and_checkout
+from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
 from cstar.system.manager import cstar_sysmgr
 
@@ -20,45 +20,69 @@ class MARBLExternalCodeBase(ExternalCodeBase):
     """
 
     @property
-    def default_source_repo(self) -> str:
+    def _default_source_repo(self) -> str:
         return "https://github.com/marbl-ecosys/MARBL.git"
 
     @property
-    def default_checkout_target(self) -> str:
+    def _default_checkout_target(self) -> str:
         return "marbl0.45.0"
 
     @property
-    def expected_env_var(self) -> str:
+    def root_env_var(self) -> str:
         return "MARBL_ROOT"
 
-    def get(self, target: str | Path) -> None:
-        """Clone MARBL code to local machine, set environment, compile libraries.
+    def _configure(self) -> None:
+        """Configure the MARBL codebase on the local machine.
 
-        This method:
-        1. clones MARBL from `source_repo`
-        2. checks out the correct commit from `checkout_target`
-        3. Sets environment variable MARBL_ROOT
-        4. Compiles MARBL
-
-        Parameters:
-        -----------
-        target: str
-            The local path where MARBL will be cloned and compiled
+        This method compiles MARBL and adds necessary  variables to the environment.
         """
-        _clone_and_checkout(
-            source_repo=self.source_repo,
-            local_path=Path(target),
-            checkout_target=self.checkout_target,
-        )
-        # Set environment variables for this session:
-        cstar_sysmgr.environment.set_env_var(self.expected_env_var, str(target))
+        assert self.working_copy is not None  # Has been verified by `configure()``
+        marbl_root = self.working_copy.path
+        # Set env var:
+        cstar_sysmgr.environment.set_env_var(self.root_env_var, str(marbl_root))
 
-        # Make things
+        # Compile
         _run_cmd(
             f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",
-            cwd=Path(target) / "src",
+            cwd=marbl_root / "src",
             msg_pre="Compiling MARBL...",
-            msg_post=f"MARBL successfully installed at {target}",
+            msg_post=f"MARBL successfully installed at {marbl_root}",
             msg_err="Error when compiling MARBL.",
             raise_on_error=True,
         )
+
+    @property
+    def is_configured(self) -> bool:
+        """Determine whether MARBL is configured locally.
+
+        This method confirms that:
+        - Necessary environment variables are set
+        - The repository has not changed from that described by `source`.
+        - MARBL's `lib` and `inc` dirs exist and are populated
+        """
+        # Check MARBL_ROOT env var is set:
+        marbl_root = cstar_sysmgr.environment.environment_variables.get(
+            self.root_env_var
+        )
+        if not marbl_root:
+            return False
+        # Check MARBL repo hasn't changed:
+        assert self.source.checkout_target is not None  # cannot be for ExternalCodeBase
+        # NOTE can't use self.working_copy.changed_from_source here as ExternalCodeBase uses this property to set `working_copy`
+        if _check_local_repo_changed_from_remote(
+            remote_repo=self.source.location,
+            local_repo=marbl_root,
+            checkout_target=self.source.checkout_target,
+        ):
+            return False
+        # Check library file exists for current compiler:
+        if not (
+            Path(marbl_root) / f"lib/libmarbl-{cstar_sysmgr.environment.compiler}-mpi.a"
+        ).exists():
+            return False
+        # Check include dir is not empty:
+        inc_dir = Path(marbl_root) / f"include/{cstar_sysmgr.environment.compiler}-mpi/"
+        if not any(inc_dir.iterdir()):
+            return False
+
+        return True

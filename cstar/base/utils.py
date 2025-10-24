@@ -1,12 +1,23 @@
+import datetime as dt
 import functools
 import hashlib
 import subprocess
 from os import PathLike
 from pathlib import Path
 
+import dateutil
+
 from cstar.base.log import get_logger
 
 log = get_logger(__name__)
+
+
+def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
+    """Coerces datetime-like input to a datetime instance."""
+    if isinstance(datetime, dt.datetime):
+        return datetime
+    else:
+        return dateutil.parser.parse(datetime)
 
 
 def _get_sha256_hash(file_path: str | Path) -> str:
@@ -250,7 +261,6 @@ def _run_cmd(
 
     result: subprocess.CompletedProcess[str] = fn(**kwargs)
     stdout = str(result.stdout).strip() if result.stdout is not None else ""
-
     if result.returncode != 0:
         rc_out = f"Return Code: `{result.returncode}`."
         stderr_out = f"STDERR:\n{result.stderr.strip()}"

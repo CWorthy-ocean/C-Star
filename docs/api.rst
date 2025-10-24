@@ -64,6 +64,19 @@ Scheduler Job
    cstar.execution.scheduler_job.SchedulerJob
    cstar.execution.scheduler_job.SlurmJob
    cstar.execution.scheduler_job.PBSJob
+
+io
+--
+.. autosummary::
+   :toctree: generated/
+
+   cstar.io.source_data.SourceData
+   cstar.io.source_data.SourceDataCollection
+   cstar.io.staged_data.StagedData
+   cstar.io.staged_data.StagedDataCollection
+   cstar.io.stager.Stager
+   cstar.io.retriever.Retriever
+
    
 System
 ------

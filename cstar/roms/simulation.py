@@ -2,15 +2,13 @@ import os
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, TypeVar, cast
 
-import requests
 import yaml
 
 import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.datasource import DataSource
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
@@ -20,6 +18,8 @@ from cstar.base.utils import (
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
+from cstar.io.constants import FileEncoding
+from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration.adapter import (
     AddtlCodeAdapter,
@@ -241,40 +241,39 @@ class ROMSSimulation(Simulation):
             valid_end_date=valid_end_date,
         )
 
+        self._validate_input(model_grid)
         self.model_grid = model_grid
-        self.initial_conditions = initial_conditions
-        self.tidal_forcing = tidal_forcing
-        self.river_forcing = river_forcing
-        self.cdr_forcing = cdr_forcing
-        self.surface_forcing = [] if surface_forcing is None else surface_forcing
-        self._check_forcing_collection_types(self.surface_forcing, ROMSSurfaceForcing)
 
+        self._validate_input(initial_conditions)
+        self.initial_conditions = initial_conditions
+
+        self._validate_input(tidal_forcing)
+        self.tidal_forcing = tidal_forcing
+
+        self._validate_input(river_forcing)
+        self.river_forcing = river_forcing
+
+        self._validate_input(cdr_forcing)
+        self.cdr_forcing = cdr_forcing
+
+        self._validate_input(surface_forcing, ROMSSurfaceForcing)
+        self.surface_forcing: list[ROMSSurfaceForcing] = (
+            [] if surface_forcing is None else surface_forcing
+        )
+
+        self._validate_input(boundary_forcing, typecheck=ROMSBoundaryForcing)
         self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
-        self._check_forcing_collection_types(self.boundary_forcing, ROMSBoundaryForcing)
+
+        self._validate_input(forcing_corrections, typecheck=ROMSForcingCorrections)
         self.forcing_corrections = (
             [] if forcing_corrections is None else forcing_corrections
         )
-        self._check_forcing_collection_types(
-            self.forcing_corrections, ROMSForcingCorrections
-        )
-        self._check_inputdataset_partitioning()
-        self._check_inputdataset_dates()
 
-        if marbl_codebase is None:
-            self.marbl_codebase = MARBLExternalCodeBase()
-            self.log.warning(
-                "Creating MARBLSimulation instance without a specified "
-                + "MARBLExternalCodeBase, default codebase will be used:\n"
-                + f"          • Source location: {self.marbl_codebase.source_repo}\n"
-                + f"          • Checkout target: {self.marbl_codebase.checkout_target}\n"
-            )
-        else:
-            self.marbl_codebase = marbl_codebase
+        self.marbl_codebase = marbl_codebase
 
         # Determine which runtime_code file corresponds to the `.in` runtime settings
         # And set the in_file attribute to be used internally
         self._find_dotin_file()
-
         # roms-specific
         self.exe_path: Path | None = None
         self._exe_hash: str | None = None
@@ -284,7 +283,7 @@ class ROMSSimulation(Simulation):
     def _find_dotin_file(self) -> None:
         """Identify the runtime settings (.in) file from runtime code.
 
-        This internal method checks the `ROMSSimulation.runtime_code.files`
+        This internal method checks the `ROMSSimulation.runtime_code.source`
         list for exactly one file ending in `.in`, which is required to
         configure ROMS runtime settings.
 
@@ -293,7 +292,9 @@ class ROMSSimulation(Simulation):
         ValueError
             If no `.in` file or more than one is found in the runtime code files.
         """
-        in_files = [f for f in self.runtime_code.files if f.endswith(".in")]
+        in_files = [
+            f.basename for f in self.runtime_code.source if f.basename.endswith(".in")
+        ]
 
         if not in_files:
             raise RuntimeError("No .in file was provided")
@@ -303,8 +304,48 @@ class ROMSSimulation(Simulation):
 
         self._in_file = in_files[0]
 
-    def _check_forcing_collection_types(self, collection: list, expected_class: type):
-        """Validate the types of input datasets in a forcing collection.
+    T = TypeVar("T", bound=ROMSInputDataset)
+
+    def _validate_input(
+        self, inp: T | list[T] | None, typecheck: type[T] | None = None
+    ) -> None:
+        """Validates supplied input datasets in the context of this simulation.
+
+        See subfunction docstrings for particulars on each check.
+
+        Parameters
+        ----------
+        inp: ROMSInputDataset or list of ROMSInputDatasets
+            datasets to be validated in the context of this simulation
+        typecheck: type, optional, default None
+            Used to confirm that datasets are all of expected type, e.g. if in a list
+        """
+        if not inp:
+            return
+
+        if typecheck:
+            self._check_inputdataset_types(inp, expected_type=typecheck)
+
+        # TODO commenting out for the moment, seems to have a lot of issues with example dataset
+
+        # Check if InputDataset has dates to validate:
+        # undated = any(
+        #     [isinstance(inp, d) for d in [ROMSModelGrid, ROMSForcingCorrections]]
+        # )
+        #
+        # if not undated:
+        #     self._check_inputdataset_dates(inp)
+
+        self._check_inputdataset_partitioning(inp)
+
+        return
+
+    def _check_inputdataset_types(
+        self,
+        inputdatasets: T | list[T],
+        expected_type: type[T],
+    ):
+        """Validate the types of input datasets.
 
         For forcing types that may correspond to multiple ROMSInputDataset instances
         (ROMSSurfaceForcing, ROMSBoundaryForcing, ROMSForcingCorrections), ensure that
@@ -314,91 +355,129 @@ class ROMSSimulation(Simulation):
         ----------
         collection : list
             A list of dataset objects to validate.
-        expected_class : type
-            The expected class (e.g., `ROMSSurfaceForcing`).
+        expected_type : type
+            The expected type (e.g., `ROMSSurfaceForcing`).
 
         Raises
         ------
         TypeError
-            If any item in the list is not an instance of `expected_class`.
+            If any item in the list is not an instance of `expected_type`.
         """
-        if not all([isinstance(ind, expected_class) for ind in collection]):
+        if not isinstance(inputdatasets, list):
+            inputdatasets = [
+                inputdatasets,
+            ]
+        if not all([isinstance(ind, expected_type) for ind in inputdatasets]):
             raise TypeError(
-                f"ROMSSimulation.{collection} must be a list of {expected_class} instances"
+                f"At least one of {[type(i) for i in inputdatasets]} is not {expected_type}."
             )
 
-    def _check_inputdataset_partitioning(self) -> None:
+    def _check_inputdataset_partitioning(self, inp: T | list[T]) -> None:
         """If a ROMSInputDataset's source is already partitioned, confirm that the
         partitioning matches the processor distribution of the simulation and raise a
         ValueError if not.
         """
-        for inp in self.input_datasets:
-            if inp.source_partitioning:
-                if (inp.source_np_xi != self.discretization.n_procs_x) or (
-                    inp.source_np_eta != self.discretization.n_procs_y
+        for i in inp if isinstance(inp, list) else [inp]:
+            if i.source_partitioning:
+                if (i.source_np_xi != self.discretization.n_procs_x) or (
+                    i.source_np_eta != self.discretization.n_procs_y
                 ):
                     raise ValueError(
                         f"Cannot instantiate ROMSSimulation with "
                         f"n_procs_x={self.discretization.n_procs_x}, "
                         f"n_procs_y={self.discretization.n_procs_y} "
                         "when {inp.__class__.__name__} has partitioning "
-                        f"({inp.source_np_xi},{inp.source_np_eta}) at source."
+                        f"({i.source_np_xi},{i.source_np_eta}) at source."
                     )
 
-    def _check_inputdataset_dates(self) -> None:
+    def _check_inputdataset_dates(self, inp: T | list[T]) -> None:
         """Ensure input dataset date ranges align with the simulation date range.
 
-        For each input dataset with `source_type='yaml'`, this method verifies that
+        For each input dataset with a plaintext (yaml) source, this method verifies that
         its `start_date` and `end_date` match the simulation’s `start_date` and
         `end_date`. If they do not match, a warning is issued and the dataset's
         dates are overwritten to enforce alignment.
 
         Raises
         ------
-        AttributeError
-            If any dataset is missing expected date attributes.
-        Warning
-            A warning is issued (not raised) when mismatched dates are corrected.
+        ValueError
+            If a mismatched date range cannot be corrected (e.g. for netCDF inputs)
 
         Notes
         -----
-        - Only datasets with a `source_type` of `"yaml"` are modified.
+        - Only datasets with a `yaml` source are modified.
         - `ROMSInitialConditions` datasets only have their `start_date` checked;
           `end_date` is not required or enforced for initial conditions.
         """
-        for inp in [
-            self.initial_conditions,
-            self.river_forcing,
-            *self.surface_forcing,
-            *self.boundary_forcing,
-        ]:
-            if (inp is not None) and (inp.source.source_type == "yaml"):
-                if (
-                    hasattr(inp, "start_date")
-                    and (inp.start_date is not None)
-                    and (inp.start_date != self.start_date)
-                ):
-                    self.log.warning(
-                        f"{inp.__class__.__name__} has start date attribute {inp.start_date} "
-                        + f"that does not match ROMSSimulation.start_date {self.start_date}. "
-                        f"C-Star will enforce {self.start_date} as the start date"
-                    )
-                inp.start_date = self.start_date
 
-                if isinstance(inp, ROMSInitialConditions):
-                    continue
+        def is_correctable(inp: ROMSInputDataset) -> bool:
+            """roms-tools yaml files' dates can be meaningfully corrected, netCDF dates cannot"""
+            return inp.source._classification.value.file_encoding == FileEncoding.TEXT
 
-                if (
-                    hasattr(inp, "end_date")
-                    and (inp.end_date is not None)
-                    and (inp.end_date != self.end_date)
-                ):
+        def correct_date_bound_or_raise(inp: ROMSInputDataset, bound: str):
+            """Correct (if possible) a mismatched date value between this ROMSSimulation and dataset, or raise."""
+            sim_bound = getattr(self, bound)
+
+            inp_bound = getattr(inp, bound, None)
+            if inp_bound == sim_bound:
+                return
+            if is_correctable(inp):
+                if inp_bound is not None:
                     self.log.warning(
-                        f"{inp.__class__.__name__} has end date attribute {inp.end_date} "
-                        + f"that does not match ROMSSimulation.end_date {self.end_date}. "
-                        f"C-Star will enforce {self.end_date} as the end date"
+                        f"{inp.__class__.__name__} has a date attribute {bound} "
+                        f"whose value {inp_bound} does not match that of ROMSSimulation ({sim_bound}). "
+                        f"C-Star will enforce {sim_bound} as the date"
                     )
-                inp.end_date = self.end_date
+                setattr(inp, bound, getattr(self, bound))
+                return
+            if inp_bound is None:
+                return
+
+            # TODO actually check start, end bounds with inequalities
+            # raise ValueError(
+            #     f"Uncorrectable mismatch between {bound} in {inp.__class__.__name__} and ROMSSimulation"
+            # )
+
+        # TODO I don't think this is true??
+        # # For a single ROMSInputDataset, start and end must match simulation
+        # if not isinstance(inp, list):
+        #     correct_date_bound_or_raise(inp, "start_date")
+        #     if not isinstance(inp, ROMSInitialConditions):
+        #         correct_date_bound_or_raise(inp, "end_date")
+        #     return
+
+        # For a list, depends on context: could be a list of sequential files or a list of different vars
+        start_dates: list[datetime] = list(
+            filter(None, [getattr(i, "start_date", None) for i in inp])  # type: ignore[union-attr]
+        )
+        end_dates: list[datetime] = list(
+            filter(None, [getattr(i, "start_date", None) for i in inp])  # type: ignore[union-attr]
+        )
+        for i in inp:  # type: ignore[union-attr]
+            # If a file is yaml, it always covers the whole simulation:
+            if is_correctable(i):
+                correct_date_bound_or_raise(i, "start_date")
+                correct_date_bound_or_raise(i, "end_date")
+                continue
+            # if it's netCDF, check it either matches bounds of simulation OR another InputDataset:
+            if (
+                hasattr(i, "start_date")
+                and (i.start_date not in [self.start_date, None])
+                and not any([ed == i.start_date for ed in end_dates])
+            ):
+                raise ValueError(
+                    f"Start date of {i.__class__.__name__} ({i.start_date}) does not match that of Simulation "
+                    f"{self.start_date} or any corresponding InputDataset's 'end_date': \n {i}"
+                )
+            if (
+                hasattr(i, "end_date")
+                and (i.end_date not in [self.end_date, None])
+                and not any([sd == i.end_date for sd in start_dates])
+            ):
+                raise ValueError(
+                    f"End date of InputDataset {i.end_date} does not match that of Simulation "
+                    f"{self.end_date} or any corresponding InputDataset's 'start_date': \n {i}"
+                )
 
     def __str__(self) -> str:
         """Returns a string representation of the simulation.
@@ -523,15 +602,21 @@ class ROMSSimulation(Simulation):
         list
             A list containing the ROMS external codebase and MARBL external codebase.
         """
-        return [self.codebase, self.marbl_codebase]
+        codebases = [
+            self.codebase,
+        ]
+        if self.marbl_codebase:
+            codebases.append(self.marbl_codebase)
+        return codebases
 
     @property
     def _forcing_paths(self) -> list[Path]:
-        """Collect and return all local paths to ROMS forcing input datasets.
+        """Collect and return all local paths to ROMS forcing input datasets in ROMS format.
 
-        This internal property gathers the `working_path` attributes of all forcing-related
-        datasets attached to the simulation — including tidal, river, surface, boundary, and
-        correction datasets — and returns a flat list of resolved file paths.
+        Calls `ROMSInputDataset.path_for_roms` to strip any partitioning information from the
+        local path, in accordance with ROMS' expectations.
+
+        This property is used to populate ROMSRuntimeSettings.forcing
 
         Returns
         -------
@@ -541,16 +626,11 @@ class ROMSSimulation(Simulation):
         Raises
         ------
         ValueError
-            If any required forcing dataset does not have a `working_path` set,
-            indicating it has not been retrieved or prepared.
+            If any required forcing dataset does not have `working_copy` set,
+            indicating it has not been staged for use by C-Star.
 
-        Notes
-        -----
-        - If any `working_path` is a list of files (e.g., multiple NetCDFs), each path
-          is included individually.
-        - This property is used to populate `runtime_settings.forcing`.
         """
-        forcing_sources = chain(
+        input_forcings = chain(
             [self.tidal_forcing, self.river_forcing],
             self.surface_forcing,
             self.boundary_forcing,
@@ -559,13 +639,13 @@ class ROMSSimulation(Simulation):
 
         forcing_paths: list[Path] = []
 
-        for source in filter(None, forcing_sources):
-            paths = source.path_for_roms
+        for forcing in filter(None, input_forcings):
+            paths = forcing.path_for_roms
             if not paths:
                 raise ValueError(
-                    f"{source.__class__.__name__} does not have "
+                    f"{forcing.__class__.__name__} does not have "
                     + "a local working_path. Call ROMSSimulation.setup() or "
-                    + f"{source.__class__.__name__}.get() and try again."
+                    + f"{forcing.__class__.__name__}.get() and try again."
                 )
 
             elif isinstance(paths, list):
@@ -625,7 +705,7 @@ class ROMSSimulation(Simulation):
         - If MARBL configuration files are present in `runtime_code.files`, their paths
           are also included.
         """
-        if self.runtime_code.working_path is None:
+        if self.runtime_code.working_copy is None:
             raise ValueError(
                 "Cannot access runtime settings without local "
                 + "`.in` file. Call ROMSSimulation.setup() or "
@@ -633,7 +713,7 @@ class ROMSSimulation(Simulation):
             )
 
         simulation_runtime_settings = ROMSRuntimeSettings.from_file(
-            self.runtime_code.working_path / self._in_file
+            self.runtime_code.working_copy.common_parent / self._in_file
         )
 
         # Modify each relevant section in the runtime settings object based on blueprint values
@@ -655,20 +735,22 @@ class ROMSSimulation(Simulation):
         simulation_runtime_settings.forcing.filenames = self._forcing_paths
 
         # all MARBL files must be present to enable MARBL
+        runtime_code_filenames = [f.basename for f in self.runtime_code.source]
         if all(
-            f in self.runtime_code.files
+            f in runtime_code_filenames
             for f in [
                 "marbl_in",
                 "marbl_tracer_output_list",
                 "marbl_diagnostic_output_list",
             ]
         ):
+            runtime_code_path = self.runtime_code.working_copy.common_parent
             simulation_runtime_settings.marbl_biogeochemistry = (
                 cstar.roms.runtime_settings.MARBLBiogeochemistry(
-                    marbl_namelist_fname=self.runtime_code.working_path / "marbl_in",
-                    marbl_tracer_list_fname=self.runtime_code.working_path
+                    marbl_namelist_fname=runtime_code_path / "marbl_in",
+                    marbl_tracer_list_fname=runtime_code_path
                     / "marbl_tracer_output_list",
-                    marbl_diag_list_fname=self.runtime_code.working_path
+                    marbl_diag_list_fname=runtime_code_path
                     / "marbl_diagnostic_output_list",
                 )
             )
@@ -765,7 +847,11 @@ class ROMSSimulation(Simulation):
         simulation_kwargs["codebase"] = codebase
 
         marbl_codebase_kwargs = simulation_dict.get("marbl_codebase", {})
-        marbl_codebase = MARBLExternalCodeBase(**marbl_codebase_kwargs)
+        marbl_codebase = (
+            MARBLExternalCodeBase(**marbl_codebase_kwargs)
+            if marbl_codebase_kwargs
+            else None
+        )
 
         simulation_kwargs["marbl_codebase"] = marbl_codebase
 
@@ -887,10 +973,8 @@ class ROMSSimulation(Simulation):
         simulation_dict = super().to_dict()
 
         # MARBLExternalCodeBase
-        marbl_codebase_info = {}
-        marbl_codebase_info["source_repo"] = self.marbl_codebase.source_repo
-        marbl_codebase_info["checkout_target"] = self.marbl_codebase.checkout_target
-        simulation_dict["marbl_codebase"] = marbl_codebase_info
+        if self.marbl_codebase:
+            simulation_dict["marbl_codebase"] = self.marbl_codebase.to_dict()
 
         # InputDatasets:
         if self.model_grid is not None:
@@ -948,16 +1032,8 @@ class ROMSSimulation(Simulation):
         to_blueprint : Saves the simulation as a YAML blueprint.
         from_dict : Creates an instance from a dictionary representation.
         """
-        source = DataSource(location=blueprint)
-        if source.source_type != "yaml":
-            raise ValueError(
-                f"C-Star expects blueprint in '.yaml' format, but got {blueprint}"
-            )
-        if source.location_type == "path":
-            with open(blueprint) as file:
-                bp_dict = yaml.safe_load(file)
-        elif source.location_type == "url":
-            bp_dict = yaml.safe_load(requests.get(source.location).text)
+        source = SourceData(location=blueprint)
+        bp_dict = yaml.safe_load(source.retriever.read().decode("utf-8"))
 
         bp = RomsMarblBlueprint.model_validate(bp_dict)
         return cls(
@@ -1020,14 +1096,15 @@ class ROMSSimulation(Simulation):
         if hasattr(self, "runtime_code") and (self.runtime_code is not None):
             simulation_tree_dict.setdefault("runtime_code", {})
             simulation_tree_dict["runtime_code"] = [
-                runtime_code.split("/")[-1] for runtime_code in self.runtime_code.files
+                codefile.basename
+                for codefile in self.runtime_code.source
+                # runtime_code.split("/")[-1] for runtime_code in self.runtime_code.files
             ]
 
         if hasattr(self, "compile_time_code") and (self.compile_time_code is not None):
             simulation_tree_dict.setdefault("compile_time_code", {})
             simulation_tree_dict["compile_time_code"] = [
-                compile_time_code.split("/")[-1]
-                for compile_time_code in self.compile_time_code.files
+                codefile.basename for codefile in self.compile_time_code.source
             ]
         print_dict = {}
         print_dict["ROMS"] = simulation_tree_dict
@@ -1080,11 +1157,11 @@ class ROMSSimulation(Simulation):
             # step, otherwise they may try to clobber each other or get tripped up on
             # detecting existing directories.
             if os.getenv("CSTAR_ORCHESTRATED", "0") == "1":
-                codebase_dir = codebases_dir / codebase.expected_env_var.split("_")[0]
+                codebase_dir = codebases_dir / codebase.root_env_var.split("_")[0]
                 codebase_dir.mkdir(parents=True, exist_ok=True)
                 codebase.get(codebase_dir)
-                os.environ[codebase.expected_env_var] = str(codebase_dir)
-            codebase.handle_config_status()
+                os.environ[codebase.root_env_var] = str(codebase_dir)
+            codebase.setup()
 
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")
@@ -1143,9 +1220,9 @@ class ROMSSimulation(Simulation):
         --------
         setup : Fetches and organizes necessary files for the simulation.
         """
-        if self.codebase.local_config_status != 0:
+        if not self.codebase.is_configured:
             return False
-        if self.marbl_codebase.local_config_status != 0:
+        if self.marbl_codebase and not self.marbl_codebase.is_configured:
             return False
         if (self.runtime_code is not None) and (not self.runtime_code.exists_locally):
             return False
@@ -1217,14 +1294,13 @@ class ROMSSimulation(Simulation):
         setup : Ensures necessary files are available before compilation.
         run : Executes the compiled ROMS model.
         """
-        self.compile_time_code = cast(AdditionalCode, self.compile_time_code)
-        build_dir = self.compile_time_code.working_path
-        if build_dir is None:
+        if (not self.compile_time_code) or (not self.compile_time_code.working_copy):
             raise ValueError(
                 "Unable to compile ROMSSimulation: "
-                + "\nROMSSimulation.compile_time_code.working_path is None."
+                + "\nROMSSimulation.compile_time_code is not staged locally."
                 + "\n Call ROMSSimulation.compile_time_code.get() and try again"
             )
+        build_dir = self.compile_time_code.working_copy.common_parent
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())
@@ -1388,7 +1464,7 @@ class ROMSSimulation(Simulation):
                 "Simulation.n_procs_tot is not set"
             )
 
-        if self.runtime_code.working_path is None:
+        if not self.runtime_code.working_copy:
             raise FileNotFoundError(
                 "Local copy of ROMSSimulation.runtime_code does not exist. "
                 "Call ROMSSimulation.setup() or ROMSSimulation.runtime_code.get() "
@@ -1402,9 +1478,8 @@ class ROMSSimulation(Simulation):
 
         # we run ROMS in the output dir
         run_path = self.directory / "output"
-
         final_runtime_settings_file = (
-            self.runtime_code.working_path.resolve() / f"{self.name}.in"
+            Path(self.runtime_code.working_copy[0].path).parent / f"{self.name}.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
         run_path.mkdir(parents=True, exist_ok=True)
@@ -1532,8 +1607,8 @@ class ROMSSimulation(Simulation):
         Returns
         -------
         ROMSSimulation
-            A new instance of `ROMSSimulation` that starts from `end_date`.
-            file and runs until `new_end_date`.
+            A new instance of `ROMSSimulation` that starts from `end_date`
+            and runs until `new_end_date`.
 
         Raises
         ------
@@ -1593,8 +1668,6 @@ class ROMSSimulation(Simulation):
 
         # Reset cached data for input datasets
         for inp in new_sim.input_datasets:
-            inp._local_file_hash_cache.clear()
-            inp._local_file_stat_cache.clear()
-            inp.working_path = None
+            inp._working_copy = None
 
         return new_sim

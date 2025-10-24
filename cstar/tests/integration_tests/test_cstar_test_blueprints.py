@@ -20,9 +20,8 @@ class TestCStar:
     def test_cstar(
         self,
         tmp_path: Path,
-        mock_user_input,
-        mock_lmod_path: Path,
         modify_template_blueprint,
+        mock_lmod_path: Path,
         fetch_remote_test_case_data,
         test_config_key,
         log: logging.Logger,
@@ -33,8 +32,6 @@ class TestCStar:
         -----------
         tmp_path:
            Built-in pytest fixture to create temporary directories
-        mock_user_input:
-           Fixture to simulate user-supplied input
         modify_template_blueprint:
            Fixture to modify the contents of a template blueprint and save to a
            temporary file (from which the ROMSSimulation instance is created)
@@ -81,12 +78,10 @@ class TestCStar:
                 modified_blueprint,
             )
 
-            with mock_user_input("y"):
-                cstar_test_case.setup()
+            cstar_test_case.setup()
 
             cstar_test_case.build()
             cstar_test_case.pre_run()
             test_process = cstar_test_case.run()
-            with mock_user_input("y"):
-                test_process.updates(seconds=0)
+            test_process.updates(seconds=60)
             cstar_test_case.post_run()
