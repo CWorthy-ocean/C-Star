@@ -2,6 +2,7 @@ import argparse
 import typing as t
 
 from cstar.cli.core import RegistryResult, cli_activity
+from cstar.orchestration.dag_runner import build_and_run_dag
 
 
 async def handle(ns: argparse.Namespace) -> None:
@@ -12,8 +13,8 @@ async def handle(ns: argparse.Namespace) -> None:
     ns : argparse.Namespace
         User inputs parsed by the CLI
     """
-    print("mock - running the workplan...")
-    print(f"Received command: {ns}")
+    await build_and_run_dag(ns.path)
+    print(f"Completed handling command: {ns}")
 
 
 @cli_activity

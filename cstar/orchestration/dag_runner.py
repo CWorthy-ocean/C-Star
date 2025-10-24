@@ -3,6 +3,7 @@ This is a hacky POC and not a production-level solution, it should be removed or
 before going into develop/main
 """
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -98,7 +99,7 @@ def check_job(step: Step, job_id: JobId) -> ExecutionStatus:
 
 
 @flow
-def build_and_run_dag(path: Path) -> None:
+async def build_and_run_dag(path: Path) -> None:
     """Execute the steps in the workplan.
 
     Parameters
@@ -162,5 +163,5 @@ if __name__ == "__main__":
     os.environ["CSTAR_RUNID"] = my_run_name
     # t = Thread(target=check_job.serve)
     # t.start()
-    build_and_run_dag(wp_path)
+    asyncio.run(build_and_run_dag(wp_path))
     # t.join()
