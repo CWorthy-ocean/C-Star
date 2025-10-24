@@ -1,7 +1,15 @@
 from pathlib import Path
-from unittest.mock import PropertyMock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def skip_html_checks_for_performance():
+    fake_response = Mock()
+    fake_response.headers = {"Content-Type": "application/octet-stream"}
+    with patch("cstar.io.source_data.requests.head", return_value=fake_response):
+        yield
 
 
 @pytest.fixture(scope="session")

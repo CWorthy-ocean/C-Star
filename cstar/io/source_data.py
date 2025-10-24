@@ -117,7 +117,9 @@ class _SourceInspector:
     def source_type(self) -> SourceType:
         """Infer source type (file/directory/repository) from 'location'."""
         if not self._source_type:
-            if self._is_repository:
+            if self.suffix == ".git":
+                self._source_type = SourceType.REPOSITORY
+            elif not self.suffix and self._is_repository:
                 self._source_type = SourceType.REPOSITORY
             elif self.location_type is LocationType.HTTP:
                 if not self._http_is_html:
