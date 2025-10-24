@@ -6,7 +6,8 @@ import pytest
 
 from cstar.cli.workplan.actions.check import create_action, handle
 from cstar.cli.workplan.command import create_command_root
-from cstar.orchestration.serialization import serialize
+from cstar.orchestration.models import Workplan
+from cstar.orchestration.serialization import deserialize, serialize
 
 
 @pytest.fixture
@@ -54,6 +55,41 @@ def test_cli_workplan_check_action(
     serialize(wp_path, workplan)
     ns = parser.parse_args(["workplan", "check", wp_path.as_posix()])
 
+    handle(ns)
+    captured = capsys.readouterr().out
+    assert " valid" in captured
+
+
+@pytest.mark.parametrize(
+    "template_file",
+    ["fanout_workplan.yaml", "linear_workplan.yaml", "mvp_workplan.yaml"],
+)
+def test_cli_workplan_check_action_tpl(
+    # request: pytest.FixtureRequest,
+    # tmp_path: Path,
+    template_file: str,
+    parser: argparse.ArgumentParser,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Verify that CLI check action validates the stored templates.
+
+    Parameters
+    ----------
+    request : pytest.FixtureRequest
+        Pytest request used to load fixtures by name
+    tmp_path : Path
+        Temporary directory for test outputs
+    workplan_name : str
+        The name of a workplan fixture to use for workplan creation
+    """
+    # workplan = request.getfixturevalue(workplan_name)
+    templates_dir = Path("/Users/chris/code/cstar/cstar/additional_files/templates")
+    wp_path = templates_dir / template_file
+
+    workplan: Workplan = deserialize(wp_path, Workplan)
+    assert workplan, "sanity-check deserialize failed."
+
+    ns = parser.parse_args(["workplan", "check", wp_path.as_posix()])
     handle(ns)
     captured = capsys.readouterr().out
     assert " valid" in captured

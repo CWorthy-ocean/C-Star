@@ -10,7 +10,7 @@ from cstar.orchestration.planning import GraphPlanner
     "workplan_name",
     ["mvp_workplan", "fanout_workplan", "linear_workplan"],
 )
-def test_cli_plan_action_mvp(
+def test_cli_plan_action(
     request: pytest.FixtureRequest, tmp_path: Path, workplan_name: str
 ) -> None:
     """Verify that CLI plan action generates an output image from a workplan.
