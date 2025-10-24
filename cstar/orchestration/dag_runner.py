@@ -23,20 +23,28 @@ JobStatus = str
 
 # these are little mocks you can uncomment if you want to run this locally and not on anvil
 
-# def create_scheduler_job(*args, **kwargs):
-#     class dummy:
-#         def submit(self):
-#             pass
-#
+# import random # noqa: E402, I001
+# from cstar.execution.scheduler_job import SchedulerJob  # noqa: E402, I001
+# def create_scheduler_job(*args, **kwargs) -> "SchedulerJob":  # noqa: F811
+#     class DummySchedulerJob:
+#         """Dummy job with minimum interface necessary for mock job execution."""
+
+#         def __init__(self) -> None:
+#             print("Creating dummy scheduler job.")
+#             self._id = random.randint(1, 100_000_000)
+
+#         def submit(self) -> None:
+#             print("Performing dummy job submission.")
+
 #         @property
-#         def id(self ):
-#             return uuid4()
-#
-#     return dummy()
-#
-#
-# def get_status_of_slurm_job(*args, **kwargs):
-#     sleep(30)
+#         def id(self) -> int | None:
+#             return self._id
+
+#     return DummySchedulerJob()
+
+
+# def get_status_of_slurm_job(job_id: str, param) -> ExecutionStatus:
+#     sleep(LOCAL_SLEEP_DURATION)
 #     return ExecutionStatus.COMPLETED
 
 
