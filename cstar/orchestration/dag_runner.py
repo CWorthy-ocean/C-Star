@@ -85,15 +85,15 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
 def check_job(step: Step, job_id: JobId) -> ExecutionStatus:
     t_start = time()
     dur = 10 * 60
+    status = ExecutionStatus.UNKNOWN
+
     while time() - t_start < dur:
         status = get_status_of_slurm_job(job_id)
         print(f"status of {step.name} is {status}")
-        if status in [
-            ExecutionStatus.CANCELLED,
-            ExecutionStatus.FAILED,
-            ExecutionStatus.COMPLETED,
-        ]:
+
+        if ExecutionStatus.is_terminal(status):
             return status
+
         sleep(10)
     return status
 
