@@ -3,12 +3,12 @@ import itertools
 import logging
 import os
 import shutil
+from copy import deepcopy
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-import cstar
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.entrypoint.service import ServiceConfiguration
 from cstar.entrypoint.worker.worker import (
@@ -58,18 +58,18 @@ def valid_args_short() -> dict[str, str]:
     }
 
 
-@pytest.fixture
-def sim_runner(
+# todo: try to rectify with Dafydd's patch_romssimulation_init_sourcedata
+
+
+@pytest.fixture(scope="module")
+def sim_runner_prep(
     blueprint_path: Path,
-    tmp_path: Path,
+    tmp_path_factory,
 ) -> SimulationRunner:
     """Fixture to create a SimulationRunner instance.
 
     Parameters
     ----------
-    stub_romssimulation: ROMSSimulation
-        An instance of ROMSSimulation to be used for the test and the path
-        to a temporary directory where the simulation resources are stored.
     tmp_path : Path
         A temporary path to store the output directory for the simulation.
 
@@ -78,8 +78,6 @@ def sim_runner(
     SimulationRunner
         An initialized instance of SimulationRunner, configured via blueprint.
     """
-    output_path = tmp_path / "output"
-
     request = BlueprintRequest(
         str(blueprint_path),
         stages=tuple(SimulationStages),
@@ -95,6 +93,14 @@ def sim_runner(
     )
     job_config = JobConfig()
     sim = SimulationRunner(request, service_config, job_config)
+    return sim
+
+
+@pytest.fixture(scope="function")
+def sim_runner(sim_runner_prep, tmp_path) -> SimulationRunner:
+    sim = deepcopy(sim_runner_prep)
+    output_path = tmp_path / "output"
+
     sim._output_root = output_path  # type: ignore[misc]
     sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
     sim._simulation.directory = sim._output_dir
@@ -362,10 +368,8 @@ def test_start_runner(
         health_check_log_threshold=10,
     )
     job_config = JobConfig()
-    with mock.patch.object(
-        cstar.roms.simulation.ROMSSimulation, "from_blueprint", return_value=og_sim
-    ):
-        runner = SimulationRunner(request, service_config, job_config)
+
+    runner = SimulationRunner(request, service_config, job_config)
 
     assert runner._blueprint_uri == request.blueprint_uri
 
@@ -484,7 +488,6 @@ def test_runner_directory_prep(
 async def test_runner_can_shutdown_as_task(
     sim_runner: SimulationRunner,
     tmp_path: Path,
-    stub_romssimulation,
 ) -> None:
     """Test the shutdown override of the base Service class.
 
@@ -497,9 +500,6 @@ async def test_runner_can_shutdown_as_task(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    stub_romssimulation: ROMSSimulation
-        An instance of ROMSSimulation to be used for the test and the path
-        to a temporary directory where the simulation resources are stored.
     """
     output_dir = tmp_path / "output"
 
@@ -539,9 +539,6 @@ async def test_runner_can_shutdown_as_task_null_sim(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    stub_romssimulation: ROMSSimulation
-        An instance of ROMSSimulation to be used for the test and the path
-        to a temporary directory where the simulation resources are stored.
     """
     output_dir = tmp_path / "output"
 
@@ -550,12 +547,11 @@ async def test_runner_can_shutdown_as_task_null_sim(
 
     # Configure the SimulationRunner to run as a task
     sim_runner._config.as_service = False
-    # use `setattr` to force-change the Final
-    setattr(sim_runner, "_simulation", None)  # noqa: B010
 
-    # and confirm it exits immediately when the simulation is None
-    assert sim_runner._can_shutdown()
-    assert sim_runner._is_status_complete()
+    with mock.patch.object(sim_runner, "_simulation", None):
+        # and confirm it exits immediately when the simulation is None
+        assert sim_runner._can_shutdown()
+        assert sim_runner._is_status_complete()
 
 
 @pytest.mark.asyncio
@@ -584,12 +580,10 @@ async def test_runner_can_shutdown_as_service_null_sim(
     # Configure the SimulationRunner to run as a task
     sim_runner._config.as_service = True
 
-    # use `setattr` to force-change the Final
-    setattr(sim_runner, "_simulation", None)  # noqa: B010
-
-    # and confirm it exits immediately when the simulation is None
-    assert sim_runner._can_shutdown()
-    assert sim_runner._is_status_complete()
+    with mock.patch.object(sim_runner, "_simulation", None):
+        # and confirm it exits immediately when the simulation is None
+        assert sim_runner._can_shutdown()
+        assert sim_runner._is_status_complete()
 
 
 @pytest.mark.asyncio
@@ -1142,8 +1136,8 @@ async def test_runner_on_iteration(
 )
 @pytest.mark.asyncio
 async def test_runner_setup_stage(
+    sim_runner: SimulationRunner,
     blueprint_path: Path,
-    tmp_path: Path,
     setup: bool,
     build: bool,
     pre_run: bool,
@@ -1164,12 +1158,6 @@ async def test_runner_setup_stage(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
-    mock_simulation = mock.Mock(spec=Simulation)
     mock_prep_fs = mock.Mock()
 
     stages = []
@@ -1189,19 +1177,8 @@ async def test_runner_setup_stage(
         stages=tuple(stages),
     )
 
-    service_config = ServiceConfiguration(
-        as_service=False,
-        loop_delay=0,
-        health_check_frequency=0,
-        log_level=logging.DEBUG,
-        health_check_log_threshold=30,
-        name="test_simulation_runner",
-    )
-    job_config = JobConfig()
-    with mock.patch.object(
-        cstar.roms.simulation.ROMSSimulation, "from_blueprint", return_value=simulation
-    ):
-        sim_runner = SimulationRunner(request, service_config, job_config)
+    setattr(sim_runner, "_stages", tuple(request.stages))
+    mock_simulation = mock.Mock(spec=Simulation)
 
     def _mock_run(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
         return mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
@@ -1273,7 +1250,7 @@ async def test_worker_main_exec(
 ) -> None:
     """Test the main entrypoint of the worker service.
 
-    This test verifies that the the main function will run the simulation when called
+    This test verifies that the main function will run the simulation when called
     with properly formatted arguments.
     """
     mock_execute = mock.AsyncMock(return_code=0)
@@ -1299,11 +1276,6 @@ async def test_worker_main_exec(
             },
             clear=True,
         ),
-        mock.patch.object(
-            cstar.roms.simulation.ROMSSimulation,
-            "from_blueprint",
-            return_value=simulation,
-        ),
     ):
         # This should run the simulation and return a success code
         return_code = await main(args)
@@ -1324,11 +1296,9 @@ async def test_worker_main_cstar_error(
 ) -> None:
     """Test the main entrypoint of the worker service.
 
-    This test verifies that the the main function catches CStarXxxErrors and shuts down
+    This test verifies that the main function catches CStarXxxErrors and shuts down
     gracefully.
     """
-    mock_execute = mock.AsyncMock(side_effect=exception_type("Mock error"))
-
     args = [
         "--blueprint-uri",
         str(blueprint_path),
@@ -1336,11 +1306,14 @@ async def test_worker_main_cstar_error(
         "DEBUG",
     ]
 
+    def return_mocked_sim_runner(*args, **kwargs):
+        raise exception_type("Mock error")
+
     # don't let it perform any real work; mock out runner.execute
     with (
         mock.patch(
-            "cstar.entrypoint.worker.SimulationRunner.execute",
-            mock_execute,
+            "cstar.entrypoint.worker.SimulationRunner.__new__",
+            return_mocked_sim_runner,
         ),
         mock.patch.dict(
             os.environ,

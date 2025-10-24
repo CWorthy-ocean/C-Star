@@ -32,7 +32,7 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def blueprint_path() -> Path:
     """Fixture that creates and returns a blueprint yaml location.
 
