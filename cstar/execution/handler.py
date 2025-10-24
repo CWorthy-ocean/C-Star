@@ -47,6 +47,14 @@ class ExecutionStatus(Enum):
     def __str__(self) -> str:
         return self.name.lower()  # Convert enum name to lowercase for display
 
+    @classmethod
+    def is_terminal(cls, status: "ExecutionStatus") -> bool:
+        return status in [
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.FAILED,
+        ]
+
 
 class ExecutionHandler(ABC, LoggingMixin):
     """Abstract base class for managing the execution of a task or process.

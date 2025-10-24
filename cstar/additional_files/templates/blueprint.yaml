@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=/private/var/folders/pj/bk3042bs0tldhwq8htgfnm640000gn/T/pytest-of-chris/pytest-9/test_serial_planner0/schema.json
+name: Test Blueprint
+description: This is the description of my test blueprint
+application: sleep
+state: draft
+valid_start_date: 2020-01-01 00:00:00
+valid_end_date: 2020-02-01 00:00:00
+code:
+  roms:
+    location: http://github.com/ankona/ucla-roms
+    branch: main
+    filter: null
+  run_time:
+    location: http://github.com/ankona/ucla-roms
+    branch: main
+    filter: null
+  compile_time:
+    location: http://github.com/ankona/ucla-roms
+    branch: main
+    filter: null
+  marbl: null
+forcing:
+  boundary:
+    data:
+      - location: http://mockdoc.com/partitioning1.nc
+        hash: abc
+      - location: http://mockdoc.com/partitioning2.nc
+        hash: pqr
+      - location: http://mockdoc.com/partitioning3.nc
+        hash: xyz
+  surface:
+    documentation: http://mockdoc.com/partitioning
+    locked: false
+    data:
+      - location: http://mockdoc.com/partitioning.nc
+        hash: abc123
+  corrections:
+    documentation: http://mockdoc.com/partitioning
+    locked: false
+    data:
+      - location: http://mockdoc.com/partitioning.nc
+        hash: abc123
+  tidal:
+    documentation: http://mockdoc.com/partitioning
+    locked: false
+    data:
+      - location: http://mockdoc.com/partitioning.nc
+        hash: abc123
+  river:
+    documentation: http://mockdoc.com/partitioning
+    locked: false
+    data:
+      - location: http://mockdoc.com/partitioning.nc
+        hash: abc123
+partitioning:
+  documentation: http://mockdoc.com/partitioning
+  hash: null
+  locked: false
+  n_procs_x: 16
+  n_procs_y: 8
+model_params:
+  documentation: http://mockdoc.com/model-params
+  hash: null
+  locked: false
+  time_step: 1
+runtime_params:
+  documentation: http://mockdoc.com/runtime-params
+  hash: null
+  locked: false
+  start_date: 2020-01-01 00:00:00
+  end_date: 2020-01-02 00:00:00
+  checkpoint_frequency: 1d
+  output_dir: .
+grid:
+  documentation: http://mockdoc.com/model-params
+  data:
+    - location: http://mockdoc.com/grid
+initial_conditions:
+  data:
+    - location: http://mockdoc.com/grid

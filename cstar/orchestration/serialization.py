@@ -1,7 +1,8 @@
 import enum
 import typing as t
-from pathlib import Path
+from pathlib import Path, PosixPath
 
+import yaml
 from pydantic import BaseModel
 from yaml import safe_load
 
@@ -50,6 +51,57 @@ adapter_map: dict[
     models.RomsMarblBlueprint: _bp_to_sim,
     models.Workplan: _wp_to_sim,
 }
+
+
+def model_to_yaml(model: BaseModel) -> str:
+    """Serialize a model to yaml.
+
+    Parameters
+    ----------
+    model : BaseModel
+        The model to be serialized
+
+    Returns
+    -------
+    str
+        The serialized model
+    """
+    dumped = model.model_dump(exclude_defaults=True)
+
+    def path_representer(
+        dumper: yaml.Dumper,
+        data: PosixPath,
+    ) -> yaml.ScalarNode:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+    def application_representer(
+        dumper: yaml.Dumper,
+        data: models.Application,
+    ) -> yaml.ScalarNode:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+    def blueprintstate_representer(
+        dumper: yaml.Dumper,
+        data: models.BlueprintState,
+    ) -> yaml.ScalarNode:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+    def workplanstate_representer(
+        dumper: yaml.Dumper,
+        data: models.WorkplanState,
+    ) -> yaml.ScalarNode:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+    dumper = yaml.Dumper
+    dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
+
+    dumper.add_representer(PosixPath, path_representer)
+    dumper.add_representer(models.WorkplanState, workplanstate_representer)
+    dumper.add_representer(models.Application, application_representer)
+    dumper.add_representer(models.BlueprintState, blueprintstate_representer)
+
+    return yaml.dump(dumped, sort_keys=False)
+
 
 _DT = t.TypeVar("_DT", models.RomsMarblBlueprint, models.Workplan)
 
@@ -103,3 +155,32 @@ def deserialize(
         raise ValueError(msg)
 
     return model
+
+
+def serialize(
+    path: Path,
+    model: BaseModel,
+    mode: PersistenceMode = PersistenceMode.yaml,
+) -> None:
+    """Serialize a model into a file.
+
+    Parameters
+    ----------
+    path : Path
+        The location to store the serialized model in
+    model : BaseModel
+        The model to serialize
+    mode : PersistenceMode
+        Specify the type of document to produce (yaml or json)
+    """
+    if mode == PersistenceMode.auto:
+        mode = PersistenceMode.yaml
+
+    if mode == PersistenceMode.json:
+        output_document = model.model_dump_json()
+    elif mode == PersistenceMode.yaml:
+        output_document = model_to_yaml(model)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open(mode="w") as fp:
+        fp.write(output_document)

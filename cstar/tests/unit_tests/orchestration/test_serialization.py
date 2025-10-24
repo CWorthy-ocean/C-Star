@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.orchestration.models import Application, Workplan
+from cstar.orchestration.serialization import deserialize, serialize
 
 
 def test_workplan_no_data(
@@ -195,3 +196,37 @@ def test_workplan_runtime_vars(
     expected = set(expected_vars)
 
     assert actual == expected
+
+
+@pytest.mark.parametrize(
+    "workplan_name",
+    [
+        "mvp_workplan",
+        "linear_workplan",
+        "fanout_workplan",
+    ],
+)
+def test_end_to_end(
+    tmp_path: Path, request: pytest.FixtureRequest, workplan_name: str
+) -> None:
+    """Verify that a workplan can be serialized from an object to a file, then
+    the operation can be reversed.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    request : pytest.FixtureRequest
+        Pytest request used to load fixtures by name
+    workplan_name : str
+        The fixture name producing a workplan to test serialization operations on.
+    """
+    # tmp_path = Path.cwd()
+    workplan: Workplan = request.getfixturevalue(workplan_name)
+    document_path = tmp_path / f"{workplan_name}.yaml"
+
+    serialize(document_path, workplan)
+    wp = deserialize(document_path, Workplan)
+
+    is_match = wp.model_dump_json() == workplan.model_dump_json()
+    assert is_match, "The final workplan does not match the input workplan"

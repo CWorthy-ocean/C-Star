@@ -3,6 +3,7 @@ This is a hacky POC and not a production-level solution, it should be removed or
 before going into develop/main
 """
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -22,34 +23,53 @@ JobStatus = str
 
 # these are little mocks you can uncomment if you want to run this locally and not on anvil
 
-# def create_scheduler_job(*args, **kwargs):
-#     class dummy:
-#         def submit(self):
-#             pass
-#
+# import random # noqa: E402, I001
+# from cstar.execution.scheduler_job import SchedulerJob  # noqa: E402, I001
+# def create_scheduler_job(*args, **kwargs) -> "SchedulerJob":  # noqa: F811
+#     class DummySchedulerJob:
+#         """Dummy job with minimum interface necessary for mock job execution."""
+
+#         def __init__(self) -> None:
+#             print("Creating dummy scheduler job.")
+#             self._id = random.randint(1, 100_000_000)
+
+#         def submit(self) -> None:
+#             print("Performing dummy job submission.")
+
 #         @property
-#         def id(self ):
-#             return uuid4()
-#
-#     return dummy()
-#
-#
-# def get_status_of_slurm_job(*args, **kwargs):
-#     sleep(30)
+#         def id(self) -> int | None:
+#             return self._id
+
+#     return DummySchedulerJob()
+
+
+# def get_status_of_slurm_job(job_id: str, param) -> ExecutionStatus:
+#     sleep(LOCAL_SLEEP_DURATION)
 #     return ExecutionStatus.COMPLETED
 
 
-def cache_func(context: TaskRunContext, params):
-    """Cache on a combination of the task name and user-assigned run id"""
+def cache_func(context: TaskRunContext, params) -> str:
+    """Cache on a combination of the task name and user-assigned run id.
+
+    Parameters
+    ----------
+    context : TaskRunContext
+        The prefect context object for the currently running task.
+    params : t.Any
+        Extra params
+        #TODO: look this up in the prefect docs
+    """
     cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
     print(f"Cache check: {cache_key}")
     return cache_key
 
 
 @task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
-def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
+def submit_job(step: Step, job_dep_ids: list[str] | None = None) -> JobId:
     bp_path = step.blueprint
     bp = deserialize(Path(bp_path), RomsMarblBlueprint)
+    if job_dep_ids is None:
+        job_dep_ids = []
 
     job = create_scheduler_job(
         commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
@@ -72,56 +92,80 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
 
 
 @task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
-def check_job(step, job_id, deps: list[str] = []) -> ExecutionStatus:
+def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatus:
     t_start = time()
     dur = 10 * 60
+    status = ExecutionStatus.UNKNOWN
+
     while time() - t_start < dur:
         status = get_status_of_slurm_job(job_id)
         print(f"status of {step.name} is {status}")
-        if status in [
-            ExecutionStatus.CANCELLED,
-            ExecutionStatus.FAILED,
-            ExecutionStatus.COMPLETED,
-        ]:
+
+        if ExecutionStatus.is_terminal(status):
             return status
+
         sleep(10)
     return status
 
 
 @flow
-def build_and_run_dag(workplan_path: Path):
-    wp = deserialize(workplan_path, Workplan)
+async def build_and_run_dag(path: Path) -> None:
+    """Execute the steps in the workplan.
+
+    Parameters
+    ----------
+    path : Path
+        The path to the blueprint to execute
+    """
+    wp = deserialize(path, Workplan)
 
     id_dict = {}
     status_dict = {}
 
     no_dep_steps = []
-
     follow_up_steps = []
 
     for step in wp.steps:
         if not step.depends_on:
+            print(f"No dependencies found for step: {step.name}")
             no_dep_steps.append(step)
         else:
+            print(f"Adding dependencies for step: {step.name}")
             follow_up_steps.append(step)
 
     for step in no_dep_steps:
+        print(f"Submitting step: {step.name}")
         id_dict[step.name] = submit_job(step)
-        status_dict[step.name] = check_job.submit(step, id_dict[step.name])
 
-    while True:
+        print(f"Retrieving status of step: {step.name}")
+        status_dict[step.name] = check_job.submit(step, id_dict[step.name])
+        print(f"Step {step.name} current status: {status_dict[step.name]}")
+
+    num_complete = 0
+    num_steps = len(wp.steps)
+
+    if num_complete == num_steps:
+        print("No job dependencies found")
+
+    while num_complete < num_steps:
+        completion_ratio = 100 * num_complete / num_steps
+        print(f"Awaiting dependent tasks. {completion_ratio:3.0f}% complete.")
+
         for step in follow_up_steps:
+            print(f"Checking step: {step.name}")
+
             if all(s in id_dict for s in step.depends_on):
+                print(f"Prerequisites met for step: {step.name}. Starting...")
                 id_dict[step.name] = submit_job(
                     step, [id_dict[s] for s in step.depends_on]
                 )
                 status_dict[step.name] = check_job.submit(
                     step, id_dict[step.name], [status_dict[s] for s in step.depends_on]
                 )
-        if len(id_dict) == len(wp.steps):
-            break
 
+        num_complete = len(id_dict)
     wait(list(status_dict.values()))
+    print("All steps completed.")
 
 
 if __name__ == "__main__":
@@ -137,5 +181,5 @@ if __name__ == "__main__":
     os.environ["CSTAR_RUNID"] = my_run_name
     # t = Thread(target=check_job.serve)
     # t.start()
-    build_and_run_dag(wp_path)
+    asyncio.run(build_and_run_dag(wp_path))
     # t.join()

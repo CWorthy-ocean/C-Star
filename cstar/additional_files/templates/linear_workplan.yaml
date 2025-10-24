@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=file://workplan-schema.json
+name: Linear Workplan
+description: a workplan that executes tasks with linear dependencies
+steps:
+- name: step A
+  application: sleep
+  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
+  depends_on:
+  - step B
+- name: step B
+  application: sleep
+  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
+state: draft
