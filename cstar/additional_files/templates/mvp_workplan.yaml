@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=file://workplan-schema.json
 name: MVP workplan
-description: minimum viable workplan
+description: a single-step, minimal workplan
 steps:
 - name: step 1
   application: sleep

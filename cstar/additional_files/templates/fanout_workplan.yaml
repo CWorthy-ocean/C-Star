@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=file://workplan-schema.json
+name: Fan-out Workplan
+description: a workplan that executes tasks in parallel
+steps:
+- name: step A
+  application: sleep
+  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
+- name: step B
+  application: sleep
+  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
+state: draft
