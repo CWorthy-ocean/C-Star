@@ -92,14 +92,16 @@ def replace_schema_directive(template: str, schema_path: Path | None) -> str:
     str
         The modified template content
     """
+    template_lines = template.split("\n")
+    if not template_lines[0].startswith("#"):
+        return template
+
     if schema_path:
         schema_ref = f"# yaml-language-server: $schema=file://{schema_path}"
     else:
         schema_ref = "# yaml-language-server: $schema=<schema-uri>"
 
-    template_lines = template.split("\n")
     template_lines[0] = schema_ref
-
     return "\n".join(template_lines)
 
 
