@@ -26,7 +26,13 @@ async def handle(ns: argparse.Namespace) -> None:
 
 @cli_activity
 def create_action() -> RegistryResult:
-    """Integrate the blueprint-check command into the CLI."""
+    """Integrate the blueprint-check command into the CLI.
+
+    Returns
+    -------
+    RegistryResult
+        A 2-tuple containing ((command name, action name), parser function)
+    """
     command: t.Literal["blueprint"] = "blueprint"
     action: t.Literal["check"] = "check"
 

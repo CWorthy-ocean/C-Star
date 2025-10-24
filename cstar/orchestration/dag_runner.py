@@ -39,8 +39,17 @@ JobStatus = str
 #     return ExecutionStatus.COMPLETED
 
 
-def cache_func(context: TaskRunContext, params):
-    """Cache on a combination of the task name and user-assigned run id"""
+def cache_func(context: TaskRunContext, params) -> str:
+    """Cache on a combination of the task name and user-assigned run id.
+
+    Parameters
+    ----------
+    context : TaskRunContext
+        The prefect context object for the currently running task.
+    params : t.Any
+        Extra params
+        #TODO: look this up in the prefect docs
+    """
     cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
     print(f"Cache check: {cache_key}")
     return cache_key
@@ -72,7 +81,7 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
 
 
 @task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
-def check_job(step, job_id, deps: list[str] = []) -> ExecutionStatus:
+def check_job(step: Step, job_id: JobId) -> ExecutionStatus:
     t_start = time()
     dur = 10 * 60
     while time() - t_start < dur:
@@ -89,29 +98,44 @@ def check_job(step, job_id, deps: list[str] = []) -> ExecutionStatus:
 
 
 @flow
-def build_and_run_dag(workplan_path: Path):
-    wp = deserialize(workplan_path, Workplan)
+def build_and_run_dag(path: Path) -> None:
+    """Execute the steps in the workplan.
+
+    Parameters
+    ----------
+    path : Path
+        The path to the blueprint to execute
+    """
+    wp = deserialize(path, Workplan)
 
     id_dict = {}
     status_dict = {}
 
     no_dep_steps = []
-
     follow_up_steps = []
 
     for step in wp.steps:
         if not step.depends_on:
+            print(f"No dependencies found for step: {step.name}")
             no_dep_steps.append(step)
         else:
+            print(f"Adding dependencies for step: {step.name}")
             follow_up_steps.append(step)
 
     for step in no_dep_steps:
+        print(f"Submitting step: {step.name}")
         id_dict[step.name] = submit_job(step)
+
+        print(f"Retrieving status of step: {step.name}")
         status_dict[step.name] = check_job.submit(step, id_dict[step.name])
+        print(f"Step {step.name} current status: {status_dict[step.name]}")
 
     while True:
         for step in follow_up_steps:
+            print(f"Checking step: {step.name}")
+
             if all(s in id_dict for s in step.depends_on):
+                print(f"Prerequisites met for step: {step.name}. Starting...")
                 id_dict[step.name] = submit_job(
                     step, [id_dict[s] for s in step.depends_on]
                 )
@@ -122,6 +146,7 @@ def build_and_run_dag(workplan_path: Path):
             break
 
     wait(list(status_dict.values()))
+    print("All steps completed.")
 
 
 if __name__ == "__main__":

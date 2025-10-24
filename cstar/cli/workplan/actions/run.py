@@ -3,8 +3,6 @@ import typing as t
 
 from cstar.cli.core import RegistryResult, cli_activity
 
-# from cstar.system.manager import cstar_sysmgr
-
 
 async def handle(ns: argparse.Namespace) -> None:
     """The action handler for the workplan-run action.
