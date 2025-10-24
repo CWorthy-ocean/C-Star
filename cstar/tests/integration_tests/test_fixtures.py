@@ -12,12 +12,6 @@ from cstar.tests.integration_tests.config import (
 )
 
 
-def test_mock_input_fixture(mock_user_input):
-    # Mocked input behavior
-    with mock_user_input("yes"):
-        assert input("Enter your choice: ") == "yes"
-
-
 def test_modify_template_blueprint(
     modify_template_blueprint: Callable,
     tmp_path: Path,

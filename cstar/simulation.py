@@ -137,8 +137,8 @@ class Simulation(ABC, LoggingMixin):
             self.log.warning(
                 f"Creating {self.__class__.__name__} instance without a specified "
                 "ExternalCodeBase, default codebase will be used:\n"
-                f"          • Source location: {self.codebase.source_repo}\n"
-                f"          • Checkout target: {self.codebase.checkout_target}\n"
+                f"          • Source location: {self.codebase._default_source_repo}\n"
+                f"          • Checkout target: {self.codebase._default_checkout_target}\n"
             )
         else:
             self.codebase = codebase
@@ -289,12 +289,12 @@ class Simulation(ABC, LoggingMixin):
 
         # Runtime code:
         if self.runtime_code is not None:
-            NN = len(self.runtime_code.files)
+            NN = len(self.runtime_code.source)
             base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
 
         # Compile-time code:
         if self.compile_time_code is not None:
-            NN = len(self.compile_time_code.files)
+            NN = len(self.compile_time_code.source)
             base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
 
         exe_path = getattr(self, "exe_path", None)
@@ -410,43 +410,18 @@ class Simulation(ABC, LoggingMixin):
         simulation_dict["valid_end_date"] = self.valid_end_date
 
         # ExternalCodeBases:
-        codebase_info = {}
-        codebase_info["source_repo"] = self.codebase.source_repo
-        codebase_info["checkout_target"] = self.codebase.checkout_target
-        simulation_dict["codebase"] = codebase_info
+        simulation_dict["codebase"] = self.codebase.to_dict()
 
         # discretization
         simulation_dict["discretization"] = self.discretization.__dict__
 
         # runtime code
-        runtime_code = getattr(self, "runtime_code")
-        if runtime_code is not None:
-            runtime_code_info = {}
-            runtime_code_info["location"] = runtime_code.source.location
-            if runtime_code.subdir is not None:
-                runtime_code_info["subdir"] = runtime_code.subdir
-            if runtime_code.checkout_target is not None:
-                runtime_code_info["checkout_target"] = runtime_code.checkout_target
-            if runtime_code.files is not None:
-                runtime_code_info["files"] = runtime_code.files
-
-            simulation_dict["runtime_code"] = runtime_code_info
+        if hasattr(self, "runtime_code") and self.runtime_code is not None:
+            simulation_dict["runtime_code"] = self.runtime_code.to_dict()
 
         # compile-time code
-        compile_time_code = getattr(self, "compile_time_code")
-        if compile_time_code is not None:
-            compile_time_code_info = {}
-            compile_time_code_info["location"] = compile_time_code.source.location
-            if compile_time_code.subdir is not None:
-                compile_time_code_info["subdir"] = compile_time_code.subdir
-            if compile_time_code.checkout_target is not None:
-                compile_time_code_info["checkout_target"] = (
-                    compile_time_code.checkout_target
-                )
-            if compile_time_code.files is not None:
-                compile_time_code_info["files"] = compile_time_code.files
-
-            simulation_dict["compile_time_code"] = compile_time_code_info
+        if hasattr(self, "compile_time_code") and self.compile_time_code is not None:
+            simulation_dict["compile_time_code"] = self.compile_time_code.to_dict()
 
         return simulation_dict
 
@@ -677,7 +652,7 @@ class Simulation(ABC, LoggingMixin):
         new_sim.start_date = self.end_date
         new_sim.directory = (
             new_sim.directory
-            / f"RESTART_{new_sim.start_date.strftime(format='%Y%m%d_%H%M%S')}"
+            / f"RESTART_{new_sim.start_date.strftime('%Y%m%d_%H%M%S')}"
         )
         if isinstance(new_end_date, str):
             new_sim.end_date = dateutil.parser.parse(new_end_date)

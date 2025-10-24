@@ -8,6 +8,7 @@ from unittest import mock
 
 import pytest
 
+import cstar
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.entrypoint.service import ServiceConfiguration
 from cstar.entrypoint.worker.worker import (
@@ -66,7 +67,7 @@ def sim_runner(
 
     Parameters
     ----------
-    example_roms_simulation: tuple[ROMSSimulation, Path]
+    stub_romssimulation: ROMSSimulation
         An instance of ROMSSimulation to be used for the test and the path
         to a temporary directory where the simulation resources are stored.
     tmp_path : Path
@@ -361,8 +362,10 @@ def test_start_runner(
         health_check_log_threshold=10,
     )
     job_config = JobConfig()
-
-    runner = SimulationRunner(request, service_config, job_config)
+    with mock.patch.object(
+        cstar.roms.simulation.ROMSSimulation, "from_blueprint", return_value=og_sim
+    ):
+        runner = SimulationRunner(request, service_config, job_config)
 
     assert runner._blueprint_uri == request.blueprint_uri
 
@@ -481,7 +484,7 @@ def test_runner_directory_prep(
 async def test_runner_can_shutdown_as_task(
     sim_runner: SimulationRunner,
     tmp_path: Path,
-    example_roms_simulation,
+    stub_romssimulation,
 ) -> None:
     """Test the shutdown override of the base Service class.
 
@@ -494,7 +497,7 @@ async def test_runner_can_shutdown_as_task(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    example_roms_simulation: tuple[ROMSSimulation, Path]
+    stub_romssimulation: ROMSSimulation
         An instance of ROMSSimulation to be used for the test and the path
         to a temporary directory where the simulation resources are stored.
     """
@@ -536,7 +539,7 @@ async def test_runner_can_shutdown_as_task_null_sim(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    example_roms_simulation: tuple[ROMSSimulation, Path]
+    stub_romssimulation: ROMSSimulation
         An instance of ROMSSimulation to be used for the test and the path
         to a temporary directory where the simulation resources are stored.
     """
@@ -1195,7 +1198,10 @@ async def test_runner_setup_stage(
         name="test_simulation_runner",
     )
     job_config = JobConfig()
-    sim_runner = SimulationRunner(request, service_config, job_config)
+    with mock.patch.object(
+        cstar.roms.simulation.ROMSSimulation, "from_blueprint", return_value=simulation
+    ):
+        sim_runner = SimulationRunner(request, service_config, job_config)
 
     def _mock_run(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
         return mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
@@ -1292,6 +1298,11 @@ async def test_worker_main_exec(
                 "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
             },
             clear=True,
+        ),
+        mock.patch.object(
+            cstar.roms.simulation.ROMSSimulation,
+            "from_blueprint",
+            return_value=simulation,
         ),
     ):
         # This should run the simulation and return a success code

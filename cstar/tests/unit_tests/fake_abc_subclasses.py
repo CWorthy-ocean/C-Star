@@ -7,25 +7,41 @@ from cstar.roms.runtime_settings import ROMSRuntimeSettingsSection
 
 
 class FakeExternalCodeBase(ExternalCodeBase):
-    """A mock subclass of the `ExternalCodeBase` abstract base class used for testing
-    purposes.
+    """A minimal subclass of the `ExternalCodeBase` abstract base class used for testing
+    purposes, without mocking any logic.
+
+    Abstract methods are defined with simple no-op or user-specified return values.
     """
 
+    _configured: bool = False
+
+    def __init__(
+        self,
+        source_repo: str | None = None,
+        checkout_target: str | None = None,
+        configured: bool = False,
+    ):
+        self._configured = configured
+        super().__init__()
+
     @property
-    def expected_env_var(self):
+    def root_env_var(self):
         return "TEST_ROOT"
 
     @property
-    def default_source_repo(self):
+    def _default_source_repo(self):
         return "https://github.com/test/repo.git"
 
     @property
-    def default_checkout_target(self):
+    def _default_checkout_target(self):
         return "test_target"
 
-    def get(self, target: str | Path):
-        self.log.info(f"mock installing ExternalCodeBase at {target}")
-        pass
+    def _configure(self) -> None:
+        return
+
+    @property
+    def is_configured(self):
+        return self._configured
 
 
 class FakeROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
