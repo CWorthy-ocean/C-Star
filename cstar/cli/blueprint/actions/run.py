@@ -48,10 +48,10 @@ def run_worker(path: Path) -> None:
 
 
 async def run_worker_process(path: Path) -> None:
-    """Execute a non-blocking blueprint in an external process.
+    """Execute a blueprint in a non-blocking worker service.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     path : Path
         The path to the blueprint to execute
     """
@@ -61,7 +61,6 @@ async def run_worker_process(path: Path) -> None:
     process.start()
 
     # delay briefly in case the process dies during startup
-    # NOTE: this stinks... they have _no_ output...
     await asyncio.sleep(4)
 
     print(f"Worker process started in PID: {process.pid}")
