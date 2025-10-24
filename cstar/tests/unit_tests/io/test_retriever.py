@@ -22,9 +22,11 @@ class DummyRetriever(retriever.Retriever):
 class TestRegistry:
     def test_register_and_get_retriever(self, mocksourcedata_local_text_file):
         """Tests that a new retriever can be registered and fetched from the register"""
-        retriever.register_retriever(DummyRetriever)
-        r = retriever.get_retriever(mocksourcedata_local_text_file())
-        assert isinstance(r, DummyRetriever)
+        temp_registry = {}
+        with mock.patch("cstar.io.retriever._registry", temp_registry):
+            retriever.register_retriever(DummyRetriever)
+            r = retriever.get_retriever(mocksourcedata_local_text_file())
+            assert isinstance(r, DummyRetriever)
 
     def test_get_retriever_not_registered(self, mocksourcedata_factory):
         """Tests that getting an unregistered retriever raises a ValueError"""
