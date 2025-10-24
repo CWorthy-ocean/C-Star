@@ -141,13 +141,13 @@ async def build_and_run_dag(path: Path) -> None:
         status_dict[step.name] = check_job.submit(step, id_dict[step.name])
         print(f"Step {step.name} current status: {status_dict[step.name]}")
 
-    num_complete = len(id_dict)
+    num_complete = 0
     num_steps = len(wp.steps)
 
     if num_complete == num_steps:
         print("No job dependencies found")
 
-    while True:
+    while num_complete < num_steps:
         completion_ratio = 100 * num_complete / num_steps
         print(f"Awaiting dependent tasks. {completion_ratio:3.0f}% complete.")
 
@@ -162,8 +162,6 @@ async def build_and_run_dag(path: Path) -> None:
                 status_dict[step.name] = check_job.submit(
                     step, id_dict[step.name], [status_dict[s] for s in step.depends_on]
                 )
-        if len(id_dict) == len(wp.steps):
-            break
 
         num_complete = len(id_dict)
     wait(list(status_dict.values()))
