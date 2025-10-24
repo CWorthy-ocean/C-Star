@@ -82,7 +82,7 @@ def submit_job(step: Step, job_dep_ids: list[str] = []) -> JobId:
 
 
 @task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
-def check_job(step: Step, job_id: JobId) -> ExecutionStatus:
+def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatus:
     t_start = time()
     dur = 10 * 60
     status = ExecutionStatus.UNKNOWN
