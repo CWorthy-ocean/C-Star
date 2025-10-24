@@ -69,7 +69,13 @@ async def run_worker_process(path: Path) -> None:
 
 
 async def handle(ns: argparse.Namespace) -> None:
-    """The action handler for the blueprint-run action."""
+    """The action handler for the blueprint-run action.
+
+    Parameters
+    ----------
+    ns : argparse.Namespace
+        User inputs parsed by the CLI
+    """
     if ns.blocking:
         run_worker(ns.path)
     else:
@@ -84,6 +90,11 @@ def create_action() -> RegistryResult:
     ----------
     ns : argparse.Namespace
         User inputs parsed by the CLI
+
+    Returns
+    -------
+    RegistryResult
+        A 2-tuple containing ((command name, action name), parser function)
     """
     command: t.Literal["blueprint"] = "blueprint"
     action: t.Literal["run"] = "run"

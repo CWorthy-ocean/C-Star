@@ -116,7 +116,13 @@ async def handle(ns: argparse.Namespace) -> None:
 
 @cli_activity
 def create_action() -> RegistryResult:
-    """Integrate the workplan-plan command into the CLI."""
+    """Integrate the workplan-plan command into the CLI.
+
+    Returns
+    -------
+    RegistryResult
+        A 2-tuple containing ((command name, action name), parser function)
+    """
     command: t.Literal["workplan"] = "workplan"
     action: t.Literal["plan"] = "plan"
 
