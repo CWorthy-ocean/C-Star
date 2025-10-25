@@ -53,23 +53,22 @@ JobStatus = str
 #     return ExecutionStatus.COMPLETED
 
 
-def cache_func(context: TaskRunContext, params) -> str:
+def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
     """Cache on a combination of the task name and user-assigned run id.
 
     Parameters
     ----------
     context : TaskRunContext
-        The prefect context object for the currently running task.
-    params : t.Any
-        Extra params
-        #TODO: look this up in the prefect docs
+        The prefect context object for the currently running task
+    params : dict[str, t.Any]
+        A dictionary containing all thee input values to the task
     """
     cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
     print(f"Cache check: {cache_key}")
     return cache_key
 
 
-@task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
+@task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
 def submit_job(step: Step, job_dep_ids: list[str] | None = None) -> JobId:
     bp_path = step.blueprint
     bp = deserialize(Path(bp_path), RomsMarblBlueprint)
@@ -96,7 +95,7 @@ def submit_job(step: Step, job_dep_ids: list[str] | None = None) -> JobId:
     return str(job.id)
 
 
-@task(persist_result=True, cache_key_fn=cache_func, log_prints=True)
+@task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
 def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatus:
     t_start = time()
     dur = 10 * 60
