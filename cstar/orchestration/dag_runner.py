@@ -6,16 +6,25 @@ before going into develop/main
 import asyncio
 import os
 import sys
+import typing as t
+from itertools import cycle
 from pathlib import Path
 from time import sleep, time
 
+import pytest  # todo: remove after moving test to unit-tests
 from prefect import flow, task
 from prefect.context import TaskRunContext
-from prefect.futures import wait
 
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import create_scheduler_job, get_status_of_slurm_job
-from cstar.orchestration.models import RomsMarblBlueprint, Step, Workplan
+from cstar.orchestration.models import RomsMarblBlueprint, Step
+from cstar.orchestration.orchestration import (
+    CStep,
+    CWorkplan,
+    Orchestrator,
+    Planner,
+    SlurmLauncher,
+)
 from cstar.orchestration.serialization import deserialize
 
 JobId = str
@@ -108,7 +117,19 @@ def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatu
     return status
 
 
-@flow
+def incremental_delays() -> t.Generator[float, None, None]:
+    """Return a value from an infinite cycle of incremental delays.
+
+    Returns
+    -------
+    float
+    """
+    delays = [2, 5, 15, 30, 45, 90]
+    delay_cycle = cycle(delays)
+    yield from delay_cycle
+
+
+@flow(log_prints=True)
 async def build_and_run_dag(path: Path) -> None:
     """Execute the steps in the workplan.
 
@@ -117,55 +138,41 @@ async def build_and_run_dag(path: Path) -> None:
     path : Path
         The path to the blueprint to execute
     """
-    wp = deserialize(path, Workplan)
+    # wp = deserialize(path, Workplan)
+    wp = CWorkplan(
+        name="demo-wp",
+        steps=[
+            CStep(name="s-00", depends_on=[]),
+            CStep(name="s-01", depends_on=["s-00"]),
+            CStep(name="s-02", depends_on=["s-00"]),
+            CStep(name="s-03", depends_on=["s-01", "s-02"]),
+            CStep(name="s-04", depends_on=["s-03"]),
+        ],
+    )
+    orchestrator = Orchestrator(Planner(workplan=wp), SlurmLauncher())
 
-    id_dict = {}
-    status_dict = {}
+    closed_set = orchestrator.get_closed_nodes()
+    open_set = orchestrator.get_open_nodes()
 
-    no_dep_steps = []
-    follow_up_steps = []
+    while open_set is not None:
+        print(f"[on-enter] Open nodes: {open_set}, Closed: {closed_set}")
 
-    for step in wp.steps:
-        if not step.depends_on:
-            print(f"No dependencies found for step: {step.name}")
-            no_dep_steps.append(step)
-        else:
-            print(f"Adding dependencies for step: {step.name}")
-            follow_up_steps.append(step)
+        await orchestrator.run()
 
-    for step in no_dep_steps:
-        print(f"Submitting step: {step.name}")
-        id_dict[step.name] = submit_job(step)
+        closed_set = orchestrator.get_closed_nodes()
+        open_set = orchestrator.get_open_nodes()
 
-        print(f"Retrieving status of step: {step.name}")
-        status_dict[step.name] = check_job.submit(step, id_dict[step.name])
-        print(f"Step {step.name} current status: {status_dict[step.name]}")
+        print(f"[on-exit] Open nodes: {open_set}, Closed: {closed_set}")
+        await asyncio.sleep(next(incremental_delays()))
 
-    num_complete = 0
-    num_steps = len(wp.steps)
+    print(f"Workplan `{wp}` execution is complete.")
 
-    if num_complete == num_steps:
-        print("No job dependencies found")
 
-    while num_complete < num_steps:
-        completion_ratio = 100 * num_complete / num_steps
-        print(f"Awaiting dependent tasks. {completion_ratio:3.0f}% complete.")
-
-        for step in follow_up_steps:
-            print(f"Checking step: {step.name}")
-
-            if all(s in id_dict for s in step.depends_on):
-                print(f"Prerequisites met for step: {step.name}. Starting...")
-                id_dict[step.name] = submit_job(
-                    step, [id_dict[s] for s in step.depends_on]
-                )
-                status_dict[step.name] = check_job.submit(
-                    step, id_dict[step.name], [status_dict[s] for s in step.depends_on]
-                )
-
-        num_complete = len(id_dict)
-    wait(list(status_dict.values()))
-    print("All steps completed.")
+@pytest.mark.asyncio
+async def test_build_and_run() -> None:
+    """Temporary unit test to trigger workflow execution."""
+    wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
+    await build_and_run_dag(wp_path)
 
 
 if __name__ == "__main__":
@@ -174,12 +181,9 @@ if __name__ == "__main__":
     os.environ["CSTAR_QUEUE_NAME"] = "wholenode"
     os.environ["CSTAR_ORCHESTRATED"] = "1"
 
-    wp_path = "/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml"
-    wp_path = "/home/x-seilerman/wp_testing/workplan.yaml"
+    wp_path = Path("/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml")
+    wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
 
     my_run_name = sys.argv[1]
     os.environ["CSTAR_RUNID"] = my_run_name
-    # t = Thread(target=check_job.serve)
-    # t.start()
     asyncio.run(build_and_run_dag(wp_path))
-    # t.join()
