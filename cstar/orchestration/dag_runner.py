@@ -1,8 +1,3 @@
-"""
-This is a hacky POC and not a production-level solution, it should be removed or heavily improved
-before going into develop/main
-"""
-
 import asyncio
 import os
 import sys
@@ -12,15 +7,17 @@ from pathlib import Path
 from time import sleep, time
 
 import pytest  # todo: remove after moving test to unit-tests
-from prefect import flow, task
+from prefect import task
 from prefect.context import TaskRunContext
 
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import create_scheduler_job, get_status_of_slurm_job
+from cstar.orchestration.local import LocalLauncher
 from cstar.orchestration.models import RomsMarblBlueprint, Step
 from cstar.orchestration.orchestration import (
     CStep,
     CWorkplan,
+    Launcher,
     Orchestrator,
     Planner,
     SlurmLauncher,
@@ -129,7 +126,7 @@ def incremental_delays() -> t.Generator[float, None, None]:
     yield from delay_cycle
 
 
-@flow(log_prints=True)
+# @flow(log_prints=True)
 async def build_and_run_dag(path: Path) -> None:
     """Execute the steps in the workplan.
 
@@ -149,7 +146,11 @@ async def build_and_run_dag(path: Path) -> None:
             CStep(name="s-04", depends_on=["s-03"]),
         ],
     )
-    orchestrator = Orchestrator(Planner(workplan=wp), SlurmLauncher())
+    planner = Planner(workplan=wp)
+    launcher: Launcher = LocalLauncher()
+    launcher = SlurmLauncher()
+
+    orchestrator = Orchestrator(planner, launcher)
 
     closed_set = orchestrator.get_closed_nodes()
     open_set = orchestrator.get_open_nodes()
@@ -173,6 +174,7 @@ async def test_build_and_run() -> None:
     """Temporary unit test to trigger workflow execution."""
     wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
     await build_and_run_dag(wp_path)
+    assert False
 
 
 if __name__ == "__main__":

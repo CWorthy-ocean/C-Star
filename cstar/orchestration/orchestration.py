@@ -14,11 +14,15 @@ class CstarDependencyError(Exception):
     ...
 
 
-class ProcessHandle(BaseModel):
+class ProcessHandle:
     """Contract used to identify processes created by any launcher."""
 
-    pid: str = Field(frozen=True)
+    pid: str
     """The process identifier."""
+
+    def __init__(self, pid: str) -> None:
+        """Initialize the handle."""
+        self.pid = pid
 
 
 class Status(IntEnum):
@@ -73,10 +77,10 @@ class CWorkplan(BaseModel):
     """The list of steps contained in the workplan."""
 
 
-class Task(BaseModel):
+class Task:
     """A task represents a live-execution of a step."""
 
-    status: Status = Field(default=Status.Unsubmitted)
+    status: Status
     """Current task status."""
 
     step: CStep
@@ -84,6 +88,16 @@ class Task(BaseModel):
 
     handle: ProcessHandle
     """The unique process identifier for the task."""
+
+    def __init__(
+        self,
+        step: CStep,
+        handle: ProcessHandle,
+        status: Status = Status.Unsubmitted,
+    ):
+        self.status = status
+        self.step = step
+        self.handle = handle
 
 
 _TValue = t.TypeVar("_TValue")
@@ -289,13 +303,14 @@ class Launcher(t.Protocol):
 
 
 def duration_fn() -> int:
+    """Mock task execution via randomly selecting a duration for the step."""
     return random.randint(5, 12)
 
 
 class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
-    duration: int = Field(default_factory=duration_fn, init=False)
+    duration: int
 
     def __init__(self, job_id: str) -> None:
         """Initialize the SLURM handle.
@@ -305,6 +320,7 @@ class SlurmHandle(ProcessHandle):
         job_id : str
             The SLURM_JOB_ID identifying a job.
         """
+        self.duration = duration_fn()
         super().__init__(pid=job_id)
 
     async def simulate_progress(self) -> None:
