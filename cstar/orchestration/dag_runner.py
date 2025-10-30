@@ -12,7 +12,7 @@ from prefect.context import TaskRunContext
 
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import create_scheduler_job, get_status_of_slurm_job
-from cstar.orchestration.local import LocalLauncher
+from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import RomsMarblBlueprint, Step
 from cstar.orchestration.orchestration import (
     CStep,
@@ -20,7 +20,6 @@ from cstar.orchestration.orchestration import (
     Launcher,
     Orchestrator,
     Planner,
-    SlurmLauncher,
 )
 from cstar.orchestration.serialization import deserialize
 
@@ -147,8 +146,8 @@ async def build_and_run_dag(path: Path) -> None:
         ],
     )
     planner = Planner(workplan=wp)
-    launcher: Launcher = LocalLauncher()
-    launcher = SlurmLauncher()
+    # launcher: Launcher = LocalLauncher()
+    launcher: Launcher = SlurmLauncher()
 
     orchestrator = Orchestrator(planner, launcher)
 
