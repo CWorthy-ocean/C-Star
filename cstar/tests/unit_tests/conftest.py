@@ -1719,7 +1719,27 @@ def patch_romssimulation_init_sourcedata(
     ]
 
     @contextmanager
-    def _context():
+    def _context(from_worker: bool = False):
+        """
+        Context manager to mock out IO classification checks and reads when setting up a ROMSSimulation.
+
+        Parameters
+        ----------
+        from_worker: if True, the worker uses a source retriever to read the yaml file of the blueprint,
+            and therefore needs one extra mock inserted in the right place
+
+        """
+        if from_worker:
+            inspector_classify_side_effect = [
+                SourceClassification.LOCAL_TEXT_FILE,
+                *mock_runtime_code_classify_side_effect,
+                *mock_compile_time_code_classify_side_effect,
+            ]
+        else:
+            inspector_classify_side_effect = [
+                *mock_runtime_code_classify_side_effect,
+                *mock_compile_time_code_classify_side_effect,
+            ]
         with (
             mock.patch(
                 "cstar.base.external_codebase.SourceData",
@@ -1755,10 +1775,7 @@ def patch_romssimulation_init_sourcedata(
             ),
             mock.patch(
                 "cstar.io.source_data._SourceInspector.classify",
-                side_effect=[
-                    *mock_runtime_code_classify_side_effect,
-                    *mock_compile_time_code_classify_side_effect,
-                ],
+                side_effect=inspector_classify_side_effect,
             ),
         ):
             yield

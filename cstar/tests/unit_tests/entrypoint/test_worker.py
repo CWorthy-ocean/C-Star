@@ -3,12 +3,10 @@ import itertools
 import logging
 import os
 import shutil
-from copy import deepcopy
 from pathlib import Path
 from unittest import mock
 
 import pytest
-from _pytest.tmpdir import TempPathFactory
 
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.entrypoint.service import ServiceConfiguration
@@ -59,15 +57,11 @@ def valid_args_short() -> dict[str, str]:
     }
 
 
-# todo: try to rectify with Dafydd's patch_romssimulation_init_sourcedata
-
-
-@pytest.fixture(scope="module")
-def sim_runner_prep(
-    blueprint_path: Path,
-    tmp_path_factory: TempPathFactory,
+@pytest.fixture(scope="function")
+def sim_runner(
+    blueprint_path: Path, patch_romssimulation_init_sourcedata, tmp_path
 ) -> SimulationRunner:
-    """Fixture to create a SimulationRunner instance. Module-scope to avoid slow initialization.
+    """Fixture to create a SimulationRunner instance.
 
     Returns
     -------
@@ -88,17 +82,10 @@ def sim_runner_prep(
         name="test_simulation_runner",
     )
     job_config = JobConfig()
-    sim = SimulationRunner(request, service_config, job_config)
-    return sim
 
+    with patch_romssimulation_init_sourcedata(from_worker=True):
+        sim = SimulationRunner(request, service_config, job_config)
 
-@pytest.fixture(scope="function")
-def sim_runner(sim_runner_prep, tmp_path) -> SimulationRunner:
-    """
-    Takes the module-level simulation runner fixture, copies it to avoid state changes,
-    and creates a new output dir and attaches it for each individual test.
-    """
-    sim = deepcopy(sim_runner_prep)
     output_path = tmp_path / "output"
 
     sim._output_root = output_path  # type: ignore[misc]
@@ -343,8 +330,7 @@ def test_format_date_for_unique_path(
 
 
 def test_start_runner(
-    blueprint_path: Path,
-    tmp_path: Path,
+    blueprint_path: Path, tmp_path: Path, patch_romssimulation_init_sourcedata
 ) -> None:
     """Test creating a SimulationRunner and starting it.
 
@@ -369,7 +355,8 @@ def test_start_runner(
     )
     job_config = JobConfig()
 
-    runner = SimulationRunner(request, service_config, job_config)
+    with patch_romssimulation_init_sourcedata(from_worker=True):
+        runner = SimulationRunner(request, service_config, job_config)
 
     assert runner._blueprint_uri == request.blueprint_uri
 
