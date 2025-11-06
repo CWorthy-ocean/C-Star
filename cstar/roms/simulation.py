@@ -326,15 +326,13 @@ class ROMSSimulation(Simulation):
         if typecheck:
             self._check_inputdataset_types(inp, expected_type=typecheck)
 
-        # TODO commenting out for the moment, seems to have a lot of issues with example dataset
-
         # Check if InputDataset has dates to validate:
-        # undated = any(
-        #     [isinstance(inp, d) for d in [ROMSModelGrid, ROMSForcingCorrections]]
-        # )
-        #
-        # if not undated:
-        #     self._check_inputdataset_dates(inp)
+        undated = any(
+            [isinstance(inp, d) for d in [ROMSModelGrid, ROMSForcingCorrections]]
+        )
+
+        if not undated:
+            self._check_inputdataset_dates(inp)
 
         self._check_inputdataset_partitioning(inp)
 
@@ -432,28 +430,25 @@ class ROMSSimulation(Simulation):
                 return
             if inp_bound is None:
                 return
+            raise ValueError(
+                f"Uncorrectable mismatch between {bound} in {inp.__class__.__name__} and ROMSSimulation"
+            )
 
-            # TODO actually check start, end bounds with inequalities
-            # raise ValueError(
-            #     f"Uncorrectable mismatch between {bound} in {inp.__class__.__name__} and ROMSSimulation"
-            # )
-
-        # TODO I don't think this is true??
-        # # For a single ROMSInputDataset, start and end must match simulation
-        # if not isinstance(inp, list):
-        #     correct_date_bound_or_raise(inp, "start_date")
-        #     if not isinstance(inp, ROMSInitialConditions):
-        #         correct_date_bound_or_raise(inp, "end_date")
-        #     return
+        # For a single ROMSInputDataset, start and end must match simulation
+        if not isinstance(inp, list):
+            correct_date_bound_or_raise(inp, "start_date")
+            if not isinstance(inp, ROMSInitialConditions):
+                correct_date_bound_or_raise(inp, "end_date")
+            return
 
         # For a list, depends on context: could be a list of sequential files or a list of different vars
         start_dates: list[datetime] = list(
-            filter(None, [getattr(i, "start_date", None) for i in inp])  # type: ignore[union-attr]
+            filter(None, [getattr(i, "start_date", None) for i in inp])
         )
         end_dates: list[datetime] = list(
-            filter(None, [getattr(i, "start_date", None) for i in inp])  # type: ignore[union-attr]
+            filter(None, [getattr(i, "start_date", None) for i in inp])
         )
-        for i in inp:  # type: ignore[union-attr]
+        for i in inp:
             # If a file is yaml, it always covers the whole simulation:
             if is_correctable(i):
                 correct_date_bound_or_raise(i, "start_date")

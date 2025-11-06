@@ -579,7 +579,6 @@ class TestROMSSimulationInitialization:
 
             assert substring in str(exception_info.value)
 
-    @pytest.mark.skip("Functionality disabled for the moment")
     def test_check_inputdataset_dates_warns_and_sets_start_date(
         self,
         stub_romssimulation,
@@ -608,7 +607,6 @@ class TestROMSSimulationInitialization:
         assert sim.river_forcing.start_date == sim.start_date
         assert "does not match that of ROMSSimulation" in caplog.text
 
-    @pytest.mark.skip("Functionality disabled for the moment")
     def test_check_inputdataset_dates_warns_and_sets_end_date(
         self,
         stub_romssimulation,
