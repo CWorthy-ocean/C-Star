@@ -17,20 +17,21 @@ async def invoke(args: Namespace) -> None:
     await handler(args)
 
 
-def main() -> None:
+def main(args: list[str] | None = None) -> None:
     """Parse arguments passed to the CLI and trigger the associated request handlers."""
-    args = sys.argv[1:]
+    if not args:
+        args = sys.argv[1:]
 
     import cstar.cli.blueprint  # noqa: F401
     import cstar.cli.template  # noqa: F401
     import cstar.cli.workplan  # noqa: F401
     from cstar.cli.core import main_parser
 
-    ns = main_parser.parse_args(args)
     try:
+        ns = main_parser.parse_args(args)
         asyncio.run(invoke(ns))
     except Exception as ex:
-        print(f"{ex}")
+        print(f"An error occurred while handling request: {ex}")
 
 
 if __name__ == "__main__":
