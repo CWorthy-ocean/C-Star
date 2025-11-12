@@ -34,8 +34,9 @@ def main(args: list[str] | None = None) -> None:
     import cstar.cli.workplan  # noqa: F401
     from cstar.cli.core import main_parser
 
+    ns = main_parser.parse_args(args)
+
     try:
-        ns = main_parser.parse_args(args)
         asyncio.run(invoke(ns))
     except Exception as ex:
         print(f"An error occurred while handling request: {ex}")
