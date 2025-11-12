@@ -4,16 +4,11 @@ import sys
 import typing as t
 from itertools import cycle
 from pathlib import Path
-from time import sleep, time
 
 import pytest  # todo: remove after moving test to unit-tests
-from prefect import task
 from prefect.context import TaskRunContext
 
-from cstar.execution.handler import ExecutionStatus
-from cstar.execution.scheduler_job import create_scheduler_job, get_status_of_slurm_job
 from cstar.orchestration.launch.slurm import SlurmLauncher
-from cstar.orchestration.models import RomsMarblBlueprint, Step
 from cstar.orchestration.orchestration import (
     CStep,
     CWorkplan,
@@ -21,7 +16,6 @@ from cstar.orchestration.orchestration import (
     Orchestrator,
     Planner,
 )
-from cstar.orchestration.serialization import deserialize
 
 JobId = str
 JobStatus = str
@@ -68,48 +62,49 @@ def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
     return cache_key
 
 
-@task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
-def submit_job(step: Step, job_dep_ids: list[str] | None = None) -> JobId:
-    bp_path = step.blueprint
-    bp = deserialize(Path(bp_path), RomsMarblBlueprint)
-    if job_dep_ids is None:
-        job_dep_ids = []
+# @task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
+# def submit_job(step: Step, job_dep_ids: list[str] | None = None) -> JobId:
+#     bp_path = step.blueprint
+#     bp = deserialize(Path(bp_path), RomsMarblBlueprint)
+#     if job_dep_ids is None:
+#         job_dep_ids = []
+#
+#     job = create_scheduler_job(
+#         commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
+#         account_key=os.getenv("CSTAR_ACCOUNT_KEY", ""),
+#         cpus=bp.cpus_needed,
+#         nodes=None,  # let existing logic handle this
+#         cpus_per_node=None,  # let existing logic handle this
+#         script_path=None,  # puts it in current dir
+#         run_path=bp.runtime_params.output_dir,
+#         job_name=None,  # to fill with some convention
+#         output_file=None,  # to fill with some convention
+#         queue_name=os.getenv("CSTAR_QUEUE_NAME"),
+#         walltime="00:10:00",  # TODO how to determine this one?
+#         depends_on=job_dep_ids,
+#     )
+#
+#     job.submit()
+#     print(f"Submitted {step.name} with id {job.id}")
+#     return str(job.id)
+#
 
-    job = create_scheduler_job(
-        commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
-        account_key=os.getenv("CSTAR_ACCOUNT_KEY", ""),
-        cpus=bp.cpus_needed,
-        nodes=None,  # let existing logic handle this
-        cpus_per_node=None,  # let existing logic handle this
-        script_path=None,  # puts it in current dir
-        run_path=bp.runtime_params.output_dir,
-        job_name=None,  # to fill with some convention
-        output_file=None,  # to fill with some convention
-        queue_name=os.getenv("CSTAR_QUEUE_NAME"),
-        walltime="00:10:00",  # TODO how to determine this one?
-        depends_on=job_dep_ids,
-    )
-
-    job.submit()
-    print(f"Submitted {step.name} with id {job.id}")
-    return str(job.id)
-
-
-@task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
-def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatus:
-    t_start = time()
-    dur = 10 * 60
-    status = ExecutionStatus.UNKNOWN
-
-    while time() - t_start < dur:
-        status = get_status_of_slurm_job(job_id)
-        print(f"status of {step.name} is {status}")
-
-        if ExecutionStatus.is_terminal(status):
-            return status
-
-        sleep(10)
-    return status
+# @task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
+# def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatus:
+#     t_start = time()
+#     dur = 10 * 60
+#     status = ExecutionStatus.UNKNOWN
+#
+#     while time() - t_start < dur:
+#         status = get_status_of_slurm_job(job_id)
+#         print(f"status of {step.name} is {status}")
+#
+#         if ExecutionStatus.is_terminal(status):
+#             return status
+#
+#         sleep(10)
+#     return status
+#
 
 
 def incremental_delays() -> t.Generator[float, None, None]:

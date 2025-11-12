@@ -30,6 +30,8 @@ class Status(IntEnum):
 
     Unsubmitted = auto()
     """A task that has not been submitted by a launcher."""
+    Submitted = auto()
+    """A task that has been submitted by a launcher and awaits a status update."""
     Running = auto()
     """A task that was submitted and has not terminated."""
     Ending = auto()
@@ -49,7 +51,7 @@ class Status(IntEnum):
     @classmethod
     def is_running(cls, status) -> bool:
         """Return `True` if a status is in the set of in-progress statuses."""
-        return status in {Status.Running, Status.Ending}
+        return status in {Status.Submitted, Status.Running, Status.Ending}
 
 
 class CStep(BaseModel):
@@ -67,6 +69,8 @@ class CStep(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     """List containing the names of steps that must complete to start this step."""
 
+    blueprint: str = ""  # todo: is this ok?
+
 
 class CWorkplan(BaseModel):
     name: str
@@ -77,7 +81,10 @@ class CWorkplan(BaseModel):
     """The list of steps contained in the workplan."""
 
 
-class Task:
+_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
+
+
+class Task(t.Generic[_THandle]):
     """A task represents a live-execution of a step."""
 
     status: Status
@@ -86,13 +93,13 @@ class Task:
     step: CStep
     """The step containing task configuration."""
 
-    handle: ProcessHandle
+    handle: _THandle
     """The unique process identifier for the task."""
 
     def __init__(
         self,
         step: CStep,
-        handle: ProcessHandle,
+        handle: _THandle,
         status: Status = Status.Unsubmitted,
     ):
         self.status = status
@@ -250,11 +257,12 @@ class Planner:
         return values
 
 
-class Launcher(t.Protocol):
+class Launcher(t.Protocol, t.Generic[_THandle]):
     """Contract required to implement a task launcher."""
 
     @classmethod
-    async def launch(cls, step: CStep) -> Task:
+    # async def launch(cls, step: CStep) -> Task:
+    async def launch(cls, step: CStep, dependencies: list[_THandle]) -> Task[_THandle]:
         """Launch a process for a step.
 
         Parameters
@@ -264,18 +272,18 @@ class Launcher(t.Protocol):
 
         Returns
         -------
-        Task
+        Task[_THandle]
             The newly launched task.
         """
         ...
 
     @classmethod
-    async def query_status(cls, item: Task | ProcessHandle) -> Status:
+    async def query_status(cls, item: Task[_THandle] | _THandle) -> Status:
         """Retrieve the current status for a running task.
 
         Parameters
         ----------
-        item : Task or ProcessHandle
+        item : Task[_THandle] or ProcessHandle
             A task or process handle to query for status updates.
 
         Returns
@@ -286,12 +294,12 @@ class Launcher(t.Protocol):
         ...
 
     @classmethod
-    async def cancel(cls, item: Task) -> Task:
+    async def cancel(cls, item: Task[_THandle]) -> Task[_THandle]:
         """Cancel a task, if possible.
 
         Parameters
         ----------
-        item : Task or ProcessHandle
+        item : Task[_THandle] or ProcessHandle
             A task or process handle to cancel.
 
         Returns
@@ -431,18 +439,60 @@ class Orchestrator:
         """
         return self._get_nodes_by_status(Status.Running)
 
-    async def execute_node(self, node: str) -> Task | None:
+    def _locate_depedendencies(self, step: CStep) -> list[ProcessHandle] | None:
+        """Look for the dependencies of the step.
+
+        Returns
+        -------
+        list[ProcessHandle] | None
+            The handles identifying the dependencies if the jobs are scheduled,
+            otherwise None.
+
+            An empty list indicates no dependencies.
+        """
+        dependencies: list[ProcessHandle] = []
+
+        # TODO: replace this with proactively configuring the keys?
+        # - e.g. reverse lookup...
+        if step.depends_on:
+            dep_tasks = [
+                t.cast(
+                    Task | None,
+                    self.planner.retrieve(dnode, Orchestrator.Keys.Task, None),
+                )
+                for dnode in step.depends_on
+            ]
+
+            running_deps = [x for x in dep_tasks if x]
+
+            if len(running_deps) != len(step.depends_on):
+                # the dependencies have not been started. abort launch...
+                return None
+
+            dependencies = [d.handle for d in running_deps]
+
+        return dependencies
+
+    async def process_node(self, node: str) -> Task | None:
         """Execute a 'simulated task'."""
-        step = self.planner.retrieve(node, Planner.Keys.Step)
-        if not step:
+        step = t.cast(
+            CStep | None, self.planner.retrieve(node, Planner.Keys.Step, None)
+        )
+        if step is None:
             msg = f"Invalid node identifier supplied: {node}"
             raise ValueError(msg)
-        task = self.planner.retrieve(node, Orchestrator.Keys.Task)
 
-        if not task:
+        dependencies = self._locate_depedendencies(step)
+        if dependencies is None:
+            # prerequisite tasks weren't all started, yet.
+            return None
+
+        if task := self.planner.retrieve(node, Orchestrator.Keys.Task):
+            task = await self.update_status(task)
+        else:
             # remove `True or ` to simulate stochastic start up speed...
             if True or random.randint(1, 100) > 35:
-                task = await self.launcher.launch(step)
+                task = await self.launcher.launch(step, dependencies)
 
                 self.planner.store(node, Planner.Keys.Status, task.status)
                 self.planner.store(node, Orchestrator.Keys.Task, task)
@@ -451,8 +501,6 @@ class Orchestrator:
                 return task
 
             print(f"\t\tTask {node} did not start yet...")
-        else:
-            task = await self.update_status(task)
 
         return task
 
@@ -508,7 +556,7 @@ class Orchestrator:
             )
             # return {}
 
-        exec_tasks = [asyncio.Task(self.execute_node(n)) for n in open_set]
+        exec_tasks = [asyncio.Task(self.process_node(n)) for n in open_set]
         exec_results = await asyncio.gather(*exec_tasks)
 
         # TODO: confirm iter order of set. may be zipping incorrect n/result

@@ -45,11 +45,11 @@ class LocalHandle(ProcessHandle):
         super().__init__(pid=str(self.popen.pid))
 
 
-class LocalLauncher(Launcher):
+class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
     @staticmethod
-    async def _submit(step: CStep) -> LocalHandle:
+    async def _submit(step: CStep, dependencies: list[LocalHandle]) -> LocalHandle:
         """Submit a step to SLURM as a new batch allocation.
 
         Parameters
@@ -90,7 +90,7 @@ class LocalLauncher(Launcher):
         return status
 
     @classmethod
-    async def launch(cls, step: CStep) -> Task:
+    async def launch(cls, step: CStep, dependencies: list[LocalHandle]) -> Task:
         """Launch a step in local process.
 
         Parameters
@@ -98,7 +98,7 @@ class LocalLauncher(Launcher):
         step : Step
             The step to run in a local process.
         """
-        handle = await LocalLauncher._submit(step)
+        handle = await LocalLauncher._submit(step, dependencies)
         status = await LocalLauncher.query_status(handle)
         return Task(
             status=status,
@@ -107,7 +107,7 @@ class LocalLauncher(Launcher):
         )
 
     @classmethod
-    async def query_status(cls, item: Task | ProcessHandle) -> Status:
+    async def query_status(cls, item: Task | LocalHandle) -> Status:
         """Retrieve the status of an item.
 
         Parameters
