@@ -368,7 +368,7 @@ class SourceDataCollection:
         common_location: str,
         subdir: str = "",
         checkout_target: str = "",
-        files: list[str] = [],
+        files: Iterable[str] = (),
     ):
         common_location_classification = SourceData(common_location).classification
         match common_location_classification:
