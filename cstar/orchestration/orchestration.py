@@ -74,7 +74,8 @@ class CStep(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     """List containing the names of steps that must complete to start this step."""
 
-    blueprint: str = ""  # todo: is this ok?
+    blueprint: str = ""  # todo: unify with "real step" and kill CStep
+    """The path to a blueprint file."""
 
 
 class CWorkplan(BaseModel):
