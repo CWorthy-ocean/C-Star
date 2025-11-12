@@ -107,7 +107,18 @@ class Task(t.Generic[_THandle]):
         step: CStep,
         handle: _THandle,
         status: Status = Status.Unsubmitted,
-    ):
+    ) -> None:
+        """Initialize the Task record.
+
+        Parameters
+        ----------
+        status : Status
+            The current status of the task
+        step : Step
+            The workplan `Step` that triggered the task to run
+        handle : _THandle
+            A handle that used to identify the running task.
+        """
         self.status = status
         self.step = step
         self.handle = handle
