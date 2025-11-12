@@ -18,7 +18,14 @@ async def invoke(args: Namespace) -> None:
 
 
 def main(args: list[str] | None = None) -> None:
-    """Parse arguments passed to the CLI and trigger the associated request handlers."""
+    """Parse arguments passed to the CLI and trigger the associated request handlers.
+
+    Parameters
+    ----------
+    args : list[str]
+        Arguments for triggering a CLI action handler. If not provided, `sys.argv`
+        will be used.
+    """
     if not args:
         args = sys.argv[1:]
 
