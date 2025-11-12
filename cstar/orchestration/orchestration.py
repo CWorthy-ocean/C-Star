@@ -49,6 +49,11 @@ class Status(IntEnum):
         return status in {Status.Done, Status.Cancelled, Status.Failed}
 
     @classmethod
+    def is_failure(cls, status) -> bool:
+        """Return `True` if a status is in the set of terminal statuses."""
+        return status in {Status.Cancelled, Status.Failed}
+
+    @classmethod
     def is_running(cls, status) -> bool:
         """Return `True` if a status is in the set of in-progress statuses."""
         return status in {Status.Submitted, Status.Running, Status.Ending}
@@ -353,12 +358,17 @@ class Orchestrator:
 
         working_list = set(nodes).difference(closed_set)
 
+        if any(Status.is_failure(g.nodes[u][Planner.Keys.Status]) for u in closed_set):
+            print("Exiting due to execution failures")
+            return None
+
         for n in working_list:
             in_edges = list(g.in_edges(n))
             in_degree = g.in_degree(n)
 
             satisfied = all(
-                g.nodes[u][Planner.Keys.Status] == Status.Done for (u, _) in in_edges
+                Status.is_terminal(g.nodes[u][Planner.Keys.Status])
+                for (u, _) in in_edges
             )
 
             if in_degree == 0 or satisfied:
@@ -427,7 +437,10 @@ class Orchestrator:
         set of str
             A set of node IDs identifying nodes with a Done status.
         """
-        return self._get_nodes_by_status(Status.Done)
+        done = self._get_nodes_by_status(Status.Done)
+        cancelled = self._get_nodes_by_status(Status.Cancelled)
+        failed = self._get_nodes_by_status(Status.Failed)
+        return {*cancelled, *failed, *done}
 
     def get_wip_nodes(self) -> set[str]:
         """Retrieve the set of task nodes that are executing.
