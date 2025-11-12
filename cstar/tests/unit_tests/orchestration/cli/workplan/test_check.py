@@ -85,7 +85,8 @@ async def test_cli_workplan_check_action_tpl(
         The name of a workplan fixture to use for workplan creation
     """
     # workplan = request.getfixturevalue(workplan_name)
-    templates_dir = Path("/Users/chris/code/cstar/cstar/additional_files/templates")
+    cstar_dir = Path(__file__).parent.parent.parent.parent.parent.parent
+    templates_dir = cstar_dir / "additional_files/templates"
     wp_path = templates_dir / template_file
 
     workplan: Workplan = deserialize(wp_path, Workplan)
