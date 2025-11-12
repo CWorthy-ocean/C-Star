@@ -1,7 +1,22 @@
 from pathlib import Path
-from unittest.mock import PropertyMock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def skip_html_checks_for_performance():
+    """
+    Global auto-use that skips the head checks used to see if HTTP input datasets are HTML.
+    For our test cases, they are always files, except for when we explicitly test that they,
+    aren't, and those tests apply patches on top of this one.
+
+    This is purely to speed up tests.
+    """
+    fake_response = Mock()
+    fake_response.headers = {"Content-Type": "application/octet-stream"}
+    with patch("cstar.io.source_data.requests.head", return_value=fake_response):
+        yield
 
 
 @pytest.fixture(scope="session")

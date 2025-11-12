@@ -113,8 +113,8 @@ class GridAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSModelGrid]):
                 if isinstance(self.model.grid.data[0], models.VersionedResource)
                 else None
             ),
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
             source_np_xi=self.model.partitioning.n_procs_x
             if self.model.grid.data[0].partitioned
             else None,
@@ -140,8 +140,8 @@ class InitialConditionAdapter(
                 )
                 else None
             ),
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
             source_np_xi=self.model.partitioning.n_procs_x
             if self.model.initial_conditions.data[0].partitioned
             else None,
@@ -167,8 +167,8 @@ class TidalForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSTidalForci
                 )
                 else None
             ),
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
             source_np_xi=self.model.partitioning.n_procs_x
             if self.model.forcing.tidal.data[0].partitioned
             else None,
@@ -195,8 +195,8 @@ class RiverForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSRiverForci
                 )
                 else None
             ),
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
             source_np_xi=self.model.partitioning.n_procs_x
             if self.model.forcing.river.data[0].partitioned
             else None,
@@ -217,8 +217,8 @@ class BoundaryForcingAdapter(
             ROMSBoundaryForcing(
                 location=str(f.location),
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=self.model.valid_start_date,
-                end_date=self.model.valid_end_date,
+                start_date=None,
+                end_date=None,
                 source_np_xi=self.model.partitioning.n_procs_x
                 if f.partitioned
                 else None,
@@ -241,8 +241,8 @@ class SurfaceForcingAdapter(
             ROMSSurfaceForcing(
                 location=str(f.location),
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=self.model.valid_start_date,
-                end_date=self.model.valid_end_date,
+                start_date=None,
+                end_date=None,
                 source_np_xi=self.model.partitioning.n_procs_x
                 if f.partitioned
                 else None,
@@ -265,8 +265,8 @@ class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing])
             file_hash=self.model.cdr_forcing.data[0].hash
             if isinstance(self.model.cdr_forcing.data[0], models.VersionedResource)
             else None,
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
         )
 
 
@@ -281,8 +281,8 @@ class ForcingCorrectionAdapter(
             ROMSForcingCorrections(
                 location=str(f.location),
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=self.model.valid_start_date,
-                end_date=self.model.valid_end_date,
+                start_date=None,
+                end_date=None,
                 source_np_xi=self.model.partitioning.n_procs_x
                 if f.partitioned
                 else None,

@@ -64,11 +64,10 @@ class TestLocalProcess:
         - commands : str
             The shell command(s) to execute.
         """
-        self.patcher = patch("subprocess.Popen")
-        self.mock_popen = self.patcher.start()
-
         # Mock subprocess behavior
         self.mock_subprocess = MagicMock()
+        self.patcher = patch("subprocess.Popen")
+        self.mock_popen = self.patcher.start()
         self.mock_popen.return_value = self.mock_subprocess
 
     def test_initialization_defaults(self, tmp_path):
@@ -153,7 +152,6 @@ class TestLocalProcess:
         - That the subprocess is called with the correct arguments.
         - That the `status` property reflects the `RUNNING` state after startup.
         """
-        # mock_popen.return_value.poll.return_value = None  # Simulate running process
         self.mock_subprocess.poll.return_value = None  # Simulate running process
 
         with patch("builtins.open", MagicMock()) as mock_open:
@@ -485,3 +483,6 @@ class TestLocalProcess:
             in captured
         )
         self.mock_subprocess.wait.assert_not_called()
+
+    def teardown_method(self):
+        patch.stopall()
