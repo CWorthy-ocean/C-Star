@@ -1,0 +1,7 @@
+name: Single Step Workplan
+description: Workplan containing a single step
+steps:
+  - name: The Step
+    application: {application}
+    blueprint: {blueprint_path}
+state: draft
