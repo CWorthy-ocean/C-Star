@@ -112,7 +112,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job_dep_ids = [d.pid for d in dependencies]
 
         print(f"Submitting {step.name}")
-        # todo: have the returned job include the name? let step give it to me?
         job = create_scheduler_job(
             # commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
             commands="sleep 10",
@@ -125,8 +124,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             job_name=job_name,
             output_file=None,  # to fill with some convention
             queue_name=os.getenv("CSTAR_QUEUE_NAME"),
-            # walltime="00:10:00",  # TODO how to determine this one?
-            walltime="00:05:00",
+            walltime="00:10:00",  # TODO how to determine this one?
             depends_on=job_dep_ids,
         )
 
