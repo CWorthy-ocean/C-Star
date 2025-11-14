@@ -1,4 +1,3 @@
-import asyncio
 import os
 import random
 import typing as t
@@ -82,40 +81,42 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The step to submit to SLURM.
         """
         job_dep_ids = [d.pid for d in dependencies]
-        # TODO: get rid of conditional after implementing dep ID passing
-        # or adding to the CStep...
-        if False and job_dep_ids:
-            bp_path = step.blueprint
-            bp = deserialize(Path(bp_path), RomsMarblBlueprint)
-            if job_dep_ids is None:
-                job_dep_ids = []
 
-            # todo: have the returned job include the name? let step give it to me?
-            job = create_scheduler_job(
-                commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
-                account_key=os.getenv("CSTAR_ACCOUNT_KEY", ""),
-                cpus=bp.cpus_needed,
-                nodes=None,  # let existing logic handle this
-                cpus_per_node=None,  # let existing logic handle this
-                script_path=None,  # puts it in current dir
-                run_path=bp.runtime_params.output_dir,
-                job_name=None,  # to fill with some convention
-                output_file=None,  # to fill with some convention
-                queue_name=os.getenv("CSTAR_QUEUE_NAME"),
-                walltime="00:10:00",  # TODO how to determine this one?
-                depends_on=job_dep_ids,
-            )
+        bp_path = step.blueprint
+        bp = deserialize(Path(bp_path), RomsMarblBlueprint)
+        if job_dep_ids is None:
+            job_dep_ids = []
 
-            job.submit()
+        print(f"Submitting {step.name}")
+        # todo: have the returned job include the name? let step give it to me?
+        job = create_scheduler_job(
+            # commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
+            commands="sleep 10",
+            account_key=os.getenv("CSTAR_ACCOUNT_KEY", ""),
+            cpus=bp.cpus_needed,
+            nodes=None,  # let existing logic handle this
+            cpus_per_node=None,  # let existing logic handle this
+            script_path=None,  # puts it in current dir
+            run_path=bp.runtime_params.output_dir,
+            job_name=None,  # to fill with some convention
+            output_file=None,  # to fill with some convention
+            queue_name=os.getenv("CSTAR_QUEUE_NAME"),
+            # walltime="00:10:00",  # TODO how to determine this one?
+            walltime="00:05:00",
+            depends_on=job_dep_ids,
+        )
 
-            if job.id:
-                print(f"Submitted {step.name} with id {job.id}")
-                handle = SlurmHandle(
-                    job_id=str(job.id)
-                )  # todo: store ID as int, name as string? abandon name?
-                return handle
+        job.submit()
 
-            raise RuntimeError(f"Unable to retrieve scheduled job ID for: {step.name}")
+        if job.id:
+            print(f"Submitted {step.name} resulting in creation of Job ID `{job.id}`")
+            # todo: store ID as int, name as string? abandon name?
+            handle = SlurmHandle(job_id=str(job.id))
+            return handle
+        else:
+            print(f"Failed job details: {job}")
+
+        raise RuntimeError(f"Unable to retrieve scheduled job ID for: {step.name}")
 
         # # TODO: replace with non-mock implementation
         # job_id = f"mock-slurm-job-id-{step.name}"
@@ -126,8 +127,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         return handle
 
-    # @task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
-    # def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatus:
     @staticmethod
     async def _status(step: CStep, handle: SlurmHandle) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
@@ -139,34 +138,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         handle : SlurmHandle
             A handle object for a SLURM-based task.
         """
-        if False:
-            # TODO: use the non-mock implementation instead...
-            t_start = time()
-            dur = 10 * 60
-            status = ExecutionStatus.UNKNOWN
+        status = ExecutionStatus.UNKNOWN
 
-            # todo: avoid this loop. let the orchestrator query when it wants to.
-            while time() - t_start < dur:
-                status = get_status_of_slurm_job(handle.pid)
-                print(f"status of job {handle.job_id} is {status}")
+        print(f"requesting status of job {handle.pid} for step {step.name}")
+        status = get_status_of_slurm_job(handle.pid)
+        print(f"status of job {handle.pid} is {status} for step {step.name}")
 
-                if ExecutionStatus.is_terminal(status):
-                    return status
-
-                # sleep(10)
-            return status
-
-        # TODO: replace with non-mock implementation
-        # Simulate "making progress" by adjusting the duration, here.
-        job_id = handle.pid
-        await handle.simulate_progress()
-        print(f"\tRemaining for {handle.pid}: {handle.duration}")
-        status = "RUNNING"
-        if handle.duration == 0:
-            status = "COMPLETED"
-        elif handle.duration < 0:
-            status = "FAILED"
-        print(f"Retrieved status `{status}` for job_id `{job_id}`")
         return status
 
         # # TODO: replace with non-mock implementation
