@@ -128,17 +128,9 @@ async def build_and_run_dag(path: Path) -> None:
     path : Path
         The path to the blueprint to execute
     """
-    # wp = deserialize(path, Workplan)
-    wp = CWorkplan(
-        name="demo-wp",
-        steps=[
-            CStep(name="s-00", depends_on=[]),
-            CStep(name="s-01", depends_on=["s-00"]),
-            CStep(name="s-02", depends_on=["s-00"]),
-            CStep(name="s-03", depends_on=["s-01", "s-02"]),
-            CStep(name="s-04", depends_on=["s-03"]),
-        ],
-    )
+    wp = deserialize(path, CWorkplan)
+    print(f"Executing workplan: {wp.name}")
+
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
     # launcher: Launcher = LocalLauncher()
@@ -167,12 +159,56 @@ async def build_and_run_dag(path: Path) -> None:
     print(f"Workplan `{wp}` execution is complete.")
 
 
+@contextmanager
+def templated_plan(plan_name: str) -> t.Generator[Path, None, None]:
+    wp_template_path = (
+        Path(__file__).parent.parent / f"additional_files/templates/wp/{plan_name}.yaml"
+    )
+    bp_template_path = (
+        Path(__file__).parent.parent / "additional_files/templates/bp/blueprint.yaml"
+    )
+
+    wp_tpl = wp_template_path.read_text()
+    bp_tpl = bp_template_path.read_text()
+
+    with (
+        NamedTemporaryFile("w", delete_on_close=False) as wp,
+        NamedTemporaryFile("w", delete_on_close=False) as bp,
+    ):
+        wp_path = Path(wp.name)
+        bp_path = Path(bp.name)
+
+        wp_tpl = wp_tpl.replace("{application}", "sleep")
+        wp_tpl = wp_tpl.replace("{blueprint_path}", bp_path.as_posix())
+
+        wp.write(wp_tpl)
+        bp.write(bp_tpl)
+        wp.close()
+        bp.close()
+
+        try:
+            print(
+                f"Temporary workplan located at {wp_path} with blueprint at {bp_path}"
+            )
+            yield wp_path
+        finally:
+            # path.unlink()
+            print(f"populated workplan template:\n{'#' * 80}\n{wp_tpl}\n{'#' * 80}")
+
+
 @pytest.mark.asyncio
 async def test_build_and_run() -> None:
     """Temporary unit test to trigger workflow execution."""
-    wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
-    await build_and_run_dag(wp_path)
-    assert False
+    os.environ["CSTAR_INTERACTIVE"] = "0"
+    os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
+    os.environ["CSTAR_QUEUE_NAME"] = "shared"
+    os.environ["CSTAR_ORCHESTRATED"] = "1"
+
+    for template in ["single_step", "fanout", "parallel"]:
+        with templated_plan(template) as wp_path:
+            my_run_name = f"{sys.argv[1]}_{template}"
+            os.environ["CSTAR_RUNID"] = my_run_name
+            asyncio.run(build_and_run_dag(wp_path))
 
 
 if __name__ == "__main__":
