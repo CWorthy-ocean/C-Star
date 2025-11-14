@@ -42,11 +42,6 @@ def slugify(source: str) -> str:
     return re.sub(r"\s+", "-", source.casefold())
 
 
-# def duration_fn() -> int:
-#     """Mock task execution via randomly selecting a duration for the step."""
-#     return random.randint(5, 12)
-
-
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
     """Cache on a combination of the task name and user-assigned run id.
 
@@ -66,8 +61,7 @@ class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
     job_name: str | None
-    """The user-friendly job name."""
-    # duration: int
+    """The user-friendly, task-based job name."""
 
     def __init__(self, job_id: str, job_name: str | None = None) -> None:
         """Initialize the SLURM handle.
@@ -77,20 +71,8 @@ class SlurmHandle(ProcessHandle):
         job_id : str
             The SLURM_JOB_ID identifying a job.
         """
-        # self.duration = duration_fn()
         super().__init__(pid=job_id)
         self.job_name = job_name
-
-    # async def simulate_progress(self) -> None:
-    #     """TEMPORARY task simulation."""
-    #     # SIMULATED TASK PROGRESS -->
-    #     self.duration -= 1
-    #     await asyncio.sleep(1)
-
-    #     # simulate task failure.
-    #     if self.duration < 5 and random.randint(0, 100) < 5:
-    #         self.duration = -100
-    #     # <--- SIMULATED TASK PROGRESS
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
@@ -167,19 +149,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         return status
 
-        # # TODO: replace with non-mock implementation
-        # # Simulate "making progress" by adjusting the duration, here.
-        # job_id = handle.pid
-        # await handle.simulate_progress()
-        # print(f"\tRemaining for {handle.pid}: {handle.duration}")
-        # status = "RUNNING"
-        # if handle.duration == 0:
-        #     status = "COMPLETED"
-        # elif handle.duration < 0:
-        #     status = "FAILED"
-        # print(f"Retrieved status `{status}` for job_id `{job_id}`")
-        # return status
-
     @classmethod
     async def launch(
         cls, step: CStep, dependencies: list[SlurmHandle]
@@ -193,11 +162,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         handle = await SlurmLauncher._submit(step, dependencies)
         return Task(
-            status=(
-                Status.Submitted
-                # if handle.pid and handle.duration > 0
-                # else Status.Failed
-            ),
+            status=Status.Submitted,
             step=step,
             handle=handle,
         )
@@ -249,10 +214,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The task after the cancellation attempt has completed.
         """
         handle = item.handle
-        # if handle.duration < 2:
-        #     # pretend that i can't cancel...
-        #     print(f"Unable to cancel this running task `{handle.pid}")
-        #     return item
 
         try:
             _run_cmd(
