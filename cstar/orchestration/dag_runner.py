@@ -193,7 +193,6 @@ def templated_plan(plan_name: str) -> t.Generator[Path, None, None]:
             )
             yield wp_path
         finally:
-            # path.unlink()
             print(f"populated workplan template:\n{'#' * 80}\n{wp_tpl}\n{'#' * 80}")
 
 
