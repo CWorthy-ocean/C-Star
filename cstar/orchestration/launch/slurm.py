@@ -42,9 +42,9 @@ def slugify(source: str) -> str:
     return re.sub(r"\s+", "-", source.casefold())
 
 
-def duration_fn() -> int:
-    """Mock task execution via randomly selecting a duration for the step."""
-    return 8 # random.randint(5, 12)
+# def duration_fn() -> int:
+#     """Mock task execution via randomly selecting a duration for the step."""
+#     return random.randint(5, 12)
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -256,5 +256,16 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         #     print(f"Unable to cancel this running task `{handle.pid}")
         #     return item
 
-        item.status = Status.Cancelled
+        try:
+            _run_cmd(
+                f"scancel {handle.pid}",
+                cwd=None,
+                raise_on_error=True,
+                msg_post=f"Job {handle.pid} cancelled",
+                msg_err="Non-zero exit code when cancelling job.",
+            )
+            item.status = Status.Cancelled
+        except RuntimeError:
+            print(f"Unable to cancel the task `{handle.pid}")
+
         return item
