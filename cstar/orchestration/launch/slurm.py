@@ -216,12 +216,21 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         handle = t.cast(SlurmHandle, item.handle if isinstance(item, Task) else item)
         slurm_status = await SlurmLauncher._status(step, handle)
+
+        print(f"SLURM job `{handle.pid}` status is `{slurm_status}`")
+
+        if slurm_status in [
+            ExecutionStatus.PENDING,
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.ENDING,
+            ExecutionStatus.HELD,
+        ]:
             return Status.Running
-        if raw_status in ["COMPLETED", "FAILED"]:
+        if slurm_status in [ExecutionStatus.COMPLETED]:
             return Status.Done
-        if raw_status in ["CANCELLED"]:
+        if slurm_status in [ExecutionStatus.CANCELLED]:
             return Status.Cancelled
-        if raw_status in ["FAILED"]:
+        if slurm_status in [ExecutionStatus.FAILED]:
             return Status.Failed
 
         return Status.Unsubmitted
