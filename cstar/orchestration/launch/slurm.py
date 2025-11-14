@@ -109,8 +109,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job_name = slugify(step.name)
         bp_path = step.blueprint
         bp = deserialize(Path(bp_path), RomsMarblBlueprint)
-        if job_dep_ids is None:
-            job_dep_ids = []
+        job_dep_ids = [d.pid for d in dependencies]
 
         print(f"Submitting {step.name}")
         # todo: have the returned job include the name? let step give it to me?
