@@ -136,7 +136,7 @@ class Planner:
     """The graph used for task planning."""
 
     class Keys(StrEnum):
-        """Identifies the attributes stored in the planning graph."""
+        """Keys used to store attributes on the planning graph."""
 
         Step = auto()
         """Key for the step associated with a task."""
@@ -329,7 +329,7 @@ class Orchestrator:
     """Manage the execution of a `Workplan`."""
 
     class Keys(StrEnum):
-        """Identifies the storage location for attributes used by a tracker."""
+        """Keys used to store tracker attributes on the planning graph."""
 
         Task = auto()
         """Key for the task associated with a step."""
@@ -348,13 +348,14 @@ class Orchestrator:
         self.launcher = launcher
 
     def get_open_nodes(self) -> set[str] | None:
-        """Retrieve the set of task nodes with a non-terminal state.
+        """Retrieve the set of task nodes with a non-terminal state that are
+        executing or ready to execute.
 
         Returns
         -------
         set[str] | None
-            - Set of nodes to launch or retrieve status updates.
-            - Empty set indicates no actions are currently possible.
+            - Set of open nodes ready for some processing actions.
+            - An empty set indicates no actions are currently possible.
             - Null indicates all nodes are closed (traversal is complete).
         """
         g = self.planner.graph
@@ -398,7 +399,7 @@ class Orchestrator:
         ----------
         status : Status
             The first status to compare.
-        other : Status
+        target: Status
             The second status to compare.
 
         Returns
@@ -555,6 +556,18 @@ class Orchestrator:
                 raise CstarExpectationFailed(f"Node {n} task failed.")
 
     async def update_status(self, task: Task) -> Task:
+        """Query the launcher for the latest status and update the task.
+
+        Parameters
+        ----------
+        task : Task
+            The task to update.
+
+        Returns
+        -------
+        Task
+            The updated task.
+        """
         status = await self.launcher.query_status(task.step, task)
         task.status = status
         return task
@@ -575,7 +588,6 @@ class Orchestrator:
                 Planner.Keys.Status,
                 default=Status.Unsubmitted,
             )
-            # return {}
 
         exec_tasks = [asyncio.Task(self.process_node(n)) for n in open_set]
         exec_results = await asyncio.gather(*exec_tasks)
