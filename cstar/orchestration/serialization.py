@@ -145,6 +145,10 @@ def deserialize(
     use_json = (is_auto and ext == ".json") or mode == PersistenceMode.json
     use_yaml = (is_auto and (ext in {".yaml", ".yml"})) or mode == PersistenceMode.yaml
 
+    if not use_json and not use_yaml:
+        print(f"Non-standard file name {path} was provided. Defaulting to YAML.")
+        use_yaml = True
+
     if use_json:
         model = _read_json(path, klass)
     elif use_yaml:
