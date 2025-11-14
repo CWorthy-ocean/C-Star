@@ -67,6 +67,7 @@ class SlurmHandle(ProcessHandle):
 
     job_name: str | None
     """The user-friendly job name."""
+    # duration: int
 
     def __init__(self, job_id: str, job_name: str | None = None) -> None:
         """Initialize the SLURM handle.
@@ -76,7 +77,7 @@ class SlurmHandle(ProcessHandle):
         job_id : str
             The SLURM_JOB_ID identifying a job.
         """
-        self.duration = duration_fn()
+        # self.duration = duration_fn()
         super().__init__(pid=job_id)
         self.job_name = job_name
 
@@ -250,10 +251,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = t.cast(SlurmHandle, item.handle)
-        if handle.duration < 2:
-            # pretend that i can't cancel...
-            print(f"Unable to cancel this running task `{handle.pid}")
-            return item
+        # if handle.duration < 2:
+        #     # pretend that i can't cancel...
+        #     print(f"Unable to cancel this running task `{handle.pid}")
+        #     return item
 
         item.status = Status.Cancelled
         return item
