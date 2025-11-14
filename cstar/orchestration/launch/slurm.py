@@ -1,13 +1,17 @@
 import os
-import random
+import re
 import typing as t
 from pathlib import Path
 
 from prefect import task
 from prefect.context import TaskRunContext
 
+from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
-from cstar.execution.scheduler_job import create_scheduler_job, get_status_of_slurm_job
+from cstar.execution.scheduler_job import (
+    create_scheduler_job,
+    get_status_of_slurm_job,
+)
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.orchestration import (
     CStep,
@@ -19,9 +23,28 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.serialization import deserialize
 
 
+def slugify(source: str) -> str:
+    """Convert a source string into a URL-safe slug.
+
+    Parameters
+    ----------
+    source : str
+        The string to be converted.
+
+    Returns
+    -------
+    str
+        The slugified version of the source string.
+    """
+    if not source:
+        raise ValueError
+
+    return re.sub(r"\s+", "-", source.casefold())
+
+
 def duration_fn() -> int:
     """Mock task execution via randomly selecting a duration for the step."""
-    return random.randint(5, 12)
+    return 8 # random.randint(5, 12)
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -42,9 +65,10 @@ def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
 class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
-    duration: int
+    job_name: str | None
+    """The user-friendly job name."""
 
-    def __init__(self, job_id: str) -> None:
+    def __init__(self, job_id: str, job_name: str | None = None) -> None:
         """Initialize the SLURM handle.
 
         Parameters
@@ -54,6 +78,7 @@ class SlurmHandle(ProcessHandle):
         """
         self.duration = duration_fn()
         super().__init__(pid=job_id)
+        self.job_name = job_name
 
     # async def simulate_progress(self) -> None:
     #     """TEMPORARY task simulation."""
@@ -80,8 +105,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         step : Step
             The step to submit to SLURM.
         """
-        job_dep_ids = [d.pid for d in dependencies]
-
+        job_name = slugify(step.name)
         bp_path = step.blueprint
         bp = deserialize(Path(bp_path), RomsMarblBlueprint)
         if job_dep_ids is None:
@@ -98,7 +122,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             cpus_per_node=None,  # let existing logic handle this
             script_path=None,  # puts it in current dir
             run_path=bp.runtime_params.output_dir,
-            job_name=None,  # to fill with some convention
+            job_name=job_name,
             output_file=None,  # to fill with some convention
             queue_name=os.getenv("CSTAR_QUEUE_NAME"),
             # walltime="00:10:00",  # TODO how to determine this one?
@@ -109,9 +133,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job.submit()
 
         if job.id:
-            print(f"Submitted {step.name} resulting in creation of Job ID `{job.id}`")
-            # todo: store ID as int, name as string? abandon name?
-            handle = SlurmHandle(job_id=str(job.id))
+            print(f"Submission of {step.name} created Job ID `{job.id}`")
+            handle = SlurmHandle(job_id=str(job.id), job_name=job_name)
             return handle
         else:
             print(f"Failed job details: {job}")
