@@ -113,7 +113,8 @@ def incremental_delays() -> t.Generator[float, None, None]:
     -------
     float
     """
-    delays = [2, 5, 15, 30, 45, 90]
+    # TODO: load delays from config to enable dynamic changes for tests.
+    delays = [2, 2, 5, 5, 15, 15]
     delay_cycle = cycle(delays)
     yield from delay_cycle
 
