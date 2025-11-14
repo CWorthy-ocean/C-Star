@@ -86,6 +86,9 @@ class CWorkplan(BaseModel):
     steps: list[CStep]
     """The list of steps contained in the workplan."""
 
+    state: str
+    """The validation status of the workplan."""
+
 
 _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 
