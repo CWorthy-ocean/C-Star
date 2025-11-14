@@ -6,7 +6,6 @@ from itertools import cycle
 from pathlib import Path
 
 import pytest  # todo: remove after moving test to unit-tests
-from prefect.context import TaskRunContext
 
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.orchestration import (
@@ -47,20 +46,20 @@ JobStatus = str
 #     return ExecutionStatus.COMPLETED
 
 
-def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
-    """Cache on a combination of the task name and user-assigned run id.
-
-    Parameters
-    ----------
-    context : TaskRunContext
-        The prefect context object for the currently running task
-    params : dict[str, t.Any]
-        A dictionary containing all thee input values to the task
-    """
-    cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
-    print(f"Cache check: {cache_key}")
-    return cache_key
-
+# def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
+#     """Cache on a combination of the task name and user-assigned run id.
+#
+#     Parameters
+#     ----------
+#     context : TaskRunContext
+#         The prefect context object for the currently running task
+#     params : dict[str, t.Any]
+#         A dictionary containing all thee input values to the task
+#     """
+#     cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
+#     print(f"Cache check: {cache_key}")
+#     return cache_key
+#
 
 # @task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
 # def submit_job(step: Step, job_dep_ids: list[str] | None = None) -> JobId:

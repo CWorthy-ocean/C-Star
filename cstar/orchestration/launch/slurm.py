@@ -3,7 +3,9 @@ import os
 import random
 import typing as t
 from pathlib import Path
-from time import time
+
+from prefect import task
+from prefect.context import TaskRunContext
 
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import create_scheduler_job, get_status_of_slurm_job
@@ -21,6 +23,21 @@ from cstar.orchestration.serialization import deserialize
 def duration_fn() -> int:
     """Mock task execution via randomly selecting a duration for the step."""
     return random.randint(5, 12)
+
+
+def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
+    """Cache on a combination of the task name and user-assigned run id.
+
+    Parameters
+    ----------
+    context : TaskRunContext
+        The prefect context object for the currently running task
+    params : dict[str, t.Any]
+        A dictionary containing all thee input values to the task
+    """
+    cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
+    print(f"Cache check: {cache_key}")
+    return cache_key
 
 
 class SlurmHandle(ProcessHandle):
@@ -54,7 +71,7 @@ class SlurmHandle(ProcessHandle):
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
 
-    # @task(persist_result=True, log_prints=True) # , cache_key_fn=cache_key_func
+    @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
     async def _submit(step: CStep, dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
