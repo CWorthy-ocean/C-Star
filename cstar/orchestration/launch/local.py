@@ -99,7 +99,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             The step to run in a local process.
         """
         handle = await LocalLauncher._submit(step, dependencies)
-        status = await LocalLauncher.query_status(handle)
+        status = await LocalLauncher.query_status(step, handle)
         return Task(
             status=status,
             step=step,
@@ -107,7 +107,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         )
 
     @classmethod
-    async def query_status(cls, item: Task | LocalHandle) -> Status:
+    async def query_status(cls, step: CStep, item: Task | LocalHandle) -> Status:
         """Retrieve the status of an item.
 
         Parameters

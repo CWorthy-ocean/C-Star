@@ -278,7 +278,6 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     """Contract required to implement a task launcher."""
 
     @classmethod
-    # async def launch(cls, step: CStep) -> Task:
     async def launch(cls, step: CStep, dependencies: list[_THandle]) -> Task[_THandle]:
         """Launch a process for a step.
 
@@ -295,7 +294,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ...
 
     @classmethod
-    async def query_status(cls, item: Task[_THandle] | _THandle) -> Status:
+    async def query_status(cls, step: CStep, item: Task[_THandle] | _THandle) -> Status:
         """Retrieve the current status for a running task.
 
         Parameters
@@ -557,9 +556,7 @@ class Orchestrator:
                 raise CstarDependencyError(f"Node {n} task failed.")
 
     async def update_status(self, task: Task) -> Task:
-        status = await self.launcher.query_status(task)
-        # TODO: consider pushing update to the handle and using...
-        # await task.query_status()
+        status = await self.launcher.query_status(task.step, task)
         task.status = status
         return task
 

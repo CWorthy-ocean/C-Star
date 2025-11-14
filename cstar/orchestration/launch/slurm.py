@@ -112,11 +112,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     # @task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
     # def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatus:
     @staticmethod
-    async def _status(handle: SlurmHandle) -> str:
+    async def _status(step: CStep, handle: SlurmHandle) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
         ----------
+        step : CStep
+            The step triggering the job.
         handle : SlurmHandle
             A handle object for a SLURM-based task.
         """
@@ -174,7 +176,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         )
 
     @classmethod
-    async def query_status(cls, item: Task | SlurmHandle) -> Status:
+    async def query_status(cls, step: CStep, item: Task | SlurmHandle) -> Status:
         """Retrieve the status of an item.
 
         Parameters
@@ -183,8 +185,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             An item with a handle to be used to execute a status query.
         """
         handle = t.cast(SlurmHandle, item.handle if isinstance(item, Task) else item)
-        raw_status = await SlurmLauncher._status(handle)
-        if raw_status in ["PENDING", "RUNNING", "ENDING"]:
+        slurm_status = await SlurmLauncher._status(step, handle)
             return Status.Running
         if raw_status in ["COMPLETED", "FAILED"]:
             return Status.Done
