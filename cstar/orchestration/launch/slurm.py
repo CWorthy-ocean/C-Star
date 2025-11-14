@@ -56,16 +56,16 @@ class SlurmHandle(ProcessHandle):
         self.duration = duration_fn()
         super().__init__(pid=job_id)
 
-    async def simulate_progress(self) -> None:
-        """TEMPORARY task simulation."""
-        # SIMULATED TASK PROGRESS -->
-        self.duration -= 1
-        await asyncio.sleep(1)
+    # async def simulate_progress(self) -> None:
+    #     """TEMPORARY task simulation."""
+    #     # SIMULATED TASK PROGRESS -->
+    #     self.duration -= 1
+    #     await asyncio.sleep(1)
 
-        # simulate task failure.
-        if self.duration < 5 and random.randint(0, 100) < 5:
-            self.duration = -100
-        # <--- SIMULATED TASK PROGRESS
+    #     # simulate task failure.
+    #     if self.duration < 5 and random.randint(0, 100) < 5:
+    #         self.duration = -100
+    #     # <--- SIMULATED TASK PROGRESS
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
@@ -117,12 +117,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
             raise RuntimeError(f"Unable to retrieve scheduled job ID for: {step.name}")
 
-        # TODO: replace with non-mock implementation
-        job_id = f"mock-slurm-job-id-{step.name}"
-        print(f"Submitting run of {step.application} created job_id: {job_id}")
-
-        handle = SlurmHandle(job_id=job_id)
-        await handle.simulate_progress()
+        # # TODO: replace with non-mock implementation
+        # job_id = f"mock-slurm-job-id-{step.name}"
+        # print(f"Submitting run of {step.application} created job_id: {job_id}")
+        #
+        # handle = SlurmHandle(job_id=job_id)
+        # await handle.simulate_progress()
 
         return handle
 
@@ -168,6 +168,19 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             status = "FAILED"
         print(f"Retrieved status `{status}` for job_id `{job_id}`")
         return status
+
+        # # TODO: replace with non-mock implementation
+        # # Simulate "making progress" by adjusting the duration, here.
+        # job_id = handle.pid
+        # await handle.simulate_progress()
+        # print(f"\tRemaining for {handle.pid}: {handle.duration}")
+        # status = "RUNNING"
+        # if handle.duration == 0:
+        #     status = "COMPLETED"
+        # elif handle.duration < 0:
+        #     status = "FAILED"
+        # print(f"Retrieved status `{status}` for job_id `{job_id}`")
+        # return status
 
     @classmethod
     async def launch(cls, step: CStep, dependencies: list[SlurmHandle]) -> Task:
