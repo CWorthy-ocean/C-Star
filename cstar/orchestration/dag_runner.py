@@ -11,7 +11,6 @@ import pytest  # todo: remove after moving test to unit-tests
 
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.orchestration import (
-    CStep,
     CWorkplan,
     Launcher,
     Orchestrator,
