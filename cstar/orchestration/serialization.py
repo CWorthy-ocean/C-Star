@@ -136,7 +136,7 @@ def deserialize(
 
     """
     if not path.exists():
-        msg = f"The blueprint file could not be found at the path `{path}`"
+        msg = f"No file found at path `{path}` to deserialize to `{klass.__name__}`"
         raise FileNotFoundError(msg)
 
     model: _DT | None = None
@@ -151,7 +151,7 @@ def deserialize(
         model = _read_yaml(path, klass)
 
     if model is None:
-        msg = f"Unable to deserialize the blueprint at `{path}` as `{mode}`"
+        msg = f"Unable to deserialize the `{klass.__name__}` at `{path}` as `{mode}` from: \n{path.read_text()}"
         raise ValueError(msg)
 
     return model
