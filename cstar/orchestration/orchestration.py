@@ -7,11 +7,7 @@ from enum import IntEnum, StrEnum, auto
 import networkx as nx
 from pydantic import BaseModel, Field
 
-
-class CstarDependencyError(Exception):
-    """Raise this error when a critical task in a workplan fails."""
-
-    ...
+from cstar.base.exceptions import CstarExpectationFailed
 
 
 class ProcessHandle:
@@ -556,7 +552,7 @@ class Orchestrator:
             # - NOTE: this may occur naturally with SLURM but not local launch
             self.planner.store(n, Planner.Keys.Status, Status.Failed)
             if step and step.critical:
-                raise CstarDependencyError(f"Node {n} task failed.")
+                raise CstarExpectationFailed(f"Node {n} task failed.")
 
     async def update_status(self, task: Task) -> Task:
         status = await self.launcher.query_status(task.step, task)
@@ -595,7 +591,7 @@ class Orchestrator:
 
         try:
             await asyncio.gather(*postproc_tasks)
-        except CstarDependencyError:
+        except CstarExpectationFailed:
             # cancel all running tasks except the known failure
             todo = {k: v for k, v in kvp.items() if v and Status.is_running(v.status)}
             cancellations = tuple(todo.values())
