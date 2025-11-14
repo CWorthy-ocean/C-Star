@@ -198,8 +198,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 # TODO: remove this simulation of insta-fail using duration of 0
                 # - consider using Status.Submitted to let it update...
                 Status.Submitted
-                if handle.pid and handle.duration > 0
-                else Status.Failed
+                # if handle.pid and handle.duration > 0
+                # else Status.Failed
             ),
             step=step,
             handle=handle,
