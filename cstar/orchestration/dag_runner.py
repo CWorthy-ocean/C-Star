@@ -28,18 +28,18 @@ JobStatus = str
 # def create_scheduler_job(*args, **kwargs) -> "SchedulerJob":  # noqa: F811
 #     class DummySchedulerJob:
 #         """Dummy job with minimum interface necessary for mock job execution."""
-
+#
 #         def __init__(self) -> None:
 #             print("Creating dummy scheduler job.")
 #             self._id = random.randint(1, 100_000_000)
-
+#
 #         def submit(self) -> None:
 #             print("Performing dummy job submission.")
-
+#
 #         @property
 #         def id(self) -> int | None:
 #             return self._id
-
+#
 #     return DummySchedulerJob()
 
 
@@ -61,7 +61,7 @@ JobStatus = str
 #     cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
 #     print(f"Cache check: {cache_key}")
 #     return cache_key
-#
+
 
 # @task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
 # def submit_job(step: Step, job_dep_ids: list[str] | None = None) -> JobId:
@@ -88,7 +88,7 @@ JobStatus = str
 #     job.submit()
 #     print(f"Submitted {step.name} with id {job.id}")
 #     return str(job.id)
-#
+
 
 # @task(persist_result=True, cache_key_fn=cache_key_func, log_prints=True)
 # def check_job(step: Step, job_id: JobId, deps: list[str] = []) -> ExecutionStatus:
@@ -105,7 +105,6 @@ JobStatus = str
 #
 #         sleep(10)
 #     return status
-#
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -153,7 +152,7 @@ async def build_and_run_dag(path: Path) -> None:
         open_set = orchestrator.get_open_nodes()
 
         print(f"[on-exit] Open nodes: {open_set}, Closed: {closed_set}")
-        
+
         sleep_duration = next(delay_iter)
         print(f"Sleeping for {sleep_duration} seconds before next check.")
         await asyncio.sleep(sleep_duration)
