@@ -183,7 +183,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         # return status
 
     @classmethod
-    async def launch(cls, step: CStep, dependencies: list[SlurmHandle]) -> Task:
+    async def launch(
+        cls, step: CStep, dependencies: list[SlurmHandle]
+    ) -> Task[SlurmHandle]:
         """Launch a step in SLURM.
 
         Parameters
@@ -192,11 +194,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The step to submit to SLURM.
         """
         handle = await SlurmLauncher._submit(step, dependencies)
-        # TODO: confirm handle did not insta-fail on launch
         return Task(
             status=(
-                # TODO: remove this simulation of insta-fail using duration of 0
-                # - consider using Status.Submitted to let it update...
                 Status.Submitted
                 # if handle.pid and handle.duration > 0
                 # else Status.Failed
@@ -206,15 +205,17 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         )
 
     @classmethod
-    async def query_status(cls, step: CStep, item: Task | SlurmHandle) -> Status:
+    async def query_status(
+        cls, step: CStep, item: Task[SlurmHandle] | SlurmHandle
+    ) -> Status:
         """Retrieve the status of an item.
 
         Parameters
         ----------
-        item : Task | ProcessHandle
+        item : Task[SlurmHandle] | SlurmHandle
             An item with a handle to be used to execute a status query.
         """
-        handle = t.cast(SlurmHandle, item.handle if isinstance(item, Task) else item)
+        handle = item.handle if isinstance(item, Task) else item
         slurm_status = await SlurmLauncher._status(step, handle)
 
         print(f"SLURM job `{handle.pid}` status is `{slurm_status}`")
@@ -236,20 +237,20 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return Status.Unsubmitted
 
     @classmethod
-    async def cancel(cls, item: Task) -> Task:
+    async def cancel(cls, item: Task[SlurmHandle]) -> Task[SlurmHandle]:
         """Cancel a task, if possible.
 
         Parameters
         ----------
-        item : Task or ProcessHandle
-            A task or process handle to cancel.
+        item : Task[SlurmHandle]
+            A task to cancel.
 
         Returns
         -------
-        Status
-            The current status of the item.
+        Task[SlurmHandle]
+            The task after the cancellation attempt has completed.
         """
-        handle = t.cast(SlurmHandle, item.handle)
+        handle = item.handle
         # if handle.duration < 2:
         #     # pretend that i can't cancel...
         #     print(f"Unable to cancel this running task `{handle.pid}")
