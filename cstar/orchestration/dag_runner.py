@@ -147,6 +147,7 @@ async def build_and_run_dag(path: Path) -> None:
 
     closed_set = orchestrator.get_closed_nodes()
     open_set = orchestrator.get_open_nodes()
+    delay_iter = iter(incremental_delays())
 
     while open_set is not None:
         print(f"[on-enter] Open nodes: {open_set}, Closed: {closed_set}")
@@ -157,7 +158,10 @@ async def build_and_run_dag(path: Path) -> None:
         open_set = orchestrator.get_open_nodes()
 
         print(f"[on-exit] Open nodes: {open_set}, Closed: {closed_set}")
-        await asyncio.sleep(next(incremental_delays()))
+        
+        sleep_duration = next(delay_iter)
+        print(f"Sleeping for {sleep_duration} seconds before next check.")
+        await asyncio.sleep(sleep_duration)
 
     print(f"Workplan `{wp}` execution is complete.")
 
