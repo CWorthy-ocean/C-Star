@@ -3,6 +3,8 @@ import random
 import typing as t
 from subprocess import Popen
 
+from psutil import Process
+
 from cstar.orchestration.orchestration import (
     CStep,
     Launcher,
@@ -12,41 +14,56 @@ from cstar.orchestration.orchestration import (
 )
 
 
-def duration_fn() -> int:
-    """Mock task execution via randomly selecting a duration for the step."""
-    return random.randint(5, 12)
-
-
 class LocalHandle(ProcessHandle):
     """Handle enabling reference to a task running in local processes."""
 
-    duration: int
     popen: Popen
-    start_at: datetime.datetime
+    """The process handle (used only for simulating local processes)."""
+    start_at: float
+    """The process creation time as a posix timestamp (in seconds)."""
 
     def __init__(
         self,
         step: CStep,
+        pid: int,
+        start_at: datetime.datetime | float,
     ) -> None:
         """Initialize the local handle.
 
         Parameters
         ----------
-        proc : subprocess.Popen
-            The subprocess handle.
+        step : Step
+            The step used to create the task.
+        pid : int
+            The process ID.
+        start_at : datetime
+            The process start time.
         """
-        self.duration = duration_fn()
         self.step = step
-        self.start_at = datetime.datetime.now()
-        cmd = ["sleep", str(self.duration)]
-        print(f"Creating local handle from cmd: {' '.join(cmd)}")
-        self.popen = Popen(cmd)
-        self.popen.poll()
-        super().__init__(pid=str(self.popen.pid))
+        self.start_at = (
+            start_at.timestamp()
+            if isinstance(start_at, datetime.datetime)
+            else start_at
+        )
+        super().__init__(pid=str(pid))
+
+    @property
+    def elapsed(self) -> float:
+        """The number of seconds passed since the task was started.
+
+        Returns
+        -------
+        int
+        """
+        now = datetime.datetime.now().timestamp()
+        return now - self.start_at
 
 
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
+
+    processes: t.ClassVar[dict[str, Popen]] = {}
+    """Mapping from step name to process."""
 
     @staticmethod
     async def _submit(step: CStep, dependencies: list[LocalHandle]) -> LocalHandle:
@@ -57,15 +74,30 @@ class LocalLauncher(Launcher[LocalHandle]):
         step : Step
             The step to execute in a local process.
         """
-        handle = LocalHandle(step)
-        print(
-            f"Local run of `{step.application}` created pid: {handle.popen.pid} with duration {handle.duration}"
-        )
+        dep_checks = [(Process(int(dep.pid)), dep.start_at) for dep in dependencies]
+
+        if any(p for p, s in dep_checks if p.is_running() and p.create_time() == s):
+            raise RuntimeError(
+                f"Unsatisfied prerequisites. Unable to start task: {step.name}"
+            )
+
+        cmd = ["sleep", str(random.randint(5, 12))]
+        print(f"Creating local process from cmd: {' '.join(cmd)}")
+
+        popen = Popen(cmd)
+        LocalLauncher.processes[step.name] = popen
+
+        pid = popen.pid
+        process = Process(pid)
+        start_at = process.create_time()
+
+        handle = LocalHandle(step, pid, start_at)
+        print(f"Local run of `{step.application}` created pid: {handle.popen.pid}")
 
         return handle
 
     @staticmethod
-    async def _status(handle: LocalHandle) -> str:
+    async def _status(step: CStep, handle: LocalHandle) -> str:
         """Retrieve the status of a step running in local process.
 
         Parameters
@@ -73,20 +105,23 @@ class LocalLauncher(Launcher[LocalHandle]):
         handle : LocalHandle
             A handle object for a process-based task.
         """
-        # TODO: replace with non-mock implementation
-        handle.popen.poll()
-        print(f"Return code for pid `{handle.pid}`is `{handle.popen.returncode}")
-        if handle.popen.returncode is None:
+        to_query = [p for p in LocalLauncher.processes.values() if p.returncode is None]
+        for process in to_query:
+            process.poll()
+
+        rc: int | None = None
+        if handle.step.name in LocalLauncher.processes:
+            rc = LocalLauncher.processes[handle.step.name].returncode
+
+        print(f"Return code for pid `{handle.pid}` is `{rc} for `{step.name}`")
+        if rc is None:
             status = "RUNNING"
-        elif handle.popen.returncode == 0:
+        elif rc == 0:
             status = "COMPLETED"
         else:
             status = "FAILED"
 
-        elapsed = datetime.datetime.now() - handle.start_at
-        print(
-            f"Retrieved status `{status}` for pid `{handle.pid}` after {elapsed.total_seconds()} seconds"
-        )
+        print(f"Status `{status}` for pid `{handle.pid}` after {handle.elapsed} sec")
         return status
 
     @classmethod
@@ -107,7 +142,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         )
 
     @classmethod
-    async def query_status(cls, step: CStep, item: Task | LocalHandle) -> Status:
+    async def query_status(
+        cls, step: CStep, item: Task[LocalHandle] | LocalHandle
+    ) -> Status:
         """Retrieve the status of an item.
 
         Parameters
@@ -115,8 +152,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         item : Task | ProcessHandle
             An item with a handle to be used to execute a status query.
         """
-        handle = t.cast(LocalHandle, item.handle if isinstance(item, Task) else item)
-        raw_status = await LocalLauncher._status(handle)
+        handle = item.handle if isinstance(item, Task) else item
+        raw_status = await LocalLauncher._status(step, handle)
         if raw_status in ["PENDING", "RUNNING", "ENDING"]:
             return Status.Running
         if raw_status in ["COMPLETED", "FAILED"]:
@@ -129,7 +166,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         return Status.Unsubmitted
 
     @classmethod
-    async def cancel(cls, item: Task) -> Task:
+    async def cancel(cls, item: Task[LocalHandle]) -> Task[LocalHandle]:
         """Cancel a task, if possible.
 
         Parameters
@@ -142,12 +179,15 @@ class LocalLauncher(Launcher[LocalHandle]):
         Status
             The current status of the item.
         """
-        handle = t.cast(LocalHandle, item.handle)
-        if handle.popen.returncode is not None:
+        handle = item.handle
+        process = LocalLauncher.processes.get(item.step.name, None)
+
+        if process and process.returncode is not None:
             # can't cancel it if it's already done
             print(f"Unable to cancel this running task `{handle.pid}")
             return item
-        else:
+
+        if process and process.returncode:
             handle.popen.kill()
             item.status = Status.Cancelled
 
