@@ -92,7 +92,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         start_at = process.create_time()
 
         handle = LocalHandle(step, pid, start_at)
-        print(f"Local run of `{step.application}` created pid: {handle.popen.pid}")
+        print(f"Local run of `{step.application}` created pid: {pid}")
 
         return handle
 
