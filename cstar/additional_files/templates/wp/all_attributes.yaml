@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=file://workplan-schema.json
-name: Sample Ensemble Workplan
-description: This is the description of my test workplan
+name: Sample Workplan
+description: A workplan containing the complete set of workplan & step attributes.
 state: draft
 compute_environment:
     num_nodes: 4

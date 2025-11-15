@@ -1,6 +1,8 @@
 import argparse
 import typing as t
+from contextlib import contextmanager
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import pytest
 
@@ -61,15 +63,56 @@ async def test_cli_workplan_check_action(
     assert " valid" in captured
 
 
+@contextmanager
+def templated_plan(plan_name: str) -> t.Generator[Path, None, None]:
+    """Return the path to a temporary file containing a populated workplan template.
+
+    # TODO: convert to a fixture or use existing fixtures (this is duped from
+    # tests in dag_runner.py for expediency).
+    """
+    wp_template_path = (
+        Path(__file__).parent.parent.parent.parent.parent.parent
+        / f"additional_files/templates/wp/{plan_name}.yaml"
+    )
+    bp_template_path = (
+        Path(__file__).parent.parent.parent.parent.parent.parent
+        / "additional_files/templates/bp/blueprint.yaml"
+    )
+
+    wp_tpl = wp_template_path.read_text()
+    bp_tpl = bp_template_path.read_text()
+
+    with (
+        NamedTemporaryFile("w", delete_on_close=False) as wp,
+        NamedTemporaryFile("w", delete_on_close=False) as bp,
+    ):
+        wp_path = Path(wp.name)
+        bp_path = Path(bp.name)
+
+        wp_tpl = wp_tpl.replace("{application}", "sleep")
+        wp_tpl = wp_tpl.replace("{blueprint_path}", bp_path.as_posix())
+
+        wp.write(wp_tpl)
+        bp.write(bp_tpl)
+        wp.close()
+        bp.close()
+
+        try:
+            print(
+                f"Temporary workplan located at {wp_path} with blueprint at {bp_path}"
+            )
+            yield wp_path
+        finally:
+            print(f"populated workplan template:\n{'#' * 80}\n{wp_tpl}\n{'#' * 80}")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "template_file",
-    ["fanout_workplan.yaml", "linear_workplan.yaml", "mvp_workplan.yaml"],
+    "plan_name",
+    ["fanout", "single_step", "parallel"],
 )
 async def test_cli_workplan_check_action_tpl(
-    # request: pytest.FixtureRequest,
-    # tmp_path: Path,
-    template_file: str,
+    plan_name: str,
     parser: argparse.ArgumentParser,
     capsys: pytest.CaptureFixture,
 ) -> None:
@@ -84,15 +127,15 @@ async def test_cli_workplan_check_action_tpl(
     workplan_name : str
         The name of a workplan fixture to use for workplan creation
     """
-    # workplan = request.getfixturevalue(workplan_name)
-    cstar_dir = Path(__file__).parent.parent.parent.parent.parent.parent
-    templates_dir = cstar_dir / "additional_files/templates"
-    wp_path = templates_dir / template_file
+    # cstar_dir = Path(__file__).parent.parent.parent.parent.parent.parent
+    # templates_dir = cstar_dir / "additional_files/templates"
+    # wp_path = templates_dir / template_file
 
-    workplan: Workplan = deserialize(wp_path, Workplan)
-    assert workplan, "sanity-check deserialize failed."
+    with templated_plan(plan_name) as wp_path:
+        workplan: Workplan = deserialize(wp_path, Workplan)
+        assert workplan, "sanity-check deserialize failed."
 
-    ns = parser.parse_args(["workplan", "check", wp_path.as_posix()])
-    await handle(ns)
+        ns = parser.parse_args(["workplan", "check", wp_path.as_posix()])
+        await handle(ns)
     captured = capsys.readouterr().out
     assert " valid" in captured
