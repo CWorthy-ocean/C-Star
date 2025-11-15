@@ -126,7 +126,7 @@ async def test_build_and_run() -> None:
 if __name__ == "__main__":
     os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
-    os.environ["CSTAR_QUEUE_NAME"] = "wholenode"
+    os.environ["CSTAR_QUEUE_NAME"] = "shared"
     os.environ["CSTAR_ORCHESTRATED"] = "1"
 
     wp_path = Path("/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml")
