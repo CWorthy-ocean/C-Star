@@ -7,32 +7,11 @@ import networkx as nx
 from cstar.orchestration.models import Step, Workplan
 
 
-class Planner(t.Protocol):
+class GraphPlanner:
+    """Convert workplans into task graphs and manage their execution."""
+
     workplan: Workplan
     """The workplan used to plan tasks."""
-
-    def __init__(self, plan: Workplan) -> None:
-        """Initialize the planner."""
-        self.workplan = plan
-
-    def __next__(self) -> Step | None:
-        steps: tuple[Step, ...] = ()
-
-        if steps:
-            return steps[0]
-
-        raise StopIteration
-
-    def __iter__(self) -> t.Iterator[Step]:
-        return iter(self.workplan.steps)
-
-    def plan(self) -> list[Step]:
-        """Return the complete plan."""
-        ...
-
-
-class GraphPlanner(Planner):
-    """Convert workplans into task graphs and manage their execution."""
 
     graph: nx.DiGraph
     """The task graph to be executed."""
@@ -68,7 +47,7 @@ class GraphPlanner(Planner):
         graph: nx.DiGraph | None = None,
     ) -> None:
         if workplan:
-            super().__init__(workplan)
+            self.workplan = workplan
 
         if workplan and not graph:
             self._initialize_from_plan(workplan)
@@ -149,7 +128,7 @@ class GraphPlanner(Planner):
 
     def __iter__(self) -> t.Iterator[Step]:
         """Return an iterator over the ordered steps."""
-        plan = self.plan()
+        plan = self.flatten()
         return iter(plan)
 
     @classmethod
@@ -247,10 +226,10 @@ class GraphPlanner(Planner):
             for node, node_data in graph.nodes(data=True)
         )
 
-    def plan(
+    def flatten(
         self,
         artifact_dir: Path | None = None,  # TODO: debug only? remove
-    ) -> list[Step]:
+    ) -> t.Iterable[Step]:
         """Create a plan specifying the desired execution order of all tasks.
 
         Builds a task graph and flatten using a breadth-first traversal

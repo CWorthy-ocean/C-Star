@@ -5,9 +5,8 @@ from pathlib import Path
 
 import pytest
 
-# from cstar.cli.workplan.actions.plan import render
 from cstar.orchestration.models import Step, Workplan
-from cstar.orchestration.planning import GraphPlanner, MonitoredPlanner, Planner
+from cstar.orchestration.planning import GraphPlanner, MonitoredPlanner
 
 
 @pytest.fixture
@@ -47,7 +46,7 @@ def the_workplan(
     ],
 )
 def test_planner_no_tasks(
-    planner_type: type[Planner],
+    planner_type: type[GraphPlanner],
     the_workplan: Workplan,
 ) -> None:
     """Verify that planners do not blow up when supplied with an empty plan.
@@ -58,7 +57,7 @@ def test_planner_no_tasks(
     object.__setattr__(the_workplan, "steps", [])
     planner = planner_type(the_workplan)
 
-    plan = list(planner)
+    plan = list(planner.flatten())
     assert len(plan) == 0
 
 
@@ -91,7 +90,7 @@ def get_monitored_graph_plan_size(plan: Workplan) -> int:
     ],
 )
 def test_planner_with_tasks(
-    planner_type: type[Planner],
+    planner_type: type[GraphPlanner],
     num_steps: int,
     node_fn: t.Callable[[Workplan], int],
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
@@ -101,7 +100,7 @@ def test_planner_with_tasks(
 
     Parameters
     ----------
-    planner_type : type[Planner]
+    planner_type : type[GraphPlanner]
         The type of planner to test
     num_steps : int
         The number of steps to add to the workplan
@@ -119,7 +118,7 @@ def test_planner_with_tasks(
     )
 
     planner = planner_type(plan)
-    proposed_plan = planner.plan()
+    proposed_plan = list(planner.flatten())
     assert len(proposed_plan) == node_fn(plan)
 
 
@@ -166,7 +165,7 @@ def test_planner_monitored_deps(
 
     planner = MonitoredPlanner(plan)
     # p = render(planner, Path())
-    proposed_plan = planner.plan(artifact_dir=tmp_path)
+    proposed_plan = planner.flatten(artifact_dir=tmp_path)
 
     edges = planner.graph.edges
 
@@ -270,7 +269,7 @@ def test_planner_bfs_breaker(
     )
 
     planner = GraphPlanner(plan)
-    proposed_plan = planner.plan(artifact_dir=tmp_path)
+    proposed_plan = planner.flatten(artifact_dir=tmp_path)
     # p = render(planner, Path())
 
     edges = planner.graph.edges
