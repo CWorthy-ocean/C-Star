@@ -74,9 +74,18 @@ class LocalLauncher(Launcher[LocalHandle]):
         step : Step
             The step to execute in a local process.
         """
-        dep_checks = [(Process(int(dep.pid)), dep.start_at) for dep in dependencies]
+        print(f"Checking deps for `{step.name}`: {[d.step.name for d in dependencies]}")
+        tracked = {
+            d.step.name: (d.step, LocalLauncher.processes.get(d.step.name, None))
+            for d in dependencies
+        }
 
-        if any(p for p, s in dep_checks if p.is_running() and p.create_time() == s):
+        if any(
+            process
+            for name, (step, process) in tracked.items()
+            if not process or (process and process.returncode is None)
+            # and process.create_time() == # TODO: solve for create date...
+        ):
             raise RuntimeError(
                 f"Unsatisfied prerequisites. Unable to start task: {step.name}"
             )
@@ -113,7 +122,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         if handle.step.name in LocalLauncher.processes:
             rc = LocalLauncher.processes[handle.step.name].returncode
 
-        print(f"Return code for pid `{handle.pid}` is `{rc} for `{step.name}`")
+        print(f"Return code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
         if rc is None:
             status = "RUNNING"
         elif rc == 0:
