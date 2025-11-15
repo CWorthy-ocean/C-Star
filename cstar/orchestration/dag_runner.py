@@ -10,8 +10,8 @@ from tempfile import NamedTemporaryFile
 import pytest  # todo: remove after moving test to unit-tests
 
 from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
-    CWorkplan,
     Launcher,
     Orchestrator,
     Planner,
@@ -41,7 +41,7 @@ async def build_and_run_dag(path: Path) -> None:
     path : Path
         The path to the blueprint to execute
     """
-    wp = deserialize(path, CWorkplan)
+    wp = deserialize(path, Workplan)
     print(f"Executing workplan: {wp.name}")
 
     planner = Planner(workplan=wp)

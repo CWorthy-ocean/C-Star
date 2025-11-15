@@ -8,6 +8,7 @@ import networkx as nx
 from pydantic import BaseModel, Field
 
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.orchestration.models import Workplan
 
 
 class ProcessHandle:
@@ -74,18 +75,6 @@ class CStep(BaseModel):
     """The path to a blueprint file."""
 
 
-class CWorkplan(BaseModel):
-    name: str
-    """The user-friendly workplan name."""
-
-    # steps: t.Iterable[CStep] = Field(default_factory=list)
-    steps: list[CStep]
-    """The list of steps contained in the workplan."""
-
-    state: str
-    """The validation status of the workplan."""
-
-
 _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 
 
@@ -129,7 +118,7 @@ _TValue = t.TypeVar("_TValue")
 class Planner:
     """Identifies depdendencies of a workplan to produce an execution plan."""
 
-    workplan: CWorkplan
+    workplan: Workplan
     """The workplan to plan."""
 
     graph: nx.DiGraph = Field(init=False)
@@ -145,7 +134,7 @@ class Planner:
 
     def __init__(
         self,
-        workplan: CWorkplan,
+        workplan: Workplan,
     ) -> None:
         """Initialize the planner and build an execution graph.
 
@@ -158,7 +147,7 @@ class Planner:
         self.graph = Planner._workplan_to_graph(workplan)
 
     @classmethod
-    def _workplan_to_graph(cls, workplan: CWorkplan) -> nx.DiGraph:
+    def _workplan_to_graph(cls, workplan: Workplan) -> nx.DiGraph:
         """Convert a workplan into a graph for planning.
 
         Parameters
