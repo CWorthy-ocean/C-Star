@@ -33,7 +33,7 @@ def incremental_delays() -> t.Generator[float, None, None]:
 
 
 async def process_plan(orchestrator: Orchestrator, mode: Orchestrator.RunMode) -> None:
-    closed_set = orchestrator.get_closed_nodes()
+    closed_set = orchestrator.get_closed_nodes(mode=mode)
     open_set = orchestrator.get_open_nodes(mode=mode)
     delay_iter = iter(incremental_delays())
 
@@ -41,7 +41,7 @@ async def process_plan(orchestrator: Orchestrator, mode: Orchestrator.RunMode) -
         print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
         await orchestrator.run(mode=mode)
 
-        closed_set = orchestrator.get_closed_nodes()
+        closed_set = orchestrator.get_closed_nodes(mode=mode)
         open_set = orchestrator.get_open_nodes(mode=mode)
         print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
 

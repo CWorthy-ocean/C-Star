@@ -362,9 +362,9 @@ class Orchestrator:
             - Null indicates all nodes are closed (traversal is complete).
         """
         g = self.planner.graph
-
         open_nodes: list[str] = []
-        closed_set = self.get_closed_nodes()
+        closed_set = self.get_closed_nodes(mode=mode)
+
         if self.planner.workplan:
             nodes = {s.name for s in self.planner.workplan.steps}
         else:
@@ -446,7 +446,7 @@ class Orchestrator:
         """
         return self._get_nodes_by_status(Status.Unsubmitted)
 
-    def get_closed_nodes(self) -> set[str]:
+    def get_closed_nodes(self, *, mode: RunMode) -> set[str]:
         """Retrieve the set of task nodes with a terminal state.
 
         Returns
@@ -457,7 +457,14 @@ class Orchestrator:
         done = self._get_nodes_by_status(Status.Done)
         cancelled = self._get_nodes_by_status(Status.Cancelled)
         failed = self._get_nodes_by_status(Status.Failed)
-        return {*cancelled, *failed, *done}
+        closed_set = {*cancelled, *failed, *done}
+
+        if mode == Orchestrator.RunMode.Schedule:
+            # during scheduling, consider all but unsubmitted as closed.
+            wip = self.get_wip_nodes()
+            closed_set.update(wip)
+
+        return closed_set
 
     def get_wip_nodes(self) -> set[str]:
         """Retrieve the set of task nodes that are executing.
@@ -467,7 +474,9 @@ class Orchestrator:
         set of str
             A set of node IDs identifying nodes with the Running status.
         """
-        return self._get_nodes_by_status(Status.Running)
+        running = self._get_nodes_by_status(Status.Submitted)
+        submitted = self._get_nodes_by_status(Status.Running)
+        return {*running, *submitted}
 
     def _locate_depedendencies(self, step: CStep) -> list[ProcessHandle] | None:
         """Look for the dependencies of the step.
