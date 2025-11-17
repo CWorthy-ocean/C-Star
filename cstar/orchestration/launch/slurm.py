@@ -116,19 +116,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             print(f"Submission of {step.name} created Job ID `{job.id}`")
             handle = SlurmHandle(job_id=str(job.id), job_name=job_name)
             return handle
-        else:
-            print(f"Failed job details: {job}")
 
+        print(f"Job submission failed: {job}")
         raise RuntimeError(f"Unable to retrieve scheduled job ID for: {step.name}")
-
-        # # TODO: replace with non-mock implementation
-        # job_id = f"mock-slurm-job-id-{step.name}"
-        # print(f"Submitting run of {step.application} created job_id: {job_id}")
-        #
-        # handle = SlurmHandle(job_id=job_id)
-        # await handle.simulate_progress()
-
-        return handle
 
     @staticmethod
     async def _status(step: CStep, handle: SlurmHandle) -> ExecutionStatus:
