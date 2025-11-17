@@ -70,11 +70,11 @@ async def build_and_run_dag(path: Path) -> None:
     launcher: Launcher = SlurmLauncher()
     orchestrator = Orchestrator(planner, launcher)
 
-    mode = Orchestrator.RunMode.Schedule
-    await process_plan(orchestrator, mode)
+    # schedule the tasks without waiting for completion
+    await process_plan(orchestrator, Orchestrator.RunMode.Schedule)
 
-    mode = Orchestrator.RunMode.Monitor
-    await process_plan(orchestrator, mode)
+    # monitor the scheduled tasks until they complete
+    await process_plan(orchestrator, Orchestrator.RunMode.Monitor)
 
 
 @contextmanager
