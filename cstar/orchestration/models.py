@@ -407,7 +407,7 @@ class Step(BaseModel):
     application: RequiredString
     """The user-friendly name of the application executed in the step."""
 
-    blueprint: FilePath
+    blueprint: FilePath | str
     """The blueprint that will be executed in this step."""
 
     depends_on: list[RequiredString] = Field(
@@ -439,6 +439,24 @@ class Step(BaseModel):
         frozen=True,
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
+
+    # @field_validator("blueprint", mode="after")
+    # @classmethod
+    # def _check_blueprint(cls, value: FilePath | str) -> Path:
+    #     """Convert strings into paths.
+
+    #     Parameters
+    #     ----------
+    #     value : FilePath or str
+    #         The value received from the input.
+
+    #     Returns
+    #     -------
+    #     Path
+    #         The input value converted to a pathlib.Path
+
+    #     """
+    #     return Path(value)
 
 
 class Workplan(BaseModel):

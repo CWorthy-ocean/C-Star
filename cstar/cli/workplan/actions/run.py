@@ -1,5 +1,7 @@
 import argparse
+import os
 import typing as t
+from pathlib import Path
 
 from cstar.cli.core import RegistryResult, cli_activity
 from cstar.orchestration.dag_runner import build_and_run_dag
@@ -13,7 +15,15 @@ async def handle(ns: argparse.Namespace) -> None:
     ns : argparse.Namespace
         User inputs parsed by the CLI
     """
-    await build_and_run_dag(ns.path)
+    # TODO: load from ~/.cstar/config (e.g. cstar config init)
+    os.environ["CSTAR_INTERACTIVE"] = "0"
+    os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
+    os.environ["CSTAR_QUEUE_NAME"] = "shared"
+    os.environ["CSTAR_ORCHESTRATED"] = "1"
+
+    os.environ["CSTAR_RUNID"] = ns.name
+
+    await build_and_run_dag(Path(ns.path))
     print(f"Completed handling command: {ns}")
 
 
@@ -35,6 +45,11 @@ def create_action() -> RegistryResult:
             "run",
             help="Execute a workplan",
             description="Path to the workplan (YAML)",
+        )
+        parser.add_argument(
+            "-n",
+            "--name",
+            help="Unique name used to identify the run",
         )
         parser.add_argument(
             dest="path",

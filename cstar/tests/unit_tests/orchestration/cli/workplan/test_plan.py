@@ -4,7 +4,7 @@ import pytest
 
 from cstar.cli.workplan.actions.plan import render
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.planning import GraphPlanner
+from cstar.orchestration.orchestration import Planner
 from cstar.orchestration.serialization import deserialize
 
 
@@ -41,7 +41,7 @@ async def test_cli_plan_action(tmp_path: Path, workplan_name: str) -> None:
     wp_path.write_text(content)
 
     wp = deserialize(wp_path, Workplan)
-    planner = GraphPlanner(wp)
+    planner = Planner(wp)
 
     plan_path = await render(planner, tmp_path)
 

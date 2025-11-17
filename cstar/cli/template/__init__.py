@@ -1,4 +1,4 @@
 from cstar.cli.template import command
-from cstar.cli.template.actions import template
+from cstar.cli.template.actions import create
 
-__all__ = ["command", "template"]
+__all__ = ["command", "create"]

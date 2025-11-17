@@ -7,13 +7,131 @@ import networkx as nx
 
 from cstar.cli.core import PathConverterAction, RegistryResult, cli_activity
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.planning import GraphPlanner
+from cstar.orchestration.orchestration import Planner
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import slugify
 
+START_NODE: t.Literal["_cs_start_"] = "_cs_start_"
+TERMINAL_NODE: t.Literal["_cs_term_"] = "_cs_term_"
+
+
+def _add_marker_nodes(graph: nx.DiGraph) -> nx.DiGraph:
+    """Add node to serve as the entrypoint and exit point of the task graph.
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        The source graph.
+    Returns
+    -------
+    nx.DiGraph
+        A copy of the original graph with the entrypoint node inserted
+    """
+    graph = t.cast("nx.DiGraph", graph.copy())
+
+    if START_NODE not in graph.nodes:
+        graph.add_node(
+            START_NODE,
+            **{"action": "start"},
+        )
+    else:
+        graph.nodes[START_NODE]["action"] = "start"
+
+    if "_cs_term_" not in graph.nodes:
+        graph.add_node(
+            "_cs_term_",
+            **{"action": "term"},
+        )
+    else:
+        graph.nodes["_cs_term_"]["action"] = "term"
+
+    # find steps with no dependencies, allowing immediate start
+    no_dep_edges = [
+        (START_NODE, node)
+        for node in graph.nodes()
+        if graph.in_degree(node) == 0 and node not in ["_cs_start_", "_cs_term_"]
+    ]
+
+    # Add edges from the  start node to all independent steps
+    graph.add_edges_from(no_dep_edges)
+
+    # find steps that have no tasks after them
+    terminal_edges = [
+        (node, "_cs_term_")
+        for node in graph.nodes()
+        if graph.out_degree(node) == 0 and node != "_cs_term_"
+    ]
+
+    # Add edges from leaf nodes to the terminal node
+    graph.add_edges_from(terminal_edges)
+
+    return graph
+
+
+def _initialize_from_graph(
+    workplan: Workplan, graph: nx.DiGraph
+) -> tuple[nx.DiGraph, dict, dict, dict]:
+    """Prepare instance from the supplied graph."""
+    step_map = {step.name: step for step in workplan.steps}
+    dep_map = {
+        step.name: [s.name for s in workplan.steps if step.name in s.depends_on]
+        for step in workplan.steps
+    }
+    name_map = {step.name: step.name for step in workplan.steps}
+    name_map.update({START_NODE: "start", TERMINAL_NODE: "end"})
+
+    nx.set_node_attributes(graph, "task", "action")
+    graph = _add_marker_nodes(graph)
+    return graph, step_map, dep_map, name_map
+
+
+def _create_color_map(
+    start_color: str = "#00ff00a1",
+    term_color: str = "#ff7300a1",
+    task_color: str = "#377aaaa1",
+) -> dict[str, str]:
+    """Return a dictionary mapping node types to color.
+    Parameters
+    ----------
+    start_color : str
+        Color of the start node
+    term_color : str
+        Color of the terminal node
+    task_color : str
+        Color of the task nodes
+    Returns
+    -------
+    dict[str, str]
+    """
+    return {
+        "start": start_color,
+        "term": term_color,
+        "task": task_color,
+    }
+
+
+def _get_color_map(
+    group_map: dict[str, str],
+    graph: nx.DiGraph,
+) -> tuple[str, ...]:
+    """Return a pyplot-usable iterable containing per-node coloring.
+    Paramters
+    ---------
+    group_map : dict[str, str]
+        A mapping of node behavior names to colors
+    graph : nx.DiGraph
+        The graph to create a color-map for
+    Returns
+    -------
+    tuple[str, ...]
+        tuple containing color strings
+    """
+    return tuple(
+        group_map[node_data["action"]] for node, node_data in graph.nodes(data=True)
+    )
+
 
 async def render(
-    planner: GraphPlanner,
+    planner: Planner,
     image_directory: Path,
     layout: str = "circular",
     cmap: str = "",
@@ -40,9 +158,10 @@ async def render(
     plt.cla()
     plt.clf()
 
-    graph = planner.graph
+    graph, *_, name_map = _initialize_from_graph(planner.workplan, planner.graph)
+    color_map = _create_color_map()
 
-    if GraphPlanner.START_NODE not in graph:
+    if START_NODE not in graph:
         msg = "Start node was not found. Graph will not be rendered."
         print(msg)
         return Path("not-found")
@@ -63,14 +182,14 @@ async def render(
         pos = nx.fruchterman_reingold_layout(graph)
     else:
         # WARNING: bfs_layout appears to require nx >= 3.5
-        pos = nx.bfs_layout(graph, GraphPlanner.START_NODE)
+        pos = nx.bfs_layout(graph, START_NODE)
 
-    node_colors = GraphPlanner._get_color_map(planner.color_map, graph)
+    node_colors = _get_color_map(color_map, graph)
     nx.draw_networkx(
         graph,
         pos,
         with_labels=True,
-        labels=planner.name_map,
+        labels=name_map,
         node_size=2000,
         node_color=range(len(graph.nodes)) if cmap else node_colors,
         font_weight="bold",
@@ -97,7 +216,7 @@ async def handle(ns: argparse.Namespace) -> None:
 
     try:
         if workplan := deserialize(ns.path, Workplan):
-            planner = GraphPlanner(workplan)
+            planner = Planner(workplan)
             plan_path = await render(
                 planner,
                 ns.output_dir,

@@ -128,9 +128,14 @@ async def generate_template(path: Path | None, template_type: TemplateTypes) -> 
 
     tpl_name = f"{template_type}.yaml"
     schema_name = f"{template_type}-schema.yaml"
+    subdir = "wp" if template_type == "workplan" else "bp"
 
     # manually locate dir; use of cstar sys_mgr results in circular reference
-    fp = Path(__file__).parent.parent.parent.parent / "additional_files/templates"
+    fp = (
+        Path(__file__).parent.parent.parent.parent
+        / "additional_files/templates"
+        / subdir
+    )
     tpl_source_path = fp / tpl_name
 
     if not tpl_source_path.exists():

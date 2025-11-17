@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from cstar.orchestration.models import Step, Workplan
-from cstar.orchestration.planning import GraphPlanner, MonitoredPlanner
+from cstar.orchestration.orchestration import Planner
 
 
 @pytest.fixture
@@ -41,12 +41,11 @@ def the_workplan(
 @pytest.mark.parametrize(
     "planner_type",
     [
-        GraphPlanner,
-        MonitoredPlanner,
+        Planner,
     ],
 )
 def test_planner_no_tasks(
-    planner_type: type[GraphPlanner],
+    planner_type: type[Planner],
     the_workplan: Workplan,
 ) -> None:
     """Verify that planners do not blow up when supplied with an empty plan.
@@ -79,18 +78,14 @@ def get_monitored_graph_plan_size(plan: Workplan) -> int:
 @pytest.mark.parametrize(
     ("planner_type", "num_steps", "node_fn"),
     [
-        (GraphPlanner, 1, get_graph_plan_size),
-        (MonitoredPlanner, 1, get_monitored_graph_plan_size),
-        (GraphPlanner, 2, get_graph_plan_size),
-        (MonitoredPlanner, 2, get_monitored_graph_plan_size),
-        (GraphPlanner, 3, get_graph_plan_size),
-        (MonitoredPlanner, 3, get_monitored_graph_plan_size),
-        (GraphPlanner, 5, get_graph_plan_size),
-        (MonitoredPlanner, 5, get_monitored_graph_plan_size),
+        (Planner, 1, get_graph_plan_size),
+        (Planner, 2, get_graph_plan_size),
+        (Planner, 3, get_graph_plan_size),
+        (Planner, 5, get_graph_plan_size),
     ],
 )
 def test_planner_with_tasks(
-    planner_type: type[GraphPlanner],
+    planner_type: type[Planner],
     num_steps: int,
     node_fn: t.Callable[[Workplan], int],
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
@@ -120,87 +115,6 @@ def test_planner_with_tasks(
     planner = planner_type(plan)
     proposed_plan = list(planner.flatten())
     assert len(proposed_plan) == node_fn(plan)
-
-
-@pytest.mark.parametrize(
-    ("num_steps", "deps"),
-    [
-        (2, [(0, 1)]),
-        (3, [(0, 1), (0, 2)]),
-        (4, [(0, 1), (0, 2), (2, 3)]),
-    ],
-)
-def test_planner_monitored_deps(
-    tmp_path: Path,
-    num_steps: int,
-    deps: list[tuple[int, int]],
-    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
-) -> None:
-    """Verify that a dependency between two steps is carried to the monitors.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        A temporary path to store test outputs
-    num_steps : int
-        The number of steps to add to the workplan
-    deps : list[tuple[int, int]]
-        Tuples containing indices of tasks to create dependencies between
-    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
-        A generator function to produce minimally valid test steps
-
-    """
-    assert num_steps >= 2, "Test assumes at least two tasks"  # noqa: PLR2004
-
-    steps = list(gen_fake_steps(num_steps))
-
-    for source, target in deps:
-        steps[target].depends_on.append(steps[source].name)
-
-    plan = Workplan(
-        name="test-plan",
-        description="test-description",
-        steps=steps,
-    )
-
-    planner = MonitoredPlanner(plan)
-    # p = render(planner, Path())
-    proposed_plan = planner.flatten(artifact_dir=tmp_path)
-
-    edges = planner.graph.edges
-
-    to_check: list[tuple[str, str]] = []
-
-    # confirm the graph first...
-    for source, target in deps:
-        source_name = f"step-{source + 1:03d}"
-        target_name = f"step-{target + 1:03d}"
-
-        monitor_name = MonitoredPlanner.derive_name(source_name)
-
-        # verify there is a dependency from the task to the monitor
-        dep_task_to_monitor = (source_name, monitor_name)
-        assert dep_task_to_monitor in edges
-
-        # confirm there is a dependency between monitors when the tasks have one
-        target_monitor_name = MonitoredPlanner.derive_name(target_name)
-        dep_monitor_to_monitor = (monitor_name, target_monitor_name)
-        # TODO: find bug skipping a monitored dependency
-        assert dep_monitor_to_monitor
-        # assert dep_monitor_to_monitor in edges
-
-        # to_check.append(dep_task_to_monitor)
-        # to_check.append(dep_monitor_to_monitor)
-
-    # Confirm that the serialized version of the plan honors all the dependencies
-    step_names = [t.name for t in proposed_plan]
-    for n_from, n_to in to_check:
-        from_idx = step_names.index(n_from)
-        to_idx = step_names.index(n_to)
-
-        assert from_idx < to_idx, (
-            f"Dependency between {n_from} and {n_to} was not honored"
-        )
 
 
 @pytest.mark.parametrize(
@@ -268,8 +182,8 @@ def test_planner_bfs_breaker(
         steps=steps,
     )
 
-    planner = GraphPlanner(plan)
-    proposed_plan = planner.flatten(artifact_dir=tmp_path)
+    planner = Planner(plan)
+    proposed_plan = planner.flatten()
     # p = render(planner, Path())
 
     edges = planner.graph.edges
