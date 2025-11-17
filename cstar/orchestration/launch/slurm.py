@@ -12,9 +12,8 @@ from cstar.execution.scheduler_job import (
     create_scheduler_job,
     get_status_of_slurm_job,
 )
-from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.orchestration.models import RomsMarblBlueprint, Step
 from cstar.orchestration.orchestration import (
-    CStep,
     Launcher,
     ProcessHandle,
     Status,
@@ -80,7 +79,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
-    async def _submit(step: CStep, dependencies: list[SlurmHandle]) -> SlurmHandle:
+    async def _submit(step: Step, dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
 
         Parameters
@@ -121,12 +120,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(f"Unable to retrieve scheduled job ID for: {step.name}")
 
     @staticmethod
-    async def _status(step: CStep, handle: SlurmHandle) -> ExecutionStatus:
+    async def _status(step: Step, handle: SlurmHandle) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
         ----------
-        step : CStep
+        step : Step
             The step triggering the job.
         handle : SlurmHandle
             A handle object for a SLURM-based task.
@@ -141,7 +140,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @classmethod
     async def launch(
-        cls, step: CStep, dependencies: list[SlurmHandle]
+        cls, step: Step, dependencies: list[SlurmHandle]
     ) -> Task[SlurmHandle]:
         """Launch a step in SLURM.
 
@@ -159,7 +158,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @classmethod
     async def query_status(
-        cls, step: CStep, item: Task[SlurmHandle] | SlurmHandle
+        cls, step: Step, item: Task[SlurmHandle] | SlurmHandle
     ) -> Status:
         """Retrieve the status of an item.
 

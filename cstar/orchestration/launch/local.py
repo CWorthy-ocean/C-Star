@@ -5,8 +5,8 @@ from subprocess import Popen
 
 from psutil import Process
 
+from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import (
-    CStep,
     Launcher,
     ProcessHandle,
     Status,
@@ -24,7 +24,7 @@ class LocalHandle(ProcessHandle):
 
     def __init__(
         self,
-        step: CStep,
+        step: Step,
         pid: int,
         start_at: datetime.datetime | float,
     ) -> None:
@@ -66,7 +66,7 @@ class LocalLauncher(Launcher[LocalHandle]):
     """Mapping from step name to process."""
 
     @staticmethod
-    async def _submit(step: CStep, dependencies: list[LocalHandle]) -> LocalHandle:
+    async def _submit(step: Step, dependencies: list[LocalHandle]) -> LocalHandle:
         """Submit a step to SLURM as a new batch allocation.
 
         Parameters
@@ -106,7 +106,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         return handle
 
     @staticmethod
-    async def _status(step: CStep, handle: LocalHandle) -> str:
+    async def _status(step: Step, handle: LocalHandle) -> str:
         """Retrieve the status of a step running in local process.
 
         Parameters
@@ -134,7 +134,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         return status
 
     @classmethod
-    async def launch(cls, step: CStep, dependencies: list[LocalHandle]) -> Task:
+    async def launch(cls, step: Step, dependencies: list[LocalHandle]) -> Task:
         """Launch a step in local process.
 
         Parameters
@@ -152,7 +152,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
     @classmethod
     async def query_status(
-        cls, step: CStep, item: Task[LocalHandle] | LocalHandle
+        cls, step: Step, item: Task[LocalHandle] | LocalHandle
     ) -> Status:
         """Retrieve the status of an item.
 

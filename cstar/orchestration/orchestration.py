@@ -4,10 +4,10 @@ import typing as t
 from enum import IntEnum, StrEnum, auto
 
 import networkx as nx
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import Step, Workplan
 
 
 class ProcessHandle:
@@ -55,25 +55,6 @@ class Status(IntEnum):
         return status in {Status.Submitted, Status.Running, Status.Ending}
 
 
-class CStep(BaseModel):
-    """User-defined configuration for execution of an application within a workplan."""
-
-    name: str
-    """The user-friendly name of the step."""
-
-    application: str = Field(default="sleep")
-    """The target application to execute."""
-
-    critical: bool = Field(default=False)
-    """(experimental) Mark steps that must be retried on failure."""
-
-    depends_on: list[str] = Field(default_factory=list)
-    """List containing the names of steps that must complete to start this step."""
-
-    blueprint: str = ""  # todo: unify with "real step" and kill CStep
-    """The path to a blueprint file."""
-
-
 _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 
 
@@ -83,7 +64,7 @@ class Task(t.Generic[_THandle]):
     status: Status
     """Current task status."""
 
-    step: CStep
+    step: Step
     """The step containing task configuration."""
 
     handle: _THandle
@@ -91,7 +72,7 @@ class Task(t.Generic[_THandle]):
 
     def __init__(
         self,
-        step: CStep,
+        step: Step,
         handle: _THandle,
         status: Status = Status.Unsubmitted,
     ) -> None:
@@ -172,7 +153,7 @@ class Planner:
         nx.set_node_attributes(g, values=defaults)
         return g
 
-    def flatten(self) -> t.Iterable[CStep]:
+    def flatten(self) -> t.Iterable[Step]:
         """Return the planned steps in execution order.
 
         Returns
@@ -181,7 +162,7 @@ class Planner:
             A traversal of the execution plan honoring all dependencies.
         """
 
-        def f(step: CStep) -> bool:
+        def f(step: Step) -> bool:
             return step is not None
 
         keys = nx.topological_sort(self.graph)
@@ -265,7 +246,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     """Contract required to implement a task launcher."""
 
     @classmethod
-    async def launch(cls, step: CStep, dependencies: list[_THandle]) -> Task[_THandle]:
+    async def launch(cls, step: Step, dependencies: list[_THandle]) -> Task[_THandle]:
         """Launch a process for a step.
 
         Parameters
@@ -281,7 +262,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ...
 
     @classmethod
-    async def query_status(cls, step: CStep, item: Task[_THandle] | _THandle) -> Status:
+    async def query_status(cls, step: Step, item: Task[_THandle] | _THandle) -> Status:
         """Retrieve the current status for a running task.
 
         Parameters
@@ -478,7 +459,7 @@ class Orchestrator:
         submitted = self._get_nodes_by_status(Status.Running)
         return {*running, *submitted}
 
-    def _locate_depedendencies(self, step: CStep) -> list[ProcessHandle] | None:
+    def _locate_depedendencies(self, step: Step) -> list[ProcessHandle] | None:
         """Look for the dependencies of the step.
 
         Returns
@@ -518,9 +499,7 @@ class Orchestrator:
         node : str
             The name of the node to process.
         """
-        step = t.cast(
-            CStep | None, self.planner.retrieve(node, Planner.Keys.Step, None)
-        )
+        step = t.cast(Step | None, self.planner.retrieve(node, Planner.Keys.Step, None))
         if step is None:
             msg = f"Unable to process. Invalid node identifier supplied: {node}"
             raise ValueError(msg)
