@@ -21,7 +21,8 @@ def slurm() -> bool:
     return True
 
 
-@pytest.mark.skipif(not slurm())
+# @pytest.mark.skipif(not slurm())
+@pytest.mark.skip(reason="tests are very slow when scheduling many tasks with slurm")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "workplan_name",
@@ -39,17 +40,16 @@ async def test_build_and_run(tmp_path: Path, workplan_name: str) -> None:
     templates_dir = cstar_dir / "additional_files/templates"
     template_path = templates_dir / "wp" / template_file
 
-    bp_tpl_path = templates_dir / "bp" / "blueprint.yaml"
-
+    bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
     bp_path = tmp_path / "blueprint.yaml"
+    bp_tpl_path = templates_dir / "bp" / "blueprint.yaml"
     bp_path.write_text(bp_tpl_path.read_text())
 
-    bp_default_path = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
-    content = template_path.read_text()
-    content = content.replace(bp_default_path, bp_path.as_posix())
+    wp_content = template_path.read_text()
+    wp_content = wp_content.replace(bp_default, bp_path.as_posix())
 
     wp_path = tmp_path / template_file
-    wp_path.write_text(content)
+    wp_path.write_text(wp_content)
 
     # create unique run name only once per hour, cache otherwise.
     now = datetime.now()

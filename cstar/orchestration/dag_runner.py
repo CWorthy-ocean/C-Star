@@ -90,20 +90,19 @@ if __name__ == "__main__":
         for template in ["fanout", "linear", "parallel", "single_step"]:
             cstar_dir = Path(__file__).parent.parent
             template_file = f"{template}.yaml"
-            templates_dir = cstar_dir / "additional_files/templates/wp"
-            template_path = templates_dir / template_file
+            templates_dir = cstar_dir / "additional_files/templates"
+            template_path = templates_dir / "wp" / template_file
 
-            empty_bp_path = tmp_path / "blueprint.yaml"
-            empty_bp_path.touch()
+            bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
+            bp_path = tmp_path / "blueprint.yaml"
+            bp_tpl_path = templates_dir / "bp/blueprint.yaml"
+            bp_path.write_text(bp_tpl_path.read_text())
 
-            bp_default_path = (
-                "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
-            )
-            content = template_path.read_text()
-            content = content.replace(bp_default_path, empty_bp_path.as_posix())
+            wp_content = template_path.read_text()
+            wp_content = wp_content.replace(bp_default, bp_path.as_posix())
 
             wp_path = tmp_path / template_file
-            wp_path.write_text(content)
+            wp_path.write_text(wp_content)
 
             my_run_name = f"{sys.argv[1]}_{template}"
             os.environ["CSTAR_RUNID"] = my_run_name
