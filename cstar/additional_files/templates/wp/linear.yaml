@@ -1,20 +1,23 @@
 # yaml-language-server: $schema=file://workplan-schema.json
-name: Fan-out Workplan
-description: A workplan that uses dependencies to gate execution of parallel steps.
+name: Linear Workplan
+description: A workplan that usees dependencies to ensure that all tasks execute in a series.
 steps:
 - name: Step A
   application: sleep
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
-- name: Step B_1
+- name: Step B
   application: sleep
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
-  depends_on: ["Step A"]
-- name: Step B_2
+  depends_on:
+  - Step A
+- name: Step C
   application: sleep
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
-  depends_on: ["Step A"]
-- name: Step B_3
+  depends_on:
+  - Step B
+- name: Step D
   application: sleep
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
-  depends_on: ["Step A"]
+  depends_on:
+  - Step C
 state: draft

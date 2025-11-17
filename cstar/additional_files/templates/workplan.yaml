@@ -1,8 +1,0 @@
-# yaml-language-server: $schema=file://workplan-schema.json
-name: MVP workplan
-description: minimum viable workplan
-steps:
-- name: step 1
-  application: sleep
-  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
-state: draft

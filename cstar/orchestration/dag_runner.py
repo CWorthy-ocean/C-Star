@@ -2,12 +2,9 @@ import asyncio
 import os
 import sys
 import typing as t
-from contextlib import contextmanager
 from itertools import cycle
 from pathlib import Path
-from tempfile import NamedTemporaryFile
-
-import pytest  # todo: remove after moving test to unit-tests
+from tempfile import TemporaryDirectory
 
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
@@ -77,66 +74,37 @@ async def build_and_run_dag(path: Path) -> None:
     await process_plan(orchestrator, Orchestrator.RunMode.Monitor)
 
 
-@contextmanager
-def templated_plan(plan_name: str) -> t.Generator[Path, None, None]:
-    wp_template_path = (
-        Path(__file__).parent.parent / f"additional_files/templates/wp/{plan_name}.yaml"
-    )
-    bp_template_path = (
-        Path(__file__).parent.parent / "additional_files/templates/bp/blueprint.yaml"
-    )
-
-    wp_tpl = wp_template_path.read_text()
-    bp_tpl = bp_template_path.read_text()
-
-    with (
-        NamedTemporaryFile("w", delete_on_close=False) as wp,
-        NamedTemporaryFile("w", delete_on_close=False) as bp,
-    ):
-        wp_path = Path(wp.name)
-        bp_path = Path(bp.name)
-
-        wp_tpl = wp_tpl.replace("{application}", "sleep")
-        wp_tpl = wp_tpl.replace("{blueprint_path}", bp_path.as_posix())
-
-        wp.write(wp_tpl)
-        bp.write(bp_tpl)
-        wp.close()
-        bp.close()
-
-        try:
-            print(
-                f"Temporary workplan located at {wp_path} with blueprint at {bp_path}"
-            )
-            yield wp_path
-        finally:
-            print(f"populated workplan template:\n{'#' * 80}\n{wp_tpl}\n{'#' * 80}")
-
-
-@pytest.mark.asyncio
-async def test_build_and_run() -> None:
-    """Temporary unit test to trigger workflow execution."""
-    os.environ["CSTAR_INTERACTIVE"] = "0"
-    os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
-    os.environ["CSTAR_QUEUE_NAME"] = "shared"
-    os.environ["CSTAR_ORCHESTRATED"] = "1"
-
-    for template in ["single_step", "fanout", "parallel"]:
-        with templated_plan(template) as wp_path:
-            my_run_name = f"{sys.argv[1]}_{template}"
-            os.environ["CSTAR_RUNID"] = my_run_name
-            asyncio.run(build_and_run_dag(wp_path))
-
-
 if __name__ == "__main__":
     os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
     os.environ["CSTAR_QUEUE_NAME"] = "shared"
     os.environ["CSTAR_ORCHESTRATED"] = "1"
 
-    wp_path = Path("/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml")
-    wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
+    # wp_path = Path("/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml")
+    # wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
+    # wp_path = Path("/anvil/projects/x-ees250129/x-cmcbride/workplans/01.simple.yaml")
 
-    my_run_name = sys.argv[1]
-    os.environ["CSTAR_RUNID"] = my_run_name
-    asyncio.run(build_and_run_dag(wp_path))
+    with TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+
+        for template in ["fanout", "linear", "parallel", "single_step"]:
+            cstar_dir = Path(__file__).parent.parent
+            template_file = f"{template}.yaml"
+            templates_dir = cstar_dir / "additional_files/templates/wp"
+            template_path = templates_dir / template_file
+
+            empty_bp_path = tmp_path / "blueprint.yaml"
+            empty_bp_path.touch()
+
+            bp_default_path = (
+                "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
+            )
+            content = template_path.read_text()
+            content = content.replace(bp_default_path, empty_bp_path.as_posix())
+
+            wp_path = tmp_path / template_file
+            wp_path.write_text(content)
+
+            my_run_name = f"{sys.argv[1]}_{template}"
+            os.environ["CSTAR_RUNID"] = my_run_name
+            asyncio.run(build_and_run_dag(wp_path))
