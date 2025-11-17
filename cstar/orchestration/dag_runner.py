@@ -32,6 +32,26 @@ def incremental_delays() -> t.Generator[float, None, None]:
     yield from delay_cycle
 
 
+async def process_plan(orchestrator: Orchestrator, mode: Orchestrator.RunMode) -> None:
+    closed_set = orchestrator.get_closed_nodes()
+    open_set = orchestrator.get_open_nodes(mode=mode)
+    delay_iter = iter(incremental_delays())
+
+    while open_set is not None:
+        print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
+        await orchestrator.run(mode=mode)
+
+        closed_set = orchestrator.get_closed_nodes()
+        open_set = orchestrator.get_open_nodes(mode=mode)
+        print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
+
+        sleep_duration = next(delay_iter)
+        print(f"Sleeping for {sleep_duration} seconds before next {mode}.")
+        await asyncio.sleep(sleep_duration)
+
+    print(f"Workplan {mode} is complete.")
+
+
 # @flow(log_prints=True)
 async def build_and_run_dag(path: Path) -> None:
     """Execute the steps in the workplan.
@@ -50,42 +70,11 @@ async def build_and_run_dag(path: Path) -> None:
     launcher: Launcher = SlurmLauncher()
     orchestrator = Orchestrator(planner, launcher)
 
-    mode: t.Literal["monitor", "schedule"] = "schedule"
-    closed_set = orchestrator.get_closed_nodes()
-    open_set = orchestrator.get_open_nodes(mode=mode)
-    delay_iter = iter(incremental_delays())
+    mode = Orchestrator.RunMode.Schedule
+    await process_plan(orchestrator, mode)
 
-    # Schedule all tasks in the plan
-    while open_set is not None:
-        print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
-        await orchestrator.run(mode="schedule")
-
-        closed_set = orchestrator.get_closed_nodes()
-        open_set = orchestrator.get_open_nodes(mode=mode)
-        print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
-
-        sleep_duration = next(delay_iter)
-        print(f"Sleeping for {sleep_duration} seconds before next schedule.")
-        await asyncio.sleep(sleep_duration)
-
-    print(f"Workplan `{wp}` scheduling is complete.")
-    mode = "monitor"
-    open_set = orchestrator.get_open_nodes(mode=mode)
-
-    # Track progress of all tasks in the plan
-    while open_set is not None:
-        print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
-        await orchestrator.run(mode="schedule")
-
-        closed_set = orchestrator.get_closed_nodes()
-        open_set = orchestrator.get_open_nodes(mode=mode)
-        print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
-
-        sleep_duration = next(delay_iter)
-        print(f"Sleeping for {sleep_duration} seconds before next monitor.")
-        await asyncio.sleep(sleep_duration)
-
-    print(f"Workplan `{wp}` execution is complete.")
+    mode = Orchestrator.RunMode.Monitor
+    await process_plan(orchestrator, mode)
 
 
 @contextmanager

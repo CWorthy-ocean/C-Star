@@ -316,6 +316,15 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 class Orchestrator:
     """Manage the execution of a `Workplan`."""
 
+    class RunMode(StrEnum):
+        """Specify the blocking behavior during plan execution."""
+
+        Monitor = auto()
+        """Block until tasks complete."""
+
+        Schedule = auto()
+        """Block until tasks are scheduled."""
+
     class Keys(StrEnum):
         """Keys used to store tracker attributes on the planning graph."""
 
@@ -335,9 +344,7 @@ class Orchestrator:
         self.planner = planner
         self.launcher = launcher
 
-    def get_open_nodes(
-        self, *, mode: t.Literal["monitor", "schedule"]
-    ) -> set[str] | None:
+    def get_open_nodes(self, *, mode: RunMode) -> set[str] | None:
         """Retrieve the set of task nodes with a non-terminal state that are
         executing or ready to execute.
 
@@ -370,7 +377,7 @@ class Orchestrator:
             satisfied = all(
                 Status.is_running(g.nodes[u][Planner.Keys.Status])
                 or Status.is_terminal(g.nodes[u][Planner.Keys.Status])
-                if mode == "schedule"
+                if mode == Orchestrator.RunMode.Schedule
                 else Status.is_terminal(g.nodes[u][Planner.Keys.Status])
                 for (u, _) in in_edges
             )
@@ -548,14 +555,12 @@ class Orchestrator:
             if step and step.critical:
                 raise CstarExpectationFailed(f"Node {n} task failed.")
 
-    async def run(
-        self, mode: t.Literal["monitor", "schedule"]
-    ) -> t.Mapping[str, Status]:
+    async def run(self, mode: RunMode) -> t.Mapping[str, Status]:
         """Execute tasks that are ready and query status on running tasks.
 
         Parameters
         ----------
-        mode : Literal["monitor", "schedule"]
+        mode : RunMode
             The operation mode. Passing `schedule` allows the orchestrator to
             submit tasks without waiting for their completion. Passing `monitor`
             causes the scheduler to track status for the tasks.
