@@ -97,8 +97,8 @@ class ROMSInputDataset(InputDataset, ABC):
                 locations.append(location.replace(old_suffix, new_suffix))
             self.partitioned_source = SourceDataCollection.from_locations(locations)
             self.partitioning = ROMSPartitioning(
-                np_xi=source_np_xi,
-                np_eta=source_np_eta,
+                np_xi=self.source_np_xi,  # type: ignore[arg-type]
+                np_eta=self.source_np_eta,  # type: ignore[arg-type]
                 files=[Path(p) for p in self.partitioned_source.locations],
             )
         self._working_copy = None
