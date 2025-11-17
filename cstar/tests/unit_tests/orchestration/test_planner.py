@@ -24,7 +24,6 @@ def the_workplan(
     A temporary path to store test outputs
     """
     data = complete_workplan_template_input
-    # var0, var1, var2 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
 
     for i, step in enumerate(data.get("steps", [])):
         empty_bp_path = tmp_path / f"blueprint-{i:00}.yaml"
