@@ -1765,6 +1765,10 @@ class TestProcessingAndExecution:
         (output_dir / "ocean_his.20240101000000.002.nc").touch()
         (output_dir / "ocean_rst.20240101000000.001.nc").touch()
 
+        # Create fake output of join process to make sure it gets moved
+        (output_dir / "ocean_his.20240101000000.nc").touch()
+        (output_dir / "ocean_rst.20240101000000.nc").touch()
+
         # Mock execution handler
         sim._execution_handler = mock.MagicMock()
         sim._execution_handler.status = (
@@ -1791,12 +1795,11 @@ class TestProcessingAndExecution:
             shell=True,
         )
 
-        # Check that files were moved
-        partitioned_dir = output_dir / "PARTITIONED"
-        assert partitioned_dir.exists()
-        assert (partitioned_dir / "ocean_his.20240101000000.001.nc").exists()
-        assert (partitioned_dir / "ocean_his.20240101000000.002.nc").exists()
-        assert (partitioned_dir / "ocean_rst.20240101000000.001.nc").exists()
+        # Check that output file was moved
+        new_out_dir = output_dir.parent / "JOINED_OUTPUT"
+        assert new_out_dir.exists()
+        assert (new_out_dir / "ocean_his.20240101000000.nc").exists()
+        assert (new_out_dir / "ocean_rst.20240101000000.nc").exists()
 
         mock_persist.assert_called_once()
 

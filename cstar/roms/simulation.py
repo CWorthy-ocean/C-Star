@@ -1,5 +1,8 @@
+import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from functools import partial
 from itertools import chain
 from pathlib import Path
 from typing import Any, Optional, TypeVar, cast
@@ -51,6 +54,38 @@ from cstar.roms.input_dataset import (
 )
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
+
+NPROCS_POST = int(os.getenv("CSTAR_NPROCS_POST", str(os.cpu_count() // 3)))  # type: ignore[operator]
+
+
+def _ncjoin_wildcard(
+    wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
+) -> None:
+    """Spatially join netcdfs matching the wildcard pattern using ncjoin, and move the joined output to output_dir.
+
+    Parameters
+    ----------
+    wildcard_pattern: the wildcard pattern to match for files within input_dir
+    input_dir: location of the partitioned netcdfs to be joined
+    output_dir: location to move the joined output to
+    logger: logger object to post log messages to
+
+    Returns
+    -------
+    None
+    """
+    logger.info(f"Joining netCDF files {wildcard_pattern}...")
+
+    _run_cmd(
+        f"ncjoin {wildcard_pattern}",
+        cwd=input_dir,
+        raise_on_error=True,
+    )
+
+    out_file = input_dir / wildcard_pattern.replace("*.", "")
+    out_file.rename(output_dir / out_file.name)
+
+    logger.info(f"done spatially joining {out_file}")
 
 
 class ROMSSimulation(Simulation):
@@ -1567,18 +1602,19 @@ class ROMSSimulation(Simulation):
         if not files:
             self.log.warning("No suitable output found")
         else:
-            (output_dir / "PARTITIONED").mkdir(exist_ok=True)
-            for wildcard_pattern in unique_wildcards:
-                # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
-                self.log.info(f"Joining netCDF files {wildcard_pattern}...")
-                _run_cmd(
-                    f"ncjoin {wildcard_pattern}",
-                    cwd=output_dir,
-                    raise_on_error=True,
-                )
+            final_output_dir = output_dir.parent / "JOINED_OUTPUT"
+            final_output_dir.mkdir(exist_ok=True, parents=True)
 
-                for F in output_dir.glob(wildcard_pattern):
-                    F.rename(output_dir / "PARTITIONED" / F.name)
+            spatial_joiner = partial(
+                _ncjoin_wildcard,
+                logger=self.log,
+                input_dir=output_dir,
+                output_dir=final_output_dir,
+            )
+
+            with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
+                results = executor.map(spatial_joiner, unique_wildcards)
+                _ = [r for r in results]  # exhaust iterator
 
         self.persist()
 
