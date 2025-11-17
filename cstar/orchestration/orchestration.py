@@ -1,6 +1,5 @@
 import asyncio
 import functools
-import random
 import typing as t
 from enum import IntEnum, StrEnum, auto
 
@@ -336,7 +335,9 @@ class Orchestrator:
         self.planner = planner
         self.launcher = launcher
 
-    def get_open_nodes(self) -> set[str] | None:
+    def get_open_nodes(
+        self, *, mode: t.Literal["monitor", "schedule"]
+    ) -> set[str] | None:
         """Retrieve the set of task nodes with a non-terminal state that are
         executing or ready to execute.
 
@@ -367,7 +368,10 @@ class Orchestrator:
             in_degree = g.in_degree(n)
 
             satisfied = all(
-                Status.is_terminal(g.nodes[u][Planner.Keys.Status])
+                Status.is_running(g.nodes[u][Planner.Keys.Status])
+                or Status.is_terminal(g.nodes[u][Planner.Keys.Status])
+                if mode == "schedule"
+                else Status.is_terminal(g.nodes[u][Planner.Keys.Status])
                 for (u, _) in in_edges
             )
 
@@ -487,12 +491,18 @@ class Orchestrator:
         return dependencies
 
     async def process_node(self, node: str) -> Task | None:
-        """Execute a 'simulated task'."""
+        """Execute a task.
+
+        Parameters
+        ----------
+        node : str
+            The name of the node to process.
+        """
         step = t.cast(
             CStep | None, self.planner.retrieve(node, Planner.Keys.Step, None)
         )
         if step is None:
-            msg = f"Invalid node identifier supplied: {node}"
+            msg = f"Unable to process. Invalid node identifier supplied: {node}"
             raise ValueError(msg)
 
         dependencies = self._locate_depedendencies(step)
@@ -501,24 +511,19 @@ class Orchestrator:
             return None
 
         if task := self.planner.retrieve(node, Orchestrator.Keys.Task):
-            task = await self.update_status(task)
+            status = await self.launcher.query_status(task.step, task)
+            task.status = status
         else:
-            # remove `True or ` to simulate stochastic start up speed...
-            if True or random.randint(1, 100) > 35:
-                task = await self.launcher.launch(step, dependencies)
+            task = await self.launcher.launch(step, dependencies)
+            self.planner.store(node, Orchestrator.Keys.Task, task)
+            print(f"Launched step: {step.name}")
 
-                self.planner.store(node, Planner.Keys.Status, task.status)
-                self.planner.store(node, Orchestrator.Keys.Task, task)
-
-                print(f"Launched step: {step.name}")
-                return task
-
-            print(f"\t\tTask {node} did not start yet...")
-
+        self.planner.store(node, Planner.Keys.Status, task.status)
         return task
 
-    async def postprocess_node(self, n: str, task: Task | None) -> None:
-        """Perform post-processing after starting a task or fetching it's update.
+    async def update_planner_state(self, n: str, task: Task | None) -> None:
+        """Update tracking information for the plan after starting a task or
+        fetching an update.
 
         Parameters
         ----------
@@ -530,7 +535,6 @@ class Orchestrator:
         if task is None:
             return
 
-        # n = task.step.name  # todo: synchronize graph task names & workplan steps
         step = self.planner.retrieve(n, Planner.Keys.Step)
 
         if task.status == Status.Done:
@@ -544,32 +548,24 @@ class Orchestrator:
             if step and step.critical:
                 raise CstarExpectationFailed(f"Node {n} task failed.")
 
-    async def update_status(self, task: Task) -> Task:
-        """Query the launcher for the latest status and update the task.
+    async def run(
+        self, mode: t.Literal["monitor", "schedule"]
+    ) -> t.Mapping[str, Status]:
+        """Execute tasks that are ready and query status on running tasks.
 
         Parameters
         ----------
-        task : Task
-            The task to update.
-
-        Returns
-        -------
-        Task
-            The updated task.
-        """
-        status = await self.launcher.query_status(task.step, task)
-        task.status = status
-        return task
-
-    async def run(self) -> t.Mapping[str, Status]:
-        """Execute tasks that are ready and query status on running tasks.
+        mode : Literal["monitor", "schedule"]
+            The operation mode. Passing `schedule` allows the orchestrator to
+            submit tasks without waiting for their completion. Passing `monitor`
+            causes the scheduler to track status for the tasks.
 
         Returns
         -------
         Mapping[Status]
             Mapping of node names to their current status.
         """
-        open_set = self.get_open_nodes()
+        open_set = self.get_open_nodes(mode=mode)
 
         if open_set is None:
             # no open nodes were found, return all current statuses
@@ -586,7 +582,7 @@ class Orchestrator:
 
         kvp = dict(zip(open_set, exec_results))
         postproc_tasks = [
-            asyncio.Task(self.postprocess_node(n, t)) for n, t in kvp.items()
+            asyncio.Task(self.update_planner_state(n, t)) for n, t in kvp.items()
         ]
         cancellations: tuple[Task, ...] = tuple()
 

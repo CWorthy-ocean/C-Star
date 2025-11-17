@@ -48,25 +48,41 @@ async def build_and_run_dag(path: Path) -> None:
     # from cstar.orchestration.launch.local import LocalLauncher
     # launcher: Launcher = LocalLauncher()
     launcher: Launcher = SlurmLauncher()
-
     orchestrator = Orchestrator(planner, launcher)
 
+    mode: t.Literal["monitor", "schedule"] = "schedule"
     closed_set = orchestrator.get_closed_nodes()
-    open_set = orchestrator.get_open_nodes()
+    open_set = orchestrator.get_open_nodes(mode=mode)
     delay_iter = iter(incremental_delays())
 
+    # Schedule all tasks in the plan
     while open_set is not None:
-        print(f"[on-enter] Open nodes: {open_set}, Closed: {closed_set}")
-
-        await orchestrator.run()
+        print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
+        await orchestrator.run(mode="schedule")
 
         closed_set = orchestrator.get_closed_nodes()
-        open_set = orchestrator.get_open_nodes()
-
-        print(f"[on-exit] Open nodes: {open_set}, Closed: {closed_set}")
+        open_set = orchestrator.get_open_nodes(mode=mode)
+        print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
 
         sleep_duration = next(delay_iter)
-        print(f"Sleeping for {sleep_duration} seconds before next check.")
+        print(f"Sleeping for {sleep_duration} seconds before next schedule.")
+        await asyncio.sleep(sleep_duration)
+
+    print(f"Workplan `{wp}` scheduling is complete.")
+    mode = "monitor"
+    open_set = orchestrator.get_open_nodes(mode=mode)
+
+    # Track progress of all tasks in the plan
+    while open_set is not None:
+        print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
+        await orchestrator.run(mode="schedule")
+
+        closed_set = orchestrator.get_closed_nodes()
+        open_set = orchestrator.get_open_nodes(mode=mode)
+        print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
+
+        sleep_duration = next(delay_iter)
+        print(f"Sleeping for {sleep_duration} seconds before next monitor.")
         await asyncio.sleep(sleep_duration)
 
     print(f"Workplan `{wp}` execution is complete.")
