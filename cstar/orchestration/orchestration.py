@@ -316,6 +316,12 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 class Orchestrator:
     """Manage the execution of a `Workplan`."""
 
+    planner: Planner
+    """The planner used by the orchestrator to prioritize tasks."""
+
+    launcher: Launcher
+    """The launcher used by the orchestrator to manage task execution."""
+
     class RunMode(StrEnum):
         """Specify the blocking behavior during plan execution."""
 
@@ -474,28 +480,26 @@ class Orchestrator:
 
             An empty list indicates no dependencies.
         """
-        dependencies: list[ProcessHandle] = []
+        if not step.depends_on:
+            return []
 
         # TODO: replace this with proactively configuring the keys?
         # - e.g. reverse lookup...
-        if step.depends_on:
-            dep_tasks = [
-                t.cast(
-                    Task | None,
-                    self.planner.retrieve(dnode, Orchestrator.Keys.Task, None),
-                )
-                for dnode in step.depends_on
-            ]
+        dep_tasks = [
+            t.cast(
+                Task | None,
+                self.planner.retrieve(dnode, Orchestrator.Keys.Task, None),
+            )
+            for dnode in step.depends_on
+        ]
 
-            running_deps = [x for x in dep_tasks if x]
+        running_deps = [x for x in dep_tasks if x]
 
-            if len(running_deps) != len(step.depends_on):
-                # the dependencies have not been started. abort launch...
-                return None
+        if len(running_deps) != len(step.depends_on):
+            # the dependencies have not been started. abort launch...
+            return None
 
-            dependencies = [d.handle for d in running_deps]
-
-        return dependencies
+        return [d.handle for d in running_deps]
 
     async def process_node(self, node: str) -> Task | None:
         """Execute a task.
@@ -567,7 +571,7 @@ class Orchestrator:
 
         Returns
         -------
-        Mapping[Status]
+        Mapping[str, Status]
             Mapping of node names to their current status.
         """
         open_set = self.get_open_nodes(mode=mode)
@@ -589,14 +593,15 @@ class Orchestrator:
         postproc_tasks = [
             asyncio.Task(self.update_planner_state(n, t)) for n, t in kvp.items()
         ]
-        cancellations: tuple[Task, ...] = tuple()
+        cancellations: set[Task] = set()
 
         try:
             await asyncio.gather(*postproc_tasks)
         except CstarExpectationFailed:
             # cancel all running tasks except the known failure
-            todo = {k: v for k, v in kvp.items() if v and Status.is_running(v.status)}
-            cancellations = tuple(todo.values())
+            cancellations = {
+                v for v in kvp.values() if v and Status.is_running(v.status)
+            }
 
         await self._cancel(cancellations)
 
@@ -610,12 +615,7 @@ class Orchestrator:
         cancellations : Iterable[Task]
             The tasks to be cancelled.
         """
-        if cancellations:
-            cancel_tasks = [
-                asyncio.Task(self.launcher.cancel(t)) for t in cancellations
-            ]
-            cancel_results = await asyncio.gather(
-                *cancel_tasks, return_exceptions=False
-            )
-            for t in cancel_results:
-                self.planner.store(t.step.name, Planner.Keys.Status, t.status)
+        tasks = [asyncio.Task(self.launcher.cancel(task)) for task in cancellations]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+        for task in results:
+            self.planner.store(task.step.name, Planner.Keys.Status, task.status)
