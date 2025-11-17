@@ -5,7 +5,9 @@ import pytest
 
 
 @pytest.fixture
-def modify_template_blueprint(tmpdir) -> Callable[[Path | str, dict[str, str]], Path]:
+def modify_template_blueprint(
+    tmpdir: str,
+) -> Callable[[Path | str, dict[str, str], Path | str], str]:
     """Fixture that provides a factory function for modifying template blueprint files.
 
     This fixture returns a function that can returns a path to a modified a blueprint
@@ -24,8 +26,10 @@ def modify_template_blueprint(tmpdir) -> Callable[[Path | str, dict[str, str]], 
     """
 
     def _modify_template_blueprint(
-        template_blueprint_path: Path | str, strs_to_replace: dict, **kwargs
-    ) -> Path:
+        template_blueprint_path: Path | str,
+        strs_to_replace: dict,
+        out_dir: Path | str,
+    ) -> str:
         """Creates a temporary, customized blueprint file from a template.
 
         This function reads a blueprint template file, performs string replacements as specified
@@ -55,6 +59,9 @@ def modify_template_blueprint(tmpdir) -> Callable[[Path | str, dict[str, str]], 
             modified_template_content = modified_template_content.replace(
                 oldstr, newstr
             )
+        modified_template_content = modified_template_content.replace(
+            "<output_dir>", str(out_dir)
+        )
         temp_path = tmpdir.join(template_blueprint_path.name)
         with open(temp_path, "w") as temp_file:
             temp_file.write(modified_template_content)

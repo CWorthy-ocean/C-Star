@@ -5,7 +5,6 @@ from pydantic import BaseModel
 from cstar.base.additional_code import AdditionalCode
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration import models
-from cstar.roms import ROMSSimulation
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -114,8 +113,8 @@ class GridAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSModelGrid]):
                 if isinstance(self.model.grid.data[0], models.VersionedResource)
                 else None
             ),
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
             source_np_xi=self.model.partitioning.n_procs_x
             if self.model.grid.data[0].partitioned
             else None,
@@ -141,8 +140,8 @@ class InitialConditionAdapter(
                 )
                 else None
             ),
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
             source_np_xi=self.model.partitioning.n_procs_x
             if self.model.initial_conditions.data[0].partitioned
             else None,
@@ -168,8 +167,8 @@ class TidalForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSTidalForci
                 )
                 else None
             ),
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
             source_np_xi=self.model.partitioning.n_procs_x
             if self.model.forcing.tidal.data[0].partitioned
             else None,
@@ -196,8 +195,8 @@ class RiverForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSRiverForci
                 )
                 else None
             ),
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
             source_np_xi=self.model.partitioning.n_procs_x
             if self.model.forcing.river.data[0].partitioned
             else None,
@@ -218,8 +217,8 @@ class BoundaryForcingAdapter(
             ROMSBoundaryForcing(
                 location=str(f.location),
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=self.model.valid_start_date,
-                end_date=self.model.valid_end_date,
+                start_date=None,
+                end_date=None,
                 source_np_xi=self.model.partitioning.n_procs_x
                 if f.partitioned
                 else None,
@@ -242,8 +241,8 @@ class SurfaceForcingAdapter(
             ROMSSurfaceForcing(
                 location=str(f.location),
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=self.model.valid_start_date,
-                end_date=self.model.valid_end_date,
+                start_date=None,
+                end_date=None,
                 source_np_xi=self.model.partitioning.n_procs_x
                 if f.partitioned
                 else None,
@@ -266,8 +265,8 @@ class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing])
             file_hash=self.model.cdr_forcing.data[0].hash
             if isinstance(self.model.cdr_forcing.data[0], models.VersionedResource)
             else None,
-            start_date=self.model.valid_start_date,
-            end_date=self.model.valid_end_date,
+            start_date=None,
+            end_date=None,
         )
 
 
@@ -282,8 +281,8 @@ class ForcingCorrectionAdapter(
             ROMSForcingCorrections(
                 location=str(f.location),
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=self.model.valid_start_date,
-                end_date=self.model.valid_end_date,
+                start_date=None,
+                end_date=None,
                 source_np_xi=self.model.partitioning.n_procs_x
                 if f.partitioned
                 else None,
@@ -293,33 +292,3 @@ class ForcingCorrectionAdapter(
             )
             for f in self.model.forcing.corrections.data
         ]
-
-
-class BlueprintAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSSimulation]):
-    """Create a ROMSSimulation from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> ROMSSimulation:
-        return ROMSSimulation(
-            name=self.model.name,
-            directory=self.model.runtime_params.output_dir,
-            discretization=DiscretizationAdapter(self.model).adapt(),
-            runtime_code=AddtlCodeAdapter(self.model, "run_time").adapt(),
-            compile_time_code=AddtlCodeAdapter(self.model, "compile_time").adapt(),
-            codebase=CodebaseAdapter(self.model).adapt(),
-            start_date=self.model.runtime_params.start_date,
-            end_date=self.model.runtime_params.end_date,
-            valid_start_date=self.model.valid_start_date,
-            valid_end_date=self.model.valid_end_date,
-            marbl_codebase=(
-                MARBLAdapter(self.model).adapt() if self.model.code.marbl else None
-            ),
-            model_grid=GridAdapter(self.model).adapt(),
-            initial_conditions=InitialConditionAdapter(self.model).adapt(),
-            tidal_forcing=TidalForcingAdapter(self.model).adapt(),
-            river_forcing=RiverForcingAdapter(self.model).adapt(),
-            forcing_corrections=ForcingCorrectionAdapter(self.model).adapt(),
-            boundary_forcing=BoundaryForcingAdapter(self.model).adapt(),
-            surface_forcing=SurfaceForcingAdapter(self.model).adapt(),
-            cdr_forcing=CdrForcingAdapter(self.model).adapt(),
-        )

@@ -1,4 +1,5 @@
 import typing as t
+from abc import ABC
 from copy import deepcopy
 from datetime import datetime
 from enum import StrEnum, auto
@@ -292,7 +293,7 @@ class ModelParameterSet(ParameterSet):
     """The time step the model integrates over."""
 
 
-class Blueprint(ConfiguredBaseModel):
+class Blueprint(ConfiguredBaseModel, ABC):
     """Common elements of all blueprints."""
 
     name: RequiredString
@@ -306,6 +307,14 @@ class Blueprint(ConfiguredBaseModel):
 
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
+
+    @property
+    def cpus_needed(self) -> int:
+        """The number of CPUs needed to run this blueprint.
+
+        Defaults to 1. Can be overridden by subclasses.
+        """
+        return 1
 
 
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
@@ -357,6 +366,11 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
             raise ValueError(msg)
 
         return self
+
+    @property
+    def cpus_needed(self) -> int:
+        """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
+        return self.partitioning.n_procs_x * self.partitioning.n_procs_y
 
 
 class WorkplanState(StrEnum):

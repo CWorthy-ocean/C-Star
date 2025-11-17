@@ -380,6 +380,7 @@ class Service(ABC, LoggingMixin):
             self._on_shutdown()
         except Exception:
             self.log.exception("Service shutdown may not have completed.")
+            raise
 
     async def execute(self) -> None:
         """Execute the complete service lifecycle.

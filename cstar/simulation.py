@@ -106,7 +106,7 @@ class Simulation(ABC, LoggingMixin):
         valid_end_date : str or datetime, optional
             The latest allowed end date, based on, e.g., the availability of input data.
         """
-        self.directory: Path = self._validate_simulation_directory(directory)
+        self.directory = Path(directory).resolve()
         self.name = name
 
         # Process valid date ranges
@@ -137,8 +137,8 @@ class Simulation(ABC, LoggingMixin):
             self.log.warning(
                 f"Creating {self.__class__.__name__} instance without a specified "
                 "ExternalCodeBase, default codebase will be used:\n"
-                f"          • Source location: {self.codebase.source_repo}\n"
-                f"          • Checkout target: {self.codebase.checkout_target}\n"
+                f"          • Source location: {self.codebase._default_source_repo}\n"
+                f"          • Checkout target: {self.codebase._default_checkout_target}\n"
             )
         else:
             self.codebase = codebase
@@ -147,43 +147,8 @@ class Simulation(ABC, LoggingMixin):
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization
 
-    def _validate_simulation_directory(self, directory: str | Path) -> Path:
-        """Validates and resolves the simulation directory.
-
-        This method ensures that the provided directory is valid and resolves its absolute path.
-        If the directory already exists and is not empty, an error is raised.
-
-        Parameters
-        ----------
-        directory : str or Path
-            The path to the simulation directory.
-
-        Returns
-        -------
-        Path
-            The resolved absolute path of the simulation directory.
-
-        Raises
-        ------
-        FileExistsError
-            If the specified directory already exists and is not empty.
-        """
-        resolved_directory = Path(directory).resolve()
-        if resolved_directory.exists() and (
-            not resolved_directory.is_dir() or any(resolved_directory.iterdir())
-        ):
-            raise FileExistsError(
-                f"Your chosen directory {directory} exists and is not an empty directory."
-                "\nIf you have previously created this case, use "
-                f"\nmy_sim = {self.__class__.__name__}.restore(directory={directory!r})"
-                "\n to restore it"
-            )
-
-        return resolved_directory
-
-    def _parse_date(
-        self, date: str | datetime | None, field_name: str
-    ) -> datetime | None:
+    @staticmethod
+    def _parse_date(date: str | datetime | None, field_name: str) -> datetime | None:
         """Converts a date string to a datetime object if it's not None.
 
         If the input is a string, it attempts to parse it into a `datetime` object.
@@ -324,12 +289,12 @@ class Simulation(ABC, LoggingMixin):
 
         # Runtime code:
         if self.runtime_code is not None:
-            NN = len(self.runtime_code.files)
+            NN = len(self.runtime_code.source)
             base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
 
         # Compile-time code:
         if self.compile_time_code is not None:
-            NN = len(self.compile_time_code.files)
+            NN = len(self.compile_time_code.source)
             base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
 
         exe_path = getattr(self, "exe_path", None)
@@ -445,43 +410,18 @@ class Simulation(ABC, LoggingMixin):
         simulation_dict["valid_end_date"] = self.valid_end_date
 
         # ExternalCodeBases:
-        codebase_info = {}
-        codebase_info["source_repo"] = self.codebase.source_repo
-        codebase_info["checkout_target"] = self.codebase.checkout_target
-        simulation_dict["codebase"] = codebase_info
+        simulation_dict["codebase"] = self.codebase.to_dict()
 
         # discretization
         simulation_dict["discretization"] = self.discretization.__dict__
 
         # runtime code
-        runtime_code = getattr(self, "runtime_code")
-        if runtime_code is not None:
-            runtime_code_info = {}
-            runtime_code_info["location"] = runtime_code.source.location
-            if runtime_code.subdir is not None:
-                runtime_code_info["subdir"] = runtime_code.subdir
-            if runtime_code.checkout_target is not None:
-                runtime_code_info["checkout_target"] = runtime_code.checkout_target
-            if runtime_code.files is not None:
-                runtime_code_info["files"] = runtime_code.files
-
-            simulation_dict["runtime_code"] = runtime_code_info
+        if hasattr(self, "runtime_code") and self.runtime_code is not None:
+            simulation_dict["runtime_code"] = self.runtime_code.to_dict()
 
         # compile-time code
-        compile_time_code = getattr(self, "compile_time_code")
-        if compile_time_code is not None:
-            compile_time_code_info = {}
-            compile_time_code_info["location"] = compile_time_code.source.location
-            if compile_time_code.subdir is not None:
-                compile_time_code_info["subdir"] = compile_time_code.subdir
-            if compile_time_code.checkout_target is not None:
-                compile_time_code_info["checkout_target"] = (
-                    compile_time_code.checkout_target
-                )
-            if compile_time_code.files is not None:
-                compile_time_code_info["files"] = compile_time_code.files
-
-            simulation_dict["compile_time_code"] = compile_time_code_info
+        if hasattr(self, "compile_time_code") and self.compile_time_code is not None:
+            simulation_dict["compile_time_code"] = self.compile_time_code.to_dict()
 
         return simulation_dict
 
@@ -490,7 +430,6 @@ class Simulation(ABC, LoggingMixin):
     def from_blueprint(
         cls,
         blueprint: str,
-        directory: str | Path,
     ) -> "Simulation":
         """Abstract method to create a Simulation instance from a blueprint file.
 
@@ -502,8 +441,6 @@ class Simulation(ABC, LoggingMixin):
         ----------
         blueprint : str
             The path or URL of a YAML file containing the blueprint for the simulation.
-        directory : str or Path
-            The local directory where the simulation will be set up.
 
         Returns
         -------
@@ -514,26 +451,6 @@ class Simulation(ABC, LoggingMixin):
         --------
         to_blueprint : Saves the Simulation instance to a YAML blueprint file.
         from_dict : Creates a Simulation instance from a dictionary.
-        """
-        pass
-
-    @abstractmethod
-    def to_blueprint(self, filename: str | Path) -> None:
-        """Abstract method to save the Simulation instance as a YAML blueprint file.
-
-        This method should be implemented in subclasses to serialize the Simulation
-        instance into a structured YAML file, making it possible to recreate the
-        instance later using `from_blueprint`.
-
-        Parameters
-        ----------
-        filename : str or Path
-            The path to the YAML file that will be created.
-
-        See Also
-        --------
-        from_blueprint : Loads a Simulation instance from a YAML blueprint file.
-        to_dict : Converts the Simulation instance into a dictionary.
         """
         pass
 
@@ -735,7 +652,7 @@ class Simulation(ABC, LoggingMixin):
         new_sim.start_date = self.end_date
         new_sim.directory = (
             new_sim.directory
-            / f"RESTART_{new_sim.start_date.strftime(format='%Y%m%d_%H%M%S')}"
+            / f"RESTART_{new_sim.start_date.strftime('%Y%m%d_%H%M%S')}"
         )
         if isinstance(new_end_date, str):
             new_sim.end_date = dateutil.parser.parse(new_end_date)

@@ -10,7 +10,6 @@ from cstar.base import Discretization
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.tests.unit_tests.fake_abc_subclasses import (
-    FakeExternalCodeBase,
     StubSimulation,
 )
 
@@ -162,7 +161,9 @@ class TestSimulationInitialization:
         sim = stub_simulation
         sim._validate_date_range()  # Should not raise any error
 
-    def test_validate_date_range_start_date_too_early(self, tmp_path):
+    def test_validate_date_range_start_date_too_early(
+        self, tmp_path, fakeexternalcodebase
+    ):
         """Test `_validate_date_range()` when `start_date` is before `valid_start_date`.
 
         This test ensures that `_validate_date_range()` raises a `ValueError` if
@@ -171,6 +172,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
+        - `fakeexternalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -182,7 +184,7 @@ class TestSimulationInitialization:
             StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
-                codebase=FakeExternalCodeBase(),
+                codebase=fakeexternalcodebase,
                 discretization=Discretization(time_step=60),
                 start_date="2023-12-31",  # Too early
                 end_date="2025-12-31",
@@ -190,7 +192,9 @@ class TestSimulationInitialization:
                 valid_end_date="2026-01-01",
             )
 
-    def test_validate_date_range_end_date_too_late(self, tmp_path):
+    def test_validate_date_range_end_date_too_late(
+        self, fakeexternalcodebase, tmp_path
+    ):
         """Test `_validate_date_range()` when `end_date` is after `valid_end_date`.
 
         This test ensures that `_validate_date_range()` raises a `ValueError` if
@@ -199,6 +203,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
+        - `fakeexternalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -210,7 +215,7 @@ class TestSimulationInitialization:
             StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
-                codebase=FakeExternalCodeBase(),
+                codebase=fakeexternalcodebase,
                 discretization=Discretization(time_step=60),
                 start_date="2025-01-01",
                 end_date="2026-02-01",  # Too late
@@ -218,7 +223,9 @@ class TestSimulationInitialization:
                 valid_end_date="2026-01-01",
             )
 
-    def test_simulation_raises_error_if_start_date_after_end_date(self, tmp_path):
+    def test_simulation_raises_error_if_start_date_after_end_date(
+        self, fakeexternalcodebase, tmp_path
+    ):
         """Test that an error is raised when `start_date` is after `end_date`.
 
         This test ensures that `Simulation` initialization fails with a `ValueError`
@@ -227,6 +234,7 @@ class TestSimulationInitialization:
         Mocks & Fixtures
         ----------------
         - `tmp_path`: Temporary directory for simulation setup.
+        - `fakeexternalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -236,7 +244,7 @@ class TestSimulationInitialization:
             StubSimulation(
                 name="InvalidSim",
                 directory=tmp_path,
-                codebase=FakeExternalCodeBase(),
+                codebase=fakeexternalcodebase,
                 discretization=Discretization(time_step=60),
                 start_date="2025-12-31",
                 end_date="2025-01-01",
@@ -244,60 +252,9 @@ class TestSimulationInitialization:
                 valid_end_date="2026-01-01",
             )
 
-    # Tests for _validate_simulation_directory
-    def test_validate_simulation_directory_new_directory(
-        self, tmp_path, stub_simulation
-    ):
-        """Test `_validate_simulation_directory()` with a new/empty directory.
-
-        This test ensures that `_validate_simulation_directory()` correctly resolves
-        the absolute path of a new/empty directory.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path`: Temporary directory for simulation setup.
-        - `stub_simulation`: Provides a mock `Simulation` instance.
-
-        Assertions
-        ----------
-        - The returned directory path is correctly resolved.
-        """
-        sim = stub_simulation
-        new_dir = tmp_path / "new_simulation"
-
-        assert sim._validate_simulation_directory(new_dir) == new_dir.resolve()
-
-    def test_validate_simulation_directory_existing_non_empty_directory(
-        self, tmp_path, stub_simulation
-    ):
-        """Test `_validate_simulation_directory()` with a non-empty existing directory.
-
-        This test ensures that `_validate_simulation_directory()` raises a `FileExistsError`
-        when the specified directory already exists and is not empty.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path`: Temporary directory for simulation setup.
-        - `stub_simulation`: Provides a mock `Simulation` instance.
-
-        Assertions
-        ----------
-        - A `FileExistsError` is raised with a message indicating the directory is not empty.
-        """
-        sim = stub_simulation
-
-        non_empty_dir = tmp_path / "existing_simulation"
-        non_empty_dir.mkdir()
-        (non_empty_dir / "file.txt").touch()
-
-        with pytest.raises(
-            FileExistsError, match="exists and is not an empty directory"
-        ):
-            sim._validate_simulation_directory(non_empty_dir)
-
     # Test Initialisation directly:
 
-    def test_simulation_initialization_valid(self):
+    def test_simulation_initialization_valid(self, fakeexternalcodebase):
         """Test valid initialization of a `Simulation` instance.
 
         This test ensures that `Simulation` initializes correctly when provided
@@ -308,6 +265,7 @@ class TestSimulationInitialization:
         ----------------
         - `patch.object(StubSimulation, "_validate_simulation_directory")`: Mocks directory validation.
         - `patch.object(StubSimulation, "_validate_date_range")`: Mocks date range validation.
+        - `fakeexternalcodebase`: an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -316,16 +274,12 @@ class TestSimulationInitialization:
         - The `Simulation` instance has correctly set attributes.
         """
         with (
-            patch.object(
-                StubSimulation, "_validate_simulation_directory"
-            ) as mock_validate_dir,
             patch.object(StubSimulation, "_validate_date_range") as mock_validate_dates,
         ):
-            mock_validate_dir.return_value = Path("some/dir").resolve()
             sim = StubSimulation(
                 name="TestSim",
                 directory="some/dir",
-                codebase=FakeExternalCodeBase(),
+                codebase=fakeexternalcodebase,
                 discretization=Discretization(time_step=60),
                 start_date="2025-01-01",
                 end_date="2025-12-31",
@@ -333,7 +287,6 @@ class TestSimulationInitialization:
                 valid_end_date="2026-01-01",
             )
 
-            mock_validate_dir.assert_called_once_with("some/dir")
             mock_validate_dates.assert_called_once()
 
             assert sim.directory == Path("some/dir").resolve()
@@ -342,7 +295,9 @@ class TestSimulationInitialization:
             assert sim.valid_start_date == datetime(2024, 1, 1)
             assert sim.valid_end_date == datetime(2026, 1, 1)
 
-    def test_simulation_uses_fallback_dates(self, tmp_path, caplog):
+    def test_simulation_uses_fallback_dates(
+        self, fakeexternalcodebase, tmp_path, caplog
+    ):
         """Test that missing `start_date` and `end_date` default to valid ranges.
 
         This test ensures that when `start_date` or `end_date` is not provided,
@@ -355,6 +310,8 @@ class TestSimulationInitialization:
             Temporary directory for simulation setup.
         caplog (pytest.LogCaptureFixture)
             builtin fixture for capturing logged messages
+        fakeexternalcodebase
+            An ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -365,7 +322,7 @@ class TestSimulationInitialization:
         sim = StubSimulation(
             name="FallbackSim",
             directory=tmp_path,
-            codebase=FakeExternalCodeBase(),
+            codebase=fakeexternalcodebase,
             discretization=Discretization(time_step=60),
             valid_start_date="2025-01-01",
             valid_end_date="2025-12-31",
@@ -377,7 +334,9 @@ class TestSimulationInitialization:
         assert sim.start_date == datetime(2025, 1, 1)
         assert sim.end_date == datetime(2025, 12, 31)
 
-    def test_simulation_warns_if_no_valid_dates(self, tmp_path, caplog):
+    def test_simulation_warns_if_no_valid_dates(
+        self, fakeexternalcodebase, tmp_path, caplog
+    ):
         """Test that a warning is issued when no valid date constraints are provided.
 
         This test ensures that if neither `valid_start_date` nor `valid_end_date`
@@ -390,6 +349,8 @@ class TestSimulationInitialization:
             Temporary directory for simulation setup.
         caplog (pytest.LogCaptureFixture)
             builtin fixture for capturing logged messages
+        fakeexternalcodebase
+            an ExternalCodeBase instance without filesystem or network logic
 
         Assertions
         ----------
@@ -397,7 +358,7 @@ class TestSimulationInitialization:
         """
         sim = StubSimulation(
             name="FallbackSim",
-            codebase=FakeExternalCodeBase(),
+            codebase=fakeexternalcodebase,
             directory=tmp_path,
             discretization=Discretization(time_step=60),
             start_date="2025-01-01",
@@ -456,8 +417,8 @@ Discretization: Discretization(time_step = 60)
 
 Code:
 Codebase: FakeExternalCodeBase instance (query using StubSimulation.codebase)
-Runtime code: AdditionalCode instance with 2 files (query using StubSimulation.runtime_code)
-Compile-time code: AdditionalCode instance with 2 files (query using StubSimulation.compile_time_code)
+Runtime code: AdditionalCode instance with 3 files (query using StubSimulation.runtime_code)
+Compile-time code: AdditionalCode instance with 3 files (query using StubSimulation.compile_time_code)
 Is compiled: True
 Executable path: {sim_dir}"""
 
@@ -527,6 +488,7 @@ class TestSimulationPersistence:
         - The `simulation_state.pkl` file is successfully created in the directory.
         """
         sim = stub_simulation
+        sim.codebase._source = None  # Can't pickle mocked SourceData
         sim.persist()
         assert sim.directory / "simulation_state.pkl", "Persisted file was not created."
 
@@ -549,11 +511,6 @@ class TestSimulationPersistence:
         sim = stub_simulation
         sim.persist()
         restored_sim = StubSimulation.restore(sim.directory)
-
-        # Ensure the restored object has the same attributes
-        assert restored_sim.to_dict() == sim.to_dict(), (
-            "Restored simulation does not match the original"
-        )
 
         # Also compare serialized versions
         assert pickle.dumps(restored_sim) == pickle.dumps(sim), (
@@ -791,13 +748,19 @@ def test_to_dict(stub_simulation):
     assert test_dict["discretization"] == {"time_step": 60}
     assert test_dict["codebase"]["source_repo"] == "https://github.com/test/repo.git"
     assert test_dict["codebase"]["checkout_target"] == "test_target"
-    assert test_dict["runtime_code"]["location"] == str(sim.directory.parent)
-    assert test_dict["runtime_code"]["files"] == ["file1", "file2"]
-    assert test_dict["runtime_code"]["subdir"] == "subdir/"
-    assert test_dict["runtime_code"]["checkout_target"] == "main"
-    assert test_dict["compile_time_code"]["location"] == str(sim.directory.parent)
-    assert test_dict["compile_time_code"]["subdir"] == "subdir/"
-    assert test_dict["compile_time_code"]["files"] == ["file1", "file2"]
-    assert test_dict["compile_time_code"]["checkout_target"] == "main"
+    assert test_dict["runtime_code"]["location"] == "/some/local/directory"
+    assert test_dict["runtime_code"]["files"] == [
+        "test_file_1.F",
+        "test_file_2.py",
+        "test_file_3.opt",
+    ]
+    assert test_dict["runtime_code"]["subdir"] == "some/subdirectory"
+    assert test_dict["compile_time_code"]["location"] == "/some/local/directory"
+    assert test_dict["compile_time_code"]["subdir"] == "some/subdirectory"
+    assert test_dict["compile_time_code"]["files"] == [
+        "test_file_1.F",
+        "test_file_2.py",
+        "test_file_3.opt",
+    ]
     assert test_dict["valid_start_date"] == datetime(2024, 1, 1, 0, 0)
     assert test_dict["valid_end_date"] == datetime(2026, 1, 1, 0, 0)
