@@ -1,5 +1,4 @@
 import os
-import re
 import typing as t
 from pathlib import Path
 
@@ -20,25 +19,7 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.serialization import deserialize
-
-
-def slugify(source: str) -> str:
-    """Convert a source string into a URL-safe slug.
-
-    Parameters
-    ----------
-    source : str
-        The string to be converted.
-
-    Returns
-    -------
-    str
-        The slugified version of the source string.
-    """
-    if not source:
-        raise ValueError
-
-    return re.sub(r"\s+", "-", source.casefold())
+from cstar.orchestration.utils import slugify
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
