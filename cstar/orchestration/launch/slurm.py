@@ -298,6 +298,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             )
             item.status = Status.Cancelled
         except RuntimeError:
-            print(f"Unable to cancel the task `{handle.pid}")
+            print(f"Unable to cancel the task `{handle.pid}`")
 
         return item
