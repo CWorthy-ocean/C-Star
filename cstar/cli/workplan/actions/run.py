@@ -42,7 +42,7 @@ def create_action() -> RegistryResult:
     def _fn(sp: argparse._SubParsersAction) -> argparse._SubParsersAction:
         """Add a parser for the command: `cstar workplan run path/to/workplan.yaml`"""
         parser = sp.add_parser(
-            "run",
+            action,
             help="Execute a workplan",
             description="Path to the workplan (YAML)",
         )

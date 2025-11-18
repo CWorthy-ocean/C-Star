@@ -102,7 +102,7 @@ def create_action() -> RegistryResult:
     def _fn(sp: argparse._SubParsersAction) -> argparse._SubParsersAction:
         """Add a parser for the command: `cstar blueprint run path/to/blueprint.yaml`"""
         parser = sp.add_parser(
-            "run",
+            action,
             help="Execute a blueprint",
             description="Path to the blueprint (YAML)",
         )
