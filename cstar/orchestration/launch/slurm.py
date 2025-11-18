@@ -1,4 +1,5 @@
 import os
+import sys
 import typing as t
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from cstar.execution.scheduler_job import (
     create_scheduler_job,
     get_status_of_slurm_job,
 )
-from cstar.orchestration.models import RomsMarblBlueprint, Step
+from cstar.orchestration.models import Application, RomsMarblBlueprint, Step
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -62,6 +63,57 @@ class SlurmHandle(ProcessHandle):
         self.job_name = job_name
 
 
+StepToCommandConversionFn: t.TypeAlias = t.Callable[[Step], str]
+"""A function that converts a `Step` into an executable CLI command."""
+
+
+def convert_roms_step_to_command(step: Step) -> str:
+    """Convert a `Step` into a command to be executed.
+
+    This function converts ROMS/ROMS-MARBL applications into a command triggering
+    a C-Star worker to run a simulation.
+
+    Parameters
+    ----------
+    step : Step
+        The step to be converted.
+
+    Returns
+    -------
+    str
+        The complete CLI command.
+    """
+    bp_path = Path(step.blueprint).as_posix()
+    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {bp_path}"
+
+
+def convert_step_to_placeholder(step: Step) -> str:
+    """Convert a `Step` into a command to be executed.
+
+    This function converts applications into mocks by starting a process that
+    executes a blocking sleep.
+
+    Parameters
+    ----------
+    step : Step
+        The step to be converted.
+
+    Returns
+    -------
+    str
+        The complete CLI command.
+    """
+    return f'{sys.executable} -c "import time; time.sleep(10)"'
+
+
+app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
+    Application.ROMS.value: convert_roms_step_to_command,
+    Application.ROMS_MARBL.value: convert_roms_step_to_command,
+    "sleep": convert_step_to_placeholder,
+}
+"""Map application types to a function that converts a step to a CLI command."""
+
+
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
 
@@ -83,14 +135,20 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             A ProcessHandle identifying the newly submitted job.
         """
         job_name = slugify(step.name)
-        bp_path = step.blueprint
-        bp = deserialize(Path(bp_path), RomsMarblBlueprint)
+        bp_path = Path(step.blueprint)
+        bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        print(f"Submitting {step.name}")
+        step_converter = app_to_cmd_map[step.application]
+        if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
+            print(
+                f"Overriding command converter for `{step.application}` to `{converter_override}`"
+            )
+            step_converter = app_to_cmd_map[converter_override]
+
+        command = step_converter(step)
         job = create_scheduler_job(
-            # commands=f"python3 -m cstar.entrypoint.worker.worker -b {bp_path}",
-            commands="sleep 10",
+            commands=command,
             account_key=os.getenv("CSTAR_ACCOUNT_KEY", ""),
             cpus=bp.cpus_needed,
             nodes=None,  # let existing logic handle this
@@ -104,14 +162,15 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             depends_on=job_dep_ids,
         )
 
+        print(f"Submitting step `{step.name}` as command `{command}`")
         job.submit()
 
         if job.id:
-            print(f"Submission of {step.name} created Job ID `{job.id}`")
+            print(f"Submission of `{step.name}` created Job ID `{job.id}`")
             handle = SlurmHandle(job_id=str(job.id), job_name=job_name)
             return handle
 
-        print(f"Job submission failed: {job}")
+        print(f"Job submission for step `{step.name}` failed: {job}")
         raise RuntimeError(f"Unable to retrieve scheduled job ID for: {step.name}")
 
     @staticmethod
