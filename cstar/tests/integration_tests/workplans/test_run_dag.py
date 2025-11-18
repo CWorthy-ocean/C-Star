@@ -35,6 +35,9 @@ async def test_build_and_run(tmp_path: Path, workplan_name: str) -> None:
     os.environ["CSTAR_QUEUE_NAME"] = "shared"
     os.environ["CSTAR_ORCHESTRATED"] = "1"
 
+    # avoid running sims during tests
+    os.environ["CSTAR_CMD_CONVERTER_OVERRIDE"] = "sleep"
+
     cstar_dir = Path(__file__).parent.parent.parent.parent
     template_file = f"{workplan_name}.yaml"
     templates_dir = cstar_dir / "additional_files/templates"
