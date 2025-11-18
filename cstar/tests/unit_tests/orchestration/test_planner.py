@@ -94,7 +94,7 @@ def test_planner_with_tasks(
 
     Parameters
     ----------
-    planner_type : type[GraphPlanner]
+    planner_type : type[Planner]
         The type of planner to test
     num_steps : int
         The number of steps to add to the workplan
