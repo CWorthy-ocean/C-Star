@@ -33,11 +33,37 @@ _T = t.TypeVar("_T", bound=BaseModel)
 
 
 def _read_json(path: Path, klass: type[_T]) -> _T:
+    """Read and process content as a JSON file.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing content.
+    klass : type[_T]
+        The type to instantiate from the content.
+
+    Returns
+    -------
+    _T
+    """
     with path.open("r", encoding="utf-8") as fp:
         return klass.model_validate_json(json_data=fp.read())
 
 
 def _read_yaml(path: Path, klass: type[_T]) -> _T:
+    """Read and process content as a YAML file.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing content.
+    klass : type[_T]
+        The type to instantiate from the content.
+
+    Returns
+    -------
+    _T
+    """
     with path.open("r", encoding="utf-8") as fp:
         model_dict = safe_load(fp)
         return klass.model_validate(model_dict)
@@ -59,7 +85,7 @@ def model_to_yaml(model: BaseModel) -> str:
     Parameters
     ----------
     model : BaseModel
-        The model to be serialized
+        The model to be serialized.
 
     Returns
     -------
@@ -117,6 +143,8 @@ def deserialize(
     ----------
     path : Path
         The location of the blueprint
+    klass : type[_T]
+        The type to instantiate.
     mode : t.Literal["json", "yaml", "auto"]
         The type of serializer used to create the file.
 

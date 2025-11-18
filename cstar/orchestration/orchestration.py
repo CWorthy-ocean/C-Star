@@ -17,7 +17,13 @@ class ProcessHandle:
     """The process identifier."""
 
     def __init__(self, pid: str) -> None:
-        """Initialize the handle."""
+        """Initialize the handle.
+
+        Parameters
+        ----------
+        pid : str
+            A unique ID identifying a running process.
+        """
         self.pid = pid
 
 
@@ -40,18 +46,48 @@ class Status(IntEnum):
     """A task that terminated due to some failure in the task."""
 
     @classmethod
-    def is_terminal(cls, status) -> bool:
-        """Return `True` if a status is in the set of terminal statuses."""
+    def is_terminal(cls, status: "Status") -> bool:
+        """Return `True` if a status is in the set of terminal statuses.
+
+        Paramters
+        ---------
+        status : "Status"
+            The status to evaluate.
+
+        Returns
+        -------
+        bool
+        """
         return status in {Status.Done, Status.Cancelled, Status.Failed}
 
     @classmethod
     def is_failure(cls, status) -> bool:
-        """Return `True` if a status is in the set of terminal statuses."""
+        """Return `True` if a status is in the set of terminal statuses.
+
+        Paramters
+        ---------
+        status : "Status"
+            The status to evaluate.
+
+        Returns
+        -------
+        bool
+        """
         return status in {Status.Cancelled, Status.Failed}
 
     @classmethod
     def is_running(cls, status) -> bool:
-        """Return `True` if a status is in the set of in-progress statuses."""
+        """Return `True` if a status is in the set of in-progress statuses.
+
+        Paramters
+        ---------
+        status : "Status"
+            The status to evaluate.
+
+        Returns
+        -------
+        bool
+        """
         return status in {Status.Submitted, Status.Running, Status.Ending}
 
 
@@ -80,12 +116,12 @@ class Task(t.Generic[_THandle]):
 
         Parameters
         ----------
-        status : Status
-            The current status of the task
         step : Step
             The workplan `Step` that triggered the task to run
         handle : _THandle
             A handle that used to identify the running task.
+        status : Status
+            The current status of the task
         """
         self.status = status
         self.step = step
@@ -163,6 +199,7 @@ class Planner:
         """
 
         def f(step: Step) -> bool:
+            """Filter steps that are non-null."""
             return step is not None
 
         keys = nx.topological_sort(self.graph)
@@ -178,6 +215,8 @@ class Planner:
             The node identifier.
         key : str
             The key to be written to on the node.
+        value : object
+            The value to be stored.
         """
         if key in Planner.Keys.__dict__:
             msg = f"WARNING: Writing to reserved key `{key}` on node `{n}`"
@@ -498,6 +537,11 @@ class Orchestrator:
         ----------
         node : str
             The name of the node to process.
+
+        Returns
+        -------
+        Task | None
+            The created task, if successfully processed.
         """
         step = t.cast(Step | None, self.planner.retrieve(node, Planner.Keys.Step, None))
         if step is None:

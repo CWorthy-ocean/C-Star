@@ -31,6 +31,11 @@ def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
         The prefect context object for the currently running task
     params : dict[str, t.Any]
         A dictionary containing all thee input values to the task
+
+    Returns
+    -------
+    str
+        The cache key for the current context.
     """
     cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
     print(f"Cache check: {cache_key}")
@@ -50,6 +55,8 @@ class SlurmHandle(ProcessHandle):
         ----------
         job_id : str
             The SLURM_JOB_ID identifying a job.
+        job_name : str or None
+            The job name assigend to the job.
         """
         super().__init__(pid=job_id)
         self.job_name = job_name
@@ -67,6 +74,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         ----------
         step : Step
             The step to submit to SLURM.
+        dependencies : list[SlurmHandle]
+            The list of tasks that must complete prior to execution of the submitted Step.
+
+        Returns
+        -------
+        SlurmHandle
+            A ProcessHandle identifying the newly submitted job.
         """
         job_name = slugify(step.name)
         bp_path = step.blueprint
@@ -110,6 +124,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The step triggering the job.
         handle : SlurmHandle
             A handle object for a SLURM-based task.
+
+        Returns
+        -------
+        ExecutionStatus
+            The current status of the step.
         """
         status = ExecutionStatus.UNKNOWN
 
@@ -129,6 +148,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         ----------
         step : Step
             The step to submit to SLURM.
+        dependencies : list[SlurmHandle]
+            The list of tasks that must complete prior to execution of the submitted Step.
+
+        Returns
+        -------
+        Task[SlurmHandle]
+            A Task containing information about the newly submitted job.
         """
         handle = await SlurmLauncher._submit(step, dependencies)
         return Task(
@@ -145,8 +171,15 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         Parameters
         ----------
+        step : Step
+            The step that will be queried for.
         item : Task[SlurmHandle] | SlurmHandle
             An item with a handle to be used to execute a status query.
+
+        Returns
+        -------
+        Status
+            The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
         slurm_status = await SlurmLauncher._status(step, handle)

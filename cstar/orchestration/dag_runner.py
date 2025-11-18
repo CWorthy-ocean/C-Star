@@ -21,7 +21,7 @@ def incremental_delays() -> t.Generator[float, None, None]:
 
     Returns
     -------
-    float
+    Generator[float]
     """
     # TODO: load delays from config to enable dynamic changes for tests.
     delays = [2, 2, 5, 5, 15, 15]
@@ -30,6 +30,18 @@ def incremental_delays() -> t.Generator[float, None, None]:
 
 
 async def process_plan(orchestrator: Orchestrator, mode: Orchestrator.RunMode) -> None:
+    """Execute a plan from start to finish.
+
+    Parameters
+    ----------
+    orchestrator : Orchestrator
+        The orchestrator to be used for processing a plan.
+    mode : Orchestrator.RunMode
+        The execution mode during processing.
+
+        - RunMode.Schedule submits all processes the plan in a non-blocking manner.
+        - RunMode.Monitor waits for all processes in the plan to complete.
+    """
     closed_set = orchestrator.get_closed_nodes(mode=mode)
     open_set = orchestrator.get_open_nodes(mode=mode)
     delay_iter = iter(incremental_delays())

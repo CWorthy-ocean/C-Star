@@ -53,7 +53,7 @@ class LocalHandle(ProcessHandle):
 
         Returns
         -------
-        int
+        float
         """
         now = datetime.datetime.now().timestamp()
         return now - self.start_at
@@ -73,6 +73,13 @@ class LocalLauncher(Launcher[LocalHandle]):
         ----------
         step : Step
             The step to execute in a local process.
+        dependencies : list[LocalHandle]
+            The list of tasks that must complete prior to execution of the submitted Step.
+
+        Returns
+        -------
+        LocalHandle
+            A ProcessHandle identifying the newly submitted job.
         """
         print(f"Checking deps for `{step.name}`: {[d.step.name for d in dependencies]}")
         tracked = {
@@ -111,8 +118,15 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         Parameters
         ----------
+        step : Step
+            The step triggering the job.
         handle : LocalHandle
             A handle object for a process-based task.
+
+        Returns
+        -------
+        str
+            The current status of the step.
         """
         to_query = [p for p in LocalLauncher.processes.values() if p.returncode is None]
         for process in to_query:
@@ -141,6 +155,13 @@ class LocalLauncher(Launcher[LocalHandle]):
         ----------
         step : Step
             The step to run in a local process.
+        dependencies : list[LocalHandle]
+            The list of tasks that must complete prior to execution of the submitted Step.
+
+        Returns
+        -------
+        Task[Localandle]
+            A Task containing information about the newly submitted job.
         """
         handle = await LocalLauncher._submit(step, dependencies)
         status = await LocalLauncher.query_status(step, handle)
@@ -158,8 +179,15 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         Parameters
         ----------
-        item : Task | ProcessHandle
+        step : Step
+            The step that will be queried for.
+        item : Task[LocalHandle] | LocalHandle
             An item with a handle to be used to execute a status query.
+
+        Returns
+        -------
+        Status
+            The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
         raw_status = await LocalLauncher._status(step, handle)
@@ -185,8 +213,8 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         Returns
         -------
-        Status
-            The current status of the item.
+        Task[LocalHandle]
+            The task after the cancellation attempt has completed.
         """
         handle = item.handle
         process = LocalLauncher.processes.get(item.step.name, None)
