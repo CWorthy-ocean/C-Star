@@ -184,38 +184,3 @@ if __name__ == "__main__":
             my_run_name = f"{sys.argv[1]}_{template}"
             os.environ["CSTAR_RUNID"] = my_run_name
             asyncio.run(build_and_run_dag(wp_path))
-
-
-if __name__ == "__main__":
-    os.environ["CSTAR_INTERACTIVE"] = "0"
-    os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
-    os.environ["CSTAR_QUEUE_NAME"] = "shared"
-    os.environ["CSTAR_ORCHESTRATED"] = "1"
-
-    # wp_path = Path("/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml")
-    # wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
-    # wp_path = Path("/anvil/projects/x-ees250129/x-cmcbride/workplans/01.simple.yaml")
-
-    with TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
-
-        for template in ["fanout", "linear", "parallel", "single_step"]:
-            cstar_dir = Path(__file__).parent.parent
-            template_file = f"{template}.yaml"
-            templates_dir = cstar_dir / "additional_files/templates"
-            template_path = templates_dir / "wp" / template_file
-
-            bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
-            bp_path = tmp_path / "blueprint.yaml"
-            bp_tpl_path = templates_dir / "bp/blueprint.yaml"
-            bp_path.write_text(bp_tpl_path.read_text())
-
-            wp_content = template_path.read_text()
-            wp_content = wp_content.replace(bp_default, bp_path.as_posix())
-
-            wp_path = tmp_path / template_file
-            wp_path.write_text(wp_content)
-
-            my_run_name = f"{sys.argv[1]}_{template}"
-            os.environ["CSTAR_RUNID"] = my_run_name
-            asyncio.run(build_and_run_dag(wp_path))
