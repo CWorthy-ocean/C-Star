@@ -36,19 +36,19 @@ def _add_marker_nodes(graph: nx.DiGraph) -> nx.DiGraph:
     else:
         graph.nodes[START_NODE]["action"] = "start"
 
-    if "_cs_term_" not in graph.nodes:
+    if TERMINAL_NODE not in graph.nodes:
         graph.add_node(
-            "_cs_term_",
+            TERMINAL_NODE,
             **{"action": "term"},
         )
     else:
-        graph.nodes["_cs_term_"]["action"] = "term"
+        graph.nodes[TERMINAL_NODE]["action"] = "term"
 
     # find steps with no dependencies, allowing immediate start
     no_dep_edges = [
         (START_NODE, node)
         for node in graph.nodes()
-        if graph.in_degree(node) == 0 and node not in ["_cs_start_", "_cs_term_"]
+        if graph.in_degree(node) == 0 and node not in [START_NODE, TERMINAL_NODE]
     ]
 
     # Add edges from the  start node to all independent steps
@@ -56,9 +56,9 @@ def _add_marker_nodes(graph: nx.DiGraph) -> nx.DiGraph:
 
     # find steps that have no tasks after them
     terminal_edges = [
-        (node, "_cs_term_")
+        (node, TERMINAL_NODE)
         for node in graph.nodes()
-        if graph.out_degree(node) == 0 and node != "_cs_term_"
+        if graph.out_degree(node) == 0 and node != TERMINAL_NODE
     ]
 
     # Add edges from leaf nodes to the terminal node
