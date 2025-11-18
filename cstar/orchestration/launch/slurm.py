@@ -64,7 +64,18 @@ class SlurmHandle(ProcessHandle):
 
 
 StepToCommandConversionFn: t.TypeAlias = t.Callable[[Step], str]
-"""A function that converts a `Step` into an executable CLI command."""
+"""Convert a `Step` into a command to be executed.
+
+Parameters
+----------
+step : Step
+    The step to be converted.
+
+Returns
+-------
+str
+    The complete CLI command.
+"""
 
 
 def convert_roms_step_to_command(step: Step) -> str:

@@ -39,7 +39,7 @@ async def process_plan(orchestrator: Orchestrator, mode: Orchestrator.RunMode) -
     mode : Orchestrator.RunMode
         The execution mode during processing.
 
-        - RunMode.Schedule submits all processes the plan in a non-blocking manner.
+        - RunMode.Schedule submits all processes in the plan in a non-blocking manner.
         - RunMode.Monitor waits for all processes in the plan to complete.
     """
     closed_set = orchestrator.get_closed_nodes(mode=mode)
