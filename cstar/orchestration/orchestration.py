@@ -9,6 +9,10 @@ from pydantic import Field
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step, Workplan
 
+KEY_STATUS: t.Literal["status"] = "status"
+KEY_STEP: t.Literal["step"] = "step"
+KEY_TASK: t.Literal["task"] = "task"
+
 
 class RunMode(StrEnum):
     """Specify the blocking behavior during plan execution."""

@@ -6,7 +6,14 @@ import pytest
 
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Step, Workplan
-from cstar.orchestration.orchestration import Orchestrator, Planner, RunMode, Status
+from cstar.orchestration.orchestration import (
+    KEY_STATUS,
+    KEY_STEP,
+    Orchestrator,
+    Planner,
+    RunMode,
+    Status,
+)
 
 
 @pytest.fixture
@@ -17,10 +24,10 @@ def diamond_graph(tmp_path: Path) -> nx.DiGraph:
     bp_path = tmp_path / "blueprint.yaml"
     initial_stats = {
         key: {
-            Planner.Keys.Step: Step(
+            KEY_STEP: Step(
                 name=f"s-{i:02d}", application="sleep", blueprint=bp_path.as_posix()
             ),
-            Planner.Keys.Status: Status.Unsubmitted,
+            KEY_STATUS: Status.Unsubmitted,
         }
         for i, key in enumerate(g.nodes)
     }
@@ -40,10 +47,8 @@ def tree_graph(tmp_path: Path) -> nx.DiGraph:
     g: nx.DiGraph = nx.DiGraph(data)
     initial_stats = {
         key: {
-            Planner.Keys.Step: Step(
-                name=key, application="sleep", blueprint=bp_path.as_posix()
-            ),
-            Planner.Keys.Status: Status.Unsubmitted,
+            KEY_STEP: Step(name=key, application="sleep", blueprint=bp_path.as_posix()),
+            KEY_STATUS: Status.Unsubmitted,
         }
         for key in g.nodes
     }
@@ -111,3 +116,32 @@ async def test_query_using_attrs(mode: RunMode, diamond_workplan: Workplan) -> N
         open_set = orchestrator.get_open_nodes(mode=mode)
 
         print(f"[on-exit] Open nodes: {open_set}, Closed: {closed_set}")
+
+
+def test_dep_keys(tmp_path: Path) -> None:
+    """Verify the orchestrator fails gracefully when dependencies are
+    mismatched to step names.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    with pytest.raises(ValueError) as ex:
+        _ = Workplan(
+            name="Invalid Dependency Key Example",
+            description="Workplan with a dependency that doesn't match a step",
+            steps=[
+                Step(
+                    name="Good Step",
+                    application="sleep",
+                    blueprint=bp_path.as_posix(),
+                ),
+                Step(
+                    name="Bad Step",
+                    application="sleep",
+                    blueprint=bp_path.as_posix(),
+                    depends_on=["Non-existent Step"],
+                ),
+            ],
+        )
+
+    assert "unknown dep" in str(ex).lower()

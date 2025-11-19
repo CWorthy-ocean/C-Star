@@ -1,3 +1,4 @@
+import itertools
 import typing as t
 from abc import ABC
 from copy import deepcopy
@@ -518,7 +519,6 @@ class Workplan(BaseModel):
         ----------
         value : list[str]
             Variable names used at runtime
-
         """
         var_counter = t.Counter(value)
         most_common = var_counter.most_common(1)
@@ -533,13 +533,12 @@ class Workplan(BaseModel):
     @field_validator("steps", mode="after")
     @classmethod
     def _check_steps(cls, value: list[Step]) -> list[Step]:
-        """Xxx.
+        """Verify step names are unique.
 
         Parameters
         ----------
         value : list[Step]
-            Variable names used at runtime
-
+            The steps in the workplan.
         """
         name_counter = t.Counter(step.name for step in value)
         most_common = name_counter.most_common(1)
@@ -548,6 +547,26 @@ class Workplan(BaseModel):
 
         if step_count > 1:
             msg = f"Step names must be unique. Found {step_count} steps with name {step_name}"
+            raise ValueError(msg)
+
+        return value
+
+    @field_validator("steps", mode="after")
+    @classmethod
+    def _check_dependencies(cls, value: list[Step]) -> list[Step]:
+        """Verify the keys named in dependencies are valid step names.
+
+        Parameters
+        ----------
+        value : list[Step]
+            The steps in the workplan.
+        """
+        names = {step.name for step in value}
+        dependencies = {
+            itertools.chain.from_iterable(step.depends_on for step in value)
+        }
+        if diff := dependencies.difference(names):
+            msg = f"Unknown dependency specified. No step(s) named: {diff}"
             raise ValueError(msg)
 
         return value
