@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from cstar.orchestration.dag_runner import build_and_run_dag
+from cstar.orchestration.models import Step, Workplan
 
 
 def slurm() -> bool:
@@ -19,6 +20,63 @@ def slurm() -> bool:
         return False
 
     return True
+
+
+@pytest.mark.skip(reason="reminder/placeholder.")
+def test_dep_fail() -> None:
+    """Verify the orchestrator fails gracefully when a structurally invalid
+    dependency structure is encountered.
+    """
+    # TODO: e.g. linear plan with circular dep
+
+    # TODO: Consider validating in planner instead of runtime failure.
+    # 1. all nodes are reachable
+    # 2. no cycles
+    ...
+
+
+@pytest.mark.skip(reason="reminder/placeholder.")
+def test_cancellation() -> None:
+    """Verify that a cancellation of a step that has a dependent step
+    causes the entire workplan to fail.
+    """
+    # TODO: wp with step a, step b
+    # - schedule step A, schedule step B
+    # - manually cancel step A immediately
+    # - ...
+    # - profit
+    ...
+
+
+@pytest.mark.skip(reason="reminder/placeholder.")
+def test_dep_keys(tmp_path: Path) -> None:
+    """Verify the orchestrator fails gracefully when dependencies are
+    mismatched to step names.
+    """
+    # TODO: serialize the "bad workplan" and run the dag runner with the path.
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    with pytest.raises(ValueError) as ex:
+        _ = Workplan(
+            name="Invalid Dependency Key Example",
+            description="Workplan with a dependency that doesn't match a step",
+            steps=[
+                Step(
+                    name="Good Step",
+                    application="sleep",
+                    blueprint=bp_path.as_posix(),
+                ),
+                Step(
+                    name="Bad Step",
+                    application="sleep",
+                    blueprint=bp_path.as_posix(),
+                    depends_on=["Non-existent Step"],
+                ),
+            ],
+        )
+
+    assert "unknown dep" in str(ex).lower()
 
 
 @pytest.mark.skip(reason="Fix LocalLauncher infinite loop bug in schedule mode")

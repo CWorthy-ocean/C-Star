@@ -2,22 +2,22 @@
 name: Linear Workplan
 description: A workplan that usees dependencies to ensure that all tasks execute in a series.
 steps:
-- name: Step A
-  application: sleep
-  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
-- name: Step B
+- name: Step L1
   application: sleep
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on:
-  - Step A
-- name: Step C
+  - Step L2
+- name: Step L2
   application: sleep
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on:
-  - Step B
-- name: Step D
+  - Step L3
+- name: Step L3
   application: sleep
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on:
-  - Step C
+  - Step L4
+- name: Step L4
+  application: sleep
+  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
 state: draft
