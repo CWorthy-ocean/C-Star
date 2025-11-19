@@ -12,6 +12,7 @@ from cstar.orchestration.orchestration import (
     Launcher,
     Orchestrator,
     Planner,
+    RunMode,
 )
 from cstar.orchestration.serialization import deserialize
 
@@ -56,13 +57,13 @@ async def retrieve_run_progress(orchestrator: Orchestrator) -> None:
     ----------
     orchestrator : Orchestrator
         The orchestrator to be used for processing a plan.
-    mode : Orchestrator.RunMode
+    mode : RunMode
         The execution mode during processing.
 
         - RunMode.Schedule submits all processes in the plan in a non-blocking manner.
         - RunMode.Monitor waits for all processes in the plan to complete.
     """
-    mode = Orchestrator.RunMode.Monitor
+    mode = RunMode.Monitor
     closed_set = orchestrator.get_closed_nodes(mode=mode)
     open_set = orchestrator.get_open_nodes(mode=mode)
 
@@ -94,14 +95,14 @@ async def load_dag_status(path: Path) -> None:
     await retrieve_run_progress(orchestrator)
 
 
-async def process_plan(orchestrator: Orchestrator, mode: Orchestrator.RunMode) -> None:
+async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
     """Execute a plan from start to finish.
 
     Parameters
     ----------
     orchestrator : Orchestrator
         The orchestrator to be used for processing a plan.
-    mode : Orchestrator.RunMode
+    mode : RunMode
         The execution mode during processing.
 
         - RunMode.Schedule submits all processes in the plan in a non-blocking manner.
@@ -145,10 +146,10 @@ async def build_and_run_dag(path: Path) -> None:
     orchestrator = Orchestrator(planner, launcher)
 
     # schedule the tasks without waiting for completion
-    await process_plan(orchestrator, Orchestrator.RunMode.Schedule)
+    await process_plan(orchestrator, RunMode.Schedule)
 
     # monitor the scheduled tasks until they complete
-    await process_plan(orchestrator, Orchestrator.RunMode.Monitor)
+    await process_plan(orchestrator, RunMode.Monitor)
 
 
 if __name__ == "__main__":

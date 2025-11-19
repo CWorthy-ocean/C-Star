@@ -10,6 +10,16 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step, Workplan
 
 
+class RunMode(StrEnum):
+    """Specify the blocking behavior during plan execution."""
+
+    Monitor = auto()
+    """Block until tasks complete."""
+
+    Schedule = auto()
+    """Block until tasks are scheduled."""
+
+
 class ProcessHandle:
     """Contract used to identify processes created by any launcher."""
 
@@ -342,15 +352,6 @@ class Orchestrator:
     launcher: Launcher
     """The launcher used by the orchestrator to manage task execution."""
 
-    class RunMode(StrEnum):
-        """Specify the blocking behavior during plan execution."""
-
-        Monitor = auto()
-        """Block until tasks complete."""
-
-        Schedule = auto()
-        """Block until tasks are scheduled."""
-
     class Keys(StrEnum):
         """Keys used to store tracker attributes on the planning graph."""
 
@@ -403,7 +404,7 @@ class Orchestrator:
             satisfied = all(
                 Status.is_running(g.nodes[u][Planner.Keys.Status])
                 or Status.is_terminal(g.nodes[u][Planner.Keys.Status])
-                if mode == Orchestrator.RunMode.Schedule
+                if mode == RunMode.Schedule
                 else Status.is_terminal(g.nodes[u][Planner.Keys.Status])
                 for (u, _) in in_edges
             )
@@ -479,7 +480,7 @@ class Orchestrator:
         failed = self._get_nodes_by_status(Status.Failed)
         closed_set = {*cancelled, *failed, *done}
 
-        if mode == Orchestrator.RunMode.Schedule:
+        if mode == RunMode.Schedule:
             # during scheduling, consider all but unsubmitted as closed.
             wip = self.get_wip_nodes()
             closed_set.update(wip)
@@ -557,13 +558,13 @@ class Orchestrator:
             status = await self.launcher.query_status(task.step, task)
             task.status = status
         else:
-            try:
-                task = await self.launcher.launch(step, dependencies)
-                self.planner.store(node, Orchestrator.Keys.Task, task)
-                print(f"Launched step: {step.name}")
-            except CstarExpectationFailed:
-                print(f"Failed to launch step: {step.name}")
-                return None
+            # try:
+            task = await self.launcher.launch(step, dependencies)
+            self.planner.store(node, Orchestrator.Keys.Task, task)
+            print(f"Launched step: {step.name}")
+            # except CstarExpectationFailed:
+            #     print(f"Failed to launch step: {step.name}")
+            #     return None
 
         self.planner.store(node, Planner.Keys.Status, task.status)
         return task

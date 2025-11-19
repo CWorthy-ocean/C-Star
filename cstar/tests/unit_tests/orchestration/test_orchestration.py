@@ -6,7 +6,7 @@ import pytest
 
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Step, Workplan
-from cstar.orchestration.orchestration import Orchestrator, Planner, Status
+from cstar.orchestration.orchestration import Orchestrator, Planner, RunMode, Status
 
 
 @pytest.fixture
@@ -103,7 +103,7 @@ async def test_query_using_attrs(
     if wp is None:
         assert False, "Workplan fixture failed to load."
 
-    mode = Orchestrator.RunMode.Schedule
+    mode = RunMode.Schedule
     orchestrator = Orchestrator(Planner(workplan=wp), LocalLauncher())
     closed_set = orchestrator.get_closed_nodes(mode=mode)
     open_set = orchestrator.get_open_nodes(mode=mode)
