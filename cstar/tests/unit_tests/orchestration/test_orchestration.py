@@ -91,20 +91,14 @@ def diamond_workplan(tmp_path: Path) -> Workplan:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "graph_shape",
+    "mode",
     [
-        "diamond_workplan",
+        RunMode.Schedule,
+        RunMode.Monitor,
     ],
 )
-async def test_query_using_attrs(
-    request: pytest.FixtureRequest, graph_shape: str
-) -> None:
-    wp: Workplan = request.getfixturevalue(graph_shape)
-    if wp is None:
-        assert False, "Workplan fixture failed to load."
-
-    mode = RunMode.Schedule
-    orchestrator = Orchestrator(Planner(workplan=wp), LocalLauncher())
+async def test_query_using_attrs(mode: RunMode, diamond_workplan: Workplan) -> None:
+    orchestrator = Orchestrator(Planner(workplan=diamond_workplan), LocalLauncher())
     closed_set = orchestrator.get_closed_nodes(mode=mode)
     open_set = orchestrator.get_open_nodes(mode=mode)
 
