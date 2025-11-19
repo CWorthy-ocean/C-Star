@@ -615,13 +615,12 @@ class Orchestrator:
                 default=Status.Unsubmitted,
             )
 
-        exec_tasks = [asyncio.Task(self.process_node(n)) for n in open_set]
+        # Ensure task/result pairing is consistent with a list
+        open_nodes = list(open_set)
+        exec_tasks = [asyncio.Task(self.process_node(n)) for n in open_nodes]
         exec_results = await asyncio.gather(*exec_tasks)
 
-        # TODO: confirm iter order of set. may be zipping incorrect n/result
-        # NOTE - it won't matter once step name is sync'd and i can pass 1 arg
-
-        kvp = dict(zip(open_set, exec_results))
+        kvp = dict(zip(open_nodes, exec_results))
         postproc_tasks = [
             asyncio.Task(self.update_planner_state(n, t)) for n, t in kvp.items()
         ]
@@ -630,7 +629,6 @@ class Orchestrator:
         try:
             await asyncio.gather(*postproc_tasks)
         except CstarExpectationFailed:
-            # cancel all running tasks except the known failure
             cancellations = {
                 v for v in kvp.values() if v and Status.is_running(v.status)
             }
