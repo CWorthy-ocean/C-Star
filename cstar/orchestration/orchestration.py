@@ -498,7 +498,7 @@ class Orchestrator:
         submitted = self._get_nodes_by_status(Status.Running)
         return {*running, *submitted}
 
-    def _locate_depedendencies(self, step: Step) -> list[ProcessHandle] | None:
+    def _locate_dependencies(self, step: Step) -> list[ProcessHandle] | None:
         """Look for the dependencies of the step.
 
         Returns
@@ -548,7 +548,7 @@ class Orchestrator:
             msg = f"Unable to process. Invalid node identifier supplied: {node}"
             raise ValueError(msg)
 
-        dependencies = self._locate_depedendencies(step)
+        dependencies = self._locate_dependencies(step)
         if dependencies is None:
             # prerequisite tasks weren't all started, yet.
             return None
