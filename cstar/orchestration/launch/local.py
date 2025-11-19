@@ -107,7 +107,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 f"Unsatisfied prerequisites. Unable to start `{step.name}`."
             )
 
-        cmd = ["sleep", str(random.randint(5, 12))]
+        cmd = ["sleep", str(random.randint(0, 3))]
         print(f"Creating local process from cmd: {' '.join(cmd)}")
 
         popen = Popen(cmd)
