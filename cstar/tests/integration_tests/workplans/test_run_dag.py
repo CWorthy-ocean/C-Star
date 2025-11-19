@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from cstar.orchestration.dag_runner import build_and_run_dag
-from cstar.orchestration.launch.local import LocalLauncher
 
 
 def slurm() -> bool:
@@ -61,7 +60,7 @@ async def test_build_and_run_local(tmp_path: Path, workplan_name: str) -> None:
     for template in ["fanout", "linear", "parallel", "single_step"]:
         my_run_name = f"{yyyymmdd}_{template}"
         os.environ["CSTAR_RUNID"] = my_run_name
-        await build_and_run_dag(wp_path, LocalLauncher())
+        await build_and_run_dag(wp_path)  # , LocalLauncher())
 
 
 # @pytest.mark.skipif(not slurm())

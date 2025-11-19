@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from yaml import safe_load
 
 from cstar.orchestration import models
-from cstar.roms import ROMSSimulation
 
 
 class PersistenceMode(enum.StrEnum):
@@ -16,17 +15,6 @@ class PersistenceMode(enum.StrEnum):
     json = enum.auto()
     yaml = enum.auto()
     auto = enum.auto()
-
-
-def _bp_to_sim(model: models.RomsMarblBlueprint) -> ROMSSimulation | None: ...
-
-
-def _wp_to_sim(model: models.Workplan) -> ROMSSimulation | None:
-    """This doesn't make sense unless the mapping functions return an iterable
-    that can be used to iterate over all the underlying simulations...
-
-    Do I really want this in deserialization?
-    """
 
 
 _T = t.TypeVar("_T", bound=BaseModel)
@@ -67,16 +55,6 @@ def _read_yaml(path: Path, klass: type[_T]) -> _T:
     with path.open("r", encoding="utf-8") as fp:
         model_dict = safe_load(fp)
         return klass.model_validate(model_dict)
-
-
-adapter_map: dict[
-    type[models.RomsMarblBlueprint | models.Workplan],
-    t.Callable[[models.RomsMarblBlueprint], ROMSSimulation | None]
-    | t.Callable[[models.Workplan], ROMSSimulation | None],
-] = {
-    models.RomsMarblBlueprint: _bp_to_sim,
-    models.Workplan: _wp_to_sim,
-}
 
 
 def model_to_yaml(model: BaseModel) -> str:
