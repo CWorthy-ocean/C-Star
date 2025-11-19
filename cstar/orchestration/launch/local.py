@@ -3,7 +3,7 @@ import random
 import typing as t
 from subprocess import Popen
 
-from psutil import Process
+from psutil import NoSuchProcess, Process
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step
@@ -110,11 +110,14 @@ class LocalLauncher(Launcher[LocalHandle]):
         cmd = ["sleep", str(random.randint(0, 3))]
         print(f"Creating local process from cmd: {' '.join(cmd)}")
 
-        popen = Popen(cmd)
-        LocalLauncher.processes[step.name] = popen
+        start_at = datetime.datetime.now()
+        LocalLauncher.processes[step.name] = Popen(cmd)
+        pid = LocalLauncher.processes[step.name].pid
 
-        pid = popen.pid
-        start_at = Process(pid).create_time()
+        try:
+            start_at = Process(pid).create_time()
+        except NoSuchProcess:
+            print(f"Unable to retrieve exact start time for completed pid: {pid}")
 
         handle = LocalHandle(step, pid, start_at)
         print(f"Local run of `{step.application}` created pid: {pid}")
