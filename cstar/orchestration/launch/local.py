@@ -89,23 +89,24 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        print(f"Checking deps for `{step.name}`: {[d.step.name for d in dependencies]}")
-        tracked = {
-            d.step.name: (d.step, LocalLauncher.processes.get(d.step.name, None))
-            for d in dependencies
-        }
+        # # TODO: implement dependency checking in local launcher correctly
+        # print(f"Checking deps for `{step.name}`: {[d.step.name for d in dependencies]}")
+        # tracked = {
+        #     d.step.name: (d.step, LocalLauncher.processes.get(d.step.name, None))
+        #     for d in dependencies
+        # }
 
         await LocalLauncher._update_processes()
 
-        if any(
-            process
-            for _, process in tracked.values()
-            if not process or (process and process.returncode is None)
-            # and process.create_time() == # TODO: solve for create date...
-        ):
-            raise CstarExpectationFailed(
-                f"Unsatisfied prerequisites. Unable to start `{step.name}`."
-            )
+        # if any(
+        #     process
+        #     for _, process in tracked.values()
+        #     if not process or (process and process.returncode is None)
+        #     # and process.create_time() == # TODO: solve for create date...
+        # ):
+        #     raise CstarExpectationFailed(
+        #         f"Unsatisfied prerequisites. Unable to start `{step.name}`."
+        #     )
 
         cmd = ["sleep", str(random.randint(0, 3))]
         print(f"Creating local process from cmd: {' '.join(cmd)}")
