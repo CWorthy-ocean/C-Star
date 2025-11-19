@@ -1,4 +1,3 @@
-from cstar.orchestration.launch.local import LocalLauncher
 import os
 import subprocess
 from datetime import datetime
@@ -7,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from cstar.orchestration.dag_runner import build_and_run_dag
+from cstar.orchestration.launch.local import LocalLauncher
 
 
 def slurm() -> bool:

@@ -5,7 +5,6 @@ from subprocess import Popen
 
 from psutil import NoSuchProcess, Process
 
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import (
     Launcher,
