@@ -99,7 +99,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         if any(
             process
-            for name, (step, process) in tracked.items()
+            for _, process in tracked.values()
             if not process or (process and process.returncode is None)
             # and process.create_time() == # TODO: solve for create date...
         ):
