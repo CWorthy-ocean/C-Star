@@ -557,9 +557,13 @@ class Orchestrator:
             status = await self.launcher.query_status(task.step, task)
             task.status = status
         else:
-            task = await self.launcher.launch(step, dependencies)
-            self.planner.store(node, Orchestrator.Keys.Task, task)
-            print(f"Launched step: {step.name}")
+            try:
+                task = await self.launcher.launch(step, dependencies)
+                self.planner.store(node, Orchestrator.Keys.Task, task)
+                print(f"Launched step: {step.name}")
+            except CstarExpectationFailed:
+                print(f"Failed to launch step: {step.name}")
+                return None
 
         self.planner.store(node, Planner.Keys.Status, task.status)
         return task

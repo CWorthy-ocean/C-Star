@@ -5,6 +5,7 @@ from subprocess import Popen
 
 from psutil import Process
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import (
     Launcher,
@@ -66,6 +67,13 @@ class LocalLauncher(Launcher[LocalHandle]):
     """Mapping from step name to process."""
 
     @staticmethod
+    async def _update_processes() -> None:
+        """Update all process statuses."""
+        to_query = [p for p in LocalLauncher.processes.values() if p.returncode is None]
+        for process in to_query:
+            process.poll()
+
+    @staticmethod
     async def _submit(step: Step, dependencies: list[LocalHandle]) -> LocalHandle:
         """Submit a step to SLURM as a new batch allocation.
 
@@ -87,14 +95,16 @@ class LocalLauncher(Launcher[LocalHandle]):
             for d in dependencies
         }
 
+        await LocalLauncher._update_processes()
+
         if any(
             process
             for name, (step, process) in tracked.items()
             if not process or (process and process.returncode is None)
             # and process.create_time() == # TODO: solve for create date...
         ):
-            raise RuntimeError(
-                f"Unsatisfied prerequisites. Unable to start task: {step.name}"
+            raise CstarExpectationFailed(
+                f"Unsatisfied prerequisites. Unable to start `{step.name}`."
             )
 
         cmd = ["sleep", str(random.randint(5, 12))]
@@ -128,9 +138,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         str
             The current status of the step.
         """
-        to_query = [p for p in LocalLauncher.processes.values() if p.returncode is None]
-        for process in to_query:
-            process.poll()
+        await LocalLauncher._update_processes()
 
         rc: int | None = None
         if handle.step.name in LocalLauncher.processes:
