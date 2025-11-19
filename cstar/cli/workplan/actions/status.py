@@ -47,6 +47,7 @@ def create_action() -> RegistryResult:
             "-n",
             "--name",
             help="Unique name used to identify the run",
+            required=True,
         )
         parser.add_argument(
             dest="path",
