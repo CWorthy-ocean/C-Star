@@ -167,7 +167,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         Returns
         -------
-        Task[Localandle]
+        Task[LocalHandle]
             A Task containing information about the newly submitted job.
         """
         handle = await LocalLauncher._submit(step, dependencies)
