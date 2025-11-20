@@ -562,9 +562,7 @@ class Workplan(BaseModel):
             The steps in the workplan.
         """
         names = {step.name for step in value}
-        dependencies = {
-            itertools.chain.from_iterable(step.depends_on for step in value)
-        }
+        dependencies = set(itertools.chain.from_iterable([x.depends_on for x in value]))
         if diff := dependencies.difference(names):
             msg = f"Unknown dependency specified. No step(s) named: {diff}"
             raise ValueError(msg)
