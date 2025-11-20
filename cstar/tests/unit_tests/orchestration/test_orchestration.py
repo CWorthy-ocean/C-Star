@@ -102,10 +102,19 @@ def diamond_workplan(tmp_path: Path) -> Workplan:
         RunMode.Monitor,
     ],
 )
-async def test_query_using_attrs(mode: RunMode, diamond_workplan: Workplan) -> None:
+async def test_orchestrator_open_closed_lists(
+    mode: RunMode, diamond_workplan: Workplan
+) -> None:
+    """Verify the orchestrator / dag runner loop over open/closed ends as-expected.
+
+    The loop should move every item that is open into a closed state after running it.
+    """
     orchestrator = Orchestrator(Planner(workplan=diamond_workplan), LocalLauncher())
     closed_set = orchestrator.get_closed_nodes(mode=mode)
     open_set = orchestrator.get_open_nodes(mode=mode)
+
+    assert open_set, "Orchestrator didn't identify any open nodes"
+    encountered = set(open_set or [])
 
     while open_set is not None:
         print(f"[on-enter] Open nodes: {open_set}, Closed: {closed_set}")
@@ -116,6 +125,11 @@ async def test_query_using_attrs(mode: RunMode, diamond_workplan: Workplan) -> N
         open_set = orchestrator.get_open_nodes(mode=mode)
 
         print(f"[on-exit] Open nodes: {open_set}, Closed: {closed_set}")
+        if open_set:
+            encountered.update(open_set)
+
+    assert closed_set, "The orchestrator failed to close tasks."
+    assert encountered == set(closed_set), "The orchestrator didn't close all tasks"
 
 
 def test_dep_keys(tmp_path: Path) -> None:
