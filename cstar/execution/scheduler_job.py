@@ -703,7 +703,9 @@ class SlurmJob(SchedulerJob):
         }
 
         deps = ":".join(str(d) for d in self.depends_on)
-        dep_clause = f" --dependency=afterok:{deps}" if deps else ""
+        dep_clause = (
+            f" --dependency=afterok:{deps} --kill-on-invalid-dep=yes" if deps else ""
+        )
 
         cmd = f"sbatch{dep_clause} {self.script_path}"
 
