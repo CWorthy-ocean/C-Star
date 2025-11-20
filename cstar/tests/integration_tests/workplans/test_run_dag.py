@@ -115,10 +115,9 @@ async def test_build_and_run_local(tmp_path: Path, workplan_name: str) -> None:
     now = datetime.now()
     yyyymmdd = now.strftime("%Y-%m-%d %H")
 
-    for template in ["fanout", "linear", "parallel", "single_step"]:
-        my_run_name = f"{yyyymmdd}_{template}"
-        os.environ["CSTAR_RUNID"] = my_run_name
-        await build_and_run_dag(wp_path)  # , LocalLauncher())
+    my_run_name = f"{yyyymmdd}_{workplan_name}"
+    os.environ["CSTAR_RUNID"] = my_run_name
+    await build_and_run_dag(wp_path)  # , LocalLauncher())
 
 
 # @pytest.mark.skipif(not slurm())
@@ -158,7 +157,6 @@ async def test_build_and_run(tmp_path: Path, workplan_name: str) -> None:
     now = datetime.now()
     yyyymmdd = now.strftime("%Y-%m-%d %H")
 
-    for template in ["fanout", "linear", "parallel", "single_step"]:
-        my_run_name = f"{yyyymmdd}_{template}"
-        os.environ["CSTAR_RUNID"] = my_run_name
-        await build_and_run_dag(wp_path)
+    my_run_name = f"{yyyymmdd}_{workplan_name}"
+    os.environ["CSTAR_RUNID"] = my_run_name
+    await build_and_run_dag(wp_path)
