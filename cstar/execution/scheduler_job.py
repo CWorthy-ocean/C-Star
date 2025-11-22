@@ -666,8 +666,9 @@ class SlurmJob(SchedulerJob):
         ) in self.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#SBATCH {key} {value}"
 
+        scheduler_script += "\n\nset -e"
         # Add roms command to scheduler script
-        scheduler_script += f"\n\n{self.commands}"
+        scheduler_script += f"\n{self.commands}"
         return scheduler_script
 
     def submit(self) -> int | None:

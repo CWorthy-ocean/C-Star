@@ -1521,6 +1521,7 @@ class ROMSSimulation(Simulation):
             f"{final_runtime_settings_file}"
         )
 
+        self.log.info(f"Running {roms_exec_cmd}")
         # If this simulation is already in a scheduler job, don't create a new one, just run it locally.
         if (
             cstar_sysmgr.scheduler is not None
