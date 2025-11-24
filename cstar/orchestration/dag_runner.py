@@ -15,6 +15,7 @@ from cstar.orchestration.orchestration import (
     RunMode,
 )
 from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.transforms import get_transform
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -127,6 +128,40 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
     print(f"Workplan {mode} is complete.")
 
 
+def transform_workplan(wp: Workplan) -> Workplan:
+    """Create a new workplan with appropriate transforms applied.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan to transform.
+
+    Returns
+    -------
+    Workplan
+        The transformed workplan.
+    """
+    steps = []
+    for step in wp.steps:
+        transform = get_transform(step.application)
+        if not transform:
+            steps.append(step)
+            continue
+
+        transformed = list(transform.split(step))
+        steps.extend(transformed)
+
+        tweaks = [s for s in wp.steps if step.name in s.depends_on]
+        for tweak in tweaks:
+            tweak.depends_on.remove(step.name)
+            tweak.depends_on.append(transformed[-1].name)
+
+    wp_attrs = wp.model_dump()
+    wp_attrs.update({"steps": steps})
+
+    return Workplan(**wp_attrs)
+
+
 # @flow(log_prints=True)
 async def build_and_run_dag(path: Path) -> None:
     """Execute the steps in the workplan.
@@ -138,6 +173,11 @@ async def build_and_run_dag(path: Path) -> None:
     """
     wp = deserialize(path, Workplan)
     print(f"Executing workplan: {wp.name}")
+
+    wp = transform_workplan(wp)
+
+    persist_path = path.with_stem(f"{path.stem}_transformed")
+    persist_path.write_text(wp.model_dump_json())
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher

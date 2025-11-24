@@ -49,8 +49,11 @@ class BlueprintRequest:
 
     blueprint_uri: str
     """The path to the blueprint."""
-    stages: tuple[SimulationStages, ...] = dc.field(default=())
-    """The simulation stages to execute."""
+    stages: tuple[SimulationStages, ...] = dc.field(default=tuple(SimulationStages))
+    """The simulation stages to execute.
+
+    Defaults to all stages.
+    """
 
 
 @dc.dataclass(frozen=True)
@@ -411,7 +414,7 @@ def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
     return ServiceConfiguration(
         as_service=True,
         loop_delay=5,
-        health_check_frequency=10,
+        health_check_frequency=None,
         log_level=logging.getLevelNamesMapping()[args.log_level],
         health_check_log_threshold=10,
         name="SimulationRunner",

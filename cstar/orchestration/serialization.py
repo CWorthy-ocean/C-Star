@@ -111,7 +111,7 @@ _DT = t.TypeVar("_DT", models.RomsMarblBlueprint, models.Workplan)
 
 
 def deserialize(
-    path: Path,
+    path: Path | str,
     klass: type[_DT],
     mode: PersistenceMode = PersistenceMode.auto,
 ) -> _DT:
@@ -141,6 +141,9 @@ def deserialize(
         The deserialized Simulation instance.
 
     """
+    if isinstance(path, str):
+        path = Path(path)
+
     if not path.exists():
         msg = f"No file found at path `{path}` to deserialize to `{klass.__name__}`"
         raise FileNotFoundError(msg)

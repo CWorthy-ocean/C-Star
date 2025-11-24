@@ -28,7 +28,14 @@ RequiredString: t.TypeAlias = t.Annotated[
 ]
 """A non-empty string with no leading or trailing whitespace."""
 
-KeyValueStore: t.TypeAlias = dict[str, str | float | list[str] | list[float]]
+KeyValueStore: t.TypeAlias = dict[
+    str,
+    str
+    | float
+    | list[str]
+    | list[float]
+    | dict[str, str | float | list[str] | dict[str, str]],
+]
 """A collection of user-defined key-value pairs."""
 
 TargetDirectoryPath = t.Annotated[
@@ -438,6 +445,9 @@ class Step(BaseModel):
         frozen=True,
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
+
+    parent: str | None = Field(default=None, validate_default=False, frozen=True)
+    """The name of the parent step if this step was created via splitting."""
 
     # @field_validator("blueprint", mode="after")
     # @classmethod

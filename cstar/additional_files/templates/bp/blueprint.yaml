@@ -3,8 +3,8 @@ name: Test Blueprint
 description: This is the description of my test blueprint
 application: sleep
 state: draft
-valid_start_date: 2020-01-01 00:00:00
-valid_end_date: 2020-02-01 00:00:00
+valid_start_date: 2000-01-01 00:00:00
+valid_end_date: 2025-01-01 00:00:00
 code:
   roms:
     location: http://github.com/ankona/ucla-roms
@@ -68,7 +68,7 @@ runtime_params:
   hash: null
   locked: false
   start_date: 2020-01-01 00:00:00
-  end_date: 2020-01-02 00:00:00
+  end_date: 2021-01-01 00:00:00
   checkpoint_frequency: 1d
   output_dir: .
 grid:

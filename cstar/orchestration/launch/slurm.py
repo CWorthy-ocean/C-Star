@@ -19,7 +19,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import clear_working_dir, slugify
 
 
@@ -94,8 +94,17 @@ def convert_roms_step_to_command(step: Step) -> str:
     str
         The complete CLI command.
     """
-    bp_path = Path(step.blueprint).as_posix()
-    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {bp_path}"
+    bp_path = Path(step.blueprint)
+
+    # load current blueprint and apply overrides
+    og_bp = deserialize(bp_path, RomsMarblBlueprint)
+    bp = og_bp.model_copy(update=step.blueprint_overrides)
+
+    bp_overrides_path = bp_path.with_stem(f"{bp_path.stem}_{slugify(step.name)}")
+    serialize(bp_overrides_path, bp)
+
+    # tell worker to use overridden blueprint
+    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {bp_overrides_path}"
 
 
 def convert_step_to_placeholder(step: Step) -> str:
