@@ -9,6 +9,8 @@ A utility for generating new regional oceanographic modeling domains and creatin
 </p>
 
 
+## Table of Contents
+
 - [Oveview](workflows/docs_overview.md)
 - [Installation instructions](workflows/docs_installation.md)
 - [Domain creation oveview](workflows/grid_index.md)
