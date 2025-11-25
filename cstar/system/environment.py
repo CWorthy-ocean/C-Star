@@ -303,9 +303,13 @@ class CStarEnvironment:
         for mod in lmod_list:
             self._call_lmod(f"load {mod}")
 
-    def set_env_var(self, key: str, value: str) -> None:
-        """Set value of an environment variable and store it in the user environment
-        file.
+    @staticmethod
+    def set_env_var(key: str, value: str) -> None:
+        """Set value of an environment variable.
+
+        Note: after removing the persisted user_env file, this method seems silly. Leaving it for the moment,
+        just so we don't have to update everywhere that uses it, and because we may want some other behavior
+        around config files or logging to be happening here in the future.
 
         Parameters
         ----------
@@ -315,4 +319,3 @@ class CStarEnvironment:
             The value to set for the environment variable.
         """
         os.environ[key] = value
-        self._env_vars = self._load_env()

@@ -788,25 +788,6 @@ def mock_path_resolve():
         yield mock_resolve
 
 
-@pytest.fixture
-def dotenv_path(tmp_path: Path, mock_user_env_name: str) -> Path:
-    """Return a complete path to a temporary user .env file.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        The path to a temporary location to write the env file
-    mock_user_env_name : str
-        The name of the file that will be written
-
-    Returns
-    -------
-    Path
-        The complete path to the config file
-    """
-    return tmp_path / mock_user_env_name
-
-
 def _write_custom_env(path: Path, variables: dict[str, str]) -> None:
     """Populate a .env configuration file.
 
@@ -843,25 +824,6 @@ def custom_system_env(
         A function that will write a new env config file.
     """
     return functools.partial(_write_custom_env, system_dotenv_path)
-
-
-@pytest.fixture
-def custom_user_env(
-    dotenv_path: Path,
-) -> Callable[[dict[str, str]], None]:
-    """Return a function to populate a mocked user environment config file.
-
-    Parameters
-    ----------
-    dotenv_path: Path
-        The path to a temporary location to write the env file
-
-    Returns
-    -------
-    Callable[[dict[str, str]], None]
-        A function that will write a new env config file.
-    """
-    return functools.partial(_write_custom_env, dotenv_path)
 
 
 @pytest.fixture(scope="session")

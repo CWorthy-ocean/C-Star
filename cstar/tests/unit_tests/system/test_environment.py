@@ -130,7 +130,6 @@ class TestSetupEnvironmentFromFiles:
     def test_env_file_loading(
         self,
         tmp_path: Path,
-        dotenv_path: Path,
         system_dotenv_path: Path,
     ):
         """Tests that environment variables are loaded and expanded correctly from .env
@@ -138,7 +137,7 @@ class TestSetupEnvironmentFromFiles:
 
         Mocks
         -----
-        - tmp_path creates temporary, emulated system and user .env files
+        - tmp_path creates temporary, emulated system .env files
         - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
 
         Asserts
@@ -151,11 +150,7 @@ class TestSetupEnvironmentFromFiles:
             "MPIHOME=${MVAPICH2HOME}/\n"
             "MPIROOT=${MVAPICH2HOME}/\n"
         )
-        # Write simulated user .env content with an overriding variable
-        dotenv_path.write_text(
-            "MPIROOT=/override/mock/mpi\n"
-            "CUSTOM_VAR=custom_value\n"
-        )  # fmt: skip
+
         # Patch the root path and expanduser to point to our temporary files
         with (
             patch.object(
@@ -168,8 +163,7 @@ class TestSetupEnvironmentFromFiles:
             expected_env_vars = {
                 "NETCDFHOME": "/mock/netcdf/",  # Expanded from ${NETCDF_FORTRANHOME}
                 "MPIHOME": "/mock/mpi/",  # Expanded from ${MVAPICH2HOME}
-                "MPIROOT": "/override/mock/mpi",  # User-defined override
-                "CUSTOM_VAR": "custom_value",
+                "MPIROOT": "/mock/mpi/",  # User-defined override
             }
 
             # Assert that environment variables were loaded, expanded, and merged as expected
@@ -187,16 +181,15 @@ class TestSetupEnvironmentFromFiles:
     )
     def test_env_file_updating(
         self,
-        dotenv_path: Path,
         mock_system_name: str,
         system_dotenv_path: Path,
         tmp_path: Path,
     ):
-        """Tests that environment variables are updated correctly in the user .env file.
+        """Tests that environment variables are updated correctly.
 
         Mocks
         -----
-        - tmp_path creates temporary, emulated system and user .env files
+        - tmp_path creates temporary, emulated system .env files
         - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
 
         Asserts
@@ -211,14 +204,6 @@ class TestSetupEnvironmentFromFiles:
         }
         sys_env_content = "\n".join(f"{k}={v}" for k, v in exp_system_env.items())
         system_dotenv_path.write_text(sys_env_content)
-        # Write simulated user .env content
-        exp_user_env = {
-            "MPIROOT": "/user-overridden/mpi",
-            "CUSTOM_VAR": "custom_value",
-            "EMPTY": "",
-        }
-        user_env_content = "\n".join(f"{k}={v}" for k, v in exp_user_env.items())
-        dotenv_path.write_text(f"{user_env_content}\n")
 
         # Patch the root path and expanduser to point to our temporary files
         with (
@@ -240,10 +225,6 @@ class TestSetupEnvironmentFromFiles:
             for key in exp_system_env:
                 assert key in actual_env
 
-            # Confirm variables set (or overriden) in user .env match
-            for key, exp_value in exp_user_env.items():
-                assert actual_env[key] == exp_value
-
             k0, v0 = "NETCDFHOME", "updated/value"
             k1, v1 = "TEST_VAR", "test-value"
             k2, v2 = "OTHER_EMPTY", ""
@@ -252,18 +233,9 @@ class TestSetupEnvironmentFromFiles:
             for key, exp_value in updated_vars:
                 env.set_env_var(key, exp_value)
 
-            # Confirm setting a key on CStarEnvironment is loaded to os.env and persisted
-            raw_env = dotenv_path.read_text()
-
             for key, exp_value in updated_vars:
                 # Confirm the active environment variable is updated
                 assert exp_value in os.environ.get(key, "key-not-found")
-
-                # Confirm the value stored in the user environment is updated
-                assert exp_value in env.environment_variables[key]
-
-                # Confirm the value is persisted to disk
-                assert key in raw_env
 
     @patch.dict(
         "os.environ",
@@ -289,7 +261,6 @@ class TestSetupEnvironmentFromFiles:
         system_name: str,
         expected_path: str,
         custom_system_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
-        custom_user_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
     ):
         """Verify that the lmod_path property returns the correct path based on the
         system name.
@@ -309,15 +280,6 @@ class TestSetupEnvironmentFromFiles:
                 "NETCDFHOME": "${NETCDF_FORTRANHOME}/",
                 "MPIHOME": "${MVAPICH2HOME}/",
                 "MPIROOT": "${MVAPICH2HOME}/",
-            }
-        )
-
-        # Write simulated user .env content
-        custom_user_env(
-            {
-                "MPIROOT": "/user-overridden/mpi",
-                "CUSTOM_VAR": "custom_value",
-                "EMPTY": "",
             }
         )
 
@@ -390,9 +352,7 @@ class TestSetupEnvironmentFromFiles:
         {},
         clear=True,
     )
-    def test_env_file_load_count(
-        self, mock_system_name: str, dotenv_path: Path
-    ) -> None:
+    def test_env_file_load_count(self, mock_system_name: str) -> None:
         """Verify that env files are reloaded after an update.
 
         Mocks
@@ -440,9 +400,8 @@ class TestSetupEnvironmentFromFiles:
 
             env.set_env_var(new_var, new_value)
 
-            # update should trigger load from disk
-            assert loader.call_count == initial_num_calls + 1
-            assert new_var in env.environment_variables
+            # update should not trigger new load from disk
+            assert loader.call_count == initial_num_calls
 
     @patch.dict(
         "os.environ",
@@ -505,7 +464,7 @@ class TestStrAndReprMethods:
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
-    def test_str_method(self, tmp_path: Path, custom_system_env, custom_user_env):
+    def test_str_method(self, tmp_path: Path, custom_system_env):
         """Tests that __str__ produces a formatted, readable summary.
 
         Mocks

@@ -1,8 +1,8 @@
+import os
 import pathlib
 import subprocess
 import unittest.mock as mock
 
-import dotenv
 import pytest
 
 import cstar
@@ -65,7 +65,6 @@ class TestMARBLExternalCodeBaseConfigure:
     def test_configure_success(
         self,
         marblexternalcodebase_staged,
-        dotenv_path: pathlib.Path,
         marbl_path: pathlib.Path,
     ):
         """Test that the _configure method succeeds when subprocess calls succeed."""
@@ -78,7 +77,7 @@ class TestMARBLExternalCodeBaseConfigure:
             mecb._configure()
 
         ## Check that environment was updated correctly
-        actual_value = dotenv.get_key(dotenv_path, mecb.root_env_var)
+        actual_value = os.getenv(mecb.root_env_var)
         assert actual_value == str(mecb.working_copy.path)
 
         mock_run_cmd.assert_called_once_with(
@@ -96,7 +95,6 @@ class TestMARBLExternalCodeBaseConfigure:
         mock_subprocess,
         marblexternalcodebase_staged,
         tmp_path,
-        dotenv_path,
     ):
         """Test that the _configure method raises an error when 'make' fails."""
         mock_subprocess.side_effect = [
@@ -123,7 +121,6 @@ class TestMARBLExternalCodeBaseConfigure:
         self,
         marblexternalcodebase_staged,
         tmp_path,
-        dotenv_path,
     ):
         """Tests that the `is_configured` property is True when all conditions met.
 
