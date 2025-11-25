@@ -1,5 +1,4 @@
 import os
-import shutil
 import sys
 import typing as t
 from pathlib import Path
@@ -21,7 +20,7 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import slugify
+from cstar.orchestration.utils import clear_working_dir, slugify
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -125,16 +124,6 @@ app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
 """Map application types to a function that converts a step to a CLI command."""
 
 
-def clear_working_dir(step: Step):
-    # TODO this is temporary only, for my sanity
-    _bp = deserialize(Path(step.blueprint), RomsMarblBlueprint)
-    out_path = _bp.runtime_params.output_dir
-    print(f"clearing {out_path}")
-    shutil.rmtree(out_path / "ROMS", ignore_errors=True)
-    shutil.rmtree(out_path / "output", ignore_errors=True)
-    shutil.rmtree(out_path / "JOINED_OUTPUT", ignore_errors=True)
-
-
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
 
@@ -161,6 +150,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job_dep_ids = [d.pid for d in dependencies]
 
         clear_working_dir(step)
+
         step_converter = app_to_cmd_map[step.application]
         if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
             print(
