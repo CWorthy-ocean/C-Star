@@ -666,8 +666,9 @@ class SlurmJob(SchedulerJob):
         ) in self.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#SBATCH {key} {value}"
 
+        scheduler_script += "\n\nset -e"
         # Add roms command to scheduler script
-        scheduler_script += f"\n\n{self.commands}"
+        scheduler_script += f"\n{self.commands}"
         return scheduler_script
 
     def submit(self) -> int | None:
@@ -702,7 +703,9 @@ class SlurmJob(SchedulerJob):
         }
 
         deps = ":".join(str(d) for d in self.depends_on)
-        dep_clause = f" --dependency=afterok:{deps}" if deps else ""
+        dep_clause = (
+            f" --dependency=afterok:{deps} --kill-on-invalid-dep=yes" if deps else ""
+        )
 
         cmd = f"sbatch{dep_clause} {self.script_path}"
 
