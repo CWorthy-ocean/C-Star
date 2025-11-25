@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.11",
     "pytimeparse>=1.1.8",
     "pooch>=1.8.1",
+    "prefect>=3.6.1",
     "roms_tools[dask]==3.1.2",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
@@ -42,6 +43,9 @@ test = [
      "roms_tools[dask]==3.1.2"
      ]
 dev =["ruff"]
+
+[project.scripts]
+cstar = "cstar.cli.cli:main"
 
 [build-system]
 requires = [

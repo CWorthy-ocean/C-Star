@@ -1,3 +1,4 @@
+import itertools
 import typing as t
 from abc import ABC
 from copy import deepcopy
@@ -185,8 +186,6 @@ class BlueprintState(StrEnum):
 class Application(StrEnum):
     """The supported application types."""
 
-    ROMS = auto()
-    """A UCLA-ROMS simulation that will not make use of biogeochemical data."""
     ROMS_MARBL = auto()
     """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
     SLEEP = auto()
@@ -302,7 +301,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     description: RequiredString
     """A user-friendly description of the scenario to be executed by the blueprint."""
 
-    application: Application = Application.ROMS
+    application: Application = Application.ROMS_MARBL
     """The process type to be executed by the blueprint."""
 
     state: BlueprintState = BlueprintState.NotSet
@@ -407,7 +406,7 @@ class Step(BaseModel):
     application: RequiredString
     """The user-friendly name of the application executed in the step."""
 
-    blueprint: FilePath
+    blueprint: FilePath | str
     """The blueprint that will be executed in this step."""
 
     depends_on: list[RequiredString] = Field(
@@ -439,6 +438,24 @@ class Step(BaseModel):
         frozen=True,
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
+
+    # @field_validator("blueprint", mode="after")
+    # @classmethod
+    # def _check_blueprint(cls, value: FilePath | str) -> Path:
+    #     """Convert strings into paths.
+
+    #     Parameters
+    #     ----------
+    #     value : FilePath or str
+    #         The value received from the input.
+
+    #     Returns
+    #     -------
+    #     Path
+    #         The input value converted to a pathlib.Path
+
+    #     """
+    #     return Path(value)
 
 
 class Workplan(BaseModel):
@@ -500,7 +517,6 @@ class Workplan(BaseModel):
         ----------
         value : list[str]
             Variable names used at runtime
-
         """
         var_counter = t.Counter(value)
         most_common = var_counter.most_common(1)
@@ -515,13 +531,12 @@ class Workplan(BaseModel):
     @field_validator("steps", mode="after")
     @classmethod
     def _check_steps(cls, value: list[Step]) -> list[Step]:
-        """Xxx.
+        """Verify step names are unique.
 
         Parameters
         ----------
         value : list[Step]
-            Variable names used at runtime
-
+            The steps in the workplan.
         """
         name_counter = t.Counter(step.name for step in value)
         most_common = name_counter.most_common(1)
@@ -530,6 +545,24 @@ class Workplan(BaseModel):
 
         if step_count > 1:
             msg = f"Step names must be unique. Found {step_count} steps with name {step_name}"
+            raise ValueError(msg)
+
+        return value
+
+    @field_validator("steps", mode="after")
+    @classmethod
+    def _check_dependencies(cls, value: list[Step]) -> list[Step]:
+        """Verify the keys named in dependencies are valid step names.
+
+        Parameters
+        ----------
+        value : list[Step]
+            The steps in the workplan.
+        """
+        names = {step.name for step in value}
+        dependencies = set(itertools.chain.from_iterable([x.depends_on for x in value]))
+        if diff := dependencies.difference(names):
+            msg = f"Unknown dependency specified. No step(s) named: {diff}"
             raise ValueError(msg)
 
         return value
