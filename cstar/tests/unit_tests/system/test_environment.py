@@ -1,6 +1,5 @@
 import os
 import subprocess
-from collections import ChainMap
 from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
@@ -346,62 +345,6 @@ class TestSetupEnvironmentFromFiles:
             expected = tmp_pkg_root / f"additional_files/env_files/{system_name}.env"
 
             assert system_actual == expected
-
-    @patch.dict(
-        "os.environ",
-        {},
-        clear=True,
-    )
-    def test_env_file_load_count(self, mock_system_name: str) -> None:
-        """Verify that env files are reloaded after an update.
-
-        Mocks
-        -----
-        - mock_system_name provides a temporary system name for the environment
-
-        Asserts
-        -------
-        - Confirms merged environment variables with expected values after expansion.
-        """
-        sys_var = "system-var"
-        usr_var = "user-var"
-        exp_system_env = {sys_var: "system-value"}
-        exp_user_env = {usr_var: "user-value"}
-
-        new_var, new_value = "new-user-var", "new-user-value"
-        updates = {new_var: new_value}
-
-        env0 = ChainMap(exp_system_env, exp_user_env)
-        env1 = ChainMap(env0, updates)
-
-        # patch the _load function so we can show loads only occur after updates
-        with (
-            patch(
-                "cstar.system.environment.CStarEnvironment._load_env",
-                new_callable=Mock,
-                side_effect=[env0, env1],
-            ) as loader,
-        ):
-            # Instantiate the environment to trigger loading the environment variables
-            env = CStarEnvironment(
-                system_name=mock_system_name,
-                mpi_exec_prefix="mpi-prefix",
-                compiler="gnu",
-            )
-
-            initial_num_calls = 1
-            assert loader.call_count == initial_num_calls
-
-            assert sys_var in env.environment_variables
-            assert usr_var in env.environment_variables
-
-            # no load from disk should occur
-            assert loader.call_count == initial_num_calls
-
-            env.set_env_var(new_var, new_value)
-
-            # update should not trigger new load from disk
-            assert loader.call_count == initial_num_calls
 
     @patch.dict(
         "os.environ",

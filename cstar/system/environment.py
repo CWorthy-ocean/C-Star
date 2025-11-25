@@ -307,6 +307,8 @@ class CStarEnvironment:
     def set_env_var(key: str, value: str) -> None:
         """Set value of an environment variable.
 
+        TODO: Remove unless new functionality is needed here.
+
         Note: after removing the persisted user_env file, this method seems silly. Leaving it for the moment,
         just so we don't have to update everywhere that uses it, and because we may want some other behavior
         around config files or logging to be happening here in the future.
