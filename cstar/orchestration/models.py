@@ -186,8 +186,6 @@ class BlueprintState(StrEnum):
 class Application(StrEnum):
     """The supported application types."""
 
-    ROMS = auto()
-    """A UCLA-ROMS simulation that will not make use of biogeochemical data."""
     ROMS_MARBL = auto()
     """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
     SLEEP = auto()
@@ -303,7 +301,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     description: RequiredString
     """A user-friendly description of the scenario to be executed by the blueprint."""
 
-    application: Application = Application.ROMS
+    application: Application = Application.ROMS_MARBL
     """The process type to be executed by the blueprint."""
 
     state: BlueprintState = BlueprintState.NotSet

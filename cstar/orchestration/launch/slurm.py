@@ -118,7 +118,6 @@ def convert_step_to_placeholder(step: Step) -> str:
 
 
 app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
-    Application.ROMS.value: convert_roms_step_to_command,
     Application.ROMS_MARBL.value: convert_roms_step_to_command,
     "sleep": convert_step_to_placeholder,
 }
