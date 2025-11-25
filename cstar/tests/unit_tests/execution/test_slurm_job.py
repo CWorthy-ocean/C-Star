@@ -123,8 +123,9 @@ class TestSlurmJob:
             "#SBATCH --export=ALL\n"
             "#SBATCH --mail-type=ALL\n"
             "#SBATCH --time=01:00:00\n"
-            "#SBATCH -mock_directive mock_value\n"
-            "\necho Hello, World"
+            "#SBATCH -mock_directive mock_value\n\n"
+            "set -e\n"
+            "echo Hello, World"
         )
 
         assert job.script.strip() == expected_script.strip(), (
@@ -184,8 +185,9 @@ class TestSlurmJob:
             "#SBATCH --export=ALL\n"
             "#SBATCH --mail-type=ALL\n"
             "#SBATCH --time=01:00:00\n"
-            "#SBATCH -mock_directive mock_value\n"
-            "\necho Hello, World"
+            "#SBATCH -mock_directive mock_value\n\n"
+            "set -e\n"
+            "echo Hello, World"
         )
 
         assert job.script.strip() == expected_script.strip(), (
