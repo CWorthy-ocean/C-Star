@@ -96,6 +96,7 @@ class ROMSInputDataset(InputDataset, ABC):
                 new_suffix = f".{i:0{ndigits}d}.nc"
                 locations.append(location.replace(old_suffix, new_suffix))
             self.partitioned_source = SourceDataCollection.from_locations(locations)
+            # muting the linter because we only enter this block if np_xi and np_eta are not None
             self.partitioning = ROMSPartitioning(
                 np_xi=self.source_np_xi,  # type: ignore[arg-type]
                 np_eta=self.source_np_eta,  # type: ignore[arg-type]
@@ -107,7 +108,7 @@ class ROMSInputDataset(InputDataset, ABC):
     @property
     def source_partitioning(self) -> tuple[int, int] | None:
         if (self.source_np_xi is not None) and (self.source_np_eta is not None):
-            return (self.source_np_xi, self.source_np_eta)
+            return self.source_np_xi, self.source_np_eta
         return None
 
     def to_dict(self) -> dict:
