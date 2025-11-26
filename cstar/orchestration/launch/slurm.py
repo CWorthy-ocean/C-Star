@@ -20,7 +20,7 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import slugify
+from cstar.orchestration.utils import clear_working_dir, slugify
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -148,6 +148,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         bp_path = Path(step.blueprint)
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
+
+        clear_working_dir(bp.runtime_params.output_dir)
 
         step_converter = app_to_cmd_map[step.application]
         if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
