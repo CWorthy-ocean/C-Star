@@ -153,7 +153,6 @@ async def build_and_run_dag(path: Path) -> None:
 
 
 if __name__ == "__main__":
-    os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
     os.environ["CSTAR_QUEUE_NAME"] = "shared"
     os.environ["CSTAR_ORCHESTRATED"] = "1"

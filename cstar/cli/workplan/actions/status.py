@@ -15,7 +15,6 @@ async def handle(ns: argparse.Namespace) -> None:
     ns : argparse.Namespace
         User inputs parsed by the CLI
     """
-    os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
     os.environ["CSTAR_QUEUE_NAME"] = "shared"
     os.environ["CSTAR_ORCHESTRATED"] = "1"

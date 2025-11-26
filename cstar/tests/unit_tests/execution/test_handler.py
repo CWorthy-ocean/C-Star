@@ -1,9 +1,7 @@
 import logging
-import os
 import threading
 import time
 from pathlib import Path
-from unittest import mock
 from unittest.mock import PropertyMock, patch
 
 import pytest
@@ -196,26 +194,13 @@ class TestExecutionHandlerUpdates:
         ):
             mock_status.return_value = ExecutionStatus.RUNNING
 
-            # Patch input to simulate the confirmation prompt
-            with patch("builtins.input", side_effect=["y"]) as mock_input:
-                # Replace `time.sleep` with a side effect that raises KeyboardInterrupt
-                # Simulate a KeyboardInterrupt during the updates call
-                with patch("time.sleep", side_effect=KeyboardInterrupt):
-                    handler.updates(seconds=0)  # Run updates indefinitely
+            # Replace `time.sleep` with a side effect that raises KeyboardInterrupt
+            # Simulate a KeyboardInterrupt during the updates call
+            with patch("time.sleep", side_effect=KeyboardInterrupt):
+                handler.updates(seconds=0)  # Run updates indefinitely
 
-                    # Assert that the "stopped by user" message was printed
-                    assert "Live status updates stopped by user." in caplog.text
-
-                # Verify that the prompt was displayed to the user
-                mock_input.assert_called_once_with(
-                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
-                    "Do you want to continue? (y/n): "
-                )
-            # Patch input to simulate the confirmation prompt
-            with patch("builtins.input", side_effect=["n"]) as mock_input:
-                with patch("builtins.open", create=True) as mock_open:
-                    handler.updates(seconds=0)
-                    mock_open.assert_not_called()
+                # Assert that the "stopped by user" message was printed
+                assert "Live status updates stopped by user." in caplog.text
 
     def test_updates_stops_when_status_changes(
         self, tmp_path, caplog: pytest.LogCaptureFixture
@@ -268,8 +253,7 @@ class TestExecutionHandlerUpdates:
         updater_thread.start()
 
         # Run the `updates` method
-        with mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}):
-            handler.updates(seconds=0)
+        handler.updates(seconds=0)
 
         # Verify that only lines from `running_updates` were printed
         printed_calls = caplog.text

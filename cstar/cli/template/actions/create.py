@@ -10,31 +10,17 @@ from cstar.orchestration.models import RomsMarblBlueprint, Workplan
 TemplateTypes: t.TypeAlias = t.Literal["workplan", "blueprint"]
 
 
-def check_or_create_path(path: Path | None, interactive: bool = False) -> None:
-    """Verify a valid directory was supplied.
-
-    If necessary, prompts the user for permission to create the directory when
-    interactive mode is enabled.
+def check_or_create_path(path: Path | None) -> None:
+    """Verify a valid directory was supplied, and create it if it doesn't exist.
 
     Parameters
     ----------
     path : Path
         A path to a directory the generated template should be stored in
-    interactive : bool
-        Specify if interactive mode is enabled
 
     """
-    if path and not path.exists() and interactive:
-        do_create = input("The directory does not exist. Create it? (yes/no): ")
-        if "y" in do_create.lower():
-            path.mkdir(parents=True, exist_ok=True)
-        else:
-            msg = "Unable to create template without valid directory"
-            raise ValueError(msg)
-
     if path and not path.exists():
-        msg = f"The specified directory does not exist: {path}"
-        raise ValueError(msg)
+        path.mkdir(parents=True, exist_ok=True)
 
 
 def get_inline_output(

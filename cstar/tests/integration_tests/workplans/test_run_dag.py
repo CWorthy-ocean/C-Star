@@ -87,7 +87,6 @@ def test_dep_keys(tmp_path: Path) -> None:
 )
 async def test_build_and_run_local(tmp_path: Path, workplan_name: str) -> None:
     """Test the dag runner with a local launcher."""
-    os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
     os.environ["CSTAR_QUEUE_NAME"] = "shared"
     os.environ["CSTAR_ORCHESTRATED"] = "1"
@@ -129,7 +128,6 @@ async def test_build_and_run_local(tmp_path: Path, workplan_name: str) -> None:
 )
 async def test_build_and_run(tmp_path: Path, workplan_name: str) -> None:
     """Test the dag runner with a SlurmLauncher."""
-    os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
     os.environ["CSTAR_QUEUE_NAME"] = "shared"
     os.environ["CSTAR_ORCHESTRATED"] = "1"

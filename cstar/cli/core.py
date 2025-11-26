@@ -1,4 +1,3 @@
-import os
 import typing as t
 from argparse import Action, ArgumentParser, Namespace, _SubParsersAction
 from collections import defaultdict
@@ -49,9 +48,6 @@ def build_parser() -> tuple[ArgumentParser, _SubParsersAction]:
         required=True,
         dest="command",
     )
-
-    interactive: bool = os.getenv("CSTAR_INTERACTIVE", "1") == "1"
-    parser.set_defaults(interactive=interactive)
 
     return parser, subparsers
 
