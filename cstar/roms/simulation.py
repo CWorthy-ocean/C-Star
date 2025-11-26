@@ -1186,7 +1186,7 @@ class ROMSSimulation(Simulation):
             # if we're running a workplan, for now, set up a code directory for each
             # step, otherwise they may try to clobber each other or get tripped up on
             # detecting existing directories.
-            if os.getenv("CSTAR_ORCHESTRATED", "0") == "1":
+            if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1":
                 codebase_dir = codebases_dir / codebase.root_env_var.split("_")[0]
                 codebase_dir.mkdir(parents=True, exist_ok=True)
                 codebase.get(codebase_dir)
