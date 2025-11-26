@@ -55,6 +55,22 @@ pytest
 
 To learn how to use `C-Star`, check out the [documentation](https://c-star.readthedocs.io/en/latest/index.html).
 
+# Environment Variables
+The following environment variables control C-Star's behavior:
+
+| Variable                     | Default                            | Effect                                                                                                                                                |
+|------------------------------|------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| CSTAR_NPROCS_POST            | os.cpu_count() / 3                 | How parallel processes to use for join operations post-run                                                                                            |
+| CSTAR_ORCHESTRATED           | 0                                  | If 1, CSTAR makes decisions about codebase clone locations with the knowledge that it is being run as an orchestrator and not a standalone simulation |
+| CSTAR_INTERACTIVE            | 1                                  | If 1, interactive prompts may be given throughout the setup process                                                                                   |
+| CSTAR_ACCOUNT_KEY            | None (must be set for SLURM usage) | The account name to be passed to SLURM for compute accounting                                                                                         |
+| CSTAR_QUEUE_NAME             | None (must be set for SLURM usage) | The SLURM queue or partition to use for jobs                                                                                                          |
+| CSTAR_RUNID                  | None, set by CLI                   | The run ID should be unique to a given "run" of an orchestration as it controls caching/restoring previous workflow state                             |
+| CSTAR_CLOBBER_WORKING_DIR    | 0                                  | If 1, clear the working directory dictated in the blueprint before launching a SLURM job. Use at your own risk.                                       |
+| CSTAR_CMD_CONVERTER_OVERRIDE | None                               | Testing only. If set, submit a custom command as the execution command to SLURM jobs, instead of the default application command.                     |
+
+
+
 # Feedback and contributions
 
 If you find a bug, have a feature suggestion, or any other kind of feedback, please start a Discussion.
