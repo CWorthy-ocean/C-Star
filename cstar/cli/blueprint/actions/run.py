@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import typing as t
 from multiprocessing import Process
 from pathlib import Path
@@ -22,8 +23,8 @@ def configure_simulation_runner(path: Path) -> SimulationRunner:
     SimulationRunner
         A simulation runner configured to execute the blueprint
     """
-    account_id = "m4632"
-    walltime = "48:00:00"
+    account_id = os.getenv("CSTAR_SLURM_ACCOUNT", "")
+    walltime = os.getenv("CSTAR_SLURM_WALLTIME", "48:00:00")
 
     request = BlueprintRequest(path.as_posix())
     service_config = ServiceConfiguration(
