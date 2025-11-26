@@ -153,10 +153,6 @@ async def build_and_run_dag(path: Path) -> None:
 
 
 if __name__ == "__main__":
-    os.environ["CSTAR_SLURM_ACCOUNT"] = "ees250129"
-    os.environ["CSTAR_SLURM_QUEUE"] = "shared"
-    os.environ["CSTAR_ORCHESTRATED"] = "1"
-
     # wp_path = Path("/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml")
     # wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
     # wp_path = Path("/anvil/projects/x-ees250129/x-cmcbride/workplans/01.simple.yaml")

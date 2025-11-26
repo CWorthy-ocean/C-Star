@@ -15,9 +15,6 @@ async def handle(ns: argparse.Namespace) -> None:
     ns : argparse.Namespace
         User inputs parsed by the CLI
     """
-    os.environ["CSTAR_SLURM_ACCOUNT"] = "ees250129"
-    os.environ["CSTAR_SLURM_QUEUE"] = "shared"
-    os.environ["CSTAR_ORCHESTRATED"] = "1"
     os.environ["CSTAR_RUNID"] = ns.name
 
     await load_dag_status(Path(ns.path))
