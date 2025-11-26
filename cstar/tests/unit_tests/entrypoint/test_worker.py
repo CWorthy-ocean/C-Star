@@ -364,7 +364,6 @@ def test_start_runner(
 def test_runner_directory_check(
     tmp_path: Path,
     sim_runner: SimulationRunner,
-    dotenv_path: Path,
 ) -> None:
     """Test the simulation runner's file system preparation.
 
@@ -377,8 +376,6 @@ def test_runner_directory_check(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    dotenv_path : Path
-        Path to a temporary location to
     """
     sim_runner._output_dir.mkdir(parents=True, exist_ok=True)
     (sim_runner._output_dir / "somefile.txt").touch()
@@ -392,7 +389,6 @@ def test_runner_directory_check(
 def test_runner_directory_check_ignore_logs(
     tmp_path: Path,
     sim_runner: SimulationRunner,
-    dotenv_path: Path,
 ) -> None:
     """Test the simulation runner's file system preparation.
 
@@ -405,14 +401,8 @@ def test_runner_directory_check_ignore_logs(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    dotenv_path : Path
-        Path to a temporary location to
     """
     output_dir = tmp_path / "output"
-
-    # populate the directories that should be cleaned-up
-    dotenv_path.parent.mkdir(parents=True, exist_ok=True)
-    dotenv_path.touch()
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logs_dir = output_dir / "logs"
@@ -421,18 +411,12 @@ def test_runner_directory_check_ignore_logs(
     # A file in the logs directory should be ignored
     (logs_dir / "any-name.txt").touch()
 
-    with mock.patch(
-        "cstar.system.environment.CStarEnvironment.user_env_path",
-        new_callable=mock.PropertyMock,
-        return_value=dotenv_path,
-    ):
-        sim_runner._prepare_file_system()
+    sim_runner._prepare_file_system()
 
 
 def test_runner_directory_prep(
     tmp_path: Path,
     sim_runner: SimulationRunner,
-    dotenv_path: Path,
 ) -> None:
     """Test the simulation runner's file system preparation.
 
@@ -444,22 +428,14 @@ def test_runner_directory_prep(
         An instance of SimulationRunner to be used for the test.
     tmp_path : Path
         A temporary path to store simulation output and logs
-    dotenv_path : Path
-        Path to a temporary location to
+
     """
     output_dir = tmp_path / "output"
-
-    # populate the directories that should be cleaned-up
-    dotenv_path.parent.mkdir(parents=True, exist_ok=True)
-    dotenv_path.touch()
 
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
 
     sim_runner._prepare_file_system()
-
-    # Confirm a user env file is not removed
-    assert dotenv_path.exists()
 
     # Confirm the output directory is created...
     assert sim_runner._output_dir.exists()
