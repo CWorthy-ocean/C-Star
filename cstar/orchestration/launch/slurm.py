@@ -170,7 +170,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             job_name=job_name,
             output_file=None,  # to fill with some convention
             queue_name=os.getenv("CSTAR_SLURM_QUEUE"),
-            walltime="00:10:00",  # TODO how to determine this one?
+            walltime=os.getenv(
+                "CSTAR_SLURM_MAX_WALLTIME", "48:00:00"
+            ),  # TODO how to determine this one?
             depends_on=job_dep_ids,
         )
 
