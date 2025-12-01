@@ -468,7 +468,6 @@ def configure_environment(log: logging.Logger) -> None:
     None
     """
     # ensure no human interaction is required
-    os.environ["CSTAR_INTERACTIVE"] = "0"
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
 
     # TODO: re-run tests now that prebuilt is gone and rebase on develop is in.

@@ -161,7 +161,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         command = step_converter(step)
         job = create_scheduler_job(
             commands=command,
-            account_key=os.getenv("CSTAR_ACCOUNT_KEY", ""),
+            account_key=os.getenv("CSTAR_SLURM_ACCOUNT", ""),
             cpus=bp.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
@@ -169,8 +169,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             run_path=bp.runtime_params.output_dir,
             job_name=job_name,
             output_file=None,  # to fill with some convention
-            queue_name=os.getenv("CSTAR_QUEUE_NAME"),
-            walltime="00:10:00",  # TODO how to determine this one?
+            queue_name=os.getenv("CSTAR_SLURM_QUEUE"),
+            walltime=os.getenv(
+                "CSTAR_SLURM_MAX_WALLTIME", "48:00:00"
+            ),  # TODO how to determine this one?
             depends_on=job_dep_ids,
         )
 

@@ -273,9 +273,6 @@ def test_configure_environment() -> None:
     ):
         configure_environment(log)
 
-        assert "CSTAR_INTERACTIVE" in os.environ
-        assert os.environ["CSTAR_INTERACTIVE"] == "0"
-
         assert "GIT_DISCOVERY_ACROSS_FILESYSTEM" in os.environ
         assert os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] == "1"
 
@@ -297,9 +294,6 @@ def test_configure_environment_prebuilt() -> None:
         clear=True,
     ):
         configure_environment(log)
-
-        assert "CSTAR_INTERACTIVE" in os.environ
-        assert os.environ["CSTAR_INTERACTIVE"] == "0"
 
         assert "GIT_DISCOVERY_ACROSS_FILESYSTEM" in os.environ
         assert os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] == "1"
@@ -747,7 +741,6 @@ async def test_runner_shutdown_side_effects(
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_log_disposition", mock_disposition),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # Trigger a run through the lifecycle as a task. This should triger
         # the complete set of shutdown behaviors.
@@ -792,7 +785,6 @@ async def test_runner_on_start_without_uri(
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # clear blueprint URI from the default SimulationRunner from the fixture
         # use `setattr` to force-change the Final
@@ -844,7 +836,6 @@ async def test_runner_on_start_without_simulation(
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # simulate a failure to load the simulation blueprint
         # use `setattr` to force-change the Final
@@ -900,7 +891,6 @@ async def test_runner_on_start_user_unhandled_setup(
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # # simulate a failure to load the simulation blueprint
         # sim_runner._simulation = None
@@ -954,7 +944,6 @@ async def test_runner_on_start_user_unhandled_build(
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # # simulate a failure to load the simulation blueprint
         # sim_runner._simulation = None
@@ -1008,7 +997,6 @@ async def test_runner_on_start_user_unhandled_pre_run(
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # # simulate a failure to load the simulation blueprint
         # sim_runner._simulation = None
@@ -1056,7 +1044,6 @@ async def test_runner_on_iteration(
         mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # Trigger a run through the lifecycle as a task.
         await sim_runner.execute()
@@ -1153,7 +1140,6 @@ async def test_runner_setup_stage(
         mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
         mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
-        mock.patch.dict(os.environ, {"CSTAR_INTERACTIVE": "0"}),
     ):
         # Trigger a run through the lifecycle as a task.
         await sim_runner.execute()
@@ -1231,14 +1217,6 @@ async def test_worker_main_exec(
             "cstar.entrypoint.worker.SimulationRunner.execute",
             mock_execute,
         ),
-        mock.patch.dict(
-            os.environ,
-            {
-                "CSTAR_INTERACTIVE": "0",
-                "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
-            },
-            clear=True,
-        ),
     ):
         # This should run the simulation and return a success code
         return_code = await main(args)
@@ -1277,14 +1255,6 @@ async def test_worker_main_cstar_error(
         mock.patch(
             "cstar.entrypoint.worker.SimulationRunner.__new__",
             return_mocked_sim_runner,
-        ),
-        mock.patch.dict(
-            os.environ,
-            {
-                "CSTAR_INTERACTIVE": "0",
-                "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
-            },
-            clear=True,
         ),
     ):
         # This should run the simulation and return a failure code.

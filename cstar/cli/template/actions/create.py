@@ -10,33 +10,6 @@ from cstar.orchestration.models import RomsMarblBlueprint, Workplan
 TemplateTypes: t.TypeAlias = t.Literal["workplan", "blueprint"]
 
 
-def check_or_create_path(path: Path | None, interactive: bool = False) -> None:
-    """Verify a valid directory was supplied.
-
-    If necessary, prompts the user for permission to create the directory when
-    interactive mode is enabled.
-
-    Parameters
-    ----------
-    path : Path
-        A path to a directory the generated template should be stored in
-    interactive : bool
-        Specify if interactive mode is enabled
-
-    """
-    if path and not path.exists() and interactive:
-        do_create = input("The directory does not exist. Create it? (yes/no): ")
-        if "y" in do_create.lower():
-            path.mkdir(parents=True, exist_ok=True)
-        else:
-            msg = "Unable to create template without valid directory"
-            raise ValueError(msg)
-
-    if path and not path.exists():
-        msg = f"The specified directory does not exist: {path}"
-        raise ValueError(msg)
-
-
 def get_inline_output(
     template_type: TemplateTypes,
     schema: str,
@@ -124,8 +97,6 @@ async def generate_template(path: Path | None, template_type: TemplateTypes) -> 
         The template content if the output path is None. Otherwise, a message
         describing where outputs were written.
     """
-    check_or_create_path(path)
-
     tpl_name = f"{template_type}.yaml"
     schema_name = f"{template_type}-schema.yaml"
     subdir = "wp" if template_type == "workplan" else "bp"
@@ -146,6 +117,7 @@ async def generate_template(path: Path | None, template_type: TemplateTypes) -> 
     template_path: Path | None = None
 
     if path is not None:
+        path.mkdir(parents=True, exist_ok=True)
         template_path = path / tpl_name
         schema_path = path / schema_name
 

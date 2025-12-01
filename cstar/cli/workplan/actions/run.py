@@ -15,12 +15,6 @@ async def handle(ns: argparse.Namespace) -> None:
     ns : argparse.Namespace
         User inputs parsed by the CLI
     """
-    # TODO: load from ~/.cstar/config (e.g. cstar config init)
-    os.environ["CSTAR_INTERACTIVE"] = "0"
-    os.environ["CSTAR_ACCOUNT_KEY"] = "ees250129"
-    os.environ["CSTAR_QUEUE_NAME"] = "shared"
-    os.environ["CSTAR_ORCHESTRATED"] = "1"
-
     os.environ["CSTAR_RUNID"] = ns.name
 
     await build_and_run_dag(Path(ns.path))
