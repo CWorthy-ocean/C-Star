@@ -194,7 +194,6 @@ class TestExecutionHandlerUpdates:
         ):
             mock_status.return_value = ExecutionStatus.RUNNING
 
-            # Replace `time.sleep` with a side effect that raises KeyboardInterrupt
             # Simulate a KeyboardInterrupt during the updates call
             with patch("time.sleep", side_effect=KeyboardInterrupt):
                 handler.updates(seconds=0)  # Run updates indefinitely
