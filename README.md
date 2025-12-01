@@ -60,7 +60,7 @@ The following environment variables control C-Star's behavior:
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| CSTAR_NPROCS_POST            | os.cpu_count() / 3                 | How many parallel processes to use for join operations post-run. |
+| CSTAR_NPROCS_POST            | os.cpu_count() / 3                 | The number of parallel processes to use for post-run join operations. |
 | CSTAR_FRESH_CODEBASES        | 0                                  | If 1, CSTAR will make fresh codebase directories and clones for each run. If 0 (default), common codebases in ROMS_ROOT/MARBL_ROOT are used (those variables default to locations within this package directory). |
 | CSTAR_CLOBBER_WORKING_DIR    | 0                                  | If 1, clear the working directory dictated in the blueprint before launching a SLURM job. Use at your own risk. |
 | CSTAR_SLURM_ACCOUNT          | None (must be set for SLURM usage) | The account name to be passed to SLURM for compute accounting. |

@@ -252,7 +252,6 @@ class TestExecutionHandlerUpdates:
         )
         updater_thread.start()
 
-        # Run the `updates` method
         handler.updates(seconds=0)
 
         # Verify that only lines from `running_updates` were printed
