@@ -287,7 +287,6 @@ class SimulationRunner(Service):
         """Execute the c-star simulation."""
         try:
             if not self._handler:
-                # if os.environ.get("SLURM_JOB_ID", True):
                 run_params = {
                     "account_key": self._job_config.account_id,
                     "walltime": self._job_config.walltime,
@@ -320,7 +319,6 @@ class SimulationRunner(Service):
             ExecutionStatus.COMPLETED,
             ExecutionStatus.CANCELLED,
             ExecutionStatus.FAILED,
-            ExecutionStatus.UNKNOWN,
         ]
 
     @override
@@ -513,6 +511,7 @@ async def main(raw_args: list[str]) -> int:
         )
 
     log = get_logger(__name__, level=service_cfg.log_level)
+    log.info(f"Running job with config: {job_cfg}")
 
     try:
         configure_environment(log)
