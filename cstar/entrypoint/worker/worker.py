@@ -507,9 +507,9 @@ async def main(raw_args: list[str]) -> int:
         service_cfg = get_service_config(args)
         blueprint_req = get_request(args)
         job_cfg = JobConfig(
-            account_id=os.getenv("CSTAR_SLURM_ACCOUNT", ""),
-            walltime=os.getenv("CSTAR_SLURM_MAX_WALLTIME", "01:00:00"),
-            priority=os.getenv("CSTAR_SLURM_QUEUE", ""),
+            account_id=os.environ.get("CSTAR_SLURM_ACCOUNT", ""),
+            walltime=os.environ.get("CSTAR_SLURM_MAX_WALLTIME", "01:00:00"),
+            priority=os.environ.get("CSTAR_SLURM_QUEUE", ""),
         )
 
     log = get_logger(__name__, level=service_cfg.log_level)
