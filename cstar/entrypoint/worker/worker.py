@@ -472,18 +472,6 @@ def configure_environment(log: logging.Logger) -> None:
     # ensure no human interaction is required
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
 
-    # TODO: re-run tests now that prebuilt is gone and rebase on develop is in.
-    # is_roms_prebuilt = os.environ.get("CSTAR_ROMS_PREBUILT", None) == "1"
-    # is_marbl_prebuilt = os.environ.get("CSTAR_MARBL_PREBUILT", None) == "1"
-
-    # if is_roms_prebuilt:
-    #     ext_root = os.environ.get("ROMS_ROOT", None)
-    #     log.debug("Using prebuilt ROMS at: %s", ext_root)
-
-    # if is_marbl_prebuilt:
-    #     ext_root = os.environ.get("MARBL_ROOT", None)
-    #     log.debug("Using prebuilt MARBL at: %s", ext_root)
-
 
 async def main(raw_args: list[str]) -> int:
     """Run the c-star worker script.
