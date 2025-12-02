@@ -9,11 +9,13 @@ from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import deep_merge, slugify
 
 
-class Splitter(t.Protocol):
-    """Protocol for a class that splits a step into multiple sub-steps."""
+class Transform(t.Protocol):
+    """Protocol for a class that transforms a step into one or more
+    new steps.
+    """
 
-    def split(self, step: Step) -> t.Iterable[Step]:
-        """Split a step into multiple sub-steps.
+    def __call__(self, step: Step) -> t.Iterable[Step]:
+        """Perform a transformation on the input step.
 
         Parameters
         ----------
@@ -28,10 +30,10 @@ class Splitter(t.Protocol):
         ...
 
 
-TRANSFORMS: dict[str, Splitter] = {}
+TRANSFORMS: dict[str, Transform] = {}
 
 
-def register_transform(application: str, transform: Splitter) -> None:
+def register_transform(application: str, transform: Transform) -> None:
     """Register a splitter for an application.
 
     Parameters
@@ -44,7 +46,7 @@ def register_transform(application: str, transform: Splitter) -> None:
     TRANSFORMS[application] = transform
 
 
-def get_transform(application: str) -> Splitter | None:
+def get_transform(application: str) -> Transform | None:
     """Retrieve a transform for an application.
 
     Parameters
@@ -109,9 +111,9 @@ def get_time_slices(
     return time_slices
 
 
-class RomsMarblTimeSplitter(Splitter):
-    """A splitter used to split a step into multiple sub-steps
-    based on the timespan covered by the simulation.
+class RomsMarblTimeSplitter(Transform):
+    """A step tranformation that splits a ROMS-MARBL simulation into
+    multiple sub-steps based on the timespan covered by the simulation.
     """
 
     def _get_location_stem(self, blueprint: RomsMarblBlueprint) -> str:
@@ -200,7 +202,7 @@ class RomsMarblTimeSplitter(Splitter):
             }
         }
 
-    def split(self, step: Step) -> t.Iterable[Step]:
+    def __call__(self, step: Step) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
 
         Parameters

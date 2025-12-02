@@ -15,7 +15,7 @@ from cstar.orchestration.orchestration import (
     RunMode,
 )
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import Splitter  # , get_transform
+from cstar.orchestration.transforms import Transform  # , get_transform
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -143,12 +143,12 @@ def transform_workplan(wp: Workplan) -> Workplan:
     """
     steps = []
     for step in wp.steps:
-        transform: Splitter | None = None  # = get_transform(step.application)
+        transform: Transform | None = None  # = get_transform(step.application)
         if not transform:
             steps.append(step)
             continue
 
-        transformed = list(transform.split(step))
+        transformed = list(transform(step))
         steps.extend(transformed)
 
         tweaks = [s for s in wp.steps if step.name in s.depends_on]
