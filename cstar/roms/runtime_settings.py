@@ -422,7 +422,9 @@ class VerticalMixing(ROMSRuntimeSettingsSection):
     @classmethod
     def fill_tracers(cls, value):
         list_len = len(value)
-        if (num_missing := MIN_NUM_TRACERS - list_len) > 0:
+        if (num_missing := MIN_NUM_TRACERS - list_len) and all(
+            [v == 0 for v in value]
+        ) > 0:
             value.extend([0] * num_missing)
         return value
 
