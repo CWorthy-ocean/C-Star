@@ -65,7 +65,7 @@ We also accept contributions in the form of Pull Requests.
 
 C-Star is openly available for use and permissively licenced under Apache 2.0. 
 
-   Copyright 2024 [C]Worthy LLC.
+   Copyright 2025 [C]Worthy LLC.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
