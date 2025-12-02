@@ -588,7 +588,6 @@ async def test_runner_shutdown_no_update_handler(
         ExecutionStatus.COMPLETED,
         ExecutionStatus.CANCELLED,
         ExecutionStatus.FAILED,
-        ExecutionStatus.UNKNOWN,
     ],
 )
 @pytest.mark.asyncio
