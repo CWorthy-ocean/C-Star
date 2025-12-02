@@ -604,9 +604,10 @@ class TestROMSRuntimeSettings:
         with pytest.raises(ValueError, match="Required field missing from file."):
             ROMSRuntimeSettings.from_file(modified_file)
 
-    def test_from_file_fills_vertical_mixing_list(
+    def test_from_file_zero_fills_vertical_mixing_list(
         self, tmp_path: Path, romsruntimesettings
     ) -> None:
+        """If vertical mixing list is incomplete and all zeros, add more zeros for all tracers"""
         modified_file = tmp_path / "modified_example_settings.in"
         shutil.copy2(
             Path(__file__).parent / "fixtures/example_runtime_settings.in",
@@ -619,6 +620,24 @@ class TestROMSRuntimeSettings:
         )
         tested_settings = ROMSRuntimeSettings.from_file(modified_file)
         assert tested_settings.vertical_mixing == romsruntimesettings.vertical_mixing
+
+    def test_from_file_doesnt_fill_partial_vertical_mixing_list(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """If vertical mixing list is incomplete but non-zero, don't change it"""
+        modified_file = tmp_path / "modified_example_settings.in"
+        shutil.copy2(
+            Path(__file__).parent / "fixtures/example_runtime_settings.in",
+            modified_file,
+        )
+        _replace_text_in_file(
+            modified_file,
+            "0.    0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.",
+            "0.    2. 5. 0.",
+        )
+        tested_settings = ROMSRuntimeSettings.from_file(modified_file)
+        assert tested_settings.vertical_mixing.Akt_bak == [2.0, 5.0, 0.0]  # type: ignore[union-attr]
 
     def test_file_roundtrip(self, romsruntimesettings, tmp_path):
         """Tests that the `to_file`/`from_file` roundtrip results in a functionally

@@ -420,7 +420,21 @@ class VerticalMixing(ROMSRuntimeSettingsSection):
 
     @field_validator("Akt_bak", mode="after")
     @classmethod
-    def fill_tracers(cls, value):
+    def zero_fill_tracers(cls, value: list[float]):
+        """
+        If the list of vertical mixing for tracers is all zeros, make sure it has enough zeros such that
+        ROMS can read a zero for every tracer (otherwise it will crash). If any values are non-zero, we can't
+        make any assumptions about which tracers the user is trying to assign, so don't do any modification and
+        let ROMS use it or fail as appropriate.
+
+        Parameters
+        ----------
+        value: the field value after running through initial pydantic validation
+
+        Returns
+        -------
+        modified field value
+        """
         list_len = len(value)
         if (num_missing := MIN_NUM_TRACERS - list_len) and all(
             [v == 0 for v in value]
