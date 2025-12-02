@@ -161,12 +161,19 @@ class ExecutionHandler(ABC, LoggingMixin):
                     self.log.info(msg)
                     break
 
+            if not self.output_file.exists():
+                msg = f"Log `{self.output_file}` does not exist. Skipping update check."
+                self.log.info(msg)
+                return
+
         try:
             with open(self.output_file) as f:
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):
-                    line = f.readline()
+                    if self.output_file.exists():
+                        line = f.readline()
+
                     if self.status != ExecutionStatus.RUNNING:
                         return
                     elif line:
