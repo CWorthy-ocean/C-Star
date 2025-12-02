@@ -67,8 +67,8 @@ class PrintingService(Service):
         """Return the number of delays executed."""
         return self.metrics["_on_delay"]
 
-    def _on_iteration(self) -> None:
-        super()._on_iteration()
+    async def _on_iteration(self) -> None:
+        await super()._on_iteration()
         self.log.debug("Running PrintingService._on_iteration")
         self.test_queue.put_nowait("_on_iteration")
         self.summarize()  # update each loop; don't let queues grow too large

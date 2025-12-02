@@ -283,7 +283,7 @@ class SimulationRunner(Service):
             self._log_disposition(treat_as_failure=treat_as_failure)
 
     @override
-    def _on_iteration(self) -> None:
+    async def _on_iteration(self) -> None:
         """Execute the c-star simulation."""
         try:
             if not self._handler:
@@ -299,7 +299,7 @@ class SimulationRunner(Service):
                 else:
                     self.log.debug("Skipping simulation run")
             else:
-                self._handler.updates(1.0)
+                await self._handler.updates(seconds=1.0)
                 self._send_update_to_hc({"status": str(self._handler.status)})
         except Exception:
             self.log.exception("An error occurred while running the simulation")

@@ -38,7 +38,10 @@ class TestExecutionHandlerUpdates:
         Confirms that `updates()` runs indefinitely when `seconds=0` and allows termination via user interruption.
     """
 
-    def test_updates_non_running_job(self, tmp_path, caplog: pytest.LogCaptureFixture):
+    @pytest.mark.asyncio
+    async def test_updates_non_running_job(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ):
         """Validates that `updates()` provides appropriate feedback when the job is not
         running.
 
@@ -66,7 +69,7 @@ class TestExecutionHandlerUpdates:
             ExecutionStatus.COMPLETED, tmp_path / "mock_output.log"
         )
 
-        handler.updates(seconds=10)
+        await handler.updates(seconds=10)
 
         captured = caplog.text
         assert (
@@ -75,7 +78,8 @@ class TestExecutionHandlerUpdates:
         )
         assert f"See {handler.output_file.resolve()} for job output" in captured
 
-    def test_updates_running_job_with_tmp_file(
+    @pytest.mark.asyncio
+    async def test_updates_running_job_with_tmp_file(
         self, tmp_path, caplog: pytest.LogCaptureFixture
     ):
         """Verifies that `updates()` streams live updates from the job's output file
@@ -129,7 +133,7 @@ class TestExecutionHandlerUpdates:
         updater_thread.start()
 
         # Run the `updates` method
-        handler.updates(seconds=0.25)
+        await handler.updates(seconds=0.25)
 
         # Ensure both initial and live update lines are printed
         captured = caplog.text
@@ -139,7 +143,8 @@ class TestExecutionHandlerUpdates:
         # Ensure the thread finishes before the test ends
         updater_thread.join()
 
-    def test_updates_indefinite_with_seconds_param_0(
+    @pytest.mark.asyncio
+    async def test_updates_indefinite_with_seconds_param_0(
         self, tmp_path, caplog: pytest.LogCaptureFixture
     ):
         """Confirms that `updates()` runs indefinitely when `seconds=0` and allows
@@ -195,13 +200,14 @@ class TestExecutionHandlerUpdates:
             mock_status.return_value = ExecutionStatus.RUNNING
 
             # Simulate a KeyboardInterrupt during the updates call
-            with patch("time.sleep", side_effect=KeyboardInterrupt):
-                handler.updates(seconds=0)  # Run updates indefinitely
+            with patch("asyncio.sleep", side_effect=KeyboardInterrupt):
+                await handler.updates(seconds=0)  # Run updates indefinitely
 
                 # Assert that the "stopped by user" message was printed
                 assert "Live status updates stopped by user." in caplog.text
 
-    def test_updates_stops_when_status_changes(
+    @pytest.mark.asyncio
+    async def test_updates_stops_when_status_changes(
         self, tmp_path, caplog: pytest.LogCaptureFixture
     ):
         """Verifies that `updates()` stops execution when `status` changes to non-
@@ -251,7 +257,7 @@ class TestExecutionHandlerUpdates:
         )
         updater_thread.start()
 
-        handler.updates(seconds=0)
+        await handler.updates(seconds=0)
 
         # Verify that only lines from `running_updates` were printed
         printed_calls = caplog.text
