@@ -1,5 +1,5 @@
 import typing as t
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import HttpUrl
@@ -219,6 +219,12 @@ class RomsMarblTimeSplitter(Splitter):
         ic_stem = self._get_location_stem(blueprint)
         output_root = Path(blueprint.runtime_params.output_dir)
         time_slices = get_time_slices(start_date, end_date)
+
+        if start_date - end_date < timedelta(days=30):
+            # TODO: leave this ask discussion driver. must determine
+            # what conditions might preclude automatic splitting.
+            yield step
+            return
 
         if end_date <= start_date:
             raise ValueError("end_date must be after start_date")
