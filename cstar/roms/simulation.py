@@ -1514,6 +1514,8 @@ class ROMSSimulation(Simulation):
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
         run_path.mkdir(parents=True, exist_ok=True)
 
+        script_path = self.directory / "scripts"
+
         ## 2: RUN ROMS
 
         roms_exec_cmd = (
@@ -1538,6 +1540,7 @@ class ROMSSimulation(Simulation):
                 cpus=self.discretization.n_procs_tot,
                 account_key=account_key,
                 run_path=run_path,
+                script_path=script_path,
                 queue_name=queue_name,
                 walltime=walltime,
             )
