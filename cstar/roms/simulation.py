@@ -2,7 +2,7 @@ import logging
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
 from functools import partial
 from itertools import chain
 from pathlib import Path
