@@ -1,10 +1,11 @@
+import argparse
 import asyncio
 import os
 import sys
 import typing as t
+from datetime import datetime, timezone
 from itertools import cycle
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
@@ -192,31 +193,108 @@ async def build_and_run_dag(path: Path) -> None:
     await process_plan(orchestrator, RunMode.Monitor)
 
 
+bp_default: t.Final[str] = (
+    "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
+)
+
+
+def get_parser() -> argparse.ArgumentParser:
+    """Simple parser for testing the dag runner in a debugger."""
+    tpl_choices: t.TypeAlias = t.Literal["single_step", "linear", "fanout", "parallel"]
+    choices: list[tpl_choices] = ["single_step", "linear", "fanout", "parallel"]
+
+    parser = argparse.ArgumentParser("dag_runner")
+    parser.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        type=Path,
+        help="The path where outputs must be written",
+    )
+    parser.add_argument(
+        "-b",
+        "--blueprint",
+        type=Path,
+        help="The path to the blueprint to execute within the workflow",
+        default=None,
+    )
+    parser.add_argument(
+        "-w",
+        "--workplan",
+        type=Path,
+        help="The path to the workplan to execute",
+        default=None,
+    )
+    parser.add_argument(
+        "-t",
+        "--template",
+        choices=choices,
+        type=str,
+        help="The template a standalone blueprint will be executed in",
+        default="single_step",
+    )
+
+    return parser
+
+
+def create_host_workplan(output_path: Path, template: str, bp_path: Path) -> Path:
+    """Replace the default blueprint path in a template and write the
+    modified workplan in a new location.
+    """
+    cstar_dir = Path(__file__).parent.parent
+    templates_dir = cstar_dir / "additional_files/templates"
+    template_path = templates_dir / "wp" / f"{template}.yaml"
+
+    bp_source_path = templates_dir / "bp/blueprint.yaml"
+    bp_target_path = output_path / bp_path.name
+
+    # copy the original blueprint into the working directory
+    bp_target_path.write_text(bp_source_path.read_text())
+
+    wp_content = template_path.read_text()
+    wp_content = wp_content.replace(bp_default, bp_target_path.as_posix())
+
+    wp_path = output_path / f"{template}-host.yaml"
+    wp_path.write_text(wp_content)
+
+    return wp_path
+
+
+def main() -> None:
+    """Execute the dag runner using parameters supplied from the CLI."""
+    args = sys.argv[1:]
+    ns = get_parser().parse_args(args)
+
+    o_path = Path(ns.output)
+    if not o_path.exists():
+        o_path.mkdir(parents=True)
+
+    wp_path = Path(ns.workplan) if ns.workplan is not None else None
+    bp_path = Path(ns.blueprint) if ns.blueprint is not None else None
+    template = ns.template
+
+    if wp_path is None and bp_path is None:
+        print("Runner not executed\n\t- A workplan or blueprint path must be provided")
+        sys.exit(1)
+
+    if bp_path:
+        # host the blueprint in a workplan template
+        wp_path = create_host_workplan(o_path, template, bp_path)
+        print(f"Running workplan at `{wp_path}` with blueprint at `{bp_path}`")
+    else:
+        bp_path = Path(bp_default)
+        print(f"Running unmodified workplan at `{wp_path}`")
+
+    run_id = (
+        f"dag-main-{template}-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    )
+    os.environ["CSTAR_RUNID"] = run_id
+
+    if wp_path is None:
+        raise ValueError("Workplan path is malformed.")
+
+    asyncio.run(build_and_run_dag(wp_path))
+
+
 if __name__ == "__main__":
-    # wp_path = Path("/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml")
-    # wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
-    # wp_path = Path("/anvil/projects/x-ees250129/x-cmcbride/workplans/01.simple.yaml")
-
-    with TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
-
-        for template in ["fanout", "linear", "parallel", "single_step"]:
-            cstar_dir = Path(__file__).parent.parent
-            template_file = f"{template}.yaml"
-            templates_dir = cstar_dir / "additional_files/templates"
-            template_path = templates_dir / "wp" / template_file
-
-            bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
-            bp_path = tmp_path / "blueprint.yaml"
-            bp_tpl_path = templates_dir / "bp/blueprint.yaml"
-            bp_path.write_text(bp_tpl_path.read_text())
-
-            wp_content = template_path.read_text()
-            wp_content = wp_content.replace(bp_default, bp_path.as_posix())
-
-            wp_path = tmp_path / template_file
-            wp_path.write_text(wp_content)
-
-            my_run_name = f"{sys.argv[1]}_{template}"
-            os.environ["CSTAR_RUNID"] = my_run_name
-            asyncio.run(build_and_run_dag(wp_path))
+    main()
