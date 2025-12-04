@@ -1593,6 +1593,7 @@ class TestProcessingAndExecution:
         sim = stub_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
         runtime_code_dir = sim.directory / "ROMS/runtime_code"
+        script_dir = sim.directory / "scripts"
         sim.runtime_code._working_copy = stageddatacollection_remote_files(
             paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
             sources=sim.runtime_code.source,
@@ -1642,6 +1643,7 @@ class TestProcessingAndExecution:
                 cpus=6,
                 account_key="some_key",
                 run_path=sim.directory / "output",
+                script_path=script_dir / "romstest.sh",
                 queue_name="default_queue",
                 walltime="12:00:00",
             )
