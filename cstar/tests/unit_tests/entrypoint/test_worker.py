@@ -26,7 +26,7 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.simulation import Simulation
 
 DEFAULT_LOOP_DELAY = 5
-DEFAULT_HEALTH_CHECK_FREQUENCY = 10
+DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
 
 
 @pytest.fixture(scope="module", autouse=True)
