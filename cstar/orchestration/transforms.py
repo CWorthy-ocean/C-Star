@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import HttpUrl
 
-from cstar.orchestration.models import RomsMarblBlueprint, Step
+from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import deep_merge, slugify
 
@@ -257,7 +257,7 @@ class RomsMarblTimeSplitter(Transform):
             if last_restart_file is not None:
                 updates = deep_merge(updates, self._get_ic_overrides(last_restart_file))
 
-            yield Step(**{**step.model_dump(), **updates})
+            yield ChildStep(**{**step.model_dump(), **updates, "parent": step.name})
 
             # use dependency on the prior substep to chain all the dynamic steps
             depends_on = [step_name]

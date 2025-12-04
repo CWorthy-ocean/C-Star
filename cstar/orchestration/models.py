@@ -446,26 +446,12 @@ class Step(BaseModel):
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
 
+
+class ChildStep(Step):
+    """An step spawned as a subtask of another step."""
+
     parent: str | None = Field(default=None, validate_default=False, frozen=True)
     """The name of the parent step if this step was created via splitting."""
-
-    # @field_validator("blueprint", mode="after")
-    # @classmethod
-    # def _check_blueprint(cls, value: FilePath | str) -> Path:
-    #     """Convert strings into paths.
-
-    #     Parameters
-    #     ----------
-    #     value : FilePath or str
-    #         The value received from the input.
-
-    #     Returns
-    #     -------
-    #     Path
-    #         The input value converted to a pathlib.Path
-
-    #     """
-    #     return Path(value)
 
 
 class Workplan(BaseModel):
