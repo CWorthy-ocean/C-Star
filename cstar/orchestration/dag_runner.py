@@ -27,7 +27,7 @@ def incremental_delays() -> t.Generator[float, None, None]:
     Generator[float]
     """
     # TODO: load delays from config to enable dynamic changes for tests.
-    delays = [2, 2, 5, 5, 15, 15]
+    delays = [0.1, 1, 2, 5, 15, 30]
     delay_cycle = cycle(delays)
     yield from delay_cycle
 
@@ -118,12 +118,20 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
         print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
         await orchestrator.run(mode=mode)
 
-        closed_set = orchestrator.get_closed_nodes(mode=mode)
-        open_set = orchestrator.get_open_nodes(mode=mode)
+        curr_closed = orchestrator.get_closed_nodes(mode=mode)
+        curr_open = orchestrator.get_open_nodes(mode=mode)
+
+        if curr_closed != closed_set or curr_open != curr_open:
+            # reset to initial delay when a task is found or completed
+            delay_iter = iter(incremental_delays())
+
+        open_set = curr_open
+        closed_set = curr_closed
+
         print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
 
         sleep_duration = next(delay_iter)
-        print(f"Sleeping for {sleep_duration} seconds before next {mode}.")
+        print(f"Sleeping for {sleep_duration:4.1f} seconds before next {mode}.")
         await asyncio.sleep(sleep_duration)
 
     print(f"Workplan {mode} is complete.")
