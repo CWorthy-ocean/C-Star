@@ -180,7 +180,7 @@ class SimulationRunner(Service):
             self.log.debug(msg)
             self._output_dir.mkdir(parents=True, exist_ok=True)
 
-    def _log_disposition(self) -> None:
+    def _log_disposition(self, treat_as_failure: bool = False) -> None:
         """Log the status of the simulation at shutdown time."""
         disposition: ExecutionStatus = (
             self._handler.status if self._handler else ExecutionStatus.UNKNOWN
@@ -189,9 +189,9 @@ class SimulationRunner(Service):
         if self._handler:
             self.log.info(f"Completed simulation logs at: {self._handler.output_file}")
 
-        if disposition == ExecutionStatus.COMPLETED:
+        if disposition == ExecutionStatus.COMPLETED and not treat_as_failure:
             self.log.info("Simulation completed successfully.")
-        elif disposition == ExecutionStatus.FAILED:
+        elif disposition == ExecutionStatus.FAILED or treat_as_failure:
             msg = "Simulation failed."
             raise CstarError(msg)
         else:
@@ -250,7 +250,7 @@ class SimulationRunner(Service):
         """
         # perform simulation cleanup activities only when required
         stage_enabled = SimulationStages.POST_RUN in self._stages
-
+        treat_as_failure = False
         try:
             if not self._simulation:
                 self.log.warning("No simulation available at shutdown")
@@ -273,10 +273,11 @@ class SimulationRunner(Service):
             else:
                 self.log.debug("Skipping simulation post-run")
         except RuntimeError:
+            treat_as_failure = True
             self.log.exception("Simulation post_run failed.")
         finally:
             # ensure status is logged even if _handler updates are suppressed.
-            self._log_disposition()
+            self._log_disposition(treat_as_failure=treat_as_failure)
 
     @override
     def _on_iteration(self) -> None:
