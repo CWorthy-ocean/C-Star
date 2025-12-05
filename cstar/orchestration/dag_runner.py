@@ -196,7 +196,7 @@ async def build_and_run_dag(path: Path) -> None:
     wp = deserialize(path, Workplan)
     print(f"Executing workplan: {wp.name}")
 
-    wp = transform_workplan(wp, path)
+    wp = transform_workplan(wp)
     _ = persist_workplan(wp, path)
 
     planner = Planner(workplan=wp)
