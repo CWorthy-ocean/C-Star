@@ -195,9 +195,13 @@ async def build_and_run_dag(path: Path) -> None:
     """
     wp = deserialize(path, Workplan)
     print(f"Executing workplan: {wp.name}")
+    original_wp = wp
 
     wp = transform_workplan(wp)
     _ = persist_workplan(wp, path)
+
+    if original_wp.model_dump() != wp.model_dump():
+        print("Transformed workplan will be used for execution.")
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
