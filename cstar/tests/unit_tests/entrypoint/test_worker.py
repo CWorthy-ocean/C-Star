@@ -70,7 +70,7 @@ def sim_runner(
     """
     request = BlueprintRequest(
         str(blueprint_path),
-        stages=tuple(SimulationStages),
+        stages=list(SimulationStages),
     )
 
     service_config = ServiceConfiguration(
@@ -1123,7 +1123,7 @@ async def test_runner_setup_stage(
 
     request = BlueprintRequest(
         str(blueprint_path),
-        stages=tuple(stages),
+        stages=list(stages),
     )
 
     setattr(sim_runner, "_stages", tuple(request.stages))
