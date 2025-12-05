@@ -49,7 +49,7 @@ class BlueprintRequest:
 
     blueprint_uri: str
     """The path to the blueprint."""
-    stages: tuple[SimulationStages, ...] = dc.field(default=tuple(SimulationStages))
+    stages: list[SimulationStages] = dc.field(default_factory=list)
     """The simulation stages to execute.
 
     Defaults to all stages.
@@ -386,7 +386,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-g",
         "--stage",
-        default=tuple(x for x in SimulationStages),
+        choices=[x.value for x in SimulationStages],
         type=str,
         required=False,
         action="append",
@@ -451,6 +451,9 @@ def get_request(args: argparse.Namespace) -> BlueprintRequest:
     BlueprintRequest
         A request configured to run a c-star simulation via a blueprint.
     """
+    if not args.stages:
+        args.stages = tuple(SimulationStages)
+
     return BlueprintRequest(
         blueprint_uri=args.blueprint_uri,
         stages=args.stages,
@@ -503,6 +506,8 @@ async def main(raw_args: list[str]) -> int:
 
     try:
         configure_environment(log)
+        log.info(f"Configuring simulation runner with config: {service_cfg}")
+        log.info(f"Starting simulation with request: {blueprint_req}")
         worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
         await worker.execute()
     except CstarError as ex:
