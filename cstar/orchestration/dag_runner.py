@@ -163,6 +163,27 @@ def transform_workplan(wp: Workplan) -> Workplan:
     return Workplan(**wp_attrs)
 
 
+def persist_workplan(wp: Workplan, source_path: Path) -> Path:
+    """Persist a transformed workplan to a file.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan to transform.
+    source_path : Path
+        The path to the original workplan file.
+
+    Returns
+    -------
+    tuple[Workplan, Path]
+        The transformed workplan and the path where it has been written.
+    """
+    persist_path = source_path.with_stem(f"{source_path.stem}_transformed")
+    persist_path.write_text(wp.model_dump_json())
+
+    return persist_path
+
+
 # @flow(log_prints=True)
 async def build_and_run_dag(path: Path) -> None:
     """Execute the steps in the workplan.
@@ -175,10 +196,8 @@ async def build_and_run_dag(path: Path) -> None:
     wp = deserialize(path, Workplan)
     print(f"Executing workplan: {wp.name}")
 
-    wp = transform_workplan(wp)
-
-    persist_path = path.with_stem(f"{path.stem}_transformed")
-    persist_path.write_text(wp.model_dump_json())
+    wp = transform_workplan(wp, path)
+    _ = persist_workplan(wp, path)
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
