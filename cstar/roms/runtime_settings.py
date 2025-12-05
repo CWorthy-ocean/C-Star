@@ -14,6 +14,7 @@ from pydantic import (
     ModelWrapValidatorHandler,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -33,6 +34,9 @@ CUSTOM_ALIAS_LOOKUP = {
     "my_bak_mixing": "MY_bak_mixing",
     "initial_conditions": "initial",
 }
+
+MIN_NUM_TRACERS = 37
+"""Vertical mixing requires enough values for all tracers or it raises an error."""
 
 
 def _format_float(val: float) -> str:
@@ -413,6 +417,30 @@ class Forcing(ROMSRuntimeSettingsSection):
 class VerticalMixing(ROMSRuntimeSettingsSection):
     Akv_bak: float
     Akt_bak: list[float]
+
+    @field_validator("Akt_bak", mode="after")
+    @classmethod
+    def zero_fill_tracers(cls, value: list[float]):
+        """
+        If the list of vertical mixing for tracers is all zeros, make sure it has enough zeros such that
+        ROMS can read a zero for every tracer (otherwise it will crash). If any values are non-zero, we can't
+        make any assumptions about which tracers the user is trying to assign, so don't do any modification and
+        let ROMS use it or fail as appropriate.
+
+        Parameters
+        ----------
+        value: the field value after running through initial pydantic validation
+
+        Returns
+        -------
+        modified field value
+        """
+        list_len = len(value)
+        if (num_missing := MIN_NUM_TRACERS - list_len) and all(
+            [v == 0 for v in value]
+        ) > 0:
+            value.extend([0] * num_missing)
+        return value
 
 
 class MARBLBiogeochemistry(ROMSRuntimeSettingsSection):
