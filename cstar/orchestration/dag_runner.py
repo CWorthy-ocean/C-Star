@@ -26,8 +26,15 @@ def incremental_delays() -> t.Generator[float, None, None]:
     -------
     Generator[float]
     """
-    # TODO: load delays from config to enable dynamic changes for tests.
     delays = [0.1, 1, 2, 5, 15, 30]
+
+    if os.getenv("CSTAR_ORCHESTRATION_DELAYS", ""):
+        try:
+            custom_delays = os.getenv("CSTAR_ORCHESTRATION_DELAYS", "")
+            delays = [float(d) for d in custom_delays.split(",")]
+        except ValueError:
+            print(f"Malformed delay provided: {custom_delays}. Using defaults.")
+
     delay_cycle = cycle(delays)
     yield from delay_cycle
 
