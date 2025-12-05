@@ -22,6 +22,8 @@ from pydantic import (
 )
 from pytimeparse import parse
 
+from cstar.orchestration.utils import slugify
+
 RequiredString: t.TypeAlias = t.Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
@@ -445,6 +447,31 @@ class Step(BaseModel):
         frozen=True,
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
+
+    @property
+    def safe_job_name(self) -> str:
+        """The name of the job that will be executed."""
+        return slugify(self.name)
+
+    def output_root(self, bp: RomsMarblBlueprint) -> Path:
+        """The step-relative directory for writing outputs."""
+        runtime_overrides = t.cast(
+            dict[str, str], self.blueprint_overrides.get("runtime_params", {})
+        )
+        output_dir: str | Path = runtime_overrides.get("output_dir", "")
+        if not output_dir:
+            # use the blueprint root path if it hasn't been overridden
+            output_dir = bp.runtime_params.output_dir
+
+        return Path(output_dir) / "tasks/{self.safe_job_name}"
+
+    def script_path(self, bp: RomsMarblBlueprint) -> Path:
+        """Compute a step-relative path for the storage of the script."""
+        return self.output_root(bp) / f"scripts/{self.safe_job_name}.sh"
+
+    def output_dir(self, bp: RomsMarblBlueprint) -> Path:
+        """Compute a step-relative path for the storage of the output files."""
+        return self.output_root(bp) / "outputs"
 
 
 class ChildStep(Step):

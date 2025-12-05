@@ -192,7 +192,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        job_name = slugify(step.name)
+        job_name = step.safe_job_name
         bp_path = Path(step.blueprint)
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
@@ -213,8 +213,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             cpus=bp.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
-            script_path=bp.runtime_params.output_dir / "scripts" / f"{job_name}.sh",
+            script_path=step.script_path(bp),
             run_path=bp.runtime_params.output_dir,
+            output_file=step.output_dir(bp),
             queue_name=SlurmLauncher.configured_queue(),
             walltime=SlurmLauncher.configured_walltime(),
             depends_on=job_dep_ids,
