@@ -150,7 +150,7 @@ class Planner:
     workplan: Workplan
     """The workplan to plan."""
 
-    graph: nx.DiGraph = Field(init=False)
+    graph: nx.DiGraph
     """The graph used for task planning."""
 
     def __init__(
