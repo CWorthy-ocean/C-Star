@@ -174,7 +174,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             cpus=bp.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
-            script_path=bp.runtime_params.output_dir / "scripts",
+            script_path=bp.runtime_params.output_dir / "scripts" / f"{job_name}.sh",
             run_path=bp.runtime_params.output_dir,
             job_name=job_name,
             output_file=None,  # to fill with some convention
