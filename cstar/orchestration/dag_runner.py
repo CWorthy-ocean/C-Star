@@ -26,7 +26,7 @@ def incremental_delays() -> t.Generator[float, None, None]:
     -------
     Generator[float]
     """
-    delays = [0.1, 1, 2, 5, 15, 30]
+    delays = [0.1, 1, 2, 5, 15, 30, 60]
 
     if os.getenv("CSTAR_ORCHESTRATION_DELAYS", ""):
         try:
