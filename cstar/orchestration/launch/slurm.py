@@ -201,10 +201,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         step_converter = app_to_cmd_map[step.application]
         if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
-            print(
-                f"Overriding command converter for `{step.application}` to `{converter_override}`"
-            )
             step_converter = app_to_cmd_map[converter_override]
+        print(f"Using `{step_converter.__name__}` for `{step.application}` commands.")
 
         command = step_converter(step)
         job = create_scheduler_job(
