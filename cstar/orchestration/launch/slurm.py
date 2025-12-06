@@ -197,7 +197,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        clear_working_dir(bp.runtime_params.output_dir)
+        clear_working_dir(step.output_root(bp))
 
         step_converter = app_to_cmd_map[step.application]
         if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
