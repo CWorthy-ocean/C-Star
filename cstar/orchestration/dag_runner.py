@@ -15,7 +15,7 @@ from cstar.orchestration.orchestration import (
     Planner,
     RunMode,
 )
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import Transform, get_transform
 
 
@@ -194,7 +194,7 @@ def persist_workplan(wp: Workplan, source_path: Path) -> Path:
         The transformed workplan and the path where it has been written.
     """
     persist_path = source_path.with_stem(f"{source_path.stem}_transformed")
-    persist_path.write_text(wp.model_dump_json())
+    serialize(persist_path, wp)
 
     return persist_path
 
