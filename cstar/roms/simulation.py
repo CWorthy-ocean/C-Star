@@ -1520,7 +1520,7 @@ class ROMSSimulation(Simulation):
         script_name = job_name or self.name
         safe_name = re.sub(r"\W", "", script_name.casefold())
         safe_name = re.sub(r"\s+", "-", safe_name)
-        script_path = self.directory / f"scripts/{safe_name}.sh"
+        script_path = self.directory / f"work/{safe_name}.sh"
 
         ## 2: RUN ROMS
 
