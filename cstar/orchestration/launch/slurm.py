@@ -222,7 +222,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             depends_on=job_dep_ids,
         )
 
-        print(f"Submitting step `{step.name}` as command `{command}`")
+        sanitized_command = command.replace("\n", "")[:40]
+        print(f"Submitting command `{sanitized_command}...` for step `{step.name}`.")
         job.submit()
 
         if job.id:
