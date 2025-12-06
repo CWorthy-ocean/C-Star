@@ -3,7 +3,6 @@ import typing as t
 from enum import IntEnum, StrEnum, auto
 
 import networkx as nx
-from pydantic import Field
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step, Workplan
