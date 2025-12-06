@@ -266,7 +266,7 @@ class RomsMarblTimeSplitter(Transform):
             depends_on = [child_step.name]
 
             # use output dir of the last step as the input for the next step
-            last_restart_file = child_step.restart_path(blueprint)
+            last_restart_file = child_step.restart_path(compact_sd, blueprint)
 
 
 register_transform("roms_marbl", RomsMarblTimeSplitter())

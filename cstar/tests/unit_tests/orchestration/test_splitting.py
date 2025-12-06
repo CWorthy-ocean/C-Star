@@ -113,8 +113,7 @@ def test_splitter(single_step_workplan: Workplan) -> None:
     assert len(transformed_steps) == 12
 
     output_directories: list[str] = []
-
-    expected_stem = "grid"
+    # expected_stem = "grid"
 
     for i, step in enumerate(transformed_steps[:-1]):
         successor = transformed_steps[i + 1]
@@ -140,7 +139,10 @@ def test_splitter(single_step_workplan: Workplan) -> None:
 
             # verify the initial conditions reference the prior step's time slice
             compact_sd = sd.strftime("%Y%m%d%H%M%S")
-            assert f"{expected_stem}_rst.{compact_sd}.*.nc" in ic_successor
+            # assert f"{expected_stem}_rst.{compact_sd}.*.nc" in ic_successor
+            assert f"outputs/.*_rst.{compact_sd}.*.nc" in ic_successor
+            # TODO: replace this assert after completing testing
+            # assert f"_rst.*.nc" in ic_successor
 
         # verify successor starts right where current step ends
         sd_successor_str = succ_runtime_params["start_date"]

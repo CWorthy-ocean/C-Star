@@ -498,9 +498,10 @@ class Step(BaseModel):
         """Compute a step-relative path for working directory of the script."""
         return self.script_path(bp).parent
 
-    def restart_path(self, bp: RomsMarblBlueprint) -> Path:
+    def restart_path(self, segment_id: str, bp: RomsMarblBlueprint) -> Path:
         """Compute a step-relative path where reset files will be located."""
-        return self.output_dir(bp) / "*_rst*.nc"
+        # name format is ".*_rst.??????????????.*.nc"
+        return self.output_dir(bp) / f".*_rst.{segment_id}.*.nc"
 
 
 class ChildStep(Step):
