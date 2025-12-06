@@ -1,4 +1,5 @@
 import os
+import random
 import sys
 import typing as t
 from pathlib import Path
@@ -123,7 +124,8 @@ def convert_step_to_placeholder(step: Step) -> str:
     str
         The complete CLI command.
     """
-    return f'{sys.executable} -c "import time; time.sleep(10)"'
+    sleep_time = random.randint(1, 10)
+    return f'\necho "{step.name} started at $(date "+%Y-%m-%d %H:%M:%S")";\nsleep {sleep_time};\necho "{step.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";\n'
 
 
 app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
