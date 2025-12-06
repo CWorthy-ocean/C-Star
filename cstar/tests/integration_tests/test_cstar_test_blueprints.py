@@ -17,7 +17,8 @@ class TestCStar:
             "test_case_local_with_netcdf_datasets",
         ],
     )
-    def test_cstar(
+    @pytest.mark.asyncio
+    async def test_cstar(
         self,
         tmp_path: Path,
         modify_template_blueprint,
@@ -83,5 +84,5 @@ class TestCStar:
             cstar_test_case.build()
             cstar_test_case.pre_run()
             test_process = cstar_test_case.run()
-            test_process.updates(seconds=60)
+            await test_process.updates(seconds=60)
             cstar_test_case.post_run()
