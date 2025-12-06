@@ -592,7 +592,6 @@ class Workplan(BaseModel):
         """
         name_counter = t.Counter(step.name for step in value)
         most_common = name_counter.most_common(1)
-        step_name, step_count = most_common[0]
         step_name, step_count = most_common[0] if most_common else ("", 0)
 
         if step_count > 1:
