@@ -218,8 +218,9 @@ class RomsMarblTimeSplitter(Transform):
         blueprint = deserialize(step.blueprint, RomsMarblBlueprint)
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
-        ic_stem = self._get_location_stem(blueprint)
-        output_root = Path(blueprint.runtime_params.output_dir)
+
+        # use the directory of the parent as the base...
+        output_root = step.tasks_dir(blueprint)
         time_slices = get_time_slices(start_date, end_date)
 
         # if (start_date - end_date).total_seconds() < timedelta(days=30).total_seconds():
@@ -239,31 +240,33 @@ class RomsMarblTimeSplitter(Transform):
             compact_sd = sd.strftime("%Y%m%d%H%M%S")
             compact_ed = ed.strftime("%Y%m%d%H%M%S")
 
-            step_name = f"{slugify(step.name)}_{compact_sd}_{compact_ed}"
-            step_output_dir = output_root / step_name
+            step_name = slugify(f"{step.name}_{compact_sd}-{compact_ed}")
 
             # reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
-            restart_file = step_output_dir / f"{ic_stem}_rst.{compact_sd}.*.nc"
+            # restart_file = step_output_root / f"{ic_stem}_rst.{compact_sd}.*.nc"
 
             # restart_files = list(step_output_dir.glob(".*_rst.??????????????.*.nc"))
             # restart_files.sort(reverse=True)
             # last_restart_file = restart_files[0] if restart_files else "not-found"
 
             updates = self._get_default_overrides(
-                step_name, sd, ed, step_output_dir, depends_on
+                step_name, sd, ed, output_root / step_name, depends_on
             )
 
             # adjust initial conditions after the first step
             if last_restart_file is not None:
                 updates = deep_merge(updates, self._get_ic_overrides(last_restart_file))
 
-            yield ChildStep(**{**step.model_dump(), **updates, "parent": step.name})
+            child_step = ChildStep(
+                **{**step.model_dump(), **updates, "parent": step.name}
+            )
+            yield child_step
 
             # use dependency on the prior substep to chain all the dynamic steps
-            depends_on = [step_name]
+            depends_on = [child_step.name]
 
             # use output dir of the last step as the input for the next step
-            last_restart_file = restart_file
+            last_restart_file = child_step.restart_path(blueprint)
 
 
 register_transform("roms_marbl", RomsMarblTimeSplitter())

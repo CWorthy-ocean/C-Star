@@ -212,9 +212,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
             script_path=step.script_path(bp),
-            run_path=bp.runtime_params.output_dir,
+            run_path=step.run_path(bp),
             job_name=job_name,
-            output_file=step.output_dir(bp),
+            output_file=step.output_file(bp),
             queue_name=SlurmLauncher.configured_queue(),
             walltime=SlurmLauncher.configured_walltime(),
             depends_on=job_dep_ids,
