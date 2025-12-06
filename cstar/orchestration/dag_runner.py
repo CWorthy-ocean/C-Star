@@ -231,6 +231,7 @@ async def build_and_run_dag(path: Path) -> None:
     await process_plan(orchestrator, RunMode.Monitor)
 
 
+bp_outputdir_default: t.Final[str] = "output_dir: ."
 bp_default: t.Final[str] = (
     "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
 )
@@ -286,13 +287,20 @@ def create_host_workplan(output_path: Path, template: str, bp_path: Path) -> Pat
     bp_source_path = templates_dir / "bp/blueprint.yaml"
     bp_target_path = output_path / bp_path.name
 
-    # copy the original blueprint into the working directory
-    bp_target_path.write_text(bp_source_path.read_text())
+    # copy the template blueprint into the working directory w/a custom output path
+    bp_content = bp_source_path.read_text()
+    bp_content = bp_content.replace(
+        bp_outputdir_default, f"output_dir: {output_path.as_posix()}"
+    )
+    bp_target_path.parent.mkdir(parents=True, exist_ok=True)
+    bp_target_path.write_text(bp_content)
 
+    # copy the template workplan into the working directory referencing the blueprint path
     wp_content = template_path.read_text()
     wp_content = wp_content.replace(bp_default, bp_target_path.as_posix())
 
     wp_path = output_path / f"{template}-host.yaml"
+    wp_path.parent.mkdir(parents=True, exist_ok=True)
     wp_path.write_text(wp_content)
 
     return wp_path
