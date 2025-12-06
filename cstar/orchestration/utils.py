@@ -21,8 +21,7 @@ def slugify(source: str) -> str:
     if not source:
         raise ValueError
 
-    alphanumeric = re.sub(r"\W", "", source.casefold())
-    return re.sub(r"\s+", "-", alphanumeric)
+    return re.sub(r"\W+", "-", source.casefold())
 
 
 def clear_working_dir(path: Path) -> None:
