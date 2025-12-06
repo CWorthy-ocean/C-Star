@@ -8,6 +8,8 @@ import pytest
 from cstar.orchestration.dag_runner import build_and_run_dag
 from cstar.orchestration.models import Step, Workplan
 
+bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
+
 
 def slurm() -> bool:
     """Check if srun exists."""
@@ -95,7 +97,6 @@ async def test_build_and_run_local(tmp_path: Path, workplan_name: str) -> None:
     templates_dir = cstar_dir / "additional_files/templates"
     template_path = templates_dir / "wp" / template_file
 
-    bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
     bp_path = tmp_path / "blueprint.yaml"
     bp_tpl_path = templates_dir / "bp" / "blueprint.yaml"
     bp_path.write_text(bp_tpl_path.read_text())
@@ -132,7 +133,6 @@ async def test_build_and_run(tmp_path: Path, workplan_name: str) -> None:
     templates_dir = cstar_dir / "additional_files/templates"
     template_path = templates_dir / "wp" / template_file
 
-    bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
     bp_path = tmp_path / "blueprint.yaml"
     bp_tpl_path = templates_dir / "bp" / "blueprint.yaml"
     bp_path.write_text(bp_tpl_path.read_text())
