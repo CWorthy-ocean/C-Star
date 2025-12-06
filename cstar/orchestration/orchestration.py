@@ -441,8 +441,7 @@ class Orchestrator:
             for u in closed_set
             if Status.is_failure(g.nodes[u][KEY_STATUS])
         }:
-            print("Exiting due to execution failures")
-            print("Tasks with failures: %s", failures)
+            print(f"Exiting due to task failures: {failures}")
             return None
 
         for n in working_list:
