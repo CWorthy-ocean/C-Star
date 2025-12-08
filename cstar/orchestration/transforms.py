@@ -96,9 +96,6 @@ def get_time_slices(
                 current_date.year,
                 month_start.month + 1,
                 1,
-                hour=0,
-                minute=0,
-                second=0,
             )
 
         time_slices.append((month_start, month_end))
