@@ -342,6 +342,70 @@ class Simulation(ABC, LoggingMixin):
 
         return repr_str
 
+    @staticmethod
+    def get_state_file(directory: Path) -> Path:
+        """The path where a state file containing a pickled Simulation will be created
+        upon successful completion of a simulation.
+
+        Returns
+        -------
+        Path
+           The path where the state file will be created.
+        """
+        return directory / "work" / "simulation_state.pkl"
+
+    @property
+    def state_file(self) -> Path:
+        """The path where a state file containing the pickled Simulation will be created
+        upon successful completion of the simulation.
+
+        Returns
+        -------
+        Path
+           The path where the state file will be created.
+        """
+        return Simulation.get_state_file(self.directory)
+
+    @property
+    def input_dir(self) -> Path:
+        """Return the path to the directory where simulation inputs will be written.
+
+        Returns
+        -------
+        Path
+        """
+        return self.directory / "input"
+
+    @property
+    def output_dir(self) -> Path:
+        """Return the path to the directory where simulation outputs will be written.
+
+        Returns
+        -------
+        Path
+        """
+        return self.directory / "output"
+
+    @property
+    def work_dir(self) -> Path:
+        """Return the path to the directory where simulation work will be written.
+
+        Returns
+        -------
+        Path
+        """
+        return self.directory / "work"
+
+    @property
+    def logs_dir(self) -> Path:
+        """Return the path to the directory where simulation logs will be written.
+
+        Returns
+        -------
+        Path
+        """
+        return self.directory / "logs"
+
     @property
     @abstractmethod
     def default_codebase(self) -> ExternalCodeBase:
@@ -500,7 +564,8 @@ class Simulation(ABC, LoggingMixin):
         if hasattr(self, "_log"):
             del self._log
 
-        with open(f"{self.directory}/simulation_state.pkl", "wb") as state_file:
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.state_file, "wb") as state_file:
             pickle.dump(self, state_file)
 
     @classmethod
@@ -532,7 +597,7 @@ class Simulation(ABC, LoggingMixin):
         persist : Saves the current simulation state.
         """
         directory = Path(directory)
-        with open(f"{directory}/simulation_state.pkl", "rb") as state_file:
+        with open(Simulation.get_state_file(directory), "rb") as state_file:
             simulation_instance = pickle.load(state_file)
         return simulation_instance
 

@@ -9,9 +9,9 @@ from cstar.orchestration.utils import clear_working_dir
 def populated_output_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
     output_dir = tmp_path / "my_output_dir"
     files = [
-        (output_dir / "ROMS" / "some_file"),
+        (output_dir / "input" / "some_file"),
         (output_dir / "output" / "some_file"),
-        (output_dir / "JOINED_OUTPUT" / "some_file"),
+        (output_dir / "output" / "JOINED_OUTPUT" / "some_file"),
     ]
 
     for f in files:

@@ -1591,8 +1591,8 @@ class TestProcessingAndExecution:
         with the appropriate parameters and submits it.
         """
         sim = stub_romssimulation
-        build_dir = sim.directory / "ROMS/compile_time_code"
-        runtime_code_dir = sim.directory / "ROMS/runtime_code"
+        build_dir = sim.directory / "input/compile_time_code"
+        runtime_code_dir = sim.directory / "input/runtime_code"
         script_dir = sim.directory / "work"
         sim.runtime_code._working_copy = stageddatacollection_remote_files(
             paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
@@ -1798,7 +1798,7 @@ class TestProcessingAndExecution:
         )
 
         # Check that output file was moved
-        new_out_dir = output_dir.parent / "JOINED_OUTPUT"
+        new_out_dir = output_dir / "JOINED_OUTPUT"
         assert new_out_dir.exists()
         assert (new_out_dir / "ocean_his.20240101000000.nc").exists()
         assert (new_out_dir / "ocean_rst.20240101000000.nc").exists()

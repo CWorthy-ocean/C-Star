@@ -37,9 +37,8 @@ def clear_working_dir(path: Path) -> None:
     """
     if os.getenv("CSTAR_CLOBBER_WORKING_DIR") == "1":
         print(f"clearing {path}")
-        shutil.rmtree(path / "ROMS", ignore_errors=True)
+        shutil.rmtree(path / "input", ignore_errors=True)
         shutil.rmtree(path / "output", ignore_errors=True)
-        shutil.rmtree(path / "JOINED_OUTPUT", ignore_errors=True)
 
 
 def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
