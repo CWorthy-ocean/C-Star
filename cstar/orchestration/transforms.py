@@ -1,3 +1,4 @@
+import os
 import typing as t
 from datetime import datetime
 from pathlib import Path
@@ -59,6 +60,9 @@ def get_transform(application: str) -> Transform | None:
     Splitter | None
         The transform instance, or None if not found.
     """
+    if os.getenv("CSTAR_ORCH_DISABLE_TRANSFORMS", "0") == "1":
+        return None
+
     return TRANSFORMS.get(application)
 
 
