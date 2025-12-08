@@ -139,7 +139,7 @@ class RomsMarblTimeSplitter(Transform):
 
         return location.stem
 
-    def _get_default_overrides(
+    def _get_blueprint_overrides(
         self,
         step_name: str,
         sd: datetime,
@@ -250,7 +250,7 @@ class RomsMarblTimeSplitter(Transform):
             # restart_files.sort(reverse=True)
             # last_restart_file = restart_files[0] if restart_files else "not-found"
 
-            updates = self._get_default_overrides(
+            updates = self._get_blueprint_overrides(
                 step_name, sd, ed, output_root / step_name, depends_on
             )
 
