@@ -331,9 +331,7 @@ def main() -> None:
         bp_path = Path(bp_default)
         print(f"Running unmodified workplan at `{wp_path}`")
 
-    run_id = (
-        f"dag-main-{template}-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    )
+    run_id = f"dag_runner_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     os.environ["CSTAR_RUNID"] = run_id
 
     if wp_path is None:
