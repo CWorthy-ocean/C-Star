@@ -232,7 +232,7 @@ class Planner:
             The value to be stored.
         """
         if key in {KEY_STATUS, KEY_STEP, KEY_TASK}:
-            msg = f"WARNING: Writing to reserved key `{key}` on node `{n}`"
+            msg = f"Writing to reserved key `{key}` on node `{n}`"
             print(msg)
 
         node = self.graph.nodes[n]
