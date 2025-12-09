@@ -61,6 +61,7 @@ def get_transform(application: str) -> Transform | None:
         The transform instance, or None if not found.
     """
     if os.getenv("CSTAR_ORCHESTRATOR_ENABLE_TRANSFORMS", "1") != "1":
+        print("Transforms are disabled.")
         return None
 
     return TRANSFORMS.get(application)
