@@ -480,7 +480,7 @@ class Step(BaseModel):
 
     def logs_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
         """Compute a step-relative path for the storage of the output files."""
-        return self.output_dir(bp) / "logs"
+        return self.output_root(bp) / "logs"
 
     def output_file(self, bp: RomsMarblBlueprint | None = None) -> Path:
         """Compute a step-relative path for the storage of the output files."""
