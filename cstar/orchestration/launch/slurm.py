@@ -105,7 +105,15 @@ def convert_roms_step_to_command(step: Step) -> str:
     # serialize(bp_overrides_path, bp)
 
     # tell worker to use overridden blueprint
-    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {step.blueprint}"
+    return " ".join(
+        [
+            sys.executable,
+            "-m",
+            "cstar.entrypoint.worker.worker",
+            "-b",
+            Path(step.blueprint_path).as_posix(),
+        ]
+    )
 
 
 def convert_step_to_placeholder(step: Step) -> str:
@@ -195,7 +203,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             A ProcessHandle identifying the newly submitted job.
         """
         job_name = step.safe_job_name
-        bp_path = Path(step.blueprint)
+        bp_path = Path(step.blueprint_path)
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 

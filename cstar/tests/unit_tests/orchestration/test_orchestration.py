@@ -79,7 +79,11 @@ def diamond_workplan(tmp_path: Path) -> Workplan:
         name="diamond",
         description="A workplan with steps arranged in a diamond-shaped dependency graph.",
         steps=[
-            Step(name="d-00", application="sleep", blueprint=bp_path.as_posix()),
+            Step(
+                name="d-00",
+                application="sleep",
+                blueprint=bp_path.as_posix(),
+            ),
             Step(
                 name="d-01",
                 depends_on=["d-00"],

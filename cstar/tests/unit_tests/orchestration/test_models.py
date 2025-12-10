@@ -7,10 +7,10 @@ import uuid
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from cstar.orchestration.models import KeyValueStore, Step, Workplan, WorkplanState
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, serialize
 
 
 def test_step_defaults(fake_blueprint_path: Path) -> None:
@@ -31,7 +31,7 @@ def test_step_defaults(fake_blueprint_path: Path) -> None:
 
     assert step.name == step_name
     assert step.application == app_name
-    assert step.blueprint == fake_blueprint_path
+    assert step.blueprint_path == fake_blueprint_path
 
     assert not step.depends_on
     assert "foo" not in step.depends_on  # ensure non-null
@@ -748,7 +748,6 @@ def test_workplan_json_serialize(
 def test_workplan_yaml_serialize(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
     tmp_path: pathlib.Path,
-    serialize_workplan: t.Callable[[Workplan, Path], str],
 ) -> None:
     """Verify that the model serializes to YAML without errors.
 
@@ -773,7 +772,10 @@ def test_workplan_yaml_serialize(
         fp.write(json.dumps(schema))
 
     yaml_path = tmp_path / "test.yaml"
-    yaml_doc = serialize_workplan(plan, yaml_path)
+    nbytes = serialize(yaml_path, plan)
+    assert nbytes > 0
+
+    yaml_doc = yaml_path.read_text()
 
     assert "name" in yaml_doc
     assert "description" in yaml_doc
@@ -791,8 +793,6 @@ def test_workplan_yaml_serialize(
 def test_workplan_yaml_deserialize(
     gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
     tmp_path: pathlib.Path,
-    serialize_workplan: t.Callable[[BaseModel, Path], str],
-    # deserialize_model: t.Callable[[Path, type], BaseModel],
 ) -> None:
     """Verify that the model deserializes from YAML without errors.
 
@@ -811,12 +811,12 @@ def test_workplan_yaml_deserialize(
     )
 
     yaml_path = tmp_path / "test.yaml"
-    _ = serialize_workplan(plan, yaml_path)
+    _ = serialize(yaml_path, plan)
 
     plan2 = t.cast("Workplan", deserialize(yaml_path, Workplan))
     # todo: fix so this str conversion isn't required.
     for step in plan.steps:
-        step.blueprint = str(step.blueprint)
+        step.blueprint_path = str(step.blueprint_path)
 
     assert plan == plan2
 

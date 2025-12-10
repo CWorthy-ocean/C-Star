@@ -351,7 +351,7 @@ class RomsMarblTimeSplitter(Transform):
         Iterable[Step]
             The sub-steps.
         """
-        blueprint = deserialize(step.blueprint, RomsMarblBlueprint)
+        blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
         step.bp = blueprint
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date

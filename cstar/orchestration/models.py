@@ -416,7 +416,7 @@ class Step(BaseModel):
     application: RequiredString
     """The user-friendly name of the application executed in the step."""
 
-    blueprint: FilePath | str
+    blueprint_path: FilePath | str = Field(alias="blueprint")
     """The blueprint that will be executed in this step."""
 
     depends_on: list[RequiredString] = Field(
