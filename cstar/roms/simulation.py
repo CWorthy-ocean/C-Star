@@ -1530,12 +1530,18 @@ class ROMSSimulation(Simulation):
         script_name = job_name or self.name
         safe_name = re.sub(r"\W+", "", script_name.casefold())
         script_path = self.work_dir / f"{safe_name}.sh"
+        output_file = self.logs_dir / f"{safe_name}.out"
 
         ## 2: RUN ROMS
 
-        roms_exec_cmd = (
-            f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
-            f"{final_runtime_settings_file}"
+        roms_exec_cmd = " ".join(
+            [
+                f"{cstar_sysmgr.environment.mpi_exec_prefix}",
+                "-n",
+                f"{self.discretization.n_procs_tot}",
+                f"{self.exe_path}",
+                f"{final_runtime_settings_file}",
+            ]
         )
 
         self.log.info(f"Running {roms_exec_cmd}")
@@ -1558,6 +1564,7 @@ class ROMSSimulation(Simulation):
                 script_path=script_path,
                 queue_name=queue_name,
                 walltime=walltime,
+                output_file=output_file,
             )
 
             job_instance.submit()
@@ -1566,7 +1573,11 @@ class ROMSSimulation(Simulation):
             return job_instance
 
         else:  # cstar_sysmgr.scheduler is None
-            romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
+            romsprocess = LocalProcess(
+                commands=roms_exec_cmd,
+                run_path=run_path,
+                output_file=output_file,
+            )
             self._execution_handler = romsprocess
             self.persist()
             romsprocess.start()

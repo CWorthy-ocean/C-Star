@@ -20,8 +20,8 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.utils import clear_working_dir, slugify
+from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.utils import clear_working_dir
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -95,17 +95,17 @@ def convert_roms_step_to_command(step: Step) -> str:
     str
         The complete CLI command.
     """
-    bp_path = Path(step.blueprint)
+    # bp_path = Path(step.blueprint)
 
     # load current blueprint and apply overrides
-    og_bp = deserialize(bp_path, RomsMarblBlueprint)
-    bp = og_bp.model_copy(update=step.blueprint_overrides)
+    # og_bp = deserialize(bp_path, RomsMarblBlueprint)
+    # bp = og_bp.model_copy(update=step.blueprint_overrides)
 
-    bp_overrides_path = bp_path.with_stem(f"{bp_path.stem}_{slugify(step.name)}")
-    serialize(bp_overrides_path, bp)
+    # bp_overrides_path = bp_path.with_stem(f"{bp_path.stem}_{slugify(step.name)}")
+    # serialize(bp_overrides_path, bp)
 
     # tell worker to use overridden blueprint
-    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {bp_overrides_path}"
+    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {step.blueprint}"
 
 
 def convert_step_to_placeholder(step: Step) -> str:
@@ -199,12 +199,16 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        clear_working_dir(step.output_root(bp))
+        clear_working_dir(step.working_dir)
 
         step_converter = app_to_cmd_map[step.application]
         if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
             step_converter = app_to_cmd_map[converter_override]
         print(f"Using `{step_converter.__name__}` for `{step.application}` commands.")
+
+        script_path = step.working_dir / "work" / "script.sh"
+        run_path = step.working_dir
+        output_file = step.working_dir / "logs" / f"{job_name}.out"  # "log.out"
 
         command = step_converter(step)
         job = create_scheduler_job(
@@ -213,10 +217,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             cpus=bp.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
-            script_path=step.script_path(bp),
-            run_path=step.run_path(bp),
+            script_path=script_path,
+            run_path=run_path,
             job_name=job_name,
-            output_file=step.output_file(bp),
+            output_file=output_file,
             queue_name=SlurmLauncher.configured_queue(),
             walltime=SlurmLauncher.configured_walltime(),
             depends_on=job_dep_ids,

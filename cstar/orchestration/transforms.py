@@ -1,13 +1,13 @@
 import os
 import typing as t
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import HttpUrl
 
-from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step
-from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import deep_merge, slugify
+from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
+from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.utils import slugify
 
 
 class Transform(t.Protocol):
@@ -60,10 +60,6 @@ def get_transform(application: str) -> Transform | None:
     Splitter | None
         The transform instance, or None if not found.
     """
-    if os.getenv("CSTAR_ORCHESTRATOR_ENABLE_TRANSFORMS", "1") != "1":
-        print("Transforms are disabled.")
-        return None
-
     return TRANSFORMS.get(application)
 
 
@@ -84,33 +80,136 @@ def get_time_slices(
     Iterable[tuple[datetime, datetime]]
         The time slices.
     """
-    current_date = datetime(start_date.year, start_date.month, 1)
+    # current_date = datetime(start_date.year, start_date.month, 1)
+    current_date = datetime(start_date.year, start_date.month, start_date.day)
 
     time_slices = []
     while current_date < end_date:
-        month_start = current_date
+        day_start = current_date
+        day_end = day_start + timedelta(days=1)
 
-        if month_start.month == 12:
-            month_end = datetime(current_date.year + 1, 1, 1)
-        else:
-            month_end = datetime(
-                current_date.year,
-                month_start.month + 1,
-                1,
-            )
+        time_slices.append((day_start, day_end))
+        current_date = day_end
 
-        time_slices.append((month_start, month_end))
-        current_date = month_end
+        # month_start = current_date
 
-    # adjust when the start date is not the first day of the month
-    if start_date > time_slices[0][0]:
-        time_slices[0] = (start_date, time_slices[0][1])
+        # if month_start.month == 12:
+        #     month_end = datetime(current_date.year + 1, 1, 1)
+        # else:
+        #     month_end = datetime(
+        #         current_date.year,
+        #         month_start.month + 1,
+        #         1,
+        #     )
 
-    # adjust when the end date is not the last day of the month
-    if end_date < time_slices[-1][1]:
-        time_slices[-1] = (time_slices[-1][0], end_date)
+        # time_slices.append((month_start, month_end))
+        # current_date = month_end
+
+    # # adjust when the start date is not the first day of the month
+    # if start_date > time_slices[0][0]:
+    #     time_slices[0] = (start_date, time_slices[0][1])
+
+    # # adjust when the end date is not the last day of the month
+    # if end_date < time_slices[-1][1]:
+    #     time_slices[-1] = (time_slices[-1][0], end_date)
 
     return time_slices
+
+
+class WorkplanTransformer:
+    """Transform a workplan by applying transforms to its steps."""
+
+    original: Workplan
+    """The original, pre-transformation workplan."""
+
+    _transformed: Workplan | None = None
+    """The post-transformation workplan."""
+
+    ENABLED_ENV_VAR: t.ClassVar[t.Final[str]] = "CSTAR_ORCHESTRATOR_ENABLE_TRANSFORMS"
+    """Environment variable to control whether transforms are enabled."""
+
+    DERIVED_PATH_SUFFIX: t.ClassVar[t.Final[str]] = "_trx"
+    """Suffix appended to the original workplan path when generating a derived path."""
+
+    def __init__(self, wp: Workplan):
+        self.original = Workplan(**wp.model_dump())
+
+    @property
+    def enabled(self) -> bool:
+        """Check local configuration to determine if transforms are enabled.
+
+        Defaults to `True` when no configuration is found.
+
+        Returns
+        -------
+        bool
+        """
+        return os.getenv(WorkplanTransformer.ENABLED_ENV_VAR, "1") == "1"
+
+    @property
+    def is_modified(self) -> bool:
+        """Return `True` if the transformed workplan differs from the original.
+
+        Returns
+        -------
+        bool
+        """
+        dump_a = self.original.model_dump()
+        dump_b = self.transformed.model_dump()
+
+        return dump_a != dump_b
+
+    @property
+    def transformed(self) -> Workplan:
+        """Return the transformed workplan."""
+        if self._transformed is None:
+            self._transformed = self.apply()
+        return Workplan(**self._transformed.model_dump())
+
+    @staticmethod
+    def derived_path(source: Path, target_dir: Path | None = None) -> Path:
+        """Generate a new path name derived from the original workplan path.
+
+        If no target directory is specified, the resulting path will be alongside
+        the original file.
+        """
+        stem = f"{source.stem}{WorkplanTransformer.DERIVED_PATH_SUFFIX}"
+        if target_dir is not None:
+            return target_dir / source.with_stem(stem)
+        return source.with_stem(stem)
+
+    def apply(self) -> Workplan:
+        """Create a new workplan with appropriate transforms applied.
+
+        Returns
+        -------
+        Workplan
+        """
+        if not self.enabled:
+            return self.original
+
+        steps = []
+        for step in self.original.steps:
+            transform = get_transform(step.application)
+            if not transform:
+                steps.append(step)
+                continue
+
+            transformed = list(transform(step))
+            steps.extend(transformed)
+
+            # replace dependencies on the original step with the last transformed step
+            tweaks = (s for s in self.original.steps if step.name in s.depends_on)
+            for tweak in tweaks:
+                tweak.depends_on.remove(step.name)
+                tweak.depends_on.append(transformed[-1].name)
+
+        wp_attrs = self.original.model_dump()
+        wp_attrs.update(
+            {"steps": steps, "name": f"{self.original.name} (with transforms)"}
+        )
+
+        return Workplan(**wp_attrs)
 
 
 class RomsMarblTimeSplitter(Transform):
@@ -136,9 +235,9 @@ class RomsMarblTimeSplitter(Transform):
         if isinstance(location, HttpUrl):
             if location.path is None:
                 raise RuntimeError("Initial conditions location is not a valid path")
-            location = Path(location.path)
+            location = location.path
 
-        return location.stem
+        return Path(location).stem
 
     def _get_blueprint_overrides(
         self,
@@ -196,13 +295,36 @@ class RomsMarblTimeSplitter(Transform):
         """
         return {
             "blueprint_overrides": {
-                "runtime_params": {
-                    "initial_conditions": {
-                        "location": last_output_path.as_posix(),
-                    }
+                "initial_conditions": {
+                    "data": [
+                        {
+                            "location": last_output_path.as_posix(),
+                            # "partitioned": "true",
+                        }
+                    ]
                 }
             }
         }
+
+    def output_root(
+        self,
+        step_name: str,
+        bp: RomsMarblBlueprint,
+    ) -> Path:
+        """The step-relative directory for writing outputs."""
+        # runtime_overrides = t.cast(
+        #     dict[str, str], self.blueprint_overrides.get("runtime_params", {})
+        # )
+        # output_dir: str | Path = runtime_overrides.get("output_dir", "")
+
+        # if output_dir:
+        #     # runtime override will always take precedence
+        #     return Path(output_dir)
+
+        # run_id = os.getenv("CSTAR_RUNID")
+
+        # use the blueprint root path if it hasn't been overridden
+        return Path(bp.runtime_params.output_dir) / slugify(step_name)
 
     def __call__(self, step: Step) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
@@ -218,12 +340,16 @@ class RomsMarblTimeSplitter(Transform):
             The sub-steps.
         """
         blueprint = deserialize(step.blueprint, RomsMarblBlueprint)
+        step.bp = blueprint
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
         # use the directory of the parent as the base...
-        output_root = step.tasks_dir(blueprint)
-        time_slices = get_time_slices(start_date, end_date)
+        output_root = self.output_root(step.name, blueprint)
+        work_root = output_root / "work"
+        task_root = output_root / "tasks"
+
+        time_slices = list(get_time_slices(start_date, end_date))
 
         # if (start_date - end_date).total_seconds() < timedelta(days=30).total_seconds():
         #     # TODO: leave this ask discussion driver. must determine
@@ -237,38 +363,72 @@ class RomsMarblTimeSplitter(Transform):
 
         depends_on = step.depends_on
         last_restart_file: Path | None = None
+        # ic_stem = self._get_location_stem(blueprint)
+        # TODO: confirm with "normal IC paths (xxx.nc, not xxx.000.nc)"
+        # ic_stem = ic_stem.split(".")[0]
 
-        for sd, ed in time_slices:
+        for i, (sd, ed) in enumerate(time_slices):
+            bp_copy = RomsMarblBlueprint(
+                **blueprint.model_dump(
+                    exclude_unset=True,
+                    exclude_defaults=True,
+                    exclude_computed_fields=True,
+                ),
+            )
+
             compact_sd = sd.strftime("%Y%m%d%H%M%S")
             compact_ed = ed.strftime("%Y%m%d%H%M%S")
 
-            step_name = slugify(f"{step.name}_{compact_sd}-{compact_ed}")
+            child_step_name = slugify(f"{i + 1:02d}_{compact_sd}_{compact_ed}")
 
-            # reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
-            # restart_file = step_output_root / f"{ic_stem}_rst.{compact_sd}.*.nc"
+            subtask_root = task_root / child_step_name
 
-            # restart_files = list(step_output_dir.glob(".*_rst.??????????????.*.nc"))
-            # restart_files.sort(reverse=True)
-            # last_restart_file = restart_files[0] if restart_files else "not-found"
-
-            updates = self._get_blueprint_overrides(
-                step_name, sd, ed, output_root / step_name, depends_on
+            bp_copy.runtime_params.start_date = sd
+            bp_copy.runtime_params.end_date = ed
+            bp_copy.runtime_params.output_dir = subtask_root
+            bp_copy.description = (
+                f"subtask {i + 1}: {sd} to {ed} - {blueprint.description}"
             )
 
-            # adjust initial conditions after the first step
-            if last_restart_file is not None:
-                updates = deep_merge(updates, self._get_ic_overrides(last_restart_file))
+            if last_restart_file:
+                bp_copy.initial_conditions.data[
+                    0
+                ].location = last_restart_file.as_posix()
+
+            store_at = work_root / f"{child_step_name}_blueprint.yaml"
+            serialize(store_at, bp_copy)
+
+            attributes = step.model_dump(exclude={"blueprint", "name", "depends_on"})
 
             child_step = ChildStep(
-                **{**step.model_dump(), **updates, "parent": step.name}
+                **attributes,
+                name=child_step_name,
+                blueprint=store_at.as_posix(),
+                depends_on=depends_on,
+                parent=step.name,
             )
+            child_step.bp = bp_copy
+
+            # child_step = ChildStep(**{step.model_dump(), "name": step_name}, parent=step.name)
             yield child_step
+            if i == len(time_slices) - 1:
+                break
+
+            # # adjust initial conditions after the first step; first step uses original IC's.
+            # if last_restart_file is not None:
+            #     updates = deep_merge(updates, self._get_ic_overrides(last_restart_file))
 
             # use dependency on the prior substep to chain all the dynamic steps
             depends_on = [child_step.name]
 
+            # Use the last restart file as initial conditions for the follow-up step
+            # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
+            reset_file_name = f"output_rst.{compact_ed}.000.nc"
+            restart_file_path = child_step.working_dir / "output" / reset_file_name
+
             # use output dir of the last step as the input for the next step
-            last_restart_file = child_step.restart_path(compact_sd, blueprint)
+            last_restart_file = restart_file_path
 
 
 register_transform("roms_marbl", RomsMarblTimeSplitter())
+# register_transform("sleep", RomsMarblTimeSplitter())

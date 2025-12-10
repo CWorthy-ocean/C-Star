@@ -5,7 +5,6 @@ from pathlib import Path
 import networkx as nx
 import pytest
 
-from cstar.orchestration.dag_runner import transform_workplan
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import (
@@ -16,7 +15,7 @@ from cstar.orchestration.orchestration import (
     RunMode,
     Status,
 )
-from cstar.orchestration.transforms import get_time_slices
+from cstar.orchestration.transforms import WorkplanTransformer, get_time_slices
 
 
 @pytest.fixture
@@ -169,7 +168,8 @@ def test_workplan_transformation(diamond_workplan: Workplan):
     for step in diamond_workplan.steps:
         step.application = Application.ROMS_MARBL.value
 
-    transformed = transform_workplan(diamond_workplan)
+    transformer = WorkplanTransformer(diamond_workplan)
+    transformed = transformer.apply()
     # start & end date in the blueprint.yaml file
     sd, ed = datetime(2020, 1, 1), datetime(2021, 1, 1)
 

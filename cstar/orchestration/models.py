@@ -56,7 +56,8 @@ class ConfiguredBaseModel(BaseModel):
 
 
 class Resource(ConfiguredBaseModel):
-    location: FilePath | HttpUrl
+    # location: FilePath | HttpUrl | str
+    location: str
     """Location of the file to retrieve."""
 
     partitioned: bool = Field(default=False, init=False)
@@ -453,55 +454,73 @@ class Step(BaseModel):
         """The name of the job that will be executed."""
         return slugify(self.name)
 
-    def output_root(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    _blueprint: RomsMarblBlueprint | None = None
+
+    @property
+    def bp(self) -> RomsMarblBlueprint | None:
+        """The blueprint that will be executed in this step."""
+        return self._blueprint
+
+    @bp.setter
+    def bp(self, value: RomsMarblBlueprint | None) -> None:
+        """The blueprint that will be executed in this step."""
+        self._blueprint = value
+
+    @property
+    def working_dir(self) -> Path:
         """The step-relative directory for writing outputs."""
-        runtime_overrides = t.cast(
-            dict[str, str], self.blueprint_overrides.get("runtime_params", {})
-        )
-        output_dir: str | Path = runtime_overrides.get("output_dir", "")
+        if not self.bp:
+            raise ValueError("Blueprint is required to determine working directory")
+        return self.bp.runtime_params.output_dir
 
-        if output_dir:
-            # runtime override will always take precedence
-            return Path(output_dir)
+    # def output_root(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    #     """The step-relative directory for writing outputs."""
+    #     runtime_overrides = t.cast(
+    #         dict[str, str], self.blueprint_overrides.get("runtime_params", {})
+    #     )
+    #     output_dir: str | Path = runtime_overrides.get("output_dir", "")
 
-        if not bp:
-            raise ValueError("Blueprint is required to determine output path")
+    #     if output_dir:
+    #         # runtime override will always take precedence
+    #         return Path(output_dir)
 
-        # use the blueprint root path if it hasn't been overridden
-        return Path(bp.runtime_params.output_dir) / self.safe_job_name
+    #     if not bp:
+    #         raise ValueError("Blueprint is required to determine output path")
 
-    def tasks_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
-        """The step-relative directory for writing outputs of sub-tasks."""
-        return self.output_root(bp) / "tasks"
+    #     # use the blueprint root path if it hasn't been overridden
+    #     return Path(bp.runtime_params.output_dir) / self.safe_job_name
 
-    def output_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
-        """Compute a step-relative path for the storage of the output files."""
-        return self.output_root(bp) / "outputs"
+    # def tasks_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    #     """The step-relative directory for writing outputs of sub-tasks."""
+    #     return self.output_root(bp) / "tasks"
 
-    def logs_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
-        """Compute a step-relative path for the storage of the output files."""
-        return self.output_root(bp) / "logs"
+    # def input_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    #     """Compute a step-relative path for the storage of the input files."""
+    #     return self.output_root(bp) / "input"
 
-    def output_file(self, bp: RomsMarblBlueprint | None = None) -> Path:
-        """Compute a step-relative path for the storage of the output files."""
-        return self.logs_dir(bp) / f"{self.safe_job_name}.out"
+    # def output_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    #     """Compute a step-relative path for the storage of the output files."""
+    #     return self.output_root(bp) / "output"
 
-    def work_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
-        """Compute a step-relative path for the storage of the script."""
-        return self.output_root(bp) / "work"
+    # def logs_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    #     """Compute a step-relative path for the storage of the output files."""
+    #     return self.output_root(bp) / "logs"
 
-    def script_path(self, bp: RomsMarblBlueprint | None = None) -> Path:
-        """Compute a step-relative path for the storage of the script."""
-        return self.work_dir(bp) / f"{self.safe_job_name}.sh"
+    # def output_file(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    #     """Compute a step-relative path for the storage of the output files."""
+    #     return self.logs_dir(bp) / f"{self.safe_job_name}.out"
 
-    def run_path(self, bp: RomsMarblBlueprint) -> Path:
-        """Compute a step-relative path for working directory of the script."""
-        return self.script_path(bp).parent
+    # def work_dir(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    #     """Compute a step-relative path for the storage of the script."""
+    #     return self.output_root(bp) / "work"
 
-    def restart_path(self, segment_id: str, bp: RomsMarblBlueprint) -> Path:
-        """Compute a step-relative path where reset files will be located."""
-        # name format is ".*_rst.??????????????.*.nc"
-        return self.output_dir(bp) / f".*_rst.{segment_id}.*.nc"
+    # def script_path(self, bp: RomsMarblBlueprint | None = None) -> Path:
+    #     """Compute a step-relative path for the storage of the script."""
+    #     return self.work_dir(bp) / f"{self.safe_job_name}.sh"
+
+    # def run_path(self, bp: RomsMarblBlueprint) -> Path:
+    #     """Compute a step-relative path for working directory of the script."""
+    #     return self.script_path(bp).parent
 
 
 class ChildStep(Step):

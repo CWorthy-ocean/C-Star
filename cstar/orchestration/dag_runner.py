@@ -16,7 +16,7 @@ from cstar.orchestration.orchestration import (
     RunMode,
 )
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import Transform, get_transform
+from cstar.orchestration.transforms import WorkplanTransformer
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -144,63 +144,33 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
     print(f"Workplan {mode} is complete.")
 
 
-def transform_workplan(wp: Workplan) -> Workplan:
-    """Create a new workplan with appropriate transforms applied.
+async def prepare_workplan(wp_path: Path, output_dir: Path) -> tuple[Workplan, Path]:
+    """Load the workplan and apply any applicable transforms.
 
     Parameters
     ----------
-    wp : Workplan
-        The workplan to transform.
+    wp_path : Path
+        The path to the workplan to load.
 
     Returns
     -------
     Workplan
-        The transformed workplan.
     """
-    steps = []
-    for step in wp.steps:
-        transform: Transform | None = get_transform(step.application)
-        if not transform:
-            steps.append(step)
-            continue
+    wp = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
-        transformed = list(transform(step))
-        steps.extend(transformed)
+    transformer = WorkplanTransformer(wp)
+    if transformer.is_modified:
+        print("A transformed workplan will be executed.")
 
-        tweaks = [s for s in wp.steps if step.name in s.depends_on]
-        for tweak in tweaks:
-            tweak.depends_on.remove(step.name)
-            tweak.depends_on.append(transformed[-1].name)
+    wp = transformer.transformed
+    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir)
+    await asyncio.to_thread(serialize, persist_as, wp)
 
-    wp_attrs = wp.model_dump()
-    wp_attrs.update({"steps": steps})
-
-    return Workplan(**wp_attrs)
-
-
-def persist_workplan(wp: Workplan, source_path: Path) -> Path:
-    """Persist a transformed workplan to a file.
-
-    Parameters
-    ----------
-    wp : Workplan
-        The workplan to transform.
-    source_path : Path
-        The path to the original workplan file.
-
-    Returns
-    -------
-    tuple[Workplan, Path]
-        The transformed workplan and the path where it has been written.
-    """
-    persist_path = source_path.with_stem(f"{source_path.stem}_transformed")
-    serialize(persist_path, wp)
-
-    return persist_path
+    return wp, persist_as
 
 
 # @flow(log_prints=True)
-async def build_and_run_dag(path: Path) -> None:
+async def build_and_run_dag(wp_path: Path, output_dir: Path) -> None:
     """Execute the steps in the workplan.
 
     Parameters
@@ -208,15 +178,7 @@ async def build_and_run_dag(path: Path) -> None:
     path : Path
         The path to the blueprint to execute
     """
-    wp = deserialize(path, Workplan)
-    print(f"Executing workplan: {wp.name}")
-    original_wp = wp
-
-    wp = transform_workplan(wp)
-    _ = persist_workplan(wp, path)
-
-    if original_wp.model_dump() != wp.model_dump():
-        print("Transformed workplan will be used for execution.")
+    wp, wp_path = await prepare_workplan(wp_path, output_dir)
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
@@ -337,7 +299,7 @@ def main() -> None:
     if wp_path is None:
         raise ValueError("Workplan path is malformed.")
 
-    asyncio.run(build_and_run_dag(wp_path))
+    asyncio.run(build_and_run_dag(wp_path, o_path))
 
 
 if __name__ == "__main__":

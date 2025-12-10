@@ -9,6 +9,7 @@ import typer
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
 from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.transforms import WorkplanTransformer
 from cstar.orchestration.utils import slugify
 
 app = typer.Typer()
@@ -221,13 +222,17 @@ def plan(
     plan_path: Path | None = None
 
     try:
-        if workplan := deserialize(path, Workplan):
-            planner = Planner(workplan)
-            plan_path = asyncio.run(
-                render(
-                    planner,
-                    output_dir,
-                )
+        if workplan := deserialize(ns.path, Workplan):
+            if ns.transform:
+                transformed = WorkplanTransformer(workplan).apply()
+                # transformed = transform_workplan(workplan)
+                planner = Planner(transformed)
+            else:
+                planner = Planner(workplan)
+
+            plan_path = await render(
+                planner,
+                ns.output_dir,
             )
         else:
             print(f"The workplan at `{path}` could not be loaded")
