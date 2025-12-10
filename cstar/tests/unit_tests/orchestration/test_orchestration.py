@@ -66,11 +66,13 @@ def diamond_workplan(tmp_path: Path) -> Workplan:
         / "additional_files/templates/bp"
         / "blueprint.yaml"
     )
-    default_output_dir: t.Literal["output_dir: ."] = "output_dir: ."
+    default_output_dir = "output_dir: ."
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
-    bp_content = bp_content.replace(default_output_dir, tmp_path.as_posix())
+    bp_content = bp_content.replace(
+        default_output_dir, f"output_dir: {tmp_path.as_posix()}"
+    )
     bp_path.write_text(bp_content)
 
     return Workplan(
