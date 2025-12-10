@@ -144,7 +144,7 @@ class WorkplanTransformer:
     """Suffix appended to the original workplan path when generating a derived path."""
 
     def __init__(self, wp: Workplan):
-        self.original = Workplan(**wp.model_dump())
+        self.original = Workplan(**wp.model_dump(by_alias=True))
 
     @property
     def enabled(self) -> bool:
