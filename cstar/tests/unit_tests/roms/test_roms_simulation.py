@@ -1553,6 +1553,7 @@ class TestProcessingAndExecution:
             mock_local_process.assert_called_once_with(
                 commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest.in",
                 run_path=sim.directory / "output",
+                output_file=sim.directory / "logs" / "romstest.out",
             )
 
             # Ensure process was started
@@ -1646,6 +1647,7 @@ class TestProcessingAndExecution:
                 script_path=script_dir / "romstest.sh",
                 queue_name="default_queue",
                 walltime="12:00:00",
+                output_file=sim.directory / "logs" / "romstest.out",
             )
 
             mock_job_instance.submit.assert_called_once()
