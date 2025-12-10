@@ -181,11 +181,11 @@ class SimulationRunner(Service):
         # the tweak to _get_unique_file_path to use the run-id ENV var
         # is appropriate OR if that should fall on the caller.
 
-        # # create a clean location to write outputs.
-        # if not self._output_dir.exists():
-        #     msg = f"Creating clean output dir: {self._output_dir}"
-        #     self.log.debug(msg)
-        #     self._output_dir.mkdir(parents=True, exist_ok=True)
+        # create a clean location to write outputs.
+        if not self._output_dir.exists():
+            msg = f"Creating clean output dir: {self._output_dir}"
+            self.log.debug(msg)
+            self._output_dir.mkdir(parents=True, exist_ok=True)
 
     def _log_disposition(self, treat_as_failure: bool = False) -> None:
         """Log the status of the simulation at shutdown time."""
