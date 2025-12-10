@@ -63,8 +63,39 @@ def get_transform(application: str) -> Transform | None:
     return TRANSFORMS.get(application)
 
 
-def get_time_slices(
+def _dailies(
     start_date: datetime, end_date: datetime
+) -> t.Iterable[tuple[datetime, datetime]]:
+    """Get the daily time slices for the given start and end dates."""
+    current_date = datetime(start_date.year, start_date.month, start_date.day)
+    while current_date < end_date:
+        day_start = current_date
+        day_end = day_start + timedelta(days=1)
+        yield (day_start, day_end)
+        current_date = day_end
+
+
+def _monthlies(
+    start_date: datetime, end_date: datetime
+) -> t.Iterable[tuple[datetime, datetime]]:
+    """Get the monthly time slices for the given start and end dates."""
+    current_date = datetime(start_date.year, start_date.month, 1)
+    while current_date < end_date:
+        month_start = current_date
+
+        if month_start.month == 12:
+            month_end = datetime(current_date.year + 1, 1, 1)
+        else:
+            month_end = datetime(current_date.year, month_start.month + 1, 1)
+
+        yield (month_start, month_end)
+        current_date = month_end
+
+
+def get_time_slices(
+    start_date: datetime,
+    end_date: datetime,
+    frequency: t.Literal["daily", "monthly"] = "monthly",
 ) -> t.Iterable[tuple[datetime, datetime]]:
     """Get the time slices for the given start and end dates.
 
@@ -80,38 +111,19 @@ def get_time_slices(
     Iterable[tuple[datetime, datetime]]
         The time slices.
     """
-    # current_date = datetime(start_date.year, start_date.month, 1)
-    current_date = datetime(start_date.year, start_date.month, start_date.day)
+    time_slices = list(
+        _dailies(start_date, end_date)
+        if frequency == "daily"
+        else _monthlies(start_date, end_date)
+    )
 
-    time_slices = []
-    while current_date < end_date:
-        day_start = current_date
-        day_end = day_start + timedelta(days=1)
+    # adjust when the start date is not the first day of the month
+    if start_date > time_slices[0][0]:
+        time_slices[0] = (start_date, time_slices[0][1])
 
-        time_slices.append((day_start, day_end))
-        current_date = day_end
-
-        # month_start = current_date
-
-        # if month_start.month == 12:
-        #     month_end = datetime(current_date.year + 1, 1, 1)
-        # else:
-        #     month_end = datetime(
-        #         current_date.year,
-        #         month_start.month + 1,
-        #         1,
-        #     )
-
-        # time_slices.append((month_start, month_end))
-        # current_date = month_end
-
-    # # adjust when the start date is not the first day of the month
-    # if start_date > time_slices[0][0]:
-    #     time_slices[0] = (start_date, time_slices[0][1])
-
-    # # adjust when the end date is not the last day of the month
-    # if end_date < time_slices[-1][1]:
-    #     time_slices[-1] = (time_slices[-1][0], end_date)
+    # adjust when the end date is not the last day of the month
+    if end_date < time_slices[-1][1]:
+        time_slices[-1] = (time_slices[-1][0], end_date)
 
     return time_slices
 
