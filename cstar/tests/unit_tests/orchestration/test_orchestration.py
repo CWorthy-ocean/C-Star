@@ -106,6 +106,65 @@ def diamond_workplan(tmp_path: Path) -> Workplan:
     )
 
 
+@pytest.fixture
+def multi_entrypoint_workplan(tmp_path: Path) -> Workplan:
+    """Generate a workplan."""
+    bp_tpl_path = (
+        Path(__file__).parent.parent.parent.parent
+        / "additional_files/templates/bp"
+        / "blueprint.yaml"
+    )
+    default_output_dir = "output_dir: ."
+
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_content = bp_tpl_path.read_text()
+    bp_content = bp_content.replace(
+        default_output_dir, f"output_dir: {tmp_path.as_posix()}"
+    )
+    bp_path.write_text(bp_content)
+
+    return Workplan(
+        name="diamond",
+        description="A workplan with two nodes immediately executable, followed by.",
+        steps=[
+            Step(
+                name="d-00-a",
+                application="sleep",
+                blueprint=bp_path.as_posix(),
+            ),
+            Step(
+                name="d-00-b",
+                application="sleep",
+                blueprint=bp_path.as_posix(),
+            ),
+            Step(
+                name="d-01",
+                depends_on=["d-00-a"],
+                application="sleep",
+                blueprint=bp_path.as_posix(),
+            ),
+            Step(
+                name="d-02",
+                depends_on=["d-00-a"],
+                application="sleep",
+                blueprint=bp_path.as_posix(),
+            ),
+            Step(
+                name="d-03",
+                depends_on=["d-00-b"],
+                application="sleep",
+                blueprint=bp_path.as_posix(),
+            ),
+            Step(
+                name="d-04",
+                depends_on=["d-01", "d-02", "d-00-b"],
+                application="sleep",
+                blueprint=bp_path.as_posix(),
+            ),
+        ],
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "mode",
@@ -122,6 +181,46 @@ async def test_orchestrator_open_closed_lists(
     The loop should move every item that is open into a closed state after running it.
     """
     orchestrator = Orchestrator(Planner(workplan=diamond_workplan), LocalLauncher())
+    closed_set = orchestrator.get_closed_nodes(mode=mode)
+    open_set = orchestrator.get_open_nodes(mode=mode)
+
+    assert open_set, "Orchestrator didn't identify any open nodes"
+    encountered = set(open_set or [])
+
+    while open_set is not None:
+        print(f"[on-enter] Open nodes: {open_set}, Closed: {closed_set}")
+
+        await orchestrator.run(mode=mode)
+
+        closed_set = orchestrator.get_closed_nodes(mode=mode)
+        open_set = orchestrator.get_open_nodes(mode=mode)
+
+        print(f"[on-exit] Open nodes: {open_set}, Closed: {closed_set}")
+        if open_set:
+            encountered.update(open_set)
+
+    assert closed_set, "The orchestrator failed to close tasks."
+    assert encountered == set(closed_set), "The orchestrator didn't close all tasks"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode",
+    [
+        RunMode.Schedule,
+        RunMode.Monitor,
+    ],
+)
+async def test_orchestrator_multi_entrypoint_open_closed_lists(
+    mode: RunMode, multi_entrypoint_workplan: Workplan
+) -> None:
+    """Verify the orchestrator / dag runner loop over open/closed ends as-expected.
+
+    This test uses a multi-entrypoint workplan to verify that the graph is traversed.
+    """
+    orchestrator = Orchestrator(
+        Planner(workplan=multi_entrypoint_workplan), LocalLauncher()
+    )
     closed_set = orchestrator.get_closed_nodes(mode=mode)
     open_set = orchestrator.get_open_nodes(mode=mode)
 
