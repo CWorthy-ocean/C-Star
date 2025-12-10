@@ -66,29 +66,33 @@ def diamond_workplan(tmp_path: Path) -> Workplan:
         / "additional_files/templates/bp"
         / "blueprint.yaml"
     )
+    default_output_dir: t.Literal["output_dir: ."] = "output_dir: ."
+
     bp_path = tmp_path / "blueprint.yaml"
-    bp_path.write_text(bp_tpl_path.read_text())
+    bp_content = bp_tpl_path.read_text()
+    bp_content = bp_content.replace(default_output_dir, tmp_path.as_posix())
+    bp_path.write_text(bp_content)
 
     return Workplan(
         name="diamond",
         description="A workplan with steps arranged in a diamond-shaped dependency graph.",
         steps=[
-            Step(name="s-00", application="sleep", blueprint=bp_path.as_posix()),
+            Step(name="d-00", application="sleep", blueprint=bp_path.as_posix()),
             Step(
-                name="s-01",
-                depends_on=["s-00"],
+                name="d-01",
+                depends_on=["d-00"],
                 application="sleep",
                 blueprint=bp_path.as_posix(),
             ),
             Step(
-                name="s-02",
-                depends_on=["s-00"],
+                name="d-02",
+                depends_on=["d-00"],
                 application="sleep",
                 blueprint=bp_path.as_posix(),
             ),
             Step(
-                name="s-03",
-                depends_on=["s-01", "s-02"],
+                name="d-03",
+                depends_on=["d-01", "d-02"],
                 application="sleep",
                 blueprint=bp_path.as_posix(),
             ),
