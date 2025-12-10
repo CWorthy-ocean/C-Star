@@ -391,7 +391,8 @@ class RomsMarblTimeSplitter(Transform):
             compact_sd = sd.strftime("%Y%m%d%H%M%S")
             compact_ed = ed.strftime("%Y%m%d%H%M%S")
 
-            child_step_name = slugify(f"{i + 1:02d}_{compact_sd}_{compact_ed}")
+            unique_name = f"{i + 1:02d}_{step.name}_{compact_sd}_{compact_ed}"
+            child_step_name = slugify(unique_name)
 
             subtask_root = task_root / child_step_name
 
