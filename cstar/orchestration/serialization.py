@@ -110,6 +110,23 @@ def model_to_yaml(model: BaseModel) -> str:
 _DT = t.TypeVar("_DT", models.RomsMarblBlueprint, models.Workplan)
 
 
+def _mode_detect(path: Path) -> PersistenceMode:
+    """Use the file extension to select the persistence mode.
+
+    Returns
+    -------
+    PersistenceMode
+    """
+    if path.suffix == ".json":
+        return PersistenceMode.json
+
+    if path.suffix in {".yaml", ".yml"}:
+        return PersistenceMode.yaml
+
+    print("Using default persistence mode `yaml` for file `{path}`")
+    return PersistenceMode.yaml
+
+
 def deserialize(
     path: Path | str,
     klass: type[_DT],
@@ -148,23 +165,18 @@ def deserialize(
         msg = f"No file found at path `{path}` to deserialize to `{klass.__name__}`"
         raise FileNotFoundError(msg)
 
-    model: _DT | None = None
-    ext = path.suffix
-    is_auto = mode == PersistenceMode.auto
-    use_json = (is_auto and ext == ".json") or mode == PersistenceMode.json
-    use_yaml = (is_auto and (ext in {".yaml", ".yml"})) or mode == PersistenceMode.yaml
+    if mode == PersistenceMode.auto:
+        mode = _mode_detect(path)
 
-    if not use_json and not use_yaml:
-        print(f"Non-standard file name {path} was provided. Defaulting to YAML.")
-        use_yaml = True
+    handlers = {
+        PersistenceMode.json: _read_json,
+        PersistenceMode.yaml: _read_yaml,
+    }
 
-    if use_json:
-        model = _read_json(path, klass)
-    elif use_yaml:
-        model = _read_yaml(path, klass)
+    model = handlers[mode](path, klass)
 
     if model is None:
-        msg = f"Unable to deserialize the `{klass.__name__}` at `{path}` as `{mode}` from: \n{path.read_text()}"
+        msg = f"Unable to deserialize a `{klass.__name__}` at `{path}` as `{mode}` from: \n{path.read_text()}"
         raise ValueError(msg)
 
     return model
@@ -174,7 +186,7 @@ def serialize(
     path: Path,
     model: BaseModel,
     mode: PersistenceMode = PersistenceMode.yaml,
-) -> None:
+) -> int:
     """Serialize a model into a file.
 
     Parameters
@@ -185,15 +197,28 @@ def serialize(
         The model to serialize
     mode : PersistenceMode
         Specify the type of document to produce (yaml or json)
-    """
-    if mode == PersistenceMode.auto:
-        mode = PersistenceMode.yaml
 
-    if mode == PersistenceMode.json:
-        output_document = model.model_dump_json()
-    elif mode == PersistenceMode.yaml:
-        output_document = model_to_yaml(model)
+    Returns
+    -------
+    int
+        The number of bytes written.
+    """
+    if path.exists():
+        msg = f"Overwriting existing file at `{path}`"
+        print(msg)
+
+    if mode == PersistenceMode.auto:
+        mode = _mode_detect(path)
+
+    handlers = {
+        PersistenceMode.json: lambda model: model.model_dump_json(),
+        PersistenceMode.yaml: model_to_yaml,
+    }
+
+    content = handlers[mode](model)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="w") as fp:
-        fp.write(output_document)
+        nbytes = fp.write(content)
+
+    return nbytes
