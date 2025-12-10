@@ -225,7 +225,6 @@ def plan(
         if workplan := deserialize(ns.path, Workplan):
             if ns.transform:
                 transformed = WorkplanTransformer(workplan).apply()
-                # transformed = transform_workplan(workplan)
                 planner = Planner(transformed)
             else:
                 planner = Planner(workplan)
