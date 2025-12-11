@@ -9,7 +9,7 @@ import typer
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import WorkplanTransformer
+from cstar.orchestration.transforms import RomsMarblTimeSplitter, WorkplanTransformer
 from cstar.orchestration.utils import slugify
 
 app = typer.Typer()
@@ -224,7 +224,9 @@ def plan(
     try:
         if workplan := deserialize(ns.path, Workplan):
             if ns.transform:
-                transformed = WorkplanTransformer(workplan).apply()
+                transformer = WorkplanTransformer(workplan, RomsMarblTimeSplitter())
+                transformed = transformer.apply()
+
                 planner = Planner(transformed)
             else:
                 planner = Planner(workplan)

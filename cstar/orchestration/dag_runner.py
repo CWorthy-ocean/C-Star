@@ -16,7 +16,11 @@ from cstar.orchestration.orchestration import (
     RunMode,
 )
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import WorkplanTransformer
+from cstar.orchestration.transforms import (
+    OverrideTransform,
+    RomsMarblTimeSplitter,
+    WorkplanTransformer,
+)
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -154,13 +158,21 @@ async def prepare_workplan(wp_path: Path, output_dir: Path) -> tuple[Workplan, P
 
     Returns
     -------
-    Workplan
+    Workplanfs
     """
     wp = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
-    transformer = WorkplanTransformer(wp)
+    transformer = WorkplanTransformer(wp, RomsMarblTimeSplitter())
     if transformer.is_modified:
-        print("A transformed workplan will be executed.")
+        print("A time-split workplan will be executed.")
+
+    wp = transformer.transformed
+    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir)
+    await asyncio.to_thread(serialize, persist_as, wp)
+
+    transformer = WorkplanTransformer(wp, OverrideTransform())
+    if transformer.is_modified:
+        print("An overridden workplan will be executed.")
 
     wp = transformer.transformed
     persist_as = WorkplanTransformer.derived_path(wp_path, output_dir)

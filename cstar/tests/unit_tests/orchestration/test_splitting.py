@@ -1,6 +1,7 @@
 import typing as t
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -8,7 +9,7 @@ from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     get_time_slices,
-    get_transform,
+    get_transforms,
 )
 
 
@@ -65,15 +66,22 @@ def test_time_splitting():
 
 
 @pytest.mark.parametrize(
-    "application",
+    "application,transform_fn",
     [
-        "roms_marbl",
-        Application.ROMS_MARBL.value,
+        ["roms_marbl", RomsMarblTimeSplitter()],
+        [Application.ROMS_MARBL.value, RomsMarblTimeSplitter()],
     ],
 )
-def test_roms_marbl_transform_registry(application: str):
+def test_roms_marbl_transform_registry(
+    application: str, transform_fn: t.Callable[[Step], t.Iterable[Step]]
+):
     """Verify that the transform registry returns the expected transform."""
-    transform = get_transform(application)
+    with mock.patch.dict(
+        "cstar.orchestration.transforms.TRANSFORMS",
+        {application: transform_fn},
+        clear=True,
+    ):
+        transform = get_transforms(application)
 
     assert transform is not None
     assert isinstance(transform, RomsMarblTimeSplitter)
@@ -88,23 +96,9 @@ def test_sleep_transform_registry(application: str):
 
     Confirm that querying the registry does not raise an exception.
     """
-    transform = get_transform(application)
+    transform = get_transforms(application)
 
     assert not transform
-
-
-@pytest.mark.parametrize(
-    "application",
-    [
-        Application.ROMS_MARBL.value,
-    ],
-)
-def test_roms_marbl_splitter(application: str):
-    """Verify that the transform registry returns the expected transform."""
-    transform = get_transform(application)
-
-    assert transform is not None
-    assert isinstance(transform, RomsMarblTimeSplitter)
 
 
 def test_splitter(single_step_workplan: Workplan) -> None:
@@ -118,7 +112,6 @@ def test_splitter(single_step_workplan: Workplan) -> None:
     assert len(transformed_steps) == 12
 
     output_directories: list[str] = []
-    # expected_stem = "grid"
 
     for i, step in enumerate(transformed_steps[:-1]):
         successor = transformed_steps[i + 1]
@@ -128,10 +121,12 @@ def test_splitter(single_step_workplan: Workplan) -> None:
         ]
 
         # verify start and end dates are valid
-        sd_str = runtime_params["start_date"]
-        ed_str = runtime_params["end_date"]
-        sd = datetime.strptime(sd_str, "%Y-%m-%d %H:%M:%S")
-        ed = datetime.strptime(ed_str, "%Y-%m-%d %H:%M:%S")
+        sd = runtime_params["start_date"]
+        if not isinstance(sd, datetime):
+            sd = datetime.strptime(sd, "%Y-%m-%d %H:%M:%S")
+        ed = runtime_params["end_date"]
+        if not isinstance(ed, datetime):
+            ed = datetime.strptime(ed, "%Y-%m-%d %H:%M:%S")
         assert sd < ed
 
         output_dir = runtime_params["output_dir"]
@@ -139,19 +134,18 @@ def test_splitter(single_step_workplan: Workplan) -> None:
 
         # verify each step uses output from the prior step as initial conditions
         if i > 0:
-            ic_successor = succ_runtime_params["initial_conditions"]["location"]
-            assert str(output_dir) in ic_successor
+            succ_init_cond = successor.blueprint_overrides.get("initial_conditions", {})
+            ic_loc_successor = succ_init_cond.get("data", [{}])[0].get("location", "")  # type: ignore[union-attr,index,operator]
+
+            assert str(output_dir) in ic_loc_successor  # type: ignore[union-attr,index,operator]
 
             # verify the initial conditions reference the prior step's time slice
-            compact_sd = sd.strftime("%Y%m%d%H%M%S")
-            # assert f"{expected_stem}_rst.{compact_sd}.*.nc" in ic_successor
-            assert f"outputs/.*_rst.{compact_sd}.*.nc" in ic_successor
-            # TODO: replace this assert after completing testing
-            # assert f"_rst.*.nc" in ic_successor
+            compact_sd = ed.strftime("%Y%m%d%H%M%S")
+            assert f"output/output_rst.{compact_sd}.000.nc" in ic_loc_successor  # type: ignore[union-attr,operator]
 
         # verify successor starts right where current step ends
-        sd_successor_str = succ_runtime_params["start_date"]
-        sd_successor = datetime.strptime(sd_successor_str, "%Y-%m-%d %H:%M:%S")
+        sd_successor = succ_runtime_params["start_date"]
+        # sd_successor = datetime.strptime(sd_successor_str, "%Y-%m-%d %H:%M:%S")
         assert sd_successor == ed
 
     # verify all output directories are unique

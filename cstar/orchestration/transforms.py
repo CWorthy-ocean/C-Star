@@ -1,5 +1,6 @@
 import os
 import typing as t
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from pydantic import HttpUrl
 
 from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.utils import slugify
+from cstar.orchestration.utils import deep_merge, slugify
 
 
 class Transform(t.Protocol):
@@ -31,7 +32,7 @@ class Transform(t.Protocol):
         ...
 
 
-TRANSFORMS: dict[str, Transform] = {}
+TRANSFORMS: dict[str, list[Transform]] = defaultdict(list)
 
 
 def register_transform(application: str, transform: Transform) -> None:
@@ -44,10 +45,10 @@ def register_transform(application: str, transform: Transform) -> None:
     transform : Splitter
         The transform instance.
     """
-    TRANSFORMS[application] = transform
+    TRANSFORMS[application].append(transform)
 
 
-def get_transform(application: str) -> Transform | None:
+def get_transforms(application: str) -> list[Transform]:
     """Retrieve a transform for an application.
 
     Parameters
@@ -60,7 +61,7 @@ def get_transform(application: str) -> Transform | None:
     Splitter | None
         The transform instance, or None if not found.
     """
-    return TRANSFORMS.get(application)
+    return TRANSFORMS.get(application, [])
 
 
 def _dailies(
@@ -143,8 +144,10 @@ class WorkplanTransformer:
     DERIVED_PATH_SUFFIX: t.ClassVar[t.Final[str]] = "_trx"
     """Suffix appended to the original workplan path when generating a derived path."""
 
-    def __init__(self, wp: Workplan):
+    def __init__(self, wp: Workplan, transform: Transform):
         self.original = Workplan(**wp.model_dump(by_alias=True))
+        self.transform_fn = transform
+        self._transformed: Workplan | None = None
 
     @property
     def enabled(self) -> bool:
@@ -176,7 +179,7 @@ class WorkplanTransformer:
         """Return the transformed workplan."""
         if self._transformed is None:
             self._transformed = self.apply()
-        return Workplan(**self._transformed.model_dump())
+        return self._transformed
 
     @staticmethod
     def derived_path(source: Path, target_dir: Path | None = None) -> Path:
@@ -200,28 +203,31 @@ class WorkplanTransformer:
         if not self.enabled:
             return self.original
 
+        if self._transformed:
+            return self._transformed
+
         steps = []
         for step in self.original.steps:
-            transform = get_transform(step.application)
-            if not transform:
+            if not self.transform_fn:
                 steps.append(step)
                 continue
 
-            transformed = list(transform(step))
-            steps.extend(transformed)
+            transformed_steps = list(self.transform_fn(step))
+            steps.extend(transformed_steps)
 
             # replace dependencies on the original step with the last transformed step
             tweaks = (s for s in self.original.steps if step.name in s.depends_on)
             for tweak in tweaks:
                 tweak.depends_on.remove(step.name)
-                tweak.depends_on.append(transformed[-1].name)
+                tweak.depends_on.append(transformed_steps[-1].name)
 
         wp_attrs = self.original.model_dump()
         wp_attrs.update(
             {"steps": steps, "name": f"{self.original.name} (with transforms)"}
         )
 
-        return Workplan(**wp_attrs)
+        self._transformed = Workplan(**wp_attrs)
+        return self._transformed
 
 
 class RomsMarblTimeSplitter(Transform):
@@ -352,7 +358,7 @@ class RomsMarblTimeSplitter(Transform):
             The sub-steps.
         """
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        step.bp = blueprint
+        # step.bp = blueprint
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
@@ -362,6 +368,7 @@ class RomsMarblTimeSplitter(Transform):
         task_root = output_root / "tasks"
 
         time_slices = list(get_time_slices(start_date, end_date))
+        n_slices = len(time_slices)
 
         # if (start_date - end_date).total_seconds() < timedelta(days=30).total_seconds():
         #     # TODO: leave this ask discussion driver. must determine
@@ -375,9 +382,6 @@ class RomsMarblTimeSplitter(Transform):
 
         depends_on = step.depends_on
         last_restart_file: Path | None = None
-        # ic_stem = self._get_location_stem(blueprint)
-        # TODO: confirm with "normal IC paths (xxx.nc, not xxx.000.nc)"
-        # ic_stem = ic_stem.split(".")[0]
 
         for i, (sd, ed) in enumerate(time_slices):
             bp_copy = RomsMarblBlueprint(
@@ -395,23 +399,44 @@ class RomsMarblTimeSplitter(Transform):
             child_step_name = slugify(unique_name)
 
             subtask_root = task_root / child_step_name
-
-            bp_copy.runtime_params.start_date = sd
-            bp_copy.runtime_params.end_date = ed
-            bp_copy.runtime_params.output_dir = subtask_root
-            bp_copy.description = (
-                f"subtask {i + 1}: {sd} to {ed} - {blueprint.description}"
+            description = (
+                f"Subtask {i + 1} of {n_slices}; Simulation covering "
+                f"timespan from `{sd}` to `{ed}` - {blueprint.description}"
             )
+            overrides = {
+                "description": description,
+                "runtime_params": {
+                    "start_date": sd,
+                    "end_date": ed,
+                    "output_dir": subtask_root.as_posix(),
+                },
+            }
+            # bp_copy.runtime_params.start_date = sd
+            # bp_copy.runtime_params.end_date = ed
+            # bp_copy.runtime_params.output_dir = subtask_root
+            # bp_copy.description = (
+            #     f"subtask {i + 1}: {sd} to {ed} - {blueprint.description}"
+            # )
 
             if last_restart_file:
-                bp_copy.initial_conditions.data[
-                    0
-                ].location = last_restart_file.as_posix()
+                # bp_copy.initial_conditions.data[
+                #     0
+                # ].location = last_restart_file.as_posix()
+                overrides["initial_conditions"] = {
+                    "data": [{"location": last_restart_file.as_posix()}]
+                }
 
             store_at = work_root / f"{child_step_name}_blueprint.yaml"
             serialize(store_at, bp_copy)
 
-            attributes = step.model_dump(exclude={"blueprint", "name", "depends_on"})
+            attributes = step.model_dump(
+                exclude={
+                    "blueprint",
+                    "name",
+                    "depends_on",
+                    "blueprint_overrides",
+                }
+            )
 
             child_step = ChildStep(
                 **attributes,
@@ -419,17 +444,12 @@ class RomsMarblTimeSplitter(Transform):
                 blueprint=store_at.as_posix(),
                 depends_on=depends_on,
                 parent=step.name,
+                blueprint_overrides=overrides,  # type: ignore[arg-type]
             )
-            child_step.bp = bp_copy
 
-            # child_step = ChildStep(**{step.model_dump(), "name": step_name}, parent=step.name)
             yield child_step
             if i == len(time_slices) - 1:
                 break
-
-            # # adjust initial conditions after the first step; first step uses original IC's.
-            # if last_restart_file is not None:
-            #     updates = deep_merge(updates, self._get_ic_overrides(last_restart_file))
 
             # use dependency on the prior substep to chain all the dynamic steps
             depends_on = [child_step.name]
@@ -437,11 +457,82 @@ class RomsMarblTimeSplitter(Transform):
             # Use the last restart file as initial conditions for the follow-up step
             # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
             reset_file_name = f"output_rst.{compact_ed}.000.nc"
-            restart_file_path = child_step.working_dir / "output" / reset_file_name
+            # restart_file_path = child_step.working_dir / "output" / reset_file_name
+            restart_file_path = subtask_root / "output" / reset_file_name
 
             # use output dir of the last step as the input for the next step
             last_restart_file = restart_file_path
 
 
+class OverrideTransform(Transform):
+    """Transform that overrides a step by returning a blueprint with all overridden attributes applied."""
+
+    @staticmethod
+    def _output_dir(step: Step, blueprint: RomsMarblBlueprint) -> Path:
+        runtime_params = t.cast(
+            dict[str, str], step.blueprint_overrides.get("runtime_params", {})
+        )
+        output_dir_override: str = runtime_params.get("output_dir", "")
+
+        if not output_dir_override:
+            return Path(blueprint.runtime_params.output_dir)
+
+        return Path(output_dir_override)
+
+    def _get_overridden_blueprint(
+        self, step: Step, blueprint: RomsMarblBlueprint
+    ) -> RomsMarblBlueprint:
+        """Apply all overrides from a blueprint.
+
+        Generate a new blueprint with overrides applied and an empty set of overrides.
+        Store the newly generated blueprint in the output directory.
+        """
+        kvs = step.blueprint_overrides
+        bp_attrs = blueprint.model_dump(exclude_unset=True)
+        description = f"{blueprint.description}\n - overrides applied"
+
+        bp_attrs.update(description=description)
+        merged = deep_merge(bp_attrs, kvs)
+
+        return RomsMarblBlueprint(**merged)
+
+    def _persist_overridden_blueprint(
+        self, blueprint: RomsMarblBlueprint, step: Step
+    ) -> Path:
+        """Persist the overridden blueprint to the output directory."""
+        output_dir = self._output_dir(step, blueprint)
+        work_dir = output_dir / "work"
+
+        store_at = work_dir / f"{blueprint.name}.yaml"
+        serialize(store_at, blueprint)
+
+        return store_at
+
+    def __call__(self, step: Step) -> t.Iterable[Step]:
+        """Split a step into multiple sub-steps.
+
+        Parameters
+        ----------
+        step : Step
+            The step to split.
+
+        Returns
+        -------
+        Iterable[Step]
+            The sub-steps.
+        """
+        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        new_bp = self._get_overridden_blueprint(step, bp)
+        new_bp_path = self._persist_overridden_blueprint(new_bp, step)
+
+        attributes = step.model_dump(exclude={"blueprint", "blueprint_overrides"})
+        new_step = Step(
+            **attributes,
+            blueprint=new_bp_path.as_posix(),
+        )
+        return [new_step]
+
+
 register_transform("roms_marbl", RomsMarblTimeSplitter())
+register_transform("roms_marbl", OverrideTransform())
 # register_transform("sleep", RomsMarblTimeSplitter())

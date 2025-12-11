@@ -207,16 +207,17 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        clear_working_dir(step.working_dir)
+        work_dir = step.working_dir(bp)
+        clear_working_dir(work_dir)  # mcb: ensure clear works...
 
         step_converter = app_to_cmd_map[step.application]
         if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
             step_converter = app_to_cmd_map[converter_override]
         print(f"Using `{step_converter.__name__}` for `{step.application}` commands.")
 
-        script_path = step.working_dir / "work" / "script.sh"
-        run_path = step.working_dir
-        output_file = step.working_dir / "logs" / f"{job_name}.out"  # "log.out"
+        script_path = work_dir / "work" / "script.sh"
+        run_path = work_dir
+        output_file = work_dir / "logs" / f"{job_name}.out"  # "log.out"
 
         command = step_converter(step)
         job = create_scheduler_job(

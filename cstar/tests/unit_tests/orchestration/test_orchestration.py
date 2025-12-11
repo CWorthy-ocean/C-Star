@@ -15,7 +15,11 @@ from cstar.orchestration.orchestration import (
     RunMode,
     Status,
 )
-from cstar.orchestration.transforms import WorkplanTransformer, get_time_slices
+from cstar.orchestration.transforms import (
+    RomsMarblTimeSplitter,
+    WorkplanTransformer,
+    get_time_slices,
+)
 
 
 @pytest.fixture
@@ -277,7 +281,7 @@ def test_workplan_transformation(diamond_workplan: Workplan):
     for step in diamond_workplan.steps:
         step.application = Application.ROMS_MARBL.value
 
-    transformer = WorkplanTransformer(diamond_workplan)
+    transformer = WorkplanTransformer(diamond_workplan, RomsMarblTimeSplitter())
     transformed = transformer.apply()
     # start & end date in the blueprint.yaml file
     sd, ed = datetime(2020, 1, 1), datetime(2021, 1, 1)
@@ -295,10 +299,10 @@ def test_workplan_transformation(diamond_workplan: Workplan):
         assert isinstance(runtime_params, dict)
         assert "start_date" in runtime_params
         assert "end_date" in runtime_params
-        assert isinstance(runtime_params["start_date"], str)
-        assert isinstance(runtime_params["end_date"], str)
+        assert isinstance(runtime_params["start_date"], datetime)
+        assert isinstance(runtime_params["end_date"], datetime)
 
-        step_sd = datetime.strptime(runtime_params["start_date"], "%Y-%m-%d %H:%M:%S")
-        step_ed = datetime.strptime(runtime_params["end_date"], "%Y-%m-%d %H:%M:%S")
+        step_sd = runtime_params["start_date"]
+        step_ed = runtime_params["end_date"]
 
         assert ((step_sd, step_ed)) in get_time_slices(sd, ed)
