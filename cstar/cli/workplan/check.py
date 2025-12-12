@@ -19,12 +19,3 @@ def check(
         print("The workplan is valid")
     except ValueError as ex:
         print(f"The workplan is invalid: {ex}")
-
-
-def main() -> None:
-    """Entrypoint for check-workplan command."""
-    app()
-
-
-if __name__ == "__main__":
-    main()

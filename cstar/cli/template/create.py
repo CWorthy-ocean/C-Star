@@ -170,12 +170,3 @@ def generate(
     """Generate a template document as a starting point."""
     msg = generate_template(path, template_type)
     print(msg)
-
-
-def main() -> None:
-    """Entrypoint for the create-template command."""
-    app()
-
-
-if __name__ == "__main__":
-    main()

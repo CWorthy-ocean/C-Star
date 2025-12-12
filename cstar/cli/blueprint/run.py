@@ -61,12 +61,3 @@ def run(
     print(f"Worker process `{process.pid}`")
     if process.exitcode:
         print(f"Worker processs failed prematurely with code `{process.exitcode}`")
-
-
-def main() -> None:
-    """Entrypoint for the run-blueprint command."""
-    app()
-
-
-if __name__ == "__main__":
-    main()

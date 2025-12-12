@@ -239,12 +239,3 @@ def plan(
         raise ValueError("Unable to generate plan")
 
     print(f"The plan has been generated and stored at: {plan_path}")
-
-
-def main() -> None:
-    """Entrypoint for the plan-workplan command."""
-    app()
-
-
-if __name__ == "__main__":
-    main()

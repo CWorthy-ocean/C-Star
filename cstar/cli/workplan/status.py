@@ -21,12 +21,3 @@ def status(
     """Retrieve the current status of a workplan."""
     os.environ["CSTAR_RUNID"] = run_id
     asyncio.run(load_dag_status(path))
-
-
-def main() -> None:
-    """Entrypoint for the workplan-status command."""
-    app()
-
-
-if __name__ == "__main__":
-    main()

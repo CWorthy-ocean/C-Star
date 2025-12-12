@@ -29,12 +29,3 @@ def run(
         print("Workplan run has completed.")
     except Exception as ex:
         print(f"Workplan run has completed unsuccessfully: {ex}")
-
-
-def main() -> None:
-    """Entrypoint for the run-workplan command."""
-    app()
-
-
-if __name__ == "__main__":
-    main()

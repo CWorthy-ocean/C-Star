@@ -19,12 +19,3 @@ def check(
         print("The blueprint is valid")
     except ValueError as ex:
         print(f"The blueprint is invalid: {ex}")
-
-
-def main() -> None:
-    """Entrypoint for the check-blueprint command."""
-    app()
-
-
-if __name__ == "__main__":
-    main()

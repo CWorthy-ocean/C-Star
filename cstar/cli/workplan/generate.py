@@ -140,12 +140,3 @@ def generate(
 
     else:
         print(f"No blueprints found in: {search_dir}")
-
-
-def main() -> None:
-    """Entrypoint for generate-workplan command."""
-    app()
-
-
-if __name__ == "__main__":
-    main()
