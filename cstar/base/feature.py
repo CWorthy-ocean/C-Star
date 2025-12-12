@@ -19,9 +19,9 @@ def is_feature_enabled(flag: str) -> bool:
     if developer_mode == "1":
         return True
 
-    # enable omitting the CSTAR_ prefix at the call-site
-    if not flag.startswith("CSTAR_"):
-        flag = f"CSTAR_{flag}"
+    # enable omitting the CSTAR_FF_ prefix at the call-site
+    if not flag.startswith("CSTAR_FF_"):
+        flag = f"CSTAR_FF_{flag}"
 
     # Enable hierarchical feature flag segments - Given a flag:
     #   CSTAR_FF_CLI_BLUEPRINT_CHECK
