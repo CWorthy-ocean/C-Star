@@ -48,7 +48,7 @@ def run(
         Path, typer.Argument(help="The path to the blueprint to execute")
     ],
 ) -> None:
-    """Execute a blueprint in a non-blocking worker service."""
+    """Execute a blueprint in a local worker service."""
     print("Executing blueprint in a worker service.")
     runner = configure_simulation_runner(path)
 
