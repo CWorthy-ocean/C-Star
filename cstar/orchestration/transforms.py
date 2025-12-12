@@ -138,10 +138,10 @@ class WorkplanTransformer:
     _transformed: Workplan | None = None
     """The post-transformation workplan."""
 
-    ENABLED_ENV_VAR: t.ClassVar[t.Final[str]] = "CSTAR_ORCHESTRATOR_ENABLE_TRANSFORMS"
+    ENABLED_ENV_VAR: t.Final[t.ClassVar[str]] = "CSTAR_ORCHESTRATOR_ENABLE_TRANSFORMS"
     """Environment variable to control whether transforms are enabled."""
 
-    DERIVED_PATH_SUFFIX: t.ClassVar[t.Final[str]] = "_trx"
+    DERIVED_PATH_SUFFIX: t.Final[t.ClassVar[str]] = "_trx"
     """Suffix appended to the original workplan path when generating a derived path."""
 
     def __init__(self, wp: Workplan, transform: Transform):
