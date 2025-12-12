@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cstar.cli.workplan.actions.plan import render
+from cstar.cli.workplan.plan import render
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
 from cstar.orchestration.serialization import deserialize

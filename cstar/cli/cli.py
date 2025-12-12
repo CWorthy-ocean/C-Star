@@ -1,43 +1,25 @@
-import asyncio
-import sys
-from argparse import Namespace
+import typer
 
-from cstar.cli.core import AsyncHandlerFn
-
-
-async def invoke(args: Namespace) -> None:
-    """Invoke the command handler registered with the parser.
-
-    Parameters
-    ----------
-    args : Namespace
-        Arguments parsed from the CLI.
-    """
-    handler: AsyncHandlerFn = args.handler
-    await handler(args)
+from cstar.cli.blueprint import app as app_blueprint
+from cstar.cli.template import app as app_template
+from cstar.cli.workplan import app as app_workplan
 
 
-def main(args: list[str] | None = None) -> None:
-    """Parse arguments passed to the CLI and trigger the associated request handlers.
+def main() -> None:
+    """Main entrypoint for the complete C-Star CLI."""
+    app = typer.Typer()
 
-    Parameters
-    ----------
-    args : list[str]
-        Arguments for triggering a CLI action handler. If not provided, `sys.argv`
-        will be used.
-    """
-    if not args:
-        args = sys.argv[1:]
-
-    import cstar.cli.blueprint  # noqa: F401
-    import cstar.cli.template  # noqa: F401
-    import cstar.cli.workplan  # noqa: F401
-    from cstar.cli.core import main_parser
-
-    ns = main_parser.parse_args(args)
+    subcommands: list[tuple[typer.Typer, str]] = [
+        (app_blueprint, "blueprint"),
+        (app_template, "template"),
+        (app_workplan, "workplan"),
+    ]
 
     try:
-        asyncio.run(invoke(ns))
+        for command_app, command_name in subcommands:
+            if command_app.registered_groups or command_app.registered_commands:
+                app.add_typer(command_app, name=command_name)
+        app()
     except Exception as ex:
         print(f"An error occurred while handling request: {ex}")
 
