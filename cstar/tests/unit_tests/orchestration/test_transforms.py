@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -47,16 +48,23 @@ def step_overiding_wp(tmp_path: Path) -> Workplan:
 
 
 def test_registry() -> None:
-    """Verify that the override transform is registered by default."""
+    """Verify that the override transform is not registered by default."""
     transforms = get_transforms(Application.ROMS_MARBL.value)
 
-    assert any(isinstance(tx, OverrideTransform) for tx in transforms)
+    assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
 
 
 def test_direct_override(step_overiding_wp: Workplan, tmp_path: Path) -> None:
     """Verify that using the override tranform directly works as expected."""
-    transforms = get_transforms(Application.ROMS_MARBL.value)
-    transform = next(item for item in transforms if isinstance(item, OverrideTransform))
+    with mock.patch.dict(
+        "cstar.orchestration.transforms.TRANSFORMS",
+        {Application.ROMS_MARBL.value: [OverrideTransform()]},
+        clear=True,
+    ):
+        transforms = get_transforms(Application.ROMS_MARBL.value)
+        transform = next(
+            item for item in transforms if isinstance(item, OverrideTransform)
+        )
     step = step_overiding_wp.steps[0]
 
     steps = transform(step)
