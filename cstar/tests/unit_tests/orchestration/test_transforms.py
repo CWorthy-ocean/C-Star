@@ -89,7 +89,7 @@ def test_workplan_transformer_overrides(
 
     transformer = WorkplanTransformer(step_overiding_wp, OverrideTransform())
 
-    with mock.patch.dict(os.environ, {"CSTAR_FF_ORC_TRANSFORM":"1"}):
+    with mock.patch.dict(os.environ, {"CSTAR_FF_ORC_TRANSFORM": "1"}):
         workplan = transformer.apply()
 
     transformed = workplan.steps[0]
