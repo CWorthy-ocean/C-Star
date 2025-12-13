@@ -17,6 +17,7 @@ def run(
         str,
         typer.Option(help="The unique identifier for an execution of the workplan."),
     ] = "...",
+    output_dir: t.Annotated[Path, typer.Argument(help="Path to a directory where outputs will be written.")],
 ) -> None:
     """Execute a workplan.
 
@@ -25,7 +26,7 @@ def run(
     os.environ["CSTAR_RUNID"] = run_id
 
     try:
-        asyncio.run(build_and_run_dag(path))
+        asyncio.run(build_and_run_dag(path, output_dir))
         print("Workplan run has completed.")
     except Exception as ex:
         print(f"Workplan run has completed unsuccessfully: {ex}")
