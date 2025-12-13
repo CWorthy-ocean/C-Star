@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -87,7 +88,9 @@ def test_workplan_transformer_overrides(
     step = step_overiding_wp.steps[0]
 
     transformer = WorkplanTransformer(step_overiding_wp, OverrideTransform())
-    workplan = transformer.apply()
+
+    with mock.patch.dict(os.environ, {"CSTAR_FF_ORC_TRANSFORM":"1"}):
+        workplan = transformer.apply()
 
     transformed = workplan.steps[0]
 

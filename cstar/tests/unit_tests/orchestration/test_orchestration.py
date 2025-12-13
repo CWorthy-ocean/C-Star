@@ -1,6 +1,8 @@
+import os
 import typing as t
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import networkx as nx
 import pytest
@@ -277,12 +279,14 @@ def test_dep_keys(tmp_path: Path) -> None:
 
 
 def test_workplan_transformation(diamond_workplan: Workplan):
-    """Verify that the workplan transformation applies appropriate transforms."""
+    """Verify that the workplan transformation applies appropriate transforms when enabled."""
     for step in diamond_workplan.steps:
         step.application = Application.ROMS_MARBL.value
 
     transformer = WorkplanTransformer(diamond_workplan, RomsMarblTimeSplitter())
-    transformed = transformer.apply()
+    with mock.patch.dict(os.environ, {"CSTAR_FF_ORC_TRANSFORM_AUTO": "1"}):
+        transformed = transformer.apply()
+
     # start & end date in the blueprint.yaml file
     sd, ed = datetime(2020, 1, 1), datetime(2021, 1, 1)
 
