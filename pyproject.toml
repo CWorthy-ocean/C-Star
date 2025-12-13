@@ -34,7 +34,7 @@ dependencies = [
     "pooch>=1.8.1",
     "prefect>=3.6.1",
     "roms_tools[dask]==3.1.2",
-    "typer>=0.17.5",
+    "typer[standard]>=0.17.5",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
@@ -42,7 +42,7 @@ keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 test = [
      "pytest>=7.0",
      "roms_tools[dask]==3.1.2"
-     ]
+]
 dev =["ruff"]
 
 [project.scripts]
