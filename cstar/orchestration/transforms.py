@@ -1,4 +1,3 @@
-import os
 import typing as t
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -6,6 +5,7 @@ from pathlib import Path
 
 from pydantic import HttpUrl
 
+from cstar.base.feature import is_feature_enabled
 from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import deep_merge, slugify
@@ -138,9 +138,6 @@ class WorkplanTransformer:
     _transformed: Workplan | None = None
     """The post-transformation workplan."""
 
-    ENABLED_ENV_VAR: t.Literal["CSTAR_ORCHESTRATOR_ENABLE_TRANSFORMS"] = "CSTAR_ORCHESTRATOR_ENABLE_TRANSFORMS"
-    """Environment variable to control whether transforms are enabled."""
-
     DERIVED_PATH_SUFFIX: t.Literal["_trx"] = "_trx"
     """Suffix appended to the original workplan path when generating a derived path."""
 
@@ -148,18 +145,6 @@ class WorkplanTransformer:
         self.original = Workplan(**wp.model_dump(by_alias=True))
         self.transform_fn = transform
         self._transformed: Workplan | None = None
-
-    @property
-    def enabled(self) -> bool:
-        """Check local configuration to determine if transforms are enabled.
-
-        Defaults to `True` when no configuration is found.
-
-        Returns
-        -------
-        bool
-        """
-        return os.getenv(WorkplanTransformer.ENABLED_ENV_VAR, "1") == "1"
 
     @property
     def is_modified(self) -> bool:
@@ -200,7 +185,7 @@ class WorkplanTransformer:
         -------
         Workplan
         """
-        if not self.enabled:
+        if not is_feature_enabled("ORC_TRANSFORM_AUTO"):
             return self.original
 
         if self._transformed:

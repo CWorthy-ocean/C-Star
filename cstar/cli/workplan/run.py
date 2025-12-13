@@ -13,7 +13,9 @@ app = typer.Typer()
 @app.command()
 def run(
     path: t.Annotated[Path, typer.Argument(help="Path to a workplan file.")],
-    output_dir: t.Annotated[Path, typer.Argument(help="Path to a directory where outputs will be written.")],
+    output_dir: t.Annotated[
+        Path, typer.Argument(help="Path to a directory where outputs will be written.")
+    ],
     run_id: t.Annotated[
         str,
         typer.Option(help="The unique identifier for an execution of the workplan."),
