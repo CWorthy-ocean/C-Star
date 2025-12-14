@@ -125,7 +125,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
     delay_iter = iter(incremental_delays())
 
     while open_set is not None:
-        print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
+        print(f"Mode: {mode}, Open nodes: {open_set}, Closed: {closed_set}")
         await orchestrator.run(mode=mode)
 
         curr_closed = orchestrator.get_closed_nodes(mode=mode)
@@ -138,10 +138,8 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
         open_set = curr_open
         closed_set = curr_closed
 
-        print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
-
         sleep_duration = next(delay_iter)
-        print(f"Sleeping for {sleep_duration:4.1f} seconds before next {mode}.")
+        print(f"Next `{mode}` check in {sleep_duration:4.1f} seconds.")
         await asyncio.sleep(sleep_duration)
 
     print(f"Workplan {mode} is complete.")
@@ -279,6 +277,9 @@ def create_host_workplan(output_path: Path, template: str, bp_path: Path) -> Pat
     return wp_path
 
 
+import re  # noqa: E402
+
+
 def main() -> None:
     """Execute the dag runner using parameters supplied from the CLI."""
     args = sys.argv[1:]
@@ -292,7 +293,7 @@ def main() -> None:
     run_id = f"{timestamp}"
     run_dir = output_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    os.environ["CSTAR_RUNID"] = run_dir.as_posix()
+    os.environ["CSTAR_RUNID"] = run_id
 
     wp_path = Path(ns.workplan) if ns.workplan is not None else None
     bp_path = Path(ns.blueprint) if ns.blueprint is not None else None
