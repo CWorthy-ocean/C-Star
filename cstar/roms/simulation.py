@@ -1631,7 +1631,7 @@ class ROMSSimulation(Simulation):
         files = list(self.output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
-            self.log.warning("No suitable output found")
+            self.log.warning(f"No suitable output found in `{self.output_dir}`")
         else:
             self.joined_output_dir.mkdir(exist_ok=True, parents=True)
 
