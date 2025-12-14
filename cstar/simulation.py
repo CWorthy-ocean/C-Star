@@ -367,46 +367,6 @@ class Simulation(ABC, LoggingMixin):
         return Simulation.get_state_file(self.directory)
 
     @property
-    def input_dir(self) -> Path:
-        """Return the path to the directory where simulation inputs will be written.
-
-        Returns
-        -------
-        Path
-        """
-        return self.directory / "input"
-
-    @property
-    def output_dir(self) -> Path:
-        """Return the path to the directory where simulation outputs will be written.
-
-        Returns
-        -------
-        Path
-        """
-        return self.directory / "output"
-
-    @property
-    def work_dir(self) -> Path:
-        """Return the path to the directory where simulation work will be written.
-
-        Returns
-        -------
-        Path
-        """
-        return self.directory / "work"
-
-    @property
-    def logs_dir(self) -> Path:
-        """Return the path to the directory where simulation logs will be written.
-
-        Returns
-        -------
-        Path
-        """
-        return self.directory / "logs"
-
-    @property
     @abstractmethod
     def default_codebase(self) -> ExternalCodeBase:
         """Abstract property that must be implemented by subclasses to provide a default

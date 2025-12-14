@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
+from cstar.execution.file_system import RomsJobFileSystem
 from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import deep_merge, slugify
@@ -348,14 +349,11 @@ class RomsMarblTimeSplitter(Transform):
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
-        # use the directory of the parent as the base...
-        # output_root = self.output_root(step.name, blueprint)
         step_work_dir = step.working_dir(blueprint)
+        job_fs = RomsJobFileSystem(step_work_dir)
+        job_fs.prepare()
 
-        work_root = step_work_dir / "work"
-        task_root = step_work_dir / "tasks"
-
-        serialize(work_root / Path(step.blueprint_path).name, blueprint)
+        serialize(job_fs.work_dir / Path(step.blueprint_path).name, blueprint)
 
         time_slices = list(get_time_slices(start_date, end_date, frequency="daily"))
         n_slices = len(time_slices)
@@ -388,7 +386,7 @@ class RomsMarblTimeSplitter(Transform):
             unique_name = f"{i + 1:02d}_{step.name}_{compact_sd}_{compact_ed}"
             child_step_name = slugify(unique_name)
 
-            subtask_root = task_root / child_step_name
+            subtask_root = job_fs.tasks_dir / child_step_name
             subtask_work = subtask_root / "work"
 
             description = (

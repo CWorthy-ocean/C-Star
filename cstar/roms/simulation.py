@@ -19,6 +19,7 @@ from cstar.base.utils import (
     _get_sha256_hash,
     _run_cmd,
 )
+from cstar.execution.file_system import RomsJobFileSystem
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -1175,10 +1176,13 @@ class ROMSSimulation(Simulation):
         build : Compiles the ROMS model.
         is_setup : Checks if the simulation has been properly configured.
         """
-        compile_time_code_dir = self.input_dir / "compile_time_code"
-        runtime_code_dir = self.input_dir / "runtime_code"
-        input_datasets_dir = self.input_dir / "input_datasets"
-        codebases_dir = self.input_dir / "codebases"
+        self.file_system = RomsJobFileSystem(self.directory)
+        self.file_system.prepare()
+
+        compile_time_code_dir = self.file_system.compile_time_code_dir
+        runtime_code_dir = self.file_system.runtime_code_dir
+        input_datasets_dir = self.file_system.input_datasets_dir
+        codebases_dir = self.file_system.codebases_dir
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
@@ -1282,16 +1286,6 @@ class ROMSSimulation(Simulation):
                 ):
                     return False
         return True
-
-    @property
-    def joined_output_dir(self) -> Path:
-        """Return the path to the directory where joined simulation outputs will be written.
-
-        Returns
-        -------
-        Path
-        """
-        return self.output_dir / "JOINED_OUTPUT"
 
     def build(self, rebuild: bool = False) -> None:
         """Compile the ROMS executable from source code.
@@ -1520,19 +1514,16 @@ class ROMSSimulation(Simulation):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
         # we run ROMS in the output dir
-        run_path = self.output_dir
+        run_path = self.file_system.output_dir
         final_runtime_settings_file = (
             Path(self.runtime_code.working_copy[0].path).parent / f"{self.name}.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
-        self.work_dir.mkdir(parents=True, exist_ok=True)
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         script_name = job_name or self.name
         safe_name = re.sub(r"\W+", "", script_name.casefold())
-        script_path = self.work_dir / f"{safe_name}.sh"
-        output_file = self.logs_dir / f"{safe_name}.out"
+        script_path = self.file_system.work_dir / f"{safe_name}.sh"
+        output_file = self.file_system.logs_dir / f"{safe_name}.out"
 
         ## 2: RUN ROMS
 
@@ -1628,18 +1619,19 @@ class ROMSSimulation(Simulation):
                 + f"but current execution status is '{self._execution_handler.status}'"
             )
 
-        files = list(self.output_dir.glob("*.??????????????.*.nc"))
+        output_dir = self.file_system.output_dir
+        files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
-            self.log.warning(f"No suitable output found in `{self.output_dir}`")
+            self.log.warning(f"No suitable output found in `{output_dir}`")
         else:
-            self.joined_output_dir.mkdir(exist_ok=True, parents=True)
+            self.file_system.joined_output_dir.mkdir(exist_ok=True, parents=True)
 
             spatial_joiner = partial(
                 _ncjoin_wildcard,
                 logger=self.log,
-                input_dir=self.output_dir,
-                output_dir=self.joined_output_dir,
+                input_dir=self.file_system.output_dir,
+                output_dir=self.file_system.joined_output_dir,
             )
 
             with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
@@ -1700,7 +1692,7 @@ class ROMSSimulation(Simulation):
         """
         new_sim = cast(ROMSSimulation, super().restart(new_end_date=new_end_date))
 
-        restart_dir = self.output_dir
+        restart_dir = self.file_system.output_dir
 
         new_start_date = new_sim.start_date
         restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")

@@ -21,7 +21,6 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import clear_working_dir
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -207,17 +206,16 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        work_dir = step.working_dir(bp)
-        clear_working_dir(work_dir)  # mcb: ensure clear works...
+        step_fs = step.file_system(bp)
+        # clear_working_dir(work_dir)
 
         step_converter = app_to_cmd_map[step.application]
         if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
             step_converter = app_to_cmd_map[converter_override]
         print(f"Using `{step_converter.__name__}` for `{step.application}` commands.")
 
-        script_path = work_dir / "work" / "script.sh"
-        run_path = work_dir
-        output_file = work_dir / "logs" / f"{job_name}.out"  # "log.out"
+        script_path = step_fs.work_dir / "script.sh"
+        output_file = step_fs.logs_dir / f"{job_name}.out"
 
         command = step_converter(step)
         job = create_scheduler_job(
@@ -227,7 +225,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
             script_path=script_path,
-            run_path=run_path,
+            run_path=script_path.parent,
             job_name=job_name,
             output_file=output_file,
             queue_name=SlurmLauncher.configured_queue(),
