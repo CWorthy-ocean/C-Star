@@ -3,8 +3,6 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from pydantic import HttpUrl
-
 from cstar.base.feature import is_feature_enabled
 from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
@@ -167,15 +165,19 @@ class WorkplanTransformer:
         return self._transformed
 
     @staticmethod
-    def derived_path(source: Path, target_dir: Path | None = None) -> Path:
+    def derived_path(
+        source: Path,
+        target_dir: Path | None = None,
+        suffix: str = "_trx",
+    ) -> Path:
         """Generate a new path name derived from the original workplan path.
 
         If no target directory is specified, the resulting path will be alongside
         the original file.
         """
-        stem = f"{source.stem}{WorkplanTransformer.DERIVED_PATH_SUFFIX}"
+        stem = f"{source.stem}{suffix}"
         if target_dir is not None:
-            return target_dir / source.with_stem(stem)
+            return target_dir / Path(source.name).with_stem(stem)
         return source.with_stem(stem)
 
     def apply(self) -> Workplan:
@@ -220,114 +222,114 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
-    def _get_location_stem(self, blueprint: RomsMarblBlueprint) -> str:
-        """Identify the stem of the initial conditions file.
+    # def _get_location_stem(self, blueprint: RomsMarblBlueprint) -> str:
+    #     """Identify the stem of the initial conditions file.
 
-        Parameters
-        ----------
-        blueprint : RomsMarblBlueprint
-            The blueprint to extract initial conditions from.
+    #     Parameters
+    #     ----------
+    #     blueprint : RomsMarblBlueprint
+    #         The blueprint to extract initial conditions from.
 
-        Returns
-        -------
-        str
-            The stem of the initial conditions file.
-        """
-        location = blueprint.initial_conditions.data[0].location
+    #     Returns
+    #     -------
+    #     str
+    #         The stem of the initial conditions file.
+    #     """
+    #     location = blueprint.initial_conditions.data[0].location
 
-        if isinstance(location, HttpUrl):
-            if location.path is None:
-                raise RuntimeError("Initial conditions location is not a valid path")
-            location = location.path
+    #     if isinstance(location, HttpUrl):
+    #         if location.path is None:
+    #             raise RuntimeError("Initial conditions location is not a valid path")
+    #         location = location.path
 
-        return Path(location).stem
+    #     return Path(location).stem
 
-    def _get_blueprint_overrides(
-        self,
-        step_name: str,
-        sd: datetime,
-        ed: datetime,
-        step_output_dir: Path,
-        depends_on: list[str],
-    ) -> dict[str, t.Any]:
-        """Create a dictionary that will override the blueprint runtime parameters
-        of a step.
+    # def _get_blueprint_overrides(
+    #     self,
+    #     step_name: str,
+    #     sd: datetime,
+    #     ed: datetime,
+    #     step_output_dir: Path,
+    #     depends_on: list[str],
+    # ) -> dict[str, t.Any]:
+    #     """Create a dictionary that will override the blueprint runtime parameters
+    #     of a step.
 
-        Parameters
-        ----------
-        step_name : str
-            The name of the step.
-        sd : datetime
-            The start date.
-        ed : datetime
-            The end date.
-        step_output_dir : Path
-            The output directory of the step.
-        depends_on : list[str]
-            The dependencies of the step.
+    #     Parameters
+    #     ----------
+    #     step_name : str
+    #         The name of the step.
+    #     sd : datetime
+    #         The start date.
+    #     ed : datetime
+    #         The end date.
+    #     step_output_dir : Path
+    #         The output directory of the step.
+    #     depends_on : list[str]
+    #         The dependencies of the step.
 
-        Returns
-        -------
-        dict[str, t.Any]
-            The overrides.
-        """
-        return {
-            "name": step_name,
-            "blueprint_overrides": {
-                "runtime_params": {
-                    "start_date": sd.strftime("%Y-%m-%d %H:%M:%S"),
-                    "end_date": ed.strftime("%Y-%m-%d %H:%M:%S"),
-                    "output_dir": step_output_dir.as_posix(),
-                }
-            },
-            "depends_on": depends_on,
-        }
+    #     Returns
+    #     -------
+    #     dict[str, t.Any]
+    #         The overrides.
+    #     """
+    #     return {
+    #         "name": step_name,
+    #         "blueprint_overrides": {
+    #             "runtime_params": {
+    #                 "start_date": sd.strftime("%Y-%m-%d %H:%M:%S"),
+    #                 "end_date": ed.strftime("%Y-%m-%d %H:%M:%S"),
+    #                 "output_dir": step_output_dir.as_posix(),
+    #             }
+    #         },
+    #         "depends_on": depends_on,
+    #     }
 
-    def _get_ic_overrides(self, last_output_path: Path) -> dict[str, t.Any]:
-        """Create a dictionary that will override the initial conditions of a step.
+    # def _get_ic_overrides(self, last_output_path: Path) -> dict[str, t.Any]:
+    #     """Create a dictionary that will override the initial conditions of a step.
 
-        Parameters
-        ----------
-        last_output_path : Path
-            The path to the last output file.
+    #     Parameters
+    #     ----------
+    #     last_output_path : Path
+    #         The path to the last output file.
 
-        Returns
-        -------
-        dict[str, t.Any]
-            The overrides.
-        """
-        return {
-            "blueprint_overrides": {
-                "initial_conditions": {
-                    "data": [
-                        {
-                            "location": last_output_path.as_posix(),
-                            # "partitioned": "true",
-                        }
-                    ]
-                }
-            }
-        }
+    #     Returns
+    #     -------
+    #     dict[str, t.Any]
+    #         The overrides.
+    #     """
+    #     return {
+    #         "blueprint_overrides": {
+    #             "initial_conditions": {
+    #                 "data": [
+    #                     {
+    #                         "location": last_output_path.as_posix(),
+    #                     }
+    #                 ]
+    #             }
+    #         }
+    #     }
 
-    def output_root(
-        self,
-        step_name: str,
-        bp: RomsMarblBlueprint,
-    ) -> Path:
-        """The step-relative directory for writing outputs."""
-        # runtime_overrides = t.cast(
-        #     dict[str, str], self.blueprint_overrides.get("runtime_params", {})
-        # )
-        # output_dir: str | Path = runtime_overrides.get("output_dir", "")
+    # def output_root(
+    #     self,
+    #     step_name: str,
+    #     bp: RomsMarblBlueprint,
+    # ) -> Path:
+    #     """The step-relative directory for writing outputs."""
+    #     # runtime_overrides = t.cast(
+    #     #     dict[str, str], self.blueprint_overrides.get("runtime_params", {})
+    #     # )
+    #     # output_dir: str | Path = runtime_overrides.get("output_dir", "")
 
-        # if output_dir:
-        #     # runtime override will always take precedence
-        #     return Path(output_dir)
+    #     # if output_dir:
+    #     #     # runtime override will always take precedence
+    #     #     return Path(output_dir)
 
-        # run_id = os.getenv("CSTAR_RUNID")
+    #     if run_path := os.getenv("CSTAR_RUNID"):
+    #         return Path(run_path) / slugify(step_name)
 
-        # use the blueprint root path if it hasn't been overridden
-        return Path(bp.runtime_params.output_dir) / slugify(step_name)
+    #     # use the blueprint root path if it hasn't been overridden
+    #     return Path(bp.runtime_params.output_dir) / slugify(step_name)
 
     def __call__(self, step: Step) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
@@ -343,16 +345,19 @@ class RomsMarblTimeSplitter(Transform):
             The sub-steps.
         """
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        # step.bp = blueprint
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
         # use the directory of the parent as the base...
-        output_root = self.output_root(step.name, blueprint)
-        work_root = output_root / "work"
-        task_root = output_root / "tasks"
+        # output_root = self.output_root(step.name, blueprint)
+        step_work_dir = step.working_dir(blueprint)
 
-        time_slices = list(get_time_slices(start_date, end_date))
+        work_root = step_work_dir / "work"
+        task_root = step_work_dir / "tasks"
+
+        serialize(work_root / Path(step.blueprint_path).name, blueprint)
+
+        time_slices = list(get_time_slices(start_date, end_date, frequency="daily"))
         n_slices = len(time_slices)
 
         # if (start_date - end_date).total_seconds() < timedelta(days=30).total_seconds():
@@ -384,6 +389,8 @@ class RomsMarblTimeSplitter(Transform):
             child_step_name = slugify(unique_name)
 
             subtask_root = task_root / child_step_name
+            subtask_work = subtask_root / "work"
+
             description = (
                 f"Subtask {i + 1} of {n_slices}; Simulation covering "
                 f"timespan from `{sd}` to `{ed}` - {blueprint.description}"
@@ -396,22 +403,24 @@ class RomsMarblTimeSplitter(Transform):
                     "output_dir": subtask_root.as_posix(),
                 },
             }
-            # bp_copy.runtime_params.start_date = sd
-            # bp_copy.runtime_params.end_date = ed
-            # bp_copy.runtime_params.output_dir = subtask_root
-            # bp_copy.description = (
-            #     f"subtask {i + 1}: {sd} to {ed} - {blueprint.description}"
-            # )
+            bp_copy.runtime_params.start_date = sd
+            bp_copy.runtime_params.end_date = ed
+            bp_copy.runtime_params.output_dir = subtask_root
+            bp_copy.description = (
+                f"subtask {i + 1}: {sd} to {ed} - {blueprint.description}"
+            )
 
             if last_restart_file:
-                # bp_copy.initial_conditions.data[
-                #     0
-                # ].location = last_restart_file.as_posix()
+                bp_copy.initial_conditions.data[
+                    0
+                ].location = last_restart_file.as_posix()
+
                 overrides["initial_conditions"] = {
                     "data": [{"location": last_restart_file.as_posix()}]
                 }
 
-            store_at = work_root / f"{child_step_name}_blueprint.yaml"
+            store_at = subtask_work / f"{child_step_name}_blueprint.yaml"
+            # store_at = work_root / f"{child_step_name}_blueprint.yaml"
             serialize(store_at, bp_copy)
 
             attributes = step.model_dump(

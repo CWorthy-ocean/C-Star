@@ -231,12 +231,12 @@ class Planner:
         value : object
             The value to be stored.
         """
-        if key in {KEY_STATUS, KEY_STEP, KEY_TASK}:
-            msg = f"Writing to reserved key `{key}` on node `{n}`"
+        stored = self.graph.nodes[n].get(key, "")
+        if key in {KEY_STATUS, KEY_STEP, KEY_TASK} and stored != value:
+            msg = f"Updating reserved key `{key}` on node `{n}`"
             print(msg)
 
-        node = self.graph.nodes[n]
-        node[key] = value
+        self.graph.nodes[n][key] = value
 
     @t.overload
     def retrieve(

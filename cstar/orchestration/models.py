@@ -1,4 +1,5 @@
 import itertools
+import os
 import typing as t
 from abc import ABC
 from copy import deepcopy
@@ -468,7 +469,12 @@ class Step(BaseModel):
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
         if output_dir_override:
-            return Path(output_dir_override)
+            p = Path(output_dir_override)
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+
+        if run_id := os.getenv("CSTAR_RUNID", ""):
+            return Path(run_id) / self.safe_job_name
 
         return Path(bp.runtime_params.output_dir)
 
@@ -478,6 +484,23 @@ class ChildStep(Step):
 
     parent: str | None = Field(default=None, validate_default=False, frozen=True)
     """The name of the parent step if this step was created via splitting."""
+
+    def working_dir(self, bp: RomsMarblBlueprint) -> Path:
+        """The step-relative directory for writing outputs."""
+        runtime_params = self.blueprint_overrides.get("runtime_params", {})  # type: ignore[union-attr,assignment]
+        output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
+
+        if output_dir_override:
+            p = Path(output_dir_override)
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+
+        if run_dir := os.getenv("CSTAR_RUNID", ""):
+            p = Path(run_dir) / f"{self.parent}/tasks/{self.safe_job_name}"
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+
+        return Path(bp.runtime_params.output_dir)
 
 
 class Workplan(BaseModel):

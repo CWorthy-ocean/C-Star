@@ -17,7 +17,6 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import (
-    OverrideTransform,
     RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
@@ -160,23 +159,21 @@ async def prepare_workplan(wp_path: Path, output_dir: Path) -> tuple[Workplan, P
     -------
     Workplanfs
     """
-    wp = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    wp_og = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
-    transformer = WorkplanTransformer(wp, RomsMarblTimeSplitter())
+    transformer = WorkplanTransformer(wp_og, RomsMarblTimeSplitter())
+    wp = transformer.apply()
+
     if transformer.is_modified:
         print("A time-split workplan will be executed.")
 
-    wp = transformer.transformed
-    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir)
-    await asyncio.to_thread(serialize, persist_as, wp)
-
-    transformer = WorkplanTransformer(wp, OverrideTransform())
-    if transformer.is_modified:
-        print("An overridden workplan will be executed.")
-
-    wp = transformer.transformed
-    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir)
-    await asyncio.to_thread(serialize, persist_as, wp)
+    # make a copy of the original and modified blueprint in the output directory
+    persist_og = WorkplanTransformer.derived_path(wp_path, output_dir / "work", "_og")
+    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir / "work")
+    _results = await asyncio.gather(
+        asyncio.to_thread(serialize, persist_og, wp_og),
+        asyncio.to_thread(serialize, persist_as, wp),
+    )
 
     return wp, persist_as
 
@@ -189,13 +186,15 @@ async def build_and_run_dag(wp_path: Path, output_dir: Path) -> None:
     ----------
     path : Path
         The path to the blueprint to execute
+    output_dir : Path
+        The path to the output directory.
     """
     wp, wp_path = await prepare_workplan(wp_path, output_dir)
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
     # launcher: Launcher = LocalLauncher()
-    launcher: Launcher = SlurmLauncher()
+    launcher = SlurmLauncher()
     orchestrator = Orchestrator(planner, launcher)
 
     # schedule the tasks without waiting for completion
@@ -285,9 +284,15 @@ def main() -> None:
     args = sys.argv[1:]
     ns = get_parser().parse_args(args)
 
-    o_path = Path(ns.output)
-    if not o_path.exists():
-        o_path.mkdir(parents=True)
+    output_dir = Path(ns.output)
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_id = f"{timestamp}"
+    run_dir = output_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["CSTAR_RUNID"] = run_dir.as_posix()
 
     wp_path = Path(ns.workplan) if ns.workplan is not None else None
     bp_path = Path(ns.blueprint) if ns.blueprint is not None else None
@@ -299,19 +304,16 @@ def main() -> None:
 
     if bp_path:
         # host the blueprint in a workplan template
-        wp_path = create_host_workplan(o_path, template, bp_path)
+        wp_path = create_host_workplan(run_dir, template, bp_path)
         print(f"Running workplan at `{wp_path}` with blueprint at `{bp_path}`")
     else:
         bp_path = Path(bp_default)
         print(f"Running unmodified workplan at `{wp_path}`")
 
-    run_id = f"dag_runner_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    os.environ["CSTAR_RUNID"] = run_id
-
     if wp_path is None:
         raise ValueError("Workplan path is malformed.")
 
-    asyncio.run(build_and_run_dag(wp_path, o_path))
+    asyncio.run(build_and_run_dag(wp_path, run_dir))
 
 
 if __name__ == "__main__":
