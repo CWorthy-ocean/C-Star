@@ -5,7 +5,7 @@ A utility for generating new regional oceanographic modeling domains and creatin
 
 ## The C-Star Ocean Network
 <p align="center">
-  <img src="workflows/cson.png" alt="C-SON Forge Logo" style="max-width: 300px;">
+  <img src="workflows/analysis/assets/cson.png" alt="C-SON Forge Logo" style="max-width: 300px;">
 </p>
 
 
