@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
@@ -1194,7 +1195,7 @@ class ROMSSimulation(Simulation):
             # detecting existing directories.
             codebase_dir = codebases_dir / codebase.root_env_var.split("_")[0]
             if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1" and codebase_dir.exists():
-                codebase_dir.unlink()
+                shutil.rmtree(codebase_dir)
 
             codebase_dir.mkdir(parents=True, exist_ok=True)
             codebase.setup(codebase_dir)
