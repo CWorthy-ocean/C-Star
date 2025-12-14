@@ -277,9 +277,6 @@ def create_host_workplan(output_path: Path, template: str, bp_path: Path) -> Pat
     return wp_path
 
 
-import re  # noqa: E402
-
-
 def main() -> None:
     """Execute the dag runner using parameters supplied from the CLI."""
     args = sys.argv[1:]
