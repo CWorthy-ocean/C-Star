@@ -82,10 +82,10 @@ class JobFileSystem(LoggingMixin):
 
 
 class RomsJobFileSystem(JobFileSystem):
-    COMPILE_TIME_NAME: Literal["compile_time_code"] = "compile_time_code"
-    RUNTIME_NAME: Literal["runtime_code"] = "runtime_code"
-    INPUT_DATASETS_NAME: Literal["input_datasets"] = "input_datasets"
-    CODEBASES_NAME: Literal["codebases"] = "codebases"
+    COMPILE_TIME_NAME: Literal["roms/compile_time_code"] = "roms/compile_time_code"
+    RUNTIME_NAME: Literal["roms/runtime_code"] = "roms/runtime_code"
+    INPUT_DATASETS_NAME: Literal["roms/input_datasets"] = "roms/input_datasets"
+    CODEBASES_NAME: Literal["roms/codebases"] = "roms/codebases"
     JOINED_OUTPUT_NAME: Literal["joined_output"] = "joined_output"
 
     compile_time_code_dir: Path
