@@ -474,8 +474,10 @@ class Step(BaseModel):
             p.mkdir(parents=True, exist_ok=True)
             return p
 
+        p = Path(bp.runtime_params.output_dir) / self.safe_job_name
         if run_id := os.getenv("CSTAR_RUNID", ""):
-            return Path(run_id) / self.safe_job_name
+            p = p / run_id
+        return p
 
     def file_system(self, bp: RomsMarblBlueprint) -> JobFileSystem:
         """The file system for this step."""
