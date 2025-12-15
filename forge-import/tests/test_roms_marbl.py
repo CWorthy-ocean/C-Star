@@ -188,11 +188,13 @@ class TestBuildAllModels:
                 else:
                     raise
             except RuntimeError as e:
-                # Build may fail for various reasons (missing compilers, etc.)
+                # Build may fail for various reasons (missing compilers, conda, etc.)
                 # That's OK - we're just testing that the interface works
-                if any(keyword in str(e).lower() for keyword in [
-                    'gfortran', 'mpifort', 'compiler', 'build', 'make', 'conda'
+                error_str = str(e).lower()
+                if any(keyword in error_str for keyword in [
+                    'gfortran', 'mpifort', 'compiler', 'build', 'make', 'conda', 'not found on path'
                 ]):
+                    # Skip if it's a missing dependency/environment issue
                     pytest.skip(f"Build environment not set up for {model_name}: {e}")
                 else:
                     raise
