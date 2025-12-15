@@ -286,7 +286,7 @@ class RomsMarblTimeSplitter(Transform):
             child_step_name = slugify(unique_name)
 
             subtask_root = job_fs.tasks_dir / child_step_name
-            subtask_work = subtask_root / "work"
+            subtask_fs = RomsJobFileSystem(subtask_root)
 
             description = (
                 f"Subtask {i + 1} of {n_slices}; Simulation covering "
@@ -316,7 +316,7 @@ class RomsMarblTimeSplitter(Transform):
                     "data": [{"location": last_restart_file.as_posix()}]
                 }
 
-            store_at = subtask_work / f"{child_step_name}_blueprint.yaml"
+            store_at = subtask_fs.work_dir / f"{child_step_name}_blueprint.yaml"
             serialize(store_at, bp_copy)
 
             attributes = step.model_dump(
@@ -348,7 +348,7 @@ class RomsMarblTimeSplitter(Transform):
             # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
             reset_file_name = f"output_rst.{compact_ed}.000.nc"
             # restart_file_path = child_step.working_dir / "output" / reset_file_name
-            restart_file_path = subtask_root / "output" / reset_file_name
+            restart_file_path = subtask_fs.output_dir / reset_file_name
 
             # use output dir of the last step as the input for the next step
             last_restart_file = restart_file_path
