@@ -470,9 +470,7 @@ class Step(BaseModel):
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
         if output_dir_override:
-            p = Path(output_dir_override)
-            p.mkdir(parents=True, exist_ok=True)
-            return p
+            return Path(output_dir_override)
 
         p = Path(bp.runtime_params.output_dir) / self.safe_job_name
         if run_id := os.getenv("CSTAR_RUNID", ""):
@@ -496,14 +494,10 @@ class ChildStep(Step):
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
         if output_dir_override:
-            p = Path(output_dir_override)
-            p.mkdir(parents=True, exist_ok=True)
-            return p
+            return Path(output_dir_override)
 
         if run_dir := os.getenv("CSTAR_RUNID", ""):
-            p = Path(run_dir) / f"{self.parent}/tasks/{self.safe_job_name}"
-            p.mkdir(parents=True, exist_ok=True)
-            return p
+            return Path(run_dir) / f"{self.parent}/tasks/{self.safe_job_name}"
 
         return Path(bp.runtime_params.output_dir)
 
