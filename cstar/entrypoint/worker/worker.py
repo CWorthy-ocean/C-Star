@@ -77,8 +77,6 @@ class SimulationRunner(Service):
     """The URI of the blueprint to run."""
     _output_root: Final[pathlib.Path]
     """The root directory where simulation outputs will be written."""
-    _output_dir: Final[pathlib.Path]
-    """A unique directory for this simulation run to write outputs."""
     _simulation: Final[ROMSSimulation]
     """The simulation instance created from the blueprint."""
     _stages: Final[tuple[SimulationStages, ...]]
@@ -117,7 +115,6 @@ class SimulationRunner(Service):
         )
 
         self._output_root = self._simulation.directory.expanduser()
-        self._output_dir = self._get_unique_path(self._output_root)
         self._stages = tuple(request.stages)
 
         roms_root = os.environ.get("ROMS_ROOT", None)
@@ -153,39 +150,7 @@ class SimulationRunner(Service):
         ValueError
             If the output directory exists and contains
         """
-        # ensure that log files don't cause startup to fail.
-        outputs = next(
-            (p for p in self._output_root.glob("*") if LOGS_DIRECTORY not in str(p)),
-            None,
-        )
-
-        if self._output_dir.exists() and outputs:
-            msg = f"Output directory {self._output_root} is not empty."
-            raise ValueError(msg)
-
-        # this kept tripping up my runs because it is checking the "default" path
-        # that is derived from package_root, rather than the path set by the user.
-        # probably we should just remove this and handle it elsewhere (as noted in
-        # previous PR, this whole method maybe belongs elsewhere), but for the moment,
-        # it's commented out til we think on it.
-
-        # leftover external code folder causes non-empty repo errors; remove.
-        # externals_path = cstar_sysmgr.environment.package_root / "externals"
-        # if externals_path.exists():
-        #     msg = f"Removing existing externals dir: {externals_path}"
-        #     self.log.debug(msg)
-        #     shutil.rmtree(externals_path)
-        # externals_path.mkdir(parents=True, exist_ok=False)
-
-        # TODO: self._output_dir is currently unused; determine if
-        # the tweak to _get_unique_file_path to use the run-id ENV var
-        # is appropriate OR if that should fall on the caller.
-
-        # create a clean location to write outputs.
-        if not self._output_dir.exists():
-            msg = f"Creating clean output dir: {self._output_dir}"
-            self.log.debug(msg)
-            self._output_dir.mkdir(parents=True, exist_ok=True)
+        ...
 
     def _log_disposition(self, treat_as_failure: bool = False) -> None:
         """Log the status of the simulation at shutdown time."""

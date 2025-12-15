@@ -84,15 +84,15 @@ def sim_runner(
     job_config = JobConfig()
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        sim = SimulationRunner(request, service_config, job_config)
+        runner = SimulationRunner(request, service_config, job_config)
 
     output_path = tmp_path / "output"
 
-    sim._output_root = output_path  # type: ignore[misc]
-    sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
-    sim._simulation.directory = sim._output_dir
+    runner._output_root = output_path  # type: ignore[misc]
+    # sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
+    runner._simulation.directory = output_path
 
-    return sim
+    return runner
 
 
 def test_create_parser_happy_path() -> None:
@@ -355,31 +355,6 @@ def test_start_runner(
     assert runner._blueprint_uri == request.blueprint_uri
 
 
-def test_runner_directory_check(
-    tmp_path: Path,
-    sim_runner: SimulationRunner,
-) -> None:
-    """Test the simulation runner's file system preparation.
-
-    Verifies that a non-empty output directory causes an exception
-    to be raised.
-
-    Parameters
-    ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
-    """
-    sim_runner._output_dir.mkdir(parents=True, exist_ok=True)
-    (sim_runner._output_dir / "somefile.txt").touch()
-
-    with (
-        pytest.raises(ValueError),
-    ):
-        sim_runner._prepare_file_system()
-
-
 def test_runner_directory_check_ignore_logs(
     tmp_path: Path,
     sim_runner: SimulationRunner,
@@ -432,12 +407,11 @@ def test_runner_directory_prep(
     sim_runner._prepare_file_system()
 
     # Confirm the output directory is created...
-    assert sim_runner._output_dir.exists()
-    assert sim_runner._output_dir.is_dir()
-    assert sim_runner._output_dir.parent == sim_runner._output_root
+    assert sim_runner._output_root.exists()
+    assert sim_runner._output_root.is_dir()
 
     # ...and is empty so no conflicts will occur.
-    output_content = list(sim_runner._output_dir.iterdir())
+    output_content = list(sim_runner._output_root.iterdir())
     assert not output_content, "Output directory should be empty after prep."
 
 
