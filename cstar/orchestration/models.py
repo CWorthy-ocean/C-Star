@@ -496,10 +496,11 @@ class ChildStep(Step):
         if output_dir_override:
             return Path(output_dir_override)
 
-        if run_dir := os.getenv("CSTAR_RUNID", ""):
-            return Path(run_dir) / f"{self.parent}/tasks/{self.safe_job_name}"
+        od_path = Path(bp.runtime_params.output_dir)
+        if run_id := os.getenv("CSTAR_RUNID", ""):
+            return od_path / f"{run_id}/{self.parent}/tasks/{self.safe_job_name}"
 
-        return Path(bp.runtime_params.output_dir)
+        return od_path
 
 
 class Workplan(BaseModel):
