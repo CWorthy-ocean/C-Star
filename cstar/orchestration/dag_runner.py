@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from itertools import cycle
 from pathlib import Path
 
+from cstar.execution.file_system import JobFileSystem
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
@@ -166,8 +167,9 @@ async def prepare_workplan(wp_path: Path, output_dir: Path) -> tuple[Workplan, P
         print("A time-split workplan will be executed.")
 
     # make a copy of the original and modified blueprint in the output directory
-    persist_og = WorkplanTransformer.derived_path(wp_path, output_dir / "work", "_og")
-    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir / "work")
+    target_dir = output_dir / JobFileSystem.WORK_NAME
+    persist_og = WorkplanTransformer.derived_path(wp_path, target_dir, "_og")
+    persist_as = WorkplanTransformer.derived_path(wp_path, target_dir)
     _results = await asyncio.gather(
         asyncio.to_thread(serialize, persist_og, wp_og),
         asyncio.to_thread(serialize, persist_as, wp),

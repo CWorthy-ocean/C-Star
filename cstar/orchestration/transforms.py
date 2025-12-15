@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
-from cstar.execution.file_system import RomsJobFileSystem
+from cstar.execution.file_system import JobFileSystem, RomsJobFileSystem
 from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import deep_merge, slugify
@@ -391,7 +391,7 @@ class OverrideTransform(Transform):
     ) -> Path:
         """Persist the overridden blueprint to the output directory."""
         output_dir = self._output_dir(step, blueprint)
-        work_dir = output_dir / "work"
+        work_dir = output_dir / JobFileSystem.WORK_NAME
 
         store_at = work_dir / f"{blueprint.name}.yaml"
         serialize(store_at, blueprint)

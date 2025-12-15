@@ -9,6 +9,7 @@ import dateutil
 
 from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
 from cstar.base.log import LoggingMixin
+from cstar.execution.file_system import JobFileSystem
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 
@@ -352,7 +353,7 @@ class Simulation(ABC, LoggingMixin):
         Path
            The path where the state file will be created.
         """
-        return directory / "work" / "simulation_state.pkl"
+        return directory / JobFileSystem.WORK_NAME / "simulation_state.pkl"
 
     @property
     def state_file(self) -> Path:
