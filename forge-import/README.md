@@ -1,5 +1,7 @@
 # C-SON Forge
 
+[![Run Tests](https://github.com/CWorthy-ocean/cson-forge/actions/workflows/tests.yaml/badge.svg)](https://github.com/CWorthy-ocean/cson-forge/actions/workflows/tests.yaml?query=branch%3Amain)
+
 A utility for generating new regional oceanographic modeling domains and creating reproducible [C-Star](https://c-star.readthedocs.io) workflows through blueprint descriptors.
 
 
