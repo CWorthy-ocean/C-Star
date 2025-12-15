@@ -1,3 +1,4 @@
+import os
 import typing as t
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -92,10 +93,19 @@ def _monthlies(
         current_date = month_end
 
 
+SLICE_FUNCTIONS = defaultdict(
+    lambda: _monthlies,
+    {
+        "daily": _dailies,
+        "monthly": _monthlies,
+    },
+)
+
+
 def get_time_slices(
     start_date: datetime,
     end_date: datetime,
-    frequency: t.Literal["daily", "monthly"] = "monthly",
+    frequency: str = "monthly",
 ) -> t.Iterable[tuple[datetime, datetime]]:
     """Get the time slices for the given start and end dates.
 
@@ -111,11 +121,8 @@ def get_time_slices(
     Iterable[tuple[datetime, datetime]]
         The time slices.
     """
-    time_slices = list(
-        _dailies(start_date, end_date)
-        if frequency == "daily"
-        else _monthlies(start_date, end_date)
-    )
+    slice_fn = SLICE_FUNCTIONS[frequency]
+    time_slices = list(slice_fn(start_date, end_date))
 
     # adjust when the start date is not the first day of the month
     if start_date > time_slices[0][0]:
@@ -355,7 +362,8 @@ class RomsMarblTimeSplitter(Transform):
 
         serialize(job_fs.work_dir / Path(step.blueprint_path).name, blueprint)
 
-        time_slices = list(get_time_slices(start_date, end_date, frequency="daily"))
+        frequency = os.getenv("CSTAR_ORC_TRANSFORM_FREQ", "monthly")
+        time_slices = list(get_time_slices(start_date, end_date, frequency=frequency))
         n_slices = len(time_slices)
 
         # if (start_date - end_date).total_seconds() < timedelta(days=30).total_seconds():

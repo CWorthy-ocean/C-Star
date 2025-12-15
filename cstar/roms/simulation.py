@@ -172,6 +172,8 @@ class ROMSSimulation(Simulation):
 
     discretization: ROMSDiscretization
     runtime_code: AdditionalCode
+    file_system: RomsJobFileSystem
+    """Utility for managing directory structure of the simulation"""
 
     def __init__(
         self,
@@ -317,6 +319,7 @@ class ROMSSimulation(Simulation):
         self._exe_hash: str | None = None
 
         self._execution_handler: ExecutionHandler | None = None
+        self.file_system = RomsJobFileSystem(self.directory)
 
     def _find_dotin_file(self) -> None:
         """Identify the runtime settings (.in) file from runtime code.
@@ -1177,7 +1180,6 @@ class ROMSSimulation(Simulation):
         build : Compiles the ROMS model.
         is_setup : Checks if the simulation has been properly configured.
         """
-        self.file_system = RomsJobFileSystem(self.directory)
         self.file_system.prepare()
 
         compile_time_code_dir = self.file_system.compile_time_code_dir

@@ -1761,8 +1761,8 @@ class TestProcessingAndExecution:
         """
         # Setup
         sim = stub_romssimulation
+        sim.file_system.prepare()
         output_dir = sim.directory / "output"
-        output_dir.mkdir()
 
         # Create fake partitioned NetCDF files
         (output_dir / "ocean_his.20240101000000.001.nc").touch()
@@ -1800,7 +1800,7 @@ class TestProcessingAndExecution:
         )
 
         # Check that output file was moved
-        new_out_dir = output_dir / "JOINED_OUTPUT"
+        new_out_dir = output_dir / "joined_output"
         assert new_out_dir.exists()
         assert (new_out_dir / "ocean_his.20240101000000.nc").exists()
         assert (new_out_dir / "ocean_rst.20240101000000.nc").exists()
