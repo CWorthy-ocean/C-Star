@@ -230,115 +230,6 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
-    # def _get_location_stem(self, blueprint: RomsMarblBlueprint) -> str:
-    #     """Identify the stem of the initial conditions file.
-
-    #     Parameters
-    #     ----------
-    #     blueprint : RomsMarblBlueprint
-    #         The blueprint to extract initial conditions from.
-
-    #     Returns
-    #     -------
-    #     str
-    #         The stem of the initial conditions file.
-    #     """
-    #     location = blueprint.initial_conditions.data[0].location
-
-    #     if isinstance(location, HttpUrl):
-    #         if location.path is None:
-    #             raise RuntimeError("Initial conditions location is not a valid path")
-    #         location = location.path
-
-    #     return Path(location).stem
-
-    # def _get_blueprint_overrides(
-    #     self,
-    #     step_name: str,
-    #     sd: datetime,
-    #     ed: datetime,
-    #     step_output_dir: Path,
-    #     depends_on: list[str],
-    # ) -> dict[str, t.Any]:
-    #     """Create a dictionary that will override the blueprint runtime parameters
-    #     of a step.
-
-    #     Parameters
-    #     ----------
-    #     step_name : str
-    #         The name of the step.
-    #     sd : datetime
-    #         The start date.
-    #     ed : datetime
-    #         The end date.
-    #     step_output_dir : Path
-    #         The output directory of the step.
-    #     depends_on : list[str]
-    #         The dependencies of the step.
-
-    #     Returns
-    #     -------
-    #     dict[str, t.Any]
-    #         The overrides.
-    #     """
-    #     return {
-    #         "name": step_name,
-    #         "blueprint_overrides": {
-    #             "runtime_params": {
-    #                 "start_date": sd.strftime("%Y-%m-%d %H:%M:%S"),
-    #                 "end_date": ed.strftime("%Y-%m-%d %H:%M:%S"),
-    #                 "output_dir": step_output_dir.as_posix(),
-    #             }
-    #         },
-    #         "depends_on": depends_on,
-    #     }
-
-    # def _get_ic_overrides(self, last_output_path: Path) -> dict[str, t.Any]:
-    #     """Create a dictionary that will override the initial conditions of a step.
-
-    #     Parameters
-    #     ----------
-    #     last_output_path : Path
-    #         The path to the last output file.
-
-    #     Returns
-    #     -------
-    #     dict[str, t.Any]
-    #         The overrides.
-    #     """
-    #     return {
-    #         "blueprint_overrides": {
-    #             "initial_conditions": {
-    #                 "data": [
-    #                     {
-    #                         "location": last_output_path.as_posix(),
-    #                     }
-    #                 ]
-    #             }
-    #         }
-    #     }
-
-    # def output_root(
-    #     self,
-    #     step_name: str,
-    #     bp: RomsMarblBlueprint,
-    # ) -> Path:
-    #     """The step-relative directory for writing outputs."""
-    #     # runtime_overrides = t.cast(
-    #     #     dict[str, str], self.blueprint_overrides.get("runtime_params", {})
-    #     # )
-    #     # output_dir: str | Path = runtime_overrides.get("output_dir", "")
-
-    #     # if output_dir:
-    #     #     # runtime override will always take precedence
-    #     #     return Path(output_dir)
-
-    #     if run_path := os.getenv("CSTAR_RUNID"):
-    #         return Path(run_path) / slugify(step_name)
-
-    #     # use the blueprint root path if it hasn't been overridden
-    #     return Path(bp.runtime_params.output_dir) / slugify(step_name)
-
     def __call__(self, step: Step) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
 
@@ -426,7 +317,6 @@ class RomsMarblTimeSplitter(Transform):
                 }
 
             store_at = subtask_work / f"{child_step_name}_blueprint.yaml"
-            # store_at = work_root / f"{child_step_name}_blueprint.yaml"
             serialize(store_at, bp_copy)
 
             attributes = step.model_dump(
