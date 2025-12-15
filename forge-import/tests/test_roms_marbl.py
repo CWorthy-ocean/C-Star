@@ -163,7 +163,7 @@ class TestBuildAllModels:
                 
                 # Try to call build - this will fail if git repos aren't available,
                 # build environment isn't set up, etc. That's expected in test environments.
-                use_conda = config.system == "MacOS"
+                use_conda = config.system in {"MacOS", "unknown"}
 
                 result = module.build(
                     model_spec=spec,
