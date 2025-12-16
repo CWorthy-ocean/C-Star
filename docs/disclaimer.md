@@ -1,4 +1,4 @@
-> [!Warning] 
+> ⚠️
 > **This project is still in an early phase of development.**
 >
 > The [python API](https://c-star.readthedocs.io/en/latest/api.html) is not yet stable, and some aspects of the schema for the [blueprint](https://c-star.readthedocs.io/en/latest/terminology.html#term-blueprint) will likely evolve. 
