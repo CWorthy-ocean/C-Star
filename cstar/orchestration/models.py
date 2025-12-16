@@ -460,7 +460,7 @@ class Step(BaseModel):
     """A collection of key-value pairs specifying overrides for workflow attributes."""
 
     @property
-    def safe_job_name(self) -> str:
+    def safe_name(self) -> str:
         """The name of the job that will be executed."""
         return slugify(self.name)
 
@@ -472,7 +472,7 @@ class Step(BaseModel):
         if output_dir_override:
             return Path(output_dir_override)
 
-        p = Path(bp.runtime_params.output_dir) / self.safe_job_name
+        p = Path(bp.runtime_params.output_dir) / self.safe_name
         if run_id := os.getenv("CSTAR_RUNID", ""):
             p = p / run_id
         return p
@@ -498,7 +498,7 @@ class ChildStep(Step):
 
         od_path = Path(bp.runtime_params.output_dir)
         if run_id := os.getenv("CSTAR_RUNID", ""):
-            return od_path / f"{run_id}/{self.parent}/tasks/{self.safe_job_name}"
+            return od_path / f"{run_id}/{self.parent}/tasks/{self.safe_name}"
 
         return od_path
 

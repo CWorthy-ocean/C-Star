@@ -201,7 +201,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        job_name = step.safe_job_name
+        job_name = step.safe_name
         bp_path = Path(step.blueprint_path)
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
