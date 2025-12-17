@@ -472,10 +472,11 @@ class Step(BaseModel):
         if output_dir_override:
             return Path(output_dir_override)
 
-        p = Path(bp.runtime_params.output_dir) / self.safe_name
+        od_path = Path(bp.runtime_params.output_dir)
+
         if run_id := os.getenv("CSTAR_RUNID", ""):
-            p = p / run_id
-        return p
+            return od_path / run_id / self.safe_name
+        return od_path / self.safe_name
 
     def file_system(self, bp: RomsMarblBlueprint) -> JobFileSystem:
         """The file system for this step."""
@@ -496,11 +497,7 @@ class ChildStep(Step):
         if output_dir_override:
             return Path(output_dir_override)
 
-        od_path = Path(bp.runtime_params.output_dir)
-        if run_id := os.getenv("CSTAR_RUNID", ""):
-            return od_path / f"{run_id}/{self.parent}/tasks/{self.safe_name}"
-
-        return od_path
+        return Path(bp.runtime_params.output_dir) / self.safe_name
 
 
 class Workplan(BaseModel):

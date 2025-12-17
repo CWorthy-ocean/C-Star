@@ -1,14 +1,12 @@
 import argparse
 import asyncio
 import os
-import sys
 import typing as t
 from datetime import datetime, timezone
 from itertools import cycle
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
-from cstar.execution.file_system import JobFileSystem
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (

@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
-from cstar.execution.file_system import JobFileSystem, RomsJobFileSystem
 from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import deep_merge, slugify
@@ -230,13 +229,16 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
-    def __call__(self, step: Step) -> t.Iterable[Step]:
+    def __call__(self, step: Step, output_dir: Path | None = None) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
 
         Parameters
         ----------
         step : Step
             The step to split.
+        output_dir : Path | None
+            An alternative output directory that will replace the
+            output directory specified in the step's blueprint.
 
         Returns
         -------
@@ -247,11 +249,12 @@ class RomsMarblTimeSplitter(Transform):
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
-        step_work_dir = step.working_dir(blueprint)
-        job_fs = RomsJobFileSystem(step_work_dir)
+        # step_work_dir = step.working_dir(blueprint)
+        # job_fs = RomsJobFileSystem(step_work_dir)
+        job_fs = step.file_system(blueprint)
         job_fs.prepare()
 
-        serialize(job_fs.work_dir / Path(step.blueprint_path).name, blueprint)
+        serialize(job_fs.root / Path(step.blueprint_path).name, blueprint)
 
         frequency = os.getenv("CSTAR_ORC_TRANSFORM_FREQ", "monthly")
         time_slices = list(get_time_slices(start_date, end_date, frequency=frequency))
@@ -282,11 +285,11 @@ class RomsMarblTimeSplitter(Transform):
             compact_sd = sd.strftime("%Y%m%d%H%M%S")
             compact_ed = ed.strftime("%Y%m%d%H%M%S")
 
-            unique_name = f"{i + 1:02d}_{step.name}_{compact_sd}_{compact_ed}"
-            child_step_name = slugify(unique_name)
+            dynamic_name = f"{i + 1:02d}_{step.safe_name}_{compact_sd}_{compact_ed}"
+            child_step_name = slugify(dynamic_name)
 
-            subtask_root = job_fs.tasks_dir / child_step_name
-            subtask_fs = RomsJobFileSystem(subtask_root)
+            subtask_root = job_fs.tasks_dir            # subtask_fs = RomsJobFileSystem(subtask_root)
+            subtask_out_dir = subtask_root / child_step_name
 
             description = (
                 f"Subtask {i + 1} of {n_slices}; Simulation covering "
@@ -295,29 +298,31 @@ class RomsMarblTimeSplitter(Transform):
             overrides = {
                 "description": description,
                 "runtime_params": {
-                    "start_date": sd,
-                    "end_date": ed,
-                    "output_dir": subtask_root.as_posix(),
+                    "name": dynamic_name,
+                    "start_date":sd.strftime("%Y%m%d %H%M%S") ,
+                    "end_date": ed.strftime("%Y%m%d %H%M%S") ,
+                    "output_dir": subtask_out_dir.as_posix(),
                 },
             }
             bp_copy.runtime_params.start_date = sd
             bp_copy.runtime_params.end_date = ed
-            bp_copy.runtime_params.output_dir = subtask_root
+            bp_copy.runtime_params.output_dir = subtask_out_dir
+            bp_copy.name = dynamic_name
             bp_copy.description = (
                 f"subtask {i + 1}: {sd} to {ed} - {blueprint.description}"
             )
 
             if last_restart_file:
-                bp_copy.initial_conditions.data[
-                    0
-                ].location = last_restart_file.as_posix()
-
+                rst_path = last_restart_file.as_posix()
+                bp_copy.initial_conditions.data[0].location = rst_path
                 overrides["initial_conditions"] = {
-                    "data": [{"location": last_restart_file.as_posix()}]
+                    "data": [{"location": rst_path}]
                 }
 
-            store_at = subtask_fs.work_dir / f"{child_step_name}_blueprint.yaml"
-            serialize(store_at, bp_copy)
+            # child_bp_path = step.file_system(bp_copy).work_dir / f"{child_step_name}_blueprint.yaml"
+            child_bp_path = subtask_out_dir / f"{child_step_name}_blueprint.yaml"
+
+            serialize(child_bp_path, bp_copy)
 
             attributes = step.model_dump(
                 exclude={
@@ -331,11 +336,12 @@ class RomsMarblTimeSplitter(Transform):
             child_step = ChildStep(
                 **attributes,
                 name=child_step_name,
-                blueprint=store_at.as_posix(),
+                blueprint=child_bp_path.as_posix(),
                 depends_on=depends_on,
                 parent=step.name,
-                blueprint_overrides=overrides,  # type: ignore[arg-type]
+                blueprint_overrides=overrides,  # type: ignore[arg-type
             )
+            child_step.file_system(bp_copy).prepare()
 
             yield child_step
             if i == len(time_slices) - 1:
@@ -348,7 +354,9 @@ class RomsMarblTimeSplitter(Transform):
             # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
             reset_file_name = f"output_rst.{compact_ed}.000.nc"
             # restart_file_path = child_step.working_dir / "output" / reset_file_name
-            restart_file_path = subtask_fs.output_dir / reset_file_name
+            restart_file_path = (
+                child_step.file_system(bp_copy).output_dir / reset_file_name
+            )
 
             # use output dir of the last step as the input for the next step
             last_restart_file = restart_file_path

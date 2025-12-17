@@ -112,7 +112,9 @@ class SimulationRunner(Service):
         self._blueprint_uri = request.blueprint_uri
 
         self._simulation = ROMSSimulation.from_blueprint(self._blueprint_uri)
-        self._simulation.name = slugify(self._simulation.name) # TODO: consider modifying from_blueprint to avoid spaces in names
+        self._simulation.name = slugify(
+            self._simulation.name
+        )  # TODO: consider modifying from_blueprint to avoid spaces in names
         self._output_root = self._simulation.directory.expanduser()
         self._stages = tuple(request.stages)
 
