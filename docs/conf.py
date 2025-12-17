@@ -18,15 +18,14 @@ import sys
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
 
-logger.info("python exec:", sys.executable)
-logger.info("sys.path:", sys.path)
 root = pathlib.Path(__file__).parent.parent.absolute()
 os.environ["PYTHONPATH"] = str(root)
 # cstar will look for os.environ["CONDA_PREFIX"] but this is not available on RTD; let's fill it with dummy
 os.environ["CONDA_PREFIX"] = str(root)
 sys.path.insert(0, str(root))
+os.environ["OMP_DISPLAY_ENV"] = "FALSE"
+os.environ["OMP_DISPLAY_AFFINITY"] = "FALSE"
 
 import cstar  # isort:skip
 
@@ -40,7 +39,7 @@ author = "C-Star developers"
 rst_prolog = """.. attention::
     **This project is still in an early phase of development.**
 
-    The `python API <https://c-star.readthedocs.io/en/latest/api.html>`_ is not yet stable, and some aspects of the schema for the `blueprint <https://c-star.readthedocs.io/en/latest/terminology.html#term-blueprint>`_ will likely evolve.
+    The :doc:`python API </api>` is not yet stable, and some aspects of the schema for the :doc:`blueprint </blueprints>` and :doc:`workplan </workplans>` will likely evolve.
     Therefore whilst you are welcome to try out using the package, we cannot yet guarantee backwards compatibility. 
     We expect to reach a more stable version in 2026.
 """
@@ -52,7 +51,6 @@ extensions = [
     "myst_parser",
     "sphinx.ext.napoleon",
     "nbsphinx",
-    "sphinxcontrib.bibtex",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
 ]
@@ -81,8 +79,6 @@ html_theme = "sphinx_book_theme"
 # html_theme = 'alabaster'
 html_static_path = ["_static"]
 
-bibtex_bibfiles = ["references.bib"]
-bibtex_reference_style = "author_year"
 
 html_theme_options = {
     "repository_url": "https://github.com/CWorthy-ocean/C-Star",

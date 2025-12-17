@@ -14,34 +14,41 @@ We are designing and building C-Star with these high-level principles in mind:
 A key strength of C-Star lies in its ability to run regional simulations using a `“blueprint” <https://c-star.readthedocs.io/en/latest/terminology.html#term-blueprint>`_ that consolidates all the necessary data to define a model setup. This enables the creation of curated databases containing both scientifically validated and research-grade blueprints. These blueprints offer users the flexibility to easily reproduce simulations, making the modeling process more accessible and consistent.
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Getting Started
+    :maxdepth: 1
+    :caption: Getting Started
 
-   Installing C-Star <installation>
+    Installing C-Star <installation>
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Terminology
+    :maxdepth: 1
+    :caption: Terminology and Concepts
 
-   terminology
+    terminology
 
+.. toctree::
+    :maxdepth: 1
+    :caption: User Guide
+
+    blueprints
+    workplans
+    configuration
    
 .. toctree::
-   :maxdepth: 1
-   :caption: Deployment
+    :maxdepth: 1
+    :caption: Deployment
 
-   machines
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Reference
-
-   api
+    machines
 
 .. toctree::
-   :maxdepth: 1
-   :caption: For Developers
+    :maxdepth: 1
+    :caption: Reference
 
-   contributing
-   releases
-   python_api_guides
+    api
+
+.. toctree::
+    :maxdepth: 1
+    :caption: For Developers
+
+    contributing
+    releases
+    python_api_guides

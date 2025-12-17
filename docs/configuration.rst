@@ -4,7 +4,13 @@ Configuration
 Environment Variables
 ---------------------
 
-The following environment variables can be set by the user to control C-Star behavior:
+User-settable environment variables
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following environment variables can be set by the user to control C-Star behavior.
+
+Frequent users may want to set preferred values for these variables in their ``.bash_profile`` or ``.zshrc`` files.
+
 
 
 +------------------------------+-----------------------+-----------------------+
@@ -49,6 +55,7 @@ The following environment variables can be set by the user to control C-Star beh
 |                              |                       | submitted to SLURM.   |
 +------------------------------+-----------------------+-----------------------+
 
+
 Developer-only environment variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -58,14 +65,7 @@ These variables are set internally or during testing and are documented here for
 | Variable                     | Default               | Effect                |
 +==============================+=======================+=======================+
 +------------------------------+-----------------------+-----------------------+
-| CSTAR_RUNID                  | None, set by CLI      | The run ID should be  |
-|                              |                       | unique to a given     |
-|                              |                       | “run” of an           |
-|                              |                       | orchestration as it   |
-|                              |                       | controls              |
-|                              |                       | caching/restoring     |
-|                              |                       | previous workflow     |
-|                              |                       | state.                |
+| CSTAR_RUNID                  | None, set by CLI      | The :term:`run ID`    |
 +------------------------------+-----------------------+-----------------------+
 | CSTAR_CMD_CONVERTER_OVERRIDE | None                  | Testing only. If set, |
 |                              |                       | submit a custom       |
