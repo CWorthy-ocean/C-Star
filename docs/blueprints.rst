@@ -106,7 +106,7 @@ In Python
     from pathlib import Path
     from cstar.cli.blueprint.check import check as check_blueprint
 
-    check_blueprint(Path("/path/to/my/blueprint"))
+    check_blueprint(Path("/path/to/my/blueprint.yaml"))
 
 
 Execution
@@ -140,4 +140,4 @@ In Python
     from pathlib import Path
     from cstar.cli.blueprint.run import run as run_blueprint
 
-    run_blueprint(Path("/path/to/my/blueprint"))
+    run_blueprint(Path("/path/to/my/blueprint.yaml"))
