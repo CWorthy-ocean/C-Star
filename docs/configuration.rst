@@ -1,0 +1,77 @@
+Configuration
+=============
+
+Environment Variables
+---------------------
+
+The following environment variables can be set by the user to control C-Star behavior:
+
+
++------------------------------+-----------------------+-----------------------+
+| Variable                     | Default               | Effect                |
++==============================+=======================+=======================+
+| CSTAR_NPROCS_POST            | os.cpu_count() / 3    | The number of         |
+|                              |                       | parallel processes to |
+|                              |                       | use for post-run join |
+|                              |                       | operations.           |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_FRESH_CODEBASES        | 0                     | If 1, CSTAR will make |
+|                              |                       | fresh codebase        |
+|                              |                       | directories and       |
+|                              |                       | clones for each run.  |
+|                              |                       | If 0 (default),       |
+|                              |                       | common codebases in   |
+|                              |                       | ROMS_ROOT/MARBL_ROOT  |
+|                              |                       | are used (those       |
+|                              |                       | variables default to  |
+|                              |                       | locations within this |
+|                              |                       | package directory).   |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_CLOBBER_WORKING_DIR    | 0                     | If 1, clear the       |
+|                              |                       | working directory     |
+|                              |                       | dictated in the       |
+|                              |                       | blueprint before      |
+|                              |                       | launching a SLURM     |
+|                              |                       | job. Use at your own  |
+|                              |                       | risk.                 |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_SLURM_ACCOUNT          | None (must be set for | The account name to   |
+|                              | SLURM usage)          | be passed to SLURM    |
+|                              |                       | for compute           |
+|                              |                       | accounting.           |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_SLURM_QUEUE            | None (must be set for | The SLURM queue or    |
+|                              | SLURM usage)          | partition to use for  |
+|                              |                       | jobs.                 |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_SLURM_MAX_WALLTIME     | “48:00:00”            | Maximum walltime to   |
+|                              |                       | set for jobs          |
+|                              |                       | submitted to SLURM.   |
++------------------------------+-----------------------+-----------------------+
+
+Developer-only environment variables
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+These variables are set internally or during testing and are documented here for developers reference.
+
++------------------------------+-----------------------+-----------------------+
+| Variable                     | Default               | Effect                |
++==============================+=======================+=======================+
++------------------------------+-----------------------+-----------------------+
+| CSTAR_RUNID                  | None, set by CLI      | The run ID should be  |
+|                              |                       | unique to a given     |
+|                              |                       | “run” of an           |
+|                              |                       | orchestration as it   |
+|                              |                       | controls              |
+|                              |                       | caching/restoring     |
+|                              |                       | previous workflow     |
+|                              |                       | state.                |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_CMD_CONVERTER_OVERRIDE | None                  | Testing only. If set, |
+|                              |                       | submit a custom       |
+|                              |                       | command as the        |
+|                              |                       | execution command to  |
+|                              |                       | SLURM jobs, instead   |
+|                              |                       | of the default        |
+|                              |                       | application command.  |
++------------------------------+-----------------------+-----------------------+
