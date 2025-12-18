@@ -24,7 +24,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.execution.file_system import JobFileSystem, RomsJobFileSystem
-from cstar.orchestration.utils import slugify
+from cstar.orchestration.utils import ENV_CSTAR_ORC_OUTDIR, ENV_CSTAR_RUNID, slugify
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -469,13 +469,17 @@ class Step(BaseModel):
         runtime_params = self.blueprint_overrides.get("runtime_params", {})  # type: ignore[union-attr,assignment]
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
+        od_path = Path(bp.runtime_params.output_dir)
+
         if output_dir_override:
             return Path(output_dir_override)
 
-        od_path = Path(bp.runtime_params.output_dir)
+        if od_system_override := os.getenv(ENV_CSTAR_ORC_OUTDIR, ""):
+            od_path = Path(od_system_override)
 
-        if run_id := os.getenv("CSTAR_RUNID", ""):
-            return od_path / run_id / self.safe_name
+        if run_id := os.getenv(ENV_CSTAR_RUNID, ""):
+            od_path = od_path / run_id
+
         return od_path / self.safe_name
 
     def file_system(self, bp: RomsMarblBlueprint) -> JobFileSystem:
@@ -486,7 +490,7 @@ class Step(BaseModel):
 class ChildStep(Step):
     """An step spawned as a subtask of another step."""
 
-    parent: str | None = Field(default=None, validate_default=False, frozen=True)
+    parent: str = Field(frozen=True)
     """The name of the parent step if this step was created via splitting."""
 
     def working_dir(self, bp: RomsMarblBlueprint) -> Path:
@@ -494,10 +498,18 @@ class ChildStep(Step):
         runtime_params = self.blueprint_overrides.get("runtime_params", {})  # type: ignore[union-attr,assignment]
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
+        od_path = Path(bp.runtime_params.output_dir)
+
         if output_dir_override:
             return Path(output_dir_override)
 
-        return Path(bp.runtime_params.output_dir) / self.safe_name
+        if od_system_override := os.getenv(ENV_CSTAR_ORC_OUTDIR, ""):
+            od_path = Path(od_system_override)
+
+        if run_id := os.getenv(ENV_CSTAR_RUNID, ""):
+            od_path = od_path / run_id
+
+        return od_path / slugify(self.parent) / self.safe_name
 
 
 class Workplan(BaseModel):

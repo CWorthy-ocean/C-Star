@@ -123,10 +123,10 @@ def test_splitter(single_step_workplan: Workplan) -> None:
         # verify start and end dates are valid
         sd = runtime_params["start_date"]
         if not isinstance(sd, datetime):
-            sd = datetime.strptime(sd, "%Y-%m-%d %H:%M:%S")
+            sd = datetime.strptime(sd, "%Y%m%d %H%M%S")
         ed = runtime_params["end_date"]
         if not isinstance(ed, datetime):
-            ed = datetime.strptime(ed, "%Y-%m-%d %H:%M:%S")
+            ed = datetime.strptime(ed, "%Y%m%d %H%M%S")
         assert sd < ed
 
         output_dir = runtime_params["output_dir"]

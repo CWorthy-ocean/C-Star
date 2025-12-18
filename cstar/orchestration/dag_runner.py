@@ -1,8 +1,8 @@
 import argparse
 import asyncio
 import os
+import sys
 import typing as t
-from datetime import datetime, timezone
 from itertools import cycle
 from pathlib import Path
 
@@ -14,12 +14,15 @@ from cstar.orchestration.orchestration import (
     Orchestrator,
     Planner,
     RunMode,
+    configure_environment,
+    get_run_id,
 )
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
+from cstar.orchestration.utils import ENV_CSTAR_ORC_DELAYS
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -31,9 +34,9 @@ def incremental_delays() -> t.Generator[float, None, None]:
     """
     delays = [0.1, 1, 2, 5, 15, 30, 60]
 
-    if os.getenv("CSTAR_ORCHESTRATION_DELAYS", ""):
+    if os.getenv(ENV_CSTAR_ORC_DELAYS, ""):
         try:
-            custom_delays = os.getenv("CSTAR_ORCHESTRATION_DELAYS", "")
+            custom_delays = os.getenv(ENV_CSTAR_ORC_DELAYS, "")
             delays = [float(d) for d in custom_delays.split(",")]
         except ValueError:
             print(f"Malformed delay provided: {custom_delays}. Using defaults.")
@@ -145,17 +148,23 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
     print(f"Workplan {mode} is complete.")
 
 
-async def prepare_workplan(wp_path: Path, output_dir: Path) -> tuple[Workplan, Path]:
+async def prepare_workplan(
+    wp_path: Path, output_dir: Path, run_id: str
+) -> tuple[Workplan, Path]:
     """Load the workplan and apply any applicable transforms.
 
     Parameters
     ----------
     wp_path : Path
         The path to the workplan to load.
+    output_dir : Path
+        The directory where workplan outputs will be written.
+    run_id : str
+        The identifier for the run.
 
     Returns
     -------
-    Workplanfs
+    Workplan
     """
     wp_og = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
@@ -169,10 +178,9 @@ async def prepare_workplan(wp_path: Path, output_dir: Path) -> tuple[Workplan, P
         wp = wp_og
 
     # make a copy of the original and modified blueprint in the output directory
-    target_dir = output_dir / JobFileSystem.WORK_NAME
-    persist_og = WorkplanTransformer.derived_path(wp_path, target_dir, "_og")
-    persist_as = WorkplanTransformer.derived_path(wp_path, target_dir)
-    _results = await asyncio.gather(
+    persist_og = WorkplanTransformer.derived_path(wp_path, output_dir, "_og")
+    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir)
+    _ = await asyncio.gather(
         asyncio.to_thread(serialize, persist_og, wp_og),
         asyncio.to_thread(serialize, persist_as, wp),
     )
@@ -190,8 +198,12 @@ async def build_and_run_dag(wp_path: Path, output_dir: Path) -> None:
         The path to the blueprint to execute
     output_dir : Path
         The path to the output directory.
+    reset_base : str
+        The basename of the reset files output by the simulation.
     """
-    wp, wp_path = await prepare_workplan(wp_path, output_dir)
+    run_id = get_run_id()
+    configure_environment(output_dir, run_id)
+    wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
@@ -225,6 +237,13 @@ def get_parser() -> argparse.ArgumentParser:
         type=Path,
         help="The path where outputs must be written",
     )
+    # parser.add_argument(
+    #     "-r",
+    #     "--reset-base",
+    #     required=True,
+    #     type=str,
+    #     help="The basename of the reset files output by the simulation (e.g. output_rst).",
+    # )
     parser.add_argument(
         "-b",
         "--blueprint",
@@ -263,6 +282,7 @@ def create_host_workplan(output_path: Path, template: str, bp_path: Path) -> Pat
     bp_target_path = output_path / bp_path.name
 
     # copy the template blueprint into the working directory w/a custom output path
+
     bp_content = bp_source_path.read_text()
     bp_content = bp_content.replace(
         bp_outputdir_default, f"output_dir: {output_path.as_posix()}"
@@ -290,15 +310,10 @@ def main() -> None:
     if not output_dir.exists():
         output_dir.mkdir(parents=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    run_id = f"{timestamp}"
-    run_dir = output_dir / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    os.environ["CSTAR_RUNID"] = run_id
-
     wp_path = Path(ns.workplan) if ns.workplan is not None else None
     bp_path = Path(ns.blueprint) if ns.blueprint is not None else None
     template = ns.template
+    # reset_base = ns.reset_base
 
     if wp_path is None and bp_path is None:
         print("Runner not executed\n\t- A workplan or blueprint path must be provided")
@@ -306,7 +321,7 @@ def main() -> None:
 
     if bp_path:
         # host the blueprint in a workplan template
-        wp_path = create_host_workplan(run_dir, template, bp_path)
+        wp_path = create_host_workplan(output_dir, template, bp_path)
         print(f"Running workplan at `{wp_path}` with blueprint at `{bp_path}`")
     else:
         bp_path = Path(bp_default)
@@ -315,7 +330,7 @@ def main() -> None:
     if wp_path is None:
         raise ValueError("Workplan path is malformed.")
 
-    asyncio.run(build_and_run_dag(wp_path, run_dir))
+    asyncio.run(build_and_run_dag(wp_path, output_dir))
 
 
 if __name__ == "__main__":

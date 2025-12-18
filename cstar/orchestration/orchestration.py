@@ -1,11 +1,20 @@
 import asyncio
+import os
 import typing as t
+from datetime import datetime, timezone
 from enum import IntEnum, StrEnum, auto
+from pathlib import Path
 
 import networkx as nx
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.utils import (
+    ENV_CSTAR_ORC_OUTDIR,
+    ENV_CSTAR_RUNID,
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_QUEUE,
+)
 
 KEY_STATUS: t.Literal["status"] = "status"
 KEY_STEP: t.Literal["step"] = "step"
@@ -625,3 +634,44 @@ class Orchestrator:
         results = await asyncio.gather(*tasks, return_exceptions=False)
         for task in results:
             self.planner.store(task.step.name, KEY_STATUS, task.status)
+
+
+def configure_environment(output_dir: Path, run_id: str) -> None:
+    """Configure environment variables required by the runner.
+
+    Parameters
+    ----------
+    output_dir : Path
+        The directory where outputs will be written.
+    run_id : str
+        The unique identifier for an execution of the workplan.
+    reset_name : str
+        The name of the reset files output by the simulation.
+
+    Raises
+    ------
+    ValueError
+        If the required environment variables are not set.
+    """
+    os.environ[ENV_CSTAR_ORC_OUTDIR] = output_dir.as_posix()
+    os.environ[ENV_CSTAR_RUNID] = run_id
+    # os.environ[ENV_CSTAR_ORC_TRX_RESET] = reset_name
+
+    for key in [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE, ENV_CSTAR_RUNID]:
+        if not os.getenv(key, ""):
+            raise ValueError(
+                f"Unable to run workplan. `{key}` not found in environment."
+            )
+
+
+def get_run_id() -> str:
+    """Generate a new run-id if the user has not supplied one.
+
+    Returns
+    -------
+    str
+    """
+    if run_id := os.getenv(ENV_CSTAR_RUNID, ""):
+        return run_id
+
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

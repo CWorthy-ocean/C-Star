@@ -6,8 +6,13 @@ from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
 from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
+from cstar.orchestration.roms_dot_in import find_roms_dot_in, get_output_root_name
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.utils import deep_merge, slugify
+from cstar.orchestration.utils import (
+    ENV_CSTAR_ORC_TRX_FREQ,
+    deep_merge,
+    slugify,
+)
 
 
 class Transform(t.Protocol):
@@ -229,6 +234,20 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
+    @staticmethod
+    def get_output_base_name(blueprint: RomsMarblBlueprint) -> str:
+        path_filter = blueprint.code.run_time.filter
+        rt_location = Path(blueprint.code.run_time.location)
+
+        if path_filter is None:
+            # raise ValueError("Unable to locate roms `.in` file")
+            dotin_path = find_roms_dot_in(rt_location)
+        else:
+            dotin_path = Path(
+                next(filter(lambda s: s.strip().endswith(".in"), path_filter.files))
+            )
+        return get_output_root_name(rt_location / dotin_path)
+
     def __call__(self, step: Step, output_dir: Path | None = None) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
 
@@ -256,7 +275,7 @@ class RomsMarblTimeSplitter(Transform):
 
         serialize(job_fs.root / Path(step.blueprint_path).name, blueprint)
 
-        frequency = os.getenv("CSTAR_ORC_TRANSFORM_FREQ", "monthly")
+        frequency = os.getenv(ENV_CSTAR_ORC_TRX_FREQ, "monthly")
         time_slices = list(get_time_slices(start_date, end_date, frequency=frequency))
         n_slices = len(time_slices)
 
@@ -273,6 +292,8 @@ class RomsMarblTimeSplitter(Transform):
         depends_on = step.depends_on
         last_restart_file: Path | None = None
 
+        output_base_name = self.get_output_base_name(blueprint)
+
         for i, (sd, ed) in enumerate(time_slices):
             bp_copy = RomsMarblBlueprint(
                 **blueprint.model_dump(
@@ -288,7 +309,9 @@ class RomsMarblTimeSplitter(Transform):
             dynamic_name = f"{i + 1:02d}_{step.safe_name}_{compact_sd}_{compact_ed}"
             child_step_name = slugify(dynamic_name)
 
-            subtask_root = job_fs.tasks_dir            # subtask_fs = RomsJobFileSystem(subtask_root)
+            subtask_root = (
+                job_fs.tasks_dir
+            )  # subtask_fs = RomsJobFileSystem(subtask_root)
             subtask_out_dir = subtask_root / child_step_name
 
             description = (
@@ -299,8 +322,8 @@ class RomsMarblTimeSplitter(Transform):
                 "description": description,
                 "runtime_params": {
                     "name": dynamic_name,
-                    "start_date":sd.strftime("%Y%m%d %H%M%S") ,
-                    "end_date": ed.strftime("%Y%m%d %H%M%S") ,
+                    "start_date": sd,  # sd.strftime("%Y%m%d %H%M%S"),
+                    "end_date": ed,  # ed.strftime("%Y%m%d %H%M%S"),
                     "output_dir": subtask_out_dir.as_posix(),
                 },
             }
@@ -315,9 +338,7 @@ class RomsMarblTimeSplitter(Transform):
             if last_restart_file:
                 rst_path = last_restart_file.as_posix()
                 bp_copy.initial_conditions.data[0].location = rst_path
-                overrides["initial_conditions"] = {
-                    "data": [{"location": rst_path}]
-                }
+                overrides["initial_conditions"] = {"data": [{"location": rst_path}]}
 
             # child_bp_path = step.file_system(bp_copy).work_dir / f"{child_step_name}_blueprint.yaml"
             child_bp_path = subtask_out_dir / f"{child_step_name}_blueprint.yaml"
@@ -339,7 +360,7 @@ class RomsMarblTimeSplitter(Transform):
                 blueprint=child_bp_path.as_posix(),
                 depends_on=depends_on,
                 parent=step.name,
-                blueprint_overrides=overrides,  # type: ignore[arg-type
+                blueprint_overrides=overrides,  # type: ignore[arg-type]
             )
             child_step.file_system(bp_copy).prepare()
 
@@ -352,85 +373,47 @@ class RomsMarblTimeSplitter(Transform):
 
             # Use the last restart file as initial conditions for the follow-up step
             # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
-            reset_file_name = f"output_rst.{compact_ed}.000.nc"
+            # output_root_name = os.getenv(ENV_CSTAR_ORC_TRX_RESET, "output_rst")
+            reset_file_name = f"{output_base_name}_rst.{compact_ed}.000.nc"
             # restart_file_path = child_step.working_dir / "output" / reset_file_name
-            restart_file_path = (
-                child_step.file_system(bp_copy).output_dir / reset_file_name
-            )
+
+            step_output_dir = child_step.file_system(bp_copy).output_dir
+            restart_file_path = step_output_dir / reset_file_name
 
             # use output dir of the last step as the input for the next step
             last_restart_file = restart_file_path
 
 
-class OverrideTransform(Transform):
+class BlueprintOverrider:
     """Transform that overrides a step by returning a blueprint with all overridden attributes applied."""
 
-    @staticmethod
-    def _output_dir(step: Step, blueprint: RomsMarblBlueprint) -> Path:
-        runtime_params = t.cast(
-            dict[str, str], step.blueprint_overrides.get("runtime_params", {})
-        )
-        output_dir_override: str = runtime_params.get("output_dir", "")
+    _system_overrides: dict[str, t.Any] = {}
 
-        if not output_dir_override:
-            return Path(blueprint.runtime_params.output_dir)
+    def __init__(self, _overrides: dict[str, t.Any] = {}):
+        self._system_overrides = _overrides
 
-        return Path(output_dir_override)
-
-    def _get_overridden_blueprint(
-        self, step: Step, blueprint: RomsMarblBlueprint
+    def apply(
+        self, bp: RomsMarblBlueprint, overrides: dict[str, t.Any] = {}
     ) -> RomsMarblBlueprint:
         """Apply all overrides from a blueprint.
 
         Generate a new blueprint with overrides applied and an empty set of overrides.
         Store the newly generated blueprint in the output directory.
         """
-        kvs = step.blueprint_overrides
-        bp_attrs = blueprint.model_dump(exclude_unset=True)
-        description = f"{blueprint.description}\n - overrides applied"
+        overrides = overrides.copy()
 
-        bp_attrs.update(description=description)
-        merged = deep_merge(bp_attrs, kvs)
+        model = bp.model_dump(exclude_unset=True)
+
+        # system-level overrides take precedence over step-level overrides
+        changeset = deep_merge(overrides, self._system_overrides)
+        merged = deep_merge(model, changeset)
+
+        description = (
+            f"{bp.description} - overrides applied to [{', '.join(changeset.keys())}]"
+        )
+        merged.update(description=description)
 
         return RomsMarblBlueprint(**merged)
 
-    def _persist_overridden_blueprint(
-        self, blueprint: RomsMarblBlueprint, step: Step
-    ) -> Path:
-        """Persist the overridden blueprint to the output directory."""
-        output_dir = self._output_dir(step, blueprint)
-        work_dir = output_dir / JobFileSystem.WORK_NAME
-
-        store_at = work_dir / f"{blueprint.name}.yaml"
-        serialize(store_at, blueprint)
-
-        return store_at
-
-    def __call__(self, step: Step) -> t.Iterable[Step]:
-        """Split a step into multiple sub-steps.
-
-        Parameters
-        ----------
-        step : Step
-            The step to split.
-
-        Returns
-        -------
-        Iterable[Step]
-            The sub-steps.
-        """
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        new_bp = self._get_overridden_blueprint(step, bp)
-        new_bp_path = self._persist_overridden_blueprint(new_bp, step)
-
-        attributes = step.model_dump(exclude={"blueprint", "blueprint_overrides"})
-        new_step = Step(
-            **attributes,
-            blueprint=new_bp_path.as_posix(),
-        )
-        return [new_step]
-
 
 register_transform("roms_marbl", RomsMarblTimeSplitter())
-# register_transform("roms_marbl", OverrideTransform())
-# register_transform("sleep", RomsMarblTimeSplitter())

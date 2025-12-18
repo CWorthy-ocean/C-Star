@@ -113,7 +113,7 @@ async def test_build_and_run_local(tmp_path: Path, workplan_name: str) -> None:
 
     my_run_name = f"{yyyymmdd}_{workplan_name}"
     os.environ["CSTAR_RUNID"] = my_run_name
-    await build_and_run_dag(wp_path, tmp_path)  # , LocalLauncher())
+    await build_and_run_dag(wp_path, tmp_path, "output_rst")  # , LocalLauncher())
 
 
 # @pytest.mark.skipif(not slurm())
@@ -149,4 +149,4 @@ async def test_build_and_run(tmp_path: Path, workplan_name: str) -> None:
 
     my_run_name = f"{yyyymmdd}_{workplan_name}"
     os.environ["CSTAR_RUNID"] = my_run_name
-    await build_and_run_dag(wp_path, tmp_path)
+    await build_and_run_dag(wp_path, tmp_path, "output_rst")
