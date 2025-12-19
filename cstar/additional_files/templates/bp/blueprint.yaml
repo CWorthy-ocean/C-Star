@@ -13,12 +13,27 @@ code:
   run_time:
     location: http://github.com/ankona/ucla-roms
     branch: main
-    filter: null
+    filter:
+      files:
+        - roms_2.in
+        - marbl_in
+        - marbl_tracer_output_list
+        - marbl_diagnostic_output_list
   compile_time:
     location: http://github.com/ankona/ucla-roms
     branch: main
-    filter: null
-  marbl: null
+    filter:
+      files:
+        - bgc.opt
+        - bulk_frc.opt
+        - cppdefs.opt
+        - diagnostics.opt
+        - ocean_vars.opt
+        - param.opt
+        - tracers.opt
+        - river_frc.opt
+        - tides.opt
+        - Makefile
 forcing:
   boundary:
     data:
