@@ -194,7 +194,6 @@ async def test_orchestrator_open_closed_lists(
     encountered = set(open_set or [])
 
     while open_set is not None:
-
         await orchestrator.run(mode=mode)
 
         closed_set = orchestrator.get_closed_nodes(mode=mode)
