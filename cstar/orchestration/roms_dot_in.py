@@ -34,10 +34,18 @@ def find_runtime_settings_file(repo: "CodeRepository") -> Path:
     if code.working_copy is None:
         raise RuntimeError(f"Unable to retrieve repository: {repo.location}")
 
+    if not code.working_copy.paths:
+        raise RuntimeError(f"Unable to retrieve .in file from repo: {repo.location}")
+    
     return next(x for x in code.working_copy.paths if x.name.endswith(".in"))
 
 
 KHVContainer = dict[str, tuple[str, str | list[str]]]
+"""A dictionary containing string keys and values
+that are 2-tuples with the header as the first element
+and the value as the second element. Values may be
+a string or list of string, depending on file content.
+"""
 
 
 def load_raw_runtime_settings(rts_path: Path) -> KHVContainer:
