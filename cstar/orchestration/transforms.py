@@ -288,10 +288,17 @@ class RomsMarblTimeSplitter(Transform):
         Returns
         -------
         str
+
+        Raises
+        ------
+        TypeError
+            If the .in file does not contain a well-formatted value for
+            output_base_name
         """
         value = get_runtime_setting_value(repo, "output_base_name")
         if isinstance(value, list):
-            raise RuntimeError("Invalid output_base_name found")
+            msg = "Invalid output_base_name found. Expected a single value."
+            raise TypeError(msg)
         return value
 
     def __call__(self, step: Step) -> t.Iterable[Step]:

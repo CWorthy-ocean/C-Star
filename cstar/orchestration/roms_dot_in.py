@@ -77,7 +77,8 @@ def get_runtime_setting_value(
     settings = load_raw_runtime_settings(rts_path)
 
     if setting_name not in settings:
-        raise ValueError(f"Unable to locate `{setting_name}`")
+        msg = f"Unable to locate `{setting_name}`"
+        raise ValueError(msg)
 
     _header, value = settings[setting_name]
     return value

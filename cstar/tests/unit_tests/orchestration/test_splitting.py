@@ -44,7 +44,7 @@ def single_step_workplan(tmp_path: Path) -> Workplan:
     )
 
 
-def test_time_splitting():
+def test_time_splitting() -> None:
     """Verify that the time splitting function honors the start and end dates.
 
     Ensures that no assumptions are made about the 1st and last days of the month.
@@ -52,7 +52,7 @@ def test_time_splitting():
     start_date = datetime(2025, 1, 1)
     end_date = datetime(2025, 12, 31)
 
-    time_slices = get_time_slices(start_date, end_date)
+    time_slices = list(get_time_slices(start_date, end_date))
     assert len(time_slices) == 12
     assert time_slices[0][0] == start_date
     assert time_slices[-1][1] == end_date
@@ -66,15 +66,15 @@ def test_time_splitting():
 
 
 @pytest.mark.parametrize(
-    "application,transform_fn",
+    ("application", "transform_fn"),
     [
-        ["roms_marbl", RomsMarblTimeSplitter()],
-        [Application.ROMS_MARBL.value, RomsMarblTimeSplitter()],
+        ("roms_marbl", RomsMarblTimeSplitter()),
+        (Application.ROMS_MARBL.value, RomsMarblTimeSplitter()),
     ],
 )
 def test_roms_marbl_transform_registry(
     application: str, transform_fn: t.Callable[[Step], t.Iterable[Step]]
-):
+) -> None:
     """Verify that the transform registry returns the expected transform."""
     with mock.patch.dict(
         "cstar.orchestration.transforms.TRANSFORMS",
@@ -91,7 +91,7 @@ def test_roms_marbl_transform_registry(
     "application",
     ["sleep", Application.SLEEP.value, "unknown-app-id"],
 )
-def test_sleep_transform_registry(application: str):
+def test_sleep_transform_registry(application: str) -> None:
     """Verify that the transform registry returns no transforms for sleep or unknown applications.
 
     Confirm that querying the registry does not raise an exception.
