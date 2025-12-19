@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
+import sys
 from unittest import mock
 
 import pytest
@@ -1126,8 +1127,7 @@ async def test_runner_setup_stage(
         assert mock_simulation.post_run.call_count == (1 if post_run else 0)
 
 
-@pytest.mark.asyncio
-async def test_worker_main(tmp_path: Path) -> None:
+def test_worker_main(tmp_path: Path) -> None:
     """Test the main entrypoint of the worker service.
 
     This test verifies that the the main function will fail to run when called without
@@ -1154,9 +1154,9 @@ async def test_worker_main(tmp_path: Path) -> None:
         "2024-02-01 00:00:00",
     ]
 
-    with mock.patch.dict(os.environ, {}):
+    with mock.patch.dict(os.environ, {}), mock.patch.object(sys, "argv", args):
         # don't let it perform any real work
-        return_code = await main(args)
+        return_code = main()
 
     # Confirm an error code is returned
     assert return_code > 0
@@ -1165,8 +1165,7 @@ async def test_worker_main(tmp_path: Path) -> None:
     assert mock_execute.call_count == 0
 
 
-@pytest.mark.asyncio
-async def test_worker_main_exec(
+def test_worker_main_exec(
     blueprint_path: Path,
     tmp_path: Path,
 ) -> None:
@@ -1178,6 +1177,7 @@ async def test_worker_main_exec(
     mock_execute = mock.AsyncMock(return_code=0)
 
     args = [
+        "cstar.entrypoint.worker.worker"
         "--blueprint-uri",
         str(blueprint_path),
         "--log-level",
@@ -1190,9 +1190,10 @@ async def test_worker_main_exec(
             "cstar.entrypoint.worker.SimulationRunner.execute",
             mock_execute,
         ),
+        mock.patch.object(sys, "argv", args),
     ):
         # This should run the simulation and return a success code
-        return_code = await main(args)
+        return_code = main()
 
     # Confirm an error code is returned
     assert return_code == 0
@@ -1202,8 +1203,7 @@ async def test_worker_main_exec(
 
 
 @pytest.mark.parametrize("exception_type", [CstarError, BlueprintError, Exception])
-@pytest.mark.asyncio
-async def test_worker_main_cstar_error(
+def test_worker_main_cstar_error(
     blueprint_path: Path,
     tmp_path: Path,
     exception_type: type[Exception],
@@ -1229,8 +1229,9 @@ async def test_worker_main_cstar_error(
             "cstar.entrypoint.worker.SimulationRunner.__new__",
             return_mocked_sim_runner,
         ),
+        mock.patch.object(sys, "argv", args),
     ):
         # This should run the simulation and return a failure code.
-        return_code = await main(args)
+        return_code = main()
 
     assert return_code > 0

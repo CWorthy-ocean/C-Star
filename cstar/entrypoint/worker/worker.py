@@ -446,7 +446,7 @@ def configure_environment(log: logging.Logger) -> None:
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
 
 
-async def main(raw_args: list[str]) -> int:
+def main() -> int:
     """Run the c-star worker script.
 
     Triggers the `Service` lifecycle of a Worker and runs a blueprint based on
@@ -458,6 +458,7 @@ async def main(raw_args: list[str]) -> int:
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
     try:
+        raw_args = sys.argv[1:]
         parser = create_parser()
         args = parser.parse_args(raw_args)
     except SystemExit:
@@ -479,7 +480,7 @@ async def main(raw_args: list[str]) -> int:
         log.info(f"Configuring simulation runner with config: {service_cfg}")
         log.info(f"Starting simulation with request: {blueprint_req}")
         worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
-        await worker.execute()
+        asyncio.run(worker.execute())
     except CstarError as ex:
         log.exception("An error occurred during the simulation", exc_info=ex)
         return 1
@@ -493,5 +494,5 @@ async def main(raw_args: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    rc = asyncio.run(main(sys.argv[1:]))
+    rc = main()
     sys.exit(rc)
