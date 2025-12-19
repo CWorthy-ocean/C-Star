@@ -11,7 +11,7 @@ def populated_output_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
     files = [
         (output_dir / "input" / "some_file"),
         (output_dir / "output" / "some_file"),
-        (output_dir / "output" / "JOINED_OUTPUT" / "some_file"),
+        (output_dir / "output" / "joined_output" / "some_file"),
     ]
 
     for f in files:
