@@ -7,7 +7,8 @@ from cstar.base.log import LoggingMixin
 
 class JobFileSystem(LoggingMixin):
     """JobFileSystem establishes a common directory structure convention across
-    all jobs."""
+    all jobs.
+    """
 
     INPUT_NAME: Literal["input"] = "input"
     WORK_NAME: Literal["work"] = "work"
@@ -54,7 +55,7 @@ class JobFileSystem(LoggingMixin):
 
     def _dir_set(self) -> set[Path]:
         """Return the complete set of directories for the job.
-        
+
         Returns
         -------
         set[Path]
@@ -77,7 +78,6 @@ class JobFileSystem(LoggingMixin):
         """Ensure the job's working directory is empty."""
         shutil.rmtree(self.root)
         self.root.mkdir(parents=True)
-
 
 
 class RomsJobFileSystem(JobFileSystem):

@@ -49,6 +49,7 @@ def is_feature_enabled(flag: str) -> bool:
 
     return os.getenv(flag, FF_OFF) == FF_ON
 
+
 def enable_feature(flag: str) -> None:
     """Enable a feature flag via it's environment variable.
 
