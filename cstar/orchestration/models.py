@@ -461,11 +461,32 @@ class Step(BaseModel):
 
     @property
     def safe_name(self) -> str:
-        """The name of the job that will be executed."""
+        """Return a URL-safe version of the step name.
+
+        Returns
+        -------
+        str
+        """
         return slugify(self.name)
 
     def working_dir(self, bp: RomsMarblBlueprint) -> Path:
-        """The step-relative directory for writing outputs."""
+        """The step-relative directory for writing outputs.
+
+        Precedence:
+        1. Overrides provided via a workplan always overwrite blueprint-supplied paths.
+        2. The system may override with a path from the environment variables.
+        3. The output path from the blueprint runtime parameters is used.
+
+        Parameters
+        ----------
+        bp : RomsMarblBlueprint
+            The blueprint instance loaded by the step
+
+        Returns
+        -------
+        Path
+            The path to the step working directory.
+        """
         runtime_params = self.blueprint_overrides.get("runtime_params", {})
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
@@ -483,7 +504,17 @@ class Step(BaseModel):
         return od_path / self.safe_name
 
     def file_system(self, bp: RomsMarblBlueprint) -> RomsJobFileSystem:
-        """The file system for this step."""
+        """The directories used by this step.
+
+        Parameters
+        ----------
+        bp : RomsMarblBlueprint
+            The blueprint instance loaded by the step
+
+        Returns
+        -------
+        RomsJobFileSystem
+        """
         return RomsJobFileSystem(self.working_dir(bp))
 
 
@@ -494,7 +525,23 @@ class ChildStep(Step):
     """The name of the parent step if this step was created via splitting."""
 
     def working_dir(self, bp: RomsMarblBlueprint) -> Path:
-        """The step-relative directory for writing outputs."""
+        """The step-relative directory for writing outputs.
+
+        Precedence:
+        1. Overrides provided via a workplan always overwrite blueprint-supplied paths.
+        2. The system may override with a path from the environment variables.
+        3. The output path from the blueprint runtime parameters is used.
+
+        Parameters
+        ----------
+        bp : RomsMarblBlueprint
+            The blueprint instance loaded by the step
+
+        Returns
+        -------
+        Path
+            The path to the step working directory.
+        """
         runtime_params = self.blueprint_overrides.get("runtime_params", {})
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
