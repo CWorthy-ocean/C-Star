@@ -281,7 +281,7 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
-    def _get_output_base_name(self, repo: CodeRepository) -> str:
+    def _get_output_root_name(self, repo: CodeRepository) -> str:
         """Parse the `.in` input file from the repository to identify
         the base name for outputs of the simulation.
 
@@ -293,11 +293,11 @@ class RomsMarblTimeSplitter(Transform):
         ------
         TypeError
             If the .in file does not contain a well-formatted value for
-            output_base_name
+            output_root_name
         """
-        value = get_runtime_setting_value(repo, "output_base_name")
+        value = get_runtime_setting_value(repo, "output_root_name")
         if isinstance(value, list):
-            msg = "Invalid output_base_name found. Expected a single value."
+            msg = "Invalid output_root_name found. Expected a single value."
             raise TypeError(msg)
         return value
 
@@ -339,9 +339,7 @@ class RomsMarblTimeSplitter(Transform):
 
         depends_on = step.depends_on
         last_restart_file: Path | None = None
-        output_root_name = get_runtime_setting_value(
-            blueprint.code.run_time, "output_root_name"
-        )
+        output_root_name = self._get_output_root_name(blueprint.code.run_time)
 
         for i, (sd, ed) in enumerate(time_slices):
             bp_copy = RomsMarblBlueprint(
