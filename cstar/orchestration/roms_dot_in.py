@@ -10,7 +10,12 @@ if t.TYPE_CHECKING:
 
 
 def find_runtime_settings_file(repo: "CodeRepository") -> Path:
-    # if possible, retrieve only a *.in file
+    """Return the path to a runtime settings file (*.in) for roms in the code repo.
+
+    Returns
+    -------
+    Path
+    """
     files = (
         list(filter(lambda s: s.endswith(".in"), repo.filter.files))
         if repo.filter
