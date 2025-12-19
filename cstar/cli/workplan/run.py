@@ -35,7 +35,7 @@ def run(
     os.environ[ENV_CSTAR_RUNID] = run_id
 
     try:
-        asyncio.run(build_and_run_dag(path, output_dir, reset_name))
+        asyncio.run(build_and_run_dag(path, output_dir))
         print("Workplan run has completed.")
     except Exception as ex:
         print(f"Workplan run has completed unsuccessfully: {ex}")

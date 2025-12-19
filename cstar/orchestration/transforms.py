@@ -5,14 +5,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
-from cstar.orchestration.models import ChildStep, RomsMarblBlueprint, Step, Workplan
-from cstar.orchestration.roms_dot_in import find_roms_dot_in, get_output_root_name
-from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.utils import (
-    ENV_CSTAR_ORC_TRX_FREQ,
-    deep_merge,
-    slugify,
+from cstar.orchestration.models import (
+    ChildStep,
+    CodeRepository,
+    RomsMarblBlueprint,
+    Step,
+    Workplan,
 )
+from cstar.orchestration.roms_dot_in import get_runtime_setting_value
+from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.utils import ENV_CSTAR_ORC_TRX_FREQ, deep_merge, slugify
 
 
 class Transform(t.Protocol):
@@ -80,6 +82,18 @@ def _dailies(
         current_date = day_end
 
 
+def _weeklies(
+    start_date: datetime, end_date: datetime
+) -> t.Iterable[tuple[datetime, datetime]]:
+    """Get the weekly time slices for the given start and end dates."""
+    current_date = datetime(start_date.year, start_date.month, start_date.day)
+    while current_date < end_date:
+        week_start = current_date
+        week_end = week_start + timedelta(days=7)
+        yield (week_start, week_end)
+        current_date = week_end
+
+
 def _monthlies(
     start_date: datetime, end_date: datetime
 ) -> t.Iterable[tuple[datetime, datetime]]:
@@ -101,6 +115,7 @@ SLICE_FUNCTIONS = defaultdict(
     lambda: _monthlies,
     {
         "daily": _dailies,
+        "weekly": _weeklies,
         "monthly": _monthlies,
     },
 )
@@ -182,15 +197,38 @@ class WorkplanTransformer:
         target_dir: Path | None = None,
         suffix: str = "_trx",
     ) -> Path:
-        """Generate a new path name derived from the original workplan path.
+        """Generate a new path name derived from the source path.
 
-        If no target directory is specified, the resulting path will be alongside
-        the original file.
+        If no target directory is specified, the derived path will be in the
+        same directory as the source path.
+
+        Parameters
+        ----------
+        source : Path
+            The source path.
+        target_dir : Path | None, optional
+            An alternate parent directory to place the file
+        suffix : str, optional
+            A suffix to append to the source file name, by default "_trx"
+
+        Returns
+        -------
+        Path
+
+        Raises
+        ------
+        ValueError
+            If the source and target paths are identical
         """
-        stem = f"{source.stem}{suffix}"
-        if target_dir is not None:
-            return target_dir / Path(source.name).with_stem(stem)
-        return source.with_stem(stem)
+        if not target_dir and not suffix:
+            raise ValueError(
+                f"Identical source and target may result in overwriting the source: `{source}`"
+            )
+
+        directory = target_dir if target_dir else source.parent
+        filename = Path(source.name).with_stem(f"{source.stem}{suffix}")
+
+        return directory / filename
 
     def apply(self) -> Workplan:
         """Create a new workplan with appropriate transforms applied.
@@ -226,7 +264,7 @@ class WorkplanTransformer:
         )
 
         self._transformed = Workplan(**wp_attrs)
-        return self._transformed
+        return t.cast(Workplan, self._transformed)
 
 
 class RomsMarblTimeSplitter(Transform):
@@ -234,19 +272,11 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
-    @staticmethod
-    def get_output_base_name(blueprint: RomsMarblBlueprint) -> str:
-        path_filter = blueprint.code.run_time.filter
-        rt_location = Path(blueprint.code.run_time.location)
-
-        if path_filter is None:
-            # raise ValueError("Unable to locate roms `.in` file")
-            dotin_path = find_roms_dot_in(rt_location)
-        else:
-            dotin_path = Path(
-                next(filter(lambda s: s.strip().endswith(".in"), path_filter.files))
-            )
-        return get_output_root_name(rt_location / dotin_path)
+    def _get_output_base_name(self, repo: CodeRepository) -> str:
+        value = get_runtime_setting_value(repo, "output_base_name")
+        if isinstance(value, list):
+            raise RuntimeError("Invalid output_base_name found")
+        return value
 
     def __call__(self, step: Step, output_dir: Path | None = None) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
@@ -268,8 +298,6 @@ class RomsMarblTimeSplitter(Transform):
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
-        # step_work_dir = step.working_dir(blueprint)
-        # job_fs = RomsJobFileSystem(step_work_dir)
         job_fs = step.file_system(blueprint)
         job_fs.prepare()
 
@@ -291,8 +319,9 @@ class RomsMarblTimeSplitter(Transform):
 
         depends_on = step.depends_on
         last_restart_file: Path | None = None
-
-        output_base_name = self.get_output_base_name(blueprint)
+        output_root_name = get_runtime_setting_value(
+            blueprint.code.run_time, "output_root_name"
+        )
 
         for i, (sd, ed) in enumerate(time_slices):
             bp_copy = RomsMarblBlueprint(
@@ -340,7 +369,6 @@ class RomsMarblTimeSplitter(Transform):
                 bp_copy.initial_conditions.data[0].location = rst_path
                 overrides["initial_conditions"] = {"data": [{"location": rst_path}]}
 
-            # child_bp_path = step.file_system(bp_copy).work_dir / f"{child_step_name}_blueprint.yaml"
             child_bp_path = subtask_out_dir / f"{child_step_name}_blueprint.yaml"
 
             serialize(child_bp_path, bp_copy)
@@ -373,9 +401,7 @@ class RomsMarblTimeSplitter(Transform):
 
             # Use the last restart file as initial conditions for the follow-up step
             # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
-            # output_root_name = os.getenv(ENV_CSTAR_ORC_TRX_RESET, "output_rst")
-            reset_file_name = f"{output_base_name}_rst.{compact_ed}.000.nc"
-            # restart_file_path = child_step.working_dir / "output" / reset_file_name
+            reset_file_name = f"{output_root_name}_rst.{compact_ed}.000.nc"
 
             step_output_dir = child_step.file_system(bp_copy).output_dir
             restart_file_path = step_output_dir / reset_file_name

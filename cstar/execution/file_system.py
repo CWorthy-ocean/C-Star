@@ -112,12 +112,16 @@ class RomsJobFileSystem(JobFileSystem):
 
     @override
     def _dir_set(self) -> set[Path]:
-        return super()._dir_set().union(
-            {
-                self.compile_time_code_dir,
-                self.runtime_code_dir,
-                self.input_datasets_dir,
-                self.codebases_dir,
-                self.joined_output_dir,
-            }
+        return (
+            super()
+            ._dir_set()
+            .union(
+                {
+                    self.compile_time_code_dir,
+                    self.runtime_code_dir,
+                    self.input_datasets_dir,
+                    self.codebases_dir,
+                    self.joined_output_dir,
+                }
+            )
         )

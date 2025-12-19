@@ -23,7 +23,7 @@ from pydantic import (
 )
 from pytimeparse import parse
 
-from cstar.execution.file_system import JobFileSystem, RomsJobFileSystem
+from cstar.execution.file_system import RomsJobFileSystem
 from cstar.orchestration.utils import ENV_CSTAR_ORC_OUTDIR, ENV_CSTAR_RUNID, slugify
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -482,7 +482,7 @@ class Step(BaseModel):
 
         return od_path / self.safe_name
 
-    def file_system(self, bp: RomsMarblBlueprint) -> JobFileSystem:
+    def file_system(self, bp: RomsMarblBlueprint) -> RomsJobFileSystem:
         """The file system for this step."""
         return RomsJobFileSystem(self.working_dir(bp))
 
