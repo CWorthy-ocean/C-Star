@@ -106,7 +106,13 @@ def test_splitter(single_step_workplan: Workplan) -> None:
     transform = RomsMarblTimeSplitter()
 
     step = single_step_workplan.steps[0]
-    transformed_steps = list(transform(step))
+    mock_base_name = "mock_base_name"
+
+    with mock.patch(
+            "cstar.orchestration.transforms.get_runtime_setting_value",
+            return_value=mock_base_name,
+        ):
+        transformed_steps = list(transform(step))
 
     # one step transforms into 12 monthly steps
     assert len(transformed_steps) == 12
@@ -141,7 +147,7 @@ def test_splitter(single_step_workplan: Workplan) -> None:
 
             # verify the initial conditions reference the prior step's time slice
             compact_sd = ed.strftime("%Y%m%d%H%M%S")
-            assert f"output/output_rst.{compact_sd}.000.nc" in ic_loc_successor  # type: ignore[union-attr,operator]
+            assert f"output/{mock_base_name}_rst.{compact_sd}.000.nc" in ic_loc_successor  # type: ignore[union-attr,operator]
 
         # verify successor starts right where current step ends
         sd_successor = succ_runtime_params["start_date"]
