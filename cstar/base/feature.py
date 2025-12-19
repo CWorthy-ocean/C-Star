@@ -1,7 +1,7 @@
 import os
 from typing import Literal
 
-FLAG_DEVELOPER_MODE: Literal["CSTAR_FF_DEVELOPER_MODE"] = "CSTAR_FF_DEVELOPER_MODE"
+FF_DEVELOPER_MODE: Literal["CSTAR_FF_DEVELOPER_MODE"] = "CSTAR_FF_DEVELOPER_MODE"
 """Feature flag enabling developer mode (enabling all development features)."""
 
 FF_PREFIX: Literal["CSTAR_FF_"] = "CSTAR_FF_"
@@ -26,7 +26,7 @@ def is_feature_enabled(flag: str) -> bool:
         pass only the <FLAG_NAME> and exclude the `CSTAR_FF_` prefix.
     """
     # developer mode enables all feature flags
-    if os.getenv(FLAG_DEVELOPER_MODE, FF_OFF) == FF_ON:
+    if os.getenv(FF_DEVELOPER_MODE, FF_OFF) == FF_ON:
         return True
 
     # enable omitting the CSTAR_FF_ prefix at the call-site
