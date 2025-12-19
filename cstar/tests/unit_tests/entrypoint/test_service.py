@@ -302,8 +302,9 @@ async def test_event_loop_hc_start(loop_count: int) -> None:
     # Configure the health check to update every event loop iteration
     # (number of start calls shouldn't be affected)
     with (
-        mock.patch(
-            "cstar.entrypoint.Service._start_healthcheck",
+        mock.patch.object(
+            Service,
+            "_start_healthcheck",
             mock_hc_start,
         ),
         PrintingService(max_iterations=loop_count, hc_freq=1) as service,

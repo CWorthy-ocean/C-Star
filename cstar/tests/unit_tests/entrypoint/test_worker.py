@@ -3,8 +3,8 @@ import itertools
 import logging
 import os
 import shutil
-from pathlib import Path
 import sys
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -1177,7 +1177,7 @@ def test_worker_main_exec(
     mock_execute = mock.AsyncMock(return_code=0)
 
     args = [
-        "cstar.entrypoint.worker.worker"
+        "cstar.entrypoint.worker.worker",
         "--blueprint-uri",
         str(blueprint_path),
         "--log-level",
@@ -1186,8 +1186,9 @@ def test_worker_main_exec(
 
     # don't let it perform any real work; mock out runner.execute
     with (
-        mock.patch(
-            "cstar.entrypoint.worker.SimulationRunner.execute",
+        mock.patch.object(
+            SimulationRunner,
+            "execute",
             mock_execute,
         ),
         mock.patch.object(sys, "argv", args),
@@ -1205,7 +1206,6 @@ def test_worker_main_exec(
 @pytest.mark.parametrize("exception_type", [CstarError, BlueprintError, Exception])
 def test_worker_main_cstar_error(
     blueprint_path: Path,
-    tmp_path: Path,
     exception_type: type[Exception],
 ) -> None:
     """Test the main entrypoint of the worker service.
@@ -1220,13 +1220,15 @@ def test_worker_main_cstar_error(
         "DEBUG",
     ]
 
-    def return_mocked_sim_runner(*args, **kwargs):
-        raise exception_type("Mock error")
+    def return_mocked_sim_runner(*_args: str, **_kwargs: str) -> None:
+        msg = "Mock error"
+        raise exception_type(msg)
 
     # don't let it perform any real work; mock out runner.execute
     with (
-        mock.patch(
-            "cstar.entrypoint.worker.SimulationRunner.__new__",
+        mock.patch.object(
+            SimulationRunner,
+            "__new__",
             return_mocked_sim_runner,
         ),
         mock.patch.object(sys, "argv", args),
