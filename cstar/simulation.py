@@ -353,7 +353,7 @@ class Simulation(ABC, LoggingMixin):
         ----------
         directory : Path
             The target working directory for an inaccessible simulation instance,
-            such as during a restart. 
+            such as during a restart.
 
         Returns
         -------

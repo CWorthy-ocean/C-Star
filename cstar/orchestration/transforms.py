@@ -39,6 +39,7 @@ class Transform(t.Protocol):
 
 
 TRANSFORMS: dict[str, list[Transform]] = defaultdict(list)
+"""Storage for transform registrations."""
 
 
 def register_transform(application: str, transform: Transform) -> None:
@@ -48,14 +49,14 @@ def register_transform(application: str, transform: Transform) -> None:
     ----------
     application : str
         The application name.
-    transform : Splitter
-        The transform instance.
+    transform : Transform
+        The transform instance to register for the application.
     """
     TRANSFORMS[application].append(transform)
 
 
 def get_transforms(application: str) -> list[Transform]:
-    """Retrieve a transform for an application.
+    """Retrieve a list of transforms to be applied for an application.
 
     Parameters
     ----------
@@ -64,8 +65,8 @@ def get_transforms(application: str) -> list[Transform]:
 
     Returns
     -------
-    Splitter | None
-        The transform instance, or None if not found.
+    list[Transform]
+        A list containing transforms
     """
     return TRANSFORMS.get(application, [])
 
@@ -73,7 +74,7 @@ def get_transforms(application: str) -> list[Transform]:
 def _dailies(
     start_date: datetime, end_date: datetime
 ) -> t.Iterable[tuple[datetime, datetime]]:
-    """Get the daily time slices for the given start and end dates."""
+    """Get daily time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, start_date.day)
     while current_date < end_date:
         day_start = current_date
@@ -85,7 +86,7 @@ def _dailies(
 def _weeklies(
     start_date: datetime, end_date: datetime
 ) -> t.Iterable[tuple[datetime, datetime]]:
-    """Get the weekly time slices for the given start and end dates."""
+    """Get weekly time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, start_date.day)
     while current_date < end_date:
         week_start = current_date
@@ -97,7 +98,7 @@ def _weeklies(
 def _monthlies(
     start_date: datetime, end_date: datetime
 ) -> t.Iterable[tuple[datetime, datetime]]:
-    """Get the monthly time slices for the given start and end dates."""
+    """Get monthly time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, 1)
     while current_date < end_date:
         month_start = current_date
@@ -134,11 +135,13 @@ def get_time_slices(
         The start date.
     end_date : datetime
         The end date.
+    frequency : str
+        The desired frequency (daily, weekly, monthly).
 
     Returns
     -------
     Iterable[tuple[datetime, datetime]]
-        The time slices.
+        Iterable containing 2-tuples of (start_date, end_date).
     """
     slice_fn = SLICE_FUNCTIONS[frequency]
     time_slices = list(slice_fn(start_date, end_date))
@@ -166,7 +169,8 @@ class WorkplanTransformer:
     DERIVED_PATH_SUFFIX: t.Literal["_trx"] = "_trx"
     """Suffix appended to the original workplan path when generating a derived path."""
 
-    def __init__(self, wp: Workplan, transform: Transform):
+    def __init__(self, wp: Workplan, transform: Transform) -> None:
+        """Initialize the instance."""
         self.original = Workplan(**wp.model_dump(by_alias=True))
         self.transform_fn = transform
         self._transformed: Workplan | None = None
@@ -186,7 +190,12 @@ class WorkplanTransformer:
 
     @property
     def transformed(self) -> Workplan:
-        """Return the transformed workplan."""
+        """Return the transformed workplan.
+
+        Returns
+        -------
+        Workplan
+        """
         if self._transformed is None:
             self._transformed = self.apply()
         return self._transformed
@@ -273,26 +282,30 @@ class RomsMarblTimeSplitter(Transform):
     """
 
     def _get_output_base_name(self, repo: CodeRepository) -> str:
+        """Parse the `.in` input file from the repository to identify
+        the base name for outputs of the simulation.
+
+        Returns
+        -------
+        str
+        """
         value = get_runtime_setting_value(repo, "output_base_name")
         if isinstance(value, list):
             raise RuntimeError("Invalid output_base_name found")
         return value
 
-    def __call__(self, step: Step, output_dir: Path | None = None) -> t.Iterable[Step]:
+    def __call__(self, step: Step) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
 
         Parameters
         ----------
         step : Step
             The step to split.
-        output_dir : Path | None
-            An alternative output directory that will replace the
-            output directory specified in the step's blueprint.
 
         Returns
         -------
         Iterable[Step]
-            The sub-steps.
+            Steps for each subtask resulting from the split.
         """
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
         start_date = blueprint.runtime_params.start_date
@@ -351,8 +364,8 @@ class RomsMarblTimeSplitter(Transform):
                 "description": description,
                 "runtime_params": {
                     "name": dynamic_name,
-                    "start_date": sd,  # sd.strftime("%Y%m%d %H%M%S"),
-                    "end_date": ed,  # ed.strftime("%Y%m%d %H%M%S"),
+                    "start_date": sd,
+                    "end_date": ed,
                     "output_dir": subtask_out_dir.as_posix(),
                 },
             }
@@ -415,8 +428,16 @@ class BlueprintOverrider:
 
     _system_overrides: dict[str, t.Any] = {}
 
-    def __init__(self, _overrides: dict[str, t.Any] = {}):
-        self._system_overrides = _overrides
+    def __init__(self, sys_overrides: dict[str, t.Any] = {}) -> None:
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        sys_overrides : dict[str, t.Any]
+            System-level blueprint overrides that will be applied after
+            the user-supplied values.
+        """
+        self._system_overrides = sys_overrides
 
     def apply(
         self, bp: RomsMarblBlueprint, overrides: dict[str, t.Any] = {}
@@ -425,6 +446,18 @@ class BlueprintOverrider:
 
         Generate a new blueprint with overrides applied and an empty set of overrides.
         Store the newly generated blueprint in the output directory.
+
+        Parameters
+        ----------
+        bp : RomsMarblBlueprint
+            The blueprint to apply overrides to
+        overrides : dict[str, t.Any]
+            A dictionary containing overrides for attributes of a blueprint.
+
+        Returns
+        -------
+        RomsMarblBlueprint
+            The blueprint with all overrides applied.
         """
         overrides = overrides.copy()
 
