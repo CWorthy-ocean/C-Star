@@ -344,9 +344,16 @@ class Simulation(ABC, LoggingMixin):
         return repr_str
 
     @staticmethod
-    def get_state_file(directory: Path) -> Path:
+    def state_file_from(directory: Path) -> Path:
         """The path where a state file containing a pickled Simulation will be created
-        upon successful completion of a simulation.
+        upon successful completion of a simulation, when that simulation uses the
+        supplied directory as it's working directory.
+
+        Parameters
+        ----------
+        directory : Path
+            The target working directory for an inaccessible simulation instance,
+            such as during a restart. 
 
         Returns
         -------
@@ -365,7 +372,7 @@ class Simulation(ABC, LoggingMixin):
         Path
            The path where the state file will be created.
         """
-        return Simulation.get_state_file(self.directory)
+        return Simulation.state_file_from(self.directory)
 
     @property
     @abstractmethod
@@ -558,7 +565,7 @@ class Simulation(ABC, LoggingMixin):
         persist : Saves the current simulation state.
         """
         directory = Path(directory)
-        with open(Simulation.get_state_file(directory), "rb") as state_file:
+        with open(Simulation.state_file_from(directory), "rb") as state_file:
             simulation_instance = pickle.load(state_file)
         return simulation_instance
 
