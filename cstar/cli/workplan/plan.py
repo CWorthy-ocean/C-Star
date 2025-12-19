@@ -230,6 +230,7 @@ def plan(
     try:
         if workplan := deserialize(path, Workplan):
             if transform:
+                # TODO: consider using dag_runner.prepare_workplan, instead.
                 transformer = WorkplanTransformer(workplan, RomsMarblTimeSplitter())
                 transformed = transformer.apply()
 
