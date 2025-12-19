@@ -36,7 +36,7 @@ def find_runtime_settings_file(repo: "CodeRepository") -> Path:
 
     if not code.working_copy.paths:
         raise RuntimeError(f"Unable to retrieve .in file from repo: {repo.location}")
-    
+
     return next(x for x in code.working_copy.paths if x.name.endswith(".in"))
 
 

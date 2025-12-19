@@ -1,17 +1,17 @@
 import textwrap
-import unittest.mock as mock
 import uuid
-import pytest
-
 from pathlib import Path
 
+import pytest
+
 from cstar.orchestration.roms_dot_in import load_raw_runtime_settings
+
 
 @pytest.fixture
 def roms_dot_in_sample(tmp_path: Path) -> Path:
     content = textwrap.dedent("""\
         title:
-                gom 
+                gom
 
         time_stepping: NTIMES   dt[sec]  NDTFAST  NINFO
                         3360      900       60      2
@@ -47,8 +47,8 @@ def roms_dot_in_sample(tmp_path: Path) -> Path:
         rho0:
             1027.4d0
 
-        lateral_visc:   VISC2,   
-                        0.     
+        lateral_visc:   VISC2,
+                        0.
 
         vertical_mixing:  Akv  Akt1  Akt2
                         1.0E-4  0.0   0.0 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.
@@ -66,7 +66,7 @@ def roms_dot_in_sample(tmp_path: Path) -> Path:
                         500.
 
         ubind:  binding velocity [m/s]
-                    0.2 
+                    0.2
 
         SSS_correction:   dSSSdt [cm/day]
                         7.777
@@ -74,6 +74,7 @@ def roms_dot_in_sample(tmp_path: Path) -> Path:
     target = tmp_path / "test.in"
     target.write_text(content)
     return target
+
 
 def test_load_raw_settings_basic(tmp_path: Path) -> None:
     """Verify the key / header / value format is parsed with a simple example."""
@@ -99,5 +100,3 @@ def test_load_raw_settings(roms_dot_in_sample: Path) -> None:
     actual_header, actual_value = settings["output_root_name"]
     assert actual_header == ""
     assert actual_value == "atlas_base"
-
-
