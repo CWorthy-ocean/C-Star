@@ -48,3 +48,16 @@ def is_feature_enabled(flag: str) -> bool:
                 return True
 
     return os.getenv(flag, FF_OFF) == FF_ON
+
+def enable_feature(flag: str) -> None:
+    """Enable a feature flag via it's environment variable.
+
+    Parameters
+    ----------
+    flag : str
+        The name of the feature flag to enable.
+
+        May take the full feature-flag form, such as `CSTAR_FF_<FLAG_NAME>` or
+        pass only the <FLAG_NAME> and exclude the `CSTAR_FF_` prefix.
+    """
+    os.environ[flag] = FF_ON
