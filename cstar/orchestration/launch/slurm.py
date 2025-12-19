@@ -94,15 +94,6 @@ def convert_roms_step_to_command(step: Step) -> str:
     str
         The complete CLI command.
     """
-    # bp_path = Path(step.blueprint)
-
-    # load current blueprint and apply overrides
-    # og_bp = deserialize(bp_path, RomsMarblBlueprint)
-    # bp = og_bp.model_copy(update=step.blueprint_overrides)
-
-    # bp_overrides_path = bp_path.with_stem(f"{bp_path.stem}_{slugify(step.name)}")
-    # serialize(bp_overrides_path, bp)
-
     # tell worker to use overridden blueprint
     return " ".join(
         [
