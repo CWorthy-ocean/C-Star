@@ -466,7 +466,7 @@ class Step(BaseModel):
 
     def working_dir(self, bp: RomsMarblBlueprint) -> Path:
         """The step-relative directory for writing outputs."""
-        runtime_params = self.blueprint_overrides.get("runtime_params", {})  # type: ignore[union-attr,assignment]
+        runtime_params = self.blueprint_overrides.get("runtime_params", {})
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
         od_path = Path(bp.runtime_params.output_dir)
@@ -495,7 +495,7 @@ class ChildStep(Step):
 
     def working_dir(self, bp: RomsMarblBlueprint) -> Path:
         """The step-relative directory for writing outputs."""
-        runtime_params = self.blueprint_overrides.get("runtime_params", {})  # type: ignore[union-attr,assignment]
+        runtime_params = self.blueprint_overrides.get("runtime_params", {})
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
         od_path = Path(bp.runtime_params.output_dir)
