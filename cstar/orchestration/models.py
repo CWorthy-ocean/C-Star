@@ -23,8 +23,9 @@ from pydantic import (
 )
 from pytimeparse import parse
 
+from cstar.base.utils import slugify
 from cstar.execution.file_system import RomsJobFileSystem
-from cstar.orchestration.utils import ENV_CSTAR_ORC_OUTDIR, ENV_CSTAR_RUNID, slugify
+from cstar.orchestration.utils import ENV_CSTAR_ORC_OUTDIR, ENV_CSTAR_RUNID
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,

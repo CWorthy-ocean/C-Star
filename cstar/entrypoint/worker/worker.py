@@ -11,9 +11,9 @@ from typing import Final, override
 
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
+from cstar.base.utils import slugify
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
-from cstar.orchestration.utils import slugify
 from cstar.roms import ROMSSimulation
 
 DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
@@ -112,9 +112,7 @@ class SimulationRunner(Service):
         self._blueprint_uri = request.blueprint_uri
 
         self._simulation = ROMSSimulation.from_blueprint(self._blueprint_uri)
-        self._simulation.name = slugify(
-            self._simulation.name
-        )  # TODO: consider modifying from_blueprint to avoid spaces in names
+        self._simulation.name = slugify(self._simulation.name)
         self._output_root = self._simulation.directory.expanduser()
         self._stages = tuple(request.stages)
 

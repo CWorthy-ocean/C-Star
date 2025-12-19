@@ -8,6 +8,7 @@ from psutil import NoSuchProcess
 from psutil import Process as PsProcess
 
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.utils import slugify
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import (
     Launcher,
@@ -15,7 +16,6 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.utils import slugify
 
 
 def run_as_process(step: Step, cmd: list[str]) -> dict[str, int]:

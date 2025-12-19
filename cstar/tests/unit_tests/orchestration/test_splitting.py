@@ -147,9 +147,9 @@ def test_splitter(single_step_workplan: Workplan) -> None:
 
             # verify the initial conditions reference the prior step's time slice
             compact_sd = ed.strftime("%Y%m%d%H%M%S")
-            assert (
-                f"output/{mock_base_name}_rst.{compact_sd}.000.nc" in ic_loc_successor
-            )  # type: ignore[union-attr,operator]
+
+            expected = f"output/{mock_base_name}_rst.{compact_sd}.000.nc"
+            assert expected in str(ic_loc_successor)
 
         # verify successor starts right where current step ends
         sd_successor = succ_runtime_params["start_date"]

@@ -5,9 +5,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from cstar.base.utils import slugify
 from cstar.orchestration.models import RomsMarblBlueprint, Step, Workplan, WorkplanState
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.utils import slugify
 
 app = typer.Typer()
 console = Console()

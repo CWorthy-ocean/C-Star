@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
+from cstar.base.utils import deep_merge, slugify
 from cstar.orchestration.models import (
     ChildStep,
     CodeRepository,
@@ -14,7 +15,7 @@ from cstar.orchestration.models import (
 )
 from cstar.orchestration.roms_dot_in import get_runtime_setting_value
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.utils import ENV_CSTAR_ORC_TRX_FREQ, deep_merge, slugify
+from cstar.orchestration.utils import ENV_CSTAR_ORC_TRX_FREQ
 
 
 class Transform(t.Protocol):

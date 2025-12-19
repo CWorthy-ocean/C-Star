@@ -1,7 +1,9 @@
 import datetime as dt
 import functools
 import hashlib
+import re
 import subprocess
+import typing as t
 from os import PathLike
 from pathlib import Path
 
@@ -277,3 +279,45 @@ def _run_cmd(
 
     log.debug(msg_post or "Command completed successfully.")
     return stdout
+
+
+def slugify(source: str) -> str:
+    """Convert a source string into a URL-safe slug.
+
+    Parameters
+    ----------
+    source : str
+        The string to be converted.
+
+    Returns
+    -------
+    str
+        The slugified version of the source string.
+    """
+    if not source:
+        raise ValueError
+
+    return re.sub(r"\W+", "-", source.casefold())
+
+
+def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
+    """Deep merge two dictionaries.
+
+    Parameters
+    ----------
+    d1 : dict[str, t.Any]
+        The first dictionary.
+    d2 : dict[str, t.Any]
+        The second dictionary.
+
+    Returns
+    -------
+    dict[str, t.Any]
+        The merged dictionaries.
+    """
+    for k, v in d2.items():
+        if isinstance(v, dict):
+            d1[k] = deep_merge(d1.get(k, {}), v)
+        else:
+            d1[k] = v
+    return d1
