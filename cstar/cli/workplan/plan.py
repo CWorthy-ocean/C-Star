@@ -1,4 +1,5 @@
 import asyncio
+import os
 import typing as t
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import typer
 
+from cstar.base.feature import FF_ON
 from cstar.base.utils import slugify
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
@@ -228,24 +230,23 @@ def plan(
     plan_path: Path | None = None
 
     try:
-        if workplan := deserialize(path, Workplan):
-            if transform:
-                # TODO: consider using dag_runner.prepare_workplan, instead.
-                transformer = WorkplanTransformer(workplan, RomsMarblTimeSplitter())
-                transformed = transformer.apply()
+        workplan = deserialize(path, Workplan)
+    except (FileNotFoundError, ValueError) as ex:
+        print(f"The workplan at `{path}` could not be loaded")
+        return
 
-                planner = Planner(transformed)
-            else:
-                planner = Planner(workplan)
+    try:
+        if transform:
+            transformer = WorkplanTransformer(workplan, RomsMarblTimeSplitter())
+            result = transformer.apply()
+            workplan = result.workplan
 
-            plan_path = asyncio.run(render(planner, output_dir))
-        else:
-            print(f"The workplan at `{path}` could not be loaded")
+        planner = Planner(workplan)
+        plan_path = asyncio.run(render(planner, output_dir))
 
+        if plan_path is None:
+            raise ValueError("Unable to generate plan")
+
+        print(f"The plan has been generated and stored at: {plan_path}")
     except ValueError as ex:
-        print(f"Error occurred: {ex}")
-
-    if plan_path is None:
-        raise ValueError("Unable to generate plan")
-
-    print(f"The plan has been generated and stored at: {plan_path}")
+        print(f"An error occurred while generating the plan: {ex}")
