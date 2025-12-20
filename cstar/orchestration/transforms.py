@@ -8,12 +8,10 @@ from cstar.base.feature import is_feature_enabled
 from cstar.base.utils import deep_merge, slugify
 from cstar.orchestration.models import (
     ChildStep,
-    CodeRepository,
     RomsMarblBlueprint,
     Step,
     Workplan,
 )
-from cstar.orchestration.roms_dot_in import get_runtime_setting_value
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import ENV_CSTAR_ORC_TRX_FREQ
 
@@ -282,25 +280,7 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
-    def _get_output_root_name(self, repo: CodeRepository) -> str:
-        """Parse the `.in` input file from the repository to identify
-        the base name for outputs of the simulation.
-
-        Returns
-        -------
-        str
-
-        Raises
-        ------
-        TypeError
-            If the .in file does not contain a well-formatted value for
-            output_root_name
-        """
-        value = get_runtime_setting_value(repo, "output_root_name")
-        if isinstance(value, list):
-            msg = "Invalid output_root_name found. Expected a single value."
-            raise TypeError(msg)
-        return value
+    OUTPUT_ROOT_DEFAULT: t.Literal["output"] = "output"
 
     def __call__(self, step: Step) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
@@ -340,7 +320,7 @@ class RomsMarblTimeSplitter(Transform):
 
         depends_on = step.depends_on
         last_restart_file: Path | None = None
-        output_root_name = self._get_output_root_name(blueprint.code.run_time)
+        output_root_name = RomsMarblTimeSplitter.OUTPUT_ROOT_DEFAULT
 
         for i, (sd, ed) in enumerate(time_slices):
             bp_copy = RomsMarblBlueprint(

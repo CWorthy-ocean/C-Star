@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import (
     Any,
     ClassVar,
+    Literal,
     Self,
     get_args,
     get_origin,
@@ -39,6 +40,11 @@ CUSTOM_ALIAS_LOOKUP = {
 MIN_NUM_TRACERS = 37
 """Vertical mixing requires enough values for all tracers or it raises an error."""
 
+DEFAULT_OUTPUT_BASE_NAME: Literal['output'] = "output"
+"""A fixed, default basename used for all simulation outputs."""
+
+OBN_KEY: Literal["output_base_name"] = "output_base_name"
+"""The key name in *.in files for the output_base_name field"""
 
 def _format_float(val: float) -> str:
     """Apply special float formatting for 0 and scientific notation."""
@@ -594,10 +600,15 @@ class ROMSRuntimeSettings(BaseModel):
                 key = line.split(":", maxsplit=1)[0].strip()  # discard headers
                 continue
 
-            if not key:
+            if not key or key == OBN_KEY:
+                key = "" # ignore lines until a new key is encountered
                 continue
 
             sections[key].append(line)
+        
+        if OBN_KEY in sections:
+            # HACK: override content from file with default
+            sections[OBN_KEY] = [DEFAULT_OUTPUT_BASE_NAME]
 
         return sections
 

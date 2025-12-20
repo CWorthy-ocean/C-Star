@@ -237,7 +237,7 @@ def plan(
         if transform:
             transformer = WorkplanTransformer(workplan, RomsMarblTimeSplitter())
             workplan = transformer.apply()
- 
+
         planner = Planner(workplan)
         plan_path = asyncio.run(render(planner, output_dir))
 

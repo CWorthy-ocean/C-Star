@@ -283,10 +283,6 @@ def test_workplan_transformation(diamond_workplan: Workplan):
     transformer = WorkplanTransformer(diamond_workplan, RomsMarblTimeSplitter())
     with (
         mock.patch.dict(os.environ, {"CSTAR_FF_ORC_TRANSFORM_AUTO": "1"}),
-        mock.patch(
-            "cstar.orchestration.transforms.get_runtime_setting_value",
-            return_value="mock_base_name",
-        ),
     ):
         transformed = transformer.apply()
 
