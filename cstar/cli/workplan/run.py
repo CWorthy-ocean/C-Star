@@ -21,12 +21,6 @@ def run(
         str,
         typer.Option(help="The unique identifier for an execution of the workplan."),
     ] = "...",
-    reset_name: t.Annotated[
-        str,
-        typer.Option(
-            help="The name of the reset files output by the simulation (e.g. output_rst)."
-        ),
-    ] = "...",
 ) -> None:
     """Execute a workplan.
 
