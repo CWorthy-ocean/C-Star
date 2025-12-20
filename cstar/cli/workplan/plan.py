@@ -1,5 +1,4 @@
 import asyncio
-import os
 import typing as t
 from pathlib import Path
 
@@ -7,7 +6,6 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import typer
 
-from cstar.base.feature import FF_ON
 from cstar.base.utils import slugify
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
@@ -231,16 +229,15 @@ def plan(
 
     try:
         workplan = deserialize(path, Workplan)
-    except (FileNotFoundError, ValueError) as ex:
+    except (FileNotFoundError, ValueError):
         print(f"The workplan at `{path}` could not be loaded")
         return
 
     try:
         if transform:
             transformer = WorkplanTransformer(workplan, RomsMarblTimeSplitter())
-            result = transformer.apply()
-            workplan = result.workplan
-
+            workplan = transformer.apply()
+ 
         planner = Planner(workplan)
         plan_path = asyncio.run(render(planner, output_dir))
 
