@@ -1,4 +1,5 @@
 import abc
+from collections import defaultdict
 import types
 from pathlib import Path
 from typing import (
@@ -580,32 +581,23 @@ class ROMSRuntimeSettings(BaseModel):
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist.")
 
-        with filepath.open() as f:
-            lines = list(f)
+        all_lines = [line.strip() for line in filepath.read_text().split("\n")]
+        lines = [line for line in all_lines if line and not line.startswith("!")]
 
-        sections = {}
-        current_section = None
-        section_lines: list[str] = []
+        sections = defaultdict(list)
+        key = ""
 
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith("!"):
-                continue
+        while lines:
+            line = lines.pop(0)
 
             if ":" in line:
-                # save the previous section if one was open
-                if current_section is not None:
-                    sections[current_section] = section_lines
+                key = line.split(":", maxsplit=1)[0].strip()  # discard headers
+                continue
 
-                # start a new section
-                current_section = line.split(":", 1)[0].strip()
-                section_lines = []
-            else:
-                section_lines.append(line)
+            if not key:
+                continue
 
-        # save the last section
-        if current_section is not None:
-            sections[current_section] = section_lines
+            sections[key].append(line)
 
         return sections
 
