@@ -1,6 +1,7 @@
 import abc
 from collections import defaultdict
 import types
+from collections import defaultdict
 from pathlib import Path
 from typing import (
     Any,
@@ -45,6 +46,7 @@ DEFAULT_OUTPUT_BASE_NAME: Literal['output'] = "output"
 
 OBN_KEY: Literal["output_base_name"] = "output_base_name"
 """The key name in *.in files for the output_base_name field"""
+
 
 def _format_float(val: float) -> str:
     """Apply special float formatting for 0 and scientific notation."""
@@ -601,11 +603,11 @@ class ROMSRuntimeSettings(BaseModel):
                 continue
 
             if not key or key == OBN_KEY:
-                key = "" # ignore lines until a new key is encountered
+                key = ""  # ignore lines until a new key is encountered
                 continue
 
             sections[key].append(line)
-        
+
         if OBN_KEY in sections:
             # HACK: override content from file with default
             sections[OBN_KEY] = [DEFAULT_OUTPUT_BASE_NAME]
