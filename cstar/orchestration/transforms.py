@@ -294,7 +294,7 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
-    OUTPUT_ROOT_DEFAULT: t.Literal["output"] = "output"
+    OUTPUT_ROOT_DEFAULT: t.Literal["output"] = "output"  # see also: RomsRuntimeSettings
     """The default name used as the output_root_name for roms.in files."""
 
     frequency: str
@@ -474,7 +474,7 @@ class RomsMarblTimeSplitter(Transform):
         """
         overrides = overrides.copy()
 
-        model = bp.model_dump(exclude_unset=True)
+        model = bp.model_dump(exclude_defaults=True, exclude_unset=True)
 
         # system-level overrides take precedence over step-level overrides
         changeset = deep_merge(overrides, self._system_overrides)

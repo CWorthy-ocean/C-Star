@@ -318,6 +318,14 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
     for k, v in d2.items():
         if isinstance(v, dict):
             d1[k] = deep_merge(d1.get(k, {}), v)
+        elif isinstance(v, list):
+            list_items = []
+            for i, item in enumerate(v):
+                if isinstance(item, dict):
+                    list_items.append(deep_merge(d1.get(k, {})[i], item))
+                else:
+                    list_items.append(item)
+            d1[k] = list_items
         else:
             d1[k] = v
     return d1

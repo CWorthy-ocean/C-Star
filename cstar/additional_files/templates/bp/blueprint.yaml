@@ -93,3 +93,4 @@ grid:
 initial_conditions:
   data:
     - location: http://mockdoc.com/grid
+      partitioned: true
