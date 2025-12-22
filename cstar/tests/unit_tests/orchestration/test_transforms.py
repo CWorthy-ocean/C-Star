@@ -1,11 +1,16 @@
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
-from cstar.orchestration.models import RomsMarblBlueprint, Workplan
+from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import OverrideTransform
+from cstar.orchestration.transforms import (
+    OverrideTransform,
+    RomsMarblTimeSplitter,
+    get_transforms,
+)
 
 
 @pytest.fixture
@@ -78,11 +83,36 @@ def step_overiding_wp(
     return wp
 
 
-# def test_registry() -> None:
-#     """Verify that the override transform is not registered by default."""
-#     transforms = get_transforms(Application.ROMS_MARBL.value)
+def test_get_transforms() -> None:
+    """Confirm that registered transforms are returned via `get_transforms`"""
+    with mock.patch.dict(
+        "cstar.orchestration.transforms.TRANSFORMS",
+        {Application.ROMS_MARBL.value: [OverrideTransform]},
+        clear=True,
+    ):
+        transforms = get_transforms(Application.ROMS_MARBL.value)
 
-#     assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
+    assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
+
+    with mock.patch.dict(
+        "cstar.orchestration.transforms.TRANSFORMS",
+        {Application.ROMS_MARBL.value: [RomsMarblTimeSplitter()]},
+        clear=True,
+    ):
+        transforms = get_transforms(Application.ROMS_MARBL.value)
+
+    assert any(isinstance(tx, RomsMarblTimeSplitter) for tx in transforms)
+
+
+def test_get_transforms_empty() -> None:
+    """Confirm that `get_transforms` does not blow up when requesting transforms
+    for an application that has no transforms registered.
+    """
+    with mock.patch.dict("cstar.orchestration.transforms.TRANSFORMS", {}, clear=True):
+        transforms = get_transforms(Application.ROMS_MARBL.value)
+
+    assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
+    assert not any(isinstance(tx, RomsMarblTimeSplitter) for tx in transforms)
 
 
 def test_override_transform(
