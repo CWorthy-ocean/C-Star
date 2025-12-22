@@ -366,10 +366,9 @@ class RomsMarblTimeSplitter(Transform):
 
             description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}"
             overrides = {
+                "name": dynamic_name,
                 "description": description,
                 "runtime_params": {
-                    "name": dynamic_name,
-                    "description": description,
                     "start_date": sd,
                     "end_date": ed,
                     "output_dir": subtask_out_dir.as_posix(),
