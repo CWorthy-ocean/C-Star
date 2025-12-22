@@ -8,6 +8,7 @@ from pathlib import Path
 from cstar.base.feature import is_feature_enabled
 from cstar.base.utils import deep_merge, slugify
 from cstar.orchestration.models import (
+    Application,
     ChildStep,
     RomsMarblBlueprint,
     Step,
@@ -525,4 +526,4 @@ class OverrideTransform(Transform):
         return "ovrd"
 
 
-register_transform("roms_marbl", RomsMarblTimeSplitter())
+register_transform(Application.ROMS_MARBL.value, RomsMarblTimeSplitter())
