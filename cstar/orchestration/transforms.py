@@ -364,26 +364,19 @@ class RomsMarblTimeSplitter(Transform):
             )  # subtask_fs = RomsJobFileSystem(subtask_root)
             subtask_out_dir = subtask_root / child_step_name
 
-            description = (
-                f"Subtask {i + 1} of {n_slices}; Simulation covering "
-                f"timespan from `{sd}` to `{ed}` - {blueprint.description}"
-            )
+            description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}"
             overrides = {
                 "description": description,
                 "runtime_params": {
                     "name": dynamic_name,
+                    "description": description,
                     "start_date": sd,
                     "end_date": ed,
                     "output_dir": subtask_out_dir.as_posix(),
                 },
             }
-            bp_copy.runtime_params.start_date = sd
-            bp_copy.runtime_params.end_date = ed
-            bp_copy.runtime_params.output_dir = subtask_out_dir
-            bp_copy.name = dynamic_name
-            bp_copy.description = (
-                f"subtask {i + 1}: {sd} to {ed} - {blueprint.description}"
-            )
+
+            bp_copy.description = description
 
             if last_restart_file:
                 rst_path = last_restart_file.as_posix()
@@ -391,7 +384,6 @@ class RomsMarblTimeSplitter(Transform):
                 overrides["initial_conditions"] = {"data": [{"location": rst_path}]}
 
             child_bp_path = subtask_out_dir / f"{child_step_name}bp.yaml"
-
             serialize(child_bp_path, bp_copy)
 
             attributes = step.model_dump(
