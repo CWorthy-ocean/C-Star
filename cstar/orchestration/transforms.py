@@ -437,6 +437,7 @@ class RomsMarblTimeSplitter(Transform):
         return "split"
 
 
+class OverrideTransform(Transform):
     """Transform that overrides a step by returning a blueprint with all overridden attributes applied."""
 
     _system_overrides: dict[str, t.Any] = {}
@@ -486,6 +487,42 @@ class RomsMarblTimeSplitter(Transform):
         merged.update(description=description)
 
         return RomsMarblBlueprint(**merged)
+
+    def __call__(self, step: Step) -> t.Iterable[Step]:
+        """Apply the transform to a step.
+
+        Parameters
+        ----------
+        step : Step
+            The step to be transformed
+
+        Returns
+        -------
+        Iterable[Step]
+            Zero-to-many steps resulting from applying the transform.
+        """
+        bp_path = Path(step.blueprint_path)
+        bp = deserialize(bp_path, RomsMarblBlueprint)
+
+        updated_bp = self.apply(bp, step.blueprint_overrides)
+        persist_as = (
+            step.file_system(updated_bp).work_dir
+            / bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
+        )
+        serialize(persist_as, updated_bp)
+        clone = Step(
+            **step.model_dump(exclude={"blueprint_overrides", "blueprint_path"}),
+            blueprint=persist_as,
+            blueprint_overrides={},
+        )
+        return [clone]
+
+    @staticmethod
+    def suffix() -> str:
+        """Return the standard prefix to be used when persisting
+        a resource modified by this transform.
+        """
+        return "ovrd"
 
 
 register_transform("roms_marbl", RomsMarblTimeSplitter())
