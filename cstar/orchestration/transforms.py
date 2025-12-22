@@ -2,6 +2,7 @@ import os
 import typing as t
 from collections import defaultdict
 from datetime import datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
@@ -111,12 +112,18 @@ def _monthlies(
         current_date = month_end
 
 
+class SplitFrequency(StrEnum):
+    Daily = "daily"
+    Weekly = "weekly"
+    Monthly = "monthly"
+
+
 SLICE_FUNCTIONS = defaultdict(
     lambda: _monthlies,
     {
-        "daily": _dailies,
-        "weekly": _weeklies,
-        "monthly": _monthlies,
+        SplitFrequency.Daily.value: _dailies,
+        SplitFrequency.Weekly.value: _weeklies,
+        SplitFrequency.Monthly.value: _monthlies,
     },
 )
 
@@ -124,7 +131,7 @@ SLICE_FUNCTIONS = defaultdict(
 def get_time_slices(
     start_date: datetime,
     end_date: datetime,
-    frequency: str = "monthly",
+    frequency: str = SplitFrequency.Monthly.value,
 ) -> t.Iterable[tuple[datetime, datetime]]:
     """Get the time slices for the given start and end dates.
 
@@ -281,6 +288,14 @@ class RomsMarblTimeSplitter(Transform):
     """
 
     OUTPUT_ROOT_DEFAULT: t.Literal["output"] = "output"
+    """The default name used as the output_root_name for roms.in files."""
+
+    frequency: str
+    """The step splitting frequency used to generate new time steps."""
+
+    def __init__(self, frequency: str = SplitFrequency.Monthly.value) -> None:
+        """Initialize the transform instance."""
+        self.frequency = os.getenv(ENV_CSTAR_ORC_TRX_FREQ, frequency)
 
     def __call__(self, step: Step) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.
@@ -304,8 +319,7 @@ class RomsMarblTimeSplitter(Transform):
 
         serialize(job_fs.root / Path(step.blueprint_path).name, blueprint)
 
-        frequency = os.getenv(ENV_CSTAR_ORC_TRX_FREQ, "monthly")
-        time_slices = list(get_time_slices(start_date, end_date, frequency=frequency))
+        time_slices = list(get_time_slices(start_date, end_date, frequency=self.frequency))
         n_slices = len(time_slices)
 
         # if (start_date - end_date).total_seconds() < timedelta(days=30).total_seconds():
