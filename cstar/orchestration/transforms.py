@@ -23,17 +23,24 @@ class Transform(t.Protocol):
     """
 
     def __call__(self, step: Step) -> t.Iterable[Step]:
-        """Perform a transformation on the input step.
+        """Apply the transform to a step.
 
         Parameters
         ----------
         step : Step
-            The step to split.
+            The step to be transformed
 
         Returns
         -------
         Iterable[Step]
-            The sub-steps.
+            Zero-to-many steps resulting from applying the transform.
+        """
+        ...
+
+    @staticmethod
+    def suffix() -> str:
+        """Return the standard prefix to be used when persisting
+        a resource modified by this transform.
         """
         ...
 
@@ -319,7 +326,7 @@ class RomsMarblTimeSplitter(Transform):
 
         serialize(job_fs.root / Path(step.blueprint_path).name, blueprint)
 
-        time_slices = list(get_time_slices(start_date, end_date, frequency=self.frequency))
+        time_slices = list(get_time_slices(start_date, end_date, self.frequency))
         n_slices = len(time_slices)
 
         # if (start_date - end_date).total_seconds() < timedelta(days=30).total_seconds():
@@ -382,7 +389,7 @@ class RomsMarblTimeSplitter(Transform):
                 bp_copy.initial_conditions.data[0].location = rst_path
                 overrides["initial_conditions"] = {"data": [{"location": rst_path}]}
 
-            child_bp_path = subtask_out_dir / f"{child_step_name}_blueprint.yaml"
+            child_bp_path = subtask_out_dir / f"{child_step_name}bp.yaml"
 
             serialize(child_bp_path, bp_copy)
 
@@ -422,8 +429,14 @@ class RomsMarblTimeSplitter(Transform):
             # use output dir of the last step as the input for the next step
             last_restart_file = restart_file_path
 
+    @staticmethod
+    def suffix() -> str:
+        """Return the standard prefix to be used when persisting
+        a resource modified by this transform.
+        """
+        return "split"
 
-class BlueprintOverrider:
+
     """Transform that overrides a step by returning a blueprint with all overridden attributes applied."""
 
     _system_overrides: dict[str, t.Any] = {}
