@@ -1,5 +1,4 @@
 import abc
-from collections import defaultdict
 import types
 from collections import defaultdict
 from pathlib import Path
@@ -41,7 +40,7 @@ CUSTOM_ALIAS_LOOKUP = {
 MIN_NUM_TRACERS = 37
 """Vertical mixing requires enough values for all tracers or it raises an error."""
 
-DEFAULT_OUTPUT_BASE_NAME: Literal['output'] = "output"
+DEFAULT_OUTPUT_BASE_NAME: Literal["output"] = "output"
 """A fixed, default basename used for all simulation outputs."""
 
 OBN_KEY: Literal["output_base_name"] = "output_base_name"
