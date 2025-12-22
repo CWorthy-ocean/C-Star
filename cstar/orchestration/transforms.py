@@ -273,13 +273,21 @@ class WorkplanTransformer:
                 continue
 
             transformed_steps = list(self.transform_fn(step))
-            steps.extend(transformed_steps)
 
             # replace dependencies on the original step with the last transformed step
             tweaks = (s for s in self.original.steps if step.name in s.depends_on)
             for tweak in tweaks:
                 tweak.depends_on.remove(step.name)
                 tweak.depends_on.append(transformed_steps[-1].name)
+
+            overridden_steps: list[Step] = []
+            override_transform = OverrideTransform()
+
+            for transformed_step in transformed_steps:
+                overridden_step_result = override_transform(transformed_step)
+                overridden_steps.extend(overridden_step_result)
+
+            steps.extend(overridden_steps)
 
         wp_attrs = self.original.model_dump()
         wp_attrs.update(
@@ -296,6 +304,7 @@ class RomsMarblTimeSplitter(Transform):
     """
 
     OUTPUT_ROOT_DEFAULT: t.Literal["output"] = "output"  # see also: RomsRuntimeSettings
+
     """The default name used as the output_root_name for roms.in files."""
 
     frequency: str
@@ -364,7 +373,7 @@ class RomsMarblTimeSplitter(Transform):
             )  # subtask_fs = RomsJobFileSystem(subtask_root)
             subtask_out_dir = subtask_root / child_step_name
 
-            description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}"
+            description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
             overrides = {
                 "name": dynamic_name,
                 "description": description,
@@ -375,11 +384,8 @@ class RomsMarblTimeSplitter(Transform):
                 },
             }
 
-            bp_copy.description = description
-
             if last_restart_file:
                 rst_path = last_restart_file.as_posix()
-                bp_copy.initial_conditions.data[0].location = rst_path
                 overrides["initial_conditions"] = {"data": [{"location": rst_path}]}
 
             child_bp_path = subtask_out_dir / f"{child_step_name}bp.yaml"
@@ -474,7 +480,7 @@ class OverrideTransform(Transform):
         merged = deep_merge(model, changeset)
 
         description = (
-            f"{bp.description} - overrides applied to [{', '.join(changeset.keys())}]"
+            f"{bp.description}; overridden keys [{', '.join(changeset.keys())}]"
         )
         merged.update(description=description)
 
