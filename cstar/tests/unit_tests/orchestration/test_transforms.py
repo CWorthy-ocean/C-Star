@@ -87,9 +87,7 @@ def step_overiding_wp(
 
 def test_override_transform(
     step_overiding_wp: Workplan,
-    tmp_path: Path,
     test_output_dir: Path,
-    test_bp_path: Path,
     test_output_dir_override: Path,
 ) -> None:
     """Verify that the OverrideTransform overwrites values in the blueprint.
@@ -142,3 +140,45 @@ def test_override_transform(
     # confirm some other attribute of the step is unchanged
     assert bp_old.initial_conditions.data[0].partitioned
     assert bp_new.initial_conditions.data[0].partitioned
+
+
+def test_override_transform_system_precedence(
+    tmp_path: Path,
+    step_overiding_wp: Workplan,
+    test_output_dir: Path,
+) -> None:
+    """Verify that system-level overrides passed to the transform override
+    values specified in the workplan.
+
+    Parameters
+    ----------
+    step_overiding_wp : Workplan
+        A workplan copied from a template with paths referencing tmp_path.
+    tmp_path : Path
+        The temporary path for writing test files.
+    test_output_dir : Path
+        The value that replaced the static content of the blueprint template
+        and was written to the test directory, tmp_path.
+    """
+    sys_od = tmp_path / "system_output_dir"
+    system_od_override = {"runtime_params": {"output_dir": sys_od.as_posix()}}
+
+    transform = OverrideTransform(sys_overrides=system_od_override)
+    step = step_overiding_wp.steps[0]
+
+    steps = transform(step)
+    transformed = list(steps)[0]
+
+    # confirm a attribute of the blueprint is changed (bp.blueprint_path)
+    dir_og = test_output_dir
+
+    # confirm a new blueprint was created.
+    assert Path(step.blueprint_path) != Path(transformed.blueprint_path)
+
+    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+
+    # confirm that even though an output_dir override was applied, the
+    # system level override was applied last.
+    assert Path(bp_old.runtime_params.output_dir) == dir_og
+    assert Path(bp_new.runtime_params.output_dir) == sys_od
