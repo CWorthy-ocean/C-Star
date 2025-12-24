@@ -114,6 +114,7 @@ class ForcingConfiguration(ConfiguredBaseModel):
     corrections: Dataset | None = Field(default=None, validate_default=False)
     """Wind or other forcing corrections."""
 
+
 class CodeRepository(DocLocMixin, ConfiguredBaseModel):
     """Reference to a remote code repository with optional path filtering
     and point-in-time specification.
