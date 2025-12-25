@@ -603,15 +603,16 @@ class ROMSRuntimeSettings(BaseModel):
         key = ""
 
         while lines:
-            line, value = lines.pop(0), ""
+            line = lines.pop(0)
 
             if ":" in line:
-                key, value = [x.strip() for x in line.split(":", maxsplit=1)]
+                key, _ = [x.strip() for x in line.split(":", maxsplit=1)]
+                continue
 
             if not key:
                 continue
 
-            sections[key].append(value)
+            sections[key].append(line)
 
         return sections
 

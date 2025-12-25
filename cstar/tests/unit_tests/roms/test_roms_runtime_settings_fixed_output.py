@@ -8,7 +8,7 @@ from cstar.roms.runtime_settings import ROMSRuntimeSettings
 @pytest.mark.parametrize(
     "output_root_name_input",
     [
-        "ROMS_test",
+        "output",
         "another_name",
         "a_third_name",
     ],
@@ -16,12 +16,12 @@ from cstar.roms.runtime_settings import ROMSRuntimeSettings
 def test_fixed_output_root_name(tmp_path, output_root_name_input):
     """Verify that ROMSRuntimeSettings always has a fixed output_root_name."""
     roms_in_content = f"""
-title: test
-time_stepping: 1 1 1 1
-bottom_drag: 1 1 1
-initial: 0
-forcing:
-output_root_name: {output_root_name_input}
+title: \n\ttest
+time_stepping:\n\t1 1 1 1
+bottom_drag:\n\t 1 1 1
+initial:\n\t 0
+forcing:\n\aaa/x.nc
+output_root_name:\n\t{output_root_name_input}
 """
     roms_in_file = tmp_path / "roms.in"
     roms_in_file.write_text(roms_in_content)
