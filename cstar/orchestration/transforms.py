@@ -509,7 +509,12 @@ class OverrideTransform(Transform):
         )
         serialize(persist_as, updated_bp)
         clone = Step(
-            **step.model_dump(exclude={"blueprint_overrides", "blueprint_path"}),
+            **step.model_dump(
+                exclude={
+                    "blueprint_overrides",
+                    "blueprint_path",
+                }
+            ),
             blueprint=persist_as,
             blueprint_overrides={},
         )

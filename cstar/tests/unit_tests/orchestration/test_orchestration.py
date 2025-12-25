@@ -8,7 +8,7 @@ import networkx as nx
 import pytest
 
 from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.models import Application, Step, Workplan
+from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.orchestration import (
     KEY_STATUS,
     KEY_STEP,
@@ -17,6 +17,7 @@ from cstar.orchestration.orchestration import (
     RunMode,
     Status,
 )
+from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
@@ -297,15 +298,12 @@ def test_workplan_transformation(diamond_workplan: Workplan):
 
     for step in transformed.steps:
         assert step.blueprint_overrides is not None
-        runtime_params = step.blueprint_overrides["runtime_params"]
+        blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
 
-        assert isinstance(runtime_params, dict)
-        assert "start_date" in runtime_params
-        assert "end_date" in runtime_params
-        assert isinstance(runtime_params["start_date"], datetime)
-        assert isinstance(runtime_params["end_date"], datetime)
+        # overrides will be transferred to the model after call to .apply
+        assert "runtime_params" not in step.blueprint_overrides
 
-        step_sd = runtime_params["start_date"]
-        step_ed = runtime_params["end_date"]
+        step_sd = blueprint.runtime_params.start_date
+        step_ed = blueprint.runtime_params.end_date
 
         assert ((step_sd, step_ed)) in get_time_slices(sd, ed)
