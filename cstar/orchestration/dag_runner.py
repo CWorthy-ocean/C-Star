@@ -128,7 +128,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
     delay_iter = iter(incremental_delays())
 
     while open_set is not None:
-        print(f"Mode: {mode}, Open nodes: {open_set}, Closed: {closed_set}")
+        # print(f"Mode: {mode}, Open nodes: {open_set}, Closed: {closed_set}")
         await orchestrator.run(mode=mode)
 
         curr_closed = orchestrator.get_closed_nodes(mode=mode)
@@ -142,7 +142,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
         closed_set = curr_closed
 
         sleep_duration = next(delay_iter)
-        print(f"Next `{mode}` check in {sleep_duration:4.1f} seconds.")
+        # print(f"Next `{mode}` check in {sleep_duration:4.1f} seconds.")
         await asyncio.sleep(sleep_duration)
 
     print(f"Workplan {mode} is complete.")
