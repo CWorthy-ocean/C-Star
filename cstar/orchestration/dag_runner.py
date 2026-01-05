@@ -149,7 +149,8 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
 
 
 async def prepare_workplan(
-    wp_path: Path, output_dir: Path, run_id: str
+    wp_path: Path,
+    output_dir: Path,
 ) -> tuple[Workplan, Path]:
     """Load the workplan and apply any applicable transforms.
 
@@ -159,8 +160,6 @@ async def prepare_workplan(
         The path to the workplan to load.
     output_dir : Path
         The directory where workplan outputs will be written.
-    run_id : str
-        The identifier for the run.
 
     Returns
     -------
@@ -201,7 +200,7 @@ async def build_and_run_dag(wp_path: Path, output_dir: Path) -> None:
     """
     run_id = get_run_id()
     configure_environment(output_dir, run_id)
-    wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
+    wp, wp_path = await prepare_workplan(wp_path, output_dir)
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
