@@ -303,6 +303,12 @@ def slugify(source: str) -> str:
 def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
     """Deep merge two dictionaries.
 
+    Iterate recursively through keys in dictionary `d2`, replacing
+    any leaf values in `d1` with the value from `d2`.
+
+    NOTE: Currently handles leaf values that are scalar or lists. Additional
+    leaf types (such as set) may require additional conditional blocks.
+
     Parameters
     ----------
     d1 : dict[str, t.Any]
