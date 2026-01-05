@@ -198,8 +198,6 @@ async def build_and_run_dag(wp_path: Path, output_dir: Path) -> None:
         The path to the blueprint to execute
     output_dir : Path
         The path to the output directory.
-    reset_base : str
-        The basename of the reset files output by the simulation.
     """
     run_id = get_run_id()
     configure_environment(output_dir, run_id)
