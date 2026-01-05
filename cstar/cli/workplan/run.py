@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 
 from cstar.orchestration.dag_runner import build_and_run_dag
-from cstar.orchestration.orchestration import ENV_CSTAR_RUNID
+from cstar.orchestration.utils import ENV_CSTAR_RUNID
 
 app = typer.Typer()
 
