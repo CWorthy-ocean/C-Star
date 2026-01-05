@@ -14,6 +14,11 @@ from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+)
 from cstar.roms import ROMSSimulation
 
 DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
@@ -449,9 +454,9 @@ def main() -> int:
         service_cfg = get_service_config(args)
         blueprint_req = get_request(args)
         job_cfg = JobConfig(
-            account_id=os.environ.get("CSTAR_SLURM_ACCOUNT", ""),
-            walltime=os.environ.get("CSTAR_SLURM_MAX_WALLTIME", "01:00:00"),
-            priority=os.environ.get("CSTAR_SLURM_QUEUE", ""),
+            account_id=os.environ.get(ENV_CSTAR_SLURM_ACCOUNT, ""),
+            walltime=os.environ.get(ENV_CSTAR_SLURM_MAX_WALLTIME, "01:00:00"),
+            priority=os.environ.get(ENV_CSTAR_SLURM_QUEUE, ""),
         )
 
     log = get_logger(__name__, level=service_cfg.log_level)
