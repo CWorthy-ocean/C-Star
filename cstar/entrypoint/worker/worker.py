@@ -456,9 +456,8 @@ def main() -> int:
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
     try:
-        raw_args = sys.argv[1:]
         parser = create_parser()
-        args = parser.parse_args(raw_args)
+        args = parser.parse_args()
     except SystemExit:
         return 1
     else:
