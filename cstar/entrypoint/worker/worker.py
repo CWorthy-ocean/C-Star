@@ -138,19 +138,6 @@ class SimulationRunner(Service):
         current_time = datetime.now(timezone.utc)
         return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
 
-    def _prepare_file_system(self) -> None:
-        """Ensure fresh directories exist for the simulation outputs.
-
-        Removes any pre-existing directories and creates empty directories to avoid
-        collisions.
-
-        Raises
-        ------
-        ValueError
-            If the output directory exists and contains
-        """
-        ...
-
     def _log_disposition(self, treat_as_failure: bool = False) -> None:
         """Log the status of the simulation at shutdown time."""
         disposition: ExecutionStatus = (
@@ -183,8 +170,6 @@ class SimulationRunner(Service):
         if self._simulation is None:
             msg = f"Unable to load the blueprint: {self._blueprint_uri}"
             raise BlueprintError(msg)
-
-        self._prepare_file_system()
 
         try:
             if SimulationStages.SETUP in self._stages:

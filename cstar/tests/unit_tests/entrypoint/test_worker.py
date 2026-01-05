@@ -381,8 +381,6 @@ def test_runner_directory_check_ignore_logs(
     # A file in the logs directory should be ignored
     (logs_dir / "any-name.txt").touch()
 
-    sim_runner._prepare_file_system()
-
 
 def test_runner_directory_prep(
     tmp_path: Path,
@@ -404,8 +402,6 @@ def test_runner_directory_prep(
 
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    sim_runner._prepare_file_system()
 
     # Confirm the output directory is created...
     assert sim_runner._output_root.exists()
@@ -749,12 +745,10 @@ async def test_runner_on_start_without_uri(
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
     mock_simulation = mock.Mock()
-    mock_prep_fs = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
@@ -769,7 +763,6 @@ async def test_runner_on_start_without_uri(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 0
         assert mock_iter.call_count == 0
         assert mock_shutdown.call_count == 1
 
@@ -800,12 +793,10 @@ async def test_runner_on_start_without_simulation(
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
     mock_simulation = mock.Mock()
-    mock_prep_fs = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
@@ -820,7 +811,6 @@ async def test_runner_on_start_without_simulation(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 0
         assert mock_iter.call_count == 0
         assert mock_shutdown.call_count == 1
 
@@ -855,12 +845,10 @@ async def test_runner_on_start_user_unhandled_setup(
     mock_simulation = mock.Mock(
         setup=mock.Mock(side_effect=ValueError("Mock setup Failure"))
     )
-    mock_prep_fs = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
@@ -874,7 +862,6 @@ async def test_runner_on_start_user_unhandled_setup(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 1
         assert mock_simulation.setup.call_count == 1
         assert mock_iter.call_count == 0
         assert mock_shutdown.call_count == 1
@@ -910,11 +897,9 @@ async def test_runner_on_start_user_unhandled_build(
     mock_simulation = mock.Mock(
         build=mock.Mock(side_effect=RuntimeError("Mock build Failure"))
     )
-    mock_prep_fs = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
@@ -927,7 +912,6 @@ async def test_runner_on_start_user_unhandled_build(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 1
         assert mock_simulation.setup.call_count == 1
         assert mock_iter.call_count == 0
         # assert mock_shutdown.call_count == 1
@@ -963,11 +947,9 @@ async def test_runner_on_start_user_unhandled_pre_run(
     mock_simulation = mock.Mock(
         pre_run=mock.Mock(side_effect=Exception("Mock pre-run Failure"))
     )
-    mock_prep_fs = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
@@ -980,7 +962,6 @@ async def test_runner_on_start_user_unhandled_pre_run(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 1
         assert mock_simulation.setup.call_count == 1
         assert mock_iter.call_count == 0
         # assert mock_shutdown.call_count == 1
@@ -1009,13 +990,11 @@ async def test_runner_on_iteration(
     (output_dir / "somefile.txt").touch()
 
     mock_simulation = mock.Mock()
-    mock_prep_fs = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
         mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
     ):
@@ -1023,7 +1002,6 @@ async def test_runner_on_iteration(
         await sim_runner.execute()
 
         # Now confirm that my target lifecycle behaviors were all executed
-        assert mock_prep_fs.call_count == 1
         assert mock_simulation.setup.call_count == 1
         assert mock_simulation.build.call_count == 1
         assert mock_simulation.pre_run.call_count == 1
@@ -1112,7 +1090,6 @@ async def test_runner_setup_stage(
     # don't let it perform any real work
     with (
         mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
     ):
         # Trigger a run through the lifecycle as a task.
