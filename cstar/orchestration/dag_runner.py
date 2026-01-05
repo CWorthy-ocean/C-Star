@@ -235,13 +235,6 @@ def get_parser() -> argparse.ArgumentParser:
         type=Path,
         help="The path where outputs must be written",
     )
-    # parser.add_argument(
-    #     "-r",
-    #     "--reset-base",
-    #     required=True,
-    #     type=str,
-    #     help="The basename of the reset files output by the simulation (e.g. output_rst).",
-    # )
     parser.add_argument(
         "-b",
         "--blueprint",
