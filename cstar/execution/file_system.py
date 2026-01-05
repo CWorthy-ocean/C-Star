@@ -78,6 +78,7 @@ class JobFileSystem(LoggingMixin):
         """Ensure the job's working directory is empty."""
         shutil.rmtree(self.root)
         self.root.mkdir(parents=True)
+        self.log.debug(f"Created empty working directory for job `{self.root.name}`")
 
 
 class RomsJobFileSystem(JobFileSystem):
