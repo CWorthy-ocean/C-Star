@@ -15,7 +15,7 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.utils import ENV_CSTAR_ORC_TRX_FREQ
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
 
 class Transform(t.Protocol):
@@ -312,7 +312,7 @@ class RomsMarblTimeSplitter(Transform):
 
     def __init__(self, frequency: str = SplitFrequency.Monthly.value) -> None:
         """Initialize the transform instance."""
-        self.frequency = os.getenv(ENV_CSTAR_ORC_TRX_FREQ, frequency)
+        self.frequency = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
 
     def __call__(self, step: Step) -> t.Iterable[Step]:
         """Split a step into multiple sub-steps.

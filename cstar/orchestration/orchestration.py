@@ -10,7 +10,7 @@ import networkx as nx
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
-    ENV_CSTAR_ORC_OUTDIR,
+    ENV_CSTAR_ORCH_OUTDIR,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_QUEUE,
@@ -653,9 +653,8 @@ def configure_environment(output_dir: Path, run_id: str) -> None:
     ValueError
         If the required environment variables are not set.
     """
-    os.environ[ENV_CSTAR_ORC_OUTDIR] = output_dir.as_posix()
+    os.environ[ENV_CSTAR_ORCH_OUTDIR] = output_dir.as_posix()
     os.environ[ENV_CSTAR_RUNID] = run_id
-    # os.environ[ENV_CSTAR_ORC_TRX_RESET] = reset_name
 
     for key in [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE, ENV_CSTAR_RUNID]:
         if not os.getenv(key, ""):

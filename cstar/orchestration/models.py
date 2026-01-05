@@ -25,7 +25,7 @@ from pytimeparse import parse
 
 from cstar.base.utils import slugify
 from cstar.execution.file_system import RomsJobFileSystem
-from cstar.orchestration.utils import ENV_CSTAR_ORC_OUTDIR, ENV_CSTAR_RUNID
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_OUTDIR, ENV_CSTAR_RUNID
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -495,7 +495,7 @@ class Step(BaseModel):
         if output_dir_override:
             return Path(output_dir_override)
 
-        if od_system_override := os.getenv(ENV_CSTAR_ORC_OUTDIR, ""):
+        if od_system_override := os.getenv(ENV_CSTAR_ORCH_OUTDIR, ""):
             od_path = Path(od_system_override)
 
         if run_id := os.getenv(ENV_CSTAR_RUNID, ""):
@@ -550,7 +550,7 @@ class ChildStep(Step):
         if output_dir_override:
             return Path(output_dir_override)
 
-        if od_system_override := os.getenv(ENV_CSTAR_ORC_OUTDIR, ""):
+        if od_system_override := os.getenv(ENV_CSTAR_ORCH_OUTDIR, ""):
             od_path = Path(od_system_override)
 
         if run_id := os.getenv(ENV_CSTAR_RUNID, ""):

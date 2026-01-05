@@ -22,7 +22,7 @@ from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORC_DELAYS
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -34,9 +34,8 @@ def incremental_delays() -> t.Generator[float, None, None]:
     """
     delays = [0.1, 1, 2, 5, 15, 30, 60]
 
-    if os.getenv(ENV_CSTAR_ORC_DELAYS, ""):
+    if custom_delays := os.getenv(ENV_CSTAR_ORCH_DELAYS, ""):
         try:
-            custom_delays = os.getenv(ENV_CSTAR_ORC_DELAYS, "")
             delays = [float(d) for d in custom_delays.split(",")]
         except ValueError:
             print(f"Malformed delay provided: {custom_delays}. Using defaults.")
