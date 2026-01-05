@@ -141,7 +141,7 @@ def test_override_transform(
     transformed = list(steps)[0]
 
     # confirm a attribute of the blueprint is changed (bp.blueprint_path)
-    dir_og = test_output_dir
+    dir_orig = test_output_dir
     exp_dir = test_output_dir_override
 
     # confirm a new blueprint was created.
@@ -151,7 +151,7 @@ def test_override_transform(
     bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
 
     # confirm nested attributes (bp.runtime_params.xxx)) is changed
-    assert Path(bp_old.runtime_params.output_dir) == dir_og
+    assert Path(bp_old.runtime_params.output_dir) == dir_orig
     assert Path(bp_new.runtime_params.output_dir) == exp_dir
 
     assert bp_old.runtime_params.start_date == datetime(2020, 1, 1)
@@ -200,7 +200,7 @@ def test_override_transform_system_precedence(
     transformed = list(steps)[0]
 
     # confirm a attribute of the blueprint is changed (bp.blueprint_path)
-    dir_og = test_output_dir
+    dir_orig = test_output_dir
 
     # confirm a new blueprint was created.
     assert Path(step.blueprint_path) != Path(transformed.blueprint_path)
@@ -210,5 +210,5 @@ def test_override_transform_system_precedence(
 
     # confirm that even though an output_dir override was applied, the
     # system level override was applied last.
-    assert Path(bp_old.runtime_params.output_dir) == dir_og
+    assert Path(bp_old.runtime_params.output_dir) == dir_orig
     assert Path(bp_new.runtime_params.output_dir) == sys_od

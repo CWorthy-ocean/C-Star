@@ -164,22 +164,22 @@ async def prepare_workplan(
     -------
     Workplan
     """
-    wp_og = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
     if is_feature_enabled("ORC_TRANSFORM_AUTO"):
-        transformer = WorkplanTransformer(wp_og, RomsMarblTimeSplitter())
+        transformer = WorkplanTransformer(wp_orig, RomsMarblTimeSplitter())
         wp = transformer.apply()
 
         if transformer.is_modified:
             print("A time-split workplan will be executed.")
     else:
-        wp = wp_og
+        wp = wp_orig
 
     # make a copy of the original and modified blueprint in the output directory
-    persist_og = WorkplanTransformer.derived_path(wp_path, output_dir, "_og")
+    persist_orig = WorkplanTransformer.derived_path(wp_path, output_dir, "_orig")
     persist_as = WorkplanTransformer.derived_path(wp_path, output_dir)
     _ = await asyncio.gather(
-        asyncio.to_thread(serialize, persist_og, wp_og),
+        asyncio.to_thread(serialize, persist_orig, wp_orig),
         asyncio.to_thread(serialize, persist_as, wp),
     )
 
