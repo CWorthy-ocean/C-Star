@@ -377,23 +377,6 @@ def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
     )
 
 
-def _format_date(date_str: str) -> datetime:
-    """Convert a date string to a datetime object using the default format.
-
-    Parameters
-    ----------
-    date_str : str
-        The date string to convert.
-
-    Returns
-    -------
-    datetime
-        The converted datetime.
-    """
-    return datetime.strptime(  # noqa: DTZ007
-        date_str,
-        DATE_FORMAT,
-    )
 
 
 def get_request(args: argparse.Namespace) -> BlueprintRequest:

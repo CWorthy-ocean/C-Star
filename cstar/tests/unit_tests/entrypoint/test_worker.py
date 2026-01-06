@@ -1,4 +1,3 @@
-import datetime
 import itertools
 import logging
 import os
@@ -16,7 +15,6 @@ from cstar.entrypoint.worker.worker import (
     JobConfig,
     SimulationRunner,
     SimulationStages,
-    _format_date,
     configure_environment,
     create_parser,
     get_request,
@@ -298,30 +296,6 @@ def test_configure_environment_prebuilt() -> None:
 
         assert "GIT_DISCOVERY_ACROSS_FILESYSTEM" in os.environ
         assert os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] == "1"
-
-
-@pytest.mark.parametrize(
-    ("date_str", "expected"),
-    [
-        ("2021-03-01 08:30:00", datetime.datetime(2021, 3, 1, 8, 30)),  # noqa: DTZ001
-        ("2020-09-01 04:06:00", datetime.datetime(2020, 9, 1, 4, 6, 0)),  # noqa: DTZ001
-        ("2019-01-01 00:00:00", datetime.datetime(2019, 1, 1, 0, 0)),  # noqa: DTZ001
-    ],
-)
-def test_format_date_for_unique_path(
-    date_str: str, expected: datetime.datetime
-) -> None:
-    """Verify that the date formatting for unique paths is correct.
-
-    Parameters
-    ----------
-    date_str: str
-        A date string to be formatted.
-    expected : datetime.datetime
-        The expected datetime object after formatting.
-    """
-    formatted_date = _format_date(date_str)
-    assert formatted_date == expected
 
 
 def test_start_runner(
