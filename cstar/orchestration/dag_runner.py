@@ -24,6 +24,8 @@ from cstar.orchestration.transforms import (
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 
+WorkplanTemplate: t.TypeAlias = t.Literal["single_step", "linear", "fanout", "parallel"]
+
 
 def incremental_delays() -> t.Generator[float, None, None]:
     """Return a value from an infinite cycle of incremental delays.
@@ -222,8 +224,7 @@ bp_default: t.Final[str] = (
 
 def get_parser() -> argparse.ArgumentParser:
     """Simple parser for testing the dag runner in a debugger."""
-    tpl_choices: t.TypeAlias = t.Literal["single_step", "linear", "fanout", "parallel"]
-    choices: list[tpl_choices] = ["single_step", "linear", "fanout", "parallel"]
+    choices: list[WorkplanTemplate] = ["single_step", "linear", "fanout", "parallel"]
 
     parser = argparse.ArgumentParser("dag_runner")
     parser.add_argument(
