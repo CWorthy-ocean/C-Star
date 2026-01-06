@@ -22,6 +22,11 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+)
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -153,7 +158,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         str
             The queue to use for SLURM jobs.
         """
-        return os.getenv("CSTAR_SLURM_QUEUE") or ""
+        return os.getenv(ENV_CSTAR_SLURM_QUEUE) or ""
 
     @staticmethod
     def configured_walltime() -> str:
@@ -166,7 +171,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         str
             The max-walltime to use for SLURM jobs.
         """
-        return os.getenv("CSTAR_SLURM_MAX_WALLTIME") or ""
+        return os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME) or ""
 
     @staticmethod
     def configured_account() -> str:
@@ -179,7 +184,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         str
             The account to use for SLURM jobs.
         """
-        return os.getenv("CSTAR_SLURM_ACCOUNT") or ""
+        return os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or ""
 
     @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
