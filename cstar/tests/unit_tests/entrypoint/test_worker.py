@@ -222,7 +222,7 @@ def test_get_service_config(
         ],
     )
 
-    config = get_service_config(parsed_args)
+    config = get_service_config(parsed_args.log_level)
 
     # some values are currently hardcoded for the worker service
     assert config.as_service
@@ -255,7 +255,7 @@ def test_get_request(
         ]
     )
 
-    config = get_request(parsed_args)
+    config = get_request(parsed_args.blueprint_uri, parsed_args.stages)
 
     assert config.blueprint_uri == blueprint_uri
 

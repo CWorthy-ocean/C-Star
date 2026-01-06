@@ -25,6 +25,7 @@ DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
 JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
 LOGS_DIRECTORY: Final[str] = "logs"
+DEFAULT_SLURM_MAX_WALLTIME: Final[str] = "48:00:00"
 
 
 def _generate_job_name() -> str:
@@ -354,51 +355,74 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
+def get_service_config(log_level: int | str) -> ServiceConfiguration:
     """Create a ServiceConfiguration instance using CLI arguments.
 
     Parameters
     ----------
-    args: argparse.Namespace
-        The arguments parsed from the command line, including log level and
+    log_level : int or str
+        The log level to be used by the worker
 
     Returns
     -------
     ServiceConfiguration
         The configuration for a service.
     """
+    level = (
+        logging.getLevelNamesMapping()[log_level]
+        if isinstance(log_level, str)
+        else log_level
+    )
+
     return ServiceConfiguration(
         as_service=True,
         loop_delay=5,
         health_check_frequency=None,
-        log_level=logging.getLevelNamesMapping()[args.log_level],
+        log_level=level,
         health_check_log_threshold=10,
         name="SimulationRunner",
     )
 
 
-
-
-def get_request(args: argparse.Namespace) -> BlueprintRequest:
+def get_request(
+    blueprint_uri: str, stages: list[SimulationStages] | None = None
+) -> BlueprintRequest:
     """Create a BlueprintRequest instance from CLI arguments.
 
     Parameters
     ----------
-    args : argparse.Namespace
-        The arguments parsed from the command line.
+    blueprint_uri : str
+        The path to a blueprint file
+    stages : list[SimulationStages]
+        The set of stages to be executed. Defaults to all stages, if empty.
 
     Returns
     -------
     BlueprintRequest
         A request configured to run a c-star simulation via a blueprint.
     """
-    if not args.stages:
-        args.stages = list(SimulationStages)
+    if not stages:
+        stages = list(SimulationStages)
 
     return BlueprintRequest(
-        blueprint_uri=args.blueprint_uri,
-        stages=args.stages,
+        blueprint_uri=blueprint_uri,
+        stages=stages,
     )
+
+
+def get_job_config() -> JobConfig:
+    """Create and configure a `JobConfig` instance from environment variables.
+
+    Returns
+    -------
+    SimulationRunner
+        A simulation runner configured to execute the blueprint
+    """
+    account_id = os.getenv(ENV_CSTAR_SLURM_ACCOUNT, "")
+    walltime = os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME, DEFAULT_SLURM_MAX_WALLTIME)
+    priority = os.environ.get(ENV_CSTAR_SLURM_QUEUE, "")
+
+    return JobConfig(account_id, walltime, priority)
 
 
 def configure_environment(log: logging.Logger) -> None:
@@ -413,14 +437,52 @@ def configure_environment(log: logging.Logger) -> None:
     -------
     None
     """
-    # ensure no human interaction is required
+    # ensure git works on distributed file-system, e.g. lustre
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
+    log.debug("Git discovery configured.")
+
+
+async def execute_runner(
+    job_cfg: JobConfig, service_cfg: ServiceConfiguration, request: BlueprintRequest
+) -> int:
+    """Execute a blueprint with a SimulationRunner.
+
+    Parameters
+    ----------
+    job_cfg : JobConfig
+        Configuration applied to the scheduler
+    service_cfg : ServiceConfiguration
+        Configuration applied to the service
+    request : BlueprintRequest
+        A request specifying the blueprint to be executed
+    """
+    log = get_logger(__name__, level=service_cfg.log_level)
+
+    log.debug(f"Job config: {job_cfg}")
+    log.debug(f"Simulation runner service config: {service_cfg}")
+    log.debug(f"Simulation request: {request}")
+
+    try:
+        configure_environment(log)
+
+        worker = SimulationRunner(request, service_cfg, job_cfg)
+        await worker.execute()
+    except CstarError as ex:
+        log.exception("An error occurred during the simulation", exc_info=ex)
+        return 1
+    except Exception as ex:
+        log.exception(
+            "An unexpected exception occurred during the simulation", exc_info=ex
+        )
+        return 1
+
+    return 0
 
 
 def main() -> int:
-    """Run the c-star worker script.
+    """Parse CLI arguments and run a c-star worker.
 
-    Triggers the `Service` lifecycle of a Worker and runs a blueprint based on
+    Triggers the `Service` lifecycle of a `Worker` and runs a blueprint based on
     any supplied parameters.
 
     Returns
@@ -433,34 +495,12 @@ def main() -> int:
         args = parser.parse_args()
     except SystemExit:
         return 1
-    else:
-        service_cfg = get_service_config(args)
-        blueprint_req = get_request(args)
-        job_cfg = JobConfig(
-            account_id=os.environ.get(ENV_CSTAR_SLURM_ACCOUNT, ""),
-            walltime=os.environ.get(ENV_CSTAR_SLURM_MAX_WALLTIME, "01:00:00"),
-            priority=os.environ.get(ENV_CSTAR_SLURM_QUEUE, ""),
-        )
 
-    log = get_logger(__name__, level=service_cfg.log_level)
-    log.info(f"Running job with config: {job_cfg}")
+    job_cfg = get_job_config()
+    service_cfg = get_service_config(args.log_level)
+    request = get_request(args.blueprint_uri, args.stages)
 
-    try:
-        configure_environment(log)
-        log.info(f"Configuring simulation runner with config: {service_cfg}")
-        log.info(f"Starting simulation with request: {blueprint_req}")
-        worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
-        asyncio.run(worker.execute())
-    except CstarError as ex:
-        log.exception("An error occurred during the simulation", exc_info=ex)
-        return 1
-    except Exception as ex:
-        log.exception(
-            "An unexpected exception occurred during the simulation", exc_info=ex
-        )
-        return 1
-
-    return 0
+    return asyncio.run(execute_runner(job_cfg, service_cfg, request))
 
 
 if __name__ == "__main__":

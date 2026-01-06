@@ -1,45 +1,18 @@
-import os
+import asyncio
+import logging
 import typing as t
-from multiprocessing import Process
 from pathlib import Path
-from time import sleep
 
 import typer
 
-from cstar.entrypoint.service import ServiceConfiguration
-from cstar.entrypoint.worker.worker import BlueprintRequest, JobConfig, SimulationRunner
+from cstar.entrypoint.worker.worker import (
+    execute_runner,
+    get_job_config,
+    get_request,
+    get_service_config,
+)
 
 app = typer.Typer()
-
-
-def configure_simulation_runner(path: Path) -> SimulationRunner:
-    """Create a `SimulationRunner` to execute the blueprint.
-
-    Parameters
-    ----------
-    path : Path
-        The path to the blueprint to execute
-
-    Returns
-    -------
-    SimulationRunner
-        A simulation runner configured to execute the blueprint
-    """
-    account_id = os.getenv("CSTAR_SLURM_ACCOUNT", "")
-    walltime = os.getenv("CSTAR_SLURM_WALLTIME", "48:00:00")
-
-    request = BlueprintRequest(path.as_posix())
-    print(f"Configured request: {request}")
-
-    service_config = ServiceConfiguration(
-        loop_delay=0, health_check_frequency=300, health_check_log_threshold=25
-    )
-    print(f"Configured service: {service_config}")
-
-    job_config = JobConfig(account_id, walltime)
-    print(f"Job configuration: {job_config}")
-
-    return SimulationRunner(request, service_config, job_config)
 
 
 @app.command()
@@ -49,15 +22,19 @@ def run(
     ],
 ) -> None:
     """Execute a blueprint in a local worker service."""
-    print("Executing blueprint in a worker service.")
-    runner = configure_simulation_runner(path)
+    print("Executing blueprint in a worker service")
+    job_cfg = get_job_config()
+    service_cfg = get_service_config(logging.DEBUG)
+    request = get_request(path.as_posix())
 
-    process = Process(target=runner.execute, kwargs={"path": path})
-    process.start()
+    rc = asyncio.run(execute_runner(job_cfg, service_cfg, request))
 
-    # delay briefly in case the process dies during startup
-    sleep(1)
+    if rc:
+        print("Blueprint execution failed")
+        raise typer.Exit(code=rc)
 
-    print(f"Worker process `{process.pid}`")
-    if process.exitcode:
-        print(f"Worker processs failed prematurely with code `{process.exitcode}`")
+    print("Blueprint execution completed")
+
+
+if __name__ == "__main__":
+    typer.run(run)
