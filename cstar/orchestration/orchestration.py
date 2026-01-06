@@ -11,7 +11,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
     ENV_CSTAR_ORCH_OUTDIR,
-    ENV_CSTAR_RUNID,
+    ENV_CSTAR_ORCH_RUNID,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_QUEUE,
 )
@@ -654,9 +654,9 @@ def configure_environment(output_dir: Path, run_id: str) -> None:
         If the required environment variables are not set.
     """
     os.environ[ENV_CSTAR_ORCH_OUTDIR] = output_dir.as_posix()
-    os.environ[ENV_CSTAR_RUNID] = run_id
+    os.environ[ENV_CSTAR_ORCH_RUNID] = run_id
 
-    for key in [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE, ENV_CSTAR_RUNID]:
+    for key in [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE, ENV_CSTAR_ORCH_RUNID]:
         if not os.getenv(key, ""):
             raise ValueError(
                 f"Unable to run workplan. `{key}` not found in environment."
@@ -670,7 +670,7 @@ def get_run_id() -> str:
     -------
     str
     """
-    if run_id := os.getenv(ENV_CSTAR_RUNID, ""):
+    if run_id := os.getenv(ENV_CSTAR_ORCH_RUNID, ""):
         return run_id
 
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 
 from cstar.orchestration.dag_runner import build_and_run_dag
-from cstar.orchestration.utils import ENV_CSTAR_RUNID
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 app = typer.Typer()
 
@@ -26,7 +26,7 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
-    os.environ[ENV_CSTAR_RUNID] = run_id
+    os.environ[ENV_CSTAR_ORCH_RUNID] = run_id
 
     try:
         asyncio.run(build_and_run_dag(path, output_dir))
