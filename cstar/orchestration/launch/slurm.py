@@ -23,6 +23,7 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
+    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
@@ -211,7 +212,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         step_fs = step.file_system(bp)
 
         step_converter = app_to_cmd_map[step.application]
-        if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
+        if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
             step_converter = app_to_cmd_map[converter_override]
         print(f"Using `{step_converter.__name__}` for `{step.application}` commands.")
 
