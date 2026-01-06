@@ -1,12 +1,13 @@
 import pytest
 
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
 
 
 @pytest.mark.parametrize(
     "output_root_name_input",
     [
-        "output",
+        DEFAULT_OUTPUT_ROOT_NAME,
         "another_name",
         "a_third_name",
     ],
@@ -26,4 +27,4 @@ output_root_name:\n\t{output_root_name_input}
 
     settings = ROMSRuntimeSettings.from_file(roms_in_file)
 
-    assert str(settings.output_root_name) == "output"
+    assert str(settings.output_root_name) == DEFAULT_OUTPUT_ROOT_NAME

@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
-from cstar.base.utils import deep_merge, slugify
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, deep_merge, slugify
 from cstar.orchestration.models import (
     Application,
     ChildStep,
@@ -303,10 +303,6 @@ class RomsMarblTimeSplitter(Transform):
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
-    OUTPUT_ROOT_DEFAULT: t.Literal["output"] = "output"  # see also: RomsRuntimeSettings
-
-    """The default name used as the output_root_name for roms.in files."""
-
     frequency: str
     """The step splitting frequency used to generate new time steps."""
 
@@ -351,7 +347,7 @@ class RomsMarblTimeSplitter(Transform):
 
         depends_on = step.depends_on
         last_restart_file: Path | None = None
-        output_root_name = RomsMarblTimeSplitter.OUTPUT_ROOT_DEFAULT
+        output_root_name = DEFAULT_OUTPUT_ROOT_NAME
 
         for i, (sd, ed) in enumerate(time_slices):
             bp_copy = RomsMarblBlueprint(

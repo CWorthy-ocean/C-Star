@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import (
     Any,
     ClassVar,
-    Literal,
     Self,
     get_args,
     get_origin,
@@ -23,7 +22,7 @@ from pydantic import (
 from pydantic.alias_generators import to_snake
 
 from cstar.base.log import get_logger
-from cstar.base.utils import _list_to_concise_str
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _list_to_concise_str
 
 log = get_logger(__name__)
 
@@ -39,9 +38,6 @@ CUSTOM_ALIAS_LOOKUP = {
 
 MIN_NUM_TRACERS = 37
 """Vertical mixing requires enough values for all tracers or it raises an error."""
-
-DEFAULT_OUTPUT_ROOT_NAME: Literal["output"] = "output"
-"""A fixed, default basename used for all simulation outputs."""
 
 
 def _format_float(val: float) -> str:

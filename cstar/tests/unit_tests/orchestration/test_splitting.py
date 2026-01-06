@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
@@ -142,8 +143,7 @@ def test_splitter(single_step_workplan: Workplan) -> None:
             # verify the initial conditions reference the prior step's time slice
             compact_sd = ed.strftime("%Y%m%d%H%M%S")
 
-            default_base_name = RomsMarblTimeSplitter.OUTPUT_ROOT_DEFAULT
-            expected = f"output/{default_base_name}_rst.{compact_sd}.000.nc"
+            expected = f"output/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
             assert expected in str(ic_loc_successor)
 
         # verify successor starts right where current step ends

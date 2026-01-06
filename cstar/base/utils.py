@@ -14,6 +14,10 @@ from cstar.base.log import get_logger
 log = get_logger(__name__)
 
 
+DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
+"""A fixed `output_root_name` to be used when generating outputs with ROMS."""
+
+
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
     """Coerces datetime-like input to a datetime instance."""
     if isinstance(datetime, dt.datetime):
