@@ -410,7 +410,7 @@ def get_request(args: argparse.Namespace) -> BlueprintRequest:
         A request configured to run a c-star simulation via a blueprint.
     """
     if not args.stages:
-        args.stages = tuple(SimulationStages)
+        args.stages = list(SimulationStages)
 
     return BlueprintRequest(
         blueprint_uri=args.blueprint_uri,
