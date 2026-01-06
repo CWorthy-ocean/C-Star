@@ -366,7 +366,6 @@ def get_service_config(log_level: int | str) -> ServiceConfiguration:
     Returns
     -------
     ServiceConfiguration
-        The configuration for a service.
     """
     level = (
         logging.getLevelNamesMapping()[log_level]
@@ -393,8 +392,8 @@ def get_request(
     ----------
     blueprint_uri : str
         The path to a blueprint file
-    stages : list[SimulationStages]
-        The set of stages to be executed. Defaults to all stages, if empty.
+    stages : list[SimulationStages] | None
+        The set of stages to be executed. Defaults to all stages, if empty or None.
 
     Returns
     -------
@@ -415,8 +414,7 @@ def get_job_config() -> JobConfig:
 
     Returns
     -------
-    SimulationRunner
-        A simulation runner configured to execute the blueprint
+    JobConfig
     """
     account_id = os.getenv(ENV_CSTAR_SLURM_ACCOUNT, "")
     walltime = os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME, DEFAULT_SLURM_MAX_WALLTIME)
