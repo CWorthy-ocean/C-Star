@@ -1552,8 +1552,8 @@ class TestProcessingAndExecution:
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
                 commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest.in",
-                run_path=sim.directory / "output",
-                output_file=sim.directory / "logs" / "romstest.out",
+                run_path=sim.file_system.output_dir,
+                output_file=sim.file_system.logs_dir / "romstest.out",
             )
 
             # Ensure process was started
@@ -1643,11 +1643,11 @@ class TestProcessingAndExecution:
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
-                run_path=sim.directory / "output",
+                run_path=sim.file_system.output_dir,
                 script_path=script_dir / "romstest.sh",
                 queue_name="default_queue",
                 walltime="12:00:00",
-                output_file=sim.directory / "logs" / "romstest.out",
+                output_file=sim.file_system.logs_dir / "romstest.out",
             )
 
             mock_job_instance.submit.assert_called_once()
@@ -1750,7 +1750,7 @@ class TestProcessingAndExecution:
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch("subprocess.run")  # Mock ncjoin execution
     def test_post_run_merges_netcdf_files(
-        self, mock_subprocess, mock_persist, stub_romssimulation
+        self, mock_subprocess, mock_persist, stub_romssimulation: ROMSSimulation
     ):
         """Tests that `post_run` correctly merges partitioned NetCDF output files.
 
@@ -1762,7 +1762,7 @@ class TestProcessingAndExecution:
         # Setup
         sim = stub_romssimulation
         sim.file_system.prepare()
-        output_dir = sim.directory / "output"
+        output_dir = sim.file_system.output_dir
 
         # Create fake partitioned NetCDF files
         (output_dir / "ocean_his.20240101000000.001.nc").touch()
@@ -1856,7 +1856,7 @@ class TestProcessingAndExecution:
         """
         # Setup
         sim = stub_romssimulation
-        output_dir = sim.directory / "output"
+        output_dir = sim.file_system.output_dir
         output_dir.mkdir(exist_ok=True, parents=True)
 
         # Fake file paths to match ncjoin pattern
@@ -1996,7 +1996,7 @@ class TestROMSSimulationRestart:
         - A `ValueError` is raised if multiple restart files are found.
         """
         sim = stub_romssimulation
-        restart_dir = sim.directory / "output"
+        restart_dir = sim.file_system.output_dir
         new_end_date = datetime(2025, 6, 1)
 
         # Fake multiple unique restart files

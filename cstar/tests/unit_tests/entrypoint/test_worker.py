@@ -21,6 +21,7 @@ from cstar.entrypoint.worker.worker import (
     get_service_config,
     main,
 )
+from cstar.execution.file_system import RomsJobFileSystem
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.simulation import Simulation
 
@@ -85,7 +86,7 @@ def sim_runner(
     with patch_romssimulation_init_sourcedata(from_worker=True):
         runner = SimulationRunner(request, service_config, job_config)
 
-    output_path = tmp_path / "output"
+    output_path = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     runner._output_root = output_path  # type: ignore[misc]
     # sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
@@ -346,7 +347,7 @@ def test_runner_directory_check_ignore_logs(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logs_dir = output_dir / "logs"
@@ -372,7 +373,7 @@ def test_runner_directory_prep(
         A temporary path to store simulation output and logs
 
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -403,7 +404,7 @@ async def test_runner_can_shutdown_as_task(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -442,7 +443,7 @@ async def test_runner_can_shutdown_as_task_null_sim(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -474,7 +475,7 @@ async def test_runner_can_shutdown_as_service_null_sim(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -505,7 +506,7 @@ async def test_runner_shutdown_no_update_handler(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -555,7 +556,7 @@ async def test_runner_shutdown_handler_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -612,7 +613,7 @@ async def test_runner_shutdown_handler_not_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -669,7 +670,7 @@ async def test_runner_shutdown_side_effects(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -711,7 +712,7 @@ async def test_runner_on_start_without_uri(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -759,7 +760,7 @@ async def test_runner_on_start_without_simulation(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -807,7 +808,7 @@ async def test_runner_on_start_user_unhandled_setup(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -859,7 +860,7 @@ async def test_runner_on_start_user_unhandled_build(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -909,7 +910,7 @@ async def test_runner_on_start_user_unhandled_pre_run(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -958,7 +959,7 @@ async def test_runner_on_iteration(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / RomsJobFileSystem.OUTPUT_NAME
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -1089,7 +1090,7 @@ def test_worker_main(tmp_path: Path) -> None:
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    output_path = tmp_path / "output"
+    output_path = tmp_path / RomsJobFileSystem.OUTPUT_NAME
     output_path.mkdir(parents=True, exist_ok=True)
 
     args = [

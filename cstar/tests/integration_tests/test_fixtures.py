@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 from _pytest._py.path import LocalPath
 
+from cstar.execution.file_system import RomsJobFileSystem
 from cstar.tests.integration_tests.config import (
     CSTAR_TEST_DATA_DIRECTORY,
     TEST_DIRECTORY,
@@ -32,13 +33,16 @@ def test_modify_template_blueprint(
     - The returned object is an instance of Path.
     - The additional_source_code location matches that expected after replacement
     """
+    fs = RomsJobFileSystem(tmp_path)
+    fs.prepare()
+
     test_blueprint = modify_template_blueprint(
         template_blueprint_path=TEST_DIRECTORY
         / "integration_tests/blueprints/blueprint_template.yaml",
         strs_to_replace={
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
         },
-        out_dir=tmp_path / "output",
+        out_dir=fs.output_dir,
     )
 
     assert isinstance(test_blueprint, LocalPath), (
@@ -51,7 +55,7 @@ def test_modify_template_blueprint(
         bpyaml["code"]["compile_time"]["location"]
         == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
     )
-    assert bpyaml["runtime_params"]["output_dir"] == str(tmp_path / "output")
+    assert bpyaml["runtime_params"]["output_dir"] == str(fs.output_dir)
 
 
 class TestFetchData:
