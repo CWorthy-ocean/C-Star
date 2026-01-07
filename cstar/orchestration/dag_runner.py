@@ -168,7 +168,7 @@ async def prepare_workplan(
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
-    if is_feature_enabled("ORC_TRANSFORM_AUTO"):
+    if is_feature_enabled("ORCH_TRANSFORM_AUTO"):
         transformer = WorkplanTransformer(wp_orig, RomsMarblTimeSplitter())
         wp = transformer.apply()
 

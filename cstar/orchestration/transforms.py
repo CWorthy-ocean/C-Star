@@ -260,7 +260,7 @@ class WorkplanTransformer:
         -------
         Workplan
         """
-        if not is_feature_enabled("ORC_TRANSFORM_AUTO"):
+        if not is_feature_enabled("ORCH_TRANSFORM_AUTO"):
             return self.original
 
         if self._transformed:
