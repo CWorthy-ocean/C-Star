@@ -1,4 +1,5 @@
 import shutil
+import textwrap
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TypeVar
@@ -8,11 +9,11 @@ import pytest
 from pydantic import ValidationError
 
 import cstar.roms.runtime_settings as rrs
-from cstar.base.utils import _replace_text_in_file
-from cstar.roms import ROMSRuntimeSettings
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _replace_text_in_file
 from cstar.roms.runtime_settings import (
     Forcing,
     InitialConditions,
+    ROMSRuntimeSettings,
     ROMSRuntimeSettingsSection,
     SingleEntryROMSRuntimeSettingsSection,
 )
@@ -684,6 +685,36 @@ class TestROMSRuntimeSettings:
         assert tested_settings.climatology == expected_settings.climatology
         assert tested_settings.tracer_diff2 == expected_settings.tracer_diff2
         assert tested_settings.vertical_mixing == expected_settings.vertical_mixing
+
+    @pytest.mark.parametrize(
+        "output_root_name_input",
+        [
+            DEFAULT_OUTPUT_ROOT_NAME,
+            "another_name",
+            "a_third_name",
+        ],
+    )
+    def test_fixed_output_root_name(
+        self, tmp_path: Path, output_root_name_input: str
+    ) -> None:
+        """Verify that ROMSRuntimeSettings always has a fixed output_root_name.
+
+        This confirms that the pydantic model overrides the value input from the *.in file.
+        """
+        roms_in_content = textwrap.dedent(f"""\
+            title: \n\ttest
+                time_stepping:\n\t1 1 1 1
+            bottom_drag:\n\t 1 1 1
+            initial: confirm-the-labels-are-ignored\n\t 0
+                forcing: confirm-whitespace-preceding-key-is-ignored\n\aaa/x.nc
+            output_root_name:\n\t{output_root_name_input}
+            """)
+        roms_in_file = tmp_path / "roms.in"
+        roms_in_file.write_text(roms_in_content)
+
+        settings = ROMSRuntimeSettings.from_file(roms_in_file)
+
+        assert str(settings.output_root_name) == DEFAULT_OUTPUT_ROOT_NAME
 
 
 class TestStrAndRepr:
