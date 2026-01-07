@@ -316,9 +316,9 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
     Parameters
     ----------
     d1 : dict[str, t.Any]
-        The first dictionary.
+        The dictionary that must be updated.
     d2 : dict[str, t.Any]
-        The second dictionary.
+        The dictionary containing values to be merged.
 
     Returns
     -------
