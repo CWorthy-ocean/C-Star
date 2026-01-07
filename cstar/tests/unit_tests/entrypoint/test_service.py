@@ -44,7 +44,7 @@ class PrintingService(Service):
         self.max_iter = abs(max_iterations)
         self.max_duration = abs(max_duration)
         self.start_time = 0.0
-        self.test_queue: mp.Queue = mp.Queue()
+        self.test_queue: mp.Queue[str] = mp.Queue()
         self.metrics: dict[str, int] = defaultdict(lambda: 0)
 
     @property

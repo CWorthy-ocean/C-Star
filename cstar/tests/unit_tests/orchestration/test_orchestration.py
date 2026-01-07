@@ -305,7 +305,7 @@ def test_dep_keys(tmp_path: Path) -> None:
     assert "unknown dep" in str(ex).lower()
 
 
-def test_workplan_transformation(diamond_workplan: Workplan):
+def test_workplan_transformation(diamond_workplan: Workplan) -> None:
     """Verify that the workplan transformation applies appropriate transforms when enabled."""
     for step in diamond_workplan.steps:
         step.application = Application.ROMS_MARBL.value

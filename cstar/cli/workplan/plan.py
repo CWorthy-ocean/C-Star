@@ -17,6 +17,9 @@ app = typer.Typer()
 START_NODE: t.Literal["_cs_start_"] = "_cs_start_"
 TERMINAL_NODE: t.Literal["_cs_term_"] = "_cs_term_"
 
+if t.TYPE_CHECKING:
+    from cstar.orchestration.models import Step
+
 
 def _add_marker_nodes(graph: nx.DiGraph) -> nx.DiGraph:
     """Add node to serve as the entrypoint and exit point of the task graph.
@@ -72,7 +75,7 @@ def _add_marker_nodes(graph: nx.DiGraph) -> nx.DiGraph:
 
 def _initialize_from_graph(
     workplan: Workplan, graph: nx.DiGraph
-) -> tuple[nx.DiGraph, dict, dict, dict]:
+) -> tuple[nx.DiGraph, dict[str, Step], dict[str, list[str]], dict[str, str]]:
     """Prepare instance from the supplied graph."""
     step_map = {step.name: step for step in workplan.steps}
     dep_map = {

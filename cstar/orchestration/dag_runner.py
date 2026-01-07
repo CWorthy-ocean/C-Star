@@ -11,7 +11,6 @@ from cstar.base.log import get_logger
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
-    Launcher,
     Orchestrator,
     Planner,
     RunMode,
@@ -107,7 +106,7 @@ async def load_dag_status(path: Path) -> None:
     log.info(f"Loading status of workplan: {wp.name}")
 
     planner = Planner(workplan=wp)
-    launcher: Launcher = SlurmLauncher()
+    launcher = SlurmLauncher()
     orchestrator = Orchestrator(planner, launcher)
 
     await retrieve_run_progress(orchestrator)
