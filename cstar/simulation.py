@@ -394,7 +394,7 @@ class Simulation(ABC, LoggingMixin):
 
     @classmethod
     @abstractmethod
-    def from_dict(self, simulation_dict: dict, directory: str | Path):
+    def from_dict(cls, simulation_dict: dict, directory: str | Path):
         """Abstract method to create a Simulation instance from a dictionary.
 
         This method must be implemented by subclasses to construct a simulation
