@@ -4,24 +4,33 @@ import typing as t
 from pathlib import Path
 
 ENV_CSTAR_ORCH_OUTDIR: t.Literal["CSTAR_ORCH_OUTDIR"] = "CSTAR_ORCH_OUTDIR"
+"""Environment variable containing the output directory for the orchestrator."""
+
 ENV_CSTAR_ORCH_DELAYS: t.Literal["CSTAR_ORCH_DELAYS"] = "CSTAR_ORCH_DELAYS"
+"""Environment variable containing configurable delay for the orchestrator."""
+
 ENV_CSTAR_ORCH_TRX_FREQ: t.Literal["CSTAR_ORCH_TRX_FREQ"] = "CSTAR_ORCH_TRX_FREQ"
-ENV_CSTAR_ORCH_TRX_RESET: t.Literal["CSTAR_ORCH_TRX_RESET"] = "CSTAR_ORCH_TRX_RESET"
-ENV_CSTAR_ORCH_CLOBBER_WD: t.Literal["CSTAR_CLOBBER_WORKING_DIR"] = (
-    "CSTAR_CLOBBER_WORKING_DIR"
-)
-ENV_CSTAR_ORCH_RESET_NAME: t.Literal["CSTAR_ORCH_RESET_NAME"] = "CSTAR_ORCH_RESET_NAME"
+"""Environment variable containing the time span for time-splitting transforms."""
+
 ENV_CSTAR_CMD_CONVERTER_OVERRIDE: t.Literal["CSTAR_CMD_CONVERTER_OVERRIDE"] = (
     "CSTAR_CMD_CONVERTER_OVERRIDE"
 )
-ENV_CSTAR_ORCH_RUNID: t.Literal["CSTAR_RUNID"] = "CSTAR_RUNID"
+"""Environment variable containing an overridden mapping key to apply when
+converting applications into CLI commands."""
 
-ENV_CSTAR_RUNID: t.Literal["CSTAR_RUNID"] = "CSTAR_RUNID"
+ENV_CSTAR_ORCH_RUNID: t.Literal["CSTAR_RUNID"] = "CSTAR_RUNID"
+"""Environment variable containing a unique run identifier used by the orchestrator."""
+
 ENV_CSTAR_SLURM_ACCOUNT: t.Literal["CSTAR_SLURM_ACCOUNT"] = "CSTAR_SLURM_ACCOUNT"
+"""Environment variable containing the account ID to be used by the SLURM scheduler."""
+
 ENV_CSTAR_SLURM_MAX_WALLTIME: t.Literal["CSTAR_SLURM_MAX_WALLTIME"] = (
     "CSTAR_SLURM_MAX_WALLTIME"
 )
+"""Environment variable containing the maximum walltime allowed by the SLURM scheduler."""
+
 ENV_CSTAR_SLURM_QUEUE: t.Literal["CSTAR_SLURM_QUEUE"] = "CSTAR_SLURM_QUEUE"
+"""Environment variable containing the SLURM priority (queue) used by the SLURM scheduler."""
 
 
 def clear_working_dir(path: Path) -> None:
