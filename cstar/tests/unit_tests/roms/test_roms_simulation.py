@@ -1581,7 +1581,7 @@ class TestProcessingAndExecution:
         self,
         mock_runtime_settings,
         mock_persist,
-        stub_romssimulation,
+        stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
         mock_system_name: str,
         exp_mpi_prefix: str,
@@ -1592,9 +1592,9 @@ class TestProcessingAndExecution:
         with the appropriate parameters and submits it.
         """
         sim = stub_romssimulation
-        build_dir = sim.directory / "input/compile_time_code"
-        runtime_code_dir = sim.directory / "input/runtime_code"
-        script_dir = sim.directory / "work"
+        build_dir = sim.file_system.compile_time_code_dir
+        runtime_code_dir = sim.file_system.runtime_code_dir
+        script_dir = sim.file_system.work_dir
         sim.runtime_code._working_copy = stageddatacollection_remote_files(
             paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
             sources=sim.runtime_code.source,
@@ -1901,10 +1901,13 @@ class TestROMSSimulationRestart:
     """
 
     @mock.patch.object(Path, "glob")  # Mock file search
-    @mock.patch.object(Path, "exists", return_value=True)
+    @mock.patch("pathlib.Path.exists", mock.Mock(return_value=True))
     def test_restart(
-        self, mock_exists, mock_glob, stub_romssimulation, mocksourcedata_local_file
-    ):
+        self,
+        mock_glob,
+        stub_romssimulation: ROMSSimulation,
+        mocksourcedata_local_file,
+    ) -> None:
         """Test that `restart` creates a new `ROMSSimulation` instance with updated
         initial conditions.
 
@@ -1918,7 +1921,7 @@ class TestROMSSimulationRestart:
         new_end_date = datetime(2026, 6, 1)
 
         # Mock restart file found
-        restart_file = sim.directory / "output/restart_rst.20251231000000.nc"
+        restart_file = sim.file_system.output_dir / "restart_rst.20251231000000.nc"
         mock_glob.return_value = [restart_file]
 
         # Call method
@@ -1934,10 +1937,8 @@ class TestROMSSimulationRestart:
         assert new_sim.initial_conditions.source.location == str(restart_file.resolve())
 
     @mock.patch.object(Path, "glob")  # Mock file search
-    @mock.patch.object(Path, "exists", return_value=True)
-    def test_restart_raises_if_no_restart_files(
-        self, mock_exists, mock_glob, stub_romssimulation
-    ):
+    @mock.patch("pathlib.Path.exists", mock.Mock(return_value=True))
+    def test_restart_raises_if_no_restart_files(self, mock_glob, stub_romssimulation):
         """Test that `restart` raises a `FileNotFoundError` if no restart files are
         found.
 
