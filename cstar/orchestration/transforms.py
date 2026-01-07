@@ -364,9 +364,7 @@ class RomsMarblTimeSplitter(Transform):
             dynamic_name = f"{i + 1:03d}_{step.safe_name}_{compact_sd}_{compact_ed}"
             child_step_name = slugify(dynamic_name)
 
-            subtask_root = (
-                job_fs.tasks_dir
-            )  # subtask_fs = RomsJobFileSystem(subtask_root)
+            subtask_root = job_fs.tasks_dir
             subtask_out_dir = subtask_root / child_step_name
 
             description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
