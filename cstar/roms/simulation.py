@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
