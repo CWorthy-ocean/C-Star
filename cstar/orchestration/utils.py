@@ -1,7 +1,4 @@
-import os
-import shutil
 import typing as t
-from pathlib import Path
 
 ENV_CSTAR_ORCH_OUTDIR: t.Literal["CSTAR_ORCH_OUTDIR"] = "CSTAR_ORCH_OUTDIR"
 """Environment variable containing the output directory for the orchestrator."""
@@ -31,20 +28,3 @@ ENV_CSTAR_SLURM_MAX_WALLTIME: t.Literal["CSTAR_SLURM_MAX_WALLTIME"] = (
 
 ENV_CSTAR_SLURM_QUEUE: t.Literal["CSTAR_SLURM_QUEUE"] = "CSTAR_SLURM_QUEUE"
 """Environment variable containing the SLURM priority (queue) used by the SLURM scheduler."""
-
-
-def clear_working_dir(path: Path) -> None:
-    """Clear specific paths under the working directory if CSTAR_CLOBBER_WORKING_DIR is set.
-
-    Parameters
-    ----------
-    path: the working directory to be cleared
-
-    Returns
-    -------
-    None
-    """
-    if os.getenv(ENV_CSTAR_ORCH_CLOBBER_WD) == "1":
-        print(f"clearing {path}")
-        shutil.rmtree(path / "input", ignore_errors=True)
-        shutil.rmtree(path / "output", ignore_errors=True)
