@@ -51,7 +51,7 @@ TRANSFORMS: dict[str, list[Transform]] = defaultdict(list)
 
 
 def register_transform(application: str, transform: Transform) -> None:
-    """Register a splitter for an application.
+    """Register a transform for an application.
 
     Parameters
     ----------
