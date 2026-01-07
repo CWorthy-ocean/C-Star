@@ -7,6 +7,7 @@ from itertools import cycle
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
+from cstar.base.log import get_logger
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
@@ -25,6 +26,7 @@ from cstar.orchestration.transforms import (
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 
 WorkplanTemplate: t.TypeAlias = t.Literal["single_step", "linear", "fanout", "parallel"]
+log = get_logger(__name__)
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -40,7 +42,7 @@ def incremental_delays() -> t.Generator[float, None, None]:
         try:
             delays = [float(d) for d in custom_delays.split(",")]
         except ValueError:
-            print(f"Malformed delay provided: {custom_delays}. Using defaults.")
+            log.warning(f"Malformed delay provided: {custom_delays}. Using defaults.")
 
     delay_cycle = cycle(delays)
     yield from delay_cycle
@@ -102,7 +104,7 @@ async def load_dag_status(path: Path) -> None:
         The path to the blueprint being executed.
     """
     wp = deserialize(path, Workplan)
-    print(f"Loading status of workplan: {wp.name}")
+    log.info(f"Loading status of workplan: {wp.name}")
 
     planner = Planner(workplan=wp)
     launcher: Launcher = SlurmLauncher()
@@ -144,7 +146,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
         sleep_duration = next(delay_iter)
         await asyncio.sleep(sleep_duration)
 
-    print(f"Workplan {mode} is complete.")
+    log.info(f"Workplan {mode} is complete.")
 
 
 async def prepare_workplan(
@@ -171,7 +173,7 @@ async def prepare_workplan(
         wp = transformer.apply()
 
         if transformer.is_modified:
-            print("A time-split workplan will be executed.")
+            log.info("A time-split workplan will be executed.")
     else:
         wp = wp_orig
 
@@ -269,19 +271,20 @@ def create_host_workplan(output_path: Path, template: str, bp_path: Path) -> Pat
     bp_source_path = templates_dir / "bp/blueprint.yaml"
     bp_target_path = output_path / bp_path.name
 
-    # copy the template blueprint into the working directory w/a custom output path
-
+    # update the workplan output directory found in the template
     bp_content = bp_source_path.read_text()
     bp_content = bp_content.replace(
         bp_outputdir_default, f"output_dir: {output_path.as_posix()}"
     )
+    # write the modified blueprint to the working directory
     bp_target_path.parent.mkdir(parents=True, exist_ok=True)
     bp_target_path.write_text(bp_content)
 
-    # copy the template workplan into the working directory referencing the blueprint path
+    # set paths in the template workplan to the just-created blueprint path
     wp_content = template_path.read_text()
     wp_content = wp_content.replace(bp_default, bp_target_path.as_posix())
 
+    # write the modified workplan to the working directory. 
     wp_path = output_path / f"{template}-host.yaml"
     wp_path.parent.mkdir(parents=True, exist_ok=True)
     wp_path.write_text(wp_content)
@@ -304,16 +307,16 @@ def main() -> None:
     # reset_base = ns.reset_base
 
     if wp_path is None and bp_path is None:
-        print("Runner not executed\n\t- A workplan or blueprint path must be provided")
+        log.error("Run aborted. A workplan or blueprint path must be provided")
         sys.exit(1)
 
     if bp_path:
         # host the blueprint in a workplan template
         wp_path = create_host_workplan(output_dir, template, bp_path)
-        print(f"Running workplan at `{wp_path}` with blueprint at `{bp_path}`")
+        log.info(f"Running workplan at `{wp_path}` with blueprint at `{bp_path}`")
     else:
         bp_path = Path(bp_default)
-        print(f"Running unmodified workplan at `{wp_path}`")
+        log.info(f"Running unmodified workplan at `{wp_path}`")
 
     if wp_path is None:
         raise ValueError("Workplan path is malformed.")
