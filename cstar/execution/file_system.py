@@ -10,11 +10,11 @@ class JobFileSystem(LoggingMixin):
     all jobs.
     """
 
-    INPUT_NAME: Literal["input"] = "input"
-    WORK_NAME: Literal["work"] = "work"
-    TASKS_NAME: Literal["tasks"] = "tasks"
-    LOGS_NAME: Literal["logs"] = "logs"
-    OUTPUT_NAME: Literal["output"] = "output"
+    _INPUT_NAME: ClassVar[Literal["input"]] = "input"
+    _WORK_NAME: ClassVar[Literal["work"]] = "work"
+    _TASKS_NAME: ClassVar[Literal["tasks"]] = "tasks"
+    _LOGS_NAME: ClassVar[Literal["logs"]] = "logs"
+    _OUTPUT_NAME: ClassVar[Literal["output"]] = "output"
 
     root: Final[Path]
     """The root directory of the job. It is provided via user configuration."""
@@ -47,11 +47,11 @@ class JobFileSystem(LoggingMixin):
             The root directory that contains all job byproducts.
         """
         self.root = root_directory
-        self.input_dir = self.root / self.INPUT_NAME
-        self.work_dir = self.root / self.WORK_NAME
-        self.tasks_dir = self.root / self.TASKS_NAME
-        self.logs_dir = self.root / self.LOGS_NAME
-        self.output_dir = self.root / self.OUTPUT_NAME
+        self.input_dir = self.root / self._INPUT_NAME
+        self.work_dir = self.root / self._WORK_NAME
+        self.tasks_dir = self.root / self._TASKS_NAME
+        self.logs_dir = self.root / self._LOGS_NAME
+        self.output_dir = self.root / self._OUTPUT_NAME
 
     def _dir_set(self) -> set[Path]:
         """Return the complete set of directories for the job.
@@ -82,11 +82,11 @@ class JobFileSystem(LoggingMixin):
 
 
 class RomsJobFileSystem(JobFileSystem):
-    COMPILE_TIME_NAME: Literal["roms/compile_time_code"] = "roms/compile_time_code"
-    RUNTIME_NAME: Literal["roms/runtime_code"] = "roms/runtime_code"
-    INPUT_DATASETS_NAME: Literal["roms/input_datasets"] = "roms/input_datasets"
-    CODEBASES_NAME: Literal["roms/codebases"] = "roms/codebases"
-    JOINED_OUTPUT_NAME: Literal["joined_output"] = "joined_output"
+    _COMPILE_TIME_NAME: ClassVar[Literal["compile_time_code"]] = "compile_time_code"
+    _RUNTIME_NAME: ClassVar[Literal["runtime_code"]] = "runtime_code"
+    _INPUT_DATASETS_NAME: ClassVar[Literal["input_datasets"]] = "input_datasets"
+    _CODEBASES_NAME: ClassVar[Literal["codebases"]] = "codebases"
+    _JOINED_OUTPUT_NAME: ClassVar[Literal["joined_output"]] = "joined_output"
 
     compile_time_code_dir: Final[Path]
     """The directory for compile-time code."""
@@ -103,13 +103,11 @@ class RomsJobFileSystem(JobFileSystem):
     def __init__(self, root_directory: Path) -> None:
         super().__init__(root_directory)
 
-        self.compile_time_code_dir = (
-            self.input_dir / RomsJobFileSystem.COMPILE_TIME_NAME
-        )
-        self.runtime_code_dir = self.input_dir / RomsJobFileSystem.RUNTIME_NAME
-        self.input_datasets_dir = self.input_dir / RomsJobFileSystem.INPUT_DATASETS_NAME
-        self.codebases_dir = self.input_dir / RomsJobFileSystem.CODEBASES_NAME
-        self.joined_output_dir = self.output_dir / RomsJobFileSystem.JOINED_OUTPUT_NAME
+        self.compile_time_code_dir = self.input_dir / self._COMPILE_TIME_NAME
+        self.runtime_code_dir = self.input_dir / self._RUNTIME_NAME
+        self.input_datasets_dir = self.input_dir / self._INPUT_DATASETS_NAME
+        self.codebases_dir = self.input_dir / self._CODEBASES_NAME
+        self.joined_output_dir = self.output_dir / self._JOINED_OUTPUT_NAME
 
     @override
     def _dir_set(self) -> set[Path]:
