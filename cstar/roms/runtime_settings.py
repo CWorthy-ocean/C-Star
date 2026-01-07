@@ -501,7 +501,7 @@ class ROMSRuntimeSettings(BaseModel):
     @model_validator(mode="after")
     def set_fixed_output_root_name(self) -> "ROMSRuntimeSettings":
         """Apply an "after" validator to automatically change the value of the
-        output_root_name attribute to the desired, fixed default name.
+        output_root_name attribute to the a fixed name.
         """
         self.output_root_name = OutputRootName(
             output_root_name=DEFAULT_OUTPUT_ROOT_NAME
