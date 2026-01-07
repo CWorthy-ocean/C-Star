@@ -295,7 +295,7 @@ class WorkplanTransformer:
         )
 
         self._transformed = Workplan(**wp_attrs)
-        return t.cast(Workplan, self._transformed)
+        return self._transformed
 
 
 class RomsMarblTimeSplitter(Transform):
