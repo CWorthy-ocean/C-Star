@@ -8,6 +8,7 @@ from pathlib import Path
 import networkx as nx
 
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.log import LoggingMixin
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
     ENV_CSTAR_ORCH_OUTDIR,
@@ -149,7 +150,7 @@ class Task(t.Generic[_THandle]):
         self.handle = handle
 
 
-class Planner:
+class Planner(LoggingMixin):
     """Identifies depdendencies of a workplan to produce an execution plan."""
 
     workplan: Workplan
@@ -239,8 +240,8 @@ class Planner:
         """
         stored = self.graph.nodes[n].get(key, "")
         if key in {KEY_STATUS, KEY_STEP, KEY_TASK} and stored != value:
-            msg = f"Updating reserved key `{key}` on node `{n}`"
-            print(msg)
+            msg = f"Updating reserved key `{key}` on node `{n}` with value `{value}`"
+            self.log.debug(msg)
 
         self.graph.nodes[n][key] = value
 
@@ -397,7 +398,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ...
 
 
-class Orchestrator:
+class Orchestrator(LoggingMixin):
     """Manage the execution of a `Workplan`."""
 
     planner: Planner
@@ -446,7 +447,7 @@ class Orchestrator:
             for u in closed_set
             if Status.is_failure(g.nodes[u][KEY_STATUS])
         }:
-            print(f"Exiting due to task failures: {failures}")
+            self.log.error(f"Exiting due to task failures: {failures}")
             return None
 
         for n in working_list:
@@ -544,7 +545,7 @@ class Orchestrator:
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)
-            print(f"Launched step: {step.name}")
+            self.log.info(f"Launched step: {step.name}")
 
         self.planner.store(node, KEY_STATUS, task.status)
         return task
@@ -564,10 +565,10 @@ class Orchestrator:
             return
 
         if task.status == Status.Done:
-            print(f"\t\tClosed node: {n}")
+            self.log.info(f"Closed node: {n}")
             self.planner.store(n, KEY_STATUS, Status.Done)
         elif task.status == Status.Failed:
-            print(f"\t\tFailed node: {n}")
+            self.log.warning(f"Failed node: {n}")
             # TODO: on failure, cancel all jobs if anything depends on it
             # - NOTE: this may occur naturally with SLURM but not local launch
             self.planner.store(n, KEY_STATUS, Status.Failed)
