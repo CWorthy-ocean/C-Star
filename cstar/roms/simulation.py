@@ -19,6 +19,7 @@ from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
+    slugify,
 )
 from cstar.execution.file_system import RomsJobFileSystem
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
@@ -1524,7 +1525,7 @@ class ROMSSimulation(Simulation):
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
 
         script_name = job_name or self.name
-        safe_name = re.sub(r"\W+", "", script_name.casefold())
+        safe_name = slugify(script_name)
         script_path = self.file_system.work_dir / f"{safe_name}.sh"
         output_file = self.file_system.logs_dir / f"{safe_name}.out"
 
