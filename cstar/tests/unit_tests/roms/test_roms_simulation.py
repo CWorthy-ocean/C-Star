@@ -1592,9 +1592,9 @@ class TestProcessingAndExecution:
         with the appropriate parameters and submits it.
         """
         sim = stub_romssimulation
-        build_dir = sim.file_system.compile_time_code_dir
-        runtime_code_dir = sim.file_system.runtime_code_dir
-        script_dir = sim.file_system.work_dir
+        build_dir = sim.fs_manager.compile_time_code_dir
+        runtime_code_dir = sim.fs_manager.runtime_code_dir
+        script_dir = sim.fs_manager.work_dir
         sim.runtime_code._working_copy = stageddatacollection_remote_files(
             paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
             sources=sim.runtime_code.source,
@@ -1643,11 +1643,11 @@ class TestProcessingAndExecution:
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
-                run_path=sim.file_system.output_dir,
+                run_path=sim.fs_manager.output_dir,
                 script_path=script_dir / "romstest.sh",
                 queue_name="default_queue",
                 walltime="12:00:00",
-                output_file=sim.file_system.logs_dir / "romstest.out",
+                output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
 
             mock_job_instance.submit.assert_called_once()
@@ -1761,8 +1761,8 @@ class TestProcessingAndExecution:
         """
         # Setup
         sim = stub_romssimulation
-        sim.file_system.prepare()
-        output_dir = sim.file_system.output_dir
+        sim.fs_manager.prepare()
+        output_dir = sim.fs_manager.output_dir
 
         # Create fake partitioned NetCDF files
         (output_dir / "ocean_his.20240101000000.001.nc").touch()
@@ -1921,7 +1921,7 @@ class TestROMSSimulationRestart:
         new_end_date = datetime(2026, 6, 1)
 
         # Mock restart file found
-        restart_file = sim.file_system.output_dir / "restart_rst.20251231000000.nc"
+        restart_file = sim.fs_manager.output_dir / "restart_rst.20251231000000.nc"
         mock_glob.return_value = [restart_file]
 
         # Call method

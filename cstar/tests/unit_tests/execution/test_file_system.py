@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from cstar.execution.file_system import RomsJobFileSystem
+from cstar.execution.file_system import RomsFileSystemManager
 
 
 @pytest.fixture
 def populated_output_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
     """Create a populated output directory."""
     asset_root = tmp_path / "my_output_dir"
-    fs = RomsJobFileSystem(asset_root)
+    fs = RomsFileSystemManager(asset_root)
     fs.prepare()
 
     files = [
@@ -36,7 +36,7 @@ def test_file_system_prepare(
         The path to temporary test outputs.
     """
     asset_root = tmp_path / "my_output_dir"
-    fs = RomsJobFileSystem(asset_root)
+    fs = RomsFileSystemManager(asset_root)
     fs.prepare()
 
     assert fs.output_dir.exists()
@@ -60,7 +60,7 @@ def test_file_system_clear(
     """
     output_dir, output_files = populated_output_dir
 
-    fs = RomsJobFileSystem(output_dir)
+    fs = RomsFileSystemManager(output_dir)
     fs.clear()
 
     assert all([not f.exists() for f in output_files])

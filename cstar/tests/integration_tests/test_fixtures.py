@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 from _pytest._py.path import LocalPath
 
-from cstar.execution.file_system import RomsJobFileSystem
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.tests.integration_tests.config import (
     CSTAR_TEST_DATA_DIRECTORY,
     TEST_DIRECTORY,
@@ -33,7 +33,7 @@ def test_modify_template_blueprint(
     - The returned object is an instance of Path.
     - The additional_source_code location matches that expected after replacement
     """
-    fs = RomsJobFileSystem(tmp_path)
+    fs = RomsFileSystemManager(tmp_path)
     fs.prepare()
 
     test_blueprint = modify_template_blueprint(

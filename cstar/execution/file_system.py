@@ -1,11 +1,11 @@
 import shutil
 from pathlib import Path
-from typing import Final, Literal, override
+from typing import ClassVar, Final, Literal, override
 
 from cstar.base.log import LoggingMixin
 
 
-class JobFileSystem(LoggingMixin):
+class JobFileSystemManager(LoggingMixin):
     """JobFileSystem establishes a common directory structure convention across
     all jobs.
     """
@@ -81,7 +81,7 @@ class JobFileSystem(LoggingMixin):
         self.log.debug(f"Created empty working directory for job `{self.root.name}`")
 
 
-class RomsJobFileSystem(JobFileSystem):
+class RomsFileSystemManager(JobFileSystemManager):
     _COMPILE_TIME_NAME: ClassVar[Literal["compile_time_code"]] = "compile_time_code"
     _RUNTIME_NAME: ClassVar[Literal["runtime_code"]] = "runtime_code"
     _INPUT_DATASETS_NAME: ClassVar[Literal["input_datasets"]] = "input_datasets"

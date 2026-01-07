@@ -9,7 +9,7 @@ import dateutil
 
 from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
 from cstar.base.log import LoggingMixin
-from cstar.execution.file_system import JobFileSystem
+from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 
@@ -147,6 +147,7 @@ class Simulation(ABC, LoggingMixin):
         self.runtime_code = runtime_code or None
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization
+        self._fs_manager = self._get_filesystem_manager(self.directory)
 
     @staticmethod
     def _parse_date(date: str | datetime | None, field_name: str) -> datetime | None:
@@ -343,8 +344,8 @@ class Simulation(ABC, LoggingMixin):
 
         return repr_str
 
-    @staticmethod
-    def state_file_from(directory: Path) -> Path:
+    @classmethod
+    def state_file_from(cls, directory: Path) -> Path:
         """The path where a state file containing a pickled Simulation will be created
         upon successful completion of a simulation, when that simulation uses the
         supplied directory as it's working directory.
@@ -360,7 +361,8 @@ class Simulation(ABC, LoggingMixin):
         Path
            The path where the state file will be created.
         """
-        return directory / JobFileSystem.WORK_NAME / "simulation_state.pkl"
+        fs = cls._get_filesystem_manager(directory)
+        return fs.work_dir / "simulation_state.pkl"
 
     @property
     def state_file(self) -> Path:
@@ -650,6 +652,12 @@ class Simulation(ABC, LoggingMixin):
         pre_run : Performs preprocessing before execution.
         """
         pass
+
+    @classmethod
+    @abstractmethod
+    def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
+        """Retrieve the manager for the simulation output directory structure."""
+        ...
 
     def restart(self, new_end_date: str | datetime) -> "Simulation":
         """Create a new Simulation instance starting from the end date of the current

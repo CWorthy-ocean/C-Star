@@ -20,7 +20,7 @@ from cstar.base.utils import (
     _run_cmd,
     slugify,
 )
-from cstar.execution.file_system import RomsJobFileSystem
+from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -172,8 +172,6 @@ class ROMSSimulation(Simulation):
 
     discretization: ROMSDiscretization
     runtime_code: AdditionalCode
-    file_system: RomsJobFileSystem
-    """Manages the directory structure for outputs of the simulation."""
 
     def __init__(
         self,
@@ -319,7 +317,6 @@ class ROMSSimulation(Simulation):
         self._exe_hash: str | None = None
 
         self._execution_handler: ExecutionHandler | None = None
-        self.file_system = RomsJobFileSystem(self.directory)
 
     def _find_dotin_file(self) -> None:
         """Identify the runtime settings (.in) file from runtime code.
@@ -611,6 +608,16 @@ class ROMSSimulation(Simulation):
         repr_str += "\n)"
 
         return repr_str
+
+    @classmethod
+    def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
+        """Retrieve the manager for the simulation output directory structure."""
+        return RomsFileSystemManager(directory)
+
+    @property
+    def fs_manager(self) -> RomsFileSystemManager:
+        """Return the file system manager for the simulation."""
+        return cast(RomsFileSystemManager, self._fs_manager)
 
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
@@ -1180,12 +1187,12 @@ class ROMSSimulation(Simulation):
         build : Compiles the ROMS model.
         is_setup : Checks if the simulation has been properly configured.
         """
-        self.file_system.prepare()
+        self.fs_manager.prepare()
 
-        compile_time_code_dir = self.file_system.compile_time_code_dir
-        runtime_code_dir = self.file_system.runtime_code_dir
-        input_datasets_dir = self.file_system.input_datasets_dir
-        codebases_dir = self.file_system.codebases_dir
+        compile_time_code_dir = self.fs_manager.compile_time_code_dir
+        runtime_code_dir = self.fs_manager.runtime_code_dir
+        input_datasets_dir = self.fs_manager.input_datasets_dir
+        codebases_dir = self.fs_manager.codebases_dir
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
@@ -1517,7 +1524,7 @@ class ROMSSimulation(Simulation):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
         # we run ROMS in the output dir
-        run_path = self.file_system.output_dir
+        run_path = self.fs_manager.output_dir
         final_runtime_settings_file = (
             Path(self.runtime_code.working_copy[0].path).parent / f"{self.name}.in"
         )
@@ -1525,8 +1532,8 @@ class ROMSSimulation(Simulation):
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
-        script_path = self.file_system.work_dir / f"{safe_name}.sh"
-        output_file = self.file_system.logs_dir / f"{safe_name}.out"
+        script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
+        output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
 
         ## 2: RUN ROMS
 
@@ -1622,19 +1629,19 @@ class ROMSSimulation(Simulation):
                 + f"but current execution status is '{self._execution_handler.status}'"
             )
 
-        output_dir = self.file_system.output_dir
+        output_dir = self.fs_manager.output_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
         else:
-            self.file_system.joined_output_dir.mkdir(exist_ok=True, parents=True)
+            self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
 
             spatial_joiner = partial(
                 _ncjoin_wildcard,
                 logger=self.log,
-                input_dir=self.file_system.output_dir,
-                output_dir=self.file_system.joined_output_dir,
+                input_dir=self.fs_manager.output_dir,
+                output_dir=self.fs_manager.joined_output_dir,
             )
 
             with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
@@ -1695,7 +1702,7 @@ class ROMSSimulation(Simulation):
         """
         new_sim = cast(ROMSSimulation, super().restart(new_end_date=new_end_date))
 
-        restart_dir = self.file_system.output_dir
+        restart_dir = self.fs_manager.output_dir
 
         new_start_date = new_sim.start_date
         restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")

@@ -24,7 +24,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
-from cstar.execution.file_system import RomsJobFileSystem
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_OUTDIR, ENV_CSTAR_ORCH_RUNID
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -503,7 +503,7 @@ class Step(BaseModel):
 
         return od_path / self.safe_name
 
-    def file_system(self, bp: RomsMarblBlueprint) -> RomsJobFileSystem:
+    def file_system(self, bp: RomsMarblBlueprint) -> RomsFileSystemManager:
         """The directories used by this step.
 
         Parameters
@@ -515,7 +515,7 @@ class Step(BaseModel):
         -------
         RomsJobFileSystem
         """
-        return RomsJobFileSystem(self.working_dir(bp))
+        return RomsFileSystemManager(self.working_dir(bp))
 
 
 class ChildStep(Step):
