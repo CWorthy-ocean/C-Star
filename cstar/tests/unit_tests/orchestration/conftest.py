@@ -25,6 +25,57 @@ def fake_blueprint_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def templates_dir(additional_files_dir: Path) -> Path:
+    """Return the path to the templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    additional_files_dir : Path
+        Fixture returning the path to the additional_files directory.
+
+    Returns
+    -------
+    Path
+    """
+    return additional_files_dir / "templates"
+
+
+@pytest.fixture
+def wp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Workplan` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "wp"
+
+
+@pytest.fixture
+def bp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Blueprint` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "bp"
+
+
+@pytest.fixture
 def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step, None, None]]:
     """Create fake steps for testing purposes.
 
@@ -364,3 +415,14 @@ def fill_blueprint_template(
         return populated
 
     return _get_blueprint_template
+
+
+@pytest.fixture
+def default_blueprint_path() -> str:
+    """Return the blueprint path found in template workplans.
+
+    Returns
+    -------
+    str
+    """
+    return "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"

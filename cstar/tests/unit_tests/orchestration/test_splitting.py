@@ -15,13 +15,24 @@ from cstar.orchestration.transforms import (
 
 
 @pytest.fixture
-def single_step_workplan(tmp_path: Path) -> Workplan:
-    """Generate a workplan."""
-    bp_tpl_path = (
-        Path(__file__).parent.parent.parent.parent
-        / "additional_files/templates/bp"
-        / "blueprint.yaml"
-    )
+def single_step_workplan(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> Workplan:
+    """Generate a workplan that contains a single step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files
+
+    Returns
+    -------
+    Workplan
+    """
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
     default_output_dir = "output_dir: ."
 
     bp_path = tmp_path / "blueprint.yaml"

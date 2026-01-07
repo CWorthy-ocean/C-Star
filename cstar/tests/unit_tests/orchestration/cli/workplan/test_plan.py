@@ -13,29 +13,33 @@ from cstar.orchestration.serialization import deserialize
     "workplan_name",
     ["fanout", "linear", "parallel", "single_step"],
 )
-async def test_cli_plan_action(tmp_path: Path, workplan_name: str) -> None:
+async def test_cli_plan_action(
+    tmp_path: Path,
+    workplan_name: str,
+    wp_templates_dir: Path,
+    default_blueprint_path: str,
+) -> None:
     """Verify that CLI plan action generates an output image from a workplan.
 
     Parameters
     ----------
-    request : pytest.FixtureRequest
-        Pytest request used to load fixtures by name
     tmp_path : Path
         Temporary directory for test outputs
     workplan_name : str
         The name of a workplan fixture to use for workplan creation
+    wp_templates_dir: Path
+        Fixture returning the path to the directory containing workplan template files
+    default_blueprint_path : str
+        Fixture returning the default blueprint path contained in template workplans
     """
-    cstar_dir = Path(__file__).parent.parent.parent.parent.parent.parent
     template_file = f"{workplan_name}.yaml"
-    templates_dir = cstar_dir / "additional_files/templates/wp"
-    template_path = templates_dir / template_file
+    template_path = wp_templates_dir / template_file
 
     empty_bp_path = tmp_path / "blueprint.yaml"
     empty_bp_path.touch()
 
-    bp_default_path = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
     content = template_path.read_text()
-    content = content.replace(bp_default_path, empty_bp_path.as_posix())
+    content = content.replace(default_blueprint_path, empty_bp_path.as_posix())
 
     wp_path = tmp_path / template_file
     wp_path.write_text(content)

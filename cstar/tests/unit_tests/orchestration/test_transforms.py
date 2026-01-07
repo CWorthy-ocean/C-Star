@@ -43,6 +43,9 @@ def step_overiding_wp(
     test_bp_path: Path,
     test_output_dir: Path,
     test_output_dir_override: Path,
+    wp_templates_dir: Path,
+    bp_templates_dir: Path,
+    default_blueprint_path: str,
 ) -> Workplan:
     """Copy a template containing blueprint overrides to the test tmp_path.
 
@@ -50,16 +53,29 @@ def step_overiding_wp(
     - output_dir (original value "/other_dir")
     - start_date (original value "")
     - end_date (original value "")
-    """
-    default_blueprint_path = (
-        "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
-    )
 
-    bp_tpl_path = (
-        Path(__file__).parent.parent.parent.parent
-        / "additional_files/templates/bp"
-        / "blueprint.yaml"
-    )
+    Parameters
+    ----------
+    test_wp_path : Path
+        Fixture returning default write location for a workplan file
+    test_bp_path : Path
+        Fixture returning default write location for a blueprint file
+    test_output_dir_override : Path
+        Fixture returning
+    test_output_dir : Path
+        Fixture returning the path to a directory for containing orchestration test files
+    wp_templates_dir : Path
+        Fixture returning the path to the directory containing workplan template files
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files
+    default_blueprint_path : str
+        Fixture returning the default blueprint path contained in template workplans
+
+    Returns
+    -------
+    Workplan
+    """
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
 
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(
@@ -67,11 +83,7 @@ def step_overiding_wp(
     )
     test_bp_path.write_text(bp_content)
 
-    wp_tpl_path = (
-        Path(__file__).parent.parent.parent.parent
-        / "additional_files/templates/wp"
-        / "wp_with_bp_overrides.yaml"
-    )
+    wp_tpl_path = wp_templates_dir / "wp_with_bp_overrides.yaml"
     wp_content = wp_tpl_path.read_text()
     wp_content = wp_content.replace(default_blueprint_path, test_bp_path.as_posix())
 

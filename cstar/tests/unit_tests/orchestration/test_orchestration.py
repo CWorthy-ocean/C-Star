@@ -46,7 +46,17 @@ def diamond_graph(tmp_path: Path) -> nx.DiGraph:
 
 @pytest.fixture
 def tree_graph(tmp_path: Path) -> nx.DiGraph:
-    """Generate a prototype graph of a 3-layer, binary tree."""
+    """Generate a prototype graph of a 3-layer, binary tree.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+
+    Returns
+    -------
+    nx.DiGraph
+    """
     data: dict[str, t.Iterable[str]] = {
         "0": ["1", "2"],
         "1": ["3", "4"],
@@ -66,13 +76,24 @@ def tree_graph(tmp_path: Path) -> nx.DiGraph:
 
 
 @pytest.fixture
-def diamond_workplan(tmp_path: Path) -> Workplan:
-    """Generate a workplan."""
-    bp_tpl_path = (
-        Path(__file__).parent.parent.parent.parent
-        / "additional_files/templates/bp"
-        / "blueprint.yaml"
-    )
+def diamond_workplan(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> Workplan:
+    """Generate a workplan.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files
+
+    Returns
+    -------
+    Workplan
+    """
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
     default_output_dir = "output_dir: ."
 
     bp_path = tmp_path / "blueprint.yaml"
@@ -114,13 +135,24 @@ def diamond_workplan(tmp_path: Path) -> Workplan:
 
 
 @pytest.fixture
-def multi_entrypoint_workplan(tmp_path: Path) -> Workplan:
-    """Generate a workplan."""
-    bp_tpl_path = (
-        Path(__file__).parent.parent.parent.parent
-        / "additional_files/templates/bp"
-        / "blueprint.yaml"
-    )
+def multi_entrypoint_workplan(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> Workplan:
+    """Generate a workplan with multiple tasks available to execute immediately.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files
+
+    Returns
+    -------
+    Workplan
+    """
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
     default_output_dir = "output_dir: ."
 
     bp_path = tmp_path / "blueprint.yaml"
