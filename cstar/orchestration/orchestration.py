@@ -149,9 +149,6 @@ class Task(t.Generic[_THandle]):
         self.handle = handle
 
 
-_TValue = t.TypeVar("_TValue")
-
-
 class Planner:
     """Identifies depdendencies of a workplan to produce an execution plan."""
 
