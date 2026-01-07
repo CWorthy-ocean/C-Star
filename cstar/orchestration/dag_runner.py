@@ -284,7 +284,7 @@ def create_host_workplan(output_path: Path, template: str, bp_path: Path) -> Pat
     wp_content = template_path.read_text()
     wp_content = wp_content.replace(bp_default, bp_target_path.as_posix())
 
-    # write the modified workplan to the working directory. 
+    # write the modified workplan to the working directory.
     wp_path = output_path / f"{template}-host.yaml"
     wp_path.parent.mkdir(parents=True, exist_ok=True)
     wp_path.write_text(wp_content)
