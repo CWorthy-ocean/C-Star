@@ -173,7 +173,7 @@ class ROMSSimulation(Simulation):
     discretization: ROMSDiscretization
     runtime_code: AdditionalCode
     file_system: RomsJobFileSystem
-    """Utility for managing directory structure of the simulation"""
+    """Manages the directory structure for outputs of the simulation."""
 
     def __init__(
         self,
