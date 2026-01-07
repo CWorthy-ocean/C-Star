@@ -75,7 +75,7 @@ def _add_marker_nodes(graph: nx.DiGraph) -> nx.DiGraph:
 
 def _initialize_from_graph(
     workplan: Workplan, graph: nx.DiGraph
-) -> tuple[nx.DiGraph, dict[str, Step], dict[str, list[str]], dict[str, str]]:
+) -> tuple[nx.DiGraph, dict[str, "Step"], dict[str, list[str]], dict[str, str]]:
     """Prepare instance from the supplied graph."""
     step_map = {step.name: step for step in workplan.steps}
     dep_map = {
