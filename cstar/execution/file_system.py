@@ -100,6 +100,9 @@ class RomsJobFileSystem(JobFileSystem):
     codebases_dir: Final[Path]
     """The directory for codebases."""
 
+    joined_output_dir: Final[Path]
+    """The directory for de-partitioned outputs."""
+
     def __init__(self, root_directory: Path) -> None:
         super().__init__(root_directory)
 
