@@ -264,14 +264,11 @@ async def test_orchestrator_multi_entrypoint_open_closed_lists(
     encountered = set(open_set or [])
 
     while open_set is not None:
-        print(f"[on-enter] Open nodes: {open_set}, Closed: {closed_set}")
-
         await orchestrator.run(mode=mode)
 
         closed_set = orchestrator.get_closed_nodes(mode=mode)
         open_set = orchestrator.get_open_nodes(mode=mode)
 
-        print(f"[on-exit] Open nodes: {open_set}, Closed: {closed_set}")
         if open_set:
             encountered.update(open_set)
 
