@@ -46,7 +46,6 @@ def test_file_system_prepare(
     assert fs.root.exists()
 
 
-
 def test_file_system_clear(
     populated_output_dir: tuple[Path, list[Path]],
 ) -> None:
