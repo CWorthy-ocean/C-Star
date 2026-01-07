@@ -384,7 +384,7 @@ class RomsMarblTimeSplitter(Transform):
                 rst_path = last_restart_file.as_posix()
                 overrides["initial_conditions"] = {"data": [{"location": rst_path}]}
 
-            child_bp_path = subtask_out_dir / f"{child_step_name}bp.yaml"
+            child_bp_path = subtask_out_dir / f"{child_step_name}_bp.yaml"
             serialize(child_bp_path, bp_copy)
 
             attributes = step.model_dump(
