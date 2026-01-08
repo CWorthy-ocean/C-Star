@@ -122,6 +122,16 @@ class ExternalCodeBase(ABC, LoggingMixin):
         """
 
     @property
+    def key(self) -> str:
+        """Return a `key` that identifies the domain for `ExternalCodeBase` subclasses.
+
+        Returns
+        -------
+        str
+        """
+        return self.root_env_var.split("_")[0]
+
+    @property
     def working_copy(self) -> StagedRepository | None:
         """StagedRepository instance describing the local clone of this codebase (if it exists)"""
         return self._working_copy

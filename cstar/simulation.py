@@ -108,6 +108,7 @@ class Simulation(ABC, LoggingMixin):
             The latest allowed end date, based on, e.g., the availability of input data.
         """
         self.directory = Path(directory).resolve()
+        self._fs_manager = self._get_filesystem_manager(self.directory)
         self.name = name
 
         # Process valid date ranges
@@ -147,7 +148,6 @@ class Simulation(ABC, LoggingMixin):
         self.runtime_code = runtime_code or None
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization
-        self._fs_manager = self._get_filesystem_manager(self.directory)
 
     @staticmethod
     def _parse_date(date: str | datetime | None, field_name: str) -> datetime | None:

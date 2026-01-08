@@ -97,7 +97,7 @@ class RomsFileSystemManager(JobFileSystemManager):
     input_datasets_dir: Final[Path]
     """The directory for input datasets."""
 
-    codebases_dir: Final[Path]
+    _codebases_dir: Final[Path]
     """The directory for codebases."""
 
     joined_output_dir: Final[Path]
@@ -109,7 +109,7 @@ class RomsFileSystemManager(JobFileSystemManager):
         self.compile_time_code_dir = self.input_dir / self._COMPILE_TIME_NAME
         self.runtime_code_dir = self.input_dir / self._RUNTIME_NAME
         self.input_datasets_dir = self.input_dir / self._INPUT_DATASETS_NAME
-        self.codebases_dir = self.input_dir / self._CODEBASES_NAME
+        self._codebases_dir = self.input_dir / self._CODEBASES_NAME
         self.joined_output_dir = self.output_dir / self._JOINED_OUTPUT_NAME
 
     @override
@@ -122,8 +122,17 @@ class RomsFileSystemManager(JobFileSystemManager):
                     self.compile_time_code_dir,
                     self.runtime_code_dir,
                     self.input_datasets_dir,
-                    self.codebases_dir,
+                    self._codebases_dir,
                     self.joined_output_dir,
                 }
             )
         )
+
+    def codebase_subdir(self, key: str) -> Path:
+        """Return a codebase subdirectory path.
+
+        Returns
+        -------
+        str
+        """
+        return self._codebases_dir / key

@@ -617,6 +617,10 @@ class ROMSSimulation(Simulation):
     @property
     def fs_manager(self) -> RomsFileSystemManager:
         """Return the file system manager for the simulation."""
+        if not hasattr(self, "_fs_manager") or not self._fs_manager:
+            # it is possible to re-hydrate a simulation and be missing FS manager
+            self._fs_manager = self._get_filesystem_manager(self.directory)
+            print("I had to re-create the _fs_manager...")
         return cast(RomsFileSystemManager, self._fs_manager)
 
     @property
@@ -1192,17 +1196,16 @@ class ROMSSimulation(Simulation):
         compile_time_code_dir = self.fs_manager.compile_time_code_dir
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
-        codebases_dir = self.fs_manager.codebases_dir
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
         for codebase in (x for x in self.codebases if x is not None):
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
+            codebase_dir = self.fs_manager.codebase_subdir(codebase.key)
 
             # if we're running a workplan, for now, set up a code directory for each
             # step, otherwise they may try to clobber each other or get tripped up on
             # detecting existing directories.
-            codebase_dir = codebases_dir / codebase.root_env_var.split("_")[0]
             if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1" and codebase_dir.exists():
                 shutil.rmtree(codebase_dir)
 

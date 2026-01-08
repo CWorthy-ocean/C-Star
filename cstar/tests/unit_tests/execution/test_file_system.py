@@ -42,7 +42,7 @@ def test_file_system_prepare(
     assert fs.output_dir.exists()
     assert fs.input_dir.exists()
     assert fs.joined_output_dir.exists()
-    assert fs.codebases_dir.exists()
+    assert fs._codebases_dir.exists()
     assert fs.root.exists()
 
 
