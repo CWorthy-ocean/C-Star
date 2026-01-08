@@ -1257,6 +1257,8 @@ class TestProcessingAndExecution:
         sim = stub_romssimulation
         build_dir = sim.fs_manager.compile_time_code_dir
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+
+        assert sim.compile_time_code
         sim.compile_time_code._working_copy = stageddatacollection_remote_files(
             paths=[build_dir / f.basename for f in sim.compile_time_code.source]
         )
@@ -1355,6 +1357,7 @@ class TestProcessingAndExecution:
         sim = stub_romssimulation
         build_dir = sim.fs_manager.compile_time_code_dir
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+        assert sim.compile_time_code
         sim.compile_time_code._working_copy = stageddatacollection_remote_files(
             paths=[build_dir / f.basename for f in sim.compile_time_code.source]
         )
