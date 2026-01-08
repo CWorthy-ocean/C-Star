@@ -374,7 +374,7 @@ class Simulation(ABC, LoggingMixin):
         Path
            The path where the state file will be created.
         """
-        return Simulation.state_file_from(self.directory)
+        return self.state_file_from(self.directory)
 
     @property
     @abstractmethod
@@ -567,7 +567,7 @@ class Simulation(ABC, LoggingMixin):
         persist : Saves the current simulation state.
         """
         directory = Path(directory)
-        with open(Simulation.state_file_from(directory), "rb") as state_file:
+        with open(cls.state_file_from(directory), "rb") as state_file:
             simulation_instance = pickle.load(state_file)
         return simulation_instance
 
@@ -657,7 +657,7 @@ class Simulation(ABC, LoggingMixin):
     @abstractmethod
     def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
         """Retrieve the manager for the simulation output directory structure."""
-        ...
+        raise NotImplementedError("Failed to implement abstract method.")
 
     def restart(self, new_end_date: str | datetime) -> "Simulation":
         """Create a new Simulation instance starting from the end date of the current
