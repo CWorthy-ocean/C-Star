@@ -101,16 +101,8 @@ def convert_roms_step_to_command(step: Step) -> str:
     str
         The complete CLI command.
     """
-    # tell worker to use overridden blueprint
-    return " ".join(
-        [
-            sys.executable,
-            "-m",
-            "cstar.entrypoint.worker.worker",
-            "-b",
-            Path(step.blueprint_path).as_posix(),
-        ]
-    )
+    bp_path = Path(step.blueprint_path).as_posix()
+    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {bp_path}"
 
 
 def convert_step_to_placeholder(step: Step) -> str:
