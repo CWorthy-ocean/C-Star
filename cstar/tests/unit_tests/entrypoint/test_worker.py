@@ -1078,7 +1078,7 @@ async def test_runner_setup_stage(
         assert mock_simulation.post_run.call_count == (1 if post_run else 0)
 
 
-def test_worker_main(tmp_path: Path) -> None:
+def test_worker_main(tmp_path: Path, sim_runner: SimulationRunner) -> None:
     """Test the main entrypoint of the worker service.
 
     This test verifies that the the main function will fail to run when called without
@@ -1089,7 +1089,7 @@ def test_worker_main(tmp_path: Path) -> None:
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    output_dir = sim_runner._simulation.file_system.output_dir
+    output_dir = sim_runner._simulation.fs_manager.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     args = [
