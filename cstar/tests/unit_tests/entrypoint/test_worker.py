@@ -382,7 +382,7 @@ def test_runner_directory_prep(
     assert sim_runner._output_root.is_dir()
 
     # ...and is empty so no conflicts will occur.
-    output_content = list(x for x in sim_runner._output_root.iterdir() if x.is_file)
+    output_content = list(x for x in sim_runner._output_root.iterdir() if x.is_file())
     assert not output_content, "Output directory should be empty after prep."
 
 
