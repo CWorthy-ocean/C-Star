@@ -513,6 +513,7 @@ class TestSimulationPersistence:
         restored_sim = StubSimulation.restore(sim.directory)
 
         # Also compare serialized versions
+        assert sim.to_dict() == restored_sim.to_dict(), "Serialized data mismatch after restore"
         assert pickle.dumps(restored_sim) == pickle.dumps(sim), (
             "Serialized data mismatch after restore"
         )

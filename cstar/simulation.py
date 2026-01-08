@@ -526,13 +526,16 @@ class Simulation(ABC, LoggingMixin):
         ):
             raise RuntimeError(
                 "Simulation.persist() was called, but at least one "
-                "local process is currently running in. Await "
+                "local process is currently running. Await "
                 "completion or use LocalProcess.cancel(), then try again"
             )
 
         # Loggers do not survive roundtrip
         if hasattr(self, "_log"):
             del self._log
+
+        if hasattr(self, "_fs_manager"):
+            del self._fs_manager
 
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.state_file, "wb") as state_file:
