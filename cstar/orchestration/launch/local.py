@@ -161,9 +161,8 @@ class LocalLauncher(Launcher[LocalHandle]):
             print(f"Return code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
         else:
             status = "FAILED"
-            print(f"Return code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
+            print(f"Failure code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
 
-        # logger.debug(f"Status `{status}` for pid `{handle.pid}` after {handle.elapsed} sec")
         return status
 
     @classmethod
