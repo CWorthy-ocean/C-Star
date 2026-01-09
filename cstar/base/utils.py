@@ -14,8 +14,14 @@ from cstar.base.log import get_logger
 log = get_logger(__name__)
 
 
+CSTAR_HOME: t.Literal["~/.cstar"] = "~/.cstar"
+"""The default C-Star configuration directory."""
+
 DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
+
+DEFAULT_OUTPUT_DIR: t.Final[str] = f"{CSTAR_HOME}/assets"
+"""The default location where job output(s) to be written."""
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
