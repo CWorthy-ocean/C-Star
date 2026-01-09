@@ -617,10 +617,6 @@ class ROMSSimulation(Simulation):
     @property
     def fs_manager(self) -> RomsFileSystemManager:
         """Return the file system manager for the simulation."""
-        if not hasattr(self, "_fs_manager") or not self._fs_manager:
-            # it is possible to re-hydrate a simulation and be missing FS manager
-            self._fs_manager = self._get_filesystem_manager(self.directory)
-            print("I had to re-create the _fs_manager...")
         return cast(RomsFileSystemManager, self._fs_manager)
 
     @property

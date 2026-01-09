@@ -68,6 +68,9 @@ class Simulation(ABC, LoggingMixin):
         Create a new Simulation instance starting from the end of this one.
     """
 
+    _fs_manager: JobFileSystemManager
+    """The file system manager ensures consistent directory structure for outputs."""
+
     def __init__(
         self,
         name: str,
@@ -571,8 +574,13 @@ class Simulation(ABC, LoggingMixin):
         """
         directory = Path(directory)
         with open(cls.state_file_from(directory), "rb") as state_file:
-            simulation_instance = pickle.load(state_file)
-        return simulation_instance
+            simulation: Simulation = pickle.load(state_file)
+
+        # manually add fs manager because persist deletes the attribute.
+        simulation._fs_manager = simulation._get_filesystem_manager(
+            simulation.directory
+        )
+        return simulation
 
     @abstractmethod
     def build(self, rebuild=False) -> None:
