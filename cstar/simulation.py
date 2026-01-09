@@ -2,6 +2,7 @@ import copy
 import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
+from logging import Logger
 from pathlib import Path
 from typing import Any, Optional
 
@@ -533,16 +534,19 @@ class Simulation(ABC, LoggingMixin):
                 "completion or use LocalProcess.cancel(), then try again"
             )
 
-        # Loggers do not survive roundtrip
+        # Remove attributes that don't survive round-trip pickling process
+        tmp_log: Logger | None = None
         if hasattr(self, "_log"):
+            tmp_log = self._log
             del self._log
-
-        if hasattr(self, "_fs_manager"):
-            del self._fs_manager
 
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.state_file, "wb") as state_file:
             pickle.dump(self, state_file)
+
+        # Restore attributes that were removed for pickling
+        if tmp_log:
+            self._log = tmp_log
 
     @classmethod
     def restore(cls, directory: str | Path) -> "Simulation":
