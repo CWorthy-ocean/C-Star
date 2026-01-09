@@ -123,13 +123,13 @@ class ExternalCodeBase(ABC, LoggingMixin):
 
     @property
     def key(self) -> str:
-        """Return a `key` that identifies the domain for `ExternalCodeBase` subclasses.
+        """Return a string that uniquely identifies `ExternalCodeBase` subclasses.
 
         Returns
         -------
         str
         """
-        return self.root_env_var.split("_")[0]
+        return self.root_env_var.split("_")[0].casefold()
 
     @property
     def working_copy(self) -> StagedRepository | None:
