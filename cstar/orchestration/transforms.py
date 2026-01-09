@@ -268,10 +268,6 @@ class WorkplanTransformer:
 
         steps = []
         for step in self.original.steps:
-            if not self.transform_fn:
-                steps.append(step)
-                continue
-
             transformed_steps = list(self.transform_fn(step))
 
             # replace dependencies on the original step with the last transformed step
