@@ -13,8 +13,11 @@ app = typer.Typer()
 def run(
     path: t.Annotated[Path, typer.Argument(help="Path to a workplan file.")],
     output_dir: t.Annotated[
-        Path, typer.Argument(help="Path to a directory where outputs will be written.")
-    ],
+        str,
+        typer.Option(
+            help="Override the output directory specified in the environment with this path."
+        ),
+    ] = "",
     run_id: t.Annotated[
         str,
         typer.Option(help="The unique identifier for an execution of the workplan."),
@@ -25,7 +28,8 @@ def run(
     Specify a previously used run_id option to re-start a prior run.
     """
     try:
-        asyncio.run(build_and_run_dag(path, run_id, output_dir))
+        output_path = Path(output_dir) if output_dir else None
+        asyncio.run(build_and_run_dag(path, run_id, output_path))
         print("Workplan run has completed.")
     except Exception as ex:
         print(f"Workplan run has completed unsuccessfully: {ex}")

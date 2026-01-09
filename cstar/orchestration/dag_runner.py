@@ -16,6 +16,7 @@ from cstar.orchestration.orchestration import (
     RunMode,
     check_environment,
     configure_environment,
+    get_output_dir,
     get_run_id,
 )
 from cstar.orchestration.serialization import deserialize, serialize
@@ -189,7 +190,9 @@ async def prepare_workplan(
 
 
 # @flow(log_prints=True)
-async def build_and_run_dag(wp_path: Path, run_id: str, output_dir: Path) -> None:
+async def build_and_run_dag(
+    wp_path: Path, run_id: str = "", output_dir: Path | None = None
+) -> None:
     """Execute the steps in the workplan.
 
     Parameters
@@ -198,9 +201,12 @@ async def build_and_run_dag(wp_path: Path, run_id: str, output_dir: Path) -> Non
         The path to the blueprint to execute
     run_id : str | None
         The run-id to be used by the orchestrator.
+    output_dir : Path | None
         The path to the output directory.
     """
     run_id = get_run_id(run_id)
+    output_dir = get_output_dir(output_dir)
+
     configure_environment(output_dir, run_id)
     check_environment()
     wp, wp_path = await prepare_workplan(wp_path, output_dir)
@@ -323,7 +329,7 @@ def main() -> None:
     if wp_path is None:
         raise ValueError("Workplan path is malformed.")
 
-    asyncio.run(build_and_run_dag(wp_path, output_dir))
+    asyncio.run(build_and_run_dag(wp_path, output_dir=output_dir))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 import os
 import subprocess
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -124,12 +123,8 @@ async def test_build_and_run_local(
     wp_path.write_text(wp_content)
 
     # create unique run name only once per hour, cache otherwise.
-    now = datetime.now()
-    yyyymmdd = now.strftime("%Y-%m-%d %H")
-
-    my_run_name = f"{yyyymmdd}_{workplan_name}"
-    os.environ["CSTAR_RUNID"] = my_run_name
-    await build_and_run_dag(wp_path, tmp_path)
+    my_run_name = f"{tmp_path.stem}_{workplan_name}"
+    await build_and_run_dag(wp_path, my_run_name, tmp_path)
 
 
 # @pytest.mark.skipif(not slurm())
@@ -178,9 +173,5 @@ async def test_build_and_run(
     wp_path.write_text(wp_content)
 
     # create unique run name only once per hour, cache otherwise.
-    now = datetime.now()
-    yyyymmdd = now.strftime("%Y-%m-%d %H")
-
-    my_run_name = f"{yyyymmdd}_{workplan_name}"
-    os.environ["CSTAR_RUNID"] = my_run_name
-    await build_and_run_dag(wp_path, tmp_path)
+    my_run_name = f"{tmp_path.stem}_{workplan_name}"
+    await build_and_run_dag(wp_path, my_run_name, tmp_path)

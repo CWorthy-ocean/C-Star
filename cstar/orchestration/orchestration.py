@@ -9,6 +9,7 @@ import networkx as nx
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
+from cstar.base.utils import DEFAULT_OUTPUT_DIR, slugify
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
     ENV_CSTAR_ORCH_OUTDIR,
@@ -646,6 +647,7 @@ def check_environment() -> None:
         ENV_CSTAR_SLURM_ACCOUNT,
         ENV_CSTAR_SLURM_QUEUE,
         ENV_CSTAR_ORCH_RUNID,
+        ENV_CSTAR_ORCH_OUTDIR,
     )
 
     for key in required_vars:
@@ -660,8 +662,11 @@ def configure_environment(output_dir: Path, run_id: str) -> None:
 
     Parameters
     ----------
-    output_dir : Path
+    output_dir : Path | None
         The directory where outputs will be written.
+
+        When not supplied, the system looks for a path specified in the environment
+        before falling back to the default `~/.cstar/assets` directory
     run_id : str
         The unique identifier for an execution of the workplan.
     reset_name : str
@@ -672,8 +677,8 @@ def configure_environment(output_dir: Path, run_id: str) -> None:
     ValueError
         If the required environment variables are not set.
     """
-    os.environ[ENV_CSTAR_ORCH_OUTDIR] = output_dir.as_posix()
-    os.environ[ENV_CSTAR_ORCH_RUNID] = run_id
+    os.environ[ENV_CSTAR_ORCH_OUTDIR] = output_dir.expanduser().resolve().as_posix()
+    os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)
 
 
 def get_run_id(run_id: str = "") -> str:
@@ -691,9 +696,27 @@ def get_run_id(run_id: str = "") -> str:
     str
     """
     if run_id:
-        return run_id.casefold()
-
-    if run_id := os.getenv(ENV_CSTAR_ORCH_RUNID, ""):
         return run_id
 
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    new_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return os.getenv(ENV_CSTAR_ORCH_RUNID, new_run_id)
+
+
+def get_output_dir(output_dir: Path | None = None) -> Path:
+    """Retrieve the current output directory.
+
+    Fall back to the default C-Star output directory if not configured or overridden.
+
+    Parameters
+    ----------
+    output_dir : Path | None
+        If non-null, used to override a pre-configured output directory.
+
+    Returns
+    -------
+    Path
+    """
+    if output_dir:
+        return output_dir
+
+    return Path(os.getenv(ENV_CSTAR_ORCH_OUTDIR, DEFAULT_OUTPUT_DIR))
