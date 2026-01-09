@@ -634,6 +634,27 @@ class Orchestrator(LoggingMixin):
             self.planner.store(task.step.name, KEY_STATUS, task.status)
 
 
+def check_environment() -> None:
+    """Verify the environment is configured correctly.
+
+    Raises
+    ------
+    ValueError
+        If required environment variables are missing or empty.
+    """
+    required_vars = (
+        ENV_CSTAR_SLURM_ACCOUNT,
+        ENV_CSTAR_SLURM_QUEUE,
+        ENV_CSTAR_ORCH_RUNID,
+    )
+
+    for key in required_vars:
+        if not os.getenv(key, ""):
+            raise ValueError(
+                f"Unable to run workplan. `{key}` not found in environment."
+            )
+
+
 def configure_environment(output_dir: Path, run_id: str) -> None:
     """Configure environment variables required by the runner.
 

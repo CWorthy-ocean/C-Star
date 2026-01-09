@@ -14,6 +14,7 @@ from cstar.orchestration.orchestration import (
     Orchestrator,
     Planner,
     RunMode,
+    check_environment,
     configure_environment,
     get_run_id,
 )
@@ -201,6 +202,7 @@ async def build_and_run_dag(wp_path: Path, run_id: str, output_dir: Path) -> Non
     """
     run_id = get_run_id(run_id)
     configure_environment(output_dir, run_id)
+    check_environment()
     wp, wp_path = await prepare_workplan(wp_path, output_dir)
 
     planner = Planner(workplan=wp)
