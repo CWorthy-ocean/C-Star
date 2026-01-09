@@ -654,20 +654,24 @@ def configure_environment(output_dir: Path, run_id: str) -> None:
     os.environ[ENV_CSTAR_ORCH_OUTDIR] = output_dir.as_posix()
     os.environ[ENV_CSTAR_ORCH_RUNID] = run_id
 
-    for key in [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE, ENV_CSTAR_ORCH_RUNID]:
-        if not os.getenv(key, ""):
-            raise ValueError(
-                f"Unable to run workplan. `{key}` not found in environment."
-            )
 
+def get_run_id(run_id: str = "") -> str:
+    """Retrieve the current run-id.
 
-def get_run_id() -> str:
-    """Generate a new run-id if the user has not supplied one.
+    Parameters
+    ----------
+    run_id : str | None
+        If non-null, used to override a pre-configured run id.
+
+    Generate a new run-id if not found in the environment.
 
     Returns
     -------
     str
     """
+    if run_id:
+        return run_id.casefold()
+
     if run_id := os.getenv(ENV_CSTAR_ORCH_RUNID, ""):
         return run_id
 

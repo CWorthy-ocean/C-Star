@@ -188,17 +188,18 @@ async def prepare_workplan(
 
 
 # @flow(log_prints=True)
-async def build_and_run_dag(wp_path: Path, output_dir: Path) -> None:
+async def build_and_run_dag(wp_path: Path, run_id: str, output_dir: Path) -> None:
     """Execute the steps in the workplan.
 
     Parameters
     ----------
     path : Path
         The path to the blueprint to execute
-    output_dir : Path
+    run_id : str | None
+        The run-id to be used by the orchestrator.
         The path to the output directory.
     """
-    run_id = get_run_id()
+    run_id = get_run_id(run_id)
     configure_environment(output_dir, run_id)
     wp, wp_path = await prepare_workplan(wp_path, output_dir)
 

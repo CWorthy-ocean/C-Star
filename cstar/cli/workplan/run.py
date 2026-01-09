@@ -1,12 +1,10 @@
 import asyncio
-import os
 import typing as t
 from pathlib import Path
 
 import typer
 
 from cstar.orchestration.dag_runner import build_and_run_dag
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 app = typer.Typer()
 
@@ -26,10 +24,8 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
-    os.environ[ENV_CSTAR_ORCH_RUNID] = run_id
-
     try:
-        asyncio.run(build_and_run_dag(path, output_dir))
+        asyncio.run(build_and_run_dag(path, run_id, output_dir))
         print("Workplan run has completed.")
     except Exception as ex:
         print(f"Workplan run has completed unsuccessfully: {ex}")
