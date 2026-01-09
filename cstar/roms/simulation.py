@@ -645,12 +645,11 @@ class ROMSSimulation(Simulation):
         list
             A list containing the ROMS external codebase and MARBL external codebase.
         """
-        codebases = [
-            self.codebase,
-        ]
+        items = [self.codebase]
         if self.marbl_codebase:
-            codebases.append(self.marbl_codebase)
-        return codebases
+            items.append(self.marbl_codebase)
+
+        return items
 
     @property
     def _forcing_paths(self) -> list[Path]:
