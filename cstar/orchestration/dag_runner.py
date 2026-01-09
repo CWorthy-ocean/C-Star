@@ -259,7 +259,7 @@ def get_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def create_host_workplan(output_path: Path, template: str, bp_path: Path) -> Path:
+def create_host_workplan(template: str, bp_path: Path, output_path: Path) -> Path:
     """Replace the default blueprint path in a template and write the
     modified workplan in a new location.
     """
@@ -311,7 +311,7 @@ def main() -> None:
 
     if bp_path:
         # host the blueprint in a workplan template
-        wp_path = create_host_workplan(output_dir, template, bp_path)
+        wp_path = create_host_workplan(template, bp_path, output_dir)
         log.info(f"Running workplan at `{wp_path}` with blueprint at `{bp_path}`")
     else:
         bp_path = Path(bp_default)
