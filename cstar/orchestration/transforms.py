@@ -331,13 +331,6 @@ class RomsMarblTimeSplitter(Transform):
         time_slices = list(get_time_slices(start_date, end_date, self.frequency))
         n_slices = len(time_slices)
 
-        # if (start_date - end_date).total_seconds() < timedelta(days=30).total_seconds():
-        #     # TODO: leave this ask discussion driver. must determine
-        #     # what conditions might preclude automatic splitting.
-        #     # yield step
-        #     # return
-        #     return [step]
-
         if end_date <= start_date:
             raise ValueError("end_date must be after start_date")
 
