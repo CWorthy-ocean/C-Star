@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 import typing as t
+from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
 
@@ -30,6 +31,14 @@ WorkplanTemplate: t.TypeAlias = t.Literal["single_step", "linear", "fanout", "pa
 log = get_logger(__name__)
 
 
+@dataclass
+class DagStatus:
+    """The current status of a workflow."""
+
+    open_items: t.Iterable[str]
+    closed_items: t.Iterable[str]
+
+
 def incremental_delays() -> t.Generator[float, None, None]:
     """Return a value from an infinite cycle of incremental delays.
 
@@ -49,27 +58,7 @@ def incremental_delays() -> t.Generator[float, None, None]:
     yield from delay_cycle
 
 
-def display_summary(
-    open_set: t.Iterable[str] | None,
-    closed_set: t.Iterable[str] | None,
-    orchestrator: Orchestrator,
-) -> None:
-    print("The remaining steps in the plan are: ")
-    if open_set:
-        for node in open_set:
-            print(f"\t- {node}")
-    else:
-        print("\t[N/A]")
-
-    print("The completed steps in the plan are: ")
-    if closed_set:
-        for node in closed_set:
-            print(f"\t- {node}")
-    else:
-        print("\t[N/A]")
-
-
-async def retrieve_run_progress(orchestrator: Orchestrator) -> None:
+async def retrieve_run_progress(orchestrator: Orchestrator) -> DagStatus:
     """Load the run state.
 
     Parameters
@@ -81,6 +70,10 @@ async def retrieve_run_progress(orchestrator: Orchestrator) -> None:
 
         - RunMode.Schedule submits all processes in the plan in a non-blocking manner.
         - RunMode.Monitor waits for all processes in the plan to complete.
+
+    Returns
+    -------
+    DagStatus
     """
     mode = RunMode.Monitor
     closed_set = orchestrator.get_closed_nodes(mode=mode)
@@ -93,16 +86,20 @@ async def retrieve_run_progress(orchestrator: Orchestrator) -> None:
         closed_set = orchestrator.get_closed_nodes(mode=mode)
         open_set = orchestrator.get_open_nodes(mode=mode)
 
-    display_summary(open_set, closed_set, orchestrator)
+    return DagStatus(open_set or [], closed_set)
 
 
-async def load_dag_status(path: Path) -> None:
+async def load_dag_status(path: Path) -> DagStatus:
     """Determine the current status of the workplan.
 
     Parameters
     ----------
     path : Path
         The path to the blueprint being executed.
+
+    Returns
+    -------
+    DagStatus
     """
     wp = deserialize(path, Workplan)
     log.info(f"Loading status of workplan: {wp.name}")
@@ -111,7 +108,7 @@ async def load_dag_status(path: Path) -> None:
     launcher = SlurmLauncher()
     orchestrator = Orchestrator(planner, launcher)
 
-    await retrieve_run_progress(orchestrator)
+    return await retrieve_run_progress(orchestrator)
 
 
 async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
