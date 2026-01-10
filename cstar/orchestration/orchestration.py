@@ -657,28 +657,23 @@ def check_environment() -> None:
             )
 
 
-def configure_environment(output_dir: Path, run_id: str) -> None:
+def configure_environment(
+    output_dir: Path | None = None, run_id: str | None = None
+) -> None:
     """Configure environment variables required by the runner.
 
     Parameters
     ----------
     output_dir : Path | None
         The directory where outputs will be written.
-
-        When not supplied, the system looks for a path specified in the environment
-        before falling back to the default `~/.cstar/assets` directory
-    run_id : str
+    run_id : str | None
         The unique identifier for an execution of the workplan.
-    reset_name : str
-        The name of the reset files output by the simulation.
-
-    Raises
-    ------
-    ValueError
-        If the required environment variables are not set.
     """
-    os.environ[ENV_CSTAR_ORCH_OUTDIR] = output_dir.expanduser().resolve().as_posix()
-    os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)
+    if output_dir:
+        os.environ[ENV_CSTAR_ORCH_OUTDIR] = output_dir.expanduser().resolve().as_posix()
+
+    if run_id:
+        os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)
 
 
 def get_run_id(run_id: str = "") -> str:

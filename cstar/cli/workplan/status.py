@@ -44,11 +44,13 @@ def status(
     path: t.Annotated[Path, typer.Argument(help="Path to a workplan file.")],
     run_id: t.Annotated[
         str,
-        typer.Option(help="The unique identifier for an execution of the workplan."),
+        typer.Option(
+            help="The unique identifier identifying a specific workplan execution."
+        ),
     ] = "...",
 ) -> None:
     """Retrieve the current status of a workplan."""
     os.environ["CSTAR_RUNID"] = run_id
-    status = asyncio.run(load_dag_status(path))
+    status = asyncio.run(load_dag_status(path, run_id))
 
     display_summary(status.open_items, status.closed_items)

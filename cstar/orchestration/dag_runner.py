@@ -89,13 +89,15 @@ async def retrieve_run_progress(orchestrator: Orchestrator) -> DagStatus:
     return DagStatus(open_set or [], closed_set)
 
 
-async def load_dag_status(path: Path) -> DagStatus:
-    """Determine the current status of the workplan.
+async def load_dag_status(path: Path, run_id: str) -> DagStatus:
+    """Determine the current status of a workplan run.
 
     Parameters
     ----------
     path : Path
         The path to the blueprint being executed.
+    run_id : str
+        The unique run id to query status for.
 
     Returns
     -------
@@ -103,6 +105,8 @@ async def load_dag_status(path: Path) -> DagStatus:
     """
     wp = deserialize(path, Workplan)
     log.info(f"Loading status of workplan: {wp.name}")
+
+    configure_environment(run_id=run_id)
 
     planner = Planner(workplan=wp)
     launcher = SlurmLauncher()
