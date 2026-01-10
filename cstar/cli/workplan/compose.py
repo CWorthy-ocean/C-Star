@@ -8,7 +8,6 @@ import typer
 
 from cstar.base.utils import DEFAULT_OUTPUT_DIR, additional_files_dir
 from cstar.orchestration.dag_runner import build_and_run_dag
-from cstar.orchestration.orchestration import get_output_dir
 
 app = typer.Typer()
 
@@ -25,12 +24,12 @@ class WorkplanTemplate(StrEnum):
     SINGLE_STEP = auto()
 
 
-def create_host_workplan(template: WorkplanTemplate, bp_path: Path, output_path: Path) -> Path:
+def create_host_workplan(
+    template: WorkplanTemplate, bp_path: Path, output_path: Path
+) -> Path:
     """Replace the default blueprint path in a template and write the
     modified workplan in a new location.
     """
-    
-
     assets_dir = additional_files_dir()
     templates_dir = assets_dir / "templates"
     template_path = templates_dir / "wp" / f"{template}.yaml"
@@ -61,8 +60,12 @@ def create_host_workplan(template: WorkplanTemplate, bp_path: Path, output_path:
 
 @app.command()
 def compose(
-    workplan: t.Annotated[str | None, typer.Argument(help="Path to a workplan file.")] = None,
-    blueprint: t.Annotated[str | None, typer.Argument(help="Path to a blueprint file.")] = None,
+    workplan: t.Annotated[
+        str | None, typer.Argument(help="Path to a workplan file.")
+    ] = None,
+    blueprint: t.Annotated[
+        str | None, typer.Argument(help="Path to a blueprint file.")
+    ] = None,
     output_dir: t.Annotated[
         str,
         typer.Option(
@@ -76,7 +79,7 @@ def compose(
     template: t.Annotated[
         WorkplanTemplate | None,
         typer.Option(help="Specify the workplan template to populate."),
-    ] = None
+    ] = None,
 ) -> None:
     """Execute a workplan composed with a user-supplied blueprint.
 
