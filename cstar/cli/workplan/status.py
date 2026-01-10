@@ -50,7 +50,6 @@ def status(
     ] = "...",
 ) -> None:
     """Retrieve the current status of a workplan."""
-    os.environ["CSTAR_RUNID"] = run_id
     status = asyncio.run(load_dag_status(path, run_id))
 
     display_summary(status.open_items, status.closed_items)
