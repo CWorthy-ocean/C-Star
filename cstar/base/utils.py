@@ -21,7 +21,7 @@ DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
 
 DEFAULT_OUTPUT_DIR: t.Final[str] = f"{CSTAR_HOME}/assets"
-"""The default location where job output(s) to be written."""
+"""The default location where job output is written."""
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
