@@ -29,14 +29,3 @@ def mock_user_env_name() -> str:
         The name of the .env file
     """
     return ".mock.env"
-
-
-@pytest.fixture(scope="session")
-def additional_files_dir() -> Path:
-    """Return the path to the additional files directory.
-
-    Returns
-    -------
-    Path
-    """
-    return Path(__file__).parent.parent / "additional_files"

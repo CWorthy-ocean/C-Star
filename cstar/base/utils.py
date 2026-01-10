@@ -345,3 +345,13 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
         else:
             d1[k] = v
     return d1
+
+
+def additional_files_dir() -> Path:
+    """Return the path to the additional files directory.
+
+    Returns
+    -------
+    Path
+    """
+    return Path(__file__).parent.parent / "additional_files"

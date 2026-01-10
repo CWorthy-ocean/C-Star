@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from cstar.base.utils import additional_files_dir
 from cstar.orchestration.models import RomsMarblBlueprint, Step, Workplan
 
 
@@ -25,20 +26,15 @@ def fake_blueprint_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def templates_dir(additional_files_dir: Path) -> Path:
+def templates_dir() -> Path:
     """Return the path to the templates directory contained in the package
     "additional files."
-
-    Parameters
-    ----------
-    additional_files_dir : Path
-        Fixture returning the path to the additional_files directory.
 
     Returns
     -------
     Path
     """
-    return additional_files_dir / "templates"
+    return additional_files_dir() / "templates"
 
 
 @pytest.fixture
