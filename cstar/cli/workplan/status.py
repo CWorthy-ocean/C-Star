@@ -1,16 +1,21 @@
 import asyncio
-import os
 import typing as t
+from itertools import zip_longest
 from pathlib import Path
 
 import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from cstar.orchestration.dag_runner import load_dag_status
 
 app = typer.Typer()
+console = Console()
 
 
 def display_summary(
+    run_id: str,
     open_set: t.Iterable[str] | None,
     closed_set: t.Iterable[str] | None,
 ) -> None:
@@ -24,19 +29,15 @@ def display_summary(
     open_set : Iterable[str] | None
         The names of jobs that have completed.
     """
-    print("The remaining steps in the plan are: ")
-    if open_set:
-        for node in open_set:
-            print(f"\t- {node}")
-    else:
-        print("\t[N/A]")
+    open_closed = zip_longest(open_set or ["N/A"], closed_set or ["N/A"])
+    table = Table("Incomplete", "Complete")
 
-    print("The completed steps in the plan are: ")
-    if closed_set:
-        for node in closed_set:
-            print(f"\t- {node}")
-    else:
-        print("\t[N/A]")
+    console.print(Panel.fit(f"Run `{run_id}` Current Status"))
+
+    for open_item, closed_item in open_closed:
+        table.add_row(open_item, closed_item)
+
+    console.print(table)
 
 
 @app.command()
@@ -45,11 +46,21 @@ def status(
     run_id: t.Annotated[
         str,
         typer.Option(
-            help="The unique identifier identifying a specific workplan execution."
+            help="The unique identifier of a specific workplan execution."
         ),
     ] = "...",
 ) -> None:
     """Retrieve the current status of a workplan."""
-    status = asyncio.run(load_dag_status(path, run_id))
+    if not path.exists():
+        console.print(f"The workplan could not be found at `{path}`")
+        raise typer.Exit(code=1)
 
-    display_summary(status.open_items, status.closed_items)
+    try:
+        status = asyncio.run(load_dag_status(path, run_id))
+        display_summary(run_id, status.open_items, status.closed_items)
+    except FileNotFoundError:  # blueprint not found.
+        console.print_exception()
+
+
+if __name__ == "__main__":
+    typer.run(status)
