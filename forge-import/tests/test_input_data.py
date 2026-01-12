@@ -628,6 +628,10 @@ class TestRomsMarblInputDataGeneration:
         sample_roms_marbl_input_data.grid = mock_grid
         
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+            # Update input_data_dir to use the mocked path since it was set in __post_init__
+            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.model_name}_{sample_roms_marbl_input_data.grid_name}"
+            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+            
             sample_roms_marbl_input_data._generate_grid()
             
             # Check that grid.save was called
