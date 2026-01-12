@@ -1,6 +1,7 @@
 import datetime as dt
 import functools
 import hashlib
+import os
 import re
 import subprocess
 import typing as t
@@ -14,14 +15,39 @@ from cstar.base.log import get_logger
 log = get_logger(__name__)
 
 
-CSTAR_HOME: t.Literal["~/.cstar"] = "~/.cstar"
+DEFAULT_CSTAR_HOME: t.Literal["~/.cstar"] = "~/.cstar"
 """The default C-Star configuration directory."""
 
 DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
 
-DEFAULT_OUTPUT_DIR: t.Final[str] = f"{CSTAR_HOME}/assets"
-"""The default location where job output is written."""
+DEFAULT_OUTPUT_DIR: t.Final[str] = "assets"
+"""The default subdirectory of `<CSTAR_HOME>` where job output is written."""
+
+ENV_CSTAR_HOME: t.Literal["CSTAR_HOME"] = "CSTAR_HOME"
+"""Environment variable enabling the user to specify a C-star home directory."""
+
+ENV_CSTAR_OUTDIR: t.Literal["ENV_CSTAR_OUTDIR"] = "ENV_CSTAR_OUTDIR"
+"""Environment variable containing a path to the root output directory."""
+
+
+def get_output_dir(value_override: Path | None = None) -> Path:
+    """Return the path to the C-star output directory.
+
+    Returns
+    -------
+    Path
+    """
+    if value_override:
+        return value_override
+
+    home = home = os.getenv(ENV_CSTAR_HOME, DEFAULT_CSTAR_HOME)
+    home_path = Path(home).expanduser().resolve()
+
+    default_out_dir = home_path / DEFAULT_OUTPUT_DIR
+    final_outdir = os.getenv(ENV_CSTAR_OUTDIR, default_out_dir)
+
+    return Path(final_outdir).expanduser().resolve()
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
 from cstar.base.log import get_logger
+from cstar.base.utils import get_output_dir
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
@@ -15,7 +16,7 @@ from cstar.orchestration.orchestration import (
     RunMode,
     check_environment,
     configure_environment,
-    get_output_dir,
+
     get_run_id,
 )
 from cstar.orchestration.serialization import deserialize, serialize

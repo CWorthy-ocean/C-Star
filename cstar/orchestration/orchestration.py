@@ -9,10 +9,9 @@ import networkx as nx
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import DEFAULT_OUTPUT_DIR, slugify
+from cstar.base.utils import ENV_CSTAR_OUTDIR, slugify
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
-    ENV_CSTAR_ORCH_OUTDIR,
     ENV_CSTAR_ORCH_RUNID,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_QUEUE,
@@ -647,7 +646,6 @@ def check_environment() -> None:
         ENV_CSTAR_SLURM_ACCOUNT,
         ENV_CSTAR_SLURM_QUEUE,
         ENV_CSTAR_ORCH_RUNID,
-        ENV_CSTAR_ORCH_OUTDIR,
     )
 
     for key in required_vars:
@@ -670,7 +668,7 @@ def configure_environment(
         The unique identifier for an execution of the workplan.
     """
     if output_dir:
-        os.environ[ENV_CSTAR_ORCH_OUTDIR] = output_dir.expanduser().resolve().as_posix()
+        os.environ[ENV_CSTAR_OUTDIR] = output_dir.expanduser().resolve().as_posix()
 
     if run_id:
         os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)
@@ -695,23 +693,3 @@ def get_run_id(run_id: str = "") -> str:
 
     new_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return os.getenv(ENV_CSTAR_ORCH_RUNID, new_run_id)
-
-
-def get_output_dir(output_dir: Path | None = None) -> Path:
-    """Retrieve the current output directory.
-
-    Fall back to the default C-Star output directory if not configured or overridden.
-
-    Parameters
-    ----------
-    output_dir : Path | None
-        If non-null, used to override a pre-configured output directory.
-
-    Returns
-    -------
-    Path
-    """
-    if output_dir:
-        return output_dir
-
-    return Path(os.getenv(ENV_CSTAR_ORCH_OUTDIR, DEFAULT_OUTPUT_DIR))
