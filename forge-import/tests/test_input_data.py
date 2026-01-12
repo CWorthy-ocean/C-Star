@@ -632,7 +632,13 @@ class TestRomsMarblInputDataGeneration:
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.model_name}_{sample_roms_marbl_input_data.grid_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
             
-            sample_roms_marbl_input_data._generate_grid()
+            # Mock xarray.open_dataset since grid.save() is mocked and doesn't create a real file
+            # _generate_grid reads the file back to check for xi_coarse dimension
+            # Note: xarray is imported inside _generate_grid, so we patch it at the module level
+            # xr.Dataset is already a context manager, so it works with 'with xr.open_dataset()'
+            mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+            with patch('xarray.open_dataset', return_value=mock_ds):
+                sample_roms_marbl_input_data._generate_grid()
             
             # Check that grid.save was called
             mock_grid.save.assert_called_once()
