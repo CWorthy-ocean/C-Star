@@ -324,7 +324,6 @@ class RomsMarblTimeSplitter(Transform):
         end_date = blueprint.runtime_params.end_date
 
         job_fs = step.file_system(blueprint)
-        job_fs.prepare()
 
         serialize(job_fs.root / Path(step.blueprint_path).name, blueprint)
 
@@ -391,7 +390,6 @@ class RomsMarblTimeSplitter(Transform):
                 parent=step.name,
                 blueprint_overrides=overrides,  # type: ignore[arg-type]
             )
-            child_step.file_system(bp_copy).prepare()
 
             yield child_step
             if i == len(time_slices) - 1:

@@ -1186,8 +1186,6 @@ class ROMSSimulation(Simulation):
         build : Compiles the ROMS model.
         is_setup : Checks if the simulation has been properly configured.
         """
-        self.fs_manager.prepare()
-
         compile_time_code_dir = self.fs_manager.compile_time_code_dir
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
