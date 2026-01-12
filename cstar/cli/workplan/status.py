@@ -45,9 +45,7 @@ def status(
     path: t.Annotated[Path, typer.Argument(help="Path to a workplan file.")],
     run_id: t.Annotated[
         str,
-        typer.Option(
-            help="The unique identifier of a specific workplan execution."
-        ),
+        typer.Option(help="The unique identifier of a specific workplan execution."),
     ] = "...",
 ) -> None:
     """Retrieve the current status of a workplan."""
