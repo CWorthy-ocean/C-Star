@@ -24,6 +24,7 @@ from cson_forge.config import (
     MachineConfig,
     _detect_system,
     _get_hostname,
+    _default_cluster_type,
     get_data_paths,
     load_machine_config,
     SYSTEM_LAYOUT_REGISTRY,
@@ -462,4 +463,50 @@ class TestCLI:
         assert exc_info.value.code == 2
         captured = capsys.readouterr()
         assert "error" in captured.err.lower() or "invalid choice" in captured.err.lower()
+
+
+class TestClusterType:
+    """Tests for ClusterType class and _default_cluster_type function."""
+    
+    def test_cluster_type_constants(self):
+        """Test that ClusterType constants are defined correctly."""
+        assert config_module.ClusterType.LOCAL == "LocalCluster"
+        assert config_module.ClusterType.SLURM == "SLURMCluster"
+        assert config_module.ClusterType.PBS == "PBSCluster"
+    
+    def test_default_cluster_type_macos(self):
+        """Test default cluster type for MacOS."""
+        result = _default_cluster_type("MacOS")
+        assert result == config_module.ClusterType.LOCAL
+    
+    def test_default_cluster_type_unknown(self):
+        """Test default cluster type for unknown system."""
+        result = _default_cluster_type("unknown")
+        assert result == config_module.ClusterType.LOCAL
+    
+    def test_default_cluster_type_anvil(self):
+        """Test default cluster type for RCAC Anvil."""
+        result = _default_cluster_type("RCAC_anvil")
+        assert result == config_module.ClusterType.SLURM
+    
+    def test_default_cluster_type_perlmutter(self):
+        """Test default cluster type for NERSC Perlmutter."""
+        result = _default_cluster_type("NERSC_perlmutter")
+        assert result == config_module.ClusterType.SLURM
+    
+    def test_default_cluster_type_unsupported(self):
+        """Test that unsupported systems raise NotImplementedError."""
+        with pytest.raises(NotImplementedError) as exc_info:
+            _default_cluster_type("unsupported_system")
+        assert "unsupported_system" in str(exc_info.value)
+    
+    def test_cluster_type_module_level(self):
+        """Test that config.cluster_type is set correctly."""
+        # The cluster_type should be set based on the detected system
+        assert hasattr(config_module, 'cluster_type')
+        assert config_module.cluster_type in [
+            config_module.ClusterType.LOCAL,
+            config_module.ClusterType.SLURM,
+            config_module.ClusterType.PBS
+        ]
 
