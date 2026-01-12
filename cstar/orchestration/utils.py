@@ -1,7 +1,6 @@
+import os
 import typing as t
-
-ENV_CSTAR_ORCH_OUTDIR: t.Literal["CSTAR_ORCH_OUTDIR"] = "CSTAR_ORCH_OUTDIR"
-"""Environment variable containing the output directory for the orchestrator."""
+from datetime import datetime, timezone
 
 ENV_CSTAR_ORCH_DELAYS: t.Literal["CSTAR_ORCH_DELAYS"] = "CSTAR_ORCH_DELAYS"
 """Environment variable containing configurable delay for the orchestrator."""
@@ -28,3 +27,24 @@ ENV_CSTAR_SLURM_MAX_WALLTIME: t.Literal["CSTAR_SLURM_MAX_WALLTIME"] = (
 
 ENV_CSTAR_SLURM_QUEUE: t.Literal["CSTAR_SLURM_QUEUE"] = "CSTAR_SLURM_QUEUE"
 """Environment variable containing the SLURM priority (queue) used by the SLURM scheduler."""
+
+
+def get_run_id(run_id: str = "") -> str:
+    """Retrieve the current run-id.
+
+    Parameters
+    ----------
+    run_id : str | None
+        If non-null, used to override a pre-configured run id.
+
+    Generate a new run-id if not found in the environment.
+
+    Returns
+    -------
+    str
+    """
+    if run_id:
+        return run_id
+
+    new_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return os.getenv(ENV_CSTAR_ORCH_RUNID, new_run_id)

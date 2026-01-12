@@ -23,9 +23,9 @@ from pydantic import (
 )
 from pytimeparse import parse
 
-from cstar.base.utils import slugify
+from cstar.base.utils import ENV_CSTAR_OUTDIR, slugify
 from cstar.execution.file_system import RomsFileSystemManager
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_OUTDIR, ENV_CSTAR_ORCH_RUNID
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -495,7 +495,7 @@ class Step(BaseModel):
         if output_dir_override:
             return Path(output_dir_override)
 
-        if od_system_override := os.getenv(ENV_CSTAR_ORCH_OUTDIR, ""):
+        if od_system_override := os.getenv(ENV_CSTAR_OUTDIR, ""):
             od_path = Path(od_system_override)
 
         if run_id := os.getenv(ENV_CSTAR_ORCH_RUNID, ""):
@@ -550,7 +550,7 @@ class ChildStep(Step):
         if output_dir_override:
             return Path(output_dir_override)
 
-        if od_system_override := os.getenv(ENV_CSTAR_ORCH_OUTDIR, ""):
+        if od_system_override := os.getenv(ENV_CSTAR_OUTDIR, ""):
             od_path = Path(od_system_override)
 
         if run_id := os.getenv(ENV_CSTAR_ORCH_RUNID, ""):

@@ -16,15 +16,13 @@ from cstar.orchestration.orchestration import (
     RunMode,
     check_environment,
     configure_environment,
-
-    get_run_id,
 )
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS, get_run_id
 
 WorkplanTemplate: t.TypeAlias = t.Literal["single_step", "linear", "fanout", "parallel"]
 log = get_logger(__name__)
