@@ -632,7 +632,13 @@ class TestRomsMarblInputDataGeneration:
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.model_name}_{sample_roms_marbl_input_data.grid_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
             
-            # Mock xarray.open_dataset since grid.save() is mocked and doesn't create a real file
+            # Make grid.save() actually create a file so Pydantic validation passes
+            # _generate_grid creates a Resource with location=out_path, which must exist
+            out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.touch()  # Create empty file so it exists for validation
+            
+            # Mock xarray.open_dataset since we're using a dummy file
             # _generate_grid reads the file back to check for xi_coarse dimension
             # Note: xarray is imported inside _generate_grid, so we patch it at the module level
             # xr.Dataset is already a context manager, so it works with 'with xr.open_dataset()'
