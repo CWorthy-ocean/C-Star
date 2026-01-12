@@ -13,6 +13,11 @@ sys.path.insert(0, str(project_root))
 import pytest
 
 
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
+
+
 @pytest.fixture
 def test_data_dir():
     """Path to test data directory."""
