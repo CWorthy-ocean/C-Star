@@ -220,6 +220,7 @@ class WorkplanTransformer:
         source: Path,
         target_dir: Path | None = None,
         suffix: str = "_trx",
+        extension: str | None = None,
     ) -> Path:
         """Generate a new path name derived from the source path.
 
@@ -251,6 +252,8 @@ class WorkplanTransformer:
 
         directory = target_dir if target_dir else source.parent
         filename = Path(source.name).with_stem(f"{source.stem}{suffix}")
+        if extension:
+            filename = filename.with_suffix(extension)
 
         return directory / filename
 

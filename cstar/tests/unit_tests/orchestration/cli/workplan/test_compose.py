@@ -16,6 +16,7 @@ from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.transforms import WorkplanTransformer
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ENV_CSTAR_ORCH_RUNID, ENV_CSTAR_ORCH_TRX_FREQ, ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_MAX_WALLTIME, ENV_CSTAR_SLURM_QUEUE, get_run_id
 
 
@@ -345,7 +346,7 @@ async def test_run_composed_dag(
         for step in wp.steps:
             step.application = Application.ROMS_MARBL.value
 
-        tweak_path = generated_wp_path.with_stem("tweaked")
+        tweak_path = WorkplanTransformer.derived_path(generated_wp_path, suffix="_composed")
         serialize(tweak_path, wp)
 
         wp_path = await build_and_run_dag(tweak_path, run_id, output_dir)

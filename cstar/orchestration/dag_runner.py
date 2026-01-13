@@ -181,8 +181,9 @@ async def prepare_workplan(
         wp = wp_orig
 
     # make a copy of the original and modified blueprint in the output directory
-    persist_orig = WorkplanTransformer.derived_path(wp_path, output_dir, "_orig")
-    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir)
+    persist_orig = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_original", ".bak")
+    persist_as = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_transformed")
+
     _ = await asyncio.gather(
         asyncio.to_thread(serialize, persist_orig, wp_orig),
         asyncio.to_thread(serialize, persist_as, wp),
@@ -214,7 +215,6 @@ async def build_and_run_dag(
     """
     run_id = get_run_id(run_id)
     output_dir = get_output_dir(output_dir)
-    # output_dir = output_dir / run_id
 
     configure_environment(output_dir, run_id)
     check_environment()
