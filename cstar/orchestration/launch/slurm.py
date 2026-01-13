@@ -179,7 +179,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         return os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or ""
 
-    @task(persist_result=True, cache_key_fn=cache_key_func)
+    # @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
     async def _submit(step: Step, dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
@@ -210,6 +210,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         script_path = step_fs.work_dir / "script.sh"
         output_file = step_fs.logs_dir / f"{job_name}.out"
+
+        if not script_path.parent.exists():
+            script_path.parent.mkdir(parents=True)
+
+        if not output_file.parent.exists():
+            output_file.parent.mkdir(parents=True)
+            output_file.write_text("ready\n")
 
         command = step_converter(step)
         job = create_scheduler_job(

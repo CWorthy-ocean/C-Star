@@ -1,16 +1,21 @@
 from pathlib import Path
 
 import os
+import uuid
 import pytest
 
 from unittest import mock
 
-from cstar.base.utils import ENV_CSTAR_OUTDIR
+from regex import T
+
+from cstar.base.utils import ENV_CSTAR_OUTDIR, get_output_dir
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
-from cstar.orchestration.dag_runner import build_and_run_dag
-from cstar.orchestration.models import RomsMarblBlueprint, Workplan
-from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID, ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_MAX_WALLTIME, ENV_CSTAR_SLURM_QUEUE
+from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
+from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
+from cstar.orchestration.orchestration import check_environment, configure_environment
+from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ENV_CSTAR_ORCH_RUNID, ENV_CSTAR_ORCH_TRX_FREQ, ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_MAX_WALLTIME, ENV_CSTAR_SLURM_QUEUE, get_run_id
 
 
 @pytest.mark.asyncio
@@ -175,7 +180,7 @@ async def test_build_and_run_dag_env(
     mock_process = mock.AsyncMock()
     mock_env = {
         ENV_CSTAR_OUTDIR: output_override_dir.as_posix(),
-        ENV_CSTAR_SLURM_ACCOUNT: "ees250129",
+        ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
         ENV_CSTAR_ORCH_RUNID: run_id,
@@ -202,12 +207,12 @@ async def test_build_and_run_dag_env(
 
 
 @pytest.mark.asyncio
-async def test_execute_composed_dag(
+async def test_prepare_composed_dag(
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
 ) -> None:
-    """Verify that the outputs are valid and execute correctly.
+    """Verify that the composed DAG is transformed by the DAG runner. 
 
     Parameters
     ----------
@@ -230,17 +235,105 @@ async def test_execute_composed_dag(
     output_override_dir = tmp_path / "overridden-output-dir"
     run_id = "my-run"
 
-    mock_process = mock.AsyncMock()
     mock_env = {
         ENV_CSTAR_OUTDIR: output_override_dir.as_posix(),
+        ENV_CSTAR_SLURM_ACCOUNT: "xyz",
+        ENV_CSTAR_SLURM_QUEUE: "wholenode",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
+        "CSTAR_FF_ORCH_TRANSFORM_AUTO": "1",
+        ENV_CSTAR_ORCH_TRX_FREQ: "monthly",
+    }
+
+    def _raise_ex(*args, **kwargs):
+        raise RuntimeError("on-purpose-fail")
+
+    with (
+        mock.patch("cstar.orchestration.orchestration.Planner.__init__", _raise_ex),
+        mock.patch.dict(os.environ, mock_env, clear=True),
+    ):
+        generated_wp_path = compose(wp_template_path.as_posix(),
+            bp_template_path.as_posix(),
+            output_dir.as_posix(),
+            run_id=run_id,
+            template=WorkplanTemplate[workplan_name.upper()],
+        )
+
+        run_id = get_run_id(run_id)
+        output_dir = get_output_dir(output_dir)
+
+        configure_environment(output_dir, run_id)
+        check_environment()
+        wp, wp_path = await prepare_workplan(generated_wp_path, output_dir)
+
+    wp = deserialize(wp_path, Workplan)
+    steps = list(wp.steps)
+
+    # default blueprint is 366 days; confirm 366 steps after tranform is applied.
+    num_timeslices = 12
+    assert len(steps) == num_timeslices
+
+    paths = set()
+    for step in steps:
+        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        paths.add(bp.runtime_params.output_dir)
+
+        assert bp.runtime_params.output_dir.exists()
+
+    # confirm that every step has a unique output path
+    assert len(steps) == num_timeslices
+
+@pytest.mark.asyncio
+async def test_run_composed_dag(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify that the composed DAG is transformed by the DAG runner. 
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    wp_templates_dir: Path
+        Fixture returning the path to the directory containing workplan template files
+    default_blueprint_path : str
+        Fixture returning the default blueprint path contained in template workplans
+    """
+    workplan_name: str = "single_step"
+    
+    wp_template_file = f"{workplan_name}.yaml"
+    wp_template_path = wp_templates_dir / wp_template_file
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    # unique_part = str(uuid.uuid4())
+    # output_dir = tmp_path / unique_part
+    output_dir = Path("/home/x-cmcbride/dag/jan12001")
+    # output_override_dir = tmp_path / "overridden-output-dir"
+    run_id = "test-run-011"
+
+    print(f"Composing workplan in: {tmp_path}")
+    mock_env = {
+        # ENV_CSTAR_OUTDIR: output_override_dir.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "ees250129",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
+        "CSTAR_FF_ORCH_TRANSFORM_AUTO": "1",
+        ENV_CSTAR_ORCH_TRX_FREQ: "monthly",
+        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
+    
+    mock_run_cmd = mock.Mock(return_code=0, stderr="", stdout="mock-run-output")
+
+    def no_delay():
+        while True:
+            yield 1
 
     with (
-        mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process),
-        mock.patch.dict(os.environ, mock_env, clear=True)
+        mock.patch.dict(os.environ, mock_env, clear=True),
+        mock.patch("cstar.base.utils._run_cmd", mock_run_cmd),
+        # mock.patch("cstar.orchestration.dag_runner.incremental_delays", no_delay),
     ):
         generated_wp_path = compose(wp_template_path.as_posix(),
             bp_template_path.as_posix(),
@@ -250,9 +343,20 @@ async def test_execute_composed_dag(
         )
 
         wp = deserialize(generated_wp_path, Workplan)
-        step = list(wp.steps)[0]
+        for step in wp.steps:
+            step.application = Application.ROMS_MARBL.value
+
+        tweak_path = generated_wp_path.with_stem("tweaked")
+        serialize(tweak_path, wp)
+
+        wp_path = await build_and_run_dag(tweak_path, run_id, output_dir)
+
+    wp = deserialize(wp_path, Workplan)
+    steps = list(wp.steps)
+
+    paths = set()
+    for step in steps:
         bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        paths.add(bp.runtime_params.output_dir)
 
-        await build_and_run_dag(generated_wp_path, run_id, output_dir)
-
-    assert bp.runtime_params.output_dir == output_dir
+        assert bp.runtime_params.output_dir.exists()

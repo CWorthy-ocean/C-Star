@@ -487,21 +487,20 @@ class Step(BaseModel):
         Path
             The path to the step working directory.
         """
+        if out_dir := os.getenv(ENV_CSTAR_OUTDIR, ""):
+            run_dir = os.environ[ENV_CSTAR_ORCH_RUNID]
+            step_dir = self.safe_name
+            return Path(out_dir) / run_dir / step_dir
+
         runtime_params = self.blueprint_overrides.get("runtime_params", {})
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
         od_path = Path(bp.runtime_params.output_dir)
 
         if output_dir_override:
-            return Path(output_dir_override)
+            od_path = Path(output_dir_override)
 
-        if od_system_override := os.getenv(ENV_CSTAR_OUTDIR, ""):
-            od_path = Path(od_system_override)
-
-        if run_id := os.getenv(ENV_CSTAR_ORCH_RUNID, ""):
-            od_path = od_path / run_id
-
-        return od_path / self.safe_name
+        return od_path
 
     def file_system(self, bp: RomsMarblBlueprint) -> RomsFileSystemManager:
         """The directories used by this step.
@@ -542,22 +541,21 @@ class ChildStep(Step):
         Path
             The path to the step working directory.
         """
+        if out_dir := os.getenv(ENV_CSTAR_OUTDIR, ""):
+            run_dir = os.environ[ENV_CSTAR_ORCH_RUNID]
+            parent_dir = slugify(self.parent)
+            step_dir = self.safe_name
+            return Path(out_dir) / run_dir / parent_dir / "tasks" / step_dir
+
         runtime_params = self.blueprint_overrides.get("runtime_params", {})
         output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
         od_path = Path(bp.runtime_params.output_dir)
 
         if output_dir_override:
-            return Path(output_dir_override)
+            od_path = Path(output_dir_override)
 
-        if od_system_override := os.getenv(ENV_CSTAR_OUTDIR, ""):
-            od_path = Path(od_system_override)
-
-        if run_id := os.getenv(ENV_CSTAR_ORCH_RUNID, ""):
-            od_path = od_path / run_id
-
-        return od_path / slugify(self.parent) / self.safe_name
-
+        return od_path
 
 class Workplan(BaseModel):
     """A collection of executable steps and the associated configuration to run them."""
@@ -568,7 +566,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: t.Sequence[Step] = Field(
+    steps: t.Sequence[Step | ChildStep] = Field(
         default_factory=list,
         min_length=1,
         frozen=True,

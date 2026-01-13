@@ -190,7 +190,7 @@ async def prepare_workplan(
 # @flow(log_prints=True)
 async def build_and_run_dag(
     wp_path: Path, run_id: str = "", output_dir: Path | None = None
-) -> None:
+) -> Path:
     """Execute the steps in the workplan.
 
     Parameters
@@ -201,9 +201,16 @@ async def build_and_run_dag(
         The run-id to be used by the orchestrator.
     output_dir : Path | None
         The path to the output directory.
+
+    Returns
+    -------
+    Path
+        The path to the workplan that was executed after any tranformations
+        were applied.
     """
     run_id = get_run_id(run_id)
     output_dir = get_output_dir(output_dir)
+    # output_dir = output_dir / run_id
 
     configure_environment(output_dir, run_id)
     check_environment()
@@ -220,3 +227,5 @@ async def build_and_run_dag(
 
     # monitor the scheduled tasks until they complete
     await process_plan(orchestrator, RunMode.Monitor)
+
+    return wp_path
