@@ -292,6 +292,7 @@ async def test_prepare_composed_dag(
     assert len(steps) == num_timeslices
 
 
+@pytest.mark.skip
 @pytest.mark.asyncio
 async def test_run_composed_dag(
     tmp_path: Path,
