@@ -50,7 +50,7 @@ async def test_compose_host_creation(
     bp_template_path = bp_templates_dir / bp_template_file
 
     mock_process = mock.AsyncMock()
-    output_dir = tmp_path / "output_override"
+    output_dir = tmp_path / "test-outputs"
     run_id = "my-run"
 
     with mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process):
@@ -60,6 +60,7 @@ async def test_compose_host_creation(
             output_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
+            run_plan="0",
         )
 
     wp = deserialize(generated_wp_path, Workplan)
@@ -74,11 +75,14 @@ async def test_compose_host_creation(
 
     assert bp.runtime_params.output_dir == output_dir
 
+    expected_bp = output_dir / run_id / "blueprint.yaml"
+    expected_host_wp = output_dir / run_id / f"{workplan_name}-host.yaml"
+
     # confirm a copy of the blueprint was made
-    assert (output_dir / "blueprint.yaml").exists()
+    assert expected_bp.exists()
 
     # confirm the workplan was copied and renamed
-    assert (output_dir / f"{workplan_name}-host.yaml").exists()
+    assert expected_host_wp.exists()
 
 
 @pytest.mark.parametrize("do_run", ["0", "1"])
