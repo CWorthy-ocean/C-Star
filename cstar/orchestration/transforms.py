@@ -505,7 +505,7 @@ class OverrideTransform(Transform):
         clone = step.model_copy(
             deep=True,
             update={
-                "blueprint": persist_as,
+                "blueprint_path": persist_as,
                 "blueprint_overrides": {},
             },
         )
