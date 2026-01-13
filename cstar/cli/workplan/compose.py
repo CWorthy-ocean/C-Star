@@ -25,22 +25,23 @@ class WorkplanTemplate(StrEnum):
 
 
 def create_host_workplan(
-    template: WorkplanTemplate, bp_path: Path, output_path: Path
+    template: WorkplanTemplate, bp_path: Path, output_path: Path, run_id: str,
 ) -> Path:
     """Replace the default blueprint path in a template and write the
     modified workplan in a new location.
     """
+    run_dir = output_path / run_id
     assets_dir = additional_files_dir()
     templates_dir = assets_dir / "templates"
     template_path = templates_dir / "wp" / f"{template}.yaml"
 
     bp_source_path = templates_dir / "bp/blueprint.yaml"
-    bp_target_path = output_path / bp_path.name
+    bp_target_path = run_dir / bp_path.name
 
     # update the workplan output directory found in the template
     bp_content = bp_source_path.read_text()
     bp_content = bp_content.replace(
-        BP_OUTDIR_DEFAULT, f"output_dir: {output_path.as_posix()}"
+        BP_OUTDIR_DEFAULT, f"output_dir: {"/path/to/be/overridden"}"
     )
     # write the modified blueprint to the working directory
     bp_target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +52,7 @@ def create_host_workplan(
     wp_content = wp_content.replace(BP_DEFAULT, bp_target_path.as_posix())
 
     # write the modified workplan to the working directory.
-    wp_path = output_path / f"{template}-host.yaml"
+    wp_path = run_dir / f"{template}-host.yaml"
     wp_path.parent.mkdir(parents=True, exist_ok=True)
     wp_path.write_text(wp_content)
 
@@ -118,11 +119,11 @@ def compose(
 
     if bp_path:
         # host the blueprint in a workplan template
-        wp_path = create_host_workplan(template, bp_path, output_path)
+        wp_path = create_host_workplan(template, bp_path, output_path, run_id)
         print(f"Running template workplan at `{wp_path}` with blueprint at `{bp_path}`")
     else:
         bp_path = Path(BP_DEFAULT)
-        wp_path = create_host_workplan(template, bp_path, output_path)
+        wp_path = create_host_workplan(template, bp_path, output_path, run_id)
         print(f"Running workplan at `{wp_path}` with sample blueprint at `{bp_path}`")
 
     if wp_path is None or not wp_path.exists():
