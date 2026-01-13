@@ -58,6 +58,17 @@ def create_host_workplan(
     return wp_path
 
 
+def _run(wp_path: Path, output_path: Path, run_id: str) -> None:
+    """Execute the DAG synchronously."""
+    try:
+        asyncio.run(build_and_run_dag(wp_path, run_id, output_path))
+        print(f"Completed execution of composed workplan: {wp_path}.")
+    except Exception as ex:
+        print(
+            f"Composed workplan run at `{wp_path}` has completed unsuccessfully: {ex}"
+        )
+
+
 @app.command()
 def compose(
     workplan: t.Annotated[
@@ -69,7 +80,7 @@ def compose(
     output_dir: t.Annotated[
         str,
         typer.Option(
-            help="Override the output directory specified in the environment with this path."
+            help="Override the output in the blueprint file(s) with this path."
         ),
     ] = DEFAULT_OUTPUT_DIR,
     run_id: t.Annotated[
@@ -80,10 +91,19 @@ def compose(
         WorkplanTemplate | None,
         typer.Option(help="Specify the workplan template to populate."),
     ] = None,
-) -> None:
+    run_plan: t.Annotated[
+        str,
+        typer.Option(help="Specify `1` to execute the workplan"),
+    ] = "0",
+) -> Path:
     """Execute a workplan composed with a user-supplied blueprint.
 
     Specify a previously used run_id option to re-start a prior run.
+
+    Returns
+    -------
+    Path
+        The path to the workplan that was generated.
     """
     output_path = Path(output_dir).expanduser().resolve()
     wp_path = Path(workplan) if workplan is not None else None
@@ -106,11 +126,10 @@ def compose(
     if wp_path is None or not wp_path.exists():
         raise ValueError("Workplan path is malformed.")
 
-    try:
-        asyncio.run(build_and_run_dag(wp_path, run_id, output_path))
-        print("Composed workplan run has completed.")
-    except Exception as ex:
-        print(f"Composed workplan run has completed unsuccessfully: {ex}")
+    if run_plan == "1":
+        _run(wp_path, output_path, run_id)
+
+    return wp_path
 
 
 if __name__ == "__main__":
