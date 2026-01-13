@@ -15,6 +15,7 @@ from pydantic import (
     HttpUrl,
     PlainSerializer,
     PositiveInt,
+    SerializeAsAny,
     StringConstraints,
     ValidationInfo,
     WithJsonSchema,
@@ -566,7 +567,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: t.Sequence[Step | ChildStep] = Field(
+    steps: t.Sequence[SerializeAsAny[Step]] = Field(
         default_factory=list,
         min_length=1,
         frozen=True,
