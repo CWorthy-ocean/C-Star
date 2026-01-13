@@ -318,13 +318,11 @@ async def test_run_composed_dag(
     bp_template_file = "blueprint.yaml"
     bp_template_path = bp_templates_dir / bp_template_file
 
-    # output_dir = tmp_path / run_id
     output_dir = Path("/home/x-cmcbride/dag/jan12001")
     run_id = f"test-run-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
     print(f"Composing workplan in: {tmp_path}")
     mock_env = {
-        # ENV_CSTAR_OUTDIR: output_override_dir.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "ees250129",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -342,7 +340,6 @@ async def test_run_composed_dag(
     with (
         mock.patch.dict(os.environ, mock_env, clear=True),
         mock.patch("cstar.base.utils._run_cmd", mock_run_cmd),
-        # mock.patch("cstar.orchestration.dag_runner.incremental_delays", no_delay),
     ):
         generated_wp_path = compose(
             wp_template_path.as_posix(),
