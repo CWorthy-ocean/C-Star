@@ -115,8 +115,6 @@ def compose(
         print("Run aborted. A workplan, blueprint, or template must be provided")
         sys.exit(1)
 
-    # output_path = output_path / run_id
-
     if bp_path:
         # host the blueprint in a workplan template
         wp_path = create_host_workplan(template, bp_path, output_path, run_id)

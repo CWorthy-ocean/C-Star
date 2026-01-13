@@ -298,18 +298,6 @@ class WorkplanTransformer:
         return self._transformed
 
 
-# def _bp_output_dir(
-#     blueprint: RomsMarblBlueprint,
-#     bp_out_overrides: dict[str, dict[str, str]],
-# ) -> Path:
-#     bp_out_root = blueprint.runtime_params.output_dir
-#     bp_out_override = bp_out_overrides.get("runtime_params", {}).get("output_dir", "")
-#     bp_root = Path(bp_out_override) if bp_out_override else Path(bp_out_root)  # type: ignore[union-attr]
-#     bp_outdir = bp_root  # / run_id
-
-#     return bp_outdir
-
-
 class RomsMarblTimeSplitter(Transform):
     """A step tranformation that splits a ROMS-MARBL simulation into
     multiple sub-steps based on the timespan covered by the simulation.
