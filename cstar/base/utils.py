@@ -27,7 +27,7 @@ DEFAULT_OUTPUT_DIR: t.Final[str] = "assets"
 ENV_CSTAR_HOME: t.Literal["CSTAR_HOME"] = "CSTAR_HOME"
 """Environment variable enabling the user to specify a C-star home directory."""
 
-ENV_CSTAR_OUTDIR: t.Literal["ENV_CSTAR_OUTDIR"] = "ENV_CSTAR_OUTDIR"
+ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
 """Environment variable containing a path to the root output directory."""
 
 
