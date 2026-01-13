@@ -263,7 +263,7 @@ async def test_prepare_composed_dag(
 
         configure_environment(output_dir, run_id)
         check_environment()
-        wp, wp_path = await prepare_workplan(generated_wp_path, output_dir)
+        wp, wp_path = await prepare_workplan(generated_wp_path, output_dir, run_id)
 
     wp = deserialize(wp_path, Workplan)
     steps = list(wp.steps)
@@ -307,11 +307,9 @@ async def test_run_composed_dag(
     bp_template_file = "blueprint.yaml"
     bp_template_path = bp_templates_dir / bp_template_file
 
-    # unique_part = str(uuid.uuid4())
-    # output_dir = tmp_path / unique_part
+    # output_dir = tmp_path / run_id
     output_dir = Path("/home/x-cmcbride/dag/jan12001")
-    # output_override_dir = tmp_path / "overridden-output-dir"
-    run_id = "test-run-011"
+    run_id = f"test-run-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
     print(f"Composing workplan in: {tmp_path}")
     mock_env = {

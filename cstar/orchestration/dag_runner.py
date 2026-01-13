@@ -151,6 +151,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
 async def prepare_workplan(
     wp_path: Path,
     output_dir: Path,
+    run_id: str,
 ) -> tuple[Workplan, Path]:
     """Load the workplan and apply any applicable transforms.
 
@@ -160,12 +161,15 @@ async def prepare_workplan(
         The path to the workplan to load.
     output_dir : Path
         The directory where workplan outputs will be written.
+    run_id : str
+        The unique ID for the current run.
 
     Returns
     -------
     Workplan
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    run_root_dir = output_dir / run_id
 
     if is_feature_enabled("ORCH_TRANSFORM_AUTO"):
         transformer = WorkplanTransformer(wp_orig, RomsMarblTimeSplitter())
@@ -214,7 +218,7 @@ async def build_and_run_dag(
 
     configure_environment(output_dir, run_id)
     check_environment()
-    wp, wp_path = await prepare_workplan(wp_path, output_dir)
+    wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
