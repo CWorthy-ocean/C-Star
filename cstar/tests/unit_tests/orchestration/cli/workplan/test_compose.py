@@ -1,23 +1,26 @@
+import os
 from datetime import datetime, timezone
 from pathlib import Path
-
-import os
-import uuid
-import pytest
-
 from unittest import mock
 
-from regex import T
+import pytest
 
 from cstar.base.utils import ENV_CSTAR_OUTDIR, get_output_dir
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
-from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import WorkplanTransformer
-from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ENV_CSTAR_ORCH_RUNID, ENV_CSTAR_ORCH_TRX_FREQ, ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_MAX_WALLTIME, ENV_CSTAR_SLURM_QUEUE, get_run_id
+from cstar.orchestration.utils import (
+    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
+    ENV_CSTAR_ORCH_RUNID,
+    ENV_CSTAR_ORCH_TRX_FREQ,
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+    get_run_id,
+)
 
 
 @pytest.mark.asyncio
@@ -39,7 +42,7 @@ async def test_compose_host_creation(
         Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "linear"
-    
+
     wp_template_file = f"{workplan_name}.yaml"
     wp_template_path = wp_templates_dir / wp_template_file
 
@@ -51,7 +54,8 @@ async def test_compose_host_creation(
     run_id = "my-run"
 
     with mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process):
-        generated_wp_path = compose(wp_template_path.as_posix(),
+        generated_wp_path = compose(
+            wp_template_path.as_posix(),
             bp_template_path.as_posix(),
             output_dir.as_posix(),
             run_id=run_id,
@@ -77,10 +81,7 @@ async def test_compose_host_creation(
     assert (output_dir / f"{workplan_name}-host.yaml").exists()
 
 
-@pytest.mark.parametrize(
-        "do_run",
-        ["0", "1"]
-)
+@pytest.mark.parametrize("do_run", ["0", "1"])
 @pytest.mark.asyncio
 async def test_compose_host_run_parameter(
     do_run: str,
@@ -120,9 +121,10 @@ async def test_compose_host_run_parameter(
     with (
         mock.patch("cstar.cli.workplan.compose._run", mock_run),
         mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process),
-        mock.patch.dict(os.environ, mock_env, clear=True)
+        mock.patch.dict(os.environ, mock_env, clear=True),
     ):
-        _ = compose(wp_template_path.as_posix(),
+        _ = compose(
+            wp_template_path.as_posix(),
             bp_template_path.as_posix(),
             output_dir.as_posix(),
             run_id=run_id,
@@ -136,13 +138,12 @@ async def test_compose_host_run_parameter(
         mock_run.assert_not_called()
 
 
-
 @pytest.mark.parametrize(
-        ("drop_var", "key"),
-        [
-            (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT"),
-            (ENV_CSTAR_SLURM_QUEUE, "QUEUE"),
-        ]
+    ("drop_var", "key"),
+    [
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT"),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE"),
+    ],
 )
 @pytest.mark.asyncio
 async def test_build_and_run_dag_env(
@@ -168,7 +169,7 @@ async def test_build_and_run_dag_env(
         Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "single_step"
-    
+
     wp_template_file = f"{workplan_name}.yaml"
     wp_template_path = wp_templates_dir / wp_template_file
 
@@ -196,7 +197,8 @@ async def test_build_and_run_dag_env(
         mock.patch.dict(os.environ, mock_env, clear=True),
         pytest.raises(ValueError) as ex,
     ):
-        generated_wp_path = compose(wp_template_path.as_posix(),
+        generated_wp_path = compose(
+            wp_template_path.as_posix(),
             bp_template_path.as_posix(),
             output_dir.as_posix(),
             run_id=run_id,
@@ -214,7 +216,7 @@ async def test_prepare_composed_dag(
     bp_templates_dir: Path,
     wp_templates_dir: Path,
 ) -> None:
-    """Verify that the composed DAG is transformed by the DAG runner. 
+    """Verify that the composed DAG is transformed by the DAG runner.
 
     Parameters
     ----------
@@ -226,7 +228,7 @@ async def test_prepare_composed_dag(
         Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "single_step"
-    
+
     wp_template_file = f"{workplan_name}.yaml"
     wp_template_path = wp_templates_dir / wp_template_file
 
@@ -253,7 +255,8 @@ async def test_prepare_composed_dag(
         mock.patch("cstar.orchestration.orchestration.Planner.__init__", _raise_ex),
         mock.patch.dict(os.environ, mock_env, clear=True),
     ):
-        generated_wp_path = compose(wp_template_path.as_posix(),
+        generated_wp_path = compose(
+            wp_template_path.as_posix(),
             bp_template_path.as_posix(),
             output_dir.as_posix(),
             run_id=run_id,
@@ -284,13 +287,14 @@ async def test_prepare_composed_dag(
     # confirm that every step has a unique output path
     assert len(steps) == num_timeslices
 
+
 @pytest.mark.asyncio
 async def test_run_composed_dag(
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
 ) -> None:
-    """Verify that the composed DAG is transformed by the DAG runner. 
+    """Verify that the composed DAG is transformed by the DAG runner.
 
     Parameters
     ----------
@@ -302,7 +306,7 @@ async def test_run_composed_dag(
         Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "single_step"
-    
+
     wp_template_file = f"{workplan_name}.yaml"
     wp_template_path = wp_templates_dir / wp_template_file
 
@@ -323,7 +327,7 @@ async def test_run_composed_dag(
         ENV_CSTAR_ORCH_TRX_FREQ: "monthly",
         ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
-    
+
     mock_run_cmd = mock.Mock(return_code=0, stderr="", stdout="mock-run-output")
 
     def no_delay():
@@ -335,7 +339,8 @@ async def test_run_composed_dag(
         mock.patch("cstar.base.utils._run_cmd", mock_run_cmd),
         # mock.patch("cstar.orchestration.dag_runner.incremental_delays", no_delay),
     ):
-        generated_wp_path = compose(wp_template_path.as_posix(),
+        generated_wp_path = compose(
+            wp_template_path.as_posix(),
             bp_template_path.as_posix(),
             output_dir.as_posix(),
             run_id=run_id,
@@ -346,7 +351,9 @@ async def test_run_composed_dag(
         for step in wp.steps:
             step.application = Application.ROMS_MARBL.value
 
-        tweak_path = WorkplanTransformer.derived_path(generated_wp_path, suffix="_composed")
+        tweak_path = WorkplanTransformer.derived_path(
+            generated_wp_path, suffix="_composed"
+        )
         serialize(tweak_path, wp)
 
         wp_path = await build_and_run_dag(tweak_path, run_id, output_dir)

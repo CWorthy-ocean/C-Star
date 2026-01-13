@@ -181,7 +181,9 @@ async def prepare_workplan(
         wp = wp_orig
 
     # make a copy of the original and modified blueprint in the output directory
-    persist_orig = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_original", ".bak")
+    persist_orig = WorkplanTransformer.derived_path(
+        wp_path, run_root_dir, "_original", ".bak"
+    )
     persist_as = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_transformed")
 
     _ = await asyncio.gather(

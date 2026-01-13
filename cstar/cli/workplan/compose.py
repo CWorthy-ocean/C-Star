@@ -25,7 +25,7 @@ class WorkplanTemplate(StrEnum):
 
 
 def create_host_workplan(
-    template: WorkplanTemplate, bp_path: Path, output_path: Path, run_id: str,
+    template: WorkplanTemplate, bp_path: Path, output_path: Path, run_id: str
 ) -> Path:
     """Replace the default blueprint path in a template and write the
     modified workplan in a new location.
@@ -41,7 +41,7 @@ def create_host_workplan(
     # update the workplan output directory found in the template
     bp_content = bp_source_path.read_text()
     bp_content = bp_content.replace(
-        BP_OUTDIR_DEFAULT, f"output_dir: {output_path.as_posix()}",
+        BP_OUTDIR_DEFAULT, f"output_dir: {output_path.as_posix()}"
     )
     # write the modified blueprint to the working directory
     bp_target_path.parent.mkdir(parents=True, exist_ok=True)

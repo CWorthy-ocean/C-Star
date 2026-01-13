@@ -291,7 +291,7 @@ class WorkplanTransformer:
 
         wp_attrs = self.original.model_dump()
         wp_attrs.update(
-            {"steps": steps, "name": f"{self.original.name} (transformed)"}
+            {"steps": steps, "name": f"{self.original.name} (transformed)"},
         )
 
         self._transformed = Workplan(**wp_attrs)
@@ -515,15 +515,11 @@ class OverrideTransform(Transform):
 
         serialize(persist_as, updated_bp)
         clone = step.model_copy(
-            # exclude={
-            #     "blueprint_overrides",
-            #     "blueprint_path",
-            # },
             deep=True,
             update={
                 "blueprint": persist_as,
                 "blueprint_overrides": {},
-            }
+            },
         )
         return [clone]
 
