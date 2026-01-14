@@ -20,7 +20,7 @@ def test_get_outdir(tmp_path: Path) -> None:
         output_dir = get_output_dir()
 
     od = (Path(DEFAULT_CSTAR_HOME) / DEFAULT_OUTPUT_DIR).expanduser().resolve()
-    assert output_dir.samefile(od)
+    assert str(output_dir) == str(od)
 
 
 def test_get_outdir_with_override(tmp_path: Path) -> None:
@@ -35,7 +35,7 @@ def test_get_outdir_with_override(tmp_path: Path) -> None:
     with mock.patch.dict(os.environ, {}, clear=True):
         output_dir = get_output_dir(tmp_path)
 
-    assert output_dir.samefile(tmp_path)
+    assert str(output_dir) == str(tmp_path)
 
 
 def test_get_outdir_with_env_var(tmp_path: Path) -> None:
@@ -48,12 +48,11 @@ def test_get_outdir_with_env_var(tmp_path: Path) -> None:
         Temporary directory for test outputs.
     """
     path = tmp_path / "other-place"
-    path.mkdir()  # samefile will return false if dir doesn't exist
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_OUTDIR: path.as_posix()}, clear=True):
         output_dir = get_output_dir(path)
 
-    assert output_dir.samefile(path)
+    assert str(output_dir) == str(path)
 
 
 def test_get_outdir_parameter_precedence(tmp_path: Path) -> None:
@@ -65,15 +64,12 @@ def test_get_outdir_parameter_precedence(tmp_path: Path) -> None:
         Temporary directory for test outputs.
     """
     path1 = tmp_path / "place1"
-    path1.mkdir()  # samefile will return false if dir doesn't exist
-
     path2 = tmp_path / "place2"
-    path2.mkdir()
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_OUTDIR: path1.as_posix()}, clear=True):
         output_dir = get_output_dir(path2)
 
-    assert output_dir.samefile(path2)
+    assert str(output_dir) == str(path2)
 
 
 def test_get_outdir_env_precedence(tmp_path: Path) -> None:
@@ -85,12 +81,8 @@ def test_get_outdir_env_precedence(tmp_path: Path) -> None:
         Temporary directory for test outputs.
     """
     path1 = tmp_path / "place1"
-    path1.mkdir()  # samefile will return false if dir doesn't exist
-
-    path2 = tmp_path / "place2"
-    path2.mkdir()
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_OUTDIR: path1.as_posix()}, clear=True):
         output_dir = get_output_dir()
 
-    assert output_dir.samefile(path1)
+    assert str(output_dir) == str(path1)
