@@ -558,6 +558,7 @@ class ChildStep(Step):
 
         return od_path
 
+
 class Workplan(BaseModel):
     """A collection of executable steps and the associated configuration to run them."""
 

@@ -179,7 +179,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         return os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or ""
 
-    # @task(persist_result=True, cache_key_fn=cache_key_func)
+    @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
     async def _submit(step: Step, dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
