@@ -11,14 +11,21 @@ from typing import Final, override
 
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger
+from cstar.base.utils import slugify
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+)
 from cstar.roms import ROMSSimulation
 
 DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
 JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
 LOGS_DIRECTORY: Final[str] = "logs"
+DEFAULT_SLURM_MAX_WALLTIME: Final[str] = "48:00:00"
 
 
 def _generate_job_name() -> str:
@@ -49,8 +56,11 @@ class BlueprintRequest:
 
     blueprint_uri: str
     """The path to the blueprint."""
-    stages: tuple[SimulationStages, ...] = dc.field(default=())
-    """The simulation stages to execute."""
+    stages: list[SimulationStages] = dc.field(default_factory=list)
+    """The simulation stages to execute.
+
+    Defaults to all stages.
+    """
 
 
 @dc.dataclass(frozen=True)
@@ -74,8 +84,6 @@ class SimulationRunner(Service):
     """The URI of the blueprint to run."""
     _output_root: Final[pathlib.Path]
     """The root directory where simulation outputs will be written."""
-    _output_dir: Final[pathlib.Path]
-    """A unique directory for this simulation run to write outputs."""
     _simulation: Final[ROMSSimulation]
     """The simulation instance created from the blueprint."""
     _stages: Final[tuple[SimulationStages, ...]]
@@ -109,12 +117,9 @@ class SimulationRunner(Service):
 
         self._blueprint_uri = request.blueprint_uri
 
-        self._simulation: ROMSSimulation = ROMSSimulation.from_blueprint(
-            self._blueprint_uri
-        )
-
+        self._simulation = ROMSSimulation.from_blueprint(self._blueprint_uri)
+        self._simulation.name = slugify(self._simulation.name)
         self._output_root = self._simulation.directory.expanduser()
-        self._output_dir = self._get_unique_path(self._output_root)
         self._stages = tuple(request.stages)
 
         roms_root = os.environ.get("ROMS_ROOT", None)
@@ -138,47 +143,6 @@ class SimulationRunner(Service):
         """
         current_time = datetime.now(timezone.utc)
         return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
-
-    def _prepare_file_system(self) -> None:
-        """Ensure fresh directories exist for the simulation outputs.
-
-        Removes any pre-existing directories and creates empty directories to avoid
-        collisions.
-
-        Raises
-        ------
-        ValueError
-            If the output directory exists and contains
-        """
-        # ensure that log files don't cause startup to fail.
-        outputs = next(
-            (p for p in self._output_root.glob("*") if LOGS_DIRECTORY not in str(p)),
-            None,
-        )
-
-        if self._output_dir.exists() and outputs:
-            msg = f"Output directory {self._output_root} is not empty."
-            raise ValueError(msg)
-
-        # this kept tripping up my runs because it is checking the "default" path
-        # that is derived from package_root, rather than the path set by the user.
-        # probably we should just remove this and handle it elsewhere (as noted in
-        # previous PR, this whole method maybe belongs elsewhere), but for the moment,
-        # it's commented out til we think on it.
-
-        # leftover external code folder causes non-empty repo errors; remove.
-        # externals_path = cstar_sysmgr.environment.package_root / "externals"
-        # if externals_path.exists():
-        #     msg = f"Removing existing externals dir: {externals_path}"
-        #     self.log.debug(msg)
-        #     shutil.rmtree(externals_path)
-        # externals_path.mkdir(parents=True, exist_ok=False)
-
-        # create a clean location to write outputs.
-        if not self._output_dir.exists():
-            msg = f"Creating clean output dir: {self._output_dir}"
-            self.log.debug(msg)
-            self._output_dir.mkdir(parents=True, exist_ok=True)
 
     def _log_disposition(self, treat_as_failure: bool = False) -> None:
         """Log the status of the simulation at shutdown time."""
@@ -212,8 +176,6 @@ class SimulationRunner(Service):
         if self._simulation is None:
             msg = f"Unable to load the blueprint: {self._blueprint_uri}"
             raise BlueprintError(msg)
-
-        self._prepare_file_system()
 
         try:
             if SimulationStages.SETUP in self._stages:
@@ -280,11 +242,10 @@ class SimulationRunner(Service):
             self._log_disposition(treat_as_failure=treat_as_failure)
 
     @override
-    def _on_iteration(self) -> None:
+    async def _on_iteration(self) -> None:
         """Execute the c-star simulation."""
         try:
             if not self._handler:
-                # if os.environ.get("SLURM_JOB_ID", True):
                 run_params = {
                     "account_key": self._job_config.account_id,
                     "walltime": self._job_config.walltime,
@@ -297,7 +258,7 @@ class SimulationRunner(Service):
                 else:
                     self.log.debug("Skipping simulation run")
             else:
-                self._handler.updates(1.0)
+                await self._handler.updates(seconds=1.0)
                 self._send_update_to_hc({"status": str(self._handler.status)})
         except Exception:
             self.log.exception("An error occurred while running the simulation")
@@ -317,7 +278,6 @@ class SimulationRunner(Service):
             ExecutionStatus.COMPLETED,
             ExecutionStatus.CANCELLED,
             ExecutionStatus.FAILED,
-            ExecutionStatus.UNKNOWN,
         ]
 
     @override
@@ -385,7 +345,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-g",
         "--stage",
-        default=tuple(x for x in SimulationStages),
+        choices=[x.value for x in SimulationStages],
         type=str,
         required=False,
         action="append",
@@ -395,65 +355,72 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_service_config(args: argparse.Namespace) -> ServiceConfiguration:
+def get_service_config(log_level: int | str) -> ServiceConfiguration:
     """Create a ServiceConfiguration instance using CLI arguments.
 
     Parameters
     ----------
-    args: argparse.Namespace
-        The arguments parsed from the command line, including log level and
+    log_level : int or str
+        The log level to be used by the worker
 
     Returns
     -------
     ServiceConfiguration
-        The configuration for a service.
     """
+    level = (
+        logging.getLevelNamesMapping()[log_level]
+        if isinstance(log_level, str)
+        else log_level
+    )
+
     return ServiceConfiguration(
         as_service=True,
         loop_delay=5,
-        health_check_frequency=10,
-        log_level=logging.getLevelNamesMapping()[args.log_level],
+        health_check_frequency=None,
+        log_level=level,
         health_check_log_threshold=10,
         name="SimulationRunner",
     )
 
 
-def _format_date(date_str: str) -> datetime:
-    """Convert a date string to a datetime object using the default format.
-
-    Parameters
-    ----------
-    date_str : str
-        The date string to convert.
-
-    Returns
-    -------
-    datetime
-        The converted datetime.
-    """
-    return datetime.strptime(  # noqa: DTZ007
-        date_str,
-        DATE_FORMAT,
-    )
-
-
-def get_request(args: argparse.Namespace) -> BlueprintRequest:
+def get_request(
+    blueprint_uri: str, stages: list[SimulationStages] | None = None
+) -> BlueprintRequest:
     """Create a BlueprintRequest instance from CLI arguments.
 
     Parameters
     ----------
-    args : argparse.Namespace
-        The arguments parsed from the command line.
+    blueprint_uri : str
+        The path to a blueprint file
+    stages : list[SimulationStages] | None
+        The set of stages to be executed. Defaults to all stages, if empty or None.
 
     Returns
     -------
     BlueprintRequest
         A request configured to run a c-star simulation via a blueprint.
     """
+    if not stages:
+        stages = list(SimulationStages)
+
     return BlueprintRequest(
-        blueprint_uri=args.blueprint_uri,
-        stages=args.stages,
+        blueprint_uri=blueprint_uri,
+        stages=stages,
     )
+
+
+def get_job_config() -> JobConfig:
+    """Create and configure a `JobConfig` instance from environment variables.
+
+    Returns
+    -------
+    JobConfig
+    """
+    account_id = os.getenv(ENV_CSTAR_SLURM_ACCOUNT, "")
+    walltime = os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME, DEFAULT_SLURM_MAX_WALLTIME)
+    priority = os.environ.get(ENV_CSTAR_SLURM_QUEUE, "")
+
+    return JobConfig(account_id, walltime, priority)
 
 
 def configure_environment(log: logging.Logger) -> None:
@@ -468,48 +435,35 @@ def configure_environment(log: logging.Logger) -> None:
     -------
     None
     """
-    # ensure no human interaction is required
+    # ensure git works on distributed file-system, e.g. lustre
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
-
-    # TODO: re-run tests now that prebuilt is gone and rebase on develop is in.
-    # is_roms_prebuilt = os.environ.get("CSTAR_ROMS_PREBUILT", None) == "1"
-    # is_marbl_prebuilt = os.environ.get("CSTAR_MARBL_PREBUILT", None) == "1"
-
-    # if is_roms_prebuilt:
-    #     ext_root = os.environ.get("ROMS_ROOT", None)
-    #     log.debug("Using prebuilt ROMS at: %s", ext_root)
-
-    # if is_marbl_prebuilt:
-    #     ext_root = os.environ.get("MARBL_ROOT", None)
-    #     log.debug("Using prebuilt MARBL at: %s", ext_root)
+    log.debug("Git discovery configured.")
 
 
-async def main(raw_args: list[str]) -> int:
-    """Run the c-star worker script.
+async def execute_runner(
+    job_cfg: JobConfig, service_cfg: ServiceConfiguration, request: BlueprintRequest
+) -> int:
+    """Execute a blueprint with a SimulationRunner.
 
-    Triggers the `Service` lifecycle of a Worker and runs a blueprint based on
-    any supplied parameters.
-
-    Returns
-    -------
-    int
-        The exit code of the worker script. Returns 0 on success, 1 on failure.
+    Parameters
+    ----------
+    job_cfg : JobConfig
+        Configuration applied to the scheduler
+    service_cfg : ServiceConfiguration
+        Configuration applied to the service
+    request : BlueprintRequest
+        A request specifying the blueprint to be executed
     """
-    try:
-        parser = create_parser()
-        args = parser.parse_args(raw_args)
-    except SystemExit:
-        return 1
-    else:
-        service_cfg = get_service_config(args)
-        blueprint_req = get_request(args)
-        job_cfg = JobConfig()  # use default HPC config
-
     log = get_logger(__name__, level=service_cfg.log_level)
+
+    log.debug(f"Job config: {job_cfg}")
+    log.debug(f"Simulation runner service config: {service_cfg}")
+    log.debug(f"Simulation request: {request}")
 
     try:
         configure_environment(log)
-        worker = SimulationRunner(blueprint_req, service_cfg, job_cfg)
+
+        worker = SimulationRunner(request, service_cfg, job_cfg)
         await worker.execute()
     except CstarError as ex:
         log.exception("An error occurred during the simulation", exc_info=ex)
@@ -523,6 +477,30 @@ async def main(raw_args: list[str]) -> int:
     return 0
 
 
+def main() -> int:
+    """Parse CLI arguments and run a c-star worker.
+
+    Triggers the `Service` lifecycle of a `Worker` and runs a blueprint based on
+    any supplied parameters.
+
+    Returns
+    -------
+    int
+        The exit code of the worker script. Returns 0 on success, 1 on failure.
+    """
+    try:
+        parser = create_parser()
+        args = parser.parse_args()
+    except SystemExit:
+        return 1
+
+    job_cfg = get_job_config()
+    service_cfg = get_service_config(args.log_level)
+    request = get_request(args.blueprint_uri, args.stages)
+
+    return asyncio.run(execute_runner(job_cfg, service_cfg, request))
+
+
 if __name__ == "__main__":
-    rc = asyncio.run(main(sys.argv[1:]))
+    rc = main()
     sys.exit(rc)

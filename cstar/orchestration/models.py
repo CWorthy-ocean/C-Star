@@ -1,4 +1,5 @@
 import itertools
+import os
 import typing as t
 from abc import ABC
 from copy import deepcopy
@@ -14,6 +15,7 @@ from pydantic import (
     HttpUrl,
     PlainSerializer,
     PositiveInt,
+    SerializeAsAny,
     StringConstraints,
     ValidationInfo,
     WithJsonSchema,
@@ -22,13 +24,32 @@ from pydantic import (
 )
 from pytimeparse import parse
 
+from cstar.base.utils import ENV_CSTAR_OUTDIR, slugify
+from cstar.execution.file_system import RomsFileSystemManager
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
+
 RequiredString: t.TypeAlias = t.Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
 """A non-empty string with no leading or trailing whitespace."""
 
-KeyValueStore: t.TypeAlias = dict[str, str | float | list[str] | list[float]]
+KeyValueStore: t.TypeAlias = dict[
+    str,
+    str
+    | float
+    | list[str]
+    | list[float]
+    | dict[
+        str,
+        str
+        | float
+        | datetime
+        | list[str]
+        | list[dict[str, str | float]]
+        | dict[str, str | float | list[str]],
+    ],
+]
 """A collection of user-defined key-value pairs."""
 
 TargetDirectoryPath = t.Annotated[
@@ -47,7 +68,7 @@ class ConfiguredBaseModel(BaseModel):
 
 
 class Resource(ConfiguredBaseModel):
-    location: FilePath | HttpUrl
+    location: FilePath | HttpUrl | str
     """Location of the file to retrieve."""
 
     partitioned: bool = Field(default=False, init=False)
@@ -406,7 +427,7 @@ class Step(BaseModel):
     application: RequiredString
     """The user-friendly name of the application executed in the step."""
 
-    blueprint: FilePath | str
+    blueprint_path: FilePath | str = Field(alias="blueprint")
     """The blueprint that will be executed in this step."""
 
     depends_on: list[RequiredString] = Field(
@@ -439,23 +460,92 @@ class Step(BaseModel):
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
 
-    # @field_validator("blueprint", mode="after")
-    # @classmethod
-    # def _check_blueprint(cls, value: FilePath | str) -> Path:
-    #     """Convert strings into paths.
+    @property
+    def safe_name(self) -> str:
+        """Return a URL-safe version of the step name.
 
-    #     Parameters
-    #     ----------
-    #     value : FilePath or str
-    #         The value received from the input.
+        Returns
+        -------
+        str
+        """
+        return slugify(self.name)
 
-    #     Returns
-    #     -------
-    #     Path
-    #         The input value converted to a pathlib.Path
+    def working_dir(self, bp: RomsMarblBlueprint) -> Path:
+        """The step-relative directory for writing outputs.
 
-    #     """
-    #     return Path(value)
+        Precedence:
+        1. Overrides provided via a workplan always overwrite blueprint-supplied paths.
+        2. The system may override with a path from the environment variables.
+        3. The output path from the blueprint runtime parameters is used.
+
+        Parameters
+        ----------
+        bp : RomsMarblBlueprint
+            The blueprint instance loaded by the step
+
+        Returns
+        -------
+        Path
+            The path to the step working directory.
+        """
+        if out_dir := os.getenv(ENV_CSTAR_OUTDIR, ""):
+            run_dir = os.environ[ENV_CSTAR_ORCH_RUNID]
+            step_dir = self.safe_name
+            return Path(out_dir) / run_dir / step_dir
+
+        runtime_params = self.blueprint_overrides.get("runtime_params", {})
+        output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
+
+        od_path = Path(bp.runtime_params.output_dir)
+
+        if output_dir_override:
+            od_path = Path(output_dir_override)
+
+        return od_path
+
+    def file_system(self, bp: RomsMarblBlueprint) -> RomsFileSystemManager:
+        """The directories used by this step.
+
+        Parameters
+        ----------
+        bp : RomsMarblBlueprint
+            The blueprint instance loaded by the step
+
+        Returns
+        -------
+        RomsJobFileSystem
+        """
+        return RomsFileSystemManager(self.working_dir(bp))
+
+
+class ChildStep(Step):
+    """An step spawned as a subtask of another step."""
+
+    parent: str = Field(frozen=True)
+    """The name of the parent step if this step was created via splitting."""
+
+    work_dir: Path
+    """The path to the working directory of the step."""
+
+    def working_dir(self, bp: RomsMarblBlueprint) -> Path:
+        """The step-relative directory for writing outputs.
+
+        Precedence:
+        1. Overrides provided via a workplan always overwrite blueprint-supplied paths.
+        2. The system may override with a path from the environment variables.
+        3. The output path from the blueprint runtime parameters is used.
+
+        Parameters
+        ----------
+        bp : RomsMarblBlueprint
+            The blueprint instance loaded by the step
+
+        Returns
+        -------
+        Path
+            The path to the step working directory.
+        """
+        return self.work_dir
 
 
 class Workplan(BaseModel):
@@ -467,7 +557,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: t.Sequence[Step] = Field(
+    steps: t.Sequence[SerializeAsAny[Step]] = Field(
         default_factory=list,
         min_length=1,
         frozen=True,
@@ -540,7 +630,6 @@ class Workplan(BaseModel):
         """
         name_counter = t.Counter(step.name for step in value)
         most_common = name_counter.most_common(1)
-        step_name, step_count = most_common[0]
         step_name, step_count = most_common[0] if most_common else ("", 0)
 
         if step_count > 1:

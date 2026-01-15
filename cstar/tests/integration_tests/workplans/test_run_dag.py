@@ -1,6 +1,5 @@
 import os
 import subprocess
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -85,34 +84,47 @@ def test_dep_keys(tmp_path: Path) -> None:
     "workplan_name",
     ["fanout", "linear", "parallel", "single_step"],
 )
-async def test_build_and_run_local(tmp_path: Path, workplan_name: str) -> None:
-    """Test the dag runner with a local launcher."""
+async def test_build_and_run_local(
+    tmp_path: Path,
+    workplan_name: str,
+    wp_templates_dir: Path,
+    bp_templates_dir: Path,
+    default_blueprint_path: str,
+) -> None:
+    """Test the dag runner with a local launcher.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    workplan_name : str
+        The name of a workplan template file to use during workplan creation
+    wp_templates_dir : Path
+        Fixture returning the path to the directory containing workplan template files
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files
+    default_blueprint_path : str
+        Fixture returning the default blueprint path contained in template workplans
+    """
     # avoid running sims during tests
     os.environ["CSTAR_CMD_CONVERTER_OVERRIDE"] = "sleep"
 
-    cstar_dir = Path(__file__).parent.parent.parent.parent
     template_file = f"{workplan_name}.yaml"
-    templates_dir = cstar_dir / "additional_files/templates"
-    template_path = templates_dir / "wp" / template_file
+    template_path = wp_templates_dir / template_file
 
-    bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
     bp_path = tmp_path / "blueprint.yaml"
-    bp_tpl_path = templates_dir / "bp" / "blueprint.yaml"
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
     bp_path.write_text(bp_tpl_path.read_text())
 
     wp_content = template_path.read_text()
-    wp_content = wp_content.replace(bp_default, bp_path.as_posix())
+    wp_content = wp_content.replace(default_blueprint_path, bp_path.as_posix())
 
     wp_path = tmp_path / template_file
     wp_path.write_text(wp_content)
 
     # create unique run name only once per hour, cache otherwise.
-    now = datetime.now()
-    yyyymmdd = now.strftime("%Y-%m-%d %H")
-
-    my_run_name = f"{yyyymmdd}_{workplan_name}"
-    os.environ["CSTAR_RUNID"] = my_run_name
-    await build_and_run_dag(wp_path)  # , LocalLauncher())
+    my_run_name = f"{tmp_path.stem}_{workplan_name}"
+    await build_and_run_dag(wp_path, my_run_name, tmp_path)
 
 
 # @pytest.mark.skipif(not slurm())
@@ -122,31 +134,44 @@ async def test_build_and_run_local(tmp_path: Path, workplan_name: str) -> None:
     "workplan_name",
     ["fanout", "linear", "parallel", "single_step"],
 )
-async def test_build_and_run(tmp_path: Path, workplan_name: str) -> None:
-    """Test the dag runner with a SlurmLauncher."""
+async def test_build_and_run(
+    tmp_path: Path,
+    workplan_name: str,
+    wp_templates_dir: Path,
+    bp_templates_dir: Path,
+    default_blueprint_path: str,
+) -> None:
+    """Test the dag runner with a SlurmLauncher.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    workplan_name : str
+        The name of a workplan template file to use during workplan creation
+    wp_templates_dir : Path
+        Fixture returning the path to the directory containing workplan template files
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files
+    default_blueprint_path : str
+        Fixture returning the default blueprint path contained in template workplans
+    """
     # avoid running sims during tests
     os.environ["CSTAR_CMD_CONVERTER_OVERRIDE"] = "sleep"
 
-    cstar_dir = Path(__file__).parent.parent.parent.parent
     template_file = f"{workplan_name}.yaml"
-    templates_dir = cstar_dir / "additional_files/templates"
-    template_path = templates_dir / "wp" / template_file
+    template_path = wp_templates_dir / template_file
 
-    bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
     bp_path = tmp_path / "blueprint.yaml"
-    bp_tpl_path = templates_dir / "bp" / "blueprint.yaml"
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
     bp_path.write_text(bp_tpl_path.read_text())
 
     wp_content = template_path.read_text()
-    wp_content = wp_content.replace(bp_default, bp_path.as_posix())
+    wp_content = wp_content.replace(default_blueprint_path, bp_path.as_posix())
 
     wp_path = tmp_path / template_file
     wp_path.write_text(wp_content)
 
     # create unique run name only once per hour, cache otherwise.
-    now = datetime.now()
-    yyyymmdd = now.strftime("%Y-%m-%d %H")
-
-    my_run_name = f"{yyyymmdd}_{workplan_name}"
-    os.environ["CSTAR_RUNID"] = my_run_name
-    await build_and_run_dag(wp_path)
+    my_run_name = f"{tmp_path.stem}_{workplan_name}"
+    await build_and_run_dag(wp_path, my_run_name, tmp_path)

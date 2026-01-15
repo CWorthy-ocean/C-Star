@@ -97,7 +97,7 @@ class Service(ABC, LoggingMixin):
         return self.__class__.__name__
 
     @abstractmethod
-    def _on_iteration(self) -> None:
+    async def _on_iteration(self) -> None:
         """Perform the main logic of the service event loop.
 
         It is executed continuously until shutdown conditions are satisfied.
@@ -399,7 +399,7 @@ class Service(ABC, LoggingMixin):
 
         while running:
             try:
-                self._on_iteration()
+                await self._on_iteration()
                 self._on_iteration_complete()
             except Exception:
                 running = False

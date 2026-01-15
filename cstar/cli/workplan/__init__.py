@@ -2,6 +2,7 @@ import typer
 
 from cstar.base.feature import is_feature_enabled
 from cstar.cli.workplan.check import app as app_check
+from cstar.cli.workplan.compose import app as app_compose
 from cstar.cli.workplan.generate import app as app_gen
 from cstar.cli.workplan.plan import app as app_plan
 from cstar.cli.workplan.run import app as app_run
@@ -21,3 +22,6 @@ app.add_typer(app_run)
 
 if is_feature_enabled("CLI_WORKPLAN_STATUS"):
     app.add_typer(app_status)
+
+if is_feature_enabled("CLI_WORKPLAN_COMPOSE"):
+    app.add_typer(app_compose)

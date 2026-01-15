@@ -1,3 +1,4 @@
+import asyncio
 import time
 from abc import ABC, abstractmethod
 from enum import Enum, auto
@@ -108,7 +109,7 @@ class ExecutionHandler(ABC, LoggingMixin):
         """
         pass
 
-    def updates(self, seconds: float = 10) -> None:
+    async def updates(self, seconds: float = 10) -> None:
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
@@ -153,24 +154,31 @@ class ExecutionHandler(ABC, LoggingMixin):
             msg = "This job is still pending. Updates will be available after it starts running."
             while seconds == 0 or (time.time() - start_time < seconds):
                 self.log.info(msg)
-                time.sleep(STATUS_RECHECK_SECONDS)
+                await asyncio.sleep(STATUS_RECHECK_SECONDS)
                 _status = self.status
                 if _status != ExecutionStatus.PENDING:
                     msg = f"Job status is now {_status}"
                     self.log.info(msg)
                     break
 
+            if not self.output_file.exists():
+                msg = f"Log `{self.output_file}` does not exist. Skipping update check."
+                self.log.info(msg)
+                return
+
         try:
             with open(self.output_file) as f:
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):
-                    line = f.readline()
+                    if self.output_file.exists():
+                        line = f.readline()
+
                     if self.status != ExecutionStatus.RUNNING:
                         return
                     elif line:
                         self.log.info(line)
                     else:
-                        time.sleep(0.1)  # 100ms delay between updates
+                        await asyncio.sleep(0.1)  # 100ms delay between updates
         except KeyboardInterrupt:
             self.log.info("Live status updates stopped by user.")

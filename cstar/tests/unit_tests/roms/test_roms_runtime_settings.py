@@ -1,4 +1,5 @@
 import shutil
+import textwrap
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TypeVar
@@ -8,11 +9,11 @@ import pytest
 from pydantic import ValidationError
 
 import cstar.roms.runtime_settings as rrs
-from cstar.base.utils import _replace_text_in_file
-from cstar.roms import ROMSRuntimeSettings
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _replace_text_in_file
 from cstar.roms.runtime_settings import (
     Forcing,
     InitialConditions,
+    ROMSRuntimeSettings,
     ROMSRuntimeSettingsSection,
     SingleEntryROMSRuntimeSettingsSection,
 )
@@ -685,6 +686,36 @@ class TestROMSRuntimeSettings:
         assert tested_settings.tracer_diff2 == expected_settings.tracer_diff2
         assert tested_settings.vertical_mixing == expected_settings.vertical_mixing
 
+    @pytest.mark.parametrize(
+        "output_root_name_input",
+        [
+            DEFAULT_OUTPUT_ROOT_NAME,
+            "another_name",
+            "a_third_name",
+        ],
+    )
+    def test_fixed_output_root_name(
+        self, tmp_path: Path, output_root_name_input: str
+    ) -> None:
+        """Verify that ROMSRuntimeSettings always has a fixed output_root_name.
+
+        This confirms that the pydantic model overrides the value input from the *.in file.
+        """
+        roms_in_content = textwrap.dedent(f"""\
+            title: \n\ttest
+                time_stepping:\n\t1 1 1 1
+            bottom_drag:\n\t 1 1 1
+            initial: confirm-the-labels-are-ignored\n\t 0
+                forcing: confirm-whitespace-preceding-key-is-ignored\n\aaa/x.nc
+            output_root_name:\n\t{output_root_name_input}
+            """)
+        roms_in_file = tmp_path / "roms.in"
+        roms_in_file.write_text(roms_in_content)
+
+        settings = ROMSRuntimeSettings.from_file(roms_in_file)
+
+        assert str(settings.output_root_name) == DEFAULT_OUTPUT_ROOT_NAME
+
 
 class TestStrAndRepr:
     """Test that the __str__ and __repr__ functions of the ROMSRuntimeSettings class
@@ -707,7 +738,7 @@ class TestStrAndRepr:
         expected_str = """ROMSRuntimeSettings
 -------------------
 Title (`ROMSRuntimeSettings.title`): Example runtime settings
-Output filename prefix (`ROMSRuntimeSettings.output_root_name`): ROMS_test
+Output filename prefix (`ROMSRuntimeSettings.output_root_name`): output
 Time stepping (`ROMSRuntimeSettings.time_stepping`):
 - Number of steps (`ntimes`) = 360,
 - Time step (`dt`, sec) = 60,
@@ -770,7 +801,7 @@ Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
         -------
         - repr(romsruntimesettings) matches an expected reference string
         """
-        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_list_fname'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
+        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='output', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_list_fname'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
         assert expected_repr == repr(romsruntimesettings), (
             f"expected \n{expected_repr}\n, got\n{repr(romsruntimesettings)}"
         )

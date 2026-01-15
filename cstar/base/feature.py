@@ -1,10 +1,15 @@
 import os
 from typing import Literal
 
-FLAG_DEVELOPER_MODE: Literal["CSTAR_FF_DEVELOPER_MODE"] = "CSTAR_FF_DEVELOPER_MODE"
-FLAG_PREFIX: Literal["CSTAR_FF_"] = "CSTAR_FF_"
+FF_DEVELOPER_MODE: Literal["CSTAR_FF_DEVELOPER_MODE"] = "CSTAR_FF_DEVELOPER_MODE"
+"""Feature flag enabling developer mode (enabling all development features)."""
+
+FF_PREFIX: Literal["CSTAR_FF_"] = "CSTAR_FF_"
+"""Conventional prefix of environment variables for feature flags."""
 FF_ON: Literal["1"] = "1"
+"""Value indicating a feature flag is enabled."""
 FF_OFF: Literal["0"] = "0"
+"""Value indicating a feature flag is disabled."""
 
 
 def is_feature_enabled(flag: str) -> bool:
@@ -21,12 +26,12 @@ def is_feature_enabled(flag: str) -> bool:
         pass only the <FLAG_NAME> and exclude the `CSTAR_FF_` prefix.
     """
     # developer mode enables all feature flags
-    if os.getenv(FLAG_DEVELOPER_MODE, FF_OFF) == FF_ON:
+    if os.getenv(FF_DEVELOPER_MODE, FF_OFF) == FF_ON:
         return True
 
     # enable omitting the CSTAR_FF_ prefix at the call-site
-    if not flag.startswith(FLAG_PREFIX):
-        flag = f"{FLAG_PREFIX}{flag}"
+    if not flag.startswith(FF_PREFIX):
+        flag = f"{FF_PREFIX}{flag}"
 
     # Enable hierarchical feature flag segments - Given a flag:
     #   CSTAR_FF_CLI_BLUEPRINT_CHECK

@@ -1,5 +1,7 @@
 import os
+import random
 import sys
+import textwrap
 import typing as t
 from pathlib import Path
 
@@ -20,7 +22,12 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import clear_working_dir, slugify
+from cstar.orchestration.utils import (
+    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+)
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -94,7 +101,7 @@ def convert_roms_step_to_command(step: Step) -> str:
     str
         The complete CLI command.
     """
-    bp_path = Path(step.blueprint).as_posix()
+    bp_path = Path(step.blueprint_path).as_posix()
     return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {bp_path}"
 
 
@@ -114,7 +121,13 @@ def convert_step_to_placeholder(step: Step) -> str:
     str
         The complete CLI command.
     """
-    return f'{sys.executable} -c "import time; time.sleep(10)"'
+    sleep_time = random.randint(1, 10)
+    return textwrap.dedent(f"""\
+        # this is a mock application script that produces verifiable output
+        echo "{step.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
+        sleep {sleep_time};
+        echo "{step.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
+        """)
 
 
 app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
@@ -126,6 +139,45 @@ app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
 
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
+
+    @staticmethod
+    def configured_queue() -> str:
+        """Get the queue to use for SLURM jobs.
+
+        Read from the environment variable `CSTAR_SLURM_QUEUE`.
+
+        Returns
+        -------
+        str
+            The queue to use for SLURM jobs.
+        """
+        return os.getenv(ENV_CSTAR_SLURM_QUEUE) or ""
+
+    @staticmethod
+    def configured_walltime() -> str:
+        """Get the max-walltime to use for SLURM jobs.
+
+        Read from the environment variable `CSTAR_SLURM_MAX_WALLTIME`.
+
+        Returns
+        -------
+        str
+            The max-walltime to use for SLURM jobs.
+        """
+        return os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME) or ""
+
+    @staticmethod
+    def configured_account() -> str:
+        """Get the account to use for SLURM jobs.
+
+        Read from the environment variable `CSTAR_SLURM_ACCOUNT`.
+
+        Returns
+        -------
+        str
+            The account to use for SLURM jobs.
+        """
+        return os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or ""
 
     @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
@@ -144,39 +196,46 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        job_name = slugify(step.name)
-        bp_path = Path(step.blueprint)
+        job_name = step.safe_name
+        bp_path = Path(step.blueprint_path)
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        clear_working_dir(bp.runtime_params.output_dir)
+        step_fs = step.file_system(bp)
 
         step_converter = app_to_cmd_map[step.application]
-        if converter_override := os.getenv("CSTAR_CMD_CONVERTER_OVERRIDE", ""):
-            print(
-                f"Overriding command converter for `{step.application}` to `{converter_override}`"
-            )
+        if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
             step_converter = app_to_cmd_map[converter_override]
+        print(f"Using `{step_converter.__name__}` for `{step.application}` commands.")
+
+        script_path = step_fs.work_dir / "script.sh"
+        output_file = step_fs.logs_dir / f"{job_name}.out"
+
+        if not script_path.parent.exists():
+            script_path.parent.mkdir(parents=True)
+
+        if not output_file.parent.exists():
+            output_file.parent.mkdir(parents=True)
+            output_file.write_text("ready\n")
 
         command = step_converter(step)
         job = create_scheduler_job(
             commands=command,
-            account_key=os.getenv("CSTAR_SLURM_ACCOUNT", ""),
+            account_key=SlurmLauncher.configured_account(),
             cpus=bp.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
-            script_path=None,  # puts it in current dir
-            run_path=bp.runtime_params.output_dir,
+            script_path=script_path,
+            run_path=script_path.parent,
             job_name=job_name,
-            output_file=None,  # to fill with some convention
-            queue_name=os.getenv("CSTAR_SLURM_QUEUE"),
-            walltime=os.getenv(
-                "CSTAR_SLURM_MAX_WALLTIME", "48:00:00"
-            ),  # TODO how to determine this one?
+            output_file=output_file,
+            queue_name=SlurmLauncher.configured_queue(),
+            walltime=SlurmLauncher.configured_walltime(),
             depends_on=job_dep_ids,
         )
 
-        print(f"Submitting step `{step.name}` as command `{command}`")
+        short_command = command.replace("\n", "")[:40]  # shorten and omit newlines
+        print(f"Submitting command `{short_command}...` for step `{step.name}`.")
         job.submit()
 
         if job.id:

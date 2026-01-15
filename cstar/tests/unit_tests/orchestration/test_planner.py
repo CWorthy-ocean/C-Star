@@ -7,12 +7,12 @@ import pytest
 
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import Planner
+from cstar.orchestration.serialization import deserialize
 
 
 @pytest.fixture
 def the_workplan(
     tmp_path: Path,
-    load_workplan: t.Callable[[Path], Workplan],
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
 ) -> Workplan:
@@ -34,7 +34,7 @@ def the_workplan(
     yaml_path = tmp_path / "workplan.yaml"
     yaml_path.write_text(wp_yaml)
 
-    return load_workplan(yaml_path)
+    return deserialize(yaml_path, Workplan)
 
 
 @pytest.mark.parametrize(

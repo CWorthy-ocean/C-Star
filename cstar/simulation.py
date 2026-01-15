@@ -2,6 +2,7 @@ import copy
 import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
+from logging import Logger
 from pathlib import Path
 from typing import Any, Optional
 
@@ -9,6 +10,7 @@ import dateutil
 
 from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
 from cstar.base.log import LoggingMixin
+from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 
@@ -67,6 +69,9 @@ class Simulation(ABC, LoggingMixin):
         Create a new Simulation instance starting from the end of this one.
     """
 
+    _fs_manager: JobFileSystemManager
+    """The file system manager ensures consistent directory structure for outputs."""
+
     def __init__(
         self,
         name: str,
@@ -107,6 +112,7 @@ class Simulation(ABC, LoggingMixin):
             The latest allowed end date, based on, e.g., the availability of input data.
         """
         self.directory = Path(directory).resolve()
+        self._fs_manager = self._get_filesystem_manager(self.directory)
         self.name = name
 
         # Process valid date ranges
@@ -342,6 +348,38 @@ class Simulation(ABC, LoggingMixin):
 
         return repr_str
 
+    @classmethod
+    def state_file_from(cls, directory: Path) -> Path:
+        """The path where a state file containing a pickled Simulation will be created
+        upon successful completion of a simulation, when that simulation uses the
+        supplied directory as it's working directory.
+
+        Parameters
+        ----------
+        directory : Path
+            The target working directory for an inaccessible simulation instance,
+            such as during a restart.
+
+        Returns
+        -------
+        Path
+           The path where the state file will be created.
+        """
+        fs = cls._get_filesystem_manager(directory)
+        return fs.work_dir / "simulation_state.pkl"
+
+    @property
+    def state_file(self) -> Path:
+        """The path where a state file containing the pickled Simulation will be created
+        upon successful completion of the simulation.
+
+        Returns
+        -------
+        Path
+           The path where the state file will be created.
+        """
+        return self.state_file_from(self.directory)
+
     @property
     @abstractmethod
     def default_codebase(self) -> ExternalCodeBase:
@@ -360,7 +398,7 @@ class Simulation(ABC, LoggingMixin):
 
     @classmethod
     @abstractmethod
-    def from_dict(self, simulation_dict: dict, directory: str | Path):
+    def from_dict(cls, simulation_dict: dict, directory: str | Path):
         """Abstract method to create a Simulation instance from a dictionary.
 
         This method must be implemented by subclasses to construct a simulation
@@ -492,16 +530,23 @@ class Simulation(ABC, LoggingMixin):
         ):
             raise RuntimeError(
                 "Simulation.persist() was called, but at least one "
-                "local process is currently running in. Await "
+                "local process is currently running. Await "
                 "completion or use LocalProcess.cancel(), then try again"
             )
 
-        # Loggers do not survive roundtrip
+        # Remove attributes that don't survive round-trip pickling process
+        tmp_log: Logger | None = None
         if hasattr(self, "_log"):
+            tmp_log = self._log
             del self._log
 
-        with open(f"{self.directory}/simulation_state.pkl", "wb") as state_file:
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.state_file, "wb") as state_file:
             pickle.dump(self, state_file)
+
+        # Restore attributes that were removed for pickling
+        if tmp_log:
+            self._log = tmp_log
 
     @classmethod
     def restore(cls, directory: str | Path) -> "Simulation":
@@ -532,9 +577,14 @@ class Simulation(ABC, LoggingMixin):
         persist : Saves the current simulation state.
         """
         directory = Path(directory)
-        with open(f"{directory}/simulation_state.pkl", "rb") as state_file:
-            simulation_instance = pickle.load(state_file)
-        return simulation_instance
+        with open(cls.state_file_from(directory), "rb") as state_file:
+            simulation: Simulation = pickle.load(state_file)
+
+        # manually add fs manager because persist deletes the attribute.
+        simulation._fs_manager = simulation._get_filesystem_manager(
+            simulation.directory
+        )
+        return simulation
 
     @abstractmethod
     def build(self, rebuild=False) -> None:
@@ -617,6 +667,12 @@ class Simulation(ABC, LoggingMixin):
         pre_run : Performs preprocessing before execution.
         """
         pass
+
+    @classmethod
+    @abstractmethod
+    def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
+        """Retrieve the manager for the simulation output directory structure."""
+        raise NotImplementedError("Failed to implement abstract method.")
 
     def restart(self, new_end_date: str | datetime) -> "Simulation":
         """Create a new Simulation instance starting from the end date of the current

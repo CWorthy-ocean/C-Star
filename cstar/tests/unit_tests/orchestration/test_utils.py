@@ -1,59 +1,88 @@
+# ruff: noqa: S101
+
+import os
 from pathlib import Path
+from unittest import mock
 
-import pytest
-
-from cstar.orchestration.utils import clear_working_dir
-
-
-@pytest.fixture
-def populated_output_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
-    output_dir = tmp_path / "my_output_dir"
-    files = [
-        (output_dir / "ROMS" / "some_file"),
-        (output_dir / "output" / "some_file"),
-        (output_dir / "JOINED_OUTPUT" / "some_file"),
-    ]
-
-    for f in files:
-        f.parent.mkdir(parents=True)
-        f.touch()
-
-    return output_dir, files
-
-
-@pytest.mark.parametrize(
-    "env_value,cleared", (("1", True), ("0", False), (None, False))
+from cstar.base.utils import (
+    DEFAULT_CSTAR_HOME,
+    DEFAULT_OUTPUT_DIR,
+    ENV_CSTAR_OUTDIR,
+    get_output_dir,
 )
-def test_clear_working_directory_env_setting(
-    env_value: str | None,
-    cleared: bool,
-    monkeypatch,
-    populated_output_dir: tuple[Path, list[Path]],
-):
+
+
+def test_get_outdir(tmp_path: Path) -> None:
+    """Verify the default outdir is returned if no environment configuration
+    is available.
     """
-    Test that clear_working_dir correctly clears the working directory if CSTAR_CLOBBER_WORKING_DIR is set to 1, and
-    doesn't clear it if set to 0 or unset.
+    with mock.patch.dict(os.environ, {}, clear=True):
+        output_dir = get_output_dir()
+
+    od = (Path(DEFAULT_CSTAR_HOME) / DEFAULT_OUTPUT_DIR).expanduser().resolve()
+    assert str(output_dir) == str(od)
+
+
+def test_get_outdir_with_override(tmp_path: Path) -> None:
+    """Verify the default path is not returned when an override is supplied
+    to get_outdir.
 
     Parameters
     ----------
-    env_value: value to set our magic env-var to
-    cleared: whether the directory should be cleared or not
-    monkeypatch: pytest util for setting env-vars in tests
-    populated_output_dir: fixture providing tmp_path and fake files
-
+    tmp_path : Path
+        Temporary directory for test outputs.
     """
-    output_dir, output_files = populated_output_dir
+    with mock.patch.dict(os.environ, {}, clear=True):
+        output_dir = get_output_dir(tmp_path)
 
-    if env_value is not None:
-        monkeypatch.setenv("CSTAR_CLOBBER_WORKING_DIR", env_value)
-    else:
-        monkeypatch.delenv("CSTAR_CLOBBER_WORKING_DIR", raising=False)
+    assert str(output_dir) == str(tmp_path)
 
-    clear_working_dir(output_dir)
-    if cleared:
-        assert all([not f.exists() for f in output_files])
-        assert all([not f.parent.exists() for f in output_files])
 
-    else:
-        assert output_dir.exists()
-        assert all([f.exists for f in output_files])
+def test_get_outdir_with_env_var(tmp_path: Path) -> None:
+    """Verify the default path is not returned when the environment has
+    an override specified.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    path = tmp_path / "other-place"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_OUTDIR: path.as_posix()}, clear=True):
+        output_dir = get_output_dir(path)
+
+    assert str(output_dir) == str(path)
+
+
+def test_get_outdir_parameter_precedence(tmp_path: Path) -> None:
+    """Verify the argument passed to get_cstar_outdir overrides all other values.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    path1 = tmp_path / "place1"
+    path2 = tmp_path / "place2"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_OUTDIR: path1.as_posix()}, clear=True):
+        output_dir = get_output_dir(path2)
+
+    assert str(output_dir) == str(path2)
+
+
+def test_get_outdir_env_precedence(tmp_path: Path) -> None:
+    """Verify the environment variable takes precedence over the default value
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    path1 = tmp_path / "place1"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_OUTDIR: path1.as_posix()}, clear=True):
+        output_dir = get_output_dir()
+
+    assert str(output_dir) == str(path1)

@@ -153,7 +153,7 @@ app = Typer()
 
 
 @app.command()
-def generate(
+def create(
     path: t.Annotated[
         Path,
         Argument(

@@ -42,8 +42,8 @@ keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 test = [
      "pytest>=7.0",
      "roms_tools[dask]==3.1.2"
-     ]
-dev =["ruff"]
+]
+dev =["ruff", "types-python-dateutil"]
 
 [project.scripts]
 cstar = "cstar.cli.cli:main"

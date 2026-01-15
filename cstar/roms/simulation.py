@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
@@ -17,7 +18,9 @@ from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
+    slugify,
 )
+from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -606,6 +609,16 @@ class ROMSSimulation(Simulation):
 
         return repr_str
 
+    @classmethod
+    def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
+        """Retrieve the manager for the simulation output directory structure."""
+        return RomsFileSystemManager(directory)
+
+    @property
+    def fs_manager(self) -> RomsFileSystemManager:
+        """Return the file system manager for the simulation."""
+        return cast(RomsFileSystemManager, self._fs_manager)
+
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
         """Returns the default ROMS external codebase.
@@ -632,12 +645,11 @@ class ROMSSimulation(Simulation):
         list
             A list containing the ROMS external codebase and MARBL external codebase.
         """
-        codebases = [
-            self.codebase,
-        ]
+        items = [self.codebase]
         if self.marbl_codebase:
-            codebases.append(self.marbl_codebase)
-        return codebases
+            items.append(self.marbl_codebase)
+
+        return items
 
     @property
     def _forcing_paths(self) -> list[Path]:
@@ -1063,7 +1075,8 @@ class ROMSSimulation(Simulation):
         from_dict : Creates an instance from a dictionary representation.
         """
         source = SourceData(location=blueprint)
-        bp_dict = yaml.safe_load(source.retriever.read().decode("utf-8"))
+        data = source.retriever.read()
+        bp_dict = yaml.safe_load(data.decode("utf-8"))
 
         bp = RomsMarblBlueprint.model_validate(bp_dict)
         return cls(
@@ -1173,25 +1186,29 @@ class ROMSSimulation(Simulation):
         build : Compiles the ROMS model.
         is_setup : Checks if the simulation has been properly configured.
         """
-        compile_time_code_dir = self.directory / "ROMS/compile_time_code"
-        runtime_code_dir = self.directory / "ROMS/runtime_code"
-        input_datasets_dir = self.directory / "ROMS/input_datasets"
-        codebases_dir = self.directory / "ROMS/codebases"
+        compile_time_code_dir = self.fs_manager.compile_time_code_dir
+        runtime_code_dir = self.fs_manager.runtime_code_dir
+        input_datasets_dir = self.fs_manager.input_datasets_dir
+
+        compile_time_code_dir.mkdir(parents=True, exist_ok=True)
+        runtime_code_dir.mkdir(parents=True, exist_ok=True)
+        input_datasets_dir.mkdir(parents=True, exist_ok=True)
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
-        for codebase in filter(lambda x: x is not None, self.codebases):  # type: ExternalCodeBase
+        for codebase in (x for x in self.codebases if x is not None):
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
+            codebase_dir = self.fs_manager.codebase_subdir(codebase.key)
 
             # if we're running a workplan, for now, set up a code directory for each
             # step, otherwise they may try to clobber each other or get tripped up on
             # detecting existing directories.
-            if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1":
-                codebase_dir = codebases_dir / codebase.root_env_var.split("_")[0]
-                codebase_dir.mkdir(parents=True, exist_ok=True)
-                codebase.get(codebase_dir)
-                os.environ[codebase.root_env_var] = str(codebase_dir)
-            codebase.setup()
+            if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1" and codebase_dir.exists():
+                shutil.rmtree(codebase_dir)
+
+            codebase_dir.mkdir(parents=True, exist_ok=True)
+            codebase.setup(codebase_dir)
+            os.environ[codebase.root_env_var] = str(codebase_dir)
 
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")
@@ -1507,18 +1524,30 @@ class ROMSSimulation(Simulation):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
         # we run ROMS in the output dir
-        run_path = self.directory / "output"
+        run_path = self.fs_manager.output_dir
         final_runtime_settings_file = (
             Path(self.runtime_code.working_copy[0].path).parent / f"{self.name}.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
-        run_path.mkdir(parents=True, exist_ok=True)
+
+        script_name = job_name or self.name
+        safe_name = slugify(script_name)
+        script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
+        output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
+
+        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
 
         ## 2: RUN ROMS
 
-        roms_exec_cmd = (
-            f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
-            f"{final_runtime_settings_file}"
+        roms_exec_cmd = " ".join(
+            [
+                f"{cstar_sysmgr.environment.mpi_exec_prefix}",
+                "-n",
+                f"{self.discretization.n_procs_tot}",
+                f"{self.exe_path}",
+                f"{final_runtime_settings_file}",
+            ]
         )
 
         self.log.info(f"Running {roms_exec_cmd}")
@@ -1538,8 +1567,10 @@ class ROMSSimulation(Simulation):
                 cpus=self.discretization.n_procs_tot,
                 account_key=account_key,
                 run_path=run_path,
+                script_path=script_path,
                 queue_name=queue_name,
                 walltime=walltime,
+                output_file=output_file,
             )
 
             job_instance.submit()
@@ -1548,7 +1579,11 @@ class ROMSSimulation(Simulation):
             return job_instance
 
         else:  # cstar_sysmgr.scheduler is None
-            romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
+            romsprocess = LocalProcess(
+                commands=roms_exec_cmd,
+                run_path=run_path,
+                output_file=output_file,
+            )
             self._execution_handler = romsprocess
             self.persist()
             romsprocess.start()
@@ -1597,20 +1632,19 @@ class ROMSSimulation(Simulation):
                 + f"but current execution status is '{self._execution_handler.status}'"
             )
 
-        output_dir = self.directory / "output"
+        output_dir = self.fs_manager.output_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
-            self.log.warning("No suitable output found")
+            self.log.warning(f"No suitable output found in `{output_dir}`")
         else:
-            final_output_dir = output_dir.parent / "JOINED_OUTPUT"
-            final_output_dir.mkdir(exist_ok=True, parents=True)
+            self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
 
             spatial_joiner = partial(
                 _ncjoin_wildcard,
                 logger=self.log,
-                input_dir=output_dir,
-                output_dir=final_output_dir,
+                input_dir=self.fs_manager.output_dir,
+                output_dir=self.fs_manager.joined_output_dir,
             )
 
             with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
@@ -1671,7 +1705,7 @@ class ROMSSimulation(Simulation):
         """
         new_sim = cast(ROMSSimulation, super().restart(new_end_date=new_end_date))
 
-        restart_dir = self.directory / "output"
+        restart_dir = self.fs_manager.output_dir
 
         new_start_date = new_sim.start_date
         restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")

@@ -1,8 +1,8 @@
-import datetime
 import itertools
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -15,7 +15,6 @@ from cstar.entrypoint.worker.worker import (
     JobConfig,
     SimulationRunner,
     SimulationStages,
-    _format_date,
     configure_environment,
     create_parser,
     get_request,
@@ -26,7 +25,7 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.simulation import Simulation
 
 DEFAULT_LOOP_DELAY = 5
-DEFAULT_HEALTH_CHECK_FREQUENCY = 10
+DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -70,7 +69,7 @@ def sim_runner(
     """
     request = BlueprintRequest(
         str(blueprint_path),
-        stages=tuple(SimulationStages),
+        stages=list(SimulationStages),
     )
 
     service_config = ServiceConfiguration(
@@ -84,15 +83,15 @@ def sim_runner(
     job_config = JobConfig()
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        sim = SimulationRunner(request, service_config, job_config)
+        runner = SimulationRunner(request, service_config, job_config)
 
-    output_path = tmp_path / "output"
+    output_path = runner._simulation.fs_manager.output_dir
 
-    sim._output_root = output_path  # type: ignore[misc]
-    sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
-    sim._simulation.directory = sim._output_dir
+    runner._output_root = output_path  # type: ignore[misc]
+    # sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
+    runner._simulation.directory = output_path
 
-    return sim
+    return runner
 
 
 def test_create_parser_happy_path() -> None:
@@ -223,7 +222,7 @@ def test_get_service_config(
         ],
     )
 
-    config = get_service_config(parsed_args)
+    config = get_service_config(parsed_args.log_level)
 
     # some values are currently hardcoded for the worker service
     assert config.as_service
@@ -256,7 +255,7 @@ def test_get_request(
         ]
     )
 
-    config = get_request(parsed_args)
+    config = get_request(parsed_args.blueprint_uri, parsed_args.stages)
 
     assert config.blueprint_uri == blueprint_uri
 
@@ -299,30 +298,6 @@ def test_configure_environment_prebuilt() -> None:
         assert os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] == "1"
 
 
-@pytest.mark.parametrize(
-    ("date_str", "expected"),
-    [
-        ("2021-03-01 08:30:00", datetime.datetime(2021, 3, 1, 8, 30)),  # noqa: DTZ001
-        ("2020-09-01 04:06:00", datetime.datetime(2020, 9, 1, 4, 6, 0)),  # noqa: DTZ001
-        ("2019-01-01 00:00:00", datetime.datetime(2019, 1, 1, 0, 0)),  # noqa: DTZ001
-    ],
-)
-def test_format_date_for_unique_path(
-    date_str: str, expected: datetime.datetime
-) -> None:
-    """Verify that the date formatting for unique paths is correct.
-
-    Parameters
-    ----------
-    date_str: str
-        A date string to be formatted.
-    expected : datetime.datetime
-        The expected datetime object after formatting.
-    """
-    formatted_date = _format_date(date_str)
-    assert formatted_date == expected
-
-
 def test_start_runner(
     blueprint_path: Path, tmp_path: Path, patch_romssimulation_init_sourcedata
 ) -> None:
@@ -355,31 +330,6 @@ def test_start_runner(
     assert runner._blueprint_uri == request.blueprint_uri
 
 
-def test_runner_directory_check(
-    tmp_path: Path,
-    sim_runner: SimulationRunner,
-) -> None:
-    """Test the simulation runner's file system preparation.
-
-    Verifies that a non-empty output directory causes an exception
-    to be raised.
-
-    Parameters
-    ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
-    """
-    sim_runner._output_dir.mkdir(parents=True, exist_ok=True)
-    (sim_runner._output_dir / "somefile.txt").touch()
-
-    with (
-        pytest.raises(ValueError),
-    ):
-        sim_runner._prepare_file_system()
-
-
 def test_runner_directory_check_ignore_logs(
     tmp_path: Path,
     sim_runner: SimulationRunner,
@@ -396,7 +346,7 @@ def test_runner_directory_check_ignore_logs(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logs_dir = output_dir / "logs"
@@ -404,8 +354,6 @@ def test_runner_directory_check_ignore_logs(
 
     # A file in the logs directory should be ignored
     (logs_dir / "any-name.txt").touch()
-
-    sim_runner._prepare_file_system()
 
 
 def test_runner_directory_prep(
@@ -424,20 +372,17 @@ def test_runner_directory_prep(
         A temporary path to store simulation output and logs
 
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    sim_runner._prepare_file_system()
-
     # Confirm the output directory is created...
-    assert sim_runner._output_dir.exists()
-    assert sim_runner._output_dir.is_dir()
-    assert sim_runner._output_dir.parent == sim_runner._output_root
+    assert sim_runner._output_root.exists()
+    assert sim_runner._output_root.is_dir()
 
     # ...and is empty so no conflicts will occur.
-    output_content = list(sim_runner._output_dir.iterdir())
+    output_content = list(x for x in sim_runner._output_root.iterdir() if x.is_file())
     assert not output_content, "Output directory should be empty after prep."
 
 
@@ -458,7 +403,7 @@ async def test_runner_can_shutdown_as_task(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -497,7 +442,7 @@ async def test_runner_can_shutdown_as_task_null_sim(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -529,7 +474,7 @@ async def test_runner_can_shutdown_as_service_null_sim(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -560,7 +505,7 @@ async def test_runner_shutdown_no_update_handler(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -588,7 +533,6 @@ async def test_runner_shutdown_no_update_handler(
         ExecutionStatus.COMPLETED,
         ExecutionStatus.CANCELLED,
         ExecutionStatus.FAILED,
-        ExecutionStatus.UNKNOWN,
     ],
 )
 @pytest.mark.asyncio
@@ -611,7 +555,7 @@ async def test_runner_shutdown_handler_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -668,7 +612,7 @@ async def test_runner_shutdown_handler_not_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -725,7 +669,7 @@ async def test_runner_shutdown_side_effects(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -767,7 +711,7 @@ async def test_runner_on_start_without_uri(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -775,12 +719,10 @@ async def test_runner_on_start_without_uri(
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
     mock_simulation = mock.Mock()
-    mock_prep_fs = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
@@ -795,7 +737,6 @@ async def test_runner_on_start_without_uri(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 0
         assert mock_iter.call_count == 0
         assert mock_shutdown.call_count == 1
 
@@ -818,7 +759,7 @@ async def test_runner_on_start_without_simulation(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -826,12 +767,10 @@ async def test_runner_on_start_without_simulation(
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
     mock_simulation = mock.Mock()
-    mock_prep_fs = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
@@ -846,7 +785,6 @@ async def test_runner_on_start_without_simulation(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 0
         assert mock_iter.call_count == 0
         assert mock_shutdown.call_count == 1
 
@@ -869,7 +807,7 @@ async def test_runner_on_start_user_unhandled_setup(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -881,12 +819,10 @@ async def test_runner_on_start_user_unhandled_setup(
     mock_simulation = mock.Mock(
         setup=mock.Mock(side_effect=ValueError("Mock setup Failure"))
     )
-    mock_prep_fs = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
@@ -900,7 +836,6 @@ async def test_runner_on_start_user_unhandled_setup(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 1
         assert mock_simulation.setup.call_count == 1
         assert mock_iter.call_count == 0
         assert mock_shutdown.call_count == 1
@@ -924,7 +859,7 @@ async def test_runner_on_start_user_unhandled_build(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -936,11 +871,9 @@ async def test_runner_on_start_user_unhandled_build(
     mock_simulation = mock.Mock(
         build=mock.Mock(side_effect=RuntimeError("Mock build Failure"))
     )
-    mock_prep_fs = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
@@ -953,7 +886,6 @@ async def test_runner_on_start_user_unhandled_build(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 1
         assert mock_simulation.setup.call_count == 1
         assert mock_iter.call_count == 0
         # assert mock_shutdown.call_count == 1
@@ -977,7 +909,7 @@ async def test_runner_on_start_user_unhandled_pre_run(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -989,11 +921,9 @@ async def test_runner_on_start_user_unhandled_pre_run(
     mock_simulation = mock.Mock(
         pre_run=mock.Mock(side_effect=Exception("Mock pre-run Failure"))
     )
-    mock_prep_fs = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
@@ -1006,7 +936,6 @@ async def test_runner_on_start_user_unhandled_pre_run(
         await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
-        assert mock_prep_fs.call_count == 1
         assert mock_simulation.setup.call_count == 1
         assert mock_iter.call_count == 0
         # assert mock_shutdown.call_count == 1
@@ -1029,19 +958,17 @@ async def test_runner_on_iteration(
     tmp_path : Path
         A temporary path to store simulation output and logs
     """
-    output_dir = tmp_path / "output"
+    output_dir = sim_runner._simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
     mock_simulation = mock.Mock()
-    mock_prep_fs = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
         mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
     ):
@@ -1049,7 +976,6 @@ async def test_runner_on_iteration(
         await sim_runner.execute()
 
         # Now confirm that my target lifecycle behaviors were all executed
-        assert mock_prep_fs.call_count == 1
         assert mock_simulation.setup.call_count == 1
         assert mock_simulation.build.call_count == 1
         assert mock_simulation.pre_run.call_count == 1
@@ -1124,7 +1050,7 @@ async def test_runner_setup_stage(
 
     request = BlueprintRequest(
         str(blueprint_path),
-        stages=tuple(stages),
+        stages=list(stages),
     )
 
     setattr(sim_runner, "_stages", tuple(request.stages))
@@ -1138,7 +1064,6 @@ async def test_runner_setup_stage(
     # don't let it perform any real work
     with (
         mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
-        mock.patch.object(sim_runner, "_prepare_file_system", mock_prep_fs),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
     ):
         # Trigger a run through the lifecycle as a task.
@@ -1153,8 +1078,7 @@ async def test_runner_setup_stage(
         assert mock_simulation.post_run.call_count == (1 if post_run else 0)
 
 
-@pytest.mark.asyncio
-async def test_worker_main(tmp_path: Path) -> None:
+def test_worker_main(tmp_path: Path, sim_runner: SimulationRunner) -> None:
     """Test the main entrypoint of the worker service.
 
     This test verifies that the the main function will fail to run when called without
@@ -1165,14 +1089,14 @@ async def test_worker_main(tmp_path: Path) -> None:
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    output_path = tmp_path / "output"
-    output_path.mkdir(parents=True, exist_ok=True)
+    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     args = [
         "--blueprint-uri",
         str(bp_path),
         "--output-dir",
-        str(output_path),
+        str(output_dir),
         "--log-level",
         "DEBUG",
         "--start-date",
@@ -1181,9 +1105,9 @@ async def test_worker_main(tmp_path: Path) -> None:
         "2024-02-01 00:00:00",
     ]
 
-    with mock.patch.dict(os.environ, {}):
+    with mock.patch.dict(os.environ, {}), mock.patch.object(sys, "argv", args):
         # don't let it perform any real work
-        return_code = await main(args)
+        return_code = main()
 
     # Confirm an error code is returned
     assert return_code > 0
@@ -1192,8 +1116,7 @@ async def test_worker_main(tmp_path: Path) -> None:
     assert mock_execute.call_count == 0
 
 
-@pytest.mark.asyncio
-async def test_worker_main_exec(
+def test_worker_main_exec(
     blueprint_path: Path,
     tmp_path: Path,
 ) -> None:
@@ -1205,6 +1128,7 @@ async def test_worker_main_exec(
     mock_execute = mock.AsyncMock(return_code=0)
 
     args = [
+        "cstar.entrypoint.worker.worker",
         "--blueprint-uri",
         str(blueprint_path),
         "--log-level",
@@ -1213,13 +1137,15 @@ async def test_worker_main_exec(
 
     # don't let it perform any real work; mock out runner.execute
     with (
-        mock.patch(
-            "cstar.entrypoint.worker.SimulationRunner.execute",
+        mock.patch.object(
+            SimulationRunner,
+            "execute",
             mock_execute,
         ),
+        mock.patch.object(sys, "argv", args),
     ):
         # This should run the simulation and return a success code
-        return_code = await main(args)
+        return_code = main()
 
     # Confirm an error code is returned
     assert return_code == 0
@@ -1229,10 +1155,8 @@ async def test_worker_main_exec(
 
 
 @pytest.mark.parametrize("exception_type", [CstarError, BlueprintError, Exception])
-@pytest.mark.asyncio
-async def test_worker_main_cstar_error(
+def test_worker_main_cstar_error(
     blueprint_path: Path,
-    tmp_path: Path,
     exception_type: type[Exception],
 ) -> None:
     """Test the main entrypoint of the worker service.
@@ -1247,17 +1171,20 @@ async def test_worker_main_cstar_error(
         "DEBUG",
     ]
 
-    def return_mocked_sim_runner(*args, **kwargs):
-        raise exception_type("Mock error")
+    def return_mocked_sim_runner(*_args: str, **_kwargs: str) -> None:
+        msg = "Mock error"
+        raise exception_type(msg)
 
     # don't let it perform any real work; mock out runner.execute
     with (
-        mock.patch(
-            "cstar.entrypoint.worker.SimulationRunner.__new__",
+        mock.patch.object(
+            SimulationRunner,
+            "__new__",
             return_mocked_sim_runner,
         ),
+        mock.patch.object(sys, "argv", args),
     ):
         # This should run the simulation and return a failure code.
-        return_code = await main(args)
+        return_code = main()
 
     assert return_code > 0

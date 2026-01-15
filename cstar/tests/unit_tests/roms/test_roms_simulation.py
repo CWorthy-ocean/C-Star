@@ -1244,7 +1244,7 @@ class TestProcessingAndExecution:
         self,
         mock_subprocess,
         mock_get_hash,
-        stub_romssimulation,
+        stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
         """Tests that `build` correctly compiles the ROMS executable.
@@ -1255,8 +1255,10 @@ class TestProcessingAndExecution:
         - Stores the executable path and hash after a successful build.
         """
         sim = stub_romssimulation
-        build_dir = sim.directory / "ROMS/compile_time_code"
+        build_dir = sim.fs_manager.compile_time_code_dir
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+
+        assert sim.compile_time_code
         sim.compile_time_code._working_copy = stageddatacollection_remote_files(
             paths=[build_dir / f.basename for f in sim.compile_time_code.source]
         )
@@ -1344,7 +1346,7 @@ class TestProcessingAndExecution:
         self,
         mock_subprocess,
         mock_get_hash,
-        stub_romssimulation,
+        stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
         """Tests that `build` raises an error if `make compile_clean` fails.
@@ -1353,8 +1355,9 @@ class TestProcessingAndExecution:
         a `RuntimeError` is raised with the appropriate error message.
         """
         sim = stub_romssimulation
-        build_dir = sim.directory / "ROMS/compile_time_code"
+        build_dir = sim.fs_manager.compile_time_code_dir
         (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+        assert sim.compile_time_code
         sim.compile_time_code._working_copy = stageddatacollection_remote_files(
             paths=[build_dir / f.basename for f in sim.compile_time_code.source]
         )
@@ -1517,7 +1520,7 @@ class TestProcessingAndExecution:
         self,
         mock_runtime_settings,
         mock_persist,
-        stub_romssimulation,
+        stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
         """Tests that `run` correctly starts a local process when no scheduler is
@@ -1552,7 +1555,8 @@ class TestProcessingAndExecution:
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
                 commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest.in",
-                run_path=sim.directory / "output",
+                run_path=sim.fs_manager.output_dir,
+                output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
 
             # Ensure process was started
@@ -1580,7 +1584,7 @@ class TestProcessingAndExecution:
         self,
         mock_runtime_settings,
         mock_persist,
-        stub_romssimulation,
+        stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
         mock_system_name: str,
         exp_mpi_prefix: str,
@@ -1591,8 +1595,9 @@ class TestProcessingAndExecution:
         with the appropriate parameters and submits it.
         """
         sim = stub_romssimulation
-        build_dir = sim.directory / "ROMS/compile_time_code"
-        runtime_code_dir = sim.directory / "ROMS/runtime_code"
+        build_dir = sim.fs_manager.compile_time_code_dir
+        runtime_code_dir = sim.fs_manager.runtime_code_dir
+        script_dir = sim.fs_manager.work_dir
         sim.runtime_code._working_copy = stageddatacollection_remote_files(
             paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
             sources=sim.runtime_code.source,
@@ -1641,9 +1646,11 @@ class TestProcessingAndExecution:
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
-                run_path=sim.directory / "output",
+                run_path=sim.fs_manager.output_dir,
+                script_path=script_dir / "romstest.sh",
                 queue_name="default_queue",
                 walltime="12:00:00",
+                output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
 
             mock_job_instance.submit.assert_called_once()
@@ -1746,7 +1753,7 @@ class TestProcessingAndExecution:
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch("subprocess.run")  # Mock ncjoin execution
     def test_post_run_merges_netcdf_files(
-        self, mock_subprocess, mock_persist, stub_romssimulation
+        self, mock_subprocess, mock_persist, stub_romssimulation: ROMSSimulation
     ):
         """Tests that `post_run` correctly merges partitioned NetCDF output files.
 
@@ -1757,8 +1764,8 @@ class TestProcessingAndExecution:
         """
         # Setup
         sim = stub_romssimulation
-        output_dir = sim.directory / "output"
-        output_dir.mkdir()
+        sim.fs_manager.prepare()
+        output_dir = sim.fs_manager.output_dir
 
         # Create fake partitioned NetCDF files
         (output_dir / "ocean_his.20240101000000.001.nc").touch()
@@ -1796,7 +1803,7 @@ class TestProcessingAndExecution:
         )
 
         # Check that output file was moved
-        new_out_dir = output_dir.parent / "JOINED_OUTPUT"
+        new_out_dir = sim.fs_manager.joined_output_dir
         assert new_out_dir.exists()
         assert (new_out_dir / "ocean_his.20240101000000.nc").exists()
         assert (new_out_dir / "ocean_rst.20240101000000.nc").exists()
@@ -1852,7 +1859,7 @@ class TestProcessingAndExecution:
         """
         # Setup
         sim = stub_romssimulation
-        output_dir = sim.directory / "output"
+        output_dir = sim.fs_manager.output_dir
         output_dir.mkdir(exist_ok=True, parents=True)
 
         # Fake file paths to match ncjoin pattern
@@ -1897,10 +1904,13 @@ class TestROMSSimulationRestart:
     """
 
     @mock.patch.object(Path, "glob")  # Mock file search
-    @mock.patch.object(Path, "exists", return_value=True)
+    @mock.patch("pathlib.Path.exists", mock.Mock(return_value=True))
     def test_restart(
-        self, mock_exists, mock_glob, stub_romssimulation, mocksourcedata_local_file
-    ):
+        self,
+        mock_glob,
+        stub_romssimulation: ROMSSimulation,
+        mocksourcedata_local_file,
+    ) -> None:
         """Test that `restart` creates a new `ROMSSimulation` instance with updated
         initial conditions.
 
@@ -1914,7 +1924,7 @@ class TestROMSSimulationRestart:
         new_end_date = datetime(2026, 6, 1)
 
         # Mock restart file found
-        restart_file = sim.directory / "output/restart_rst.20251231000000.nc"
+        restart_file = sim.fs_manager.output_dir / "restart_rst.20251231000000.nc"
         mock_glob.return_value = [restart_file]
 
         # Call method
@@ -1930,10 +1940,8 @@ class TestROMSSimulationRestart:
         assert new_sim.initial_conditions.source.location == str(restart_file.resolve())
 
     @mock.patch.object(Path, "glob")  # Mock file search
-    @mock.patch.object(Path, "exists", return_value=True)
-    def test_restart_raises_if_no_restart_files(
-        self, mock_exists, mock_glob, stub_romssimulation
-    ):
+    @mock.patch("pathlib.Path.exists", mock.Mock(return_value=True))
+    def test_restart_raises_if_no_restart_files(self, mock_glob, stub_romssimulation):
         """Test that `restart` raises a `FileNotFoundError` if no restart files are
         found.
 
@@ -1992,7 +2000,7 @@ class TestROMSSimulationRestart:
         - A `ValueError` is raised if multiple restart files are found.
         """
         sim = stub_romssimulation
-        restart_dir = sim.directory / "output"
+        restart_dir = sim.fs_manager.output_dir
         new_end_date = datetime(2025, 6, 1)
 
         # Fake multiple unique restart files

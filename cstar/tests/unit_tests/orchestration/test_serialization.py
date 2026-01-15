@@ -6,11 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.orchestration.models import Application, Workplan
+from cstar.orchestration.serialization import deserialize
 
 
 def test_workplan_no_data(
     tmp_path: Path,
-    load_workplan: t.Callable[[Path], Workplan],
 ) -> None:
     """Verify that an empty workplan yaml file fails to deserialize."""
     wp_yaml = ""
@@ -18,7 +18,7 @@ def test_workplan_no_data(
     yaml_path.write_text(wp_yaml)
 
     with pytest.raises(ValidationError):
-        _ = load_workplan(yaml_path)
+        _ = deserialize(yaml_path, Workplan)
 
 
 @pytest.mark.parametrize(
@@ -37,7 +37,6 @@ def test_workplan_no_data(
 )
 def test_workplan_required_fields(
     tmp_path: Path,
-    load_workplan: t.Callable[[Path], Workplan],
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     attr_to_exclude: str,
     complete_workplan_template_input: dict[str, t.Any],
@@ -59,7 +58,7 @@ def test_workplan_required_fields(
     yaml_path.write_text(wp_yaml)
 
     with pytest.raises(ValidationError) as ex:
-        _ = load_workplan(yaml_path)
+        _ = deserialize(yaml_path, Workplan)
 
     assert attr_to_exclude in str(ex)
 
@@ -73,7 +72,6 @@ def test_workplan_required_fields(
 )
 def test_workplan_optional_fields(
     tmp_path: Path,
-    load_workplan: t.Callable[[Path], Workplan],
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     attr_to_empty: str,
     complete_workplan_template_input: dict[str, t.Any],
@@ -94,14 +92,13 @@ def test_workplan_optional_fields(
     yaml_path = tmp_path / "workplan.yaml"
     yaml_path.write_text(wp_yaml)
 
-    workplan = load_workplan(yaml_path)
+    workplan = deserialize(yaml_path, Workplan)
 
     assert workplan.name == data["name"]
 
 
 def test_workplan_happy_path(
     tmp_path: Path,
-    load_workplan: t.Callable[[Path], Workplan],
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
 ) -> None:
@@ -117,7 +114,7 @@ def test_workplan_happy_path(
     yaml_path = tmp_path / "workplan.yaml"
     yaml_path.write_text(wp_yaml)
 
-    workplan = load_workplan(yaml_path)
+    workplan = deserialize(yaml_path, Workplan)
 
     assert workplan.name == "Test Workplan"
     assert workplan.steps[0].name == "Test Step"
@@ -131,7 +128,6 @@ def test_workplan_happy_path(
 
 def test_workplan_compute_env(
     tmp_path: Path,
-    load_workplan: t.Callable[[Path], Workplan],
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
 ) -> None:
@@ -158,7 +154,7 @@ def test_workplan_compute_env(
     yaml_path = tmp_path / "workplan.yaml"
     yaml_path.write_text(wp_yaml)
 
-    workplan = load_workplan(yaml_path)
+    workplan = deserialize(yaml_path, Workplan)
 
     compute_env = workplan.compute_environment
 
@@ -168,7 +164,6 @@ def test_workplan_compute_env(
 
 def test_workplan_runtime_vars(
     tmp_path: Path,
-    load_workplan: t.Callable[[Path], Workplan],
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
 ) -> None:
@@ -189,7 +184,7 @@ def test_workplan_runtime_vars(
     yaml_path = tmp_path / "workplan.yaml"
     yaml_path.write_text(wp_yaml)
 
-    workplan = load_workplan(yaml_path)
+    workplan = deserialize(yaml_path, Workplan)
 
     actual = set(workplan.runtime_vars)
     expected = set(expected_vars)

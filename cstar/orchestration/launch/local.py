@@ -8,6 +8,7 @@ from psutil import NoSuchProcess
 from psutil import Process as PsProcess
 
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.utils import slugify
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import (
     Launcher,
@@ -15,7 +16,6 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.utils import slugify
 
 
 def run_as_process(step: Step, cmd: list[str]) -> dict[str, int]:
@@ -154,15 +154,15 @@ class LocalLauncher(Launcher[LocalHandle]):
         # await LocalLauncher._update_processes()
         rc = handle.process.exitcode
 
-        print(f"Return code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
         if rc is None:
             status = "RUNNING"
         elif rc == 0:
             status = "COMPLETED"
+            print(f"Return code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
         else:
             status = "FAILED"
+            print(f"Failure code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
 
-        print(f"Status `{status}` for pid `{handle.pid}` after {handle.elapsed} sec")
         return status
 
     @classmethod

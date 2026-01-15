@@ -1,7 +1,10 @@
 import datetime as dt
 import functools
 import hashlib
+import os
+import re
 import subprocess
+import typing as t
 from os import PathLike
 from pathlib import Path
 
@@ -10,6 +13,41 @@ import dateutil
 from cstar.base.log import get_logger
 
 log = get_logger(__name__)
+
+
+DEFAULT_CSTAR_HOME: t.Literal["~/.cstar"] = "~/.cstar"
+"""The default C-Star configuration directory."""
+
+DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
+"""A fixed `output_root_name` to be used when generating outputs with ROMS."""
+
+DEFAULT_OUTPUT_DIR: t.Final[str] = "assets"
+"""The default subdirectory of `<CSTAR_HOME>` where job output is written."""
+
+ENV_CSTAR_HOME: t.Literal["CSTAR_HOME"] = "CSTAR_HOME"
+"""Environment variable enabling the user to specify a C-star home directory."""
+
+ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
+"""Environment variable containing a path to the root output directory."""
+
+
+def get_output_dir(value_override: Path | None = None) -> Path:
+    """Return the path to the C-star output directory.
+
+    Returns
+    -------
+    Path
+    """
+    if value_override:
+        return value_override
+
+    home = home = os.getenv(ENV_CSTAR_HOME, DEFAULT_CSTAR_HOME)
+    home_path = Path(home).expanduser().resolve()
+
+    default_out_dir = home_path / DEFAULT_OUTPUT_DIR
+    final_outdir = os.getenv(ENV_CSTAR_OUTDIR, default_out_dir)
+
+    return Path(final_outdir).expanduser().resolve()
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
@@ -277,3 +315,69 @@ def _run_cmd(
 
     log.debug(msg_post or "Command completed successfully.")
     return stdout
+
+
+def slugify(source: str) -> str:
+    """Convert a source string into a URL-safe slug.
+
+    Parameters
+    ----------
+    source : str
+        The string to be converted.
+
+    Returns
+    -------
+    str
+        The slugified version of the source string.
+    """
+    if not source:
+        raise ValueError
+
+    return re.sub(r"\W+", "-", source.casefold())
+
+
+def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
+    """Deep merge two dictionaries.
+
+    Iterate recursively through keys in dictionary `d2`, replacing
+    any leaf values in `d1` with the value from `d2`.
+
+    NOTE: Currently handles leaf values that are scalar or lists. Additional
+    leaf types (such as set) may require additional conditional blocks.
+
+    Parameters
+    ----------
+    d1 : dict[str, t.Any]
+        The dictionary that must be updated.
+    d2 : dict[str, t.Any]
+        The dictionary containing values to be merged.
+
+    Returns
+    -------
+    dict[str, t.Any]
+        The merged dictionaries.
+    """
+    for k, v in d2.items():
+        if isinstance(v, dict):
+            d1[k] = deep_merge(d1.get(k, {}), v)
+        elif isinstance(v, list):
+            list_items = []
+            for i, item in enumerate(v):
+                if isinstance(item, dict):
+                    list_items.append(deep_merge(d1.get(k, {})[i], item))
+                else:
+                    list_items.append(item)
+            d1[k] = list_items
+        else:
+            d1[k] = v
+    return d1
+
+
+def additional_files_dir() -> Path:
+    """Return the path to the additional files directory.
+
+    Returns
+    -------
+    Path
+    """
+    return Path(__file__).parent.parent / "additional_files"

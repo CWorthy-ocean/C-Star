@@ -1,12 +1,20 @@
 import asyncio
+import os
 import typing as t
 from enum import IntEnum, StrEnum, auto
+from pathlib import Path
 
 import networkx as nx
-from pydantic import Field
 
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.log import LoggingMixin
+from cstar.base.utils import ENV_CSTAR_OUTDIR, slugify
 from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.utils import (
+    ENV_CSTAR_ORCH_RUNID,
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_QUEUE,
+)
 
 KEY_STATUS: t.Literal["status"] = "status"
 KEY_STEP: t.Literal["step"] = "step"
@@ -141,16 +149,13 @@ class Task(t.Generic[_THandle]):
         self.handle = handle
 
 
-_TValue = t.TypeVar("_TValue")
-
-
-class Planner:
+class Planner(LoggingMixin):
     """Identifies depdendencies of a workplan to produce an execution plan."""
 
     workplan: Workplan
     """The workplan to plan."""
 
-    graph: nx.DiGraph = Field(init=False)
+    graph: nx.DiGraph
     """The graph used for task planning."""
 
     def __init__(
@@ -232,12 +237,12 @@ class Planner:
         value : object
             The value to be stored.
         """
-        if key in {KEY_STATUS, KEY_STEP, KEY_TASK}:
-            msg = f"WARNING: Writing to reserved key `{key}` on node `{n}`"
-            print(msg)
+        stored = self.graph.nodes[n].get(key, "")
+        if key in {KEY_STATUS, KEY_STEP, KEY_TASK} and stored != value:
+            msg = f"Updating reserved key `{key}` on node `{n}` with value `{value}`"
+            self.log.debug(msg)
 
-        node = self.graph.nodes[n]
-        node[key] = value
+        self.graph.nodes[n][key] = value
 
     @t.overload
     def retrieve(
@@ -392,7 +397,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ...
 
 
-class Orchestrator:
+class Orchestrator(LoggingMixin):
     """Manage the execution of a `Workplan`."""
 
     planner: Planner
@@ -436,8 +441,12 @@ class Orchestrator:
 
         working_list = set(nodes).difference(closed_set)
 
-        if any(Status.is_failure(g.nodes[u][KEY_STATUS]) for u in closed_set):
-            print("Exiting due to execution failures")
+        if failures := {
+            u: g.nodes[u][KEY_STATUS]
+            for u in closed_set
+            if Status.is_failure(g.nodes[u][KEY_STATUS])
+        }:
+            self.log.error(f"Exiting due to task failures: {failures}")
             return None
 
         for n in working_list:
@@ -535,7 +544,7 @@ class Orchestrator:
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)
-            print(f"Launched step: {step.name}")
+            self.log.info(f"Launched step: {step.name}")
 
         self.planner.store(node, KEY_STATUS, task.status)
         return task
@@ -555,10 +564,10 @@ class Orchestrator:
             return
 
         if task.status == Status.Done:
-            print(f"\t\tClosed node: {n}")
+            self.log.info(f"Closed node: {n}")
             self.planner.store(n, KEY_STATUS, Status.Done)
         elif task.status == Status.Failed:
-            print(f"\t\tFailed node: {n}")
+            self.log.warning(f"Failed node: {n}")
             # TODO: on failure, cancel all jobs if anything depends on it
             # - NOTE: this may occur naturally with SLURM but not local launch
             self.planner.store(n, KEY_STATUS, Status.Failed)
@@ -622,3 +631,43 @@ class Orchestrator:
         results = await asyncio.gather(*tasks, return_exceptions=False)
         for task in results:
             self.planner.store(task.step.name, KEY_STATUS, task.status)
+
+
+def check_environment() -> None:
+    """Verify the environment is configured correctly.
+
+    Raises
+    ------
+    ValueError
+        If required environment variables are missing or empty.
+    """
+    required_vars = (
+        ENV_CSTAR_SLURM_ACCOUNT,
+        ENV_CSTAR_SLURM_QUEUE,
+        ENV_CSTAR_ORCH_RUNID,
+    )
+
+    for key in required_vars:
+        if not os.getenv(key, ""):
+            raise ValueError(
+                f"Unable to run workplan. `{key}` not found in environment."
+            )
+
+
+def configure_environment(
+    output_dir: Path | None = None, run_id: str | None = None
+) -> None:
+    """Configure environment variables required by the runner.
+
+    Parameters
+    ----------
+    output_dir : Path | None
+        The directory where outputs will be written.
+    run_id : str | None
+        The unique identifier for an execution of the workplan.
+    """
+    if output_dir:
+        os.environ[ENV_CSTAR_OUTDIR] = output_dir.expanduser().resolve().as_posix()
+
+    if run_id:
+        os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)

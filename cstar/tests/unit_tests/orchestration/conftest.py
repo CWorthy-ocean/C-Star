@@ -6,84 +6,9 @@ import typing as t
 from pathlib import Path
 
 import pytest
-import yaml
-from pydantic import BaseModel
 
+from cstar.base.utils import additional_files_dir
 from cstar.orchestration.models import RomsMarblBlueprint, Step, Workplan
-from cstar.orchestration.serialization import model_to_yaml
-
-_T = t.TypeVar("_T", bound=BaseModel)
-
-
-def yaml_to_model(yaml_doc: str, cls: type[_T]) -> _T:
-    """Deserialize yaml to a model.
-
-    Parameters
-    ----------
-    yaml_doc : str
-        The serialized model
-    cls : type
-        The type to deserialize to
-
-    Returns
-    -------
-    _T
-        The deserialized model instance
-    """
-    loaded_dict = yaml.safe_load(yaml_doc)
-
-    return cls.model_validate(loaded_dict)
-
-
-@pytest.fixture
-def serialize_blueprint(
-    blueprint_schema_path: Path,
-) -> t.Callable[[RomsMarblBlueprint, Path], str]:
-    def _inner(model: RomsMarblBlueprint, path: Path) -> str:
-        yaml_doc = model_to_yaml(model)
-
-        schema_directive = (
-            f"# yaml-language-server: $schema={blueprint_schema_path.as_posix()}"
-        )
-
-        yaml_doc = f"{schema_directive}\n{yaml_doc}"
-
-        print(f"Writing test yaml document to: {path}")
-        path.write_text(yaml_doc, encoding="utf-8")
-
-        return yaml_doc
-
-    return _inner
-
-
-@pytest.fixture
-def serialize_workplan(
-    workplan_schema_path: Path,
-) -> t.Callable[[Workplan, Path], str]:
-    def _inner(model: Workplan, path: Path) -> str:
-        yaml_doc = model_to_yaml(model)
-
-        schema_directive = (
-            f"# yaml-language-server: $schema={workplan_schema_path.as_posix()}"
-        )
-
-        yaml_doc = f"{schema_directive}\n{yaml_doc}"
-
-        print(f"Writing test yaml document to: {path}")
-        path.write_text(yaml_doc, encoding="utf-8")
-
-        return yaml_doc
-
-    return _inner
-
-
-@pytest.fixture
-def deserialize_model() -> t.Callable[[Path, type], BaseModel]:
-    def _inner(path: Path, klass: type) -> BaseModel:
-        yaml_content = path.read_text()
-        return yaml_to_model(yaml_content, klass)
-
-    return _inner
 
 
 @pytest.fixture
@@ -98,6 +23,52 @@ def fake_blueprint_path(tmp_path: Path) -> Path:
     path = tmp_path / "blueprint.yml"
     path.touch()
     return path
+
+
+@pytest.fixture
+def templates_dir() -> Path:
+    """Return the path to the templates directory contained in the package
+    "additional files."
+
+    Returns
+    -------
+    Path
+    """
+    return additional_files_dir() / "templates"
+
+
+@pytest.fixture
+def wp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Workplan` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "wp"
+
+
+@pytest.fixture
+def bp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Blueprint` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "bp"
 
 
 @pytest.fixture
@@ -125,30 +96,6 @@ def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step, None, 
             )
 
     return _gen_fake_steps
-
-
-@pytest.fixture
-def load_workplan() -> t.Callable[[Path], Workplan]:
-    """Create a function to load workplan yaml."""
-
-    def _data_loader(path: Path) -> Workplan:
-        """Deserialize a yaml file and return the resulting Workplan."""
-        yaml_doc = path.read_text(encoding="utf-8")
-        return yaml_to_model(yaml_doc, Workplan)
-
-    return _data_loader
-
-
-@pytest.fixture
-def load_blueprint() -> t.Callable[[Path], RomsMarblBlueprint]:
-    """Create a function to load workplan yaml."""
-
-    def _data_loader(path: Path) -> RomsMarblBlueprint:
-        """Deserialize a yaml file and return the resulting Workplan."""
-        yaml_doc = path.read_text(encoding="utf-8")
-        return yaml_to_model(yaml_doc, RomsMarblBlueprint)
-
-    return _data_loader
 
 
 @pytest.fixture
@@ -190,7 +137,7 @@ def complete_blueprint_template_input() -> dict[str, t.Any]:
     a valid blueprint, each populated with a valid value.
     """
     return {
-        "name": "Test Workplan",
+        "name": "Test Blueprint",
         # "description": "This is the description of my test workplan",
         # "state": "draft",
         # "compute_environment": {
@@ -464,3 +411,14 @@ def fill_blueprint_template(
         return populated
 
     return _get_blueprint_template
+
+
+@pytest.fixture
+def default_blueprint_path() -> str:
+    """Return the blueprint path found in template workplans.
+
+    Returns
+    -------
+    str
+    """
+    return "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"

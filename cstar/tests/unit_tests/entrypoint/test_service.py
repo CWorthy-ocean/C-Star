@@ -44,7 +44,7 @@ class PrintingService(Service):
         self.max_iter = abs(max_iterations)
         self.max_duration = abs(max_duration)
         self.start_time = 0.0
-        self.test_queue: mp.Queue = mp.Queue()
+        self.test_queue: mp.Queue[str] = mp.Queue()
         self.metrics: dict[str, int] = defaultdict(lambda: 0)
 
     @property
@@ -67,8 +67,8 @@ class PrintingService(Service):
         """Return the number of delays executed."""
         return self.metrics["_on_delay"]
 
-    def _on_iteration(self) -> None:
-        super()._on_iteration()
+    async def _on_iteration(self) -> None:
+        await super()._on_iteration()
         self.log.debug("Running PrintingService._on_iteration")
         self.test_queue.put_nowait("_on_iteration")
         self.summarize()  # update each loop; don't let queues grow too large
@@ -302,8 +302,9 @@ async def test_event_loop_hc_start(loop_count: int) -> None:
     # Configure the health check to update every event loop iteration
     # (number of start calls shouldn't be affected)
     with (
-        mock.patch(
-            "cstar.entrypoint.Service._start_healthcheck",
+        mock.patch.object(
+            Service,
+            "_start_healthcheck",
             mock_hc_start,
         ),
         PrintingService(max_iterations=loop_count, hc_freq=1) as service,

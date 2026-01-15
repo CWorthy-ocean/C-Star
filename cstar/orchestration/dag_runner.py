@@ -1,20 +1,39 @@
 import asyncio
 import os
-import sys
 import typing as t
+from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
+from cstar.base.feature import is_feature_enabled
+from cstar.base.log import get_logger
+from cstar.base.utils import get_output_dir
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
-    Launcher,
     Orchestrator,
     Planner,
     RunMode,
+    check_environment,
+    configure_environment,
 )
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.transforms import (
+    RomsMarblTimeSplitter,
+    WorkplanTransformer,
+)
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS, get_run_id
+
+WorkplanTemplate: t.TypeAlias = t.Literal["single_step", "linear", "fanout", "parallel"]
+log = get_logger(__name__)
+
+
+@dataclass
+class DagStatus:
+    """The current status of a workflow."""
+
+    open_items: t.Iterable[str]
+    closed_items: t.Iterable[str]
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -24,33 +43,19 @@ def incremental_delays() -> t.Generator[float, None, None]:
     -------
     Generator[float]
     """
-    # TODO: load delays from config to enable dynamic changes for tests.
-    delays = [2, 2, 5, 5, 15, 15]
+    delays = [0.1, 1, 2, 5, 15, 30, 60]
+
+    if custom_delays := os.getenv(ENV_CSTAR_ORCH_DELAYS, ""):
+        try:
+            delays = [float(d) for d in custom_delays.split(",")]
+        except ValueError:
+            log.warning(f"Malformed delay provided: {custom_delays}. Using defaults.")
+
     delay_cycle = cycle(delays)
     yield from delay_cycle
 
 
-def display_summary(
-    open_set: t.Iterable[str] | None,
-    closed_set: t.Iterable[str] | None,
-    orchestrator: Orchestrator,
-) -> None:
-    print("The remaining steps in the plan are: ")
-    if open_set:
-        for node in open_set:
-            print(f"\t- {node}")
-    else:
-        print("\t[N/A]")
-
-    print("The completed steps in the plan are: ")
-    if closed_set:
-        for node in closed_set:
-            print(f"\t- {node}")
-    else:
-        print("\t[N/A]")
-
-
-async def retrieve_run_progress(orchestrator: Orchestrator) -> None:
+async def retrieve_run_progress(orchestrator: Orchestrator) -> DagStatus:
     """Load the run state.
 
     Parameters
@@ -62,6 +67,10 @@ async def retrieve_run_progress(orchestrator: Orchestrator) -> None:
 
         - RunMode.Schedule submits all processes in the plan in a non-blocking manner.
         - RunMode.Monitor waits for all processes in the plan to complete.
+
+    Returns
+    -------
+    DagStatus
     """
     mode = RunMode.Monitor
     closed_set = orchestrator.get_closed_nodes(mode=mode)
@@ -74,25 +83,33 @@ async def retrieve_run_progress(orchestrator: Orchestrator) -> None:
         closed_set = orchestrator.get_closed_nodes(mode=mode)
         open_set = orchestrator.get_open_nodes(mode=mode)
 
-    display_summary(open_set, closed_set, orchestrator)
+    return DagStatus(open_set or [], closed_set)
 
 
-async def load_dag_status(path: Path) -> None:
-    """Determine the current status of the workplan.
+async def load_dag_status(path: Path, run_id: str) -> DagStatus:
+    """Determine the current status of a workplan run.
 
     Parameters
     ----------
     path : Path
         The path to the blueprint being executed.
+    run_id : str
+        The unique run id to query status for.
+
+    Returns
+    -------
+    DagStatus
     """
     wp = deserialize(path, Workplan)
-    print(f"Loading status of workplan: {wp.name}")
+    log.info(f"Loading status of workplan: {wp.name}")
+
+    configure_environment(run_id=run_id)
 
     planner = Planner(workplan=wp)
-    launcher: Launcher = SlurmLauncher()
+    launcher = SlurmLauncher()
     orchestrator = Orchestrator(planner, launcher)
 
-    await retrieve_run_progress(orchestrator)
+    return await retrieve_run_progress(orchestrator)
 
 
 async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
@@ -113,36 +130,102 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
     delay_iter = iter(incremental_delays())
 
     while open_set is not None:
-        print(f"[on-enter::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
         await orchestrator.run(mode=mode)
 
-        closed_set = orchestrator.get_closed_nodes(mode=mode)
-        open_set = orchestrator.get_open_nodes(mode=mode)
-        print(f"[on-exit::{mode}] Open nodes: {open_set}, Closed: {closed_set}")
+        curr_closed = orchestrator.get_closed_nodes(mode=mode)
+        curr_open = orchestrator.get_open_nodes(mode=mode)
+
+        if curr_closed != closed_set or curr_open != curr_open:
+            # reset to initial delay when a task is found or completed
+            delay_iter = iter(incremental_delays())
+
+        open_set = curr_open
+        closed_set = curr_closed
 
         sleep_duration = next(delay_iter)
-        print(f"Sleeping for {sleep_duration} seconds before next {mode}.")
         await asyncio.sleep(sleep_duration)
 
-    print(f"Workplan {mode} is complete.")
+    log.info(f"Workplan {mode} is complete.")
+
+
+async def prepare_workplan(
+    wp_path: Path,
+    output_dir: Path,
+    run_id: str,
+) -> tuple[Workplan, Path]:
+    """Load the workplan and apply any applicable transforms.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The path to the workplan to load.
+    output_dir : Path
+        The directory where workplan outputs will be written.
+    run_id : str
+        The unique ID for the current run.
+
+    Returns
+    -------
+    Workplan
+    """
+    wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    run_root_dir = output_dir / run_id
+
+    if is_feature_enabled("ORCH_TRANSFORM_AUTO"):
+        transformer = WorkplanTransformer(wp_orig, RomsMarblTimeSplitter())
+        wp = transformer.apply()
+
+        if transformer.is_modified:
+            log.info("A time-split workplan will be executed.")
+    else:
+        wp = wp_orig
+
+    # make a copy of the original and modified blueprint in the output directory
+    persist_orig = WorkplanTransformer.derived_path(
+        wp_path, run_root_dir, "_original", ".bak"
+    )
+    persist_as = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_transformed")
+
+    _ = await asyncio.gather(
+        asyncio.to_thread(serialize, persist_orig, wp_orig),
+        asyncio.to_thread(serialize, persist_as, wp),
+    )
+
+    return wp, persist_as
 
 
 # @flow(log_prints=True)
-async def build_and_run_dag(path: Path) -> None:
+async def build_and_run_dag(
+    wp_path: Path, run_id: str = "", output_dir: Path | None = None
+) -> Path:
     """Execute the steps in the workplan.
 
     Parameters
     ----------
     path : Path
         The path to the blueprint to execute
+    run_id : str | None
+        The run-id to be used by the orchestrator.
+    output_dir : Path | None
+        The path to the output directory.
+
+    Returns
+    -------
+    Path
+        The path to the workplan that was executed after any tranformations
+        were applied.
     """
-    wp = deserialize(path, Workplan)
-    print(f"Executing workplan: {wp.name}")
+    run_id = get_run_id(run_id)
+    output_dir = get_output_dir(output_dir)
+
+    configure_environment(output_dir, run_id)
+    check_environment()
+    wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 
     planner = Planner(workplan=wp)
     # from cstar.orchestration.launch.local import LocalLauncher
     # launcher: Launcher = LocalLauncher()
-    launcher: Launcher = SlurmLauncher()
+    launcher = SlurmLauncher()
     orchestrator = Orchestrator(planner, launcher)
 
     # schedule the tasks without waiting for completion
@@ -151,32 +234,4 @@ async def build_and_run_dag(path: Path) -> None:
     # monitor the scheduled tasks until they complete
     await process_plan(orchestrator, RunMode.Monitor)
 
-
-if __name__ == "__main__":
-    # wp_path = Path("/Users/eilerman/git/C-Star/personal_testing/workplan_local.yaml")
-    # wp_path = Path("/home/x-seilerman/wp_testing/workplan.yaml")
-    # wp_path = Path("/anvil/projects/x-ees250129/x-cmcbride/workplans/01.simple.yaml")
-
-    with TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
-
-        for template in ["fanout", "linear", "parallel", "single_step"]:
-            cstar_dir = Path(__file__).parent.parent
-            template_file = f"{template}.yaml"
-            templates_dir = cstar_dir / "additional_files/templates"
-            template_path = templates_dir / "wp" / template_file
-
-            bp_default = "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
-            bp_path = tmp_path / "blueprint.yaml"
-            bp_tpl_path = templates_dir / "bp/blueprint.yaml"
-            bp_path.write_text(bp_tpl_path.read_text())
-
-            wp_content = template_path.read_text()
-            wp_content = wp_content.replace(bp_default, bp_path.as_posix())
-
-            wp_path = tmp_path / template_file
-            wp_path.write_text(wp_content)
-
-            my_run_name = f"{sys.argv[1]}_{template}"
-            os.environ["CSTAR_RUNID"] = my_run_name
-            asyncio.run(build_and_run_dag(wp_path))
+    return wp_path

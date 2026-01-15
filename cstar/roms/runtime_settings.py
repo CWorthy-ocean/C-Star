@@ -1,5 +1,6 @@
 import abc
 import types
+from collections import defaultdict
 from pathlib import Path
 from typing import (
     Any,
@@ -21,7 +22,7 @@ from pydantic import (
 from pydantic.alias_generators import to_snake
 
 from cstar.base.log import get_logger
-from cstar.base.utils import _list_to_concise_str
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _list_to_concise_str
 
 log = get_logger(__name__)
 
@@ -496,6 +497,17 @@ class ROMSRuntimeSettings(BaseModel):
 
     # Pydantic model configuration
     model_config = {"populate_by_name": True, "alias_generator": _get_alias}
+
+    @model_validator(mode="after")
+    def set_fixed_output_root_name(self) -> "ROMSRuntimeSettings":
+        """Apply an "after" validator to automatically change the value of the
+        output_root_name attribute to the a fixed name.
+        """
+        self.output_root_name = OutputRootName(
+            output_root_name=DEFAULT_OUTPUT_ROOT_NAME
+        )
+        return self
+
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -580,32 +592,23 @@ class ROMSRuntimeSettings(BaseModel):
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist.")
 
-        with filepath.open() as f:
-            lines = list(f)
+        all_lines = [line.strip() for line in filepath.read_text().split("\n")]
+        lines = [line for line in all_lines if line and not line.startswith("!")]
 
-        sections = {}
-        current_section = None
-        section_lines: list[str] = []
+        sections = defaultdict(list)
+        key = ""
 
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith("!"):
-                continue
+        while lines:
+            line = lines.pop(0)
 
             if ":" in line:
-                # save the previous section if one was open
-                if current_section is not None:
-                    sections[current_section] = section_lines
+                key, _ = [x.strip() for x in line.split(":", maxsplit=1)]
+                continue
 
-                # start a new section
-                current_section = line.split(":", 1)[0].strip()
-                section_lines = []
-            else:
-                section_lines.append(line)
+            if not key:
+                continue
 
-        # save the last section
-        if current_section is not None:
-            sections[current_section] = section_lines
+            sections[key].append(line)
 
         return sections
 
