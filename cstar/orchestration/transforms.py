@@ -395,6 +395,7 @@ class RomsMarblTimeSplitter(Transform):
                 depends_on=depends_on,
                 parent=step.name,
                 blueprint_overrides=overrides,  # type: ignore[arg-type]
+                work_dir=child_out_dir,
             )
 
             yield child_step

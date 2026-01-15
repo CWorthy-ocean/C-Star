@@ -524,6 +524,9 @@ class ChildStep(Step):
     parent: str = Field(frozen=True)
     """The name of the parent step if this step was created via splitting."""
 
+    work_dir: Path
+    """The path to the working directory of the step."""
+
     def working_dir(self, bp: RomsMarblBlueprint) -> Path:
         """The step-relative directory for writing outputs.
 
@@ -542,21 +545,7 @@ class ChildStep(Step):
         Path
             The path to the step working directory.
         """
-        if out_dir := os.getenv(ENV_CSTAR_OUTDIR, ""):
-            run_dir = os.environ[ENV_CSTAR_ORCH_RUNID]
-            parent_dir = slugify(self.parent)
-            step_dir = self.safe_name
-            return Path(out_dir) / run_dir / parent_dir / "tasks" / step_dir
-
-        runtime_params = self.blueprint_overrides.get("runtime_params", {})
-        output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
-
-        od_path = Path(bp.runtime_params.output_dir)
-
-        if output_dir_override:
-            od_path = Path(output_dir_override)
-
-        return od_path
+        return self.work_dir
 
 
 class Workplan(BaseModel):
