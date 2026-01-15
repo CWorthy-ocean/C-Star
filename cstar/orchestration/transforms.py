@@ -329,10 +329,6 @@ class RomsMarblTimeSplitter(Transform):
 
         job_fs = step.file_system(blueprint)
 
-        # bp_outdir = _bp_output_dir(blueprint, step.blueprint_overrides, get_run_id())  # type: ignore[arg-type]
-        # step_outdir = bp_outdir / slugify(step.name)
-        # job_fs = RomsFileSystemManager(step_outdir)
-
         bp_path = job_fs.work_dir / Path(step.blueprint_path).name
         serialize(bp_path, blueprint)
 
@@ -494,10 +490,8 @@ class OverrideTransform(Transform):
         blueprint = deserialize(bp_path, RomsMarblBlueprint)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
-        # bp_outdir = _bp_output_dir(updated_bp, step.blueprint_overrides, get_run_id())  # type: ignore[arg-type]
 
         fs_manager = step.file_system(blueprint)
-        # fs_manager = RomsFileSystemManager(bp_outdir)
         bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
         persist_as = fs_manager.work_dir / bp_renamed
 
