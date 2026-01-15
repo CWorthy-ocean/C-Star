@@ -1531,6 +1531,9 @@ class ROMSSimulation(Simulation):
         script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
 
+        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
+
         ## 2: RUN ROMS
 
         roms_exec_cmd = " ".join(
