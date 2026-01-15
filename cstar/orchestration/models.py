@@ -527,24 +527,8 @@ class ChildStep(Step):
     work_dir: Path
     """The path to the working directory of the step."""
 
+    @t.override
     def working_dir(self, bp: RomsMarblBlueprint) -> Path:
-        """The step-relative directory for writing outputs.
-
-        Precedence:
-        1. Overrides provided via a workplan always overwrite blueprint-supplied paths.
-        2. The system may override with a path from the environment variables.
-        3. The output path from the blueprint runtime parameters is used.
-
-        Parameters
-        ----------
-        bp : RomsMarblBlueprint
-            The blueprint instance loaded by the step
-
-        Returns
-        -------
-        Path
-            The path to the step working directory.
-        """
         return self.work_dir
 
 
