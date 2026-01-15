@@ -1190,6 +1190,10 @@ class ROMSSimulation(Simulation):
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
 
+        compile_time_code_dir.mkdir(parents=True, exist_ok=True)
+        runtime_code_dir.mkdir(parents=True, exist_ok=True)
+        input_datasets_dir.mkdir(parents=True, exist_ok=True)
+
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
         for codebase in (x for x in self.codebases if x is not None):
