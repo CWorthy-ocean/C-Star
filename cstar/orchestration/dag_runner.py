@@ -24,7 +24,6 @@ from cstar.orchestration.transforms import (
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS, get_run_id
 
-WorkplanTemplate: t.TypeAlias = t.Literal["single_step", "linear", "fanout", "parallel"]
 log = get_logger(__name__)
 
 
