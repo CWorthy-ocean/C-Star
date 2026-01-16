@@ -6,7 +6,10 @@ The C-SON Forge workflow progresses through distinct stages, transforming a mode
 
 ```{mermaid}
 flowchart TD
-    A[models.yml] -->|load_models_yaml| B[ModelSpec]
+    S[settings-defaults.yml] --> A[models.yml]
+    T["templates:<br/>*.opt.j2"] --> A[models.yml]
+    A -->|load_models_yaml| B[ModelSpec]
+
     C["User input (or domains.yml)"] -->|domain config| D[CstarSpecBuilder]
     B -->|model_spec| D
     
@@ -20,11 +23,12 @@ flowchart TD
     H -->|persist| I[B_postconfig.yml]
     
     I -->|configure_build| J["BUILD<br/>Render Templates<br/>Create Simulation<br/>."]
+
     J -->|persist| K[B_build.yml]
     
     K -->|build| L["Compile<br/>Setup C-Star<br/>Build ROMS/MARBL<br/>."]
     L --> M[Executable]
-    
+
     M -->|run| N["RUN<br/>run-time settings<br/>run<br/>."]
     N -->|persist| O[B_run.yml]
     
