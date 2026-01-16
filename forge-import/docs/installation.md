@@ -33,8 +33,7 @@ To verify that everything is installed correctly, run the following in a Python 
 
 ```python
 import cson_forge
-import config
-print(f"System detected: {config.system}")
+print(f"System detected: {cson_forge.config.system}")
 ```
 
 ## Register for data access
