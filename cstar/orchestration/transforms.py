@@ -219,7 +219,7 @@ class WorkplanTransformer:
     def derived_path(
         source: Path,
         target_dir: Path | None = None,
-        suffix: str = "_trx",
+        suffix: str = DERIVED_PATH_SUFFIX,
         extension: str | None = None,
     ) -> Path:
         """Generate a new path name derived from the source path.

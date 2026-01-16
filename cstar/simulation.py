@@ -580,10 +580,6 @@ class Simulation(ABC, LoggingMixin):
         with open(cls.state_file_from(directory), "rb") as state_file:
             simulation: Simulation = pickle.load(state_file)
 
-        # manually add fs manager because persist deletes the attribute.
-        simulation._fs_manager = simulation._get_filesystem_manager(
-            simulation.directory
-        )
         return simulation
 
     @abstractmethod
