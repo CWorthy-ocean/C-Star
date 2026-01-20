@@ -144,10 +144,10 @@ class CodeRepository(DocLocMixin, ConfiguredBaseModel):
     location: HttpUrl | str
     """Location of the remote code repository."""
 
-    commit: str = Field(default="", min_length=1, validate_default=False)
+    commit: str = Field(default="", validate_default=False)
     """A specific commit to be used."""
 
-    branch: str = Field(default="", min_length=1, validate_default=False)
+    branch: str = Field(default="", validate_default=False)
     """A specific branch to be used."""
 
     filter: PathFilter | None = Field(default=None, validate_default=False)
