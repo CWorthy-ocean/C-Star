@@ -22,7 +22,7 @@ jobs:
       - name: Install C-Star
         shell: micromamba-shell {0}
         run: |
-           python - V
+           python -V
            python -m pip install -e . --force-reinstall
       - name: Build Docs
         shell: bash -l {0}
