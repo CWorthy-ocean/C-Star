@@ -53,6 +53,7 @@ extensions = [
     "nbsphinx",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
+    "sphinx_design",
 ]
 
 numpydoc_show_class_members = True

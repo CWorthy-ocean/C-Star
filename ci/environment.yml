@@ -21,12 +21,12 @@ dependencies:
   - pytest
   - pytest-asyncio
   # docs
-  - sphinx
   - nbsphinx
-  - sphinx-book-theme
+  - sphinx
   - sphinxcontrib-bibtex
-  - myst-parser
-  - pip:
+  - sphinx-book-theme
+  - sphinx-design
+ - pip:
     - readthedocs-sphinx-ext
   # for running jupyter notebooks
   - ipykernel
