@@ -75,14 +75,34 @@ Run the setup script:
 
 To verify that everything is installed correctly:
 
-**a) Check that the package can be imported:**
+**a) Check that the Jupyter kernel is installed:**
+
+```bash
+jupyter kernelspec list | grep cson-forge-v0
+```
+
+You should see `cson-forge-v0` in the list. If not, the kernel installation may have failed.
+
+**b) Activate the environment and test the installation:**
+
+```bash
+# Activate the environment (using micromamba or conda)
+eval "$(./bin/micromamba shell hook --shell bash)"  # or use conda if micromamba not available
+micromamba activate cson-forge-v0  # or: conda activate cson-forge-v0
+
+# Test that cson_forge can be imported
+cd workflows
+python -c "import cson_forge; print('✓ cson_forge works')"
+```
+
+**c) Check that the package can be imported in Python:**
 
 ```python
 import cson_forge
 print(f"System detected: {cson_forge.config.system}")
 ```
 
-**b) Inspect the configured paths:**
+**d) Inspect the configured paths:**
 
 The `show-paths` command displays the detected system and all configured data paths:
 
