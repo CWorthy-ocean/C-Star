@@ -39,7 +39,7 @@ def test_run_notebook_calls_papermill(monkeypatch, tmp_path):
             notebook_path.name,
             str(output_path),
             params,
-            "cson-atlas",
+            "cson-forge-v0",
             str(notebook_path.parent.resolve()),
         ),
     ]
@@ -134,7 +134,8 @@ def test_main_cli_uses_yaml_file(monkeypatch, tmp_path):
 
     nb_engine.main(args)
 
-    assert captured["notebook_path"] == Path("regional-domain-sizing.ipynb")
+    # Notebook path is resolved relative to workflow directory (where config_path is)
+    assert captured["notebook_path"] == tmp_path / "regional-domain-sizing.ipynb"
     assert captured["output_path"] == tmp_path / "executed/domain-sizing/example.ipynb"
     assert captured["parameters"]["grid_yaml"] == str(tmp_path / "tests/_grid.yml")
 

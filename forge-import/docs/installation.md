@@ -20,6 +20,11 @@ In your terminal, clone your forked repository:
 git clone https://github.com/<YOUR_GITHUB_USERNAME>/cson-forge.git
 cd cson-forge
 ```
+Consider creating a branch to keep your work organized
+```bash
+git checkout -b <branch-name>
+```
+
 
 :::{note}
 **HTTPS vs SSH Access**
@@ -33,6 +38,7 @@ cd cson-forge
 
 For more information on HTTPS and SSH access, see the [GitHub documentation on cloning repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
 :::
+
 
 ### 3. Run the Setup Script
 
@@ -120,11 +126,6 @@ Paths:
   ...
 ```
 
-For JSON output:
-```bash
-python -m cson_forge.config show-paths --json
-```
-
 ## Register for data access
 
 CSON Forge facilitates access to a collection of open datasets required to force regional oceanographic models. 
@@ -133,6 +134,34 @@ These data are documented in ROMS Tools [here](https://roms-tools.readthedocs.io
 Access to most of the data is facilitated automatically. 
 - [Sign up for access](https://help.marine.copernicus.eu/en/articles/4220332-how-to-sign-up-for-copernicus-marine-service) to the Copernicus Marine Service 
 - [Sign up for access](https://www.tpxo.net/global) to TPXO data
+
+
+## Try running the `CStarSpecBuilder` Demo:
+
+Once your environment is set up, you can try running the `CStarSpecBuilder` demo notebook to create a new domain and run a ROMS simulation:
+
+1. **Navigate to the workflows directory:**
+   ```bash
+   cd workflows/generate-models
+   ```
+
+2. **Start JupyterLab:**
+   ```bash
+   jupyter lab
+   ```
+
+3. **Open the demo notebook:**
+   - Open `CStarSpecBuilder-demo.ipynb` in Jupyter
+   - Make sure the kernel is set to `cson-forge-v0` (you can change it in the Kernel menu if needed)
+
+4. **Run the notebook:**
+   - Execute the cells sequentially to:
+     - Set up the domain configuration (grid size, boundaries, partitioning)
+     - Configure and build the ROMS model
+     - Run the simulation
+   - The notebook will automatically save a timestamped copy to `executed/forge/{system_id}/` for reproducibility
+
+For more details on using `CStarSpecBuilder`, see the [Model Specification Introduction](model-spec-intro.md) and [Model Specification Example](model-spec-example.ipynb).
 
 
 
