@@ -21,24 +21,6 @@ git clone https://github.com/<YOUR_GITHUB_USERNAME>/cson-forge.git
 cd cson-forge
 ```
 
-:::{note}
-**HTTPS vs SSH Access**
-
-The command above uses HTTPS. Alternatively, you can use SSH:
-
-```bash
-git clone git@github.com:<YOUR_GITHUB_USERNAME>/cson-forge.git
-cd cson-forge
-```
-
-For more information on HTTPS and SSH access, see the [GitHub documentation on cloning repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
-:::
-
-:::{tip}
-SSH keys provide a more secure and convenient way to authenticate with GitHub, eliminating the need to enter your credentials for each push or pull operation. To set up SSH keys for GitHub, see:
-- [Generating a new SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent)
-- [Adding a new SSH key to your GitHub account](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account)
-:::
 
 ### 3. Run the Setup Script
 
@@ -68,7 +50,7 @@ Run the setup script:
 ./dev-setup.sh --clean
 
 # Automated setup without prompts
-./dev-setup.sh --batch
+./dev-setup.sh --force
 ```
 
 ### 4. Verify Installation
@@ -137,3 +119,26 @@ These data are documented in ROMS Tools [here](https://roms-tools.readthedocs.io
 Access to most of the data is facilitated automatically. 
 - [Sign up for access](https://help.marine.copernicus.eu/en/articles/4220332-how-to-sign-up-for-copernicus-marine-service) to the Copernicus Marine Service 
 - [Sign up for access](https://www.tpxo.net/global) to TPXO data
+
+
+### Notes
+:::{note}
+**HTTPS vs SSH Access**
+
+The command above uses HTTPS. Alternatively, you can use SSH:
+
+```bash
+git clone git@github.com:<YOUR_GITHUB_USERNAME>/cson-forge.git
+cd cson-forge
+```
+
+For more information on HTTPS and SSH access, see the [GitHub documentation on cloning repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
+:::
+
+:::{tip}
+SSH keys provide a more secure and convenient way to authenticate with GitHub, eliminating the need to enter your credentials for each push or pull operation. To set up SSH keys for GitHub, see:
+- [Generating a new SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent)
+- [Adding a new SSH key to your GitHub account](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account)
+:::
+
+
