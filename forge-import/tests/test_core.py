@@ -50,7 +50,6 @@ def _create_mock_paths_core(tmp_path, blueprints_dir=None, run_dir=None, here=No
         source_data=config.paths.source_data,
         input_data=config.paths.input_data,
         run_dir=run_dir if run_dir is not None else config.paths.run_dir,
-        code_root=config.paths.code_root,
         blueprints=blueprints_dir if blueprints_dir is not None else tmp_path,
         models_yaml=config.paths.models_yaml,
         builds_yaml=config.paths.builds_yaml,
@@ -509,7 +508,6 @@ class TestCstarSpecBuilderModelPostInit:
                     source_data=config.paths.source_data,
                     input_data=config.paths.input_data,
                     run_dir=config.paths.run_dir,
-                    code_root=config.paths.code_root,
                     blueprints=tmp_path,
                     models_yaml=config.paths.models_yaml,
                     builds_yaml=config.paths.builds_yaml,
@@ -2374,8 +2372,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                             # Check that RomsMarblInputData was called with correct args
                             mock_input_data_class.assert_called_once()
                             call_kwargs = mock_input_data_class.call_args[1]
-                            assert call_kwargs["model_name"] == builder.model_name
-                            assert call_kwargs["grid_name"] == builder.grid_name
+                            assert call_kwargs["domain_name"] == builder.name
                             assert call_kwargs["start_date"] == builder.start_date
                             assert call_kwargs["end_date"] == builder.end_date
     

@@ -45,7 +45,6 @@ def _create_mock_paths(tmp_path):
         source_data=config.paths.source_data,
         input_data=tmp_path,
         run_dir=config.paths.run_dir,
-        code_root=config.paths.code_root,
         blueprints=config.paths.blueprints,
         models_yaml=config.paths.models_yaml,
         builds_yaml=config.paths.builds_yaml,
@@ -192,8 +191,7 @@ def sample_roms_marbl_input_data(
     blueprint_dir.mkdir(parents=True, exist_ok=True)
     
     return RomsMarblInputData(
-        model_name="test_model",
-        grid_name="test_grid",
+        domain_name="test_grid",
         start_date=datetime(2012, 1, 1),
         end_date=datetime(2012, 1, 2),
         model_spec=sample_model_spec,
@@ -213,14 +211,12 @@ class TestInputData:
         """Test InputData initialization."""
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
-                model_name="test_model",
-                grid_name="test_grid",
+                domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2)
             )
             
-            assert data.model_name == "test_model"
-            assert data.grid_name == "test_grid"
+            assert data.domain_name == "test_grid"
             assert data.start_date == datetime(2012, 1, 1)
             assert data.end_date == datetime(2012, 1, 2)
             assert data.input_data_dir.exists()
@@ -229,22 +225,20 @@ class TestInputData:
         """Test _forcing_filename method."""
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
-                model_name="test_model",
-                grid_name="test_grid",
+                domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2)
             )
             
             filename = data._forcing_filename("grid")
-            assert filename.name == "test_model_grid.nc"
+            assert filename.name == "test_grid_grid.nc"
             assert filename.parent == data.input_data_dir
     
     def test_inputdata_ensure_empty_or_clobber_no_files(self, tmp_path):
         """Test _ensure_empty_or_clobber when directory is empty."""
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
-                model_name="test_model",
-                grid_name="test_grid",
+                domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2)
             )
@@ -256,8 +250,7 @@ class TestInputData:
         """Test _ensure_empty_or_clobber when files exist and clobber=False."""
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
-                model_name="test_model",
-                grid_name="test_grid",
+                domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2)
             )
@@ -272,8 +265,7 @@ class TestInputData:
         """Test _ensure_empty_or_clobber when files exist and clobber=True."""
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
-                model_name="test_model",
-                grid_name="test_grid",
+                domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2)
             )
@@ -290,8 +282,7 @@ class TestInputData:
         """Test that InputData.generate_all raises NotImplementedError."""
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
-                model_name="test_model",
-                grid_name="test_grid",
+                domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2)
             )
@@ -415,8 +406,7 @@ class TestRomsMarblInputDataInitialization:
         
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = RomsMarblInputData(
-                model_name="test_model",
-                grid_name="test_grid",
+                domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),
                 model_spec=sample_model_spec,
@@ -428,8 +418,7 @@ class TestRomsMarblInputDataInitialization:
                 use_dask=False
             )
             
-            assert data.model_name == "test_model"
-            assert data.grid_name == "test_grid"
+            assert data.domain_name == "test_grid"
             assert data.grid is not None
             assert data.model_spec is not None
             assert data.blueprint_elements is not None
@@ -504,8 +493,7 @@ class TestRomsMarblInputDataInitialization:
         # This should work since all inputs are registered
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = RomsMarblInputData(
-                model_name="test_model",
-                grid_name="test_grid",
+                domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),
                 model_spec=model_spec,
@@ -629,7 +617,7 @@ class TestRomsMarblInputDataGeneration:
         
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             # Update input_data_dir to use the mocked path since it was set in __post_init__
-            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.model_name}_{sample_roms_marbl_input_data.grid_name}"
+            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
             
             # Make grid.save() actually create a file so Pydantic validation passes
@@ -788,6 +776,12 @@ class TestRomsMarblInputDataGeneration:
         river_path = tmp_path / "river.nc"
         river_path.touch()  # Ensure file exists for Pydantic validation
         mock_rf.save.return_value = river_path
+        # Create a mock dataset with required variables
+        mock_ds = xr.Dataset({
+            "river_volume": (["nriver", "time"], np.random.rand(5, 10)),
+            "river_tracer": (["nriver", "time", "tracer"], np.random.rand(5, 10, 3)),
+        })
+        mock_rf.ds = mock_ds
         mock_rf_class.return_value = mock_rf
         
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
@@ -922,11 +916,16 @@ class TestRomsMarblInputDataGenerateAll:
             return path
         mock_river_instance.save.side_effect = river_save
         mock_river_instance.to_yaml = MagicMock()
+        # Create a mock dataset with required variables
+        mock_river_ds = xr.Dataset({
+            "river_volume": (["nriver", "time"], np.random.rand(5, 10)),
+            "river_tracer": (["nriver", "time", "tracer"], np.random.rand(5, 10, 3)),
+        })
+        mock_river_instance.ds = mock_river_ds
         mock_river.return_value = mock_river_instance
         
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             # Mock xr.open_dataset to prevent file operations when opening source files
-            import xarray as xr
             with patch('xarray.combine_by_coords') as mock_combine:
                 with patch('xarray.open_dataset') as mock_open_dataset:
                     mock_ds = xr.Dataset()  # Create a real empty Dataset
@@ -1017,15 +1016,25 @@ class TestRomsMarblInputDataGenerateAll:
             mock_obj.to_yaml = MagicMock()
             return mock_obj
         
+        # Helper to create a mock river with dataset
+        def create_mock_river_class():
+            mock_obj = create_mock_forcing_class()
+            # Create a mock dataset with required variables for river forcing
+            mock_river_ds = xr.Dataset({
+                "river_volume": (["nriver", "time"], np.random.rand(5, 10)),
+                "river_tracer": (["nriver", "time", "tracer"], np.random.rand(5, 10, 3)),
+            })
+            mock_obj.ds = mock_river_ds
+            return mock_obj
+        
         # Mock all forcing classes
         mock_ic_class.return_value = create_mock_forcing_class()
         mock_surface_class.return_value = create_mock_forcing_class()
         mock_boundary_class.return_value = create_mock_forcing_class()
         mock_tidal_class.return_value = create_mock_forcing_class()
-        mock_river_class.return_value = create_mock_forcing_class()
+        mock_river_class.return_value = create_mock_river_class()
         
         # Mock xr.open_dataset to prevent file operations
-        import xarray as xr
         mock_ds = xr.Dataset()  # Create a real empty Dataset
         mock_open_dataset.return_value = mock_ds
         mock_combine.return_value = mock_ds

@@ -44,7 +44,6 @@ class TestDataPaths:
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
             run_dir=tmp_path / "run-dir",
-            code_root=tmp_path / "code-root",
             blueprints=tmp_path / "blueprints",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
@@ -56,7 +55,6 @@ class TestDataPaths:
         assert paths.source_data == tmp_path / "source-data"
         assert paths.input_data == tmp_path / "input-data"
         assert paths.run_dir == tmp_path / "run-dir"
-        assert paths.code_root == tmp_path / "code-root"
         assert paths.blueprints == tmp_path / "blueprints"
         assert paths.models_yaml == tmp_path / "models.yml"
         assert paths.builds_yaml == tmp_path / "builds.yml"
@@ -70,7 +68,6 @@ class TestDataPaths:
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
             run_dir=tmp_path / "run-dir",
-            code_root=tmp_path / "code-root",
             blueprints=tmp_path / "blueprints",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
@@ -146,14 +143,14 @@ class TestSystemDetection:
         assert result == "unknown"
     
     @patch.dict(os.environ, {"HOSTNAME": "test-host"})
-    @patch('cson_forge.config.socket.gethostname')
-    @patch('cson_forge.config.platform.node')
+    @patch('cson_forge.config.socket.gethostname', return_value="")
+    @patch('cson_forge.config.platform.node', return_value="")
     def test_get_hostname_from_env(self, mock_node, mock_gethostname):
         """Test getting hostname from HOSTNAME environment variable."""
         result = _get_hostname()
         assert result == "test-host"
-        mock_gethostname.assert_not_called()
-        mock_node.assert_not_called()
+        mock_gethostname.assert_called_once()
+        mock_node.assert_called_once()
     
     @patch.dict(os.environ, {}, clear=True)
     @patch('cson_forge.config.socket.gethostname')
@@ -217,44 +214,42 @@ class TestSystemLayoutRegistry:
     def test_macos_layout(self, tmp_path):
         """Test MacOS layout function."""
         layout_fn = SYSTEM_LAYOUT_REGISTRY["MacOS"]
-        source_data, input_data, run_dir, code_root = layout_fn(tmp_path, {})
+        source_data, input_data, run_dir = layout_fn(tmp_path, {})
         
         assert source_data == tmp_path / "cson-forge-data" / "source-data"
         assert input_data == tmp_path / "cson-forge-data" / "input-data"
         assert run_dir == tmp_path / "cson-forge-data" / "cson-forge-run"
-        assert code_root == tmp_path / "cson-forge-data" / "codes"
     
     def test_unknown_layout(self, tmp_path):
         """Test unknown layout function."""
         layout_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
-        source_data, input_data, run_dir, code_root = layout_fn(tmp_path, {})
+        source_data, input_data, run_dir = layout_fn(tmp_path, {})
         
         assert source_data == tmp_path / "cson-forge-data" / "source-data"
         assert input_data == tmp_path / "cson-forge-data" / "input-data"
         assert run_dir == tmp_path / "cson-forge-data" / "cson-forge-run"
-        assert code_root == tmp_path / "cson-forge-data" / "codes"
     
     def test_anvil_layout(self, tmp_path):
         """Test RCAC Anvil layout function."""
+        from cson_forge.config import USER
         layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
         env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
-        source_data, input_data, run_dir, code_root = layout_fn(tmp_path, env)
+        source_data, input_data, run_dir = layout_fn(tmp_path, env)
         
         assert source_data == tmp_path / "work" / "cson-forge-data" / "source-data"
-        assert input_data == tmp_path / "work" / "cson-forge-data" / "input-data"
+        assert input_data == tmp_path / "work" / "cson-forge-data" / USER / "input-data"
         assert run_dir == tmp_path / "scratch" / "cson-forge-run"
-        assert code_root == tmp_path / "work" / "cson-forge-data" / "codes"
     
     def test_perlmutter_layout(self, tmp_path):
         """Test NERSC Perlmutter layout function."""
+        from cson_forge.config import USER
         layout_fn = SYSTEM_LAYOUT_REGISTRY["NERSC_perlmutter"]
         env = {"SCRATCH": str(tmp_path / "scratch")}
-        source_data, input_data, run_dir, code_root = layout_fn(tmp_path, env)
+        source_data, input_data, run_dir = layout_fn(tmp_path, env)
         
         assert source_data == tmp_path / "scratch" / "cson-forge-data" / "source-data"
-        assert input_data == tmp_path / "scratch" / "cson-forge-data" / "input-data"
+        assert input_data == tmp_path / "scratch" / "cson-forge-data" / USER / "input-data"
         assert run_dir == tmp_path / "scratch" / "cson-forge-data" / "cson-forge-run"
-        assert code_root == tmp_path / "scratch" / "cson-forge-data" / "codes"
 
 
 class TestGetDataPaths:
@@ -278,7 +273,6 @@ class TestGetDataPaths:
         assert paths.source_data.exists()
         assert paths.input_data.exists()
         assert paths.run_dir.exists()
-        assert paths.code_root.exists()
         assert paths.blueprints.exists()
         assert paths.model_configs.exists()
     
@@ -295,7 +289,6 @@ class TestGetDataPaths:
         assert paths.source_data.exists()
         assert paths.input_data.exists()
         assert paths.run_dir.exists()
-        assert paths.code_root.exists()
 
 
 class TestLoadMachineConfig:
@@ -375,7 +368,6 @@ class TestCLI:
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             run_dir=Path("/test/run"),
-            code_root=Path("/test/code"),
             blueprints=Path("/test/blueprints"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
@@ -403,7 +395,6 @@ class TestCLI:
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             run_dir=Path("/test/run"),
-            code_root=Path("/test/code"),
             blueprints=Path("/test/blueprints"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
@@ -433,7 +424,6 @@ class TestCLI:
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             run_dir=Path("/test/run"),
-            code_root=Path("/test/code"),
             blueprints=Path("/test/blueprints"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
