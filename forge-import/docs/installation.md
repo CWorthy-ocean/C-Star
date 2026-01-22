@@ -21,15 +21,20 @@ git clone https://github.com/<YOUR_GITHUB_USERNAME>/cson-forge.git
 cd cson-forge
 ```
 
+:::{note}
+**HTTPS vs SSH Access**
+
+The command above uses HTTPS. Alternatively, you can use SSH:
+
+```bash
+git clone git@github.com:<YOUR_GITHUB_USERNAME>/cson-forge.git
+cd cson-forge
+```
+
+For more information on HTTPS and SSH access, see the [GitHub documentation on cloning repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
+:::
 
 ### 3. Run the Setup Script
-
-The `dev-setup.sh` script automates the entire setup process, including:
-- [Installing Micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) (if needed)
-- [Creating the conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file)
-- [Installing the `cson-forge` package in editable mode](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs)
-- [Installing `C-Star`](https://c-star.readthedocs.io)
-- [Setting up the Jupyter kernel](https://ipykernel.readthedocs.io/en/stable/user-guide.html#kernel-installation)
 
 Run the setup script:
 
@@ -52,6 +57,15 @@ Run the setup script:
 # Automated setup without prompts
 ./dev-setup.sh --force
 ```
+
+:::{note}
+The `dev-setup.sh` script automates the setup process:
+- [Installing Micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) (if needed)
+- [Creating the conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file)
+- [Installing the `cson-forge` package in editable mode](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs)
+- [Installing `C-Star`](https://c-star.readthedocs.io)
+- [Setting up the Jupyter kernel](https://ipykernel.readthedocs.io/en/stable/user-guide.html#kernel-installation)
+:::
 
 ### 4. Verify Installation
 
@@ -121,19 +135,6 @@ Access to most of the data is facilitated automatically.
 - [Sign up for access](https://www.tpxo.net/global) to TPXO data
 
 
-### Notes
-:::{note}
-**HTTPS vs SSH Access**
-
-The command above uses HTTPS. Alternatively, you can use SSH:
-
-```bash
-git clone git@github.com:<YOUR_GITHUB_USERNAME>/cson-forge.git
-cd cson-forge
-```
-
-For more information on HTTPS and SSH access, see the [GitHub documentation on cloning repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
-:::
 
 :::{tip}
 SSH keys provide a more secure and convenient way to authenticate with GitHub, eliminating the need to enter your credentials for each push or pull operation. To set up SSH keys for GitHub, see:
