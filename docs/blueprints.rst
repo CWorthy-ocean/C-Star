@@ -1,8 +1,82 @@
 Blueprints
 ==========
 
-Example
--------
+Blueprints are the contract for communicating the available behaviors of an
+application. When a user creates a blueprint, the values of it's
+attributes tell the system which of the possible behaviors are desired.
+
+
+Core Attributes
+---------------
+
+Blueprints inherit core attributes from the :class:`cstar.orchestration.models.Blueprint` class. 
+
+.. rubric:: Core Blueprint Attributes
+
+.. autosummary::
+
+  ~cstar.orchestration.models.Blueprint.name
+  ~cstar.orchestration.models.Blueprint.description
+  ~cstar.orchestration.models.Blueprint.application
+  ~cstar.orchestration.models.Blueprint.state
+  ~cstar.orchestration.models.Blueprint.cpus_needed
+
+
+Customizing Blueprints
+----------------------
+
+The core blueprint attributes do not contain enough information to be executed. Instead,
+`Blueprint` subclasses are created to contain additional attributes specific to each
+supported application type. 
+
+
+Custom Blueprint Example: `RomsMarblBlueprint`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:class:`cstar.orchestration.models.RomsMarblBlueprint` contains all information
+necessary to execute a coupled simulation using `UCLA-ROMS` with biogeochemistry
+handled by `MARBL`. It adds the following attributes:
+
+.. rubric:: RomsMarblBlueprint Attributes
+
+.. autosummary::
+
+  ~cstar.orchestration.models.RomsMarblBlueprint.valid_start_date
+  ~cstar.orchestration.models.RomsMarblBlueprint.valid_end_date
+  ~cstar.orchestration.models.RomsMarblBlueprint.code
+  ~cstar.orchestration.models.RomsMarblBlueprint.initial_conditions
+  ~cstar.orchestration.models.RomsMarblBlueprint.grid
+  ~cstar.orchestration.models.RomsMarblBlueprint.forcing
+  ~cstar.orchestration.models.RomsMarblBlueprint.partitioning
+  ~cstar.orchestration.models.RomsMarblBlueprint.model_params
+  ~cstar.orchestration.models.RomsMarblBlueprint.runtime_params
+  ~cstar.orchestration.models.RomsMarblBlueprint.cdr_forcing
+
+Explore the API reference of :class:`cstar.orchestration.models.RomsMarblBlueprint` 
+for more detail on each item.
+
+
+Preparing a Blueprint
+---------------------
+
+A blueprint can be prepared for execution in two ways:
+
+1. Create a `YAML` file with the desired blueprint configuration.
+2. Write `python` code to define a `RomsMarblBlueprint` instance.
+
+We recommend our users to create the `YAML` file directly and execute it 
+using the `cstar cli`.
+
+
+RomsMarblBlueprint Example
+--------------------------
+
+This example demonstrates a configured `RomsMarblBlueprint`. Notice that:
+
+- `ROMS` code can be built from a fork, branch, or even a git commit hash.
+- Remote or local resources can be used to build and execute a simulation.
+- C-Star handles both partioned and unpartitioned data.
+- Runtime and compile-time behaviors can be customized
 
 .. code:: yaml
 
@@ -82,31 +156,42 @@ Example
       end_date: "2000-01-22 00:00:00"
       output_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
 
-Schema details
---------------
+Schema Reference
+----------------
 
-TODO
+.. autosummary::
+  :toctree:
+
+  cstar.orchestration.models.Blueprint
+  cstar.orchestration.models.RomsMarblBlueprint
 
 Checking validity
 -----------------
 
+Blueprints can be checked for errors using the CLI and in code.
 
-CLI
-^^^
+.. tab-set::
 
-.. code::
+   .. tab-item:: Validating `YAML` with the CLI
 
-    cstar blueprint check my_blueprint.yaml
+    Use the `check` command from the `cstar CLI`.
 
-In Python
-^^^^^^^^^
+    .. code-block:: console
+      :caption: Validating a blueprint `YAML` file.
 
-.. code:: python
+        cstar blueprint check my_blueprint.yaml
 
-    from pathlib import Path
-    from cstar.cli.blueprint.check import check as check_blueprint
+   .. tab-item:: Programmatic `YAML` Validation
 
-    check_blueprint(Path("/path/to/my/blueprint.yaml"))
+    Use the `deserialize` method to validate a `YAML` file in Python.
+
+    .. code-block:: python
+      :caption: Validating a blueprint `YAML` file.
+
+        from cstar.orchestration.models import RomsMarblBlueprint
+        from cstar.orchestration.serialization import deserialize
+
+        deserialize("my_blueprint.yaml", RomsMarblBlueprint)
 
 
 Execution
@@ -114,10 +199,10 @@ Execution
 
 
 .. attention::
-    You may need want to examine the `configuration options <configuration.rst>`_ available via environment variables before running.
+    Review the `configuration options <configuration.rst>`_ available via environment variables before running.
 
 .. warning::
-    If you run a ROMS-MARBL blueprint directly on a HPC login node, you should *strongly* consider setting ``CSTAR_NPROCS_POST`` to a small number (~2), otherwise the joining post-process will try to use too many login node cores and will get terminated (and make the admins angry).
+    If you run a `ROMS-MARBL` blueprint directly on a HPC login node, you should *strongly* consider setting ``CSTAR_NPROCS_POST`` to a small number (~2), otherwise the joining post-process will try to use too many login node cores and will get terminated (and make the admins angry).
 
     Consider making single-step workplans to run single simulations entirely on the compute cluster.
 
@@ -125,19 +210,39 @@ Execution
 CLI
 ^^^
 
-.. code::
+Use the `run` command from the `cstar CLI` to execute a blueprint.
+
+.. code-block:: console
 
     cstar blueprint run my_blueprint.yaml
 
 
+.. tab-set::
 
-In Python
-^^^^^^^^^
+   .. tab-item:: Executing Blueprint `YAML` with the CLI
 
+    Use the `run` command from the `cstar CLI`.
 
-.. code:: python
+    .. code-block:: console
+      :caption: Executing a blueprint `YAML` file.
 
-    from pathlib import Path
-    from cstar.cli.blueprint.run import run as run_blueprint
+        cstar blueprint run my_blueprint.yaml
 
-    run_blueprint(Path("/path/to/my/blueprint.yaml"))
+   .. tab-item:: Programmatic Blueprint `YAML` Execution
+
+    Use a `SimulationRunner` to execute the blueprint.
+
+    .. code-block:: python
+      :caption: Executing a blueprint `YAML` file in python.
+
+        from cstar.entrypoint.service import ServiceConfiguration
+        from cstar.entrypoint.worker.worker import BlueprintRequest, JobConfig, SimulationRunner
+
+        account_id = "your-account-id"
+        queue_id = "wholenode"
+        
+        request = BlueprintRequest("my_blueprint.yaml")
+        service_cfg = ServiceConfiguration()
+        job_cfg = JobConfig(account_id, priority=queue_id)
+
+        SimulationRunner(request, service_cfg, job_cfg)
