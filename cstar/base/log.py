@@ -142,6 +142,7 @@ class LoggingMixin:
 
     @property
     def log(self) -> logging.Logger:
+        """Return the logger instance for this class."""
         if not hasattr(self, "_log"):
             name = f"{self.__class__.__module__}.{self.__class__.__name__}"
             self._log = get_logger(name)

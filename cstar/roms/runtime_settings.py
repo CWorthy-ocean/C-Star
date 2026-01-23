@@ -472,31 +472,81 @@ class MYBakMixing(ROMSRuntimeSettingsSection):
 
 
 class ROMSRuntimeSettings(BaseModel):
+    """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
+    files.
+
+    This class represents the structured input used by ROMS for a single model run.
+    It supports loading settings from disk via `from_file()`, editing or inspecting
+    values via named attributes, and writing a valid ROMS `.in` file via `to_file()`.
+
+    Each attribute corresponds to a section in the `.in` file, and is an instance of a
+    `ROMSRuntimeSettingsSection` subclass corresponding to that section.
+    """
+
     title: Title
+    """Description of the ROMS run."""
     time_stepping: TimeStepping
+    """Time integration parameters: ntimes, dt, ndtfast, ninfo."""
     bottom_drag: BottomDrag
+    """Bottom drag coefficients: rdrg, rdrg2, zob."""
     initial: InitialConditions
+    """Initial condition parameters: nrrec and ininame."""
     forcing: Forcing
+    """List of forcing NetCDF files."""
     output_root_name: OutputRootName
+    """Base name for output NetCDF files."""
 
     s_coord: SCoord | None = None
+    """S-coordinate transformation parameters:
+    - theta_s (surface stretching parameter)
+    - theta_b (bottom stretching parameter)
+    """
     grid: Grid | None = None
+    """Grid file path."""
     marbl_biogeochemistry: MARBLBiogeochemistry | None = None
+    """Filenames for MARBL namelist and diagnostics:
+    - marbl_namelist_fname
+    - marbl_tracer_list_fname
+    - marbl_diag_list_fname
+    """
     lateral_visc: LateralVisc | None = None
+    """Horizontal Laplacian kinematic viscosity (m2/s)."""
     rho0: Rho0 | None = None
+    """Boussinesq reference density (rho0, kg/m3)."""
     lin_rho_eos: LinRhoEos | None = None
+    """Linear equation of state parameters:
+    - Tcoef (thermal expansion coefficient, kg/m3/K)
+    - Scoef (haline contraction coefficient, kg/m3/PSU)
+    """
     gamma2: Gamma2 | None = None
+    """Lateral boundary slipperiness coefficient (free-slip=+1,no-slip=-1)."""
     tracer_diff2: TracerDiff2 | None = None
+    """Horizontal Laplacian mixing coefficients (one per tracer, m2/s)."""
     vertical_mixing: VerticalMixing | None = None
+    """Vertical mixing parameters:
+    - akv_bak (background vertical viscosity, m2/s)
+    - akt_bak (background vertical mixing for tracers, m2/s)
+    """
     my_bak_mixing: MYBakMixing | None = None
+    """Background vertical mixing for MY2.5 scheme parameters:
+    - akq_bak (background vertical TKE mixing, m2/s)
+    - q2nu2 (horizontal Laplacian TKE mixing, m2/s)
+    - q2nu4 (horizontal biharmonic TKE mixing, m4/s)
+    """
     sss_correction: SSSCorrection | None = None
+    """Surface salinity correction factor."""
     sst_correction: SSTCorrection | None = None
+    """Surface temperature correction factor."""
     ubind: UBind | None = None
+    """Open boundary binding velocity (m/s)"""
     v_sponge: VSponge | None = None
+    """Maximum sponge layer viscosity (m2/s)"""
     climatology: Climatology | None = None
+    """Climatology file path"""
 
     # Pydantic model configuration
     model_config = {"populate_by_name": True, "alias_generator": _get_alias}
+    """Pydantic model configuration"""
 
     @model_validator(mode="after")
     def set_fixed_output_root_name(self) -> "ROMSRuntimeSettings":
@@ -507,77 +557,6 @@ class ROMSRuntimeSettings(BaseModel):
             output_root_name=DEFAULT_OUTPUT_ROOT_NAME
         )
         return self
-
-    """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
-    files.
-
-    This class represents the structured input used by ROMS for a single model run.
-    It supports loading settings from disk via `from_file()`, editing or inspecting
-    values via named attributes, and writing a valid ROMS `.in` file via `to_file()`.
-
-    Each attribute corresponds to a section in the `.in` file, and is an instance of a
-    `ROMSRuntimeSettingsSection` subclass corresponding to that section.
-
-    Attributes
-    ----------
-    title : Title
-        Description of the ROMS run.
-    time_stepping : TimeStepping
-        Time integration parameters: ntimes, dt, ndtfast, ninfo.
-    bottom_drag : BottomDrag
-        Bottom drag coefficients: rdrg, rdrg2, zob.
-    initial : InitialConditions
-        Initial condition parameters: nrrec and ininame.
-    forcing : Forcing
-        List of forcing NetCDF files.
-    output_root_name : OutputRootName
-        Base name for output NetCDF files.
-
-    Optional Attributes (depending on CPP flags)
-    --------------------------------------------
-    s_coord : Optional[SCoord]
-        S-coordinate transformation parameters:
-        - theta_s (surface stretching parameter)
-        - theta_b (bottom stretching parameter)
-    rho0 : Rho0, optional, default None
-        Boussinesq reference density (rho0, kg/m3)
-    lin_rho_eos : LinRhoEos, optional, default None
-        Linear equation of state parameters:
-        - Tcoef (thermal expansion coefficient, kg/m3/K)
-        - Scoef (haline contraction coefficient, kg/m3/PSU)
-    marbl_biogeochemistry : MARBLBiogeochemistry, optional, default None
-        Filenames for MARBL namelist and diagnostics:
-        - marbl_namelist_fname
-        - marbl_tracer_list_fname
-        - marbl_diag_list_fname
-    lateral_visc : LateralVisc, optional, default None
-        Horizontal Laplacian kinematic viscosity (m2/s)
-    gamma2 : Gamma2, optional, default None
-        Lateral boundary slipperiness coefficient (free-slip=+1,no-slip=-1)
-    tracer_diff2 : TracerDiff2, optional, default None
-        Horizontal Laplacian mixing coefficients (one per tracer, m2/s)
-    vertical_mixing : VerticalMixing, optional, default None
-        Vertical mixing parameters:
-        - akv_bak (background vertical viscosity, m2/s)
-        - akt_bak (background vertical mixing for tracers, m2/s)
-    my_bak_mixing : MYBakMixing, optional, default None
-        Background vertical mixing for MY2.5 scheme parameters:
-        - akq_bak (background vertical TKE mixing, m2/s)
-        - q2nu2 (horizontal Laplacian TKE mixing, m2/s)
-        - q2nu4 (horizontal biharmonic TKE mixing, m4/s)
-    sss_correction : SSSCorrection, optional, default None
-        Surface salinity correction factor.
-    sst_correction : SSTCorrection, optional, default None
-        Surface temperature correction factor.
-    ubind : UBind, optional, default None
-        Open boundary binding velocity (m/s)
-    v_sponge : VSponge, optional, default None
-        Maximum sponge layer viscosity (m2/s)
-    grid : Grid, optional, default None
-        Grid file path
-    climatology : Climatology, optional, default None
-        Climatology file path
-    """
 
     @staticmethod
     def _load_raw_sections(filepath: str | Path) -> dict[str, list[str]]:
