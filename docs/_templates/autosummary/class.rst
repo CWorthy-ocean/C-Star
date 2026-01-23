@@ -4,27 +4,28 @@
 
 .. autoclass:: {{ objname }}
    :class-doc-from: class
+   :show-inheritance:
 
-   {% block methods %}
-   {% if methods %}
-   .. rubric:: Methods
-   .. autosummary::
-      :toctree:
-   {% for item in all_methods %}
+{% block methods %}
+{% if methods %}
+.. rubric:: Methods
+.. autosummary::
+   :toctree:
+{% for item in all_methods %}
    {%- if not item.startswith("_") or item in ["__call__"] %}
-      {{ name }}.{{ item }}
+   {{ name }}.{{ item }}
 
-      {% endif %}
-   {% endfor %}
    {% endif %}
-   {% endblock %}
+{% endfor %}
+{% endif %}
+{% endblock %}
 
-   {% block attributes %}
-   {% if attributes %}
-   .. rubric:: Attributes
-   .. autosummary::
-   {% for item in attributes %}
-      {{ name }}.{{ item }}
-   {% endfor %}
-   {% endif %}
-   {% endblock %}
+{% block attributes %}
+{% if attributes %}
+.. rubric:: Attributes
+.. autosummary::
+{% for item in attributes %}
+   {{ name }}.{{ item }}
+{% endfor %}
+{% endif %}
+{% endblock %}
