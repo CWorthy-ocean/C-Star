@@ -9,7 +9,7 @@ to execute, and in what order.
 Workplan Schema
 ---------------
 
-The core attributes of a blueprints come from the :class:`cstar.orchestration.models.Workplan`.
+Workplans are defined in :class:`cstar.orchestration.models.Workplan`.
 
 .. rubric:: Workplan Attributes
 
@@ -57,10 +57,23 @@ The heart of a workplan is the collection of steps found in :attr:`~cstar.orches
 Steps have a 1-to-1 relationship with blueprints - each step must specify the path to a blueprint file.
 The step also specifies the application type to use for it's execution.
 
-Step Schema
-"""""""""""
 
-See :class:`cstar.orchestration.models.Step` for more details on how to configure steps.
+Step Schema
+-----------
+
+See :class:`cstar.orchestration.models.Step` for complete details on configuring steps.
+
+.. rubric:: Step Attributes
+
+.. autosummary::
+    
+  ~cstar.orchestration.models.Step.name
+  ~cstar.orchestration.models.Step.application
+  ~cstar.orchestration.models.Step.blueprint
+  ~cstar.orchestration.models.Step.depends_on
+  ~cstar.orchestration.models.Step.blueprint_overrides
+  ~cstar.orchestration.models.Step.compute_overrides
+  ~cstar.orchestration.models.Step.workflow_overrides
 
 
 
