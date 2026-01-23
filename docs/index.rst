@@ -43,6 +43,8 @@ A key strength of C-Star lies in its ability to run regional simulations using a
     :maxdepth: 1
     :caption: Reference
 
+    api-blueprint
+    api-orchestration
     api
 
 .. toctree::
