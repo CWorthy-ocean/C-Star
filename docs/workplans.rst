@@ -55,7 +55,7 @@ Execution
 
 
 .. attention::
-    You may need want to examine the `configuration options <configuration.rst>`_ available via environment variables before running.
+    Review the `configuration options <configuration.rst>`_ available via environment variables before running.
 
     If you are running on a HPC (recommended), you will need to set the account and queue for SLURM to use, or you will get an error.
 
