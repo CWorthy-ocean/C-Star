@@ -197,14 +197,14 @@ Blueprints can be checked for errors using the CLI and in code.
 Execution
 ---------
 
-
-.. attention::
-    Review the `configuration options <configuration.rst>`_ available via environment variables before running.
+.. include:: snippets/review-config.rst
 
 .. warning::
-    If you run a `ROMS-MARBL` blueprint directly on a HPC login node, you should *strongly* consider setting ``CSTAR_NPROCS_POST`` to a small number (~2), otherwise the joining post-process will try to use too many login node cores and will get terminated (and make the admins angry).
+    If you run a `ROMS-MARBL` blueprint directly on a HPC login node, you should *strongly* consider setting ``CSTAR_NPROCS_POST`` to a small number (~2).
+    
+    Otherwise, the post-processing step joining partitioned data files will may consume all available cores of the login node and be terminated (and make the admins angry).
 
-    Consider making single-step workplans to run single simulations entirely on the compute cluster.
+    Consider making :ref:`single-step workplans <workplans>` to run single simulations entirely on the compute cluster.
 
 
 CLI
