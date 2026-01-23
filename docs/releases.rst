@@ -39,8 +39,7 @@ Bugfixes:
 - Add `expanduser` to `Path` instances to allow tildes to represent root in paths
 - Correct issue where `AdditionalCode.modified_files` list indices did not correspond to `AdditionalCode.files`
 
-  
-=============
+
 .. _v0.0.8-alpha:
 
 v0.0.8-alpha ()
