@@ -200,12 +200,10 @@ Execution
 .. include:: snippets/review-config.rst
 
 .. warning::
-    If you run a `ROMS-MARBL` blueprint directly on a HPC login node, you should *strongly* consider setting ``CSTAR_NPROCS_POST`` to a small number (~2).
-    
-    Otherwise, the post-processing step joining partitioned data files will may consume all available cores of the login node and be terminated (and make the admins angry).
+    The post-processing step joining partitioned data may consume all available cores of a login node and be terminated (and make the admins angry).
 
-    Consider making :ref:`single-step workplans <workplans>` to run single simulations entirely on the compute cluster.
-
+    - We *strongly* recommend setting ``CSTAR_NPROCS_POST`` to a small number (~2) when running a `ROMS-MARBL` blueprint directly on a HPC login node.
+    - Consider making a :ref:`single-step workplan <single-step-wp-ex>` to run a simulation entirely on the compute cluster.
 
 CLI
 ^^^

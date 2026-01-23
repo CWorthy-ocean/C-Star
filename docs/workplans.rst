@@ -56,8 +56,8 @@ Execution
 .. include:: snippets/review-config.rst
 
 .. attention::
-    If you are running on a HPC (recommended), you will need to set the account and queue for SLURM to use, or you will get an error.
-
+    An error will occur if the `SLURM` **account** and **queue** are not configured when running on a HPC.
+    
 CLI
 ^^^
 
