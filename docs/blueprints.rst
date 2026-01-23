@@ -156,14 +156,6 @@ This example demonstrates a configured `RomsMarblBlueprint`. Notice that:
       end_date: "2000-01-22 00:00:00"
       output_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
 
-Schema Reference
-----------------
-
-.. autosummary::
-  :toctree:
-
-  cstar.orchestration.models.Blueprint
-  cstar.orchestration.models.RomsMarblBlueprint
 
 Checking validity
 -----------------
