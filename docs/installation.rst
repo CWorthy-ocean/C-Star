@@ -74,13 +74,13 @@ Finally, install ``C-Star`` in your active conda environment:
 
    .. tab-item:: Contributors
 
-      This method installs optional dependencies for development and testing. 
+      This method installs optional dependencies for development and documentation generation. 
       
       It is required for those contributing code to C-Star.
 
       .. code-block:: console
 
-         pip install -e .[dev,test]
+         pip install -e .[dev,docs]
 
 Verify the installation
 -----------------------
