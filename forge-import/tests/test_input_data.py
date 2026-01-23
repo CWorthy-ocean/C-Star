@@ -44,7 +44,7 @@ def _create_mock_paths(tmp_path):
         model_configs=config.paths.model_configs,
         source_data=config.paths.source_data,
         input_data=tmp_path,
-        run_dir=config.paths.run_dir,
+        scratch=config.paths.scratch,
         blueprints=config.paths.blueprints,
         models_yaml=config.paths.models_yaml,
         builds_yaml=config.paths.builds_yaml,

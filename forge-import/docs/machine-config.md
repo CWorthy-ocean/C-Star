@@ -17,7 +17,7 @@ Data paths are automatically configured based on the detected system. The `confi
 
 - **Source data** (`config.paths.source_data`): External datasets (GLORYS, UNIFIED_BGC, SRTM15, etc.)
 - **Input data** (`config.paths.input_data`): Generated ROMS-MARBL input files
-- **Run directory** (`config.paths.run_dir`): Model execution directories
+- **Scratch directory** (`config.paths.scratch`): Model execution directories
 - **Model configs** (`config.paths.model_configs`): Model configuration templates and defaults
 - **Blueprints** (`config.paths.blueprints`): Generated blueprint specifications
 - **YAML files** (`config.paths.models_yaml`, `config.paths.builds_yaml`, `config.paths.machines_yaml`): Configuration files
@@ -51,7 +51,7 @@ python -m cson_forge.config show-paths
 This will display:
 - The detected system tag (e.g., `MacOS`, `RCAC_anvil`, `NERSC_perlmutter`)
 - The hostname
-- All configured data paths (source_data, input_data, run_dir, model_configs, blueprints, etc.)
+- All configured data paths (source_data, input_data, scratch, model_configs, blueprints, etc.)
 
 To output the paths in JSON format:
 
@@ -89,7 +89,7 @@ The cluster type is accessible via `config.cluster_type` and is used by the exec
 
 To customize paths or add a new system, edit `cson_forge/config.py` and:
 
-1. Create a layout function that returns `(source_data, input_data, run_dir)` paths
+1. Create a layout function that returns `(source_data, input_data, scratch)` paths
 2. Register it using the `@register_system(tag)` decorator
 
 Example:
@@ -100,8 +100,8 @@ def _layout_my_system(home: Path, env: dict) -> Tuple[Path, Path, Path]:
     base = Path(env.get("MY_DATA_ROOT", home / "data"))
     source_data = base / "source-data"
     input_data = base / "input-data"
-    run_dir = base / "runs"
-    return source_data, input_data, run_dir
+    scratch = base / "runs"
+    return source_data, input_data, scratch
 ```
 
 The system detection logic in `_detect_system()` will need to be updated to recognize your system tag based on hostname or environment variables.
@@ -115,7 +115,7 @@ Each system layout function receives:
 Layout functions should return a tuple of three paths:
 1. `source_data`: Location for external datasets
 2. `input_data`: Location for generated input files
-3. `run_dir`: Location for model execution directories
+3. `scratch`: Location for model execution directories
 
 The `get_data_paths()` function automatically creates these directories if they don't exist.
 

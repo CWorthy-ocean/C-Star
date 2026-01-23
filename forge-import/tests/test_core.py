@@ -41,7 +41,7 @@ def _create_empty_dataset(tmp_path):
     )
 
 
-def _create_mock_paths_core(tmp_path, blueprints_dir=None, run_dir=None, here=None):
+def _create_mock_paths_core(tmp_path, blueprints_dir=None, scratch=None, here=None):
     """Helper to create a mock DataPaths for core tests."""
     from cson_forge import config as config_module
     return DataPaths(
@@ -49,7 +49,7 @@ def _create_mock_paths_core(tmp_path, blueprints_dir=None, run_dir=None, here=No
         model_configs=config.paths.model_configs,
         source_data=config.paths.source_data,
         input_data=config.paths.input_data,
-        run_dir=run_dir if run_dir is not None else config.paths.run_dir,
+        scratch=scratch if scratch is not None else config.paths.scratch,
         blueprints=blueprints_dir if blueprints_dir is not None else tmp_path,
         models_yaml=config.paths.models_yaml,
         builds_yaml=config.paths.builds_yaml,
@@ -367,7 +367,7 @@ class TestCstarSpecBuilderProperties:
             temp_dir = Path(tempfile.mkdtemp())
             mock_paths.input_data = temp_dir / "input_data"
             mock_paths.blueprints = temp_dir / "blueprints"
-            mock_paths.run_dir = temp_dir / "run"
+            mock_paths.scratch = temp_dir / "run"
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -392,7 +392,7 @@ class TestCstarSpecBuilderProperties:
             temp_dir = Path(tempfile.mkdtemp())
             mock_paths.input_data = temp_dir / "input_data"
             mock_paths.blueprints = temp_dir / "blueprints"
-            mock_paths.run_dir = temp_dir / "run"
+            mock_paths.scratch = temp_dir / "run"
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -412,7 +412,7 @@ class TestCstarSpecBuilderProperties:
             temp_dir = Path(tempfile.mkdtemp())
             mock_paths.input_data = temp_dir / "input_data"
             mock_paths.blueprints = temp_dir / "blueprints"
-            mock_paths.run_dir = temp_dir / "run"
+            mock_paths.scratch = temp_dir / "run"
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -507,7 +507,7 @@ class TestCstarSpecBuilderModelPostInit:
                     model_configs=config.paths.model_configs,
                     source_data=config.paths.source_data,
                     input_data=config.paths.input_data,
-                    run_dir=config.paths.run_dir,
+                    scratch=config.paths.scratch,
                     blueprints=tmp_path,
                     models_yaml=config.paths.models_yaml,
                     builds_yaml=config.paths.builds_yaml,
@@ -1323,7 +1323,7 @@ class TestCstarSpecBuilderPathBlueprint:
             temp_dir = Path(tempfile.mkdtemp())
             mock_paths.input_data = temp_dir / "input_data"
             mock_paths.blueprints = temp_dir / "blueprints"
-            mock_paths.run_dir = temp_dir / "run"
+            mock_paths.scratch = temp_dir / "run"
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -1346,7 +1346,7 @@ class TestCstarSpecBuilderPathBlueprint:
             temp_dir = Path(tempfile.mkdtemp())
             mock_paths.input_data = temp_dir / "input_data"
             mock_paths.blueprints = temp_dir / "blueprints"
-            mock_paths.run_dir = temp_dir / "run"
+            mock_paths.scratch = temp_dir / "run"
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -1368,7 +1368,7 @@ class TestCstarSpecBuilderPathBlueprint:
             temp_dir = Path(tempfile.mkdtemp())
             mock_paths.input_data = temp_dir / "input_data"
             mock_paths.blueprints = temp_dir / "blueprints"
-            mock_paths.run_dir = temp_dir / "run"
+            mock_paths.scratch = temp_dir / "run"
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -1391,7 +1391,7 @@ class TestCstarSpecBuilderPathBlueprint:
             temp_dir = Path(tempfile.mkdtemp())
             mock_paths.input_data = temp_dir / "input_data"
             mock_paths.blueprints = temp_dir / "blueprints"
-            mock_paths.run_dir = temp_dir / "run"
+            mock_paths.scratch = temp_dir / "run"
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -1440,7 +1440,7 @@ class TestCstarSpecBuilderPathBlueprint:
             temp_dir = Path(tempfile.mkdtemp())
             mock_paths.input_data = temp_dir / "input_data"
             mock_paths.blueprints = temp_dir / "blueprints"
-            mock_paths.run_dir = temp_dir / "run"
+            mock_paths.scratch = temp_dir / "run"
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -1464,7 +1464,7 @@ class TestCstarSpecBuilderPersist:
         with patch("cson_forge._core.config.paths") as mock_paths:
             mock_paths.input_data = Path("/test/input_data")
             mock_paths.blueprints = tmp_path
-            mock_paths.run_dir = Path("/test/run")
+            mock_paths.scratch = Path("/test/run")
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -1492,7 +1492,7 @@ class TestCstarSpecBuilderPersist:
         with patch("cson_forge._core.config.paths") as mock_paths:
             mock_paths.input_data = Path("/test/input_data")
             mock_paths.blueprints = tmp_path
-            mock_paths.run_dir = Path("/test/run")
+            mock_paths.scratch = Path("/test/run")
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -1513,7 +1513,7 @@ class TestCstarSpecBuilderPersist:
         with patch("cson_forge._core.config.paths") as mock_paths:
             mock_paths.input_data = Path("/test/input_data")
             mock_paths.blueprints = tmp_path
-            mock_paths.run_dir = Path("/test/run")
+            mock_paths.scratch = Path("/test/run")
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
                 mock_load.return_value = mock_model_spec
@@ -1586,7 +1586,7 @@ class TestCstarSpecBuilderDefaultRuntimeParams:
         """
         # Patch config.paths BEFORE creating builder to avoid filesystem access during init
         with patch("cson_forge._core.config.paths") as mock_paths:
-            mock_paths.run_dir = tmp_path / "run"
+            mock_paths.scratch = tmp_path / "run"
             mock_paths.blueprints = tmp_path / "blueprints"  # Needed for _load_blueprint_from_file
             
             with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
@@ -1600,7 +1600,7 @@ class TestCstarSpecBuilderDefaultRuntimeParams:
                     assert runtime_params.start_date == builder.start_date
                     assert runtime_params.end_date == builder.end_date
                     # default_runtime_params uses run_output_dir which includes datestr (casename)
-                    expected_output_dir = mock_paths.run_dir / builder.casename
+                    expected_output_dir = mock_paths.scratch / builder.casename
                     assert runtime_params.output_dir == expected_output_dir
                     # Verify it's the same as run_output_dir property
                     assert runtime_params.output_dir == builder.run_output_dir
@@ -2019,7 +2019,7 @@ class TestCstarSpecBuilderRun:
                 mock_grid.return_value = _create_grid_mock()
                 with patch("cson_forge._core.config.paths") as mock_paths:
                     mock_paths.blueprints = tmp_path
-                    mock_paths.run_dir = Path("/test/run")
+                    mock_paths.scratch = Path("/test/run")
                     
                     builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
                     

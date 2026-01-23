@@ -43,7 +43,7 @@ class TestDataPaths:
             model_configs=tmp_path / "model-configs",
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
-            run_dir=tmp_path / "run-dir",
+            scratch=tmp_path / "run-dir",
             blueprints=tmp_path / "blueprints",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
@@ -54,7 +54,7 @@ class TestDataPaths:
         assert paths.model_configs == tmp_path / "model-configs"
         assert paths.source_data == tmp_path / "source-data"
         assert paths.input_data == tmp_path / "input-data"
-        assert paths.run_dir == tmp_path / "run-dir"
+        assert paths.scratch == tmp_path / "run-dir"
         assert paths.blueprints == tmp_path / "blueprints"
         assert paths.models_yaml == tmp_path / "models.yml"
         assert paths.builds_yaml == tmp_path / "builds.yml"
@@ -67,7 +67,7 @@ class TestDataPaths:
             model_configs=tmp_path / "model-configs",
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
-            run_dir=tmp_path / "run-dir",
+            scratch=tmp_path / "run-dir",
             blueprints=tmp_path / "blueprints",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
@@ -214,42 +214,42 @@ class TestSystemLayoutRegistry:
     def test_macos_layout(self, tmp_path):
         """Test MacOS layout function."""
         layout_fn = SYSTEM_LAYOUT_REGISTRY["MacOS"]
-        source_data, input_data, run_dir = layout_fn(tmp_path, {})
+        source_data, input_data, scratch = layout_fn(tmp_path, {})
         
         assert source_data == tmp_path / "cson-forge-data" / "source-data"
         assert input_data == tmp_path / "cson-forge-data" / "input-data"
-        assert run_dir == tmp_path / "cson-forge-data" / "cson-forge-run"
+        assert scratch == tmp_path / "cson-forge-data" / "cson-forge-run"
     
     def test_unknown_layout(self, tmp_path):
         """Test unknown layout function."""
         layout_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
-        source_data, input_data, run_dir = layout_fn(tmp_path, {})
+        source_data, input_data, scratch = layout_fn(tmp_path, {})
         
         assert source_data == tmp_path / "cson-forge-data" / "source-data"
         assert input_data == tmp_path / "cson-forge-data" / "input-data"
-        assert run_dir == tmp_path / "cson-forge-data" / "cson-forge-run"
+        assert scratch == tmp_path / "cson-forge-data" / "cson-forge-run"
     
     def test_anvil_layout(self, tmp_path):
         """Test RCAC Anvil layout function."""
         from cson_forge.config import USER
         layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
         env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
-        source_data, input_data, run_dir = layout_fn(tmp_path, env)
+        source_data, input_data, scratch = layout_fn(tmp_path, env)
         
         assert source_data == tmp_path / "work" / "cson-forge-data" / "source-data"
         assert input_data == tmp_path / "work" / "cson-forge-data" / USER / "input-data"
-        assert run_dir == tmp_path / "scratch" / "cson-forge-run"
+        assert scratch == tmp_path / "scratch" / "cson-forge-run"
     
     def test_perlmutter_layout(self, tmp_path):
         """Test NERSC Perlmutter layout function."""
         from cson_forge.config import USER
         layout_fn = SYSTEM_LAYOUT_REGISTRY["NERSC_perlmutter"]
         env = {"SCRATCH": str(tmp_path / "scratch")}
-        source_data, input_data, run_dir = layout_fn(tmp_path, env)
+        source_data, input_data, scratch = layout_fn(tmp_path, env)
         
         assert source_data == tmp_path / "scratch" / "cson-forge-data" / "source-data"
         assert input_data == tmp_path / "scratch" / "cson-forge-data" / USER / "input-data"
-        assert run_dir == tmp_path / "scratch" / "cson-forge-data" / "cson-forge-run"
+        assert scratch == tmp_path / "scratch" / "cson-forge-data" / "cson-forge-run"
 
 
 class TestGetDataPaths:
@@ -272,7 +272,7 @@ class TestGetDataPaths:
         # These directories are created by get_data_paths
         assert paths.source_data.exists()
         assert paths.input_data.exists()
-        assert paths.run_dir.exists()
+        assert paths.scratch.exists()
         assert paths.blueprints.exists()
         assert paths.model_configs.exists()
     
@@ -288,7 +288,7 @@ class TestGetDataPaths:
         # Verify directories were created (they should exist after get_data_paths)
         assert paths.source_data.exists()
         assert paths.input_data.exists()
-        assert paths.run_dir.exists()
+        assert paths.scratch.exists()
 
 
 class TestLoadMachineConfig:
@@ -367,7 +367,7 @@ class TestCLI:
             model_configs=Path("/test/model-configs"),
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
-            run_dir=Path("/test/run"),
+            scratch=Path("/test/run"),
             blueprints=Path("/test/blueprints"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
@@ -394,7 +394,7 @@ class TestCLI:
             model_configs=Path("/test/model-configs"),
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
-            run_dir=Path("/test/run"),
+            scratch=Path("/test/run"),
             blueprints=Path("/test/blueprints"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
@@ -423,7 +423,7 @@ class TestCLI:
             model_configs=Path("/test/model-configs"),
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
-            run_dir=Path("/test/run"),
+            scratch=Path("/test/run"),
             blueprints=Path("/test/blueprints"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),

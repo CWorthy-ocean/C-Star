@@ -122,7 +122,7 @@ Paths:
   model_configs -> /path/to/cson-forge/cson_forge/model-configs
   source_data  -> /path/to/source-data
   input_data   -> /path/to/input-data
-  run_dir      -> /path/to/run-directory
+  scratch      -> /path/to/scratch-directory
   ...
 ```
 
