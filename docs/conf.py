@@ -48,12 +48,78 @@ rst_prolog = """.. attention::
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    "sphinx.ext.napoleon",
     "nbsphinx",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
+    "sphinx.ext.napoleon",
     "sphinx_design",
 ]
+
+
+def get_pydantic_exclusions() -> set[str]:
+    return {
+        "Config",
+        "construct",
+        "copy",
+        "dict",
+        "json",
+        "from_orm",
+        "model_computed_fields",
+        "model_config",
+        "model_construct",
+        "model_copy",
+        "model_dump",
+        "model_dump_json",
+        "model_extra",
+        "model_fields",
+        "model_fields_set",
+        "model_json",
+        "model_json_schema",
+        "model_parametrized_name",
+        "model_post_init",
+        "model_rebuild",
+        "model_validate",
+        "model_validate_json",
+        "model_validate_strings",
+        "parse_file",
+        "parse_obj",
+        "parse_raw",
+        "schema",
+        "schema_json",
+        "update_forward_refs",
+        "validate",
+    }
+
+
+def get_enum_exclusions() -> set[str]:
+    return {
+        "as_integer_ratio",
+        "bit_length",
+        "bit_count",
+        "conjugate",
+        "denominator",
+        "from_bytes",
+        "imag",
+        "is_integer",
+        "numerator",
+        "real",
+        "to_bytes",
+    }
+
+
+def autodoc_skip_member(app, what, name, obj, skip, options) -> bool:
+    """Return `True` if class member should be skipped by autodoc."""
+    exclusions = get_pydantic_exclusions() | get_enum_exclusions()
+
+    # if what in ("method", "function", "attribute") and (
+    if name.startswith("_") or name in exclusions:
+        return True
+    return skip
+
+
+def setup(app):
+    app.connect("autodoc-skip-member", autodoc_skip_member)
+
 
 numpydoc_show_class_members = True
 napolean_google_docstring = False
