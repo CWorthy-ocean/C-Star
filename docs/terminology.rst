@@ -20,15 +20,14 @@ Definitions
 
      Blueprint content varies based on the needs of the target application.
 
-     .. tip::
-
+     .. seealso::
        Blueprints can be created in code or as `YAML` files executed using the C-Star CLI.
 
        See the `blueprints page <blueprints.rst>`_ for examples and more info.
 
     Workplan
      A workplan defines a collection of **steps** to be executed. Each step is a
-     logical unit of work referencing a blueprint.
+     logical unit of work referencing a **blueprint**.
 
      A workplan can define dependencies for a step. As a result:
 
@@ -38,8 +37,7 @@ Definitions
      In future releases, workplans may be designated as “validated.” Customization of
      validated workplans will be restricted to ensure reproducibility and auditability.
 
-     .. tip::
-
+     .. seealso::
        Workplans can be created in code or as `YAML` files executed using the C-Star CLI.
 
        See the `workplans page <workplans.rst>`_ for more examples and more info.
