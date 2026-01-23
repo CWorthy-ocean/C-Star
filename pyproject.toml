@@ -39,10 +39,22 @@ dependencies = [
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
 [project.optional-dependencies]
-test = [
-     "pytest>=7.0",
+dev = [
+    "coverage>=7.13",
+    "pre-commit==3.8.0",
+    "ruff",
+    "pytest>=7.0",
+    "pytest-asyncio>=1.3.0",
 ]
-dev =["ruff", "types-python-dateutil"]
+docs = [
+    "nbsphinx",
+    "readthedocs-sphinx-ext",
+    "sphinx",
+    "sphinxcontrib-bibtex",
+    "sphinxcontrib-napoleon",
+    "sphinx-book-theme",
+    "sphinx-design",
+]
 
 [project.scripts]
 cstar = "cstar.cli.cli:main"
