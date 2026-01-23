@@ -12,10 +12,17 @@ The following environment variables can be set by the user to control C-Star beh
 Frequent users may want to set preferred values for these variables in their ``.bash_profile`` or ``.zshrc`` files.
 
 
-
 +------------------------------+-----------------------+-----------------------+
 | Variable                     | Default               | Effect                |
 +==============================+=======================+=======================+
+| CSTAR_HOME                   | ~/.cstar              | The default location  |
+|                              |                       | for storage of C-Star |
+|                              |                       | configuration.        |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_OUTDIR                 | ~/.cstar/assets       | The default location  |
+|                              |                       | for storage of C-Star |
+|                              |                       | outputs.              |
++------------------------------+-----------------------+-----------------------+
 | CSTAR_NPROCS_POST            | os.cpu_count() / 3    | The number of         |
 |                              |                       | parallel processes to |
 |                              |                       | use for post-run join |
@@ -54,6 +61,13 @@ Frequent users may want to set preferred values for these variables in their ``.
 |                              |                       | set for jobs          |
 |                              |                       | submitted to SLURM.   |
 +------------------------------+-----------------------+-----------------------+
+| CSTAR_ORCH_TRX_FREQ          | monthly               | The timespan used when|
+|                              |                       | automatically         |
+|                              |                       | splitting             |
+|                              |                       | simulations. Accepts: |
+|                              |                       | monthly, weekly,      |
+|                              |                       | daily                 |
++------------------------------+-----------------------+-----------------------+
 
 
 Developer-only environment variables
@@ -74,4 +88,40 @@ These variables are set internally or during testing and are documented here for
 |                              |                       | SLURM jobs, instead   |
 |                              |                       | of the default        |
 |                              |                       | application command.  |
++------------------------------+-----------------------+-----------------------+
+
+
+Feature-flag Environment Variables
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Feature flags enable unsupported, experimental features in C-Star. They are subject to change without notice and should be used with caution.
+
++------------------------------+-----------------------+-----------------------+
+| Variable                     | Default               | Effect                |
++==============================+=======================+=======================+
++------------------------------+-----------------------+-----------------------+
+| CSTAR_FF_DEVELOPER_MODE      | 0                     | If 1, enable all      |
+|                              |                       | experimental          |
+|                              |                       | features.             |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_FF_CLI_TEMPLATE_CREATE | 0                     | If 1, enable the      |
+|                              |                       | `cstar template       |
+|                              |                       | create` command.      |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_FF_CLI_WORKPLAN_GEN    | 0                     | If 1, enable the      |
+|                              |                       | `cstar workplan       |
+|                              |                       | generate` command.    |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_FF_CLI_WORKPLAN_PLAN   | 0                     | If 1, enable the      |
+|                              |                       | `cstar workplan       |
+|                              |                       | plan` command.        |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_FF_CLI_WORKPLAN_STATUS | 0                     | If 1, enable the      |
+|                              |                       | `cstar workplan       |
+|                              |                       | status` command.      |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_FF_ORCH_TRANSFORM_AUTO | 0                     | If 1, enable the      |
+|                              |                       | time-splitting of     |
+|                              |                       | simulations when run  |
+|                              |                       | by the orchestrator.  |
 +------------------------------+-----------------------+-----------------------+
