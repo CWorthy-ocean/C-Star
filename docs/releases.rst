@@ -79,7 +79,7 @@ v0.0.1-alpha (6th Dec 2024)
 
 The first release of C-Star!
 
-This release provides basic functionality, including the ability to create, import, and export a ":term:`blueprint`" for reproducible ocean model simulations (a C-Star ":term:`Case`") using supported ocean models (ROMS, optionally with MARBL biogeochemistry) and run those Cases locally or on supported HPC systems (via Slurm and PBS). 
+This release provides basic functionality, including the ability to create, import, and export a ":term:`blueprint`" for reproducible ocean model simulations (a C-Star "`Case`") using supported ocean models (ROMS, optionally with MARBL biogeochemistry) and run those Cases locally or on supported HPC systems (via Slurm and PBS). 
 There is support for using existing model input data in netCDF format, or creating new input data via integration with the roms-tools library.
 
 Note that the python API is not yet stable, and some aspects of the schema for the blueprint will likely evolve. 
