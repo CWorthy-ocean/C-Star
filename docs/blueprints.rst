@@ -1,15 +1,14 @@
 Blueprints
 ==========
 
-Blueprints are the contract for communicating the available behaviors of an
-application. When a user creates a blueprint, the values of it's
-attributes tell the system which of the possible behaviors are desired.
+Blueprints define the contract for communicating the available behaviors of an
+application. A user-configured blueprint informs C-Star which behaviors are
+desired.
 
+Core Blueprint Schema
+---------------------
 
-Core Attributes
----------------
-
-Blueprints inherit core attributes from the :class:`cstar.orchestration.models.Blueprint` class. 
+The core attributes of a blueprints come from :class:`cstar.orchestration.models.Blueprint`.
 
 .. rubric:: Core Blueprint Attributes
 
@@ -21,13 +20,14 @@ Blueprints inherit core attributes from the :class:`cstar.orchestration.models.B
   ~cstar.orchestration.models.Blueprint.state
   ~cstar.orchestration.models.Blueprint.cpus_needed
 
+The core blueprint attributes do not contain enough information to be executed.
 
 Customizing Blueprints
 ----------------------
 
-The core blueprint attributes do not contain enough information to be executed. Instead,
-`Blueprint` subclasses are created to contain additional attributes specific to each
-supported application type. 
+`Blueprint` subclasses are created to define attributes for each supported
+application. These classes are responsible for exposing the set of configurable
+parameters that are user-facing.
 
 
 Custom Blueprint Example: `RomsMarblBlueprint`
