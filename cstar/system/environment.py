@@ -74,13 +74,13 @@ class CStarEnvironment:
         self._mpi_exec_prefix = mpi_exec_prefix
         self._compiler = compiler
         self._PACKAGE_ROOT: Path = self._find_package_root()
-        
+
         # Load modules FIRST (if using lmod), then load env file
         # This ensures module-set variables (e.g., CRAY_NETCDF_PREFIX) are available
         # when env file variables are expanded
         if self.uses_lmod:
             self.load_lmod_modules(lmod_file=self.lmod_path)
-        
+
         # Load env file AFTER modules so variables can be expanded
         self._env_vars = self._load_env()
 
@@ -141,7 +141,7 @@ class CStarEnvironment:
         env_vars = dotenv_values(self.system_env_path)
 
         env_vars = {k: v for k, v in env_vars.items() if v is not None}
-        
+
         # Expand shell variables (e.g., ${CRAY_NETCDF_PREFIX}) using os.path.expandvars
         # This allows env file to reference variables set by modules (which are loaded first)
         expanded_vars = {}
@@ -149,7 +149,7 @@ class CStarEnvironment:
             # Use os.path.expandvars to expand ${VAR} and $VAR syntax
             expanded_value = os.path.expandvars(value)
             expanded_vars[key] = expanded_value
-        
+
         os.environ.update(expanded_vars)
 
         return expanded_vars
