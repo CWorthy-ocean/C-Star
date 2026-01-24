@@ -76,64 +76,100 @@ See :class:`cstar.orchestration.models.Step` for complete details on configuring
   ~cstar.orchestration.models.Step.workflow_overrides
 
 
+.. _workplan_examples:
 
-.. _single-step-wp-ex:
-Example - Single Step Workplan
--------
+Workplan Examples
+-----------------
 
-The following example demonstrates the minimum possible workplan containing
-a single step:
+.. tab-set::
 
-.. code:: yaml
+   .. tab-item:: Single-step
 
-    name: Simple Workplan
-    description: Run a simulation
-    state: draft
+    The following example demonstrates the minimum possible workplan.
+    
+    It contains a single step to be executed.
 
-    steps:
-      - name: job1
-        application: roms_marbl
-        blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_a.yaml
+    .. code:: yaml
 
+        name: Simple Workplan
+        description: Run a simulation
+        state: draft
 
-.. _multi-step-wp-ex:
-Example - Multi-step Workplan
--------
+        steps:
+        - name: job1
+            application: roms_marbl
+            blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_a.yaml
 
-The following example demonstrates a workplan with multiple steps. Note that each step
-can reference different blueprints.
+   .. tab-item:: Multi-step
 
-Additionally, this example introduces a simple dependency with ``depends_on: job1``. A
-dependency must be specified if the steps of the workplan require specific ordering. Here,
-*job1* must complete successfully before *job2* will start.
+    The following example demonstrates a workplan with multiple steps. Note that each step
+    can reference different blueprints.
 
-.. tip::
-    A multi-step workplan without dependencies does not guarantee any ordering. All jobs
-    will be executed as the scheduler on the system sees fit.
+    Additionally, this example introduces a simple dependency with ``depends_on: job1``. A
+    dependency must be specified if the steps of the workplan require specific ordering. Here,
+    *job1* must complete successfully before *job2* will start.
 
-.. code:: yaml
+    .. important::
+        A multi-step workplan without dependencies has no ordering guarantees. 
+        
+        Jobs are scheduled immediately and executed as the system launcher permits.
 
-    name: Multi-step Workplan Example
-    description: Run multiple ROMS-MARBL simulations
-    state: draft
+    .. code:: yaml
 
-    steps:
-      - name: job1
-        application: roms_marbl
-        blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_a.yaml
-      - name: job2
-        application: roms_marbl
-        blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_b.yaml
-        depends_on:
-          - job1
-      - name: job3
-        application: roms_marbl
-        blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_c.yaml
+        name: Multi-step Workplan Example
+        description: Run multiple ROMS-MARBL simulations
+        state: draft
 
-Schema details
---------------
+        steps:
+        - name: job1
+            application: roms_marbl
+            blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_a.yaml
+        - name: job2
+            application: roms_marbl
+            blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_b.yaml
+            depends_on:
+            - job1
+        - name: job3
+            application: roms_marbl
+            blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_c.yaml
 
-TODO
+   .. tab-item:: Overriding Blueprints
+
+    The following example demonstrates how to override configuration in a 
+    blueprint from the workplan. Overriding blueprints enables the same
+    blueprint to be used with different inputs, data sources, etc.
+
+    .. tip::
+        Blueprint overrides are supplied as a dictionary with 
+        :ref:`Blueprint schema<blueprint_schema>`
+
+    .. code:: yaml
+
+        name: Workplan Overriding a Blueprint
+        description: Run a blueprint ensemble varying parameters with overrides
+        state: draft
+
+        steps:
+        - name: step 1
+            application: roms_marbl
+            blueprint: blueprint.yaml
+            blueprint_overrides: 
+            - name: Run blueprint with development UCLA-ROMS branch
+            - code:
+                roms:
+                  location: https://github.com/CWorthy-ocean/ucla-roms.git
+                  branch: develop
+
+        - name: step 2
+            application: roms_marbl
+            blueprint: blueprint.yaml
+            blueprint_overrides: 
+            - name: Run blueprint with custom UCLA-ROMS fork
+            - code:
+                roms:
+                  location: https://github.com/github-user/ucla-roms.git
+                  branch: main
+
 
 Checking validity
 -----------------
