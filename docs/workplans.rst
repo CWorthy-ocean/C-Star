@@ -174,23 +174,28 @@ Workplan Examples
 Checking validity
 -----------------
 
+Workplans can be checked for errors using the CLI and in code.
 
-CLI
-^^^
+.. tab-set::
 
-.. code::
+   .. tab-item:: Validating via CLI
 
-    cstar workplan check my_workplan.yaml
+    Use the `check` command from the `cstar CLI`.
 
-In Python
-^^^^^^^^^
+    .. code-block:: console
 
-.. code:: python
+        cstar workplan check my_workplan.yaml
 
-    from pathlib import Path
-    from cstar.cli.workplan.check import check as check_workplan
+   .. tab-item:: Programmatic Validation
 
-    check_workplan(Path("/path/to/my/workplan.yaml"))
+    Use the `deserialize` method to validate a `YAML` file in Python.
+
+    .. code-block:: python
+
+        from cstar.orchestration.models import Workplan
+        from cstar.orchestration.serialization import deserialize
+
+        deserialize("my_workplan.yaml", Workplan)
 
 
 Execution
