@@ -14,6 +14,7 @@ from cson_forge.parsers import (
     load_roms_tools_object,
     load_yaml_params,
     normalize_file_type,
+    parse_slurm_job_id,
     _parse_notebook_entries,
 )
 
@@ -273,3 +274,47 @@ def test_load_yaml_params_rejects_non_mapping(tmp_path):
     yaml_path.write_text("---\n- 1\n- 2\n", encoding="utf-8")
     with pytest.raises(ValueError, match="must be mappings"):
         load_yaml_params(yaml_path)
+
+
+def test_parse_slurm_job_id():
+    """Test parsing SLURM Job ID from log file."""
+    fixture_path = Path(__file__).parent / "fixtures" / "cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.out"
+    
+    job_id = parse_slurm_job_id(fixture_path)
+    
+    assert job_id == "48052914"
+
+
+def test_parse_slurm_job_id_not_found(tmp_path):
+    """Test parsing SLURM Job ID when not present in file."""
+    log_file = tmp_path / "no_job_id.out"
+    log_file.write_text("Some log content\nNo SLURM Job ID here\n", encoding="utf-8")
+    
+    job_id = parse_slurm_job_id(log_file)
+    
+    assert job_id is None
+
+
+def test_parse_slurm_job_id_file_not_exists(tmp_path):
+    """Test parsing SLURM Job ID when file doesn't exist."""
+    nonexistent_file = tmp_path / "nonexistent.out"
+    
+    job_id = parse_slurm_job_id(nonexistent_file)
+    
+    assert job_id is None
+
+
+def test_parse_slurm_job_id_multiple_matches(tmp_path):
+    """Test parsing SLURM Job ID when multiple matches exist (should return first)."""
+    log_file = tmp_path / "multiple_job_ids.out"
+    log_file.write_text(
+        "SLURM Job ID: 12345\n"
+        "Some other content\n"
+        "SLURM Job ID: 67890\n",
+        encoding="utf-8"
+    )
+    
+    job_id = parse_slurm_job_id(log_file)
+    
+    # Should return the first match
+    assert job_id == "12345"

@@ -355,7 +355,9 @@ class TestCstarSpecBuilderProperties:
                 mock_grid.return_value = _create_grid_mock()
                 
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                expected_name = f"{mock_model_spec.name}_{builder.grid_name}"
+                # Name now includes n_procs suffix: {model_name}_{grid_name}_{n_procs}procs
+                n_procs = builder.partitioning.n_procs_x * builder.partitioning.n_procs_y
+                expected_name = f"{mock_model_spec.name}_{builder.grid_name}_{n_procs}procs"
                 assert builder.name == expected_name
 
     def test_path_input_data_property(self, minimal_cstar_spec_builder_args, mock_model_spec):
@@ -385,8 +387,9 @@ class TestCstarSpecBuilderProperties:
 
     def test_blueprint_dir_property(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test the blueprint_dir property."""
-        # Patch config.paths BEFORE creating builder to avoid issues in model_post_init
-        with patch("cson_forge._core.config.paths") as mock_paths:
+        # Patch config.paths and config.system_id BEFORE creating builder
+        with patch("cson_forge._core.config.paths") as mock_paths, \
+             patch("cson_forge._core.config.system_id", "MacOS"):
             # Use a temporary directory instead of /test to avoid read-only filesystem errors
             import tempfile
             temp_dir = Path(tempfile.mkdtemp())
@@ -400,13 +403,15 @@ class TestCstarSpecBuilderProperties:
                     mock_grid.return_value = _create_grid_mock()
                     
                     builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                    expected_path = temp_dir / "blueprints" / f"{builder.model_name}_{builder.grid_name}"
+                    # Blueprint dir now includes system_id and n_procs suffix
+                    expected_path = mock_paths.blueprints / "MacOS" / builder.name
                     assert builder.blueprint_dir == expected_path
 
     def test_path_blueprint_method(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test the path_blueprint method."""
-        # Patch config.paths BEFORE creating builder to avoid issues in model_post_init
-        with patch("cson_forge._core.config.paths") as mock_paths:
+        # Patch config.paths and config.system_id BEFORE creating builder
+        with patch("cson_forge._core.config.paths") as mock_paths, \
+             patch("cson_forge._core.config.system_id", "MacOS"):
             # Use a temporary directory instead of /test to avoid read-only filesystem errors
             import tempfile
             temp_dir = Path(tempfile.mkdtemp())
@@ -421,8 +426,10 @@ class TestCstarSpecBuilderProperties:
                     
                     builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
                     # path_blueprint is a method, not a property
+                    # Blueprint path now includes system_id in the directory
                     expected_path = (
-                        temp_dir / "blueprints"
+                        mock_paths.blueprints
+                        / "MacOS"
                         / builder.name
                         / f"B_{builder.name}_preconfig.yml"
                     )
