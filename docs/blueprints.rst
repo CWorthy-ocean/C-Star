@@ -214,7 +214,6 @@ Use the `run` command from the `cstar CLI` to execute a blueprint.
     Use the `run` command from the `cstar CLI`.
 
     .. code-block:: console
-      :caption: Executing a blueprint `YAML` file.
 
         cstar blueprint run my_blueprint.yaml
 
