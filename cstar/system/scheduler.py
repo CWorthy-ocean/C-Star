@@ -449,7 +449,20 @@ class SlurmScheduler(Scheduler):
 
     @property
     def in_active_allocation(self) -> bool:
-        """Determine whether the process is in an active allocation by looking for the SLURM_JOBID environment variable."""
+        override = os.getenv("CSTAR_IN_ACTIVE_ALLOCATION")
+        if override is not None:
+            return override.strip().lower() in {"1", "true", "yes", "on"}
+
+        jupyter_env_vars = (
+            "JUPYTERHUB_API_TOKEN",
+            "JUPYTERHUB_USER",
+            "JUPYTERHUB_SERVICE_PREFIX",
+            "JUPYTER_SERVER_ROOT",
+            "JUPYTER_SERVER_URL",
+        )
+        if any(k in os.environ for k in jupyter_env_vars):
+            return False
+
         return os.getenv("SLURM_JOBID") is not None
 
     @property
