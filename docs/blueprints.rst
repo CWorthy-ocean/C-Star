@@ -195,7 +195,7 @@ Execution
     The post-processing step joining partitioned data may consume all available cores of a login node and be terminated (and make the admins angry).
 
     - We *strongly* recommend setting ``CSTAR_NPROCS_POST`` to a small number (~2) when running a `ROMS-MARBL` blueprint directly on a HPC login node.
-    - Consider making a :ref:`single-step workplan <single-step-wp-ex>` to run a simulation entirely on the compute cluster.
+    - Consider making a :ref:`single-step workplan <workplan_examplesjF>` to run a simulation entirely on the compute cluster.
 
 CLI
 ^^^
