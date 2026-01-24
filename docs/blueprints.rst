@@ -10,7 +10,7 @@ desired.
 Core Blueprint Schema
 ---------------------
 
-The core attributes of a blueprints come from :class:`cstar.orchestration.models.Blueprint`.
+The core attributes of a blueprint come from :class:`cstar.orchestration.models.Blueprint`.
 
 .. rubric:: Core Blueprint Attributes
 
