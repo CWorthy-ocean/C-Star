@@ -12,3 +12,5 @@ dependencies:
   - netCDF4
   - pip
   - ipykernel
+  # only needed for building docs
+  - pandoc
