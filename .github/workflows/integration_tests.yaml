@@ -39,7 +39,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python - V
-           python -m pip install -e . --force-reinstall
+           python -m pip install -e ".[dev]" --force-reinstall
 
       - name: Running Tests
         shell: micromamba-shell {0}        
