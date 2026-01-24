@@ -5,6 +5,8 @@ Blueprints define the contract for communicating the available behaviors of an
 application. A user-configured blueprint informs C-Star which behaviors are
 desired.
 
+.. _blueprint_schema:
+
 Core Blueprint Schema
 ---------------------
 
