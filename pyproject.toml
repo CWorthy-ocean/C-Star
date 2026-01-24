@@ -41,7 +41,6 @@ keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 [project.optional-dependencies]
 test = [
      "pytest>=7.0",
-     "roms_tools[dask]==3.3.0"
 ]
 dev =["ruff", "types-python-dateutil"]
 
