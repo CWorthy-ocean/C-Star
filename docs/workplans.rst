@@ -206,22 +206,34 @@ Execution
 .. attention::
     An error will occur if the `SLURM` **account** and **queue** are not configured when running on a HPC.
     
-CLI
-^^^
 
-.. code::
+.. tab-set::
 
-    cstar workplan run my_workplan.yaml --run-id my-unique-id
+   .. tab-item:: Run via CLI
 
-You can run the same command later, with the same :term:`run ID` to check the status of your running jobs. Or, you can use a different run ID to re-run the workplan from scratch.
+    Use the `run` command from the `cstar CLI` to execute the workplan.
 
-In Python
-^^^^^^^^^
+    .. code-block:: console
+
+        cstar workplan run --run-id <my-unique-id> my_workplan.yaml
+
+    .. tip::
+        Executing the command again with the same :term:`run ID` will attach to the
+        previous execution and continue to monitor status until terminated.
+        
+        Specify a different :term:`run ID` to re-run the workplan from scratch.
 
 
-.. code:: python
+   .. tab-item:: Programmatic Execution
 
-    from pathlib import Path
-    from cstar.cli.workplan.run import run as run_workplan
+    Use the `dag_runner` module to execute a Workplan in python.
 
-    run_workplan(Path("/path/to/my/workplan.yaml"), run_id = "my-unique-id")
+    .. code-block:: python
+
+        from pathlib import Path
+        from cstar.orchestration.dag_runner import build_and_run_dag
+
+        path = Path("/path/to/my/workplan.yaml")
+        await run_workplan(path, run_id="my-unique-id")
+
+
