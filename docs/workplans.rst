@@ -45,9 +45,12 @@ The desired compute environment characteristic are specified using :attr:`~cstar
 Runtime Variables
 ^^^^^^^^^^^^^^^^^
 
-C-Star performs some simple templating for user convenience. The key-value pairs in
-:attr:`~cstar.orchestration.models.Workplan.runtime_vars` define the original value
-and the value that will replace it at run time.
+.. include:: snippets/in-development.rst
+
+C-Star performs some simple templating for user convenience. The variables identified in
+:attr:`~cstar.orchestration.models.Workplan.runtime_vars` are meant to be provided at runtime,
+such that one workplan could be shared and used for a range of supported values without needing
+to modify the yaml. The user API for specifying runtime variables is still in development.
 
 
 Steps
@@ -55,7 +58,7 @@ Steps
 
 The heart of a workplan is the collection of steps found in :attr:`~cstar.orchestration.models.Workplan.steps`.
 Steps have a 1-to-1 relationship with blueprints - each step must specify the path to a blueprint file.
-The step also specifies the application type to use for it's execution.
+The step also specifies the application type to use for its execution.
 
 
 Step Schema
@@ -97,8 +100,8 @@ Workplan Examples
 
         steps:
         - name: job1
-            application: roms_marbl
-            blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_a.yaml
+          application: roms_marbl
+          blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_a.yaml
 
    .. tab-item:: Multi-step
 
@@ -122,16 +125,16 @@ Workplan Examples
 
         steps:
         - name: job1
-            application: roms_marbl
-            blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_a.yaml
+          application: roms_marbl
+          blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_a.yaml
         - name: job2
-            application: roms_marbl
-            blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_b.yaml
-            depends_on:
-            - job1
+          application: roms_marbl
+          blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_b.yaml
+          depends_on:
+          - job1
         - name: job3
-            application: roms_marbl
-            blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_c.yaml
+          application: roms_marbl
+          blueprint: /home/x-seilerman/wp_testing/2node_1wk_new_c.yaml
 
    .. tab-item:: Overriding Blueprints
 
@@ -151,24 +154,24 @@ Workplan Examples
 
         steps:
         - name: step 1
-            application: roms_marbl
-            blueprint: blueprint.yaml
-            blueprint_overrides: 
-            - name: Run blueprint with development UCLA-ROMS branch
-            - code:
-                roms:
-                  location: https://github.com/CWorthy-ocean/ucla-roms.git
-                  branch: develop
+          application: roms_marbl
+          blueprint: blueprint.yaml
+          blueprint_overrides:
+          - name: Run blueprint with development UCLA-ROMS branch
+          - code:
+              roms:
+                location: https://github.com/CWorthy-ocean/ucla-roms.git
+                branch: develop
 
         - name: step 2
-            application: roms_marbl
-            blueprint: blueprint.yaml
-            blueprint_overrides: 
-            - name: Run blueprint with custom UCLA-ROMS fork
-            - code:
-                roms:
-                  location: https://github.com/github-user/ucla-roms.git
-                  branch: main
+          application: roms_marbl
+          blueprint: blueprint.yaml
+          blueprint_overrides:
+          - name: Run blueprint with custom UCLA-ROMS fork
+          - code:
+              roms:
+                location: https://github.com/github-user/ucla-roms.git
+                branch: main
 
 
 Checking validity
@@ -204,14 +207,14 @@ Execution
 .. include:: snippets/review-config.rst
 
 .. attention::
-    An error will occur if the `SLURM` **account** and **queue** are not configured when running on a HPC.
+    An error will occur if the SLURM **account** and **queue** are not configured when running on a HPC.
     
 
 .. tab-set::
 
    .. tab-item:: Run via CLI
 
-    Use the `run` command from the `cstar CLI` to execute the workplan.
+    Use the ``run`` command from the cstar CLI to execute the workplan.
 
     .. code-block:: console
 
