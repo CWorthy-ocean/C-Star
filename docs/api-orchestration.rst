@@ -27,4 +27,6 @@ Execution
    cstar.orchestration.models.Workplan
    cstar.orchestration.orchestration.Planner
    cstar.orchestration.orchestration.Launcher
+   cstar.orchestration.launch.local.LocalLauncher
+   cstar.orchestration.launch.slurm.SlurmLauncher
    cstar.orchestration.orchestration.Orchestrator
