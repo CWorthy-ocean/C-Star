@@ -33,7 +33,7 @@ dependencies = [
     "pytimeparse>=1.1.8",
     "pooch>=1.8.1",
     "prefect>=3.6.1",
-    "roms_tools[dask]==3.1.2",
+    "roms_tools[dask]==3.3.0",
     "typer>=0.17.5",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
@@ -41,7 +41,6 @@ keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 [project.optional-dependencies]
 test = [
      "pytest>=7.0",
-     "roms_tools[dask]==3.1.2"
 ]
 dev =["ruff", "types-python-dateutil"]
 
