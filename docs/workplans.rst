@@ -237,3 +237,16 @@ Execution
         await run_workplan(path, run_id="my-unique-id")
 
 
+Checking Workplan Status
+------------------------
+
+.. tab-set::
+
+   .. tab-item:: CLI Status Check
+
+    Use the `status` command from the `cstar CLI` to retrieve the current
+    status of steps in a running workplan.
+
+    .. code-block:: console
+
+        cstar workplan status --run-id <my-unique-id>
