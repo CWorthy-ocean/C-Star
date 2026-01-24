@@ -164,21 +164,19 @@ Blueprints can be checked for errors using the CLI and in code.
 
 .. tab-set::
 
-   .. tab-item:: Validating `YAML` with the CLI
+   .. tab-item:: Validating via CLI
 
     Use the `check` command from the `cstar CLI`.
 
     .. code-block:: console
-      :caption: Validating a blueprint `YAML` file.
 
         cstar blueprint check my_blueprint.yaml
 
-   .. tab-item:: Programmatic `YAML` Validation
+   .. tab-item:: Programmatic Validation
 
     Use the `deserialize` method to validate a `YAML` file in Python.
 
     .. code-block:: python
-      :caption: Validating a blueprint `YAML` file.
 
         from cstar.orchestration.models import RomsMarblBlueprint
         from cstar.orchestration.serialization import deserialize
@@ -209,7 +207,7 @@ Use the `run` command from the `cstar CLI` to execute a blueprint.
 
 .. tab-set::
 
-   .. tab-item:: Executing Blueprint `YAML` with the CLI
+   .. tab-item:: Run via CLI
 
     Use the `run` command from the `cstar CLI`.
 
@@ -218,7 +216,7 @@ Use the `run` command from the `cstar CLI` to execute a blueprint.
 
         cstar blueprint run my_blueprint.yaml
 
-   .. tab-item:: Programmatic Blueprint `YAML` Execution
+   .. tab-item:: Programmatic Execution
 
     Use a `SimulationRunner` to execute the blueprint.
 
