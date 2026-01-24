@@ -68,7 +68,15 @@ Frequent users may want to set preferred values for these variables in their ``.
 |                              |                       | monthly, weekly,      |
 |                              |                       | daily                 |
 +------------------------------+-----------------------+-----------------------+
-
+| CSTAR_IN_ACTIVE_ALLOCATION   | None (auto-detect)    | Override behavior for |
+|                              |                       | launching new jobs    |
+|                              |                       | via SLURM or simply   |
+|                              |                       | executing via mpirun. |
+|                              |                       | Only set this to 0 if |
+|                              |                       | you need to launch new|
+|                              |                       | jobs from within an   |
+|                              |                       | existing allocation.  |
++------------------------------+-----------------------+-----------------------+
 
 Developer-only environment variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
