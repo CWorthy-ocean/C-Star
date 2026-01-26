@@ -288,6 +288,7 @@ class SourceData:
 
     @property
     def retriever(self) -> "Retriever":
+        """The retriever instance used to fetch data."""
         if not self._retriever:
             self._retriever = get_retriever(self)
         return self._retriever
@@ -369,7 +370,30 @@ class SourceDataCollection:
         subdir: str = "",
         checkout_target: str = "",
         files: Iterable[str] = (),
-    ):
+    ) -> "SourceDataCollection":
+        """Create a SourceDataCollection automatically by inspecting the contents of a common location.
+
+        Parameters
+        ----------
+        common_location: str
+            The common location to inspect.
+        subdir: str
+            The subdirectory to inspect.
+        checkout_target: str
+            The checkout target to use for remote repositories.
+        files: Iterable[str]
+            The files to inspect.
+
+        Returns
+        -------
+        SourceDataCollection
+            A SourceDataCollection containing the specified files.
+
+        Raises
+        ------
+        ValueError
+            If the common location is not a remote repository or local directory.
+        """
         common_location_classification = SourceData(common_location).classification
         match common_location_classification:
             case SourceClassification.REMOTE_REPOSITORY:

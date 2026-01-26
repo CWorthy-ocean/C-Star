@@ -3,6 +3,8 @@
 .. currentmodule:: {{ module }}
 
 .. autoclass:: {{ objname }}
+   :class-doc-from: class
+   :show-inheritance:
 
    {% block methods %}
    {% if methods %}
@@ -10,8 +12,7 @@
    .. autosummary::
       :toctree:
    {% for item in all_methods %}
-      {%- if not item.startswith('_') or item in ['__call__',
-                                                  ] %}
+      {%- if not item.startswith("_") or item in ["__call__"] %}
       {{ name }}.{{ item }}
 
       {% endif %}
