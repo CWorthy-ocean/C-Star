@@ -111,13 +111,13 @@ def autodoc_skip_member(app, what, name, obj, skip, options) -> bool:
     """Return `True` if class member should be skipped by autodoc."""
     exclusions = get_pydantic_exclusions() | get_enum_exclusions()
 
-    # if what in ("method", "function", "attribute") and (
     if name.startswith("_") or name in exclusions:
         return True
     return skip
 
 
-def setup(app):
+def setup(app) -> None:
+    """Configure the Sphinx app."""
     app.connect("autodoc-skip-member", autodoc_skip_member)
 
 
