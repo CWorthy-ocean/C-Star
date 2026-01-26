@@ -29,11 +29,11 @@ dependencies = [
     "python-dateutil>=2.8.2",
     "python-dotenv",
     "PyYAML==6.0.2",
-    "pydantic>=2.11",
+    "pydantic>=2.12",
     "pytimeparse>=1.1.8",
     "pooch>=1.8.1",
     "prefect>=3.6.1",
-    "roms_tools[dask]==3.3.0",
+    "roms_tools[dask]>=3.4.0,<4",
     "typer>=0.17.5",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]

@@ -166,6 +166,18 @@ class ExecutionHandler(ABC, LoggingMixin):
                 self.log.info(msg)
                 return
 
+        if _status == ExecutionStatus.PENDING:
+            start_time = time.time()
+            msg = "This job is still pending. Updates will be available after it starts running."
+            while seconds == 0 or (time.time() - start_time < seconds):
+                self.log.info(msg)
+                time.sleep(STATUS_RECHECK_SECONDS)
+                _status = self.status
+                if _status != ExecutionStatus.PENDING:
+                    msg = f"Job status is now {_status}"
+                    self.log.info(msg)
+                    break
+
         try:
             with open(self.output_file) as f:
                 f.seek(0, 2)  # Move to the end of the file
