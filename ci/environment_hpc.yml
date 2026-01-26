@@ -10,4 +10,4 @@ dependencies:
   - pip
   - ipykernel
   # only needed for building docs
-  - pandoc 
+  - pandoc
