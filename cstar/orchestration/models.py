@@ -62,7 +62,7 @@ TargetDirectoryPath = t.Annotated[
 
 class ConfiguredBaseModel(BaseModel):
     """Base-model configuring common instantiation and validation behavior
-    forsubclasses.
+    for subclasses.
     """
 
     model_config = ConfigDict(extra="forbid", from_attributes=True)
