@@ -419,7 +419,7 @@ class SchedulerJob(ExecutionHandler, ABC):
 
     @property
     def walltime(self) -> str | None:
-        """The maximum walltime for the job, in the format "HH:MM:SS"."""
+        """The maximum walltime for the job, in the format `HH:MM:SS`."""
         return self._walltime
 
     @property

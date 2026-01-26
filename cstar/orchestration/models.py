@@ -61,7 +61,9 @@ TargetDirectoryPath = t.Annotated[
 
 
 class ConfiguredBaseModel(BaseModel):
-    """BaseModel with configuration options that we want as default for other models."""
+    """Base-model configuring common instantiation and validation behavior
+    for subclasses.
+    """
 
     model_config = ConfigDict(extra="forbid", from_attributes=True)
     """Pydantic ConfigDict with options we want changed."""
@@ -72,9 +74,14 @@ class Resource(ConfiguredBaseModel):
     """Location of the file to retrieve."""
 
     partitioned: bool = Field(default=False, init=False)
+    """Flag indicating whether the resource is pre-partitioned."""
 
 
 class VersionedResource(Resource):
+    """A physical asset that is used as an input or configuration and
+    has an associated hash used to identify a specific version.
+    """
+
     hash: RequiredString
     """Expected hash of the file."""
 
@@ -90,6 +97,7 @@ class DocLocMixin(ConfiguredBaseModel):
 
 
 DataResource: t.TypeAlias = Resource | VersionedResource
+"""A physical resource identifying a source of data."""
 
 
 class Dataset(DocLocMixin):
@@ -99,6 +107,7 @@ class Dataset(DocLocMixin):
     """A list of one or more data resources."""
 
     def __len__(self) -> int:
+        """Return the number of data resources in the dataset."""
         if isinstance(self.data, list):
             return len(self.data)
         return 1 if self.data else 0
@@ -214,6 +223,8 @@ class Application(StrEnum):
 
 
 class ParameterSet(DocLocMixin, ConfiguredBaseModel):
+    """A base class for parameter sets exposed on a blueprint."""
+
     hash: str | None = Field(default=None, init=False, validate_default=False)
     """Hash used to verify the parameters are unchanged."""
 
