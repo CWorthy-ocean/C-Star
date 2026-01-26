@@ -54,7 +54,6 @@ def test_codebase_repr(fakeexternalcodebase):
     )
 
     assert result_repr == expected_repr
-    pass
 
 
 class TestToDict:

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=file://workplan-schema.json
+name: Parallel Workplan
+description: A workplan that executes all tasks immediately in parallel
+steps:
+- name: Step A_1
+  application: sleep
+  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
+- name: Step A_2
+  application: sleep
+  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
+- name: Step A_3
+  application: sleep
+  blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
+state: draft

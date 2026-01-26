@@ -2,6 +2,7 @@ import json
 import os
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
@@ -19,6 +20,39 @@ from cstar.system.scheduler import (
 )
 
 
+def get_status_of_slurm_job(job_id: str) -> ExecutionStatus:
+    """Check the status of a Slurm job using sacct.
+
+    Parameters
+    ----------
+    job_id: str
+        The job_id to check
+
+    Returns
+    -------
+    status: ExecutionStatus
+        The status of the job
+    """
+    sacct_cmd = f"sacct -j {job_id} --format=State%20 --noheader"
+    msg_err = f"Failed to retrieve job status using {sacct_cmd}."
+    stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
+
+    # Map sacct states to ExecutionStatus enum
+    sacct_status_map = {
+        "PENDING": ExecutionStatus.PENDING,
+        "RUNNING": ExecutionStatus.RUNNING,
+        "COMPLETED": ExecutionStatus.COMPLETED,
+        "CANCELLED": ExecutionStatus.CANCELLED,
+        "FAILED": ExecutionStatus.FAILED,
+    }
+    for state, status in sacct_status_map.items():
+        if state in stdout:
+            return status
+
+    # Fallback if no known state is found
+    return ExecutionStatus.UNKNOWN
+
+
 def create_scheduler_job(
     commands: str,
     account_key: str,
@@ -32,6 +66,7 @@ def create_scheduler_job(
     queue_name: str | None = None,
     send_email: bool | None = True,
     walltime: str | None = None,
+    depends_on: Iterable[str] = (),
 ) -> "SchedulerJob":
     """Create a scheduler job for either SLURM or PBS based on the system's active
     scheduler.
@@ -67,6 +102,8 @@ def create_scheduler_job(
         Whether to send email notifications about job status. Defaults to True.
     walltime : str, optional
         The maximum walltime for the job, in the format "HH:MM:SS". Defaults to the queue's maximum.
+    depends_on: Iterable[str], optional
+        An iterable of job ids to pass as dependencies to the scheduler. Defaults to ().
 
     Returns
     -------
@@ -104,6 +141,7 @@ def create_scheduler_job(
         queue_name=queue_name,
         send_email=send_email,
         walltime=walltime,
+        depends_on=depends_on,
     )
 
 
@@ -178,6 +216,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         queue_name: str | None = None,
         send_email: bool | None = True,
         walltime: str | None = None,
+        depends_on: Iterable[str] = (),
     ):
         """Initialize a SchedulerJob instance.
 
@@ -217,6 +256,8 @@ class SchedulerJob(ExecutionHandler, ABC):
         walltime : str, optional
             The maximum walltime for the job, in the format "HH:MM:SS". If not provided,
             it defaults to the queue's maximum walltime.
+        depends_on: Iterable[str], optional
+            An iterable of job ids to pass as dependencies to the scheduler. Defaults to ().
 
         Raises
         ------
@@ -249,6 +290,8 @@ class SchedulerJob(ExecutionHandler, ABC):
             scheduler.primary_queue_name if queue_name is None else queue_name
         )
         self._walltime = walltime
+
+        self.depends_on = depends_on
 
         if (walltime is None) and (self.queue.max_walltime is None):
             raise ValueError(
@@ -376,7 +419,7 @@ class SchedulerJob(ExecutionHandler, ABC):
 
     @property
     def walltime(self) -> str | None:
-        """The maximum walltime for the job, in the format "HH:MM:SS"."""
+        """The maximum walltime for the job, in the format `HH:MM:SS`."""
         return self._walltime
 
     @property
@@ -444,6 +487,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         Writes the generated job script to the file specified by the `script_path` attribute.
         The file can then be used to submit the job to the scheduler.
         """
+        self.script_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.script_path, "w") as f:
             f.write(self.script)
 
@@ -587,25 +631,7 @@ class SlurmJob(SchedulerJob):
         """
         if self.id is None:
             return ExecutionStatus.UNSUBMITTED
-        else:
-            sacct_cmd = f"sacct -j {self.id} --format=State%20 --noheader"
-            msg_err = f"Failed to retrieve job status using {sacct_cmd}."
-            stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
-
-        # Map sacct states to ExecutionStatus enum
-        sacct_status_map = {
-            "PENDING": ExecutionStatus.PENDING,
-            "RUNNING": ExecutionStatus.RUNNING,
-            "COMPLETED": ExecutionStatus.COMPLETED,
-            "CANCELLED": ExecutionStatus.CANCELLED,
-            "FAILED": ExecutionStatus.FAILED,
-        }
-        for state, status in sacct_status_map.items():
-            if state in stdout:
-                return status
-
-        # Fallback if no known state is found
-        return ExecutionStatus.UNKNOWN
+        return get_status_of_slurm_job(str(self.id))
 
     @property
     def script(self) -> str:
@@ -640,8 +666,9 @@ class SlurmJob(SchedulerJob):
         ) in self.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#SBATCH {key} {value}"
 
+        scheduler_script += "\n\nset -e"
         # Add roms command to scheduler script
-        scheduler_script += f"\n\n{self.commands}"
+        scheduler_script += f"\n{self.commands}"
         return scheduler_script
 
     def submit(self) -> int | None:
@@ -663,6 +690,7 @@ class SlurmJob(SchedulerJob):
             submission output.
         """
         self.save_script()
+        self.run_path.mkdir(parents=True, exist_ok=True)
         # remove any slurm variables in case submitting from inside another slurm job
         env_vars_to_exclude = []
         for k in os.environ.keys():
@@ -674,8 +702,16 @@ class SlurmJob(SchedulerJob):
             k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
         }
 
+        deps = ":".join(str(d) for d in self.depends_on)
+        dep_clause = (
+            f" --dependency=afterok:{deps} --kill-on-invalid-dep=yes" if deps else ""
+        )
+
+        cmd = f"sbatch{dep_clause} {self.script_path}"
+
+        self.log.info(f"Submitting job: {cmd}")
         stdout = _run_cmd(
-            f"sbatch {self.script_path}",
+            cmd,
             cwd=self.run_path,
             env=slurm_env,
             msg_err="Non-zero exit code when submitting job.",

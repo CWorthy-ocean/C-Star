@@ -1,5 +1,6 @@
 import abc
 import types
+from collections import defaultdict
 from pathlib import Path
 from typing import (
     Any,
@@ -14,13 +15,14 @@ from pydantic import (
     ModelWrapValidatorHandler,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_serializer,
     model_validator,
 )
 from pydantic.alias_generators import to_snake
 
 from cstar.base.log import get_logger
-from cstar.base.utils import _list_to_concise_str
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _list_to_concise_str
 
 log = get_logger(__name__)
 
@@ -33,6 +35,9 @@ CUSTOM_ALIAS_LOOKUP = {
     "my_bak_mixing": "MY_bak_mixing",
     "initial_conditions": "initial",
 }
+
+MIN_NUM_TRACERS = 37
+"""Vertical mixing requires enough values for all tracers or it raises an error."""
 
 
 def _format_float(val: float) -> str:
@@ -414,6 +419,30 @@ class VerticalMixing(ROMSRuntimeSettingsSection):
     Akv_bak: float
     Akt_bak: list[float]
 
+    @field_validator("Akt_bak", mode="after")
+    @classmethod
+    def zero_fill_tracers(cls, value: list[float]):
+        """
+        If the list of vertical mixing for tracers is all zeros, make sure it has enough zeros such that
+        ROMS can read a zero for every tracer (otherwise it will crash). If any values are non-zero, we can't
+        make any assumptions about which tracers the user is trying to assign, so don't do any modification and
+        let ROMS use it or fail as appropriate.
+
+        Parameters
+        ----------
+        value: the field value after running through initial pydantic validation
+
+        Returns
+        -------
+        modified field value
+        """
+        list_len = len(value)
+        if (num_missing := MIN_NUM_TRACERS - list_len) and all(
+            [v == 0 for v in value]
+        ) > 0:
+            value.extend([0] * num_missing)
+        return value
+
 
 class MARBLBiogeochemistry(ROMSRuntimeSettingsSection):
     marbl_namelist_fname: Path
@@ -443,31 +472,6 @@ class MYBakMixing(ROMSRuntimeSettingsSection):
 
 
 class ROMSRuntimeSettings(BaseModel):
-    title: Title
-    time_stepping: TimeStepping
-    bottom_drag: BottomDrag
-    initial: InitialConditions
-    forcing: Forcing
-    output_root_name: OutputRootName
-
-    s_coord: SCoord | None = None
-    grid: Grid | None = None
-    marbl_biogeochemistry: MARBLBiogeochemistry | None = None
-    lateral_visc: LateralVisc | None = None
-    rho0: Rho0 | None = None
-    lin_rho_eos: LinRhoEos | None = None
-    gamma2: Gamma2 | None = None
-    tracer_diff2: TracerDiff2 | None = None
-    vertical_mixing: VerticalMixing | None = None
-    my_bak_mixing: MYBakMixing | None = None
-    sss_correction: SSSCorrection | None = None
-    sst_correction: SSTCorrection | None = None
-    ubind: UBind | None = None
-    v_sponge: VSponge | None = None
-    climatology: Climatology | None = None
-
-    # Pydantic model configuration
-    model_config = {"populate_by_name": True, "alias_generator": _get_alias}
     """Container for reading, manipulating, and writing ROMS `.in` runtime configuration
     files.
 
@@ -477,67 +481,82 @@ class ROMSRuntimeSettings(BaseModel):
 
     Each attribute corresponds to a section in the `.in` file, and is an instance of a
     `ROMSRuntimeSettingsSection` subclass corresponding to that section.
-
-    Attributes
-    ----------
-    title : Title
-        Description of the ROMS run.
-    time_stepping : TimeStepping
-        Time integration parameters: ntimes, dt, ndtfast, ninfo.
-    bottom_drag : BottomDrag
-        Bottom drag coefficients: rdrg, rdrg2, zob.
-    initial : InitialConditions
-        Initial condition parameters: nrrec and ininame.
-    forcing : Forcing
-        List of forcing NetCDF files.
-    output_root_name : OutputRootName
-        Base name for output NetCDF files.
-
-    Optional Attributes (depending on CPP flags)
-    --------------------------------------------
-    s_coord : Optional[SCoord]
-        S-coordinate transformation parameters:
-        - theta_s (surface stretching parameter)
-        - theta_b (bottom stretching parameter)
-    rho0 : Rho0, optional, default None
-        Boussinesq reference density (rho0, kg/m3)
-    lin_rho_eos : LinRhoEos, optional, default None
-        Linear equation of state parameters:
-        - Tcoef (thermal expansion coefficient, kg/m3/K)
-        - Scoef (haline contraction coefficient, kg/m3/PSU)
-    marbl_biogeochemistry : MARBLBiogeochemistry, optional, default None
-        Filenames for MARBL namelist and diagnostics:
-        - marbl_namelist_fname
-        - marbl_tracer_list_fname
-        - marbl_diag_list_fname
-    lateral_visc : LateralVisc, optional, default None
-        Horizontal Laplacian kinematic viscosity (m2/s)
-    gamma2 : Gamma2, optional, default None
-        Lateral boundary slipperiness coefficient (free-slip=+1,no-slip=-1)
-    tracer_diff2 : TracerDiff2, optional, default None
-        Horizontal Laplacian mixing coefficients (one per tracer, m2/s)
-    vertical_mixing : VerticalMixing, optional, default None
-        Vertical mixing parameters:
-        - akv_bak (background vertical viscosity, m2/s)
-        - akt_bak (background vertical mixing for tracers, m2/s)
-    my_bak_mixing : MYBakMixing, optional, default None
-        Background vertical mixing for MY2.5 scheme parameters:
-        - akq_bak (background vertical TKE mixing, m2/s)
-        - q2nu2 (horizontal Laplacian TKE mixing, m2/s)
-        - q2nu4 (horizontal biharmonic TKE mixing, m4/s)
-    sss_correction : SSSCorrection, optional, default None
-        Surface salinity correction factor.
-    sst_correction : SSTCorrection, optional, default None
-        Surface temperature correction factor.
-    ubind : UBind, optional, default None
-        Open boundary binding velocity (m/s)
-    v_sponge : VSponge, optional, default None
-        Maximum sponge layer viscosity (m2/s)
-    grid : Grid, optional, default None
-        Grid file path
-    climatology : Climatology, optional, default None
-        Climatology file path
     """
+
+    title: Title
+    """Description of the ROMS run."""
+    time_stepping: TimeStepping
+    """Time integration parameters: ntimes, dt, ndtfast, ninfo."""
+    bottom_drag: BottomDrag
+    """Bottom drag coefficients: rdrg, rdrg2, zob."""
+    initial: InitialConditions
+    """Initial condition parameters: nrrec and ininame."""
+    forcing: Forcing
+    """List of forcing NetCDF files."""
+    output_root_name: OutputRootName
+    """Base name for output NetCDF files."""
+
+    s_coord: SCoord | None = None
+    """S-coordinate transformation parameters:
+    - theta_s (surface stretching parameter)
+    - theta_b (bottom stretching parameter)
+    """
+    grid: Grid | None = None
+    """Grid file path."""
+    marbl_biogeochemistry: MARBLBiogeochemistry | None = None
+    """Filenames for MARBL namelist and diagnostics:
+    - marbl_namelist_fname
+    - marbl_tracer_list_fname
+    - marbl_diag_list_fname
+    """
+    lateral_visc: LateralVisc | None = None
+    """Horizontal Laplacian kinematic viscosity (m2/s)."""
+    rho0: Rho0 | None = None
+    """Boussinesq reference density (rho0, kg/m3)."""
+    lin_rho_eos: LinRhoEos | None = None
+    """Linear equation of state parameters:
+    - Tcoef (thermal expansion coefficient, kg/m3/K)
+    - Scoef (haline contraction coefficient, kg/m3/PSU)
+    """
+    gamma2: Gamma2 | None = None
+    """Lateral boundary slipperiness coefficient (free-slip=+1,no-slip=-1)."""
+    tracer_diff2: TracerDiff2 | None = None
+    """Horizontal Laplacian mixing coefficients (one per tracer, m2/s)."""
+    vertical_mixing: VerticalMixing | None = None
+    """Vertical mixing parameters:
+    - akv_bak (background vertical viscosity, m2/s)
+    - akt_bak (background vertical mixing for tracers, m2/s)
+    """
+    my_bak_mixing: MYBakMixing | None = None
+    """Background vertical mixing for MY2.5 scheme parameters:
+    - akq_bak (background vertical TKE mixing, m2/s)
+    - q2nu2 (horizontal Laplacian TKE mixing, m2/s)
+    - q2nu4 (horizontal biharmonic TKE mixing, m4/s)
+    """
+    sss_correction: SSSCorrection | None = None
+    """Surface salinity correction factor."""
+    sst_correction: SSTCorrection | None = None
+    """Surface temperature correction factor."""
+    ubind: UBind | None = None
+    """Open boundary binding velocity (m/s)"""
+    v_sponge: VSponge | None = None
+    """Maximum sponge layer viscosity (m2/s)"""
+    climatology: Climatology | None = None
+    """Climatology file path"""
+
+    # Pydantic model configuration
+    model_config = {"populate_by_name": True, "alias_generator": _get_alias}
+    """Pydantic model configuration"""
+
+    @model_validator(mode="after")
+    def set_fixed_output_root_name(self) -> "ROMSRuntimeSettings":
+        """Apply an "after" validator to automatically change the value of the
+        output_root_name attribute to the a fixed name.
+        """
+        self.output_root_name = OutputRootName(
+            output_root_name=DEFAULT_OUTPUT_ROOT_NAME
+        )
+        return self
 
     @staticmethod
     def _load_raw_sections(filepath: str | Path) -> dict[str, list[str]]:
@@ -552,32 +571,23 @@ class ROMSRuntimeSettings(BaseModel):
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist.")
 
-        with filepath.open() as f:
-            lines = list(f)
+        all_lines = [line.strip() for line in filepath.read_text().split("\n")]
+        lines = [line for line in all_lines if line and not line.startswith("!")]
 
-        sections = {}
-        current_section = None
-        section_lines: list[str] = []
+        sections = defaultdict(list)
+        key = ""
 
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith("!"):
-                continue
+        while lines:
+            line = lines.pop(0)
 
             if ":" in line:
-                # save the previous section if one was open
-                if current_section is not None:
-                    sections[current_section] = section_lines
+                key, _ = [x.strip() for x in line.split(":", maxsplit=1)]
+                continue
 
-                # start a new section
-                current_section = line.split(":", 1)[0].strip()
-                section_lines = []
-            else:
-                section_lines.append(line)
+            if not key:
+                continue
 
-        # save the last section
-        if current_section is not None:
-            sections[current_section] = section_lines
+            sections[key].append(line)
 
         return sections
 
@@ -614,7 +624,7 @@ class ROMSRuntimeSettings(BaseModel):
                 "\n- bottom_drag"
                 "\n- output_root_name"
             )
-        return cls(**sections)
+        return cls(**sections)  # type: ignore[arg-type]
 
     def __str__(self) -> str:
         """Returns a string representation of the input settings.
@@ -773,17 +783,17 @@ class ROMSRuntimeSettings(BaseModel):
             "s_coord": dict(self.s_coord) if self.s_coord else None,
             "rho0": self.rho0,
             "lin_rho_eos": dict(self.lin_rho_eos) if self.lin_rho_eos else None,
-            "marbl_biogeochemistry": dict(self.marbl_biogeochemistry)
-            if self.marbl_biogeochemistry
-            else None,
+            "marbl_biogeochemistry": (
+                dict(self.marbl_biogeochemistry) if self.marbl_biogeochemistry else None
+            ),
             "lateral_visc": self.lateral_visc,
             "gamma2": self.gamma2,
-            "tracer_diff2": self.tracer_diff2
-            if self.tracer_diff2 is not None
-            else None,
-            "vertical_mixing": dict(self.vertical_mixing)
-            if self.vertical_mixing
-            else None,
+            "tracer_diff2": (
+                self.tracer_diff2 if self.tracer_diff2 is not None else None
+            ),
+            "vertical_mixing": (
+                dict(self.vertical_mixing) if self.vertical_mixing else None
+            ),
             "my_bak_mixing": dict(self.my_bak_mixing) if self.my_bak_mixing else None,
             "sss_correction": self.sss_correction,
             "sst_correction": self.sst_correction,
@@ -800,7 +810,7 @@ class ROMSRuntimeSettings(BaseModel):
         found in a ROMS-compatible `.in` file.
         """
         output = ""
-        for field_name, field_info in type(self).model_fields.items():
+        for field_name in type(self).model_fields:
             section = getattr(self, field_name)
             if section is None:
                 continue
@@ -817,4 +827,4 @@ class ROMSRuntimeSettings(BaseModel):
             Path where the output file will be written.
         """
         with Path(filepath).open("w") as f:
-            f.write(self.model_dump())
+            f.write(str(self.model_dump()))

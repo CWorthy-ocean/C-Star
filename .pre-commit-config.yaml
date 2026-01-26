@@ -32,6 +32,7 @@ repos:
           "types-python-dateutil",
           "types-PyYAML",
           "types-pytz",
+          "pydantic",
         ]        
 
   - repo: https://github.com/MarcoGorelli/absolufy-imports

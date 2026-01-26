@@ -7,7 +7,9 @@ authors = [
     { name = "Dafydd Stephenson", email = "dafydd@cworthy.org" },
     { name = "Thomas Nicholas", email = "tom@cworthy.org" },
     { name = "Nora Loose", email = "nora@cworthy.org" },
-    { name = "Matt Long", email = "matt@cworthy.org" }
+    { name = "Matt Long", email = "matt@cworthy.org" },
+    { name = "Scott Eilerman", email = "scott.eilerman@cworthy.org" },
+    { name = "Chris McBride", email = "chris@cworthy.org" },
 ]
 license = { text = "Apache-2.0" }
 classifiers = [
@@ -27,18 +29,35 @@ dependencies = [
     "python-dateutil>=2.8.2",
     "python-dotenv",
     "PyYAML==6.0.2",
-    "pydantic>=2.11",
+    "pydantic>=2.12",
+    "pytimeparse>=1.1.8",
     "pooch>=1.8.1",
-    "roms_tools[dask]==3.1.2"
+    "prefect>=3.6.1",
+    "roms_tools[dask]>=3.4.0,<4",
+    "typer>=0.17.5",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
 [project.optional-dependencies]
-test = [
-     "pytest>=7.0",
-     "roms_tools[dask]==3.1.2"
-     ]
-dev =["ruff"]
+dev = [
+    "coverage>=7.13",
+    "pre-commit==3.8.0",
+    "ruff",
+    "pytest>=7.0",
+    "pytest-asyncio>=1.3.0",
+]
+docs = [
+    "nbsphinx",
+    "readthedocs-sphinx-ext",
+    "sphinx",
+    "sphinxcontrib-bibtex",
+    "sphinxcontrib-napoleon",
+    "sphinx-book-theme",
+    "sphinx-design",
+]
+
+[project.scripts]
+cstar = "cstar.cli.cli:main"
 
 [build-system]
 requires = [
@@ -100,6 +119,7 @@ include-package-data = true
 norecursedirs = [".tox", ".git", "__pycache__", ".#*", "*~"]
 log_cli_format = "%(asctime)s | %(levelname)s | %(name)s::%(funcName)s:%(lineno)d: %(message)s"
 log_cli_level = "INFO"
+asyncio_mode = "auto"
 
 
 # Use addopts to ignore specific files and directories

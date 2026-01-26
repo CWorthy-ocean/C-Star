@@ -9,6 +9,7 @@ from cstar.system.manager import (
     _DerechoSystemContext,
     _ExpanseSystemContext,
     _get_system_context,
+    _LinuxARM64SystemContext,
     _LinuxSystemContext,
     _MacOSSystemContext,
     _PerlmutterSystemContext,
@@ -29,6 +30,7 @@ def test_unique_context_names() -> None:
         _MacOSSystemContext,
         _DerechoSystemContext,
         _ExpanseSystemContext,
+        _LinuxARM64SystemContext,
         _LinuxSystemContext,
         _AnvilSystemContext,
     )
@@ -46,6 +48,7 @@ def test_unique_context_names() -> None:
         _DerechoSystemContext,
         _ExpanseSystemContext,
         _LinuxSystemContext,
+        _LinuxARM64SystemContext,
     ],
 )
 def test_context_registry(wrapped_class: type[_SystemContext]) -> None:

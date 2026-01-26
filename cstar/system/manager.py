@@ -319,6 +319,22 @@ class _MacOSSystemContext(_SystemContext):
         return None
 
 
+@register_sys_context
+@dataclass(frozen=True)
+class _LinuxARM64SystemContext(_SystemContext):
+    name: ClassVar[str] = "linux_aarch64"
+    """The unique name identifying the Linux system on an ARM64 platform."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on ARM64 Linux."""
+    mpi_prefix: ClassVar[str] = "mpirun"
+    """The MPI prefix used on Linux."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Return None - a scheduler on the Linux system is not supported."""
+        return None
+
+
 class CStarSystemManager:
     """Manage system-specific configuration and resources."""
 

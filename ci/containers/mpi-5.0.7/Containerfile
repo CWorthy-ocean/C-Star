@@ -1,0 +1,59 @@
+ARG ACCT="C-Worthy"
+ARG FROM_TAG="latest"
+ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:$FROM_TAG"
+ARG MAIN_STAGE="main"  # pass `add_test` to build the test program /runtest
+
+FROM $IMG_BUILDBASE as main
+
+ARG OPENMPI_URI="https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.7.tar.gz"
+ARG OMPI_TGZ_NAME="openmpi-5.0.7.tar.gz" 
+ARG OMPI_TGZ_OUT_DIR="openmpi-5.0.7"
+
+ARG SRC_DIR="/install"
+ARG INSTALL_BASE_DIR="/opt"
+ENV MPIHOME="$INSTALL_BASE_DIR/$OMPI_TGZ_OUT_DIR"
+ARG MPI_PROFILE="/etc/profile.d/ompi-5.0.7.sh"
+
+RUN mkdir -p "$SRC_DIR"
+
+WORKDIR "$SRC_DIR"
+
+
+RUN wget -q "$OPENMPI_URI" && \
+    tar xvf "$OMPI_TGZ_NAME" && \
+    cd "$OMPI_TGZ_OUT_DIR" && \
+    ./configure \
+        --prefix="$MPIHOME" --with-pic \
+        --with-slurm \
+        --with-prrte \
+        --enable-mpirun-prefix-by-default \
+        --with-pmix \
+        --with-libfabric && \
+    make -j $(nproc) && make install && cd "$SRC_DIR" && \
+    rm "$OMPI_TGZ_NAME" && \
+    rm -rf "$OMPI_TGZ_OUT_DIR" && \
+    ldconfig 
+
+ENV PATH="$MPIHOME/bin:$PATH"
+ENV LD_LIBRARY_PATH="$MPIHOME/lib:$LD_LIBRARY_PATH"
+ENV CPATH="$MPIHOME/include:$CPATH"
+ENV LIBRARY_PATH="$MPIHOME/lib:$LIBRARY_PATH"
+ENV LD_RUN_PATH="$MPIHOME/lib:$LD_RUN_PATH"
+
+RUN mkdir -p "/etc/profile.d" && \
+    echo "export MPIHOME=$MPIHOME" >> $MPI_PROFILE && \
+    echo 'export PATH=$MPIHOME/bin:$PATH' >> $MPI_PROFILE && \
+    echo 'export LD_LIBRARY_PATH=$MPIHOME/lib:$LD_LIBRARY_PATH' >> $MPI_PROFILE && \
+    echo 'export CPATH=$MPIHOME/include:$CPATH' >> $MPI_PROFILE && \
+    echo 'export LIBRARY_PATH=$MPIHOME/lib:$LIBRARY_PATH' >> $MPI_PROFILE && \
+    echo 'export LD_RUN_PATH=$MPIHOME/lib:$LD_RUN_PATH' >> $MPI_PROFILE && \
+    echo 'export OMPI_ALLOW_RUN_AS_ROOT=1' >> $MPI_PROFILE && \
+    echo 'export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1' >> $MPI_PROFILE
+
+WORKDIR $INSTALL_BASE_DIR
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD []
+ENTRYPOINT ["/entrypoint.sh"]

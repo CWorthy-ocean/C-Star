@@ -14,50 +14,43 @@ We are designing and building C-Star with these high-level principles in mind:
 A key strength of C-Star lies in its ability to run regional simulations using a `“blueprint” <https://c-star.readthedocs.io/en/latest/terminology.html#term-blueprint>`_ that consolidates all the necessary data to define a model setup. This enables the creation of curated databases containing both scientifically validated and research-grade blueprints. These blueprints offer users the flexibility to easily reproduce simulations, making the modeling process more accessible and consistent.
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Getting Started
+    :maxdepth: 1
+    :caption: Getting Started
 
-   Installing C-Star <installation>
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Terminology
-
-   terminology
+    Installing C-Star <installation>
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Tutorials
+    :maxdepth: 1
+    :caption: Terminology and Concepts
 
-   Building a Simulation and exporting it as a blueprint <tutorials/1_building_a_simulation_and_exporting_it_as_a_blueprint>
-   Importing and running a Simulation from a blueprint <tutorials/2_importing_and_running_a_simulation_from_a_blueprint>
-   Restarting and continuing a Simulation <tutorials/3_restarting_and_continuing_a_simulation>
+    terminology
 
 .. toctree::
-   :maxdepth: 1
-   :caption: How-to Guides
+    :maxdepth: 1
+    :caption: User Guide
 
-   Working with the AdditionalCode class <howto_guides/1_working_with_additionalcode>
-   Working with the InputDataset class <howto_guides/2_working_with_inputdatasets>
-   Working with the ExternalCodeBase class <howto_guides/3_working_with_externalcodebases>
-   Tracking runs executed locally <howto_guides/4_running_on_personal_computers>
-   Tracking runs executed as jobs on HPC systems <howto_guides/5_handling_jobs_on_hpc_systems>
+    blueprints
+    workplans
+    configuration
    
 .. toctree::
-   :maxdepth: 1
-   :caption: Deployment
+    :maxdepth: 1
+    :caption: Deployment
 
-   machines
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Reference
-
-   api
+    machines
 
 .. toctree::
-   :maxdepth: 1
-   :caption: For Developers
+    :maxdepth: 1
+    :caption: Reference
 
-   contributing
-   releases
+    api-blueprint
+    api-orchestration
+    api
+
+.. toctree::
+    :maxdepth: 1
+    :caption: For Developers
+
+    contributing
+    releases
+    python_api_guides

@@ -1,0 +1,28 @@
+ARG ACCT="C-Worthy"
+ARG FROM_TAG="latest"
+ARG IMG_NCDF="$ACCT/cstar-netcdf:$FROM_TAG"
+
+FROM $IMG_NCDF
+
+ARG TGZ_NAME="marbl0.45.0.tar.gz"
+ARG REPO_MARBL="https://github.com/marbl-ecosys/MARBL/archive/refs/tags/$TGZ_NAME"
+
+ENV INSTALL_BASE_DIR=/opt
+ENV MARBL_ROOT=$INSTALL_BASE_DIR/marbl0.45.0
+ARG MARBL_PROFILE=/etc/profile.d/marbl.sh
+
+
+WORKDIR "$INSTALL_BASE_DIR"
+RUN wget -q "$REPO_MARBL" && \
+    tar xvf "$TGZ_NAME" && \
+    mv MARBL-marbl0.45.0 $MARBL_ROOT && \
+    rm "$TGZ_NAME" && \
+    cd "$MARBL_ROOT/src" && \
+    make gnu USEMPI=TRUE && \
+    echo "export MARBL_ROOT=$MARBL_ROOT" >> $MARBL_PROFILE
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD []
+ENTRYPOINT ["/entrypoint.sh"]

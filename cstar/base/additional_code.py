@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from pathlib import Path
 
 from cstar.base.log import LoggingMixin
@@ -26,14 +27,14 @@ class AdditionalCode(LoggingMixin):
         Stage this InputDataset for local use by C-Star
     """
 
-    files: list[str]
+    files: Iterable[str]
 
     def __init__(
         self,
         location: str,
         subdir: str = "",
         checkout_target: str = "",
-        files: list[str] = [],
+        files: Iterable[str] = (),
     ):
         """Initialize an AdditionalCode object from a DataSource  and a list of code
         files.
@@ -109,7 +110,7 @@ class AdditionalCode(LoggingMixin):
     @property
     def exists_locally(self) -> bool:
         """Determine whether an unmodified local working copy of the AdditionalCode is available"""
-        if (self.working_copy) and not (self.working_copy.changed_from_source):
+        if self.working_copy and not self.working_copy.changed_from_source:
             return True
         return False
 

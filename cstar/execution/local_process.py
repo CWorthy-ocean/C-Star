@@ -109,6 +109,9 @@ class LocalProcess(ExecutionHandler):
         cancel : Terminates the running subprocess.
         """
         # Open the output file to write to
+        self.output_file.parent.mkdir(parents=True, exist_ok=True)
+        self.run_path.mkdir(parents=True, exist_ok=True)
+
         self._output_file_handle = open(self.output_file, "w")
         local_process = subprocess.Popen(
             self.commands.split(),

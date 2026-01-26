@@ -252,57 +252,6 @@ class TestSimulationInitialization:
                 valid_end_date="2026-01-01",
             )
 
-    # Tests for _validate_simulation_directory
-    def test_validate_simulation_directory_new_directory(
-        self, tmp_path, stub_simulation
-    ):
-        """Test `_validate_simulation_directory()` with a new/empty directory.
-
-        This test ensures that `_validate_simulation_directory()` correctly resolves
-        the absolute path of a new/empty directory.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path`: Temporary directory for simulation setup.
-        - `stub_simulation`: Provides a mock `Simulation` instance.
-
-        Assertions
-        ----------
-        - The returned directory path is correctly resolved.
-        """
-        sim = stub_simulation
-        new_dir = tmp_path / "new_simulation"
-
-        assert sim._validate_simulation_directory(new_dir) == new_dir.resolve()
-
-    def test_validate_simulation_directory_existing_non_empty_directory(
-        self, tmp_path, stub_simulation
-    ):
-        """Test `_validate_simulation_directory()` with a non-empty existing directory.
-
-        This test ensures that `_validate_simulation_directory()` raises a `FileExistsError`
-        when the specified directory already exists and is not empty.
-
-        Mocks & Fixtures
-        ----------------
-        - `tmp_path`: Temporary directory for simulation setup.
-        - `stub_simulation`: Provides a mock `Simulation` instance.
-
-        Assertions
-        ----------
-        - A `FileExistsError` is raised with a message indicating the directory is not empty.
-        """
-        sim = stub_simulation
-
-        non_empty_dir = tmp_path / "existing_simulation"
-        non_empty_dir.mkdir()
-        (non_empty_dir / "file.txt").touch()
-
-        with pytest.raises(
-            FileExistsError, match="exists and is not an empty directory"
-        ):
-            sim._validate_simulation_directory(non_empty_dir)
-
     # Test Initialisation directly:
 
     def test_simulation_initialization_valid(self, fakeexternalcodebase):
@@ -325,12 +274,8 @@ class TestSimulationInitialization:
         - The `Simulation` instance has correctly set attributes.
         """
         with (
-            patch.object(
-                StubSimulation, "_validate_simulation_directory"
-            ) as mock_validate_dir,
             patch.object(StubSimulation, "_validate_date_range") as mock_validate_dates,
         ):
-            mock_validate_dir.return_value = Path("some/dir").resolve()
             sim = StubSimulation(
                 name="TestSim",
                 directory="some/dir",
@@ -342,7 +287,6 @@ class TestSimulationInitialization:
                 valid_end_date="2026-01-01",
             )
 
-            mock_validate_dir.assert_called_once_with("some/dir")
             mock_validate_dates.assert_called_once()
 
             assert sim.directory == Path("some/dir").resolve()
@@ -569,6 +513,8 @@ class TestSimulationPersistence:
         restored_sim = StubSimulation.restore(sim.directory)
 
         # Also compare serialized versions
+        assert sim.to_dict() == restored_sim.to_dict(), "Data mismatch after restore"
+
         assert pickle.dumps(restored_sim) == pickle.dumps(sim), (
             "Serialized data mismatch after restore"
         )

@@ -1,0 +1,35 @@
+ARG ACCT="C-Worthy"
+ARG IMG_BUILDBASE="$ACCT/cstar-buildbase:latest"
+
+FROM $IMG_BUILDBASE as main
+
+ARG MINICONDA_SCRIPT="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" 
+ARG INSTALL_BASE_DIR="/opt"
+ARG CSTAR_REPO="cworthy-ocean/c-star"
+ARG CSTAR_HASH="develop"
+
+ARG CONDA_HOME="$INSTALL_BASE_DIR/miniconda3"
+
+RUN mkdir -p "$CONDA_HOME" && \
+    wget -q "$MINICONDA_SCRIPT" -O "/tmp/miniconda.sh" && \
+    chmod +x "/tmp/miniconda.sh" && \
+    bash "/tmp/miniconda.sh" -b -u -p "$CONDA_HOME" && \
+    rm "/tmp/miniconda.sh" && \
+    "$CONDA_HOME/bin/conda" init --all && \
+    "$CONDA_HOME/bin/conda" tos accept && \
+    cp "$CONDA_HOME/etc/profile.d/conda.sh" /etc/profile.d/conda.sh && \
+    echo "conda activate base" >> /etc/profile.d/conda.sh && \
+    . /etc/profile && \
+    git clone -b $CSTAR_HASH --single-branch "https://github.com/$CSTAR_REPO" /tmp/cstar && \
+    conda env update --prune --name base --file /tmp/cstar/ci/environment.yml && \ 
+    conda clean -afy && \
+    pip install /tmp/cstar --root-user-action ignore --no-cache-dir && \
+    rm -rf /tmp/cstar
+
+WORKDIR $INSTALL_BASE_DIR
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD []
+ENTRYPOINT ["/entrypoint.sh"]

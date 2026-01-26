@@ -1,4 +1,9 @@
+import logging
+import os
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from functools import partial
 from itertools import chain
 from pathlib import Path
 from typing import Any, Optional, TypeVar, cast
@@ -13,17 +18,35 @@ from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
+    slugify,
 )
+from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.adapter import (
+    AddtlCodeAdapter,
+    BoundaryForcingAdapter,
+    CdrForcingAdapter,
+    CodebaseAdapter,
+    DiscretizationAdapter,
+    ForcingCorrectionAdapter,
+    GridAdapter,
+    InitialConditionAdapter,
+    MARBLAdapter,
+    RiverForcingAdapter,
+    SurfaceForcingAdapter,
+    TidalForcingAdapter,
+)
+from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
+    ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSInputDataset,
@@ -34,6 +57,38 @@ from cstar.roms.input_dataset import (
 )
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
+
+NPROCS_POST = int(os.getenv("CSTAR_NPROCS_POST", str(os.cpu_count() // 3)))  # type: ignore[operator]
+
+
+def _ncjoin_wildcard(
+    wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
+) -> None:
+    """Spatially join netcdfs matching the wildcard pattern using ncjoin, and move the joined output to output_dir.
+
+    Parameters
+    ----------
+    wildcard_pattern: the wildcard pattern to match for files within input_dir
+    input_dir: location of the partitioned netcdfs to be joined
+    output_dir: location to move the joined output to
+    logger: logger object to post log messages to
+
+    Returns
+    -------
+    None
+    """
+    logger.info(f"Joining netCDF files {wildcard_pattern}...")
+
+    _run_cmd(
+        f"ncjoin {wildcard_pattern}",
+        cwd=input_dir,
+        raise_on_error=True,
+    )
+
+    out_file = input_dir / wildcard_pattern.replace("*.", "")
+    out_file.rename(output_dir / out_file.name)
+
+    logger.info(f"done spatially joining {out_file}")
 
 
 class ROMSSimulation(Simulation):
@@ -135,6 +190,7 @@ class ROMSSimulation(Simulation):
         initial_conditions: Optional["ROMSInitialConditions"] = None,
         tidal_forcing: Optional["ROMSTidalForcing"] = None,
         river_forcing: Optional["ROMSRiverForcing"] = None,
+        cdr_forcing: Optional["ROMSCdrForcing"] = None,
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
@@ -235,6 +291,9 @@ class ROMSSimulation(Simulation):
         self._validate_input(river_forcing)
         self.river_forcing = river_forcing
 
+        self._validate_input(cdr_forcing)
+        self.cdr_forcing = cdr_forcing
+
         self._validate_input(surface_forcing, ROMSSurfaceForcing)
         self.surface_forcing: list[ROMSSurfaceForcing] = (
             [] if surface_forcing is None else surface_forcing
@@ -242,6 +301,7 @@ class ROMSSimulation(Simulation):
 
         self._validate_input(boundary_forcing, typecheck=ROMSBoundaryForcing)
         self.boundary_forcing = [] if boundary_forcing is None else boundary_forcing
+
         self._validate_input(forcing_corrections, typecheck=ROMSForcingCorrections)
         self.forcing_corrections = (
             [] if forcing_corrections is None else forcing_corrections
@@ -549,6 +609,16 @@ class ROMSSimulation(Simulation):
 
         return repr_str
 
+    @classmethod
+    def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
+        """Retrieve the manager for the simulation output directory structure."""
+        return RomsFileSystemManager(directory)
+
+    @property
+    def fs_manager(self) -> RomsFileSystemManager:
+        """Return the file system manager for the simulation."""
+        return cast(RomsFileSystemManager, self._fs_manager)
+
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
         """Returns the default ROMS external codebase.
@@ -575,12 +645,11 @@ class ROMSSimulation(Simulation):
         list
             A list containing the ROMS external codebase and MARBL external codebase.
         """
-        codebases = [
-            self.codebase,
-        ]
+        items = [self.codebase]
         if self.marbl_codebase:
-            codebases.append(self.marbl_codebase)
-        return codebases
+            items.append(self.marbl_codebase)
+
+        return items
 
     @property
     def _forcing_paths(self) -> list[Path]:
@@ -873,6 +942,11 @@ class ROMSSimulation(Simulation):
                 **river_forcing_kwargs
             )
 
+        # Construct any ROMSCdrForcing instance:
+        cdr_forcing_kwargs = simulation_dict.get("cdr_forcing")
+        if cdr_forcing_kwargs is not None:
+            simulation_kwargs["cdr_forcing"] = ROMSCdrForcing(**cdr_forcing_kwargs)
+
         # Construct any ROMSBoundaryForcing instances:
         boundary_forcing_entries = simulation_dict.get("boundary_forcing", [])
         if len(boundary_forcing_entries) > 0:
@@ -953,6 +1027,8 @@ class ROMSSimulation(Simulation):
             simulation_dict["tidal_forcing"] = self.tidal_forcing.to_dict()
         if self.river_forcing is not None:
             simulation_dict["river_forcing"] = self.river_forcing.to_dict()
+        if self.cdr_forcing is not None:
+            simulation_dict["cdr_forcing"] = self.cdr_forcing.to_dict()
         if len(self.surface_forcing) > 0:
             simulation_dict["surface_forcing"] = [
                 sf.to_dict() for sf in self.surface_forcing
@@ -972,9 +1048,6 @@ class ROMSSimulation(Simulation):
     def from_blueprint(
         cls,
         blueprint: str,
-        directory: str | Path,
-        start_date: str | datetime | None = None,
-        end_date: str | datetime | None = None,
     ):
         """Create a `ROMSSimulation` instance from a YAML blueprint.
 
@@ -985,14 +1058,6 @@ class ROMSSimulation(Simulation):
         ----------
         blueprint : str
             The path or URL to the YAML blueprint file.
-        directory : str or Path
-            The directory where the simulation will be stored.
-        start_date : str or datetime, optional
-            The start date for the simulation. If not provided, defaults to the
-            `valid_start_date` specified in the blueprint.
-        end_date : str or datetime, optional
-            The end date for the simulation. If not provided, defaults to the
-            `valid_end_date` specified in the blueprint.
 
         Returns
         -------
@@ -1010,37 +1075,31 @@ class ROMSSimulation(Simulation):
         from_dict : Creates an instance from a dictionary representation.
         """
         source = SourceData(location=blueprint)
-        bp_dict = yaml.safe_load(source.retriever.read().decode("utf-8"))
+        data = source.retriever.read()
+        bp_dict = yaml.safe_load(data.decode("utf-8"))
 
-        return cls.from_dict(
-            bp_dict, directory=directory, start_date=start_date, end_date=end_date
+        bp = RomsMarblBlueprint.model_validate(bp_dict)
+        return cls(
+            name=bp.name,
+            directory=bp.runtime_params.output_dir,
+            discretization=DiscretizationAdapter(bp).adapt(),
+            runtime_code=AddtlCodeAdapter(bp, "run_time").adapt(),
+            compile_time_code=AddtlCodeAdapter(bp, "compile_time").adapt(),
+            codebase=CodebaseAdapter(bp).adapt(),
+            start_date=bp.runtime_params.start_date,
+            end_date=bp.runtime_params.end_date,
+            valid_start_date=bp.valid_start_date,
+            valid_end_date=bp.valid_end_date,
+            marbl_codebase=(MARBLAdapter(bp).adapt() if bp.code.marbl else None),
+            model_grid=GridAdapter(bp).adapt(),
+            initial_conditions=InitialConditionAdapter(bp).adapt(),
+            tidal_forcing=TidalForcingAdapter(bp).adapt(),
+            river_forcing=RiverForcingAdapter(bp).adapt(),
+            forcing_corrections=ForcingCorrectionAdapter(bp).adapt(),
+            boundary_forcing=BoundaryForcingAdapter(bp).adapt(),
+            surface_forcing=SurfaceForcingAdapter(bp).adapt(),
+            cdr_forcing=CdrForcingAdapter(bp).adapt(),
         )
-
-    def to_blueprint(self, filename: str) -> None:
-        """Save the `ROMSSimulation` instance as a YAML blueprint.
-
-        This method converts the simulation instance into a dictionary representation
-        and writes it to a YAML file in a structured format.
-
-        Parameters
-        ----------
-        filename : str
-            The name of the YAML file where the blueprint will be saved.
-
-        Raises
-        ------
-        OSError
-            If an issue occurs while writing to the file.
-
-        See Also
-        --------
-        from_blueprint : Creates a `ROMSSimulation` instance from a YAML blueprint.
-        to_dict : Converts the instance into a dictionary representation.
-        """
-        with open(filename, "w") as yaml_file:
-            yaml.dump(
-                self.to_dict(), yaml_file, default_flow_style=False, sort_keys=False
-            )
 
     def tree(self):
         """Display a tree-style representation of the ROMS simulation structure.
@@ -1127,15 +1186,30 @@ class ROMSSimulation(Simulation):
         build : Compiles the ROMS model.
         is_setup : Checks if the simulation has been properly configured.
         """
-        compile_time_code_dir = self.directory / "ROMS/compile_time_code"
-        runtime_code_dir = self.directory / "ROMS/runtime_code"
-        input_datasets_dir = self.directory / "ROMS/input_datasets"
+        compile_time_code_dir = self.fs_manager.compile_time_code_dir
+        runtime_code_dir = self.fs_manager.runtime_code_dir
+        input_datasets_dir = self.fs_manager.input_datasets_dir
+
+        compile_time_code_dir.mkdir(parents=True, exist_ok=True)
+        runtime_code_dir.mkdir(parents=True, exist_ok=True)
+        input_datasets_dir.mkdir(parents=True, exist_ok=True)
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
-        for codebase in filter(lambda x: x is not None, self.codebases):
+        for codebase in (x for x in self.codebases if x is not None):
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
-            codebase.setup()
+            codebase_dir = self.fs_manager.codebase_subdir(codebase.key)
+
+            # if we're running a workplan, for now, set up a code directory for each
+            # step, otherwise they may try to clobber each other or get tripped up on
+            # detecting existing directories.
+            if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1" and codebase_dir.exists():
+                shutil.rmtree(codebase_dir)
+
+            codebase_dir.mkdir(parents=True, exist_ok=True)
+            codebase.setup(codebase_dir)
+            os.environ[codebase.root_env_var] = str(codebase_dir)
+
         # Compile-time code
         self.log.info("📦 Fetching compile-time code...")
         if self.compile_time_code is not None:
@@ -1294,7 +1368,7 @@ class ROMSSimulation(Simulation):
             _run_cmd(
                 "make compile_clean",
                 cwd=build_dir,
-                msg_err="Error when compiling ROMS.",
+                msg_err="Error when cleaning existing ROMS compilation.",
                 raise_on_error=True,
             )
 
@@ -1450,21 +1524,38 @@ class ROMSSimulation(Simulation):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
         # we run ROMS in the output dir
-        run_path = self.directory / "output"
+        run_path = self.fs_manager.output_dir
         final_runtime_settings_file = (
             Path(self.runtime_code.working_copy[0].path).parent / f"{self.name}.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
-        run_path.mkdir(parents=True, exist_ok=True)
+
+        script_name = job_name or self.name
+        safe_name = slugify(script_name)
+        script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
+        output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
+
+        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
 
         ## 2: RUN ROMS
 
-        roms_exec_cmd = (
-            f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {self.discretization.n_procs_tot} {self.exe_path} "
-            f"{final_runtime_settings_file}"
+        roms_exec_cmd = " ".join(
+            [
+                f"{cstar_sysmgr.environment.mpi_exec_prefix}",
+                "-n",
+                f"{self.discretization.n_procs_tot}",
+                f"{self.exe_path}",
+                f"{final_runtime_settings_file}",
+            ]
         )
 
-        if cstar_sysmgr.scheduler is not None:
+        self.log.info(f"Running {roms_exec_cmd}")
+        # If this simulation is already in a scheduler job, don't create a new one, just run it locally.
+        if (
+            cstar_sysmgr.scheduler is not None
+            and not cstar_sysmgr.scheduler.in_active_allocation
+        ):
             if account_key is None:
                 raise ValueError(
                     "please call Simulation.run() with a value for account_key"
@@ -1476,8 +1567,10 @@ class ROMSSimulation(Simulation):
                 cpus=self.discretization.n_procs_tot,
                 account_key=account_key,
                 run_path=run_path,
+                script_path=script_path,
                 queue_name=queue_name,
                 walltime=walltime,
+                output_file=output_file,
             )
 
             job_instance.submit()
@@ -1486,7 +1579,11 @@ class ROMSSimulation(Simulation):
             return job_instance
 
         else:  # cstar_sysmgr.scheduler is None
-            romsprocess = LocalProcess(commands=roms_exec_cmd, run_path=run_path)
+            romsprocess = LocalProcess(
+                commands=roms_exec_cmd,
+                run_path=run_path,
+                output_file=output_file,
+            )
             self._execution_handler = romsprocess
             self.persist()
             romsprocess.start()
@@ -1535,24 +1632,24 @@ class ROMSSimulation(Simulation):
                 + f"but current execution status is '{self._execution_handler.status}'"
             )
 
-        output_dir = self.directory / "output"
+        output_dir = self.fs_manager.output_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
         unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
-            self.log.warning("No suitable output found")
+            self.log.warning(f"No suitable output found in `{output_dir}`")
         else:
-            (output_dir / "PARTITIONED").mkdir(exist_ok=True)
-            for wildcard_pattern in unique_wildcards:
-                # Want to go from, e.g. myfile.001.nc to myfile.*.nc, so we apply stem twice:
-                self.log.info(f"Joining netCDF files {wildcard_pattern}...")
-                _run_cmd(
-                    f"ncjoin {wildcard_pattern}",
-                    cwd=output_dir,
-                    raise_on_error=True,
-                )
+            self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
 
-                for F in output_dir.glob(wildcard_pattern):
-                    F.rename(output_dir / "PARTITIONED" / F.name)
+            spatial_joiner = partial(
+                _ncjoin_wildcard,
+                logger=self.log,
+                input_dir=self.fs_manager.output_dir,
+                output_dir=self.fs_manager.joined_output_dir,
+            )
+
+            with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
+                results = executor.map(spatial_joiner, unique_wildcards)
+                _ = [r for r in results]  # exhaust iterator
 
         self.persist()
 
@@ -1608,7 +1705,7 @@ class ROMSSimulation(Simulation):
         """
         new_sim = cast(ROMSSimulation, super().restart(new_end_date=new_end_date))
 
-        restart_dir = self.directory / "output"
+        restart_dir = self.fs_manager.output_dir
 
         new_start_date = new_sim.start_date
         restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")

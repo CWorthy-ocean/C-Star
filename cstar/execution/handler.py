@@ -1,4 +1,4 @@
-import os
+import asyncio
 import time
 from abc import ABC, abstractmethod
 from enum import Enum, auto
@@ -46,6 +46,14 @@ class ExecutionStatus(Enum):
 
     def __str__(self) -> str:
         return self.name.lower()  # Convert enum name to lowercase for display
+
+    @classmethod
+    def is_terminal(cls, status: "ExecutionStatus") -> bool:
+        return status in [
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.FAILED,
+        ]
 
 
 class ExecutionHandler(ABC, LoggingMixin):
@@ -101,7 +109,7 @@ class ExecutionHandler(ABC, LoggingMixin):
         """
         pass
 
-    def updates(self, seconds: float = 10, confirm_indefinite: bool = True):
+    async def updates(self, seconds: float = 10) -> None:
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
@@ -116,10 +124,6 @@ class ExecutionHandler(ABC, LoggingMixin):
             The duration (in seconds) for which updates should be streamed.
             If set to 0, updates will be streamed indefinitely until
             interrupted by the user.
-        confirm_indefinite: bool, optional, default = True
-            If 'seconds' is set to 0, the user will be prompted to confirm
-            whether they want to continue with an indefinite update stream
-            if confirm_indefinite is set to True
 
         Notes
         -----
@@ -145,18 +149,21 @@ class ExecutionHandler(ABC, LoggingMixin):
             self.log.warning(error_msg)
             return
 
-        interactive = bool(int(os.environ.get("CSTAR_INTERACTIVE", "1")))
-        if seconds == 0 and confirm_indefinite and interactive:
-            # Confirm indefinite tailing
-            confirmation = (
-                input(
-                    "This will provide indefinite updates to your job. You can stop it anytime using Ctrl+C. "
-                    "Do you want to continue? (y/n): "
-                )
-                .strip()
-                .lower()
-            )
-            if confirmation not in {"y", "yes"}:
+        if _status == ExecutionStatus.PENDING:
+            start_time = time.time()
+            msg = "This job is still pending. Updates will be available after it starts running."
+            while seconds == 0 or (time.time() - start_time < seconds):
+                self.log.info(msg)
+                await asyncio.sleep(STATUS_RECHECK_SECONDS)
+                _status = self.status
+                if _status != ExecutionStatus.PENDING:
+                    msg = f"Job status is now {_status}"
+                    self.log.info(msg)
+                    break
+
+            if not self.output_file.exists():
+                msg = f"Log `{self.output_file}` does not exist. Skipping update check."
+                self.log.info(msg)
                 return
 
         if _status == ExecutionStatus.PENDING:
@@ -176,12 +183,14 @@ class ExecutionHandler(ABC, LoggingMixin):
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):
-                    line = f.readline()
+                    if self.output_file.exists():
+                        line = f.readline()
+
                     if self.status != ExecutionStatus.RUNNING:
                         return
                     elif line:
                         self.log.info(line)
                     else:
-                        time.sleep(0.1)  # 100ms delay between updates
+                        await asyncio.sleep(0.1)  # 100ms delay between updates
         except KeyboardInterrupt:
             self.log.info("Live status updates stopped by user.")

@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
@@ -339,6 +340,12 @@ class Scheduler(ABC, LoggingMixin):
         self.documentation = documentation
         self._max_cpus_per_node = max_cpus_per_node
 
+    @property
+    @abstractmethod
+    def in_active_allocation(self) -> bool:
+        """Return True if the current process is running in an active allocation."""
+        raise NotImplementedError()
+
     def get_queue(self, name) -> Queue:
         """Retrieve a queue by name.
 
@@ -441,6 +448,24 @@ class SlurmScheduler(Scheduler):
     """
 
     @property
+    def in_active_allocation(self) -> bool:
+        override = os.getenv("CSTAR_IN_ACTIVE_ALLOCATION")
+        if override is not None:
+            return override.strip().lower() in {"1", "true", "yes", "on"}
+
+        jupyter_env_vars = (
+            "JUPYTERHUB_API_TOKEN",
+            "JUPYTERHUB_USER",
+            "JUPYTERHUB_SERVICE_PREFIX",
+            "JUPYTER_SERVER_ROOT",
+            "JUPYTER_SERVER_URL",
+        )
+        if any(k in os.environ for k in jupyter_env_vars):
+            return False
+
+        return os.getenv("SLURM_JOBID") is not None
+
+    @property
     def global_max_cpus_per_node(self) -> int | None:
         """Retrieve the maximum number of CPUs available per node across all SLURM
         nodes.
@@ -525,6 +550,11 @@ class PBSScheduler(Scheduler):
     requires_task_distribution = True
 
     @property
+    def in_active_allocation(self) -> bool:
+        """Determine whether the process is in an active allocation by looking for the PBS_JOBID environment variable."""
+        return os.getenv("PBS_JOBID") is not None
+
+    @property
     def global_max_cpus_per_node(self) -> int | None:
         """Retrieve the maximum number of CPUs available per node across all PBS nodes.
 
@@ -579,6 +609,3 @@ class PBSScheduler(Scheduler):
             return float(stdout[:-2])  # Already in gigabytes
 
         return None
-
-
-################################################################################
