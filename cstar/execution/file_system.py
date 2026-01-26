@@ -80,6 +80,15 @@ class JobFileSystemManager(LoggingMixin):
         self.root.mkdir(parents=True)
         self.log.debug(f"Created empty working directory for job `{self.root.name}`")
 
+    def __getstate__(self):
+        """Return the state of the object."""
+        return {"root": self.root.as_posix()}
+
+    def __setstate__(self, state):
+        """Restore the object from a pickle."""
+        state["root"] = Path(state["root"])
+        self.__dict__.update(state)
+
 
 class RomsFileSystemManager(JobFileSystemManager):
     _COMPILE_TIME_NAME: ClassVar[Literal["compile_time_code"]] = "compile_time_code"
