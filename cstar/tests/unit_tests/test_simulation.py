@@ -1,4 +1,5 @@
 import logging
+import pickle
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -514,10 +515,9 @@ class TestSimulationPersistence:
         # Also compare serialized versions
         assert sim.to_dict() == restored_sim.to_dict(), "Data mismatch after restore"
 
-        # this is broken in the current build -- I don't think it's important at the moment
-        # assert pickle.dumps(restored_sim) == pickle.dumps(sim), (
-        #     "Serialized data mismatch after restore"
-        # )
+        assert pickle.dumps(restored_sim) == pickle.dumps(sim), (
+            "Serialized data mismatch after restore"
+        )
 
     def test_restore_missing_file(self, tmp_path):
         """Test that `restore()` raises an error when the state file is missing.

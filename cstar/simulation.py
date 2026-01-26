@@ -2,7 +2,6 @@ import copy
 import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
-from logging import Logger
 from pathlib import Path
 from typing import Any, Optional
 
@@ -506,6 +505,19 @@ class Simulation(ABC, LoggingMixin):
         """
         pass
 
+    def __getstate__(self):
+        """Return a pickle-able representation of the object."""
+        state = self.__dict__.copy()
+
+        # Remove the un-pickleable logger attribute
+        state.pop("_log", None)
+
+        return state
+
+    def __setstate__(self, state):
+        """Restore the object from a pickle."""
+        self.__dict__.update(state)
+
     def persist(self) -> None:
         """Save the current state of the simulation to a file.
 
@@ -534,19 +546,9 @@ class Simulation(ABC, LoggingMixin):
                 "completion or use LocalProcess.cancel(), then try again"
             )
 
-        # Remove attributes that don't survive round-trip pickling process
-        tmp_log: Logger | None = None
-        if hasattr(self, "_log"):
-            tmp_log = self._log
-            del self._log
-
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.state_file, "wb") as state_file:
             pickle.dump(self, state_file)
-
-        # Restore attributes that were removed for pickling
-        if tmp_log:
-            self._log = tmp_log
 
     @classmethod
     def restore(cls, directory: str | Path) -> "Simulation":
