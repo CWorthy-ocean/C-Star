@@ -264,30 +264,31 @@ class WorkplanTransformer:
         -------
         Workplan
         """
-        if not is_feature_enabled("ORCH_TRANSFORM_AUTO"):
-            return self.original
-
         if self._transformed:
             return self._transformed
 
-        steps = []
-        for step in self.original.steps:
-            transformed_steps = list(self.transform_fn(step))
+        steps = list(self.original.steps)
 
-            # replace dependencies on the original step with the last transformed step
-            tweaks = (s for s in self.original.steps if step.name in s.depends_on)
-            for tweak in tweaks:
-                tweak.depends_on.remove(step.name)
-                tweak.depends_on.append(transformed_steps[-1].name)
+        if is_feature_enabled("CSTAR_FF_ORCH_TRANSFORM_AUTO"):
+            steps = []
 
-            overridden_steps: list[Step] = []
+            for step in self.original.steps:
+                transformed_steps = list(self.transform_fn(step))
+
+                # replace dependencies on the original step with the last transformed step
+                tweaks = (s for s in self.original.steps if step.name in s.depends_on)
+                for tweak in tweaks:
+                    tweak.depends_on.remove(step.name)
+                    tweak.depends_on.append(transformed_steps[-1].name)
+
+                steps.extend(transformed_steps)
+
+        if is_feature_enabled("CSTAR_FF_ORCH_TRANSFORM_OVR"):
             override_transform = OverrideTransform()
 
-            for transformed_step in transformed_steps:
-                overridden_step_result = override_transform(transformed_step)
-                overridden_steps.extend(overridden_step_result)
-
-            steps.extend(overridden_steps)
+            for i, step in enumerate(steps):
+                overridden_step_result = list(override_transform(step))
+                steps[i] = overridden_step_result[0]
 
         wp_attrs = self.original.model_dump()
         wp_attrs.update(
