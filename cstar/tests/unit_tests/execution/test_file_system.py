@@ -1,8 +1,9 @@
+import pickle
 from pathlib import Path
 
 import pytest
 
-from cstar.execution.file_system import RomsFileSystemManager
+from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
 
 
 @pytest.fixture
@@ -65,3 +66,25 @@ def test_file_system_clear(
 
     assert all([not f.exists() for f in output_files])
     assert all([not f.parent.exists() for f in output_files])
+
+
+def test_file_system_pickle_job_fs(tmp_path: Path) -> None:
+    """Verify the attributes of the file-system object match pre- and post-pickling."""
+    fsm = JobFileSystemManager(tmp_path)
+
+    pickled_fsm = pickle.dumps(fsm)
+    unpickled: JobFileSystemManager = pickle.loads(pickled_fsm)
+
+    for k in fsm.__dict__:
+        assert getattr(fsm, k) == getattr(unpickled, k)
+
+
+def test_file_system_pickle_roms_fs(tmp_path: Path) -> None:
+    """Verify the attributes of the file-system object match pre- and post-pickling."""
+    fsm = RomsFileSystemManager(tmp_path)
+
+    pickled_fsm = pickle.dumps(fsm)
+    unpickled: RomsFileSystemManager = pickle.loads(pickled_fsm)
+
+    for k in fsm.__dict__:
+        assert getattr(fsm, k) == getattr(unpickled, k)
