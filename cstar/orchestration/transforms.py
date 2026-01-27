@@ -283,9 +283,16 @@ class WorkplanTransformer(LoggingMixin):
                     tweak.depends_on.append(transformed_steps[-1].name)
 
                 steps.extend(transformed_steps)
-                    
-            if self.is_modified:
-                self.log.info("A time-split workplan will be returned.")
+
+        # HACK: force-update the step output directories to avoid collisions
+        for step in self.original.steps:
+            bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+            overrides = step.blueprint_overrides
+            if "runtime_params" not in overrides:
+                step.blueprint_overrides["runtime_params"] = {}
+            runtime_params = t.cast(dict[str, str | Path], overrides.get("runtime_params", {}))
+            if "output_dir" not in runtime_params:
+                runtime_params["output_dir"] = step.working_dir(bp)
 
         if is_feature_enabled("CSTAR_FF_ORCH_TRANSFORM_OVR"):
             override_transform = OverrideTransform()
