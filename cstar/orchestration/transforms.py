@@ -6,6 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from cstar.base.feature import is_feature_enabled
+from cstar.base.log import LoggingMixin
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, deep_merge, slugify
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import (
@@ -172,7 +173,7 @@ def get_time_slices(
     return time_slices
 
 
-class WorkplanTransformer:
+class WorkplanTransformer(LoggingMixin):
     """Transform a workplan by applying transforms to its steps."""
 
     original: Workplan
@@ -282,6 +283,9 @@ class WorkplanTransformer:
                     tweak.depends_on.append(transformed_steps[-1].name)
 
                 steps.extend(transformed_steps)
+                    
+            if self.is_modified:
+                self.log.info("A time-split workplan will be returned.")
 
         if is_feature_enabled("CSTAR_FF_ORCH_TRANSFORM_OVR"):
             override_transform = OverrideTransform()
