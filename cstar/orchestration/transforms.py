@@ -290,7 +290,9 @@ class WorkplanTransformer(LoggingMixin):
             overrides = step.blueprint_overrides
             if "runtime_params" not in overrides:
                 step.blueprint_overrides["runtime_params"] = {}
-            runtime_params = t.cast(dict[str, str | Path], overrides.get("runtime_params", {}))
+            runtime_params = t.cast(
+                dict[str, Path], overrides.get("runtime_params", {})
+            )
             if "output_dir" not in runtime_params:
                 runtime_params["output_dir"] = step.working_dir(bp)
 
