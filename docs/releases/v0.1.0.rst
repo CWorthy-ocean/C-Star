@@ -1,0 +1,38 @@
+.. _v0.1.0:
+
+v0.1.0
+------
+
+New features:
+~~~~~~~~~~~~~
+- Add support for river forcing
+- Add support for forcing corrections (used in legacy ROMS configurations)
+
+Breaking Changes:
+~~~~~~~~~~~~~~~~~
+- Merge Case and Component classes into a single class, Simulation, simplifying internal/blueprint structure. Remove old Case and Component modules.
+- Rename `caseroot` to `directory` 
+- Rename BaseModel to ExternalCodeBase
+- Remove `start_time` and `end_time` parameters from `InputDataset.get()`, these are now obtained from the corresponding attributes
+- Rename `ROMSComponent.namelists` to `ROMSSimulation.runtime_code` and `ROMSComponent.additional_source_code` to `ROMSSimulation.compile_time_code`
+
+Internal Changes:
+~~~~~~~~~~~~~~~~~
+- Update calls to `roms-tools` to reflect latest changes in API
+- Update internal/test blueprints to reflect new structure
+- New backend data retrieval system `cstar.io`
+- Add ROMSRuntimeSettings class with ability to parse and create roms `.in` files
+- Save partitioned `ROMSInputDatasets` in the same directory as their un-partitioned versions, rather than a subdirectory "PARTITIONED"
+
+Documentation:
+~~~~~~~~~~~~~~
+- Run most examples in documentation locally (unless HPC-specific), so HPC access is not required
+- Add 'How-to Guides' section
+- Remove tutorial page on using roms-tools
+- Replace all URLs to other doc pages with relative links
+
+Bugfixes:
+~~~~~~~~~
+- Complete missing unit test coverage from Case and Component in new Simulation modules
+- Add `expanduser` to `Path` instances to allow tildes to represent root in paths
+- Correct issue where `AdditionalCode.modified_files` list indices did not correspond to `AdditionalCode.files`
