@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
 
-from cstar.base.feature import is_feature_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import get_output_dir
 from cstar.orchestration.launch.slurm import SlurmLauncher
