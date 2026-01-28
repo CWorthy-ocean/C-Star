@@ -2,6 +2,7 @@ from pathlib import Path
 
 from cstar import Simulation
 from cstar.base import ExternalCodeBase, InputDataset
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.roms import ROMSInputDataset
 from cstar.roms.runtime_settings import ROMSRuntimeSettingsSection
 
@@ -126,3 +127,7 @@ class StubSimulation(Simulation):
     def post_run(self):
         """No-op implementation of abstract method."""
         pass
+
+    @classmethod
+    def _get_filesystem_manager(cls, directory: Path) -> RomsFileSystemManager:
+        return RomsFileSystemManager(directory)

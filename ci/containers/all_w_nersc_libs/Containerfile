@@ -1,0 +1,147 @@
+ARG ACCT="C-Worthy"
+ARG FROM_TAG="latest"
+
+ARG INSTALL_BASE_DIR="/opt"
+ARG PROFILE_DIR="/etc/profile.d"
+
+ARG mpich=4.2.2
+ARG mpich_prefix=mpich-$mpich
+
+FROM ubuntu:24.04
+SHELL ["/bin/bash", "-c"]
+ENV DEBIAN_FRONTEND noninteractive
+WORKDIR /tmp
+
+RUN \
+    apt-get update        && \
+    apt-get install --yes    \
+                    --no-install-recommends \
+                    build-essential      \
+                    binutils \
+                    build-essential \
+                    ca-certificates \
+                    git-all \
+                    gfortran \
+                    libfabric-dev \
+                    libstdc++-14-dev \
+                    libxml2-dev \
+                    libcurl4-openssl-dev \
+                    m4 \
+                    python3 \
+                    python3-pip \
+                    python3-venv \
+                    python-is-python3 \
+                    rsync \
+                    software-properties-common \
+            	    wget \
+                    zlib1g-dev \
+                    libssl-dev autoconf automake libtool \
+                    python3-dev          \
+                    wget              && \
+    apt-get install -y python3-pip && \
+    apt-get clean all
+
+
+ARG mpich=4.2.2
+ARG mpich_prefix=mpich-$mpich
+ARG ncpus $(( $nproc / 8 ))
+
+
+
+ARG SRC_DIR="/install"
+
+ARG HDF5_PROFILE="/etc/profile.d/hdf5.sh"
+ARG HDF5_INSTALL_DIR="hdf5-1.14.6-install"
+ARG HDF5_TAR="hdf5_1.14.6.tar.gz"
+ARG HDF5_URL="https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.6.tar.gz"
+
+ENV HDF5_HOME=$INSTALL_BASE_DIR/$HDF5_INSTALL_DIR
+ENV HDF5_SRC=$SRC_DIR/hdf5-hdf5_1.14.6
+
+WORKDIR $SRC_DIR
+
+
+ARG NETCDF_V="4.9.3"
+ARG NETCDF_TAR="v$NETCDF_V.tar.gz"
+ARG NETCDF_URL="https://github.com/Unidata/netcdf-c/archive/refs/tags/$NETCDF_TAR"
+
+ARG NETCDF_FV="4.6.2"
+ARG NETCDF_FORTRAN_TAR="v$NETCDF_FV.tar.gz"
+ARG NETCDF_FORTRAN_URL="https://github.com/Unidata/netcdf-fortran/archive/refs/tags/$NETCDF_FORTRAN_TAR"
+
+ARG NETCDF_SRC="$SRC_DIR/netcdf-c-$NETCDF_V"
+ARG NETCDF_HOME="$INSTALL_BASE_DIR/netcdf-$NETCDF_V-install"
+ARG NETCDF_FORTRAN_SRC="$SRC_DIR/netcdf-fortran-$NETCDF_FV"
+ARG NETCDF_FORTRAN_HOME="$INSTALL_BASE_DIR/netcdf-fortran-$NETCDF_FV-install"
+
+
+WORKDIR "$SRC_DIR"
+
+
+ENV NETCDF_DIR=/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3
+
+ENV MPIHOME=/opt/cray/pe/mpich/8.1.30/ofi/gnu/12.3
+ENV NETCDFHOME=/opt/cray/pe/netcdf/4.9.0.9/gnu/12.3/
+ENV HDF5_HOME=/opt/cray/pe/hdf5/1.14.3.1/gnu/12.3
+
+ENV PATH=$MPIHOME/bin:$NETCDFHOME/bin:$HDF5_HOME/bin:$ROMS_PATH:$PATH
+ENV LD_LIBRARY_PATH=$MPIHOME/lib:$NETCDF_FORTRAN_HOME/lib:$NETCDF_HOME/lib:$HDF5_HOME/lib:/opt/cray/pe/lib64/:$LD_LIBRARY_PATH
+ENV CPATH=$MPIHOME/include:$NETCDF_FORTRAN_HOME/include:$NETCDF_HOME/include:HDF5_HOME/include:$CPATH
+ENV LIBRARY_PATH=$$MPIHOME/lib:NETCDF_FORTRAN_HOME/lib:$NETCDF_HOME/lib:$HDF5_HOME/lib:$LIBRARY_PATH
+ENV LD_RUN_PATH="$MPIHOME/lib:$NETCDF_FORTRAN_HOME/lib:$NETCDF_HOME/lib:$HDF5_HOME/lib:/opt/cray/pe/lib64/:$LD_RUN_PATH"
+RUN /sbin/ldconfig
+
+
+ARG MARBL_BASENAME=marbl0.45.0
+ARG TGZ_NAME="$MARBL_BASENAME.tar.gz"
+ARG REPO_MARBL="https://github.com/marbl-ecosys/MARBL/archive/refs/tags/$TGZ_NAME"
+
+ENV MARBL_ROOT=$INSTALL_BASE_DIR/$MARBL_BASENAME
+ARG MARBL_PROFILE=/etc/profile.d/marbl.sh
+
+
+RUN wget -q "$REPO_MARBL" && \
+    tar xvf "$TGZ_NAME" && \
+    mv MARBL-$MARBL_BASENAME $MARBL_ROOT && \
+    rm "$TGZ_NAME" && \
+    cd "$MARBL_ROOT/src" && \
+    which mpifort && which mpif90 && env && sleep 2 && \
+    make USEMPI=TRUE FC=mpif90 && \
+    echo "export MARBL_ROOT=$MARBL_ROOT" >> $MARBL_PROFILE
+
+
+ENV CSTAR_INTERACTIVE="0"
+ENV GIT_DISCOVERY_ACROSS_FILESYSTEM="1"
+
+
+ARG ROMS_BASENAME=mpi-masking
+ENV ROMS_ROOT=$INSTALL_BASE_DIR/ucla-roms 
+ENV ROMS_PATH=$ROMS_ROOT/Tools-Roms
+ARG REPO_ROMS="https://github.com/ScottEilerman/ucla-roms/archive/refs/heads/$ROMS_BASENAME.tar.gz"
+ENV ROMS_PROFILE="/etc/profile.d/ucla-roms.sh"
+
+RUN echo "export ROMS_ROOT=$ROMS_ROOT" >> $ROMS_PROFILE && \
+    echo "export ROMS_PATH=$ROMS_PATH" >> $ROMS_PROFILE && \
+    echo 'export PATH=$PATH:$ROMS_PATH' >> $ROMS_PROFILE
+
+RUN . /etc/profile && \
+    wget -q "$REPO_ROMS" && \
+    tar xvf $ROMS_BASENAME.tar.gz && \
+    mv ucla-roms-$ROMS_BASENAME "$ROMS_ROOT" && \
+    rm $ROMS_BASENAME.tar.gz
+
+WORKDIR /opt
+RUN mkdir -p /opt/work_internal/compile_time_code
+
+RUN \
+    cd "$ROMS_ROOT/Work" && \
+    make tools-roms COMPILER=gnu
+
+ENV PATH=$PATH:$ROMS_PATH
+
+COPY * /opt/work_internal/compile_time_code
+
+RUN cd /opt/work_internal/compile_time_code && make compile_clean && make COMPILER=gnu
+
+# add these to end of roms compile if you need debug outputs:
+#BUILD_MODE=debug KEEP_PPSRC=true

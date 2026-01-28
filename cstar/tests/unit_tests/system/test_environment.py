@@ -1,6 +1,5 @@
 import os
 import subprocess
-from collections import ChainMap
 from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
@@ -130,7 +129,6 @@ class TestSetupEnvironmentFromFiles:
     def test_env_file_loading(
         self,
         tmp_path: Path,
-        dotenv_path: Path,
         system_dotenv_path: Path,
     ):
         """Tests that environment variables are loaded and expanded correctly from .env
@@ -138,7 +136,7 @@ class TestSetupEnvironmentFromFiles:
 
         Mocks
         -----
-        - tmp_path creates temporary, emulated system and user .env files
+        - tmp_path creates temporary, emulated system .env files
         - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
 
         Asserts
@@ -151,11 +149,7 @@ class TestSetupEnvironmentFromFiles:
             "MPIHOME=${MVAPICH2HOME}/\n"
             "MPIROOT=${MVAPICH2HOME}/\n"
         )
-        # Write simulated user .env content with an overriding variable
-        dotenv_path.write_text(
-            "MPIROOT=/override/mock/mpi\n"
-            "CUSTOM_VAR=custom_value\n"
-        )  # fmt: skip
+
         # Patch the root path and expanduser to point to our temporary files
         with (
             patch.object(
@@ -168,8 +162,7 @@ class TestSetupEnvironmentFromFiles:
             expected_env_vars = {
                 "NETCDFHOME": "/mock/netcdf/",  # Expanded from ${NETCDF_FORTRANHOME}
                 "MPIHOME": "/mock/mpi/",  # Expanded from ${MVAPICH2HOME}
-                "MPIROOT": "/override/mock/mpi",  # User-defined override
-                "CUSTOM_VAR": "custom_value",
+                "MPIROOT": "/mock/mpi/",  # User-defined override
             }
 
             # Assert that environment variables were loaded, expanded, and merged as expected
@@ -187,16 +180,15 @@ class TestSetupEnvironmentFromFiles:
     )
     def test_env_file_updating(
         self,
-        dotenv_path: Path,
         mock_system_name: str,
         system_dotenv_path: Path,
         tmp_path: Path,
     ):
-        """Tests that environment variables are updated correctly in the user .env file.
+        """Tests that environment variables are updated correctly.
 
         Mocks
         -----
-        - tmp_path creates temporary, emulated system and user .env files
+        - tmp_path creates temporary, emulated system .env files
         - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
 
         Asserts
@@ -211,14 +203,6 @@ class TestSetupEnvironmentFromFiles:
         }
         sys_env_content = "\n".join(f"{k}={v}" for k, v in exp_system_env.items())
         system_dotenv_path.write_text(sys_env_content)
-        # Write simulated user .env content
-        exp_user_env = {
-            "MPIROOT": "/user-overridden/mpi",
-            "CUSTOM_VAR": "custom_value",
-            "EMPTY": "",
-        }
-        user_env_content = "\n".join(f"{k}={v}" for k, v in exp_user_env.items())
-        dotenv_path.write_text(f"{user_env_content}\n")
 
         # Patch the root path and expanduser to point to our temporary files
         with (
@@ -240,10 +224,6 @@ class TestSetupEnvironmentFromFiles:
             for key in exp_system_env:
                 assert key in actual_env
 
-            # Confirm variables set (or overriden) in user .env match
-            for key, exp_value in exp_user_env.items():
-                assert actual_env[key] == exp_value
-
             k0, v0 = "NETCDFHOME", "updated/value"
             k1, v1 = "TEST_VAR", "test-value"
             k2, v2 = "OTHER_EMPTY", ""
@@ -252,18 +232,9 @@ class TestSetupEnvironmentFromFiles:
             for key, exp_value in updated_vars:
                 env.set_env_var(key, exp_value)
 
-            # Confirm setting a key on CStarEnvironment is loaded to os.env and persisted
-            raw_env = dotenv_path.read_text()
-
             for key, exp_value in updated_vars:
                 # Confirm the active environment variable is updated
                 assert exp_value in os.environ.get(key, "key-not-found")
-
-                # Confirm the value stored in the user environment is updated
-                assert exp_value in env.environment_variables[key]
-
-                # Confirm the value is persisted to disk
-                assert key in raw_env
 
     @patch.dict(
         "os.environ",
@@ -289,7 +260,6 @@ class TestSetupEnvironmentFromFiles:
         system_name: str,
         expected_path: str,
         custom_system_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
-        custom_user_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
     ):
         """Verify that the lmod_path property returns the correct path based on the
         system name.
@@ -309,15 +279,6 @@ class TestSetupEnvironmentFromFiles:
                 "NETCDFHOME": "${NETCDF_FORTRANHOME}/",
                 "MPIHOME": "${MVAPICH2HOME}/",
                 "MPIROOT": "${MVAPICH2HOME}/",
-            }
-        )
-
-        # Write simulated user .env content
-        custom_user_env(
-            {
-                "MPIROOT": "/user-overridden/mpi",
-                "CUSTOM_VAR": "custom_value",
-                "EMPTY": "",
             }
         )
 
@@ -390,66 +351,6 @@ class TestSetupEnvironmentFromFiles:
         {},
         clear=True,
     )
-    def test_env_file_load_count(
-        self,
-        mock_system_name: str,
-    ) -> None:
-        """Verify that env files are reloaded after an update.
-
-        Mocks
-        -----
-        - mock_system_name provides a temporary system name for the environment
-
-        Asserts
-        -------
-        - Confirms merged environment variables with expected values after expansion.
-        """
-        sys_var = "system-var"
-        usr_var = "user-var"
-        exp_system_env = {sys_var: "system-value"}
-        exp_user_env = {usr_var: "user-value"}
-
-        new_var, new_value = "new-user-var", "new-user-value"
-        updates = {new_var: new_value}
-
-        env0 = ChainMap(exp_system_env, exp_user_env)
-        env1 = ChainMap(env0, updates)
-
-        # patch the _load function so we can show loads only occur after updates
-        with (
-            patch(
-                "cstar.system.environment.CStarEnvironment._load_env",
-                new_callable=Mock,
-                side_effect=[env0, env1],
-            ) as loader,
-        ):
-            # Instantiate the environment to trigger loading the environment variables
-            env = CStarEnvironment(
-                system_name=mock_system_name,
-                mpi_exec_prefix="mpi-prefix",
-                compiler="gnu",
-            )
-
-            initial_num_calls = 1
-            assert loader.call_count == initial_num_calls
-
-            assert sys_var in env.environment_variables
-            assert usr_var in env.environment_variables
-
-            # no load from disk should occur
-            assert loader.call_count == initial_num_calls
-
-            env.set_env_var(new_var, new_value)
-
-            # update should trigger load from disk
-            assert loader.call_count == initial_num_calls + 1
-            assert new_var in env.environment_variables
-
-    @patch.dict(
-        "os.environ",
-        {},
-        clear=True,
-    )
     def test_env_vars_frozen(
         self,
         mock_system_name: str,
@@ -502,11 +403,11 @@ class TestStrAndReprMethods:
     """
 
     @patch.object(
-        cstar.system.environment.CStarEnvironment,
+        CStarEnvironment,
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
-    def test_str_method(self, _mock_uses_lmod):
+    def test_str_method(self, tmp_path: Path, custom_system_env):
         """Tests that __str__ produces a formatted, readable summary.
 
         Mocks
@@ -533,15 +434,16 @@ class TestStrAndReprMethods:
         )
 
         with patch(
-            "cstar.system.environment.CStarEnvironment.environment_variables",
-            new_callable=PropertyMock,
+            "cstar.system.environment.CStarEnvironment._load_env",
+            new_callable=Mock,
             return_value={"VAR1": "value1", "VAR2": "value2"},
         ):
+            # Instantiate the environment to trigger loading the cstar environment variables
             env = MockEnvironment()
             assert str(env) == expected_str
 
     @patch.object(
-        cstar.system.environment.CStarEnvironment,
+        CStarEnvironment,
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )

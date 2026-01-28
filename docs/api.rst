@@ -1,5 +1,5 @@
-API Reference
-#############
+Simulation API
+##############
 
 Simulation
 ----------

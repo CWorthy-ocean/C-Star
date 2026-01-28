@@ -122,12 +122,12 @@ class InputDataset(ABC, LoggingMixin):
             repr_str += f"\nend_date = {self.end_date!r}"
         repr_str += "\n)"
         info_str = ""
-        # if self.working_path is not None:
+
         if self.working_copy:
             info_str += f"working_copy = {' '.join([str(p) for p in self._local])}"
         if len(info_str) > 0:
             repr_str += f"\nState: <{info_str}>"
-        # Additional info
+
         return repr_str
 
     def to_dict(self) -> dict:

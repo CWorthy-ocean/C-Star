@@ -16,7 +16,6 @@ from cstar.roms.simulation import ROMSSimulation
 
 __all__ = [
     "ROMSExternalCodeBase",
-    "ROMSComponent",
     "ROMSSimulation",
     "ROMSDiscretization",
     "ROMSRuntimeSettings",

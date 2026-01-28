@@ -3,16 +3,14 @@ import shutil
 import tempfile
 from abc import ABC
 from pathlib import Path
-from typing import Any
 
 import roms_tools
-import yaml
 
 from cstar.base.input_dataset import InputDataset
 from cstar.base.utils import _list_to_concise_str, coerce_datetime
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData, SourceDataCollection
-from cstar.io.staged_data import StagedDataCollection, StagedFile
+from cstar.io.staged_data import StagedDataCollection
 
 
 class ROMSPartitioning:
@@ -61,9 +59,6 @@ class ROMSInputDataset(InputDataset, ABC):
             """
     ROMS-specific implementation of `InputDataset` (doc below)
 
-    Extends `get()` method to generate dataset using roms-tools in the case that `source`
-    points to a yaml file.
-
     Docstring for InputDataset:
     ---------------------------
     """
@@ -101,13 +96,19 @@ class ROMSInputDataset(InputDataset, ABC):
                 new_suffix = f".{i:0{ndigits}d}.nc"
                 locations.append(location.replace(old_suffix, new_suffix))
             self.partitioned_source = SourceDataCollection.from_locations(locations)
+            # muting the linter because we only enter this block if np_xi and np_eta are not None
+            self.partitioning = ROMSPartitioning(
+                np_xi=self.source_np_xi,  # type: ignore[arg-type]
+                np_eta=self.source_np_eta,  # type: ignore[arg-type]
+                files=[Path(p) for p in self.partitioned_source.locations],
+            )
         self._working_copy = None
         self.validate()
 
     @property
     def source_partitioning(self) -> tuple[int, int] | None:
         if (self.source_np_xi is not None) and (self.source_np_eta is not None):
-            return (self.source_np_xi, self.source_np_eta)
+            return self.source_np_xi, self.source_np_eta
         return None
 
     def to_dict(self) -> dict:
@@ -293,10 +294,6 @@ class ROMSInputDataset(InputDataset, ABC):
         if self.source_partitioning:
             self._get_from_partitioned_source(local_dir)
 
-        # roms-tools yaml source
-        elif self.source._classification.value.file_encoding == FileEncoding.TEXT:
-            self._get_from_yaml(local_dir)
-
         # regular (netCDF) source
         else:
             super().get(local_dir=local_dir)
@@ -316,81 +313,6 @@ class ROMSInputDataset(InputDataset, ABC):
         # Otherwise stage them all:
         else:
             self._working_copy = self.partitioned_source.stage(local_dir)
-
-    def _get_from_yaml(self, local_dir: Path) -> None:
-        """Creates (with roms-tools) and stages local netCDF datasets from compatible yaml instructions."""
-        if self.exists_locally:
-            # Can't know where roms-tools will save so have to do a less advanced check
-            self.log.info(f"⏭️ {self._local} already exists, skipping.")
-            return
-
-        retriever = self.source.retriever
-        raw_yaml_text = retriever.read().decode("utf-8")
-        _, header, yaml_data = raw_yaml_text.split("---", 2)
-
-        yaml_dict = yaml.safe_load(yaml_data)
-        yaml_keys = list(yaml_dict.keys())
-        if len(yaml_keys) == 1:
-            roms_tools_class_name = yaml_keys[0]
-        elif len(yaml_keys) == 2:
-            roms_tools_class_name = [y for y in yaml_keys if y != "Grid"][0]
-        else:
-            raise ValueError(
-                f"roms tools yaml file has {len(yaml_keys)} sections. "
-                + "Expected 'Grid' and one other class"
-            )
-        start_time = (
-            self.start_date.isoformat() if self.start_date is not None else None
-        )
-        end_time = self.end_date.isoformat() if self.end_date is not None else None
-
-        yaml_entries_to_modify = {
-            "start_time": start_time,
-            "ini_time": start_time,
-            "end_time": end_time,
-        }
-
-        for key, value in yaml_entries_to_modify.items():
-            if key in yaml_dict[roms_tools_class_name].keys():
-                yaml_dict[roms_tools_class_name][key] = value
-
-        roms_tools_class = getattr(roms_tools, roms_tools_class_name)
-
-        # Create a temporary file that deletes itself when closed
-        with tempfile.NamedTemporaryFile(mode="w", delete=True) as temp_file:
-            from_yaml_kwargs: dict[Any, Any] = {}
-            temp_file.write(f"---{header}---\n" + yaml.dump(yaml_dict))
-            temp_file.flush()  # Ensure data is written to disk
-
-            from_yaml_kwargs["filepath"] = temp_file.name
-            # roms-tools currently requires dask for every class except Grid,RiverForcing
-            # in order to use wildcards in filepaths (known xarray issue):
-            if roms_tools_class_name not in ["Grid", "RiverForcing"]:
-                from_yaml_kwargs["use_dask"] = True
-
-            roms_tools_class_instance = roms_tools_class.from_yaml(**from_yaml_kwargs)
-        ##
-
-        # ... and save:
-        self.log.info(
-            f"💾 Saving roms-tools dataset created from {self.source.location}..."
-        )
-        save_kwargs: dict[Any, Any] = {}
-        save_kwargs["filepath"] = Path(
-            f"{local_dir / Path(self.source.location).stem}.nc"
-        )
-
-        savepath = roms_tools_class_instance.save(**save_kwargs)
-        staged = []
-        for p in savepath:
-            staged.append(StagedFile(source=self.source, path=p))
-
-        final_staged: StagedFile | StagedDataCollection
-        if len(staged) == 1:
-            final_staged = staged[0]
-        else:
-            final_staged = StagedDataCollection(items=staged)
-        self._working_copy = final_staged
 
     def _update_partitioning_attribute(
         self, new_np_xi: int, new_np_eta: int, parted_files: list[Path]
@@ -479,3 +401,9 @@ class ROMSForcingCorrections(ROMSInputDataset):
                 f"{self.__class__.__name__} cannot be initialized with a source YAML file. "
                 "Please provide a direct path or URL to a dataset (e.g., NetCDF)."
             )
+
+
+class ROMSCdrForcing(ROMSInputDataset):
+    """An implementation of the ROMSInputDataset class for CDR forcing files."""
+
+    pass

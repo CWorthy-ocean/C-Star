@@ -18,7 +18,7 @@ forcing: filenames
     input_datasets/roms_bry_bgc.nc
 
 output_root_name: output_root_name
-    ROMS_test
+    output
 
 S-coord: theta_s theta_b tcline
     5.0    2.0    300.0

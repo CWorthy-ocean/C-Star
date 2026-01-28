@@ -1,4 +1,5 @@
 import shutil
+import textwrap
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TypeVar
@@ -8,11 +9,11 @@ import pytest
 from pydantic import ValidationError
 
 import cstar.roms.runtime_settings as rrs
-from cstar.base.utils import _replace_text_in_file
-from cstar.roms import ROMSRuntimeSettings
+from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _replace_text_in_file
 from cstar.roms.runtime_settings import (
     Forcing,
     InitialConditions,
+    ROMSRuntimeSettings,
     ROMSRuntimeSettingsSection,
     SingleEntryROMSRuntimeSettingsSection,
 )
@@ -90,14 +91,14 @@ class TestROMSRuntimeSettingsSection:
        where entries are on different lines.
     """
 
-    def test_init_with_args(self):
+    def test_init_with_args(self) -> None:
         """Test ROMSRuntimeSettingsSection.__init__ with *args instead of **kwargs."""
 
         class TestSection(ROMSRuntimeSettingsSection):
             val1: float
             val2: str
 
-        section = TestSection(5.0, "hello")
+        section = TestSection(val1=5.0, val2="hello")
         assert section.val1 == 5
         assert section.val2 == "hello"
 
@@ -208,14 +209,14 @@ class TestROMSRuntimeSettingsSection:
             "otherval",
         ]
 
-    def test_from_lines_raises_if_no_lines(self):
+    def test_from_lines_raises_if_no_lines(self) -> None:
         """Test the `ROMSRuntimeSettingsSection.from_lines` method returns None if given
         an empty list.
         """
         with pytest.raises(ValueError):
             FakeROMSRuntimeSettingsSection.from_lines([])
 
-    def test_from_lines_on_float_section_with_D_formatting(self):
+    def test_from_lines_on_float_section_with_D_formatting(self) -> None:
         """Test a ROMSRuntimeSettingsSection subclass with a single float entry is
         correctly returned by `from_lines` with fortran-style formatting.
         """
@@ -226,7 +227,7 @@ class TestROMSRuntimeSettingsSection:
         section = FloatSection.from_lines(["5.0D0"])
         assert section.val == 5.0
 
-    def test_from_lines_multiple_fields(self):
+    def test_from_lines_multiple_fields(self) -> None:
         """Test a ROMSRuntimeSettingsSection with more than one entry is correctly
         returned by `from_lines`
         """
@@ -239,7 +240,7 @@ class TestROMSRuntimeSettingsSection:
         assert section.count == 7
         assert section.name == "example_name"
 
-    def test_from_lines_list_field_at_end(self):
+    def test_from_lines_list_field_at_end(self) -> None:
         """Test that ROMSRuntimeSettingsSection.from_lines correctly handles lines where
         the final entry is a list (using all remaining values to populate it)
         """
@@ -252,7 +253,7 @@ class TestROMSRuntimeSettingsSection:
         assert section.prefix == "prefix"
         assert section.items == [1, 2, 3]
 
-    def test_from_lines_list_field_only(self):
+    def test_from_lines_list_field_only(self) -> None:
         """Test that ROMSRuntimeSettingsSection.from_lines correctly returns a valid
         instance when the only entry is a list.
         """
@@ -263,7 +264,7 @@ class TestROMSRuntimeSettingsSection:
         section = OnlyList.from_lines(["a b c"])
         assert section.entries == ["a", "b", "c"]
 
-    def test_from_lines_multiline_flag(self):
+    def test_from_lines_multiline_flag(self) -> None:
         """Test that ROMSRuntimeSettingsSection.from_lines correctly handles the case
         where entries are on different lines.
         """
@@ -275,7 +276,7 @@ class TestROMSRuntimeSettingsSection:
         section = MultiLinePaths.from_lines(["a.nc", "b.nc", "c.nc"])
         assert section.paths == [Path("a.nc"), Path("b.nc"), Path("c.nc")]
 
-    def test_from_lines_on_initial_conditions_with_nrrec_0(self):
+    def test_from_lines_on_initial_conditions_with_nrrec_0(self) -> None:
         """Test the bespoke InitialConditions.from_lines() method handles the situation
         where nrrec is 0 and ininame is empty.
         """
@@ -288,11 +289,11 @@ class TestROMSRuntimeSettingsSection:
         assert ic.ininame is None
         assert ic.model_dump() == "initial: nrrec ininame\n    0\n\n"
 
-    def test_from_lines_on_forcing_with_filenames_empty(self):
+    def test_from_lines_on_forcing_with_filenames_empty(self) -> None:
         """Test the bespoke Forcing.from_lines() method handles the situation where
         filenames is empty.
         """
-        lines = []
+        lines: list[str] = []
         fr = Forcing.from_lines(lines)
         assert fr.filenames is None
         assert fr.model_dump() == "forcing: filenames\n    \n\n"
@@ -323,25 +324,27 @@ class TestSingleEntryROMSRuntimeSettingsSection:
     class MockSingleEntrySection(SingleEntryROMSRuntimeSettingsSection):
         value: float
 
-    def test_single_entry_validator_returns_cls_when_type_matches(self):
+    def test_single_entry_validator_returns_cls_when_type_matches(self) -> None:
         """Tests that the `single_entry_validator` method passes a correctly typed value
         to cls() without requiring a dict or kwargs for initialization.
         """
-        result = self.MockSingleEntrySection(3.14)
+        result = self.MockSingleEntrySection(value=3.14)
 
         assert isinstance(
             result, TestSingleEntryROMSRuntimeSettingsSection.MockSingleEntrySection
         )
         assert result.value == 3.14
 
-    def test_single_entry_validator_calls_handler_when_type_does_not_match(self):
+    def test_single_entry_validator_calls_handler_when_type_does_not_match(
+        self,
+    ) -> None:
         """Tests that `single_entry_validator` falls back to the handler if the value
         supplied to __init__ is not of the expected type.
         """
         handler = MagicMock(return_value="fallback")
         result = self.MockSingleEntrySection.single_entry_validator(
             "not a float", handler
-        )
+        )  # type: ignore[operator]
 
         handler.assert_called_once_with("not a float")
         assert result == "fallback"
@@ -362,23 +365,25 @@ class TestSingleEntryROMSRuntimeSettingsSection:
             (Path.cwd(), Path, nullcontext()),
         ],
     )
-    def test_strict_validation_for_single_entries(self, obj, annotation, context):
+    def test_strict_validation_for_single_entries(
+        self, obj, annotation, context
+    ) -> None:
         class MyTestClass(SingleEntryROMSRuntimeSettingsSection):
             value: annotation
 
         with context:
-            assert MyTestClass(obj).value == obj
+            assert MyTestClass(value=obj).value == obj
 
-    def test_str_and_repr_return_value(self):
+    def test_str_and_repr_return_value(self) -> None:
         """Tests that the `str` and `repr` functions for
         SingleEntryROMSRuntimeSettingsSection simply return a string of the single
         entry's value.
         """
-        section = self.MockSingleEntrySection(1.0)
+        section = self.MockSingleEntrySection(value=1.0)
         assert str(section) == "1.0"
         assert repr(section) == "1.0"
 
-    def test_single_entry_section_raises_if_multiple_fields(self):
+    def test_single_entry_section_raises_if_multiple_fields(self) -> None:
         """Tests that attempting to initialize a SingleEntryROMSRuntimeSettingsSection
         with multiple entries raises a TypeError.
         """
@@ -423,7 +428,7 @@ class TestROMSRuntimeSettings:
        functionally identical with the one subsequently read back with from_file
     """
 
-    def test_load_raw_sections_parses_multiple_sections(self, tmp_path):
+    def test_load_raw_sections_parses_multiple_sections(self, tmp_path: Path) -> None:
         file = tmp_path / "test.in"
         file.write_text(
             """
@@ -448,7 +453,9 @@ class TestROMSRuntimeSettings:
             "bottom_drag": ["0.0 1.0E-3 1.0E-2"],
         }
 
-    def test_load_raw_sections_skips_blank_and_comment_lines(self, tmp_path):
+    def test_load_raw_sections_skips_blank_and_comment_lines(
+        self, tmp_path: Path
+    ) -> None:
         file = tmp_path / "test.in"
         file.write_text(
             """
@@ -463,7 +470,7 @@ class TestROMSRuntimeSettings:
         result = ROMSRuntimeSettings._load_raw_sections(file)
         assert result == {"title": ["This is a test"]}
 
-    def test_load_raw_sections_raises_on_missing_file(self):
+    def test_load_raw_sections_raises_on_missing_file(self) -> None:
         with pytest.raises(FileNotFoundError, match="does not exist"):
             ROMSRuntimeSettings._load_raw_sections(Path("not_a_file.in"))
 
@@ -559,7 +566,7 @@ class TestROMSRuntimeSettings:
         assert tested_settings.tracer_diff2 == expected_settings.tracer_diff2
         assert tested_settings.vertical_mixing == expected_settings.vertical_mixing
 
-    def test_from_file_with_missing_optional_sections(self, tmp_path):
+    def test_from_file_with_missing_optional_sections(self, tmp_path: Path) -> None:
         """Confirms that ROMSRuntimeSettings.from_file sets the attributes corresponding
         to settings that are not present in the file to None.
 
@@ -587,7 +594,7 @@ class TestROMSRuntimeSettings:
         tested_settings = ROMSRuntimeSettings.from_file(modified_file)
         assert tested_settings.climatology is None
 
-    def test_from_file_raises_if_missing_section(self, tmp_path):
+    def test_from_file_raises_if_missing_section(self, tmp_path: Path) -> None:
         modified_file = tmp_path / "modified_example_settings.in"
         shutil.copy2(
             Path(__file__).parent / "fixtures/example_runtime_settings.in",
@@ -598,9 +605,44 @@ class TestROMSRuntimeSettings:
         with pytest.raises(ValueError, match="Required field missing from file."):
             ROMSRuntimeSettings.from_file(modified_file)
 
+    def test_from_file_zero_fills_vertical_mixing_list(
+        self, tmp_path: Path, romsruntimesettings
+    ) -> None:
+        """If vertical mixing list is incomplete and all zeros, add more zeros for all tracers"""
+        modified_file = tmp_path / "modified_example_settings.in"
+        shutil.copy2(
+            Path(__file__).parent / "fixtures/example_runtime_settings.in",
+            modified_file,
+        )
+        _replace_text_in_file(
+            modified_file,
+            "0.    0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.",
+            "0.    0. 0. 0.",
+        )
+        tested_settings = ROMSRuntimeSettings.from_file(modified_file)
+        assert tested_settings.vertical_mixing == romsruntimesettings.vertical_mixing
+
+    def test_from_file_doesnt_fill_partial_vertical_mixing_list(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """If vertical mixing list is incomplete but non-zero, don't change it"""
+        modified_file = tmp_path / "modified_example_settings.in"
+        shutil.copy2(
+            Path(__file__).parent / "fixtures/example_runtime_settings.in",
+            modified_file,
+        )
+        _replace_text_in_file(
+            modified_file,
+            "0.    0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.",
+            "0.    2. 5. 0.",
+        )
+        tested_settings = ROMSRuntimeSettings.from_file(modified_file)
+        assert tested_settings.vertical_mixing.Akt_bak == [2.0, 5.0, 0.0]  # type: ignore[union-attr]
+
     def test_file_roundtrip(self, romsruntimesettings, tmp_path):
         """Tests that the `to_file`/`from_file` roundtrip results in a functionally
-        indentical ROMSRuntimeSettings instance.
+        identical ROMSRuntimeSettings instance.
 
         Mocks and Fixtures
         ------------------
@@ -644,6 +686,36 @@ class TestROMSRuntimeSettings:
         assert tested_settings.tracer_diff2 == expected_settings.tracer_diff2
         assert tested_settings.vertical_mixing == expected_settings.vertical_mixing
 
+    @pytest.mark.parametrize(
+        "output_root_name_input",
+        [
+            DEFAULT_OUTPUT_ROOT_NAME,
+            "another_name",
+            "a_third_name",
+        ],
+    )
+    def test_fixed_output_root_name(
+        self, tmp_path: Path, output_root_name_input: str
+    ) -> None:
+        """Verify that ROMSRuntimeSettings always has a fixed output_root_name.
+
+        This confirms that the pydantic model overrides the value input from the *.in file.
+        """
+        roms_in_content = textwrap.dedent(f"""\
+            title: \n\ttest
+                time_stepping:\n\t1 1 1 1
+            bottom_drag:\n\t 1 1 1
+            initial: confirm-the-labels-are-ignored\n\t 0
+                forcing: confirm-whitespace-preceding-key-is-ignored\n\aaa/x.nc
+            output_root_name:\n\t{output_root_name_input}
+            """)
+        roms_in_file = tmp_path / "roms.in"
+        roms_in_file.write_text(roms_in_content)
+
+        settings = ROMSRuntimeSettings.from_file(roms_in_file)
+
+        assert str(settings.output_root_name) == DEFAULT_OUTPUT_ROOT_NAME
+
 
 class TestStrAndRepr:
     """Test that the __str__ and __repr__ functions of the ROMSRuntimeSettings class
@@ -666,7 +738,7 @@ class TestStrAndRepr:
         expected_str = """ROMSRuntimeSettings
 -------------------
 Title (`ROMSRuntimeSettings.title`): Example runtime settings
-Output filename prefix (`ROMSRuntimeSettings.output_root_name`): ROMS_test
+Output filename prefix (`ROMSRuntimeSettings.output_root_name`): output
 Time stepping (`ROMSRuntimeSettings.time_stepping`):
 - Number of steps (`ntimes`) = 360,
 - Time step (`dt`, sec) = 60,
@@ -729,7 +801,7 @@ Climatology data files (`ROMSRuntimeSettings.climatology`): climfile2.nc"""
         -------
         - repr(romsruntimesettings) matches an expected reference string
         """
-        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='ROMS_test', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_list_fname'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
+        expected_repr = """ROMSRuntimeSettings(title='Example runtime settings', time_stepping={'ntimes': 360, 'dt': 60, 'ndtfast': 60, 'ninfo': 1}, bottom_drag={'rdrg': 0.0, 'rdrg2': 0.001, 'zob': 0.01}, initial={'nrrec': 1, 'ininame': PosixPath('input_datasets/roms_ini.nc')}, forcing=["('filenames', [PosixPath('input_datasets/roms_frc.nc'), PosixPath('input_datasets/roms_frc_bgc.nc'), PosixPath('input_datasets/roms_bry.nc'), PosixPath('input_datasets/roms_bry_bgc.nc')])"], output_root_name='output', grid='input_datasets/roms_grd.nc', climatology='climfile2.nc', s_coord={'theta_s': 5.0, 'theta_b': 2.0, 'tcline': 300.0}, rho0=1000.0, lin_rho_eos={'Tcoef': 0.2, 'T0': 1.0, 'Scoef': 0.822, 'S0': 1.0}, marbl_biogeochemistry={'marbl_namelist_fname': PosixPath('marbl_in'), 'marbl_tracer_list_fname': PosixPath('marbl_tracer_list_fname'), 'marbl_diag_list_fname': PosixPath('marbl_diagnostic_output_list')}, lateral_visc=0.0, gamma2=1.0, tracer_diff2=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vertical_mixing={'Akv_bak': 0.0, 'Akt_bak': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, my_bak_mixing={'Akq_bak': 1e-05, 'q2nu2': 0.0, 'q2nu4': 0.0}, sss_correction=7.777, sst_correction=10.0, ubind=0.1, v_sponge=0.0)"""
         assert expected_repr == repr(romsruntimesettings), (
             f"expected \n{expected_repr}\n, got\n{repr(romsruntimesettings)}"
         )

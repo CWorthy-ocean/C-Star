@@ -1,0 +1,85 @@
+name: roms_marbl_example_new_bp
+description: this is to test the new blueprint schema, here's "a few" weird characters.
+application: roms_marbl
+state: draft
+valid_start_date: 2012-01-01 12:00:00
+valid_end_date: 2012-12-31 12:00:00
+
+
+code:
+  roms:
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    commit: e5e3658ac42b9a19b74bd4ba11d6f6536bdae2e9
+    documentation: cworthy fork
+  marbl:
+    location: https://github.com/marbl-ecosys/MARBL.git
+    branch: marbl0.45.0
+
+  run_time:
+    location: <additional_code_location>
+    branch: roms_tools_3_1_2
+    filter:
+      files:
+        - roms.in
+        - marbl_in
+        - marbl_tracer_output_list
+        - marbl_diagnostic_output_list
+      directory: additional_code/ROMS/runtime_code
+  compile_time:
+    location: <additional_code_location>
+    branch: roms_tools_3_1_2
+    filter:
+      directory: additional_code/ROMS/compile_time_code
+      files:
+      - bgc.opt
+      - bulk_frc.opt
+      - cppdefs.opt
+      - diagnostics.opt
+      - ocean_vars.opt
+      - param.opt
+      - tracers.opt
+      - Makefile
+
+grid:
+  documentation: my favorite grid
+  data:
+    - location: <input_datasets_location>/roms_grd.nc
+      hash: 73a15442870db4c22a626c19ec6764d2cd1214bb15795c46983ec0f3030aea5c
+
+
+initial_conditions:
+  data:
+    - location: <input_datasets_location>/roms_ini.nc
+      hash: 5f37c42b538dfe9963a6dd9e6887b9aaf537562eda086d2f2538a2e70d7f3606
+
+forcing:
+  tidal:
+    data:
+      - location: <input_datasets_location>/roms_tides.nc
+        hash: 2db437f0cdaadec0e9eaa15f00cb077f1b2b384dc1abe5c8ec2d38f07a3418c0
+  surface:
+    documentation: best forcing ever
+    locked: true
+    data:
+    - location: <input_datasets_location>/roms_frc.nc
+      hash: 096f0b19aa27e99a92ac2b76b534e59051f76846b62dc7d41c607da2a2517e16
+    - location: <input_datasets_location>/roms_frc_bgc.nc
+      hash: 142b19c66f9e37d3c24a858424ad01b3448b563c89f0fecaabc398c88458b0de
+  boundary:
+    data:
+    - location: <input_datasets_location>/roms_bry.nc
+      hash: 5946f6aba0093a1123aa9f247a6f78270fa05228e5e33c56053a6efada2be0a0
+    - location: <input_datasets_location>/roms_bry_bgc.nc
+      hash: d3bdf070100e9ed3ddca15ca37cd3c6ecbae93b9425aa5bafb4b37418efae43c
+
+partitioning:
+  n_procs_x: 2
+  n_procs_y: 2
+
+model_params:
+  time_step: 60
+
+runtime_params:
+  start_date: "2012-01-01 12:00:00"
+  end_date: "2012-01-01 12:10:00"
+  output_dir: <output_dir>

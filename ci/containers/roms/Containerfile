@@ -1,0 +1,42 @@
+ARG ACCT="C-Worthy"
+ARG FROM_TAG="latest"
+ARG IMG_NCDF="$ACCT/cstar-netcdf:$FROM_TAG"
+
+FROM $IMG_NCDF
+
+ARG SRC_DIR="/install"
+ARG INSTALL_BASE_DIR=/opt
+ENV ROMS_ROOT=$INSTALL_BASE_DIR/ucla-roms 
+ENV ROMS_PATH=$ROMS_ROOT/Tools-Roms
+ARG TARGET_BRANCH="main"
+ARG REPO_ROMS="https://github.com/CWorthy-ocean/ucla-roms/archive/refs/heads/$TARGET_BRANCH.tar.gz"
+ENV ROMS_PROFILE="/etc/profile.d/ucla-roms.sh"
+
+WORKDIR "$SRC_DIR"
+
+RUN echo "export ROMS_ROOT=$ROMS_ROOT" >> $ROMS_PROFILE && \
+    echo "export ROMS_PATH=$ROMS_PATH" >> $ROMS_PROFILE && \
+    echo 'export PATH=$PATH:$ROMS_PATH' >> $ROMS_PROFILE
+
+RUN . /etc/profile && \
+    wget -q "$REPO_ROMS" && \
+    tar xvf "$TARGET_BRANCH.tar.gz" && \
+    mv "ucla-roms-$TARGET_BRANCH" "$ROMS_ROOT" && \
+    rm "$TARGET_BRANCH.tar.gz"
+
+
+ENV PATH=$PATH:$ROMS_PATH
+
+RUN  . /etc/profile &&  \
+     cd $ROMS_ROOT/Work &&  \
+     make compile_clean &&  \
+     make tools-roms &&  \
+     make
+
+WORKDIR $INSTALL_BASE_DIR
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD []
+ENTRYPOINT ["/entrypoint.sh"]

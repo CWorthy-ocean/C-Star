@@ -55,6 +55,7 @@ pytest
 
 To learn how to use `C-Star`, check out the [documentation](https://c-star.readthedocs.io/en/latest/index.html).
 
+
 # Feedback and contributions
 
 If you find a bug, have a feature suggestion, or any other kind of feedback, please start a Discussion.

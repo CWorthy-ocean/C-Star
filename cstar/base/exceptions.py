@@ -8,7 +8,6 @@ class BlueprintError(CstarError):
     def __init__(self, message: str) -> None:
         """Initialize BlueprintError with a message."""
         super().__init__(message)
-        self.message = message
 
 
 class SimulationError(CstarError):
@@ -17,4 +16,9 @@ class SimulationError(CstarError):
     def __init__(self, message: str) -> None:
         """Initialize SimulationError with a message."""
         super().__init__(message)
-        self.message = message
+
+
+class CstarExpectationFailed(Exception):
+    """Raise this error when a component cannot proceed due to prerequisites."""
+
+    ...

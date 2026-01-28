@@ -9,6 +9,7 @@ import dateutil
 
 from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
 from cstar.base.log import LoggingMixin
+from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 
@@ -67,6 +68,9 @@ class Simulation(ABC, LoggingMixin):
         Create a new Simulation instance starting from the end of this one.
     """
 
+    _fs_manager: JobFileSystemManager
+    """The file system manager ensures consistent directory structure for outputs."""
+
     def __init__(
         self,
         name: str,
@@ -106,7 +110,8 @@ class Simulation(ABC, LoggingMixin):
         valid_end_date : str or datetime, optional
             The latest allowed end date, based on, e.g., the availability of input data.
         """
-        self.directory: Path = self._validate_simulation_directory(directory)
+        self.directory = Path(directory).resolve()
+        self._fs_manager = self._get_filesystem_manager(self.directory)
         self.name = name
 
         # Process valid date ranges
@@ -147,43 +152,8 @@ class Simulation(ABC, LoggingMixin):
         self.compile_time_code = compile_time_code or None
         self.discretization = discretization
 
-    def _validate_simulation_directory(self, directory: str | Path) -> Path:
-        """Validates and resolves the simulation directory.
-
-        This method ensures that the provided directory is valid and resolves its absolute path.
-        If the directory already exists and is not empty, an error is raised.
-
-        Parameters
-        ----------
-        directory : str or Path
-            The path to the simulation directory.
-
-        Returns
-        -------
-        Path
-            The resolved absolute path of the simulation directory.
-
-        Raises
-        ------
-        FileExistsError
-            If the specified directory already exists and is not empty.
-        """
-        resolved_directory = Path(directory).resolve()
-        if resolved_directory.exists() and (
-            not resolved_directory.is_dir() or any(resolved_directory.iterdir())
-        ):
-            raise FileExistsError(
-                f"Your chosen directory {directory} exists and is not an empty directory."
-                "\nIf you have previously created this case, use "
-                f"\nmy_sim = {self.__class__.__name__}.restore(directory={directory!r})"
-                "\n to restore it"
-            )
-
-        return resolved_directory
-
-    def _parse_date(
-        self, date: str | datetime | None, field_name: str
-    ) -> datetime | None:
+    @staticmethod
+    def _parse_date(date: str | datetime | None, field_name: str) -> datetime | None:
         """Converts a date string to a datetime object if it's not None.
 
         If the input is a string, it attempts to parse it into a `datetime` object.
@@ -332,9 +302,10 @@ class Simulation(ABC, LoggingMixin):
             NN = len(self.compile_time_code.source)
             base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
 
-        if hasattr(self, "exe_path") and self.exe_path is not None:
+        exe_path = getattr(self, "exe_path", None)
+        if exe_path is not None:
             base_str += "\nIs compiled: True"
-            base_str += "\nExecutable path: " + str(self.exe_path)
+            base_str += "\nExecutable path: " + str(exe_path)
 
         return base_str
 
@@ -376,6 +347,38 @@ class Simulation(ABC, LoggingMixin):
 
         return repr_str
 
+    @classmethod
+    def state_file_from(cls, directory: Path) -> Path:
+        """The path where a state file containing a pickled Simulation will be created
+        upon successful completion of a simulation, when that simulation uses the
+        supplied directory as it's working directory.
+
+        Parameters
+        ----------
+        directory : Path
+            The target working directory for an inaccessible simulation instance,
+            such as during a restart.
+
+        Returns
+        -------
+        Path
+           The path where the state file will be created.
+        """
+        fs = cls._get_filesystem_manager(directory)
+        return fs.work_dir / "simulation_state.pkl"
+
+    @property
+    def state_file(self) -> Path:
+        """The path where a state file containing the pickled Simulation will be created
+        upon successful completion of the simulation.
+
+        Returns
+        -------
+        Path
+           The path where the state file will be created.
+        """
+        return self.state_file_from(self.directory)
+
     @property
     @abstractmethod
     def default_codebase(self) -> ExternalCodeBase:
@@ -394,7 +397,7 @@ class Simulation(ABC, LoggingMixin):
 
     @classmethod
     @abstractmethod
-    def from_dict(self, simulation_dict: dict, directory: str | Path):
+    def from_dict(cls, simulation_dict: dict, directory: str | Path):
         """Abstract method to create a Simulation instance from a dictionary.
 
         This method must be implemented by subclasses to construct a simulation
@@ -464,8 +467,7 @@ class Simulation(ABC, LoggingMixin):
     def from_blueprint(
         cls,
         blueprint: str,
-        directory: str | Path,
-    ):
+    ) -> "Simulation":
         """Abstract method to create a Simulation instance from a blueprint file.
 
         This method should be implemented in subclasses to read a YAML file containing
@@ -476,8 +478,6 @@ class Simulation(ABC, LoggingMixin):
         ----------
         blueprint : str
             The path or URL of a YAML file containing the blueprint for the simulation.
-        directory : str or Path
-            The local directory where the simulation will be set up.
 
         Returns
         -------
@@ -488,26 +488,6 @@ class Simulation(ABC, LoggingMixin):
         --------
         to_blueprint : Saves the Simulation instance to a YAML blueprint file.
         from_dict : Creates a Simulation instance from a dictionary.
-        """
-        pass
-
-    @abstractmethod
-    def to_blueprint(self, filename: str) -> None:
-        """Abstract method to save the Simulation instance as a YAML blueprint file.
-
-        This method should be implemented in subclasses to serialize the Simulation
-        instance into a structured YAML file, making it possible to recreate the
-        instance later using `from_blueprint`.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the YAML file that will be created.
-
-        See Also
-        --------
-        from_blueprint : Loads a Simulation instance from a YAML blueprint file.
-        to_dict : Converts the Simulation instance into a dictionary.
         """
         pass
 
@@ -524,6 +504,19 @@ class Simulation(ABC, LoggingMixin):
         run : Executes the simulation.
         """
         pass
+
+    def __getstate__(self):
+        """Return a pickle-able representation of the object."""
+        state = self.__dict__.copy()
+
+        # Remove the un-pickleable logger attribute
+        state.pop("_log", None)
+
+        return state
+
+    def __setstate__(self, state):
+        """Restore the object from a pickle."""
+        self.__dict__.update(state)
 
     def persist(self) -> None:
         """Save the current state of the simulation to a file.
@@ -549,15 +542,12 @@ class Simulation(ABC, LoggingMixin):
         ):
             raise RuntimeError(
                 "Simulation.persist() was called, but at least one "
-                "local process is currently running in. Await "
+                "local process is currently running. Await "
                 "completion or use LocalProcess.cancel(), then try again"
             )
 
-        # Loggers do not survive roundtrip
-        if hasattr(self, "_log"):
-            del self._log
-
-        with open(f"{self.directory}/simulation_state.pkl", "wb") as state_file:
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.state_file, "wb") as state_file:
             pickle.dump(self, state_file)
 
     @classmethod
@@ -589,9 +579,10 @@ class Simulation(ABC, LoggingMixin):
         persist : Saves the current simulation state.
         """
         directory = Path(directory)
-        with open(f"{directory}/simulation_state.pkl", "rb") as state_file:
-            simulation_instance = pickle.load(state_file)
-        return simulation_instance
+        with open(cls.state_file_from(directory), "rb") as state_file:
+            simulation: Simulation = pickle.load(state_file)
+
+        return simulation
 
     @abstractmethod
     def build(self, rebuild=False) -> None:
@@ -674,6 +665,12 @@ class Simulation(ABC, LoggingMixin):
         pre_run : Performs preprocessing before execution.
         """
         pass
+
+    @classmethod
+    @abstractmethod
+    def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
+        """Retrieve the manager for the simulation output directory structure."""
+        raise NotImplementedError("Failed to implement abstract method.")
 
     def restart(self, new_end_date: str | datetime) -> "Simulation":
         """Create a new Simulation instance starting from the end date of the current

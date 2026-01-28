@@ -3,7 +3,6 @@ import pathlib
 import subprocess
 import unittest.mock as mock
 
-import dotenv
 import pytest
 
 import cstar
@@ -68,7 +67,6 @@ class TestROMSExternalCodeBaseConfigure:
     def test_configure_success(
         self,
         romsexternalcodebase_staged,
-        dotenv_path: pathlib.Path,
         roms_path: pathlib.Path,
     ):
         """Test that the _configure method succeeds when subprocess calls succeed."""
@@ -84,10 +82,7 @@ class TestROMSExternalCodeBaseConfigure:
 
             # Assertions:
             ## Check environment variables
-            dotenv.load_dotenv(dotenv_path, override=True)
             assert os.environ[recb.root_env_var] == str(recb.working_copy.path)
-            dotenv_var = dotenv.get_key(dotenv_path, recb.root_env_var)
-            assert dotenv_var == str(recb.working_copy.path)
 
         mock_run_cmd.assert_any_call(
             f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
@@ -102,7 +97,6 @@ class TestROMSExternalCodeBaseConfigure:
         self,
         mock_subprocess,
         romsexternalcodebase_staged,
-        dotenv_path,
     ):
         """Test that the _configure method raises an error when 'NHMG/make' fails."""
         mock_subprocess.side_effect = [
@@ -133,7 +127,6 @@ class TestROMSExternalCodeBaseConfigure:
         self,
         mock_subprocess,
         romsexternalcodebase_staged,
-        dotenv_path,
     ):
         """Test that the _configure method raises an error when 'Tools-Roms/make' fails."""
         mock_subprocess.side_effect = [
@@ -164,7 +157,6 @@ class TestROMSExternalCodeBaseConfigure:
         self,
         romsexternalcodebase_staged,
         roms_path,
-        dotenv_path,
     ):
         """Tests that the `is_configured` property returns True when all conditions met:
 
