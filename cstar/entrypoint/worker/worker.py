@@ -459,6 +459,7 @@ async def execute_runner(
     log.debug(f"Job config: {job_cfg}")
     log.debug(f"Simulation runner service config: {service_cfg}")
     log.debug(f"Simulation request: {request}")
+    log.debug(f"os.environ: {os.environ}")
 
     try:
         configure_environment(log)

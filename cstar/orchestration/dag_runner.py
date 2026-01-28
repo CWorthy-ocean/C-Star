@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
 
-from cstar.base.feature import is_feature_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import get_output_dir
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -170,14 +169,11 @@ async def prepare_workplan(
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
     run_root_dir = output_dir / run_id
 
-    if is_feature_enabled("ORCH_TRANSFORM_AUTO"):
-        transformer = WorkplanTransformer(wp_orig, RomsMarblTimeSplitter())
-        wp = transformer.apply()
+    transformer = WorkplanTransformer(wp_orig, RomsMarblTimeSplitter())
+    wp = transformer.apply()
 
-        if transformer.is_modified:
-            log.info("A time-split workplan will be executed.")
-    else:
-        wp = wp_orig
+    if transformer.is_modified:
+        log.info("A time-split workplan will be executed.")
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = WorkplanTransformer.derived_path(
