@@ -1,8 +1,10 @@
 import logging
 import logging.handlers
 import pathlib
+import re
 import typing as t
 import uuid
+from time import strftime
 from unittest import mock
 
 import pytest
@@ -84,8 +86,9 @@ def test_loglevel_fh(
 
         lt_levels, gt_eq_levels = levels_fn(level_)
 
-        msg = str(uuid.uuid4())
+        msg = str(uuid.uuid4()).replace("-", "")
         funcs = [log.debug, log.info, log.warning, log.error, log.critical]
+        today = strftime("%Y\\-%m\\-%d")
 
         for msg_level, log_fn in zip(all_levels, funcs):
             log_fn(msg)
@@ -93,8 +96,12 @@ def test_loglevel_fh(
 
             # confirm all messages >= level are in the file
             if msg_level in list(gt_eq_levels):
-                expected_log_entry = f"[{logging.getLevelName(msg_level)}] {msg}"
-                assert expected_log_entry in log_content
+                level_name = logging.getLevelName(msg_level)
+                pattern = (
+                    rf"{today} \d*:\d*:\d*,\d* \[{level_name}\] - .*\.py:\d* - {msg}"
+                )
+                matches = re.findall(pattern, log_content)
+                assert matches
 
             # confirm messages < level are not in file
             if msg_level in list(lt_levels):
@@ -118,19 +125,20 @@ def test_filehandler_no_dupes(
     log = get_logger(logger_name, level, filename=filename)
     log = get_logger(logger_name, level, filename=filename)
 
-    msg = str(uuid.uuid4())
+    msg = str(uuid.uuid4()).replace("-", "")
     log.info(msg)
 
     log_content = filename.read_text()
-    expected_log_entry = f"[{logging._levelToName[level]}] {msg}"
+
+    today = strftime("%Y\\-%m\\-%d")
+    pattern = rf"{today} \d*:\d*:\d*,\d* \[INFO\] - .*\.py:\d* - {msg}"
+    matches = re.findall(pattern, log_content)
 
     # confirm entry is found...
-    found_at = log_content.find(expected_log_entry)
-    assert found_at > -1
+    assert matches
 
     # ... and isn't written more than once
-    found_at = log_content.find(expected_log_entry, found_at + len(expected_log_entry))
-    assert found_at == -1
+    assert len(matches) == 1
 
 
 @pytest.mark.parametrize(
