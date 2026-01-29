@@ -18,6 +18,7 @@ A key strength of C-Star lies in its ability to run regional simulations using a
     :caption: Getting Started
 
     Installing C-Star <installation>
+    configuration
 
 .. toctree::
     :maxdepth: 1
@@ -31,8 +32,7 @@ A key strength of C-Star lies in its ability to run regional simulations using a
 
     blueprints
     workplans
-    configuration
-   
+
 .. toctree::
     :maxdepth: 1
     :caption: Deployment
