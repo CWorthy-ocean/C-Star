@@ -14,4 +14,3 @@ New features
 Bugfixes
 ~~~~~~~~
 - git and DataSource information are now read-only attributes throughout
-j;
