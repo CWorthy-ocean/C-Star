@@ -563,7 +563,8 @@ class TestModelSpec:
             name="test_model",
             code=code_repo,
             inputs=inputs,
-            datasets=["GLORYS_REGIONAL", "UNIFIED_BGC"]
+            datasets=["GLORYS_REGIONAL", "UNIFIED_BGC"],
+            settings=SettingsSpec(),
         )
         
         assert spec.name == "test_model"
@@ -613,7 +614,8 @@ class TestModelSpec:
                 name="test_model",
                 code=code_repo,
                 inputs=inputs,
-                datasets=[]
+                datasets=[],
+                settings=SettingsSpec(),
             )
         assert "roms" in str(exc_info.value).lower()
     
@@ -660,7 +662,8 @@ class TestModelSpec:
                 name="test_model",
                 code=code_repo,
                 inputs=inputs,
-                datasets=[]
+                datasets=[],
+                settings=SettingsSpec(),
             )
         assert "run_time" in str(exc_info.value).lower()
     
@@ -708,7 +711,8 @@ class TestModelSpec:
             name="test_model",
             code=code_repo,
             inputs=inputs,
-            datasets=[]
+            datasets=[],
+            settings=SettingsSpec(),
         )
         
         # Check if master_settings_file_name exists as a property
@@ -922,7 +926,8 @@ class TestModelSpec:
                 code=code_repo,
                 inputs=inputs,
                 datasets=[],
-                templates=templates
+                templates=templates,
+                settings=SettingsSpec(),
             )
         assert "nonexistent.j2" in str(exc_info.value)
     
@@ -987,7 +992,8 @@ class TestModelSpec:
             code=code_repo,
             inputs=inputs,
             datasets=[],
-            templates=templates
+            templates=templates,
+            settings=SettingsSpec(),
         )
         assert spec.templates is not None
     
@@ -1050,7 +1056,8 @@ class TestModelSpec:
             code=code_repo,
             inputs=inputs,
             datasets=[],
-            templates=templates
+            templates=templates,
+            settings=SettingsSpec(),
         )
         assert spec.templates is not None
         assert spec.templates.run_time is not None
@@ -1113,7 +1120,8 @@ class TestModelSpec:
             code=code_repo,
             inputs=inputs,
             datasets=[],
-            templates=templates
+            templates=templates,
+            settings=SettingsSpec(),
         )
         assert spec.templates is not None
 
