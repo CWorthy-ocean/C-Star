@@ -3,7 +3,9 @@ import sys
 from pathlib import Path
 
 DEFAULT_LOG_LEVEL = logging.INFO
-DEFAULT_LOG_FORMAT = "[%(levelname)s] %(message)s"
+DEFAULT_LOG_FORMAT = (
+    "%(asctime)s [%(levelname)s] - %(filename)s:%(lineno)d - %(message)s"
+)
 
 
 def register_file_handler(
