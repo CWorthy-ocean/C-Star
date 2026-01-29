@@ -52,4 +52,4 @@ Miscellaneous
 
 For more details, please refer to the `v0.2.0 commit history`_.
 
-.. _v0.2.0 commit history: https://github.com/CWorthy-ocean/C-Star/compare/v0.2.0...v0.1.0
+.. _v0.2.0 commit history: https://github.com/CWorthy-ocean/C-Star/compare/v0.1.0...v0.2.0
