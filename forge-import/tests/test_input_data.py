@@ -31,6 +31,7 @@ from cson_forge.input_data import (
     register_input,
 )
 from cson_forge import models as cson_models
+from cson_forge.models import SettingsSpec
 from cson_forge import source_data
 from cson_forge import config
 from cson_forge.config import DataPaths
@@ -141,7 +142,8 @@ def sample_model_spec(tmp_path):
         name="test_model",
         code=code_repo,
         inputs=model_inputs,
-        datasets=["GLORYS_REGIONAL", "UNIFIED_BGC", "ERA5", "TPXO", "DAI"]
+        datasets=["GLORYS_REGIONAL", "UNIFIED_BGC", "ERA5", "TPXO", "DAI"],
+        settings=SettingsSpec(),
     )
 
 
@@ -480,7 +482,8 @@ class TestRomsMarblInputDataInitialization:
             name="test_model",
             code=code_repo,
             inputs=model_inputs,
-            datasets=[]
+            datasets=[],
+            settings=SettingsSpec(),
         )
         
         blueprint_dir = tmp_path / "blueprints"
