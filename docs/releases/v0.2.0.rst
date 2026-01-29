@@ -32,7 +32,7 @@ Bug Fixes
 - Fix failure occurring in worker post-run handler.
 - Fix/modify how the "active allocation" is identified.
 - Fix env var expansion failures due to lmod and environment loading ordering.
-- Fix missing partitioning information on in ``ROMSInputDataset``.
+- Fix missing partitioning information in ``ROMSInputDataset``.
 - Fix simulation failures due to file collisions.
 
 Improvements
