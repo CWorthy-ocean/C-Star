@@ -202,10 +202,6 @@ CLI
 
 Use the `run` command from the `cstar CLI` to execute a blueprint.
 
-.. code-block:: console
-
-    cstar blueprint run my_blueprint.yaml
-
 
 .. tab-set::
 
