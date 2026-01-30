@@ -173,7 +173,7 @@ async def prepare_workplan(
     wp = transformer.apply()
 
     if transformer.is_modified:
-        log.info("A time-split workplan will be executed.")
+        log.info("A transformed workplan will be executed.")
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = WorkplanTransformer.derived_path(
