@@ -671,3 +671,5 @@ def configure_environment(
 
     if run_id:
         os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)
+
+    os.environ["CSTAR_FF_POSTRUN_ANALYSIS"] = "1"

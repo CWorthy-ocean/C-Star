@@ -14,6 +14,7 @@ import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.feature import is_feature_enabled
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -1389,18 +1390,14 @@ class ROMSSimulation(Simulation):
 
     def _run_analysis(self, data_paths: list[Path]) -> None:
         """Execute analysis scripts registered to be executed after the simulation."""
-        if script := os.environ.get("CSTAR_SIM_POSTRUN_ANALYSIS", ""):
-            script_path = Path(script).resolve()
-            import sys
-
+        if is_feature_enabled("CSTAR_FF_POSTRUN_ANALYSIS"):
+            analysis_dir = self.fs_manager.joined_output_dir.as_posix()
             args: list[str] = [
-                sys.executable,
-                script_path.as_posix(),
+                "cstar-analysis",
                 "--output",
-                self.fs_manager.joined_output_dir.as_posix(),
+                analysis_dir,
             ]
             for path in data_paths:
-                # --path {data_path}"
                 args.extend(["--path", path.resolve().as_posix()])
             command = " ".join(args)
 
@@ -1408,8 +1405,8 @@ class ROMSSimulation(Simulation):
                 _run_cmd(
                     command,
                     cwd=self.fs_manager.joined_output_dir,
-                    msg_pre=f"Running post-run analysis script at: {script_path}",
-                    msg_post=f"Completed post-run analysis script at: {script_path}",
+                    msg_pre=f"Running post-run analysis script at: {analysis_dir}",
+                    msg_post=f"Completed post-run analysis script at: {analysis_dir}",
                     msg_err="Error occurred while executing post-run analysis.",
                     raise_on_error=True,
                 )

@@ -58,6 +58,7 @@ docs = [
 
 [project.scripts]
 cstar = "cstar.cli.cli:main"
+cstar-analysis = "cstar.entrypoint.analysis:main"
 
 [build-system]
 requires = [
