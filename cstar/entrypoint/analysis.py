@@ -43,12 +43,14 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
         log.error(msg)
         raise RuntimeError(msg)
 
+    pattern = r"\..*\.nc"
+    rst_wildcard = re.sub(pattern, ".*.nc", rst_path.as_posix())
     output_plot_path = working_dir
 
     grid = Grid.from_file(grid_path)
     roms_output = ROMSOutput(
         grid=grid,
-        path=rst_path,
+        path=rst_wildcard,
         use_dask=True,
     )
 
