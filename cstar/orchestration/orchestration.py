@@ -627,9 +627,13 @@ class Orchestrator(LoggingMixin):
         cancellations : Iterable[Task]
             The tasks to be cancelled.
         """
-        tasks = [asyncio.Task(self.launcher.cancel(task)) for task in cancellations]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        cancel_requests = [
+            asyncio.Task(self.launcher.cancel(task)) for task in cancellations
+        ]
+        results = await asyncio.gather(*cancel_requests, return_exceptions=False)
         for task in results:
+            msg = f"The orchestrator requested cancellation of task: {task.step.name}"
+            self.log.warning(msg)
             self.planner.store(task.step.name, KEY_STATUS, task.status)
 
 
