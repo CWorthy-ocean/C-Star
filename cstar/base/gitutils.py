@@ -110,8 +110,8 @@ def _check_local_repo_changed_from_remote(
 
         return bool(status_output.strip())  # True if any changes
 
-    except RuntimeError as e:
-        print(f"Git error: {e}")
+    except RuntimeError:
+        log.exception("An error occurred while verifying repository status")
         return True
 
 
