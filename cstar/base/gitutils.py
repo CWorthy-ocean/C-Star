@@ -101,6 +101,12 @@ def _check_local_repo_changed_from_remote(
         )
 
         if head_hash != expected_hash:
+            log.debug(
+                "Hash mismatch for repo in %s. Actual: %s, Expected: %s",
+                local_repo,
+                head_hash,
+                expected_hash,
+            )
             return True  # HEAD is not at the expected hash
 
         # if HEAD is at expected hash, check if dirty:
