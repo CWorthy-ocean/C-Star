@@ -20,8 +20,29 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
     log.info("Performing analysis of data found at: %s", all_paths)
 
     ########### START SAM'S HACK BLOCK ##########
-    grid_path = next(p for p in paths if "_grid" in p.stem)
-    rst_path = next(p for p in paths if "_reset" in p.stem)
+    grid_path = next((p for p in paths if "_grid" in p.stem), None)
+    rst_path = next((p for p in paths if "_reset" in p.stem), None)
+
+    if not grid_path:
+        msg = f"No grid file found in {all_paths}"
+        log.error(msg)
+        raise RuntimeError(msg)
+
+    if not rst_path:
+        msg = f"No reset file found in {all_paths}"
+        log.error(msg)
+        raise RuntimeError(msg)
+
+    if not grid_path.exists():
+        msg = f"Grid file not found at {grid_path}"
+        log.error(msg)
+        raise RuntimeError(msg)
+
+    if not rst_path.exists():
+        msg = f"Grid file not found at {rst_path}"
+        log.error(msg)
+        raise RuntimeError(msg)
+
     output_plot_path = working_dir
 
     grid = Grid.from_file(grid_path)
@@ -43,8 +64,20 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
         s=-1,
         save_path=output_plot_path / "surface_temp.png",
     )
-    roms_output.plot("ALK", time=5, lat=27, s=-1)
-    roms_output.plot("temp", time=5, lat=27, s=-1)
+    roms_output.plot(
+        "ALK",
+        time=5,
+        lat=27,
+        s=-1,
+        save_path=output_plot_path / "surf_lat_ALK.png",
+    )
+    roms_output.plot(
+        "temp",
+        time=5,
+        lat=27,
+        s=-1,
+        save_path=output_plot_path / "surf_lat_temp.png",
+    )
     ########### END SAM'S HACK BLOCK ##########
 
 
