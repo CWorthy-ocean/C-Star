@@ -20,8 +20,8 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
     log.info("Performing analysis of data found at: %s", all_paths)
 
     ########### START SAM'S HACK BLOCK ##########
-    grid_path = next((p for p in paths if "_grid" in p.stem), None)
-    rst_path = next((p for p in paths if "_reset" in p.stem), None)
+    grid_path = next((p for p in paths if "_avg" in p.name), None)
+    rst_path = next((p for p in paths if "_rst" in p.name), None)
 
     if not grid_path:
         msg = f"No grid file found in {all_paths}"
@@ -56,27 +56,27 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
         "ALK",
         time=1,
         s=-1,
-        save_path=output_plot_path / "surface_ALK.png",
+        save_path=(output_plot_path / "surface_ALK.png").as_posix(),
     )
     roms_output.plot(
         "temp",
         time=1,
         s=-1,
-        save_path=output_plot_path / "surface_temp.png",
+        save_path=(output_plot_path / "surface_temp.png").as_posix(),
     )
     roms_output.plot(
         "ALK",
         time=5,
         lat=27,
         s=-1,
-        save_path=output_plot_path / "surf_lat_ALK.png",
+        save_path=(output_plot_path / "surf_lat_ALK.png").as_posix(),
     )
     roms_output.plot(
         "temp",
         time=5,
         lat=27,
         s=-1,
-        save_path=output_plot_path / "surf_lat_temp.png",
+        save_path=(output_plot_path / "surf_lat_temp.png").as_posix(),
     )
     ########### END SAM'S HACK BLOCK ##########
 
