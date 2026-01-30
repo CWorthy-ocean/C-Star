@@ -1651,6 +1651,28 @@ class ROMSSimulation(Simulation):
                 results = executor.map(spatial_joiner, unique_wildcards)
                 _ = [r for r in results]  # exhaust iterator
 
+        ########### START SAM'S HACK BLOCK ##########
+        from roms_tools import Grid, ROMSOutput
+
+        grid_path = <PATH_TO_GRID_FILE>
+        rst_path = <PATH_TO_JOINED_RST_FILE>
+        output_plot_path = <PATH_TO_SAVE_FIGS>
+
+        grid = Grid.from_file(grid_path)
+        roms_output = ROMSOutput(
+            grid=grid,
+            path=rst_path,
+            use_dask=True,
+        )
+
+        roms_output.plot("ALK", time=1, s=-1, save_path=output_plot_path+"/surface_ALK.png")
+        roms_output.plot("temp", time=1, s=-1, save_path=output_plot_path+"/surface_temp.png")
+        roms_output.plot("ALK", time=5, lat=27, s=-1)
+        roms_output.plot("temp", time=5, lat=27, s=-1)
+
+
+        ########### END SAM'S HACK BLOCK ##########
+
         self.persist()
 
     def restart(self, new_end_date: str | datetime) -> "ROMSSimulation":
