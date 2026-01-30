@@ -628,14 +628,20 @@ class Orchestrator(LoggingMixin):
         cancellations : Iterable[Task]
             The tasks to be cancelled.
         """
-        cancel_requests = [
-            asyncio.Task(self.launcher.cancel(task)) for task in cancellations
-        ]
-        results = await asyncio.gather(*cancel_requests, return_exceptions=False)
-        for task in results:
-            msg = f"The orchestrator requested cancellation of task: {task.step.name}"
-            self.log.warning(msg)
-            self.planner.store(task.step.name, KEY_STATUS, task.status)
+        if not cancellations:
+            return
+
+        cancel_coros = [self.launcher.cancel(task) for task in cancellations]
+        results = await asyncio.gather(*cancel_coros, return_exceptions=True)
+
+        for task, coro_result in zip(cancellations, results, strict=True):
+            if isinstance(coro_result, BaseException):
+                msg = f"An error occurred while cancelling `{task.step.name}`: {coro_result}"
+                self.log.error(msg)
+            else:
+                msg = f"The orchestrator requested cancellation of: {task.step.name}"
+                self.log.warning(msg)
+                self.planner.store(task.step.name, KEY_STATUS, task.status)
 
 
 def check_environment() -> None:
