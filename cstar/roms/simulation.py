@@ -1667,8 +1667,8 @@ class ROMSSimulation(Simulation):
 
         roms_output.plot("ALK", time=1, s=-1, save_path=output_plot_path+"/surface_ALK.png")
         roms_output.plot("temp", time=1, s=-1, save_path=output_plot_path+"/surface_temp.png")
-        roms_output.plot("ALK", time=5, lat=27, s=-1)
-        roms_output.plot("temp", time=5, lat=27, s=-1)
+        roms_output.plot("ALK", time=5, lat=27, s=-1, save_path=output_plot_path+"/surf_lat_ALK.png")
+        roms_output.plot("temp", time=5, lat=27, s=-1, save_path=output_plot_path+"/surf_lat_temp.png")
 
 
         ########### END SAM'S HACK BLOCK ##########
