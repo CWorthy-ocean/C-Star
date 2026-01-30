@@ -407,9 +407,14 @@ class SourceDataCollection:
                 file_list = list(files)
                 if subdir.startswith("/"):
                     subdir = subdir[1:]
+                if subdir.endswith("/"):
+                    subdir = subdir[:-1]
+    
                 for i, f in enumerate(file_list):
                     if f.startswith("/"):
                         file_list[i] = f[1:]
+                    if f.endswith("/"):
+                        file_list[i] = f[:-1]
                 return cls.from_locations(
                     locations=[f"{common_location}/{subdir}/{f}" for f in file_list]
                 )
