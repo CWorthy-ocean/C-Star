@@ -404,8 +404,14 @@ class SourceDataCollection:
                     ]
                 )
             case SourceClassification.LOCAL_DIRECTORY:
+                file_list = list(files)
+                if subdir.startswith("/"):
+                    subdir = subdir[1:]
+                for i, f in enumerate(file_list):
+                    if f.startswith("/"):
+                        file_list[i] = f[1:]
                 return cls.from_locations(
-                    locations=[f"{common_location}/{subdir}/{f}" for f in files]
+                    locations=[f"{common_location}/{subdir}/{f}" for f in file_list]
                 )
             case _:
                 raise ValueError(
