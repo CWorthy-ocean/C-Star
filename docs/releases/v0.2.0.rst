@@ -46,7 +46,7 @@ Improvements
 Miscellaneous
 ~~~~~~~~~~~~~
 - Mitigate various linter warnings
-- Pin roms-tools to 3.3.0
+- Pin roms-tools to 3.4.0
 
 ---
 
