@@ -1392,12 +1392,18 @@ class ROMSSimulation(Simulation):
         """Execute analysis scripts registered to be executed after the simulation."""
         if is_feature_enabled("CSTAR_FF_POSTRUN_ANALYSIS"):
             analysis_dir = self.fs_manager.joined_output_dir.as_posix()
+            grid_loc = Path(self.model_grid.source.location).as_posix() if self.model_grid else None
+
+            if not grid_loc:
+                self.log.error("No grid location could be identified.")
+                return
+
             args: list[str] = [
                 "cstar-analysis",
                 "--output",
                 analysis_dir,
                 "--path",
-                Path(self.model_grid.source.location).as_posix(),
+                grid_loc,
             ]
             for path in data_paths:
                 args.extend(["--path", path.resolve().as_posix()])
