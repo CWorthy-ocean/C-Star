@@ -49,7 +49,6 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
     output_plot_path = working_dir
 
     log.info(f"Creating ROMS grid for analysis from: {rst_wildcard}")
-    
     grid = Grid.from_file(grid_path)
     roms_output = ROMSOutput(
         grid=grid,

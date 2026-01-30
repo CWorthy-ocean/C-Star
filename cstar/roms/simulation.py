@@ -1409,8 +1409,8 @@ class ROMSSimulation(Simulation):
                 "--path",
                 grid_loc,
             ]
-            for path in data_paths:
-                args.extend(["--path", path.resolve().as_posix()])
+            for path in sorted(data_paths):
+                args.extend(["--path", path.as_posix()])
             command = " ".join(args)
 
             try:
