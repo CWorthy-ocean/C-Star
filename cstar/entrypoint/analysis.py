@@ -1,6 +1,5 @@
 import argparse
 import re
-
 from pathlib import Path
 
 from roms_tools import Grid, ROMSOutput
