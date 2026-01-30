@@ -1396,6 +1396,8 @@ class ROMSSimulation(Simulation):
                 "cstar-analysis",
                 "--output",
                 analysis_dir,
+                "--path",
+                Path(self.model_grid.source.location).as_posix(),
             ]
             for path in data_paths:
                 args.extend(["--path", path.resolve().as_posix()])

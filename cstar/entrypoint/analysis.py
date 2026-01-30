@@ -20,7 +20,7 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
     log.info("Performing analysis of data found at: %s", all_paths)
 
     ########### START SAM'S HACK BLOCK ##########
-    grid_path = next((p for p in paths if "_avg" in p.name), None)
+    grid_path = next((p for p in paths if "grid_" in p.name), None)
     rst_path = next((p for p in paths if "_rst" in p.name), None)
 
     if not grid_path:
