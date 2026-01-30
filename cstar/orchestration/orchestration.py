@@ -614,6 +614,7 @@ class Orchestrator(LoggingMixin):
             cancellations = {
                 v for v in kvp.values() if v and Status.is_running(v.status)
             }
+            self.log.exception("A task has failed unexpectedly")
 
         await self._cancel(cancellations)
 
