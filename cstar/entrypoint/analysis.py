@@ -40,7 +40,7 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
         raise RuntimeError(msg)
 
     if not rst_path.exists():
-        msg = f"Grid file not found at {rst_path}"
+        msg = f"Reset file not found at {rst_path}"
         log.error(msg)
         raise RuntimeError(msg)
 
