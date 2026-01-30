@@ -63,7 +63,7 @@ NPROCS_POST = int(os.getenv("CSTAR_NPROCS_POST", str(os.cpu_count() // 3)))  # t
 
 def _ncjoin_wildcard(
     wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
-) -> None:
+) -> Path:
     """Spatially join netcdfs matching the wildcard pattern using ncjoin, and move the joined output to output_dir.
 
     Parameters
@@ -89,6 +89,7 @@ def _ncjoin_wildcard(
     out_file.rename(output_dir / out_file.name)
 
     logger.info(f"done spatially joining {out_file}")
+    return out_file
 
 
 class ROMSSimulation(Simulation):
@@ -1386,6 +1387,30 @@ class ROMSSimulation(Simulation):
 
         self.persist()
 
+    def _run_analysis(self, data_paths: list[Path]) -> None:
+        """Execute analysis scripts registered to be executed after the simulation."""
+        if script := os.environ.get("CSTAR_SIM_POSTRUN_ANALYSIS", ""):
+            script_path = Path(script).resolve()
+            import sys
+
+            args: list[str] = [sys.executable, script_path.as_posix()]
+            for path in data_paths:
+                # --path {data_path}"
+                args.extend(["--path", path.resolve().as_posix()])
+            command = " ".join(args)
+
+            try:
+                _run_cmd(
+                    command,
+                    cwd=self.fs_manager.joined_output_dir,
+                    msg_pre=f"Running post-run analysis script at: {script_path}",
+                    msg_post=f"Completed post-run analysis script at: {script_path}",
+                    msg_err="Error occurred while executing post-run analysis.",
+                    raise_on_error=True,
+                )
+            except Exception:
+                self.log.exception("Post-run analysis script failed.")
+
     def pre_run(self, overwrite_existing_files=False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
@@ -1648,8 +1673,9 @@ class ROMSSimulation(Simulation):
             )
 
             with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
-                results = executor.map(spatial_joiner, unique_wildcards)
-                _ = [r for r in results]  # exhaust iterator
+                joined_outputs = list(executor.map(spatial_joiner, unique_wildcards))
+
+            self._run_analysis(joined_outputs)
 
         self.persist()
 
