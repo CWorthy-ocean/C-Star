@@ -283,19 +283,16 @@ class Service(ABC, LoggingMixin):
 
         last_health_check = time.time()  # timestamp of last health check
         running = True
-        hc_elapsed = 0.0
 
         while running:
-            try:
-                hc_elapsed = time.time() - last_health_check
-                hcf_remaining = config.health_check_frequency - hc_elapsed
-                remaining_wait = max(hcf_remaining, 0)
+            hc_elapsed = time.time() - last_health_check
+            remaining_wait = max(config.health_check_frequency - hc_elapsed, 0)
 
+            try:
                 # report large gaps between updates.
                 if hc_elapsed > config.max_health_check_latency:
-                    self.log.warning(
-                        f"No health update in last {hc_elapsed:.2f} seconds."
-                    )
+                    msg = f"No health update in last {hc_elapsed:.2f} seconds."
+                    self.log.warning(msg)
 
                 if msg := msg_queue.get_nowait():
                     if hc_elapsed >= config.health_check_frequency:
@@ -304,16 +301,15 @@ class Service(ABC, LoggingMixin):
 
                     command = msg.get(self.CMD_PREFIX, None)
                     if not command:
-                        self.log.info(
-                            f"Healthcheck thread received message: {msg}",
-                        )
+                        msg = f"Healthcheck thread received message: {msg}"
+                        self.log.info(msg)
                     elif command == self.CMD_QUIT:
                         running = False
                 else:
                     time.sleep(remaining_wait)
 
-            except Empty:  # noqa: PERF203
-                ...  # ignore empty queue; just wait for shutdown msg
+            except Empty:
+                time.sleep(remaining_wait)
             except Exception:  # noqa: BLE001
                 # queue was shutdown on other side. ignore and exit.
                 running = False
