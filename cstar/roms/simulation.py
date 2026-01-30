@@ -1393,7 +1393,12 @@ class ROMSSimulation(Simulation):
             script_path = Path(script).resolve()
             import sys
 
-            args: list[str] = [sys.executable, script_path.as_posix()]
+            args: list[str] = [
+                sys.executable,
+                script_path.as_posix(),
+                "--output",
+                self.fs_manager.joined_output_dir.as_posix(),
+            ]
             for path in data_paths:
                 # --path {data_path}"
                 args.extend(["--path", path.resolve().as_posix()])
