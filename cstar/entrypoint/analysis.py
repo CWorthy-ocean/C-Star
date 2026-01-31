@@ -11,7 +11,7 @@ from cstar.base.log import get_logger
 log = get_logger(__name__)
 
 
-def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
+def perform_analysis(working_dir: Path, grid_path: Path, rst_path: Path) -> None:
     """Perform analysis of Simulation output data.
 
     Parameters
@@ -19,29 +19,16 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
     paths : list[Path]
         The list of all joined output file paths.
     """
-    all_paths = ", ".join(p.as_posix() for p in paths)
+    all_paths = ", ".join([working_dir.as_posix(), grid_path.as_posix(), rst_path.as_posix()])
     log.info("Performing analysis of data found at: %s", all_paths)
 
     ########### START SAM'S HACK BLOCK ##########
-    grid_path = next((p for p in paths if "grid_" in p.name), None)
-    rst_path = next((p for p in paths if "_rst" in p.name), None)
-
-    if not grid_path:
-        msg = f"No grid file found in {all_paths}"
-        log.error(msg)
-        raise RuntimeError(msg)
-
-    if not rst_path:
-        msg = f"No reset file found in {all_paths}"
-        log.error(msg)
-        raise RuntimeError(msg)
-
     if not grid_path.exists():
         msg = f"Grid file not found at {grid_path}"
         log.error(msg)
         raise RuntimeError(msg)
 
-    # if not rst_path.exists():
+    # if not rst_path.parent.glob(rst_path.stem):
     #     msg = f"Reset file not found at {rst_path}"
     #     log.error(msg)
     #     raise RuntimeError(msg)
@@ -61,20 +48,27 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
     temp_ds = roms_output.ds["ALK"].isel({"s_rho": -1, "eta_rho": 11, "xi_rho": 11})
     temp_ds.plot(marker=".")
 
-    plt.savefig(str(output_plot_path / "time_ALK.png"))
+    alk_path = output_plot_path / "time_ALK.png"
+    plt.savefig(str(alk_path))
+    log.info(f"Alkalinity over time: {alk_path}")
 
+    alk_surface_path = (output_plot_path / "surface_ALK.png")
     roms_output.plot(
         "ALK",
         time=1,
         s=-1,
-        save_path=(output_plot_path / "surface_ALK.png").as_posix(),
+        save_path=str(alk_surface_path),
     )
+    log.info(f"Surface alkalinity: {alk_surface_path}")
+
+    temp_path = output_plot_path / "surface_temp.png"
     roms_output.plot(
         "temp",
         time=1,
         s=-1,
-        save_path=(output_plot_path / "surface_temp.png").as_posix(),
+        save_path=str(temp_path),
     )
+    log.info(f"Surface temp: {temp_path}")
     ########### END SAM'S HACK BLOCK ##########
 
 
@@ -82,13 +76,18 @@ def main() -> None:
     """Entrypoint for executing basic analysis of a Simulation run."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--path",
-        "-p",
+        "--grid",
+        "-g",
         type=str,
         required=True,
-        action="append",
-        dest="paths",
-        help="Specify the path to simulation outputs",
+        help="Specify the path to simulation grid file",
+    )
+    parser.add_argument(
+        "--reset",
+        "-r",
+        type=str,
+        required=True,
+        help="Specify the path to simulation reset files",
     )
     parser.add_argument(
         "--output",
@@ -99,10 +98,7 @@ def main() -> None:
     )
 
     ns = parser.parse_args(sys.argv[1:])
-    paths = [Path(p) for p in ns.paths]
-    working_dir = Path(ns.output)
-
-    perform_analysis(working_dir, paths)
+    perform_analysis(Path(ns.output), Path(ns.grid), Path(ns.reset))
 
 
 if __name__ == "__main__":

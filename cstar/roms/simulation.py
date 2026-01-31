@@ -1388,39 +1388,32 @@ class ROMSSimulation(Simulation):
 
         self.persist()
 
-    def _run_analysis(self, data_paths: list[Path]) -> None:
+    def _run_analysis(self) -> None:
         """Execute analysis scripts registered to be executed after the simulation."""
         if is_feature_enabled("CSTAR_FF_POSTRUN_ANALYSIS"):
-            all_paths = ", ".join(x.as_posix() for x in data_paths)
-            self.log.info(f"Executing analysis with paths: {all_paths}")
             analysis_dir = self.fs_manager.joined_output_dir.as_posix()
-            grid_loc = (
+            grid_path = (
                 Path(self.model_grid.source.location).as_posix()
                 if self.model_grid
                 else None
             )
+            reset_path = self.fs_manager.joined_output_dir / "output_rst.*.nc"
 
-            if not grid_loc:
+            if not grid_path:
                 self.log.error("No grid location could be identified.")
                 return
+
+            self.log.info(f"Executing analysis with paths: {grid_path}, {reset_path}")
 
             args: list[str] = [
                 "cstar-analysis",
                 "--output",
                 f"'{analysis_dir}'",
-                "--path",
-                f"'{grid_loc}'",
+                "--grid",
+                f"'{grid_path}'",
+                "--reset",
+                f"'{reset_path}'",
             ]
-            # for path in sorted(data_paths):
-            #     args.extend(["--path", path.as_posix()])
-            # command = " ".join(args)
-
-            args.extend(
-                [
-                    "--path",
-                    f"'{(self.fs_manager.joined_output_dir / 'output_rst.*.nc').as_posix()}'",
-                ]
-            )
             command = " ".join(args)
 
             try:
@@ -1699,9 +1692,9 @@ class ROMSSimulation(Simulation):
             )
 
             with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
-                joined_outputs = list(executor.map(spatial_joiner, unique_wildcards))
+                _ = list(executor.map(spatial_joiner, unique_wildcards))
 
-            self._run_analysis(joined_outputs)
+            self._run_analysis()
 
         self.persist()
 
