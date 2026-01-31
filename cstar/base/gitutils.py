@@ -2,7 +2,10 @@ import re
 import warnings
 from pathlib import Path
 
+from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
+
+log = get_logger(__name__)
 
 
 def _clone(source_repo: str, local_path: str | Path) -> None:
@@ -65,7 +68,7 @@ def _clone_and_checkout(
 
 def _check_local_repo_changed_from_remote(
     remote_repo: str, local_repo: str | Path, checkout_target: str
-):
+) -> bool:
     """Return `True` if a local repository HEAD does not match the checkout target.
 
     Parameters
@@ -79,34 +82,43 @@ def _check_local_repo_changed_from_remote(
     """
     local_repo = Path(local_repo)
 
-    if (not local_repo.exists()) or (not (local_repo / ".git").exists()):
+    if not local_repo.exists():
+        log.debug("Directory for local repository was not found: %s", local_repo)
         return True
 
-        try:
-            expected_hash = _get_hash_from_checkout_target(
-                repo_url=remote_repo, checkout_target=checkout_target
+    if not (local_repo / ".git").exists():
+        log.debug("Git repository not found in local path: %s", local_repo)
+        return True
+
+    try:
+        expected_hash = _get_hash_from_checkout_target(
+            repo_url=remote_repo, checkout_target=checkout_target
+        )
+
+        # 1. Check current HEAD commit hash
+        head_hash = _run_cmd(
+            cmd="git rev-parse HEAD", cwd=local_repo, raise_on_error=True
+        )
+
+        if head_hash != expected_hash:
+            log.debug(
+                "Hash mismatch for repo in %s. Actual: %s, Expected: %s",
+                local_repo,
+                head_hash,
+                expected_hash,
             )
+            return True  # HEAD is not at the expected hash
 
-            # 1. Check current HEAD commit hash
-            head_hash = _run_cmd(
-                cmd="git rev-parse HEAD", cwd=local_repo, raise_on_error=True
-            )
+        # if HEAD is at expected hash, check if dirty:
+        status_output = _run_cmd(
+            cmd="git diff-index HEAD", cwd=local_repo, raise_on_error=True
+        )
 
-            if head_hash != expected_hash:
-                return True  # HEAD is not at the expected hash
+        return bool(status_output.strip())  # True if any changes
 
-            # if HEAD is at expected hash, check if dirty:
-            status_output = _run_cmd(
-                cmd="git diff-index HEAD", cwd=local_repo, raise_on_error=True
-            )
-
-            return bool(status_output.strip())  # True if any changes
-
-        except RuntimeError as e:
-            print(f"Git error: {e}")
-            return True
-
-        return False
+    except RuntimeError:
+        log.exception("An error occurred while verifying repository status")
+        return True
 
 
 def _get_repo_remote(local_path: str | Path) -> str:
