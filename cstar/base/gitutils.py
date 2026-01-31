@@ -6,7 +6,15 @@ from cstar.base.utils import _run_cmd
 
 
 def _clone(source_repo: str, local_path: str | Path) -> None:
-    """Clone `source_repo` to `local_path`"""
+    """Clone `source_repo` to `local_path`.
+
+    Parameters
+    ----------
+    source_repo : str
+        The URI identifying the source git repository.
+    local_path : str
+        The path to a local directory where the remote repository should be cloned.
+    """
     _run_cmd(
         f"git clone {source_repo} {local_path}",
         msg_pre=f"Cloning `{source_repo}`",
@@ -17,7 +25,17 @@ def _clone(source_repo: str, local_path: str | Path) -> None:
 
 
 def _checkout(source_repo: str, local_path: str | Path, checkout_target: str) -> None:
-    """Checkout the target `checkout_target` for `source_repo` found in `local_path`."""
+    """Checkout the target `checkout_target` for `source_repo` found in `local_path`.
+
+    Parameters
+    ----------
+    source_repo : str
+        The URI identifying the source git repository.
+    local_path : str
+        The path to a local directory where a git repository is cloned.
+    checkout_target : str
+        A git tag, branch, or commit identifier.
+    """
     _run_cmd(
         f"git -C {local_path} checkout {checkout_target}",
         msg_pre=f"Checking out `{source_repo}` @ `{checkout_target}`",
@@ -30,7 +48,17 @@ def _checkout(source_repo: str, local_path: str | Path, checkout_target: str) ->
 def _clone_and_checkout(
     source_repo: str, local_path: str | Path, checkout_target: str
 ) -> None:
-    """Clone `source_repo` to `local_path` and checkout `checkout_target`."""
+    """Clone `source_repo` to `local_path` and checkout `checkout_target`.
+
+    Parameters
+    ----------
+    source_repo : str
+        The URI identifying the source git repository.
+    local_path : str
+        The path to a local directory where a git repository is cloned.
+    checkout_target : str
+        A git tag, branch, or commit identifier.
+    """
     _clone(source_repo, local_path)
     _checkout(source_repo, local_path, checkout_target)
 
@@ -38,7 +66,17 @@ def _clone_and_checkout(
 def _check_local_repo_changed_from_remote(
     remote_repo: str, local_repo: str | Path, checkout_target: str
 ):
-    """Returns True if a local repository has changed since being checked out from a remote at a given target"""
+    """Return `True` if a local repository HEAD does not match the checkout target.
+
+    Parameters
+    ----------
+    source_repo : str
+        The URI identifying the source git repository.
+    local_path : str
+        The path to a local directory where a git repository is cloned.
+    checkout_target : str
+        A git tag, branch, or commit identifier.
+    """
     local_repo = Path(local_repo)
 
     if (not local_repo.exists()) or (not (local_repo / ".git").exists()):
@@ -74,6 +112,11 @@ def _check_local_repo_changed_from_remote(
 def _get_repo_remote(local_path: str | Path) -> str:
     """Take a local repository path string (local_path) and return as a string the
     remote URL.
+
+    Parameters
+    ----------
+    local_path : str
+        The path to a local directory where a git repository is cloned.
     """
     return _run_cmd(
         f"git -C {local_path} remote get-url origin",
@@ -86,6 +129,11 @@ def _get_repo_remote(local_path: str | Path) -> str:
 def _get_repo_head_hash(local_path: str | Path) -> str:
     """Take a local repository path string (local_path) and return as a string the
     commit hash of HEAD.
+
+    Parameters
+    ----------
+    local_path : str
+        The path to a local directory where a git repository is cloned.
     """
     return _run_cmd(
         f"git -C {local_path} rev-parse HEAD",
@@ -133,11 +181,9 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
         return checkout_target
 
     # Otherwise, see if it is listed as a branch or tag
+    alt_refs = {f"refs/heads/{checkout_target}", f"refs/tags/{checkout_target}"}
     for ref, has in ref_dict.items():
-        if (
-            ref == f"refs/heads/{checkout_target}"
-            or ref == f"refs/tags/{checkout_target}"
-        ):
+        if ref in alt_refs:
             return has
 
     # Lastly, if NOTA worked, see if the checkout target is a 7 or 40 digit hexadecimal string
@@ -185,13 +231,13 @@ def git_location_to_raw(
 
     Parameters
     ----------
-    repo: str
+    repo_url: str
         The repository location
     checkout_target: str
         The tag, branch, or commit hash from which to get the file
     filename: str
         The name of the file (including extension)
-     subdir: str, optional
+    subdir: str, optional
         The subdirectory (from the repository top level) in which to find the file
 
     Returns
@@ -200,9 +246,8 @@ def git_location_to_raw(
         A URL from which to retrieve the raw file directly
     """
     if "http" not in repo_url.lower():
-        raise ValueError(
-            f"Please provide a HTTP(S) address to the repository, not {repo_url}"
-        )
+        msg = f"Please provide a HTTP(S) address to the repository, not {repo_url}"
+        raise ValueError(msg)
 
     repo_url = repo_url.removesuffix(".git")
 
@@ -214,6 +259,5 @@ def git_location_to_raw(
     elif "bitbucket.org" in repo_url:
         return f"{repo_url}/raw/{checkout_target}/{subdir}/{filename}"
     else:
-        raise ValueError(
-            f"Git service at {repo_url} unsupported. Please use Github, Gitlab, or Bitbucket addresses"
-        )
+        msg = f"Git service at {repo_url} unsupported. Please use Github, Gitlab, or Bitbucket addresses"
+        raise ValueError(msg)
