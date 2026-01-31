@@ -145,7 +145,7 @@ class RomsFileSystemManager(JobFileSystemManager):
     @property
     def joined_output_dir(self) -> Path:
         """The directory for de-partitioned outputs."""
-        return self.output_dir / self._JOINED_OUTPUT_NAME
+        return self.root / self._JOINED_OUTPUT_NAME
 
     def codebase_subdir(self, key: str) -> Path:
         """Return a codebase subdirectory path.
