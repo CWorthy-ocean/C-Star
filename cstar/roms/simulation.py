@@ -1415,7 +1415,12 @@ class ROMSSimulation(Simulation):
             #     args.extend(["--path", path.as_posix()])
             # command = " ".join(args)
 
-            args.extend(["--path", f"'{(self.fs_manager.joined_output_dir / "output_rst.*.nc").as_posix()}'"])
+            args.extend(
+                [
+                    "--path",
+                    f"'{(self.fs_manager.joined_output_dir / 'output_rst.*.nc').as_posix()}'",
+                ]
+            )
             command = " ".join(args)
 
             try:

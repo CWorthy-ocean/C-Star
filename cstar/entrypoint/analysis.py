@@ -1,8 +1,9 @@
 import argparse
 import re
-from pathlib import Path
 import sys
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 from roms_tools import Grid, ROMSOutput
 
 from cstar.base.log import get_logger
@@ -46,16 +47,21 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
     #     raise RuntimeError(msg)
 
     pattern = r"\._rst.*\.nc"
-    rst_wildcard = re.sub(pattern, "_r.*.nc", rst_path.as_posix())
+    rst_wildcard = re.sub(pattern, "_rst.*", rst_path.as_posix())
     output_plot_path = working_dir
 
     log.info(f"Creating ROMS grid for analysis from: {rst_wildcard}")
     grid = Grid.from_file(grid_path)
     roms_output = ROMSOutput(
         grid=grid,
-        path=rst_wildcard,
+        path=rst_path,
         use_dask=True,
     )
+
+    temp_ds = roms_output.ds["ALK"].isel({"s_rho": -1, "eta_rho": 11, "xi_rho": 11})
+    temp_ds.plot(marker=".")
+
+    plt.savefig(str(output_plot_path / "time_ALK.png"))
 
     roms_output.plot(
         "ALK",
@@ -68,20 +74,6 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
         time=1,
         s=-1,
         save_path=(output_plot_path / "surface_temp.png").as_posix(),
-    )
-    roms_output.plot(
-        "ALK",
-        time=5,
-        lat=27,
-        s=-1,
-        save_path=(output_plot_path / "surf_lat_ALK.png").as_posix(),
-    )
-    roms_output.plot(
-        "temp",
-        time=5,
-        lat=27,
-        s=-1,
-        save_path=(output_plot_path / "surf_lat_temp.png").as_posix(),
     )
     ########### END SAM'S HACK BLOCK ##########
 
