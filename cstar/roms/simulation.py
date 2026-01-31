@@ -1391,6 +1391,8 @@ class ROMSSimulation(Simulation):
     def _run_analysis(self, data_paths: list[Path]) -> None:
         """Execute analysis scripts registered to be executed after the simulation."""
         if is_feature_enabled("CSTAR_FF_POSTRUN_ANALYSIS"):
+            all_paths = ", ".join(x.as_posix() for x in data_paths)
+            self.log.info(f"Executing analysis with paths: {all_paths}")
             analysis_dir = self.fs_manager.joined_output_dir.as_posix()
             grid_loc = (
                 Path(self.model_grid.source.location).as_posix()
@@ -1405,16 +1407,20 @@ class ROMSSimulation(Simulation):
             args: list[str] = [
                 "cstar-analysis",
                 "--output",
-                analysis_dir,
+                f"'{analysis_dir}'",
                 "--path",
-                grid_loc,
+                f"'{grid_loc}'",
             ]
-            for path in sorted(data_paths):
-                args.extend(["--path", path.as_posix()])
+            # for path in sorted(data_paths):
+            #     args.extend(["--path", path.as_posix()])
+            # command = " ".join(args)
+
+            args.extend(["--path", f"'{(self.fs_manager.joined_output_dir / "output_rst.*.nc").as_posix()}'"])
             command = " ".join(args)
 
             try:
-                _run_cmd(
+                self.log.info(f"Executing post-run analysis script: {command}")
+                stdout = _run_cmd(
                     command,
                     cwd=self.fs_manager.joined_output_dir,
                     msg_pre=f"Running post-run analysis script at: {analysis_dir}",
@@ -1422,6 +1428,7 @@ class ROMSSimulation(Simulation):
                     msg_err="Error occurred while executing post-run analysis.",
                     raise_on_error=True,
                 )
+                print(stdout)
             except Exception:
                 self.log.exception("Post-run analysis script failed.")
 

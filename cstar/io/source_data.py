@@ -409,7 +409,7 @@ class SourceDataCollection:
                     subdir = subdir[1:]
                 if subdir.endswith("/"):
                     subdir = subdir[:-1]
-    
+
                 for i, f in enumerate(file_list):
                     if f.startswith("/"):
                         file_list[i] = f[1:]

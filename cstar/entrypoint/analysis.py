@@ -1,6 +1,7 @@
 import argparse
 import re
 from pathlib import Path
+import sys
 
 from roms_tools import Grid, ROMSOutput
 
@@ -39,13 +40,13 @@ def perform_analysis(working_dir: Path, paths: list[Path]) -> None:
         log.error(msg)
         raise RuntimeError(msg)
 
-    if not rst_path.exists():
-        msg = f"Reset file not found at {rst_path}"
-        log.error(msg)
-        raise RuntimeError(msg)
+    # if not rst_path.exists():
+    #     msg = f"Reset file not found at {rst_path}"
+    #     log.error(msg)
+    #     raise RuntimeError(msg)
 
-    pattern = r"\..*\.nc"
-    rst_wildcard = re.sub(pattern, ".*.nc", rst_path.as_posix())
+    pattern = r"\._rst.*\.nc"
+    rst_wildcard = re.sub(pattern, "_r.*.nc", rst_path.as_posix())
     output_plot_path = working_dir
 
     log.info(f"Creating ROMS grid for analysis from: {rst_wildcard}")
@@ -105,7 +106,7 @@ def main() -> None:
         help="Specify the path where outputs will be written",
     )
 
-    ns = parser.parse_args()
+    ns = parser.parse_args(sys.argv[1:])
     paths = [Path(p) for p in ns.paths]
     working_dir = Path(ns.output)
 
