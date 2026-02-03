@@ -24,15 +24,21 @@ DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 DEFAULT_OUTPUT_DIR: t.Final[str] = "assets"
 """The default subdirectory of `<CSTAR_HOME>` where job output is written."""
 
+DEFAULT_CACHE_DIR: t.Final[str] = "cache"
+"""The default subdirectory of `<CSTAR_HOME>` where the system caches files."""
+
 ENV_CSTAR_HOME: t.Literal["CSTAR_HOME"] = "CSTAR_HOME"
 """Environment variable enabling the user to specify a C-star home directory."""
 
 ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
 """Environment variable containing a path to the root output directory."""
 
+ENV_CSTAR_CACHEDIR: t.Literal["CSTAR_CACHEDIR"] = "CSTAR_CACHEDIR"
+"""Environment variable containing a path to the directory where C-star caches files."""
 
-def get_output_dir(value_override: Path | None = None) -> Path:
-    """Return the path to the C-star output directory.
+
+def get_home_dir(value_override: Path | None = None) -> Path:
+    """Return the path to the C-star home directory.
 
     Returns
     -------
@@ -41,17 +47,84 @@ def get_output_dir(value_override: Path | None = None) -> Path:
     if value_override:
         return value_override
 
-    home = home = os.getenv(ENV_CSTAR_HOME, DEFAULT_CSTAR_HOME)
-    home_path = Path(home).expanduser().resolve()
+    home = os.getenv(ENV_CSTAR_HOME, DEFAULT_CSTAR_HOME)
+    home_dir = Path(home).expanduser().resolve()
 
-    default_out_dir = home_path / DEFAULT_OUTPUT_DIR
-    final_outdir = os.getenv(ENV_CSTAR_OUTDIR, default_out_dir)
+    return home_dir
 
-    return Path(final_outdir).expanduser().resolve()
+
+def _home_subdir(
+    default_subdir: str, env_var_name: str, value_override: Path | None = None
+) -> Path:
+    """Return the path to a subdirectory of the C-Star home directory.
+
+    Parameters
+    ----------
+    default_subdir : str
+        The default name of the subdirectory when not overridden by the user.
+    env_var_name : str
+        The user-facing environment variable used to override the setting.
+    value_override : Path | None
+        An inline override of the value with precedence over default and user env.
+
+    Returns
+    -------
+    Path
+        The absolute path to the directory.
+    """
+    if value_override:
+        return value_override
+
+    home_path = get_home_dir()
+
+    default_dir = home_path / default_subdir
+    final_dir = os.getenv(env_var_name, default_dir)
+
+    return Path(final_dir).expanduser().resolve()
+
+
+def get_output_dir(value_override: Path | None = None) -> Path:
+    """Return the path to the C-star output directory.
+
+    Parameters
+    ----------
+    value_override : Path | None
+        An inline override of the value with precedence over default and user env.
+
+    Returns
+    -------
+    Path
+    """
+    return _home_subdir(DEFAULT_OUTPUT_DIR, ENV_CSTAR_OUTDIR, value_override)
+
+
+def get_cache_dir(value_override: Path | None = None) -> Path:
+    """Return the path to the C-star cache directory.
+
+    Parameters
+    ----------
+    value_override : Path | None
+        An inline override of the value with precedence over default and user env.
+
+    Returns
+    -------
+    Path
+    """
+    return _home_subdir(DEFAULT_OUTPUT_DIR, ENV_CSTAR_OUTDIR, value_override)
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
-    """Coerces datetime-like input to a datetime instance."""
+    """Coerces datetime-like input to a datetime instance.
+
+    Parameters
+    ----------
+    datetime : str | datetime
+       The value to be coerced into a datetime.
+
+    Returns
+    -------
+    datetime
+    """
     if isinstance(datetime, dt.datetime):
         return datetime
     else:
