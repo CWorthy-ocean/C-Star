@@ -1,10 +1,12 @@
 from abc import ABC
+import shutil
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from cstar.io.source_data import SourceData
+from cstar.base.utils import get_cache_dir, slugify
 from cstar.io.constants import SourceClassification
 from cstar.io.staged_data import StagedFile, StagedRepository
 
@@ -110,7 +112,6 @@ class LocalTextFileStager(Stager):
     _classification = SourceClassification.LOCAL_TEXT_FILE
 
 
-@register_stager
 class RemoteRepositoryStager(Stager):
     _classification = SourceClassification.REMOTE_REPOSITORY
 
@@ -120,8 +121,38 @@ class RemoteRepositoryStager(Stager):
 
         Parameters
         ----------
-        target_dir, Path:
+        target_dir : Path
             The local directory in which to stage the repository
         """
         retrieved_path = self.source.retriever.save(target_dir=target_dir)
         return StagedRepository(source=self.source, path=retrieved_path)
+
+
+@register_stager
+class CachedRemoteRepositoryStager(Stager):
+    _classification = SourceClassification.REMOTE_REPOSITORY
+
+    # Used for e.g. an ExternalCodeBase
+    def stage(self, target_dir: "Path") -> "StagedRepository":
+        """Clone and checkout a git repository at a given target.
+
+        Store the result in a local repository cache for re-use.
+
+        Parameters
+        ----------
+        target_dir : Path
+            The local directory in which to stage the repository
+        
+        Returns
+        -------
+        StagedRepository
+        """
+        cache_dir = get_cache_dir()
+        source_key = slugify(self.source.location.casefold().strip())
+        cache_path = cache_dir / source_key
+        if not cache_path.exists():
+            cache_path = self.source.retriever.save(target_dir=cache_path)
+
+        shutil.copytree(cache_path, target_dir, symlinks=True)
+
+        return StagedRepository(source=self.source, path=target_dir)

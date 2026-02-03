@@ -1,6 +1,7 @@
 import datetime
 import pytest
 from cstar.base.utils import slugify
+from cstar.io.source_data import SourceData
 from cstar.tasks.repo import get_repo, get_cache_dir
 from shutil import rmtree
 
@@ -143,3 +144,11 @@ def test_materialized_clone_caching(tmp_path: Path) -> None:
         print(f"Second retrieval took {(t_end - t_start).total_seconds()} seconds")
 
     assert repo_path_2 != repo_path_1
+
+@pytest.mark.usefixtures("mock_home_dir")
+def test_cached_stager(tmp_path: Path) -> None:
+    source_data = SourceData("https://github.com/CWorthy-ocean/ucla-roms")
+    stage_path = tmp_path / "my-roms"
+
+    staged_data = source_data.stage(stage_path)
+    assert staged_data is not None
