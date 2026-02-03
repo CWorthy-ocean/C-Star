@@ -1,0 +1,55 @@
+.. _v0.2.0:
+
+v0.2.0
+------
+
+This release focuses on introducing capabilities enabling the orchestration of 
+one-to-many heterogeneous simulations.
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+- The blueprint schema introduced in :ref:`v0.0.1-alpha` is deprecated
+- Deprecate the use of the user environment file
+
+New features
+~~~~~~~~~~~~
+
+- Add ``SimulationRunner`` entrypoint for blueprint execution
+- Add public orchestration models in ``cstar.orchestration.models``
+- Add ``Workplan`` and ``Blueprint`` orchestration in ``cstar.orchestration.orchestration``
+- Add ``cstar`` CLI for command-line execution of ``Workplan``'s and ``Blueprint``'s
+- Add optional dependencies when launching jobs with ``SLURM``
+
+Security Fixes
+~~~~~~~~~~~~~~
+N/A
+
+Bug Fixes
+~~~~~~~~~
+
+- Fix logging failure when file directories do not exist
+- Fix incorrect number of tracers in vertical mixing configuration
+- Fix failure occurring in worker post-run handler
+- Fix/modify how the "active allocation" is identified
+- Fix env var expansion failures due to lmod and environment loading ordering
+- Fix missing partitioning information in ``ROMSInputDataset``
+- Fix simulation failures due to file collisions
+
+Improvements
+~~~~~~~~~~~~
+- Overhaul documentation with a focus on ``Blueprint`` orchestration
+- Improved error logging and message de-duplication
+- Improved developer experience; additional docstrings, increased typehint coverage, expanded linting rules
+- Centralized calculation of various shared strings and paths
+- Parallelized ``ncjoin`` operations
+
+Miscellaneous
+~~~~~~~~~~~~~
+- Mitigate various linter warnings
+- Pin roms-tools to 3.3.0
+
+---
+
+For more details, please refer to the `v0.2.0 commit history`_.
+
+.. _v0.2.0 commit history: https://github.com/CWorthy-ocean/C-Star/compare/v0.1.0...v0.2.0
