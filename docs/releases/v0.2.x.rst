@@ -1,0 +1,49 @@
+.. _v0.2.x:
+
+v0.2.x
+------
+
+This is a bug-fix release focused on stabilizing the orchestration of blueprints.
+
+.. note:: 
+    This release is currently in development
+
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- N/A
+
+New features
+~~~~~~~~~~~~
+
+- Add remote repository caching for re-use across simulations
+
+Security Fixes
+~~~~~~~~~~~~~~
+
+- N/A
+
+Bug Fixes
+~~~~~~~~~
+
+- Fix path concatenation bug resulting in invalid source data paths
+- Fix indentation creating an unreachable code block in git utils
+
+Improvements
+~~~~~~~~~~~~
+
+- Avoid automatic failures by retrying failed git clone operations
+- Add informational logging when tasks fail and additional tasks are cancelled
+- Update default log format to include file name and line number
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+- Additional details added in docstrings
+
+---
+
+For more details, please refer to the `commit history`_.
+
+.. _commit history: https://github.com/CWorthy-ocean/C-Star/compare/v0.2.0...v0.2.x
