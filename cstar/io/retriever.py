@@ -273,8 +273,7 @@ class RemoteRepositoryRetriever(Retriever):
         if any(target_dir.iterdir()):
             raise ValueError(f"cannot clone repository to {target_dir} - dir not empty")
 
-        num_retries = 5
-        delays = iter([30] * num_retries)
+        delays = iter((30, 30))  # allow 3 clone attempts, retry after a 30s delay.
 
         while delay := next(delays, 0):
             try:

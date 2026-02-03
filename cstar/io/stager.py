@@ -1,5 +1,5 @@
-from abc import ABC
 import shutil
+from abc import ABC
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
@@ -142,7 +142,7 @@ class CachedRemoteRepositoryStager(Stager):
         ----------
         target_dir : Path
             The local directory in which to stage the repository
-        
+
         Returns
         -------
         StagedRepository
