@@ -1,5 +1,6 @@
 import hashlib
 import shutil
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar
 import requests
 
 from cstar.base.gitutils import _checkout, _clone
+from cstar.base.log import LoggingMixin
 from cstar.io.constants import SourceClassification
 
 if TYPE_CHECKING:
@@ -44,7 +46,7 @@ def get_retriever(source: "SourceData") -> "Retriever":
     raise ValueError(f"No retriever for {classification}")
 
 
-class Retriever(ABC):
+class Retriever(ABC, LoggingMixin):
     """Class to handle retrieval of data for access by C-Star
 
     Methods
@@ -80,6 +82,7 @@ class Retriever(ABC):
         else:
             target_dir.mkdir(parents=True)
 
+        self.log.debug(f"Saving source `{self.source}` to: {target_dir}")
         savepath = self._save(target_dir=target_dir)
         return savepath
 
@@ -270,10 +273,21 @@ class RemoteRepositoryRetriever(Retriever):
         if any(target_dir.iterdir()):
             raise ValueError(f"cannot clone repository to {target_dir} - dir not empty")
 
-        _clone(
-            source_repo=self.source.location,
-            local_path=target_dir,
-        )
+        num_retries = 5
+        delays = iter([30] * num_retries)
+
+        while delay := next(delays, 0):
+            try:
+                _clone(
+                    source_repo=self.source.location,
+                    local_path=target_dir,
+                )
+                delays = iter([0])
+            except Exception:
+                msg = f"An error occurred while cloning {self.source.location}. Retrying in {delay} seconds."
+                self.log.exception(msg)
+                time.sleep(delay)
+
         if self.source.checkout_target:
             _checkout(
                 source_repo=self.source.location,
