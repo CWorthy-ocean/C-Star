@@ -405,7 +405,7 @@ class SourceDataCollection:
                 )
             case SourceClassification.LOCAL_DIRECTORY:
                 return cls.from_locations(
-                    locations=[f"{common_location}/{subdir}/{f}" for f in files]
+                    locations=[f"{Path(common_location) / subdir / f}" for f in files]
                 )
             case _:
                 raise ValueError(
