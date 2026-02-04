@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import requests
 
+from cstar.base.exceptions import CstarError
 from cstar.base.gitutils import _checkout, _clone
 from cstar.base.log import LoggingMixin
 from cstar.io.constants import SourceClassification
@@ -253,39 +254,49 @@ class RemoteRepositoryRetriever(Retriever):
         raise NotImplementedError("Cannot 'read' a remote repository to memory")
 
     def _save(self, target_dir: Path) -> Path:
-        """Clone this repository to `target_dir`
+        """Clone this repository to `target_dir`.
 
         Parameters
         ----------
-        target_dir, pathlib.Path:
-            The directory in which to clone this repository. Must be empty.
+        target_dir : pathlib.Path
+            The empty directory where this repository will be cloned
 
         Returns
         -------
-        pathlib.Path:
+        pathlib.Path
             The path to the local clone of the repository
 
         Raises
         ------
-        ValueError:
+        ValueError
             If `save` is called with a non-empty directory as `target_dir`
+        CStarError
+            If the clone operation cannot be completed due to remote repo issues
         """
         if any(target_dir.iterdir()):
             raise ValueError(f"cannot clone repository to {target_dir} - dir not empty")
 
-        delays = iter((30, 30))  # allow 3 clone attempts, retry after a 30s delay.
+        delays = [30, 30]  # allow 3 clone attempts, retry after each 30s delay.
+        cloned = False
 
-        while delay := next(delays, 0):
+        while delays and not cloned:
+            delay = delays.pop(0)
+
             try:
                 _clone(
                     source_repo=self.source.location,
                     local_path=target_dir,
                 )
-                delays = iter([0])
+                cloned = True
             except Exception:
                 msg = f"An error occurred while cloning {self.source.location}. Retrying in {delay} seconds."
                 self.log.exception(msg)
                 time.sleep(delay)
+
+        if not cloned:
+            raise CstarError(
+                f"All clone attempts have failed for: {self.source.location}"
+            )
 
         if self.source.checkout_target:
             _checkout(
