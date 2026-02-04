@@ -9,7 +9,7 @@ valid_end_date: 2012-12-31 12:00:00
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: e5e3658ac42b9a19b74bd4ba11d6f6536bdae2e9
+    commit: 7864087ff12742b7890b9bbe4c96ffa8526871f8
     documentation: cworthy fork
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git

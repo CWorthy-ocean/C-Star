@@ -85,10 +85,11 @@ class TestROMSExternalCodeBaseConfigure:
             assert os.environ[recb.root_env_var] == str(recb.working_copy.path)
 
         mock_run_cmd.assert_any_call(
-            f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
-            cwd=roms_path / "Work",
-            msg_pre="Compiling NHMG library...",
-            msg_err="Error when compiling ROMS' NHMG library.",
+            f"make COMPILER={cstar_sysmgr.environment.compiler}",
+            cwd=roms_path / "Tools-Roms",
+            msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
+            msg_post="Compiled Tools-Roms",
+            msg_err="Error when compiling Tools-Roms.",
             raise_on_error=True,
         )
 
