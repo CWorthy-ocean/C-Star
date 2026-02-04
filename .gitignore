@@ -137,6 +137,15 @@ dask-worker-space/
 # PyCharm
 .idea/
 
+# Agents
+**/GEMINI.md
+.gemini/
+gha-creds-*.json
+
+
 # C-Star specific
 cstar/externals/
 docs/generated/
+
+.gemini/
+gha-creds-*.json
