@@ -76,7 +76,6 @@ class TestROMSExternalCodeBaseConfigure:
         ) as mock_run_cmd:
             mock_run_cmd.side_effect = [
                 mock.Mock(returncode=0),  # first call
-                mock.Mock(returncode=0),  # second call
             ]
             recb._configure()
 
