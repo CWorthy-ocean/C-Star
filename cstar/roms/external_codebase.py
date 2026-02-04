@@ -43,7 +43,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
 
         # Compile NHMG library
         _run_cmd(
-            f"make nhmg COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make all COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=roms_root / "Work",
             msg_pre="Compiling NHMG library...",
             msg_err="Error when compiling ROMS' NHMG library.",
