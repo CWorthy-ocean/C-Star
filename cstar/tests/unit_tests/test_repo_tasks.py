@@ -1,8 +1,21 @@
+import typing as t
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from cstar.io.source_data import SourceData
+
+
+@pytest.fixture
+def mock_home_dir(tmp_path: Path) -> t.Generator[t.Callable[[], Path], None, None]:
+    home_dir = tmp_path / "test-asset-cache"
+    home_dir.mkdir(parents=True, exist_ok=True)
+
+    with mock.patch(
+        "cstar.base.utils.get_home_dir", return_value=home_dir
+    ) as mock_get_home_dir:
+        yield mock_get_home_dir
 
 
 @pytest.mark.usefixtures("mock_home_dir")
