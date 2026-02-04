@@ -31,10 +31,10 @@ ENV_CSTAR_HOME: t.Literal["CSTAR_HOME"] = "CSTAR_HOME"
 """Environment variable enabling the user to specify a C-star home directory."""
 
 ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
-"""Environment variable containing a path to the root output directory."""
+"""Environment variable containing a path to the root output directory (user override)."""
 
 ENV_CSTAR_CACHEDIR: t.Literal["CSTAR_CACHEDIR"] = "CSTAR_CACHEDIR"
-"""Environment variable containing a path to the directory where C-star caches files."""
+"""Environment variable containing a path to the asset cache directory (user override)."""
 
 
 def get_home_dir(value_override: Path | None = None) -> Path:
