@@ -38,15 +38,14 @@ def test_cached_stager(tmp_path: Path) -> None:
     stager: CRRS = t.cast(CRRS, source_data.stager)
     cached_data_path = stager._get_cache_path()
 
-    # confirm the repository is retrieved.
     files_1 = {x.resolve().as_posix() for x in staged_data.path.iterdir()}
     files_2 = {x.resolve().as_posix() for x in cached_data_path.iterdir()}
 
-    # confirm cache & target dir both have files
+    # confirm the repository is retrieved.
     assert files_1
     assert files_2
 
-    # confirm the cache and target
+    # confirm the cache and target files do not resolve and overlap
     assert not files_1.intersection(files_2)
 
 
@@ -78,10 +77,10 @@ def test_cached_stager_reuse(tmp_path: Path) -> None:
     ):
         staged_data_2 = source_data_2.stage(stage_path_2)
 
-    # confirm the local copy is refreshed before use without cloning
+    # confirm the remote is not cloned
     mock_clone.assert_not_called()
 
-    # confirm the cached copy is updated before use
+    # confirm the cached copy is updated
     mock_pull.assert_called_once()
 
     # confirm both targets contain the same files.
