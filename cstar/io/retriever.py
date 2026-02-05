@@ -101,7 +101,6 @@ class Retriever(ABC, LoggingMixin):
             The directory containing resources to refresh
         """
         self.log.debug(f"Skipping refresh of datasource in: {target_dir}")
-        pass
 
 
 class RemoteFileRetriever(Retriever, ABC):
