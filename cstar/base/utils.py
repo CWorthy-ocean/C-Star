@@ -40,6 +40,11 @@ ENV_CSTAR_CACHEDIR: t.Literal["CSTAR_CACHEDIR"] = "CSTAR_CACHEDIR"
 def get_home_dir(value_override: Path | None = None) -> Path:
     """Return the path to the C-star home directory.
 
+    Parameters
+    ----------
+    value_override : Path | None
+        An inline override of the value with precedence over default and user env.
+
     Returns
     -------
     Path
