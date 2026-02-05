@@ -147,12 +147,25 @@ class CachedRemoteRepositoryStager(Stager):
         -------
         StagedRepository
         """
-        cache_dir = get_cache_dir()
-        source_key = slugify(self.source.location.casefold().strip())
-        cache_path = cache_dir / source_key
+        cache_path = self._get_cache_path()
         if not cache_path.exists():
             cache_path = self.source.retriever.save(target_dir=cache_path)
+        else:
+            self.source.retriever.refresh(target_dir=cache_path)
 
         shutil.copytree(cache_path, target_dir, symlinks=True, dirs_exist_ok=True)
 
         return StagedRepository(source=self.source, path=target_dir)
+
+    def _get_cache_path(self) -> "Path":
+        """Calculate the path where the stager will cache the repository.
+
+        Returns
+        -------
+        Path
+        """
+        cache_dir = get_cache_dir()
+        source_key = slugify(self.source.location.casefold().strip())
+        cache_path = cache_dir / source_key
+
+        return cache_path

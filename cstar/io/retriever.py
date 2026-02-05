@@ -3,12 +3,12 @@ import shutil
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, override
 
 import requests
 
 from cstar.base.exceptions import CstarError
-from cstar.base.gitutils import _checkout, _clone
+from cstar.base.gitutils import _checkout, _clone, _pull
 from cstar.base.log import LoggingMixin
 from cstar.io.constants import SourceClassification
 
@@ -90,6 +90,17 @@ class Retriever(ABC, LoggingMixin):
     @abstractmethod
     def _save(self, target_dir: Path) -> Path:
         """Retrieve data to a local path"""
+        pass
+
+    def refresh(self, target_dir: Path) -> None:
+        """Refresh local data from the datasource.
+
+        Parameters
+        ----------
+        target_dir: pathlib.Path
+            The directory containing resources to refresh
+        """
+        self.log.debug(f"Skipping refresh of datasource in: {target_dir}")
         pass
 
 
@@ -305,3 +316,18 @@ class RemoteRepositoryRetriever(Retriever):
                 checkout_target=self.source.checkout_target,
             )
         return target_dir
+
+    @override
+    def refresh(self, target_dir: Path) -> None:
+        """Refresh local data from the datasource.
+
+        Parameters
+        ----------
+        target_dir : pathlib.Path
+            The directory containing resources to refresh
+        """
+        try:
+            _pull(local_path=target_dir)
+        except Exception:
+            msg = f"An error occurred while refreshing {self.source.location}"
+            self.log.exception(msg)

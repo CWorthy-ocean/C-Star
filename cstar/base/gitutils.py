@@ -22,7 +22,24 @@ def _clone(source_repo: str, local_path: str | Path) -> None:
         f"git clone {source_repo} {local_path}",
         msg_pre=f"Cloning `{source_repo}`",
         msg_post=f"Cloned {source_repo} to {local_path}",
-        msg_err=f"Error when cloning repository {source_repo} to {local_path}.",
+        msg_err=f"Error when cloning repository {source_repo} to {local_path}",
+        raise_on_error=True,
+    )
+
+
+def _pull(local_path: str | Path) -> None:
+    """Pull latest updates to a local copy of a repository found at `local_path`.
+
+    Parameters
+    ----------
+    local_path : str
+        The path to a local directory containing a cloned repository.
+    """
+    _run_cmd(
+        f"git -C {local_path} pull",
+        msg_pre=f"Pulling latest to `{local_path}`",
+        msg_post=f"Pulled latest in {local_path}",
+        msg_err=f"Error when pulling latest changes to {local_path}",
         raise_on_error=True,
     )
 
