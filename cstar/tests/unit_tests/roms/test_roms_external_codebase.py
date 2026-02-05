@@ -93,36 +93,6 @@ class TestROMSExternalCodeBaseConfigure:
         )
 
     @mock.patch("cstar.base.utils.subprocess.run")
-    def test_make_nhmg_failure(
-        self,
-        mock_subprocess,
-        romsexternalcodebase_staged,
-    ):
-        """Test that the _configure method raises an error when 'NHMG/make' fails."""
-        mock_subprocess.side_effect = [
-            subprocess.CompletedProcess(
-                args=["make nhmg"],
-                returncode=1,
-                stdout="",
-                stderr="Mocked ROMS Compilation Failure",
-            ),
-        ]
-        recb = romsexternalcodebase_staged
-
-        # Test
-        with (
-            pytest.raises(
-                RuntimeError,
-                match=(
-                    "Error when compiling ROMS' NHMG library. Return Code: `1`. STDERR:\n"
-                    "Mocked ROMS Compilation Failure"
-                ),
-            ),
-        ):
-            recb._configure()
-        assert mock_subprocess.call_count == 1
-
-    @mock.patch("cstar.base.utils.subprocess.run")
     def test_make_tools_failure(
         self,
         mock_subprocess,
@@ -130,9 +100,6 @@ class TestROMSExternalCodeBaseConfigure:
     ):
         """Test that the _configure method raises an error when 'Tools-Roms/make' fails."""
         mock_subprocess.side_effect = [
-            subprocess.CompletedProcess(
-                args=["make nhmg"], returncode=0, stdout="", stderr=""
-            ),
             subprocess.CompletedProcess(
                 args=["make Tools-Roms"],
                 returncode=1,
@@ -151,7 +118,7 @@ class TestROMSExternalCodeBaseConfigure:
             ),
         ):
             recb._configure()
-        assert mock_subprocess.call_count == 2
+        assert mock_subprocess.call_count == 1
 
     def test_is_configured_when_configured(
         self,
