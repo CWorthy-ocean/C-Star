@@ -166,6 +166,4 @@ class CachedRemoteRepositoryStager(Stager):
         """
         cache_dir = get_cache_dir()
         source_key = slugify(self.source.location)
-        cache_path = cache_dir / source_key
-
-        return cache_path
+        return cache_dir / source_key
