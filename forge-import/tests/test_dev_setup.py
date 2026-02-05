@@ -166,13 +166,13 @@ class TestDevSetupScript:
         assert "ipykernel" in content, "Script missing Jupyter kernel setup"
         assert "KernelSpecManager" in content, "Script missing kernel detection"
     
-    def test_script_clones_cstar(self, dev_setup_script):
-        """Test that script clones C-Star repository."""
+    def test_script_does_not_clone_cstar(self, dev_setup_script):
+        """Test that script does not clone C-Star (C-Star is installed via environment.yml)."""
         with open(dev_setup_script) as f:
             content = f.read()
-        
-        assert "C-Star" in content, "Script missing C-Star setup"
-        assert "git clone" in content, "Script missing git clone command"
+        assert "git clone" not in content, (
+            "dev-setup.sh should not clone C-Star; C-Star is installed via environment.yml pip section"
+        )
     
     @pytest.mark.skipif(
         not shutil.which("bash"),
