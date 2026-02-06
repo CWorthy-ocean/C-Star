@@ -1,4 +1,5 @@
 import shutil
+import typing as t
 from pathlib import Path
 from typing import ClassVar, Final, Literal, override
 
@@ -10,13 +11,13 @@ class JobFileSystemManager(LoggingMixin):
     all jobs.
     """
 
-    _INPUT_NAME: ClassVar[Literal["input"]] = "input"
-    _WORK_NAME: ClassVar[Literal["work"]] = "work"
-    _TASKS_NAME: ClassVar[Literal["tasks"]] = "tasks"
-    _LOGS_NAME: ClassVar[Literal["logs"]] = "logs"
-    _OUTPUT_NAME: ClassVar[Literal["output"]] = "output"
+    _INPUT_NAME: t.ClassVar[t.Literal["input"]] = "input"
+    _WORK_NAME: t.ClassVar[t.Literal["work"]] = "work"
+    _TASKS_NAME: t.ClassVar[t.Literal["tasks"]] = "tasks"
+    _LOGS_NAME: t.ClassVar[t.Literal["logs"]] = "logs"
+    _OUTPUT_NAME: t.ClassVar[t.Literal["output"]] = "output"
 
-    root: Final[Path]
+    root: t.Final[Path]
     """The root directory of the job. It is provided via user configuration."""
 
     def __init__(self, root_directory: Path) -> None:
@@ -97,16 +98,16 @@ class JobFileSystemManager(LoggingMixin):
 
 
 class RomsFileSystemManager(JobFileSystemManager):
-    _COMPILE_TIME_NAME: ClassVar[Literal["compile_time_code"]] = "compile_time_code"
-    _RUNTIME_NAME: ClassVar[Literal["runtime_code"]] = "runtime_code"
-    _INPUT_DATASETS_NAME: ClassVar[Literal["input_datasets"]] = "input_datasets"
-    _CODEBASES_NAME: ClassVar[Literal["codebases"]] = "codebases"
-    _JOINED_OUTPUT_NAME: ClassVar[Literal["joined_output"]] = "joined_output"
+    _COMPILE_TIME_NAME: t.ClassVar[t.Literal["compile_time_code"]] = "compile_time_code"
+    _RUNTIME_NAME: t.ClassVar[t.Literal["runtime_code"]] = "runtime_code"
+    _INPUT_DATASETS_NAME: t.ClassVar[t.Literal["input_datasets"]] = "input_datasets"
+    _CODEBASES_NAME: t.ClassVar[t.Literal["codebases"]] = "codebases"
+    _JOINED_OUTPUT_NAME: t.ClassVar[t.Literal["joined_output"]] = "joined_output"
 
     def __init__(self, root_directory: Path) -> None:
         super().__init__(root_directory)
 
-    @override
+    @t.override
     def _dir_set(self) -> set[Path]:
         return (
             super()
