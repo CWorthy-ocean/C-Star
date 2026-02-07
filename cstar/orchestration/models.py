@@ -25,7 +25,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
-from cstar.execution.file_system import DirectoryManager, RomsFileSystemManager
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -501,11 +501,11 @@ class Step(BaseModel):
         """
         # TODO: remove bp parameter
         # TODO: consider removing this completely and ONLY storing relative paths
-        out_dir = DirectoryManager.state_home()
+        # out_dir = DirectoryManager.state_home()
 
         run_dir = os.environ[ENV_CSTAR_ORCH_RUNID]
         step_dir = self.safe_name
-        return Path(out_dir) / run_dir / step_dir
+        return Path(run_dir) / step_dir
 
         # runtime_params = self.blueprint_overrides.get("runtime_params", {})
         # output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
