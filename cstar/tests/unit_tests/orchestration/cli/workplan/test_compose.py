@@ -5,14 +5,15 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.utils import ENV_CSTAR_STATE_HOME
+from cstar.base.feature import FF_ON
+from cstar.base.utils import ENV_CSTAR_STATE_HOME, ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import WorkplanTransformer
+from cstar.orchestration.transforms import SplitFrequency, WorkplanTransformer
 from cstar.orchestration.utils import (
     ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_RUNID,
@@ -249,8 +250,8 @@ async def test_prepare_composed_dag(
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
-        "CSTAR_FF_ORCH_TRANSFORM_AUTO": "1",
-        ENV_CSTAR_ORCH_TRX_FREQ: "monthly",
+        ENV_FF_ORCH_TRX_TIMESPLIT: FF_ON,
+        ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
     }
 
     def _raise_ex(*args, **kwargs):
@@ -326,8 +327,8 @@ async def test_run_composed_dag(
         ENV_CSTAR_SLURM_ACCOUNT: "ees250129",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
-        "CSTAR_FF_ORCH_TRANSFORM_AUTO": "1",
-        ENV_CSTAR_ORCH_TRX_FREQ: "monthly",
+        ENV_FF_ORCH_TRX_TIMESPLIT: FF_ON,
+        ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
         ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
 
