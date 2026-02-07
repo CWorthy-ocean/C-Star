@@ -69,7 +69,7 @@ class TestMARBLExternalCodeBaseConfigure:
         """Test that the _configure method succeeds when subprocess calls succeed."""
         mecb = marblexternalcodebase_staged
         # marbl_path = tmp_path
-        with mock.patch.object(MARBLExternalCodeBase, "_run_cmd") as mock_run_cmd:
+        with mock.patch("cstar.marbl.external_codebase._run_cmd") as mock_run_cmd:
             mock_run_cmd.return_value.returncode = 0
             mecb._configure()
 
