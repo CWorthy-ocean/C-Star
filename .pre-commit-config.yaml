@@ -27,13 +27,7 @@ repos:
     rev: v1.16.1
     hooks:
       - id: mypy
-        additional_dependencies: [
-          "types-requests",
-          "types-python-dateutil",
-          "types-PyYAML",
-          "types-pytz",
-          "pydantic",
-        ]        
+        additional_dependencies: []        
 
   - repo: https://github.com/MarcoGorelli/absolufy-imports
     rev: v0.3.1
