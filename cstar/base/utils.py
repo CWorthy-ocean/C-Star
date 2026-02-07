@@ -51,26 +51,6 @@ ENV_CSTAR_CACHEDIR: t.Literal["CSTAR_CACHEDIR"] = "CSTAR_CACHEDIR"
 """Environment variable containing a path to the asset cache directory (user override)."""
 
 
-# def get_output_dir(value_override: Path | None = None) -> Path:
-#     """Return the path to the C-star output directory.
-
-#     Returns
-#     -------
-#     Path
-#     """
-#     if value_override:
-#         return value_override
-
-#     home = home = os.getenv(ENV_CSTAR_HOME, DEFAULT_CSTAR_HOME)
-#     home_path = Path(home).expanduser().resolve()
-
-#     default_out_dir = home_path / DEFAULT_OUTPUT_DIR
-#     final_outdir = os.getenv(ENV_CSTAR_OUTDIR, default_out_dir)
-
-#     return Path(final_outdir).expanduser().resolve()
-
-
-
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
     """Coerces datetime-like input to a datetime instance.
 

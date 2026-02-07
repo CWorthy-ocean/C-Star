@@ -317,7 +317,7 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
             {
                 "CSTAR_RUNID": "12345",
                 "CSTAR_FF_ORCH_TRANSFORM_AUTO": "1",
-                "CSTAR_FF_ORCH_TRANSFORM_OVR": "1"
+                "CSTAR_FF_ORCH_TRANSFORM_OVR": "1",
             },
         ),
     ):
