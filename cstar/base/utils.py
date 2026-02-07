@@ -44,6 +44,47 @@ DEFAULT_STATE_HOME: t.Final[str] = "~/.local/state"
 SCRATCH_DIRS: t.Final[list[str]] = ["SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"]
 """Common env var names identifying scratch paths on HPC systems, in order of precedence."""
 
+ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
+"""Environment variable containing a path to the root output directory."""
+
+ENV_FF_ORCH_TRX_TIMESPLIT: t.Final[str] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
+"""Enable automatic time-splitting of simulations."""
+
+ENV_FF_ORCH_TRX_OVERRIDE: t.Final[str] = "CSTAR_FF_ORCH_TRX_OVERRIDE"
+"""Enable automatic overrides to blueprints contained in a workplan."""
+
+ENV_FF_CLI_ENV_SHOW: t.Final[str] = "CSTAR_FF_CLI_ENV_SHOW"
+"""Enable CLI for displaying environment configuration."""
+
+ENV_FF_CLI_TEMPLATE_CREATE: t.Final[str] = "CSTAR_FF_CLI_TEMPLATE_CREATE"
+"""Enable CLI for creating blueprints and workplans from standard templates."""
+
+ENV_FF_CLI_WORKPLAN_GEN: t.Final[str] = "CSTAR_FF_CLI_WORKPLAN_GEN"
+"""Enable CLI for generating a workplan from a directory of blueprints."""
+
+ENV_FF_CLI_WORKPLAN_PLAN: t.Final[str] = "CSTAR_FF_CLI_WORKPLAN_PLAN"
+"""Enable CLI for generating the execution plan of a workplan."""
+
+ENV_FF_CLI_WORKPLAN_STATUS: t.Final[str] = "CSTAR_FF_CLI_WORKPLAN_STATUS"
+"""Enable CLI for retrieving status about a workplan run."""
+
+ENV_FF_CLI_WORKPLAN_COMPOSE: t.Final[str] = "CSTAR_FF_CLI_WORKPLAN_COMPOSE"
+"""Enable CLI for composing a workplan from pre-existing blueprints."""
+
+
+def get_ff_descriptions() -> dict[str, str]:
+    """Return user-friendly mapping of key-to-decription for all available feature flags."""
+    return {
+        ENV_FF_ORCH_TRX_TIMESPLIT: "Enable automatic time-splitting of simulations.",
+        ENV_FF_ORCH_TRX_OVERRIDE: "Enable automatic overrides to blueprints contained in a workplan.",
+        ENV_FF_CLI_ENV_SHOW: "Enable CLI for displaying environment configuration.",
+        ENV_FF_CLI_TEMPLATE_CREATE: "Enable CLI for creating blueprints and workplans from standard templates.",
+        ENV_FF_CLI_WORKPLAN_GEN: "Enable CLI for generating a workplan from a directory of blueprints.",
+        ENV_FF_CLI_WORKPLAN_PLAN: "Enable CLI for generating the execution plan of a workplan.",
+        ENV_FF_CLI_WORKPLAN_STATUS: "Enable CLI for retrieving status about a workplan run.",
+        ENV_FF_CLI_WORKPLAN_COMPOSE: "Enable CLI for composing a workplan from pre-existing blueprints.",
+    }
+
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
     """Coerces datetime-like input to a datetime instance.
