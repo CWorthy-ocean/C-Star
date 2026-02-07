@@ -89,7 +89,7 @@ class ROMSInputDataset(InputDataset, ABC):
                     "Cannot use hash verification with partitioned source files"
                 )
             n_source_partitions = self.source_np_xi * self.source_np_eta  # type: ignore[operator]
-            ndigits = len(str(n_source_partitions))
+            ndigits = len(str(n_source_partitions - 1))
             locations = []
             for i in range(n_source_partitions):
                 old_suffix = f".{0:0{ndigits}d}.nc"
@@ -332,7 +332,7 @@ class ROMSInputDataset(InputDataset, ABC):
         expects to see `my_grid.nc`
         """
         if self.partitioning is not None:
-            ndigits = len(str(self.partitioning.np_xi * self.partitioning.np_eta))
+            ndigits = len(str(self.partitioning.np_xi * self.partitioning.np_eta - 1))
             zero_str = "." + "0" * ndigits + ".nc"
             zero_files = [f for f in self.partitioning.files if zero_str in str(f)]
             return [Path(str(f).replace(zero_str, ".nc")) for f in zero_files]
