@@ -29,6 +29,7 @@ repos:
         name: mypy
         entry: mypy
         language: system
+        types: [python]
 
   - repo: https://github.com/MarcoGorelli/absolufy-imports
     rev: v0.3.1
