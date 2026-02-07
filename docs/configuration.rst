@@ -19,9 +19,13 @@ Frequent users may want to set preferred values for these variables in their ``.
 |                              |                       | for storage of C-Star |
 |                              |                       | configuration.        |
 +------------------------------+-----------------------+-----------------------+
-| CSTAR_OUTDIR                 | ~/.cstar/assets       | The default location  |
-|                              |                       | for storage of C-Star |
+| CSTAR_OUTDIR                 | ~/.cstar/assets       | The location for      |
+|                              |                       | storage of C-Star     |
 |                              |                       | outputs.              |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_CACHEDIR               | ~/.cstar/cache        | The location for      |
+|                              |                       | storage of re-usable  |
+|                              |                       | assets.               |
 +------------------------------+-----------------------+-----------------------+
 | CSTAR_NPROCS_POST            | os.cpu_count() / 3    | The number of         |
 |                              |                       | parallel processes to |

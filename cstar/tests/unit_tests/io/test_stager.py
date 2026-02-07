@@ -33,7 +33,10 @@ class TestRegistry:
     @pytest.mark.parametrize(
         "classification, expected_stager_cls",
         [
-            (SourceClassification.REMOTE_REPOSITORY, stager.RemoteRepositoryStager),
+            (
+                SourceClassification.REMOTE_REPOSITORY,
+                stager.CachedRemoteRepositoryStager,
+            ),
             (SourceClassification.REMOTE_BINARY_FILE, stager.RemoteBinaryFileStager),
             (SourceClassification.REMOTE_TEXT_FILE, stager.RemoteTextFileStager),
             (SourceClassification.LOCAL_BINARY_FILE, stager.LocalBinaryFileStager),
@@ -90,7 +93,7 @@ class TestStagerSubclasses:
             stager.RemoteTextFileStager,
             stager.LocalBinaryFileStager,
             stager.LocalTextFileStager,
-            stager.RemoteRepositoryStager,
+            stager.CachedRemoteRepositoryStager,
         ]:
             source = mocksourcedata_factory(
                 location="somewhere", classification=cls._classification

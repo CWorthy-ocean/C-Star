@@ -1,12 +1,15 @@
 import hashlib
 import shutil
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, override
 
 import requests
 
-from cstar.base.gitutils import _checkout, _clone
+from cstar.base.exceptions import CstarError
+from cstar.base.gitutils import _checkout, _clone, _pull
+from cstar.base.log import LoggingMixin
 from cstar.io.constants import SourceClassification
 
 if TYPE_CHECKING:
@@ -44,7 +47,7 @@ def get_retriever(source: "SourceData") -> "Retriever":
     raise ValueError(f"No retriever for {classification}")
 
 
-class Retriever(ABC):
+class Retriever(ABC, LoggingMixin):
     """Class to handle retrieval of data for access by C-Star
 
     Methods
@@ -80,6 +83,7 @@ class Retriever(ABC):
         else:
             target_dir.mkdir(parents=True)
 
+        self.log.debug(f"Saving source `{self.source}` to: {target_dir}")
         savepath = self._save(target_dir=target_dir)
         return savepath
 
@@ -87,6 +91,16 @@ class Retriever(ABC):
     def _save(self, target_dir: Path) -> Path:
         """Retrieve data to a local path"""
         pass
+
+    def refresh(self, target_dir: Path) -> None:
+        """Refresh local data from the datasource.
+
+        Parameters
+        ----------
+        target_dir: pathlib.Path
+            The directory containing resources to refresh
+        """
+        self.log.debug(f"Skipping refresh of datasource in: {target_dir}")
 
 
 class RemoteFileRetriever(Retriever, ABC):
@@ -250,30 +264,50 @@ class RemoteRepositoryRetriever(Retriever):
         raise NotImplementedError("Cannot 'read' a remote repository to memory")
 
     def _save(self, target_dir: Path) -> Path:
-        """Clone this repository to `target_dir`
+        """Clone this repository to `target_dir`.
 
         Parameters
         ----------
-        target_dir, pathlib.Path:
-            The directory in which to clone this repository. Must be empty.
+        target_dir : pathlib.Path
+            The empty directory where this repository will be cloned
 
         Returns
         -------
-        pathlib.Path:
+        pathlib.Path
             The path to the local clone of the repository
 
         Raises
         ------
-        ValueError:
+        ValueError
             If `save` is called with a non-empty directory as `target_dir`
+        CStarError
+            If the clone operation cannot be completed due to remote repo issues
         """
         if any(target_dir.iterdir()):
             raise ValueError(f"cannot clone repository to {target_dir} - dir not empty")
 
-        _clone(
-            source_repo=self.source.location,
-            local_path=target_dir,
-        )
+        delays = [30, 30]  # allow 3 clone attempts, retry after each 30s delay.
+        cloned = False
+
+        while delays and not cloned:
+            delay = delays.pop(0)
+
+            try:
+                _clone(
+                    source_repo=self.source.location,
+                    local_path=target_dir,
+                )
+                cloned = True
+            except Exception:
+                msg = f"An error occurred while cloning {self.source.location}. Retrying in {delay} seconds."
+                self.log.exception(msg)
+                time.sleep(delay)
+
+        if not cloned:
+            raise CstarError(
+                f"All clone attempts have failed for: {self.source.location}"
+            )
+
         if self.source.checkout_target:
             _checkout(
                 source_repo=self.source.location,
@@ -281,3 +315,18 @@ class RemoteRepositoryRetriever(Retriever):
                 checkout_target=self.source.checkout_target,
             )
         return target_dir
+
+    @override
+    def refresh(self, target_dir: Path) -> None:
+        """Refresh local data from the datasource.
+
+        Parameters
+        ----------
+        target_dir : pathlib.Path
+            The directory containing resources to refresh
+        """
+        try:
+            _pull(local_path=target_dir)
+        except Exception:
+            msg = f"An error occurred while refreshing {self.source.location}"
+            self.log.exception(msg)
