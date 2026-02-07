@@ -2,8 +2,8 @@ import typing as t
 from dataclasses import dataclass
 from enum import StrEnum, auto
 
+import typer
 from rich import print
-from typer import Typer
 
 from cstar.base.feature import FF_OFF, FF_ON, is_feature_enabled
 from cstar.base.utils import (
@@ -19,7 +19,7 @@ from cstar.base.utils import (
 )
 from cstar.execution import file_system as fs
 
-app = Typer()
+app = typer.Typer()
 
 
 CONFIG_HEADER: t.Final[str] = "C-Star Environment Configuration"
@@ -62,10 +62,14 @@ class Group:
 
 def _interactive(all_config: dict[VariableGroup, Group]) -> None:
     """Format configuration for an interactive user."""
-    print(f"[underline2]{CONFIG_HEADER}[/underline2]\n")
+    show_headers = len(all_config) > 1
+
+    if show_headers:
+        print(f"[underline2]{CONFIG_HEADER}[/underline2]\n")
 
     for group in all_config.values():
-        print(f"[underline]{group.header}[/underline]")
+        if show_headers:
+            print(f"[underline]{group.header}[/underline]")
 
         for item in group:
             val_in = "[bold red]" if item.value != item.default else ""
@@ -169,3 +173,7 @@ def show(
         return
 
     _interactive(group_meta_map)
+
+
+if __name__ == "__main__":
+    typer.run(app)
