@@ -5,8 +5,9 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.utils import ENV_CSTAR_OUTDIR, get_output_dir
+from cstar.base.utils import ENV_CSTAR_STATE_HOME
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
+from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
@@ -120,7 +121,7 @@ async def test_compose_host_run_parameter(
 
     mock_run = mock.Mock()
     run_id = "my-run"
-    mock_env = {ENV_CSTAR_OUTDIR: output_override_dir.as_posix()}
+    mock_env = {ENV_CSTAR_STATE_HOME: output_override_dir.as_posix()}
 
     with (
         mock.patch("cstar.cli.workplan.compose._run", mock_run),
@@ -186,7 +187,7 @@ async def test_build_and_run_dag_env(
 
     mock_process = mock.AsyncMock()
     mock_env = {
-        ENV_CSTAR_OUTDIR: output_override_dir.as_posix(),
+        ENV_CSTAR_STATE_HOME: output_override_dir.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -244,7 +245,7 @@ async def test_prepare_composed_dag(
     run_id = "my-run"
 
     mock_env = {
-        ENV_CSTAR_OUTDIR: output_override_dir.as_posix(),
+        ENV_CSTAR_STATE_HOME: output_override_dir.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -267,10 +268,9 @@ async def test_prepare_composed_dag(
             template=WorkplanTemplate[workplan_name.upper()],
         )
 
-        run_id = get_run_id(run_id)
-        output_dir = get_output_dir(output_dir)
-
         configure_environment(output_dir, run_id)
+        run_id = get_run_id()
+        output_dir = DirectoryManager.state_home()
         check_environment()
         wp, wp_path = await prepare_workplan(generated_wp_path, output_dir, run_id)
 
