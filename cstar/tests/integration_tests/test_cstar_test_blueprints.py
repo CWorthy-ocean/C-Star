@@ -4,7 +4,6 @@ from unittest import mock
 
 import pytest
 
-import cstar
 from cstar.roms.simulation import ROMSSimulation
 from cstar.tests.integration_tests.config import TEST_CONFIG
 
@@ -53,8 +52,8 @@ class TestCStar:
             mock.patch(
                 "cstar.system.environment.CStarEnvironment.lmod_path", mock_lmod_path
             ),
-            mock.patch.object(
-                cstar.system.environment.CStarEnvironment, "package_root", new=ext_root
+            mock.patch(
+                "cstar.system.environment.CStarEnvironment.package_root", new=ext_root
             ),
         ):
             if "local" in test_config_key:

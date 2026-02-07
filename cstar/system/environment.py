@@ -147,7 +147,7 @@ class CStarEnvironment:
         expanded_vars = {}
         for key, value in env_vars.items():
             # Use os.path.expandvars to expand ${VAR} and $VAR syntax
-            expanded_value = os.path.expandvars(value)
+            expanded_value = os.path.expandvars(value) if value else ""
             expanded_vars[key] = expanded_value
 
         os.environ.update(expanded_vars)
