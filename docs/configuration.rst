@@ -116,6 +116,10 @@ Feature flags enable unsupported, experimental features in C-Star. They are subj
 |                              |                       | experimental          |
 |                              |                       | features.             |
 +------------------------------+-----------------------+-----------------------+
+| CSTAR_FF_CLI_ENV_SHOW        | 0                     | If 1, enable the      |
+|                              |                       | `cstar env show`      |
+|                              |                       | command.              |
++------------------------------+-----------------------+-----------------------+
 | CSTAR_FF_CLI_TEMPLATE_CREATE | 0                     | If 1, enable the      |
 |                              |                       | `cstar template       |
 |                              |                       | create` command.      |
