@@ -1,9 +1,192 @@
+import functools
+import os
 import shutil
 import typing as t
+from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, Final, Literal, override
 
 from cstar.base.log import LoggingMixin
+from cstar.base.utils import (
+    DEFAULT_CACHE_HOME,
+    DEFAULT_CONFIG_HOME,
+    DEFAULT_DATA_HOME,
+    DEFAULT_STATE_HOME,
+    ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_STATE_HOME,
+    SCRATCH_DIRS,
+)
+
+
+def hpc_data_directory() -> Path | None:
+    """A path-locator function that looks for standard scratch file-systems.
+
+    Returns
+    -------
+    Path | None
+        If a scratch file system is identified, return it's paty, otherwise return None.
+    """
+    for env_var in SCRATCH_DIRS:
+        if scratch_path := os.getenv(env_var, ""):
+            return Path(scratch_path)
+
+    return None
+
+
+@dataclass(slots=True)
+class XdgMetaItem:
+    """Metadata specifying how to select a specific XDG-compliant setting."""
+
+    purpose: str
+    """Plain-text description of a setting."""
+    xdg_var_name: str
+    """The standard XDG environment variable name used for the setting."""
+    default_value: str
+    """The default XDG-compliant value for the setting."""
+    var_name: str
+    """The C-Star environment variable used to override default settings."""
+    cstar_subdirectory: str
+    """The name of a subdirectory to be used in the setting home folder."""
+    override_fn: t.Callable[[], Path | None] | None = None
+    """A callable used to identify overridden values at runtime."""
+
+
+@dataclass(slots=True)
+class XdgMetaContainer:
+    """Collection of metadata used to locate configuration values related to
+    the XDG-compliant directories C-Star will use at runtime.
+    """
+
+    cache: XdgMetaItem
+    """Metadata used to identify the cache directory."""
+    config: XdgMetaItem
+    """Metadata used to identify the config directory."""
+    data: XdgMetaItem
+    """Metadata used to identify the data directory."""
+    state: XdgMetaItem
+    """Metadata used to identify the state directory."""
+
+    def __iter__(self) -> t.Iterator[XdgMetaItem]:
+        """Return an iterable containing all settings contained in the instance."""
+        yield self.cache
+        yield self.config
+        yield self.data
+        yield self.state
+
+    def __getitem__(
+        self, key: t.Literal["cache", "config", "data", "state"]
+    ) -> XdgMetaItem:
+        """Return configuration sections by subscript."""
+        return getattr(self, key)
+
+
+@functools.cache
+def load_xdg_metadata() -> XdgMetaContainer:
+    """Retrieve the configuration used to identify XDG-compliant directories."""
+    return XdgMetaContainer(
+        cache=XdgMetaItem(
+            purpose="Specify the root directory where C-Star will cache temporary files.",
+            xdg_var_name="XDG_CACHE_HOME",
+            default_value=DEFAULT_CACHE_HOME,
+            var_name=ENV_CSTAR_CACHE_HOME,
+            cstar_subdirectory="cstar",
+        ),
+        config=XdgMetaItem(
+            purpose="Specify the root directory where C-Star will store configuration files.",
+            xdg_var_name="XDG_CONFIG_HOME",
+            default_value=DEFAULT_CONFIG_HOME,
+            var_name=ENV_CSTAR_CONFIG_HOME,
+            cstar_subdirectory="cstar",
+        ),
+        data=XdgMetaItem(
+            purpose="Specify the root directory where C-Star will store datasets.",
+            xdg_var_name="XDG_DATA_HOME",
+            default_value=DEFAULT_DATA_HOME,
+            var_name=ENV_CSTAR_DATA_HOME,
+            cstar_subdirectory="cstar",
+            override_fn=hpc_data_directory,
+        ),
+        state=XdgMetaItem(
+            purpose="Specify the root directory where C-Star will store state.",
+            xdg_var_name="XDG_STATE_HOME",
+            default_value=DEFAULT_STATE_HOME,
+            var_name=ENV_CSTAR_STATE_HOME,
+            cstar_subdirectory="cstar",
+        ),
+    )
+
+
+class DirectoryManager:
+    """Manage the directories used by C-Star."""
+
+    @classmethod
+    def xdg_dir(cls, var_set: XdgMetaItem) -> Path:
+        """Calculate an XDG-compliant path honoring standard precedence rules.
+
+        Returns a value in the order:
+        - user-overrides provided via environment variable
+        - overrides resulting from custom "locator" functions
+        - subdirectories provided in XDG_***_HOME environment variables
+        - default XDG-compliant folders if no env vars are provided.
+
+        Parameters
+        ----------
+        var_set : XdgVarSet
+            The configuration used to identify the pertinent environment variables
+            and default values for a given directory.
+
+        Returns
+        -------
+        Path
+        """
+        dir_name = var_set.cstar_subdirectory
+        override_fn = var_set.override_fn
+        path = Path(var_set.default_value) / dir_name
+
+        if env_value := os.getenv(var_set.var_name, ""):
+            # check user-provided environment variables
+            path = Path(env_value)
+        elif override_fn and (override_value := override_fn()):
+            # check functions that return alternative locations
+            path = override_value / dir_name
+        elif xdg_value := os.getenv(var_set.xdg_var_name, ""):
+            # check user provided XDG-.*-HOME environment variables
+            path = Path(xdg_value) / dir_name
+
+        return path.expanduser().resolve()
+
+    @classmethod
+    def cache_home(cls) -> Path:
+        """Get the C-Star cache directory.
+
+        Used to cache temporary files to disk (e.g. git repositories).
+        """
+        return cls.xdg_dir(load_xdg_metadata().cache)
+
+    @classmethod
+    def config_home(cls) -> Path:
+        """Get the C-Star config directory.
+
+        Used to store persistent C-Star configuration on disk (e.g .env files).
+        """
+        return cls.xdg_dir(load_xdg_metadata().config)
+
+    @classmethod
+    def data_home(cls) -> Path:
+        """Get the C-Star data directory.
+
+        Used to store large data files to disk (e.g. simulation input datasets).
+        """
+        return cls.xdg_dir(load_xdg_metadata().data)
+
+    @classmethod
+    def state_home(cls) -> Path:
+        """Get the C-Star state directory.
+
+        Used to store C-Star state files (databases, logs, etc.).
+        """
+        return cls.xdg_dir(load_xdg_metadata().state)
 
 
 class JobFileSystemManager(LoggingMixin):

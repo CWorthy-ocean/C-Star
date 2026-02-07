@@ -1,7 +1,6 @@
 import datetime as dt
 import functools
 import hashlib
-import os
 import re
 import subprocess
 import typing as t
@@ -15,20 +14,35 @@ from cstar.base.log import get_logger
 log = get_logger(__name__)
 
 
-DEFAULT_CSTAR_HOME: t.Literal["~/.cstar"] = "~/.cstar"
-"""The default C-Star configuration directory."""
+ENV_CSTAR_CONFIG_HOME: t.Final[str] = "CSTAR_CONFIG_HOME"
+"""Environment variable used to override the home directory for C-Star config storage."""
+
+ENV_CSTAR_DATA_HOME: t.Final[str] = "CSTAR_DATA_HOME"
+"""Environment variable used to override the home directory for C-Star dataset storage."""
+
+ENV_CSTAR_STATE_HOME: t.Final[str] = "CSTAR_STATE_HOME"
+"""Environment variable used to override the home directory for C-Star state storage."""
+
+ENV_CSTAR_CACHE_HOME: t.Final[str] = "CSTAR_CACHE_HOME"
+"""Environment variable used to override the home directory for C-Star file cache."""
 
 DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
 
-DEFAULT_OUTPUT_DIR: t.Final[str] = "assets"
-"""The default subdirectory of `<CSTAR_HOME>` where job output is written."""
+DEFAULT_CACHE_HOME: t.Final[str] = "~/.cache"
+"""The default, XDG-compliant directory where c-star cache is written"""
 
-DEFAULT_CACHE_DIR: t.Final[str] = "cache"
-"""The default subdirectory of `<CSTAR_HOME>` where the system caches files."""
+DEFAULT_CONFIG_HOME: t.Final[str] = "~/.config"
+"""The default, XDG-compliant directory where c-star config is written"""
 
-ENV_CSTAR_HOME: t.Literal["CSTAR_HOME"] = "CSTAR_HOME"
-"""Environment variable enabling the user to specify a C-star home directory."""
+DEFAULT_DATA_HOME: t.Final[str] = "~/.local/share"
+"""The default, XDG-compliant directory where c-star config is written"""
+
+DEFAULT_STATE_HOME: t.Final[str] = "~/.local/state"
+"""The default, XDG-compliant directory where c-star state is written"""
+
+SCRATCH_DIRS: t.Final[list[str]] = ["SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"]
+"""Common scratch directory names on HPC systems, in order of precedence."""
 
 ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
 """Environment variable containing a path to the root output directory (user override)."""
@@ -37,85 +51,24 @@ ENV_CSTAR_CACHEDIR: t.Literal["CSTAR_CACHEDIR"] = "CSTAR_CACHEDIR"
 """Environment variable containing a path to the asset cache directory (user override)."""
 
 
-def get_home_dir(value_override: Path | None = None) -> Path:
-    """Return the path to the C-star home directory.
+# def get_output_dir(value_override: Path | None = None) -> Path:
+#     """Return the path to the C-star output directory.
 
-    Parameters
-    ----------
-    value_override : Path | None
-        An inline override of the value with precedence over default and user env.
+#     Returns
+#     -------
+#     Path
+#     """
+#     if value_override:
+#         return value_override
 
-    Returns
-    -------
-    Path
-    """
-    if value_override:
-        return value_override
+#     home = home = os.getenv(ENV_CSTAR_HOME, DEFAULT_CSTAR_HOME)
+#     home_path = Path(home).expanduser().resolve()
 
-    home = os.getenv(ENV_CSTAR_HOME, DEFAULT_CSTAR_HOME)
-    home_dir = Path(home).expanduser().resolve()
+#     default_out_dir = home_path / DEFAULT_OUTPUT_DIR
+#     final_outdir = os.getenv(ENV_CSTAR_OUTDIR, default_out_dir)
 
-    return home_dir
+#     return Path(final_outdir).expanduser().resolve()
 
-
-def _home_subdir(
-    default_subdir: str, env_var_name: str, value_override: Path | None = None
-) -> Path:
-    """Return the path to a subdirectory of the C-Star home directory.
-
-    Parameters
-    ----------
-    default_subdir : str
-        The default name of the subdirectory when not overridden by the user.
-    env_var_name : str
-        The user-facing environment variable used to override the setting.
-    value_override : Path | None
-        An inline override of the value with precedence over default and user env.
-
-    Returns
-    -------
-    Path
-        The absolute path to the directory.
-    """
-    if value_override:
-        return value_override
-
-    home_path = get_home_dir()
-
-    default_dir = home_path / default_subdir
-    final_dir = os.getenv(env_var_name, default_dir)
-
-    return Path(final_dir).expanduser().resolve()
-
-
-def get_output_dir(value_override: Path | None = None) -> Path:
-    """Return the path to the C-star output directory.
-
-    Parameters
-    ----------
-    value_override : Path | None
-        An inline override of the value with precedence over default and user env.
-
-    Returns
-    -------
-    Path
-    """
-    return _home_subdir(DEFAULT_OUTPUT_DIR, ENV_CSTAR_OUTDIR, value_override)
-
-
-def get_cache_dir(value_override: Path | None = None) -> Path:
-    """Return the path to the C-star cache directory.
-
-    Parameters
-    ----------
-    value_override : Path | None
-        An inline override of the value with precedence over default and user env.
-
-    Returns
-    -------
-    Path
-    """
-    return _home_subdir(DEFAULT_OUTPUT_DIR, ENV_CSTAR_OUTDIR, value_override)
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
@@ -375,7 +328,7 @@ def _run_cmd(
     if env:
         kwargs["env"] = env
 
-    result: subprocess.CompletedProcess[str] = fn(**kwargs)
+    result: subprocess.CompletedProcess[str] = fn(**kwargs)  # type: ignore[reportArgumentType,reportCallIssue]
     stdout = str(result.stdout).strip() if result.stdout is not None else ""
     if result.returncode != 0:
         rc_out = f"Return Code: `{result.returncode}`."

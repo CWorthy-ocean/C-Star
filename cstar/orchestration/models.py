@@ -24,8 +24,8 @@ from pydantic import (
 )
 from pytimeparse import parse
 
-from cstar.base.utils import ENV_CSTAR_OUTDIR, slugify
-from cstar.execution.file_system import RomsFileSystemManager
+from cstar.base.utils import slugify
+from cstar.execution.file_system import DirectoryManager, RomsFileSystemManager
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -499,20 +499,23 @@ class Step(BaseModel):
         Path
             The path to the step working directory.
         """
-        if out_dir := os.getenv(ENV_CSTAR_OUTDIR, ""):
-            run_dir = os.environ[ENV_CSTAR_ORCH_RUNID]
-            step_dir = self.safe_name
-            return Path(out_dir) / run_dir / step_dir
+        # TODO: remove bp parameter
+        # TODO: consider removing this completely and ONLY storing relative paths
+        out_dir = DirectoryManager.state_home()
 
-        runtime_params = self.blueprint_overrides.get("runtime_params", {})
-        output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
+        run_dir = os.environ[ENV_CSTAR_ORCH_RUNID]
+        step_dir = self.safe_name
+        return Path(out_dir) / run_dir / step_dir
 
-        od_path = Path(bp.runtime_params.output_dir)
+        # runtime_params = self.blueprint_overrides.get("runtime_params", {})
+        # output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
 
-        if output_dir_override:
-            od_path = Path(output_dir_override)
+        # od_path = Path(bp.runtime_params.output_dir)
 
-        return od_path
+        # if output_dir_override:
+        #     od_path = Path(output_dir_override)
+
+        # return od_path
 
     def file_system(self, bp: RomsMarblBlueprint) -> RomsFileSystemManager:
         """The directories used by this step.
