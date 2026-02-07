@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from cstar.base.utils import DEFAULT_OUTPUT_DIR, additional_files_dir
+from cstar.base.utils import DEFAULT_STATE_HOME, additional_files_dir
 from cstar.orchestration.dag_runner import build_and_run_dag
 
 app = typer.Typer()
@@ -83,7 +83,7 @@ def compose(
         typer.Option(
             help="Override the output in the blueprint file(s) with this path."
         ),
-    ] = DEFAULT_OUTPUT_DIR,
+    ] = DEFAULT_STATE_HOME,
     run_id: t.Annotated[
         str,
         typer.Option(help="The unique identifier for an execution of the workplan."),

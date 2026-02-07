@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -149,7 +150,9 @@ def test_override_transform(
     transform = OverrideTransform()
     step = step_overiding_wp.steps[0]
 
-    steps = transform(step)
+    with mock.patch.dict(os.environ, {"CSTAR_RUNID": "12345"}, clear=True):
+        steps = transform(step)
+
     transformed = list(steps)[0]
 
     # confirm a attribute of the blueprint is changed (bp.blueprint_path)
@@ -208,7 +211,9 @@ def test_override_transform_system_precedence(
     transform = OverrideTransform(sys_overrides=system_od_override)
     step = step_overiding_wp.steps[0]
 
-    steps = transform(step)
+    with mock.patch.dict(os.environ, {"CSTAR_RUNID": "12345"}, clear=True):
+        steps = transform(step)
+
     transformed = list(steps)[0]
 
     # confirm a attribute of the blueprint is changed (bp.blueprint_path)

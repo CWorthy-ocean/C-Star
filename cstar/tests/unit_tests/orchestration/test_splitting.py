@@ -1,3 +1,4 @@
+import os
 import typing as t
 from datetime import datetime
 from pathlib import Path
@@ -118,7 +119,9 @@ def test_splitter(single_step_workplan: Workplan) -> None:
     transform = RomsMarblTimeSplitter()
 
     step = single_step_workplan.steps[0]
-    transformed_steps = list(transform(step))
+
+    with mock.patch.dict(os.environ, {"CSTAR_RUNID": "12345"}, clear=True):
+        transformed_steps = list(transform(step))
 
     # one step transforms into 12 monthly steps
     assert len(transformed_steps) == 12

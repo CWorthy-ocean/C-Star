@@ -29,13 +29,8 @@ ENV_CSTAR_SLURM_QUEUE: t.Literal["CSTAR_SLURM_QUEUE"] = "CSTAR_SLURM_QUEUE"
 """Environment variable containing the SLURM priority (queue) used by the SLURM scheduler."""
 
 
-def get_run_id(run_id: str = "") -> str:
+def get_run_id() -> str:
     """Retrieve the current run-id.
-
-    Parameters
-    ----------
-    run_id : str | None
-        If non-null, used to override a pre-configured run id.
 
     Generate a new run-id if not found in the environment.
 
@@ -43,8 +38,5 @@ def get_run_id(run_id: str = "") -> str:
     -------
     str
     """
-    if run_id:
-        return run_id
-
     new_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return os.getenv(ENV_CSTAR_ORCH_RUNID, new_run_id)
