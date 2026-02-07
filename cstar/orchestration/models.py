@@ -1,5 +1,4 @@
 import itertools
-import os
 import typing as t
 from abc import ABC
 from copy import deepcopy
@@ -26,7 +25,7 @@ from pytimeparse import parse
 
 from cstar.base.utils import slugify
 from cstar.execution.file_system import DirectoryManager, RomsFileSystemManager
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
+from cstar.orchestration.utils import get_run_id
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -503,7 +502,7 @@ class Step(BaseModel):
         # TODO: consider removing this completely and ONLY storing relative paths
         out_dir = DirectoryManager.state_home()
 
-        run_dir = os.environ[ENV_CSTAR_ORCH_RUNID]
+        run_dir = get_run_id()
         step_dir = self.safe_name
         return Path(out_dir) / run_dir / step_dir
 
