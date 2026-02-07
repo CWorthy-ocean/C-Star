@@ -132,7 +132,12 @@ Feature flags enable unsupported, experimental features in C-Star. They are subj
 |                              |                       | `cstar workplan       |
 |                              |                       | status` command.      |
 +------------------------------+-----------------------+-----------------------+
-| CSTAR_FF_ORCH_TRANSFORM_AUTO | 0                     | If 1, enable the      |
+| CSTAR_FF_ORCH_TRX_OVERRIDE   | 0                     | If 1, enable auto-    |
+|                              |                       | matic overrides to    |
+|                              |                       | blueprints contained  |
+|                              |                       | in a workplan.        |
++------------------------------+-----------------------+-----------------------+
+| CSTAR_FF_ORCH_TRX_TIMESPLIT  | 0                     | If 1, enable the      |
 |                              |                       | time-splitting of     |
 |                              |                       | simulations when run  |
 |                              |                       | by the orchestrator.  |
