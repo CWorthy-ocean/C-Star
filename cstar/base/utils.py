@@ -44,12 +44,6 @@ DEFAULT_STATE_HOME: t.Final[str] = "~/.local/state"
 SCRATCH_DIRS: t.Final[list[str]] = ["SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"]
 """Common env var names identifying scratch paths on HPC systems, in order of precedence."""
 
-ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
-"""Environment variable containing a path to the root output directory (user override)."""
-
-ENV_CSTAR_CACHEDIR: t.Literal["CSTAR_CACHEDIR"] = "CSTAR_CACHEDIR"
-"""Environment variable containing a path to the asset cache directory (user override)."""
-
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
     """Coerces datetime-like input to a datetime instance.
