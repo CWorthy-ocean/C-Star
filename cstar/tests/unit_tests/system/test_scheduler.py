@@ -225,7 +225,7 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, caplog: pytest.CaptureFixture
+        self, mock_subprocess_run, caplog: pytest.LogCaptureFixture
     ):
         """Validate SlurmScheduler handles subprocess failures when querying CPUs.
 
@@ -278,7 +278,7 @@ class TestScheduler:
         )
 
     def test_slurmscheduler_global_max_mem_per_node_gb_failure(
-        self, mock_subprocess_run, caplog: pytest.CaptureFixture
+        self, mock_subprocess_run, caplog: pytest.LogCaptureFixture
     ):
         """Validate SlurmScheduler handles subprocess failures when querying memory.
 
@@ -328,7 +328,7 @@ class TestScheduler:
         )
 
     def test_pbsscheduler_global_max_cpus_per_node_failure(
-        self, mock_subprocess_run, caplog: pytest.CaptureFixture
+        self, mock_subprocess_run, caplog: pytest.LogCaptureFixture
     ):
         """Validate PBSScheduler handles subprocess failures when querying CPUs.
 
@@ -360,7 +360,7 @@ class TestScheduler:
         assert "STDERR:\nError querying CPUs" in captured
 
     def test_pbsscheduler_global_max_mem_per_node_gb_failure(
-        self, mock_subprocess_run, caplog: pytest.CaptureFixture
+        self, mock_subprocess_run, caplog: pytest.LogCaptureFixture
     ):
         """Validate PBSScheduler handles subprocess failures when querying memory.
 

@@ -5,7 +5,6 @@ import unittest.mock as mock
 
 import pytest
 
-import cstar
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.system.manager import cstar_sysmgr
 
@@ -71,9 +70,7 @@ class TestROMSExternalCodeBaseConfigure:
     ):
         """Test that the _configure method succeeds when subprocess calls succeed."""
         recb = romsexternalcodebase_staged
-        with mock.patch.object(
-            cstar.roms.external_codebase, "_run_cmd"
-        ) as mock_run_cmd:
+        with mock.patch.object(ROMSExternalCodeBase, "_run_cmd") as mock_run_cmd:
             mock_run_cmd.side_effect = [
                 mock.Mock(returncode=0),  # first call
                 mock.Mock(returncode=0),  # second call
