@@ -38,6 +38,7 @@ Improvements
 - Avoid automatic failures by retrying failed git clone operations
 - Add informational logging when tasks fail and additional tasks are cancelled
 - Update default log format to include file name and line number
+- Add constants for the set of available feature flags
 
 Miscellaneous
 ~~~~~~~~~~~~~
