@@ -36,7 +36,7 @@ DEFAULT_CONFIG_HOME: t.Final[str] = "~/.config"
 """The default, XDG-compliant directory where c-star config is written"""
 
 DEFAULT_DATA_HOME: t.Final[str] = "~/.local/share"
-"""The default, XDG-compliant directory where c-star config is written"""
+"""The default, XDG-compliant directory where c-star data is written"""
 
 DEFAULT_STATE_HOME: t.Final[str] = "~/.local/state"
 """The default, XDG-compliant directory where c-star state is written"""
