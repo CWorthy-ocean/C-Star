@@ -42,7 +42,7 @@ DEFAULT_STATE_HOME: t.Final[str] = "~/.local/state"
 """The default, XDG-compliant directory where c-star state is written"""
 
 SCRATCH_DIRS: t.Final[list[str]] = ["SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"]
-"""Common scratch directory names on HPC systems, in order of precedence."""
+"""Common env var names identifying scratch paths on HPC systems, in order of precedence."""
 
 ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
 """Environment variable containing a path to the root output directory (user override)."""
