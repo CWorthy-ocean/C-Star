@@ -6,11 +6,10 @@ from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
 
-import cstar
 from cstar.system.environment import CStarEnvironment
 
 
-class MockEnvironment(cstar.system.environment.CStarEnvironment):
+class MockEnvironment(CStarEnvironment):
     def __init__(
         self,
         system_name="mock_system",
@@ -41,7 +40,7 @@ class TestSetupEnvironmentFromFiles:
     @pytest.mark.parametrize("lmod_syshost", ["perlmutter", "derecho", "expanse"])
     @patch("cstar.base.utils.subprocess.run")
     @patch.object(
-        cstar.system.environment.CStarEnvironment,
+        CStarEnvironment,
         "uses_lmod",
         new_callable=PropertyMock,
         return_value=True,
@@ -152,9 +151,7 @@ class TestSetupEnvironmentFromFiles:
 
         # Patch the root path and expanduser to point to our temporary files
         with (
-            patch.object(
-                cstar.system.environment.CStarEnvironment, "package_root", new=tmp_path
-            ),
+            patch.object(CStarEnvironment, "package_root", new=tmp_path),
         ):
             # Instantiate the environment to trigger loading the environment variables
             env = MockEnvironment()

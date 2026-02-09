@@ -23,17 +23,13 @@ repos:
         args: ["--fix"]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.16.1
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies: [
-          "types-requests",
-          "types-python-dateutil",
-          "types-PyYAML",
-          "types-pytz",
-          "pydantic",
-        ]        
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
 
   - repo: https://github.com/MarcoGorelli/absolufy-imports
     rev: v0.3.1
