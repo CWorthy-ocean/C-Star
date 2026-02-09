@@ -17,11 +17,6 @@ from cstar.base.utils import (
 )
 from cstar.execution.file_system import DirectoryManager as FSM
 
-# DEFAULT_CACHE_DIR = "~/.cache/cstar"
-# DEFAULT_CONFIG_DIR = "~/.config/cstar"
-# DEFAULT_DATA_DIR = "~/.local/share/cstar"
-# DEFAULT_STATE_DIR = "~/.local/state/cstar"
-
 
 @pytest.mark.parametrize(
     ("fn_under_test", "default_value"),
