@@ -7,49 +7,13 @@ from pathlib import Path
 
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import (
-    DEFAULT_CACHE_HOME,
-    DEFAULT_CONFIG_HOME,
-    DEFAULT_DATA_HOME,
-    DEFAULT_STATE_HOME,
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_STATE_HOME,
-    SCRATCH_DIRS,
+    EnvItem,
+    get_env_item,
 )
-
-
-def hpc_data_directory() -> Path | None:
-    """A path-locator function that looks for standard scratch file-systems.
-
-    Returns
-    -------
-    Path | None
-        If a scratch file system is identified, return it's paty, otherwise return None.
-    """
-    for env_var in SCRATCH_DIRS:
-        if scratch_path := os.getenv(env_var, ""):
-            return Path(scratch_path)
-
-    return None
-
-
-@dataclass(slots=True)
-class XdgMetaItem:
-    """Metadata specifying how to select a specific XDG-compliant setting."""
-
-    purpose: str
-    """Plain-text description of a setting."""
-    xdg_var_name: str
-    """The standard XDG environment variable name used for the setting."""
-    default_value: str
-    """The default XDG-compliant value for the setting."""
-    var_name: str
-    """The C-Star environment variable used to override default settings."""
-    cstar_subdirectory: str
-    """The name of a subdirectory to be used in the setting home folder."""
-    override_fn: t.Callable[[], Path | None] | None = None
-    """A callable used to identify overridden values at runtime."""
 
 
 @dataclass(slots=True)
@@ -58,62 +22,31 @@ class XdgMetaContainer:
     the XDG-compliant directories C-Star will use at runtime.
     """
 
-    cache: XdgMetaItem
+    cache: EnvItem
     """Metadata used to identify the cache directory."""
-    config: XdgMetaItem
+    config: EnvItem
     """Metadata used to identify the config directory."""
-    data: XdgMetaItem
+    data: EnvItem
     """Metadata used to identify the data directory."""
-    state: XdgMetaItem
+    state: EnvItem
     """Metadata used to identify the state directory."""
 
-    def __iter__(self) -> t.Iterator[XdgMetaItem]:
+    def __iter__(self) -> t.Iterator[EnvItem]:
         """Return an iterable containing all settings contained in the instance."""
         yield self.cache
         yield self.config
         yield self.data
         yield self.state
 
-    def __getitem__(
-        self, key: t.Literal["cache", "config", "data", "state"]
-    ) -> XdgMetaItem:
-        """Return configuration sections by subscript."""
-        return getattr(self, key)
-
 
 @functools.cache
 def load_xdg_metadata() -> XdgMetaContainer:
     """Retrieve the configuration used to identify XDG-compliant directories."""
     return XdgMetaContainer(
-        cache=XdgMetaItem(
-            purpose="Specify the root directory where C-Star will cache temporary files.",
-            xdg_var_name="XDG_CACHE_HOME",
-            default_value=DEFAULT_CACHE_HOME,
-            var_name=ENV_CSTAR_CACHE_HOME,
-            cstar_subdirectory="cstar",
-        ),
-        config=XdgMetaItem(
-            purpose="Specify the root directory where C-Star will store configuration files.",
-            xdg_var_name="XDG_CONFIG_HOME",
-            default_value=DEFAULT_CONFIG_HOME,
-            var_name=ENV_CSTAR_CONFIG_HOME,
-            cstar_subdirectory="cstar",
-        ),
-        data=XdgMetaItem(
-            purpose="Specify the root directory where C-Star will store datasets.",
-            xdg_var_name="XDG_DATA_HOME",
-            default_value=DEFAULT_DATA_HOME,
-            var_name=ENV_CSTAR_DATA_HOME,
-            cstar_subdirectory="cstar",
-            override_fn=hpc_data_directory,
-        ),
-        state=XdgMetaItem(
-            purpose="Specify the root directory where C-Star will store state.",
-            xdg_var_name="XDG_STATE_HOME",
-            default_value=DEFAULT_STATE_HOME,
-            var_name=ENV_CSTAR_STATE_HOME,
-            cstar_subdirectory="cstar",
-        ),
+        cache=get_env_item(ENV_CSTAR_CACHE_HOME),
+        config=get_env_item(ENV_CSTAR_CONFIG_HOME),
+        data=get_env_item(ENV_CSTAR_DATA_HOME),
+        state=get_env_item(ENV_CSTAR_STATE_HOME),
     )
 
 
@@ -121,7 +54,7 @@ class DirectoryManager:
     """Manage the directories used by C-Star."""
 
     @classmethod
-    def xdg_dir(cls, var_set: XdgMetaItem) -> Path:
+    def xdg_dir(cls, env_item: EnvItem) -> Path:
         """Calculate an XDG-compliant path honoring standard precedence rules.
 
         Returns a value in the order:
@@ -140,19 +73,19 @@ class DirectoryManager:
         -------
         Path
         """
-        dir_name = var_set.cstar_subdirectory
-        override_fn = var_set.override_fn
-        path = Path(var_set.default_value) / dir_name
+        dir_name = "cstar"
+        override_fn = env_item.default_factory
+        path = Path(env_item.default) / dir_name
 
-        if env_value := os.getenv(var_set.var_name, ""):
+        if env_value := os.getenv(env_item.name, ""):
             # check user-provided environment variables
             path = Path(env_value)
-        elif override_fn and (override_value := override_fn()):
+        elif override_fn and (override_value := override_fn(env_item)):
             # check functions that return alternative locations
-            path = override_value / dir_name
-        elif xdg_value := os.getenv(var_set.xdg_var_name, ""):
+            path = Path(override_value) / dir_name
+        elif env_value := os.getenv(env_item.indirect_var, ""):
             # check user provided XDG-.*-HOME environment variables
-            path = Path(xdg_value) / dir_name
+            path = Path(env_value) / dir_name
 
         return path.expanduser().resolve()
 
@@ -263,13 +196,13 @@ class JobFileSystemManager(LoggingMixin):
         """Construct the directory tree for the job."""
         for task_dir in self._dir_set():
             task_dir.mkdir(parents=True, exist_ok=True)
-            self.log.debug(f"Created {task_dir.name} directory `{task_dir}`")
+            self.log.debug("Created `%s` directory `%s`", task_dir.name, task_dir)
 
     def clear(self) -> None:
         """Ensure the job's working directory is empty."""
         shutil.rmtree(self.root)
         self.root.mkdir(parents=True)
-        self.log.debug(f"Created empty working directory for job `{self.root.name}`")
+        self.log.debug("Created empty working directory for job `%s`", self.root.name)
 
     def __getstate__(self) -> dict[str, str]:
         """Return the state of the object."""

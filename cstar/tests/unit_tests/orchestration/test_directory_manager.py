@@ -6,28 +6,25 @@ from unittest import mock
 import pytest
 
 from cstar.base.utils import (
-    DEFAULT_CACHE_HOME,
-    DEFAULT_CONFIG_HOME,
-    DEFAULT_DATA_HOME,
-    DEFAULT_STATE_HOME,
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_STATE_HOME,
+    get_env_item,
 )
-from cstar.execution.file_system import DirectoryManager as FSM
+from cstar.execution.file_system import DirectoryManager as DirMgr
 
 
 @pytest.mark.parametrize(
     ("fn_under_test", "default_value"),
     [
-        (FSM.cache_home, DEFAULT_CACHE_HOME),
-        (FSM.config_home, DEFAULT_CONFIG_HOME),
-        (FSM.data_home, DEFAULT_DATA_HOME),
-        (FSM.state_home, DEFAULT_STATE_HOME),
+        (DirMgr.cache_home, get_env_item(ENV_CSTAR_CACHE_HOME).default),
+        (DirMgr.config_home, get_env_item(ENV_CSTAR_CONFIG_HOME).default),
+        (DirMgr.data_home, get_env_item(ENV_CSTAR_DATA_HOME).default),
+        (DirMgr.state_home, get_env_item(ENV_CSTAR_STATE_HOME).default),
     ],
 )
-def test_fsm_cachedir_no_config(
+def test_directory_mgr_cachedir_no_config(
     fn_under_test: t.Callable[[], Path], default_value: str
 ) -> None:
     """Verify the default state directory is returned if no environment config is set."""
@@ -42,13 +39,13 @@ def test_fsm_cachedir_no_config(
 @pytest.mark.parametrize(
     ("fn_under_test", "xdg_var", "xdg_value"),
     [
-        (FSM.cache_home, "XDG_CACHE_HOME", "/foo/bar"),
-        (FSM.config_home, "XDG_CONFIG_HOME", "~/foo/baz"),
-        (FSM.data_home, "XDG_DATA_HOME", "/foo/beep"),
-        (FSM.state_home, "XDG_STATE_HOME", "~/foo/boop"),
+        (DirMgr.cache_home, "XDG_CACHE_HOME", "/foo/bar"),
+        (DirMgr.config_home, "XDG_CONFIG_HOME", "~/foo/baz"),
+        (DirMgr.data_home, "XDG_DATA_HOME", "/foo/beep"),
+        (DirMgr.state_home, "XDG_STATE_HOME", "~/foo/boop"),
     ],
 )
-def test_fsm_cachedir_xdg_config(
+def test_directory_mgr_cachedir_xdg_config(
     fn_under_test: t.Callable[[], Path],
     xdg_var: str,
     xdg_value: str,
@@ -68,28 +65,28 @@ def test_fsm_cachedir_xdg_config(
     ("fn_under_test", "xdg_var", "xdg_value", "cstar_var", "cstar_val"),
     [
         (
-            FSM.cache_home,
+            DirMgr.cache_home,
             "XDG_CACHE_HOME",
             "/foo/bar",
             ENV_CSTAR_CACHE_HOME,
             "/my-cache/cstar-cache",
         ),
         (
-            FSM.config_home,
+            DirMgr.config_home,
             "XDG_CONFIG_HOME",
             "/foo/baz",
             ENV_CSTAR_CONFIG_HOME,
             "~/my-config/cstar-config",
         ),
         (
-            FSM.data_home,
+            DirMgr.data_home,
             "XDG_DATA_HOME",
             "/foo/beep",
             ENV_CSTAR_DATA_HOME,
             "/my-data/cstar-data",
         ),
         (
-            FSM.state_home,
+            DirMgr.state_home,
             "XDG_STATE_HOME",
             "/foo/boop",
             ENV_CSTAR_STATE_HOME,
@@ -97,7 +94,7 @@ def test_fsm_cachedir_xdg_config(
         ),
     ],
 )
-def test_fsm_cachedir_cstar_config(
+def test_directory_mgr_cachedir_cstar_config(
     fn_under_test: t.Callable[[], Path],
     xdg_var: str,
     xdg_value: str,
@@ -126,7 +123,7 @@ def test_fsm_cachedir_cstar_config(
         ("LOCAL_SCRATCH", "/local-scratch", "XDG_DATA_HOME", "/foo/beep"),
     ],
 )
-def test_fsm_datadir_hpc_override(
+def test_directory_mgr_datadir_hpc_override(
     scratch_var: str, scratch_val: str, xdg_var: str, xdg_value: str
 ) -> None:
     """Verify the XDG data directory is overridden when HPC-specific scratch
@@ -140,12 +137,12 @@ def test_fsm_datadir_hpc_override(
     with mock.patch.dict(
         os.environ, {xdg_var: xdg_value, scratch_var: scratch_val}, clear=True
     ):
-        output_dir = FSM.data_home()
+        output_dir = DirMgr.data_home()
 
     assert output_dir == expected_path
 
 
-def test_fsm_datadir_hpc_override_with_cstar_var() -> None:
+def test_directory_mgr_datadir_hpc_override_with_cstar_var() -> None:
     """Verify the data directory from the c-star env var takes precedence over both
     automatic scratch paths and xdg values.
     """
@@ -164,6 +161,6 @@ def test_fsm_datadir_hpc_override_with_cstar_var() -> None:
         },
         clear=True,
     ):
-        output_dir = FSM.data_home()
+        output_dir = DirMgr.data_home()
 
     assert output_dir == expected_path
