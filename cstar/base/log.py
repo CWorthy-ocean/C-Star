@@ -123,7 +123,7 @@ def get_logger(
     if not logger.hasHandlers():
         # Root logger defaults to STDERR, we want anything at INFO or lower in STDOUT
         stdout_handler = logging.StreamHandler(sys.stdout)
-        stdout_handler.setLevel(logging.DEBUG)
+        stdout_handler.setLevel(DEFAULT_LOG_LEVEL)
 
         # Filter out any WARNING or higher (goes to STDERR):
         stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
