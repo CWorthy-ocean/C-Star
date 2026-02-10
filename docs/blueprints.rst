@@ -11,6 +11,7 @@ Core Blueprint Schema
 ---------------------
 
 The core attributes of a blueprint come from :class:`cstar.orchestration.models.Blueprint`.
+See the blueprint YAML below for example usage fo the attributes.
 
 .. rubric:: Core Blueprint Attributes
 
@@ -22,7 +23,7 @@ The core attributes of a blueprint come from :class:`cstar.orchestration.models.
   ~cstar.orchestration.models.Blueprint.state
   ~cstar.orchestration.models.Blueprint.cpus_needed
 
-The core blueprint attributes do not contain enough information to be executed.
+The core blueprint attributes do not contain enough information to be executed alone.
 
 Customizing Blueprints
 ----------------------
@@ -73,12 +74,13 @@ using the `cstar cli`.
 RomsMarblBlueprint Example
 --------------------------
 
-This example demonstrates a configured `RomsMarblBlueprint`. Notice that:
+This example YAML demonstrates a configured `RomsMarblBlueprint`. Notice that:
 
-- `ROMS` code can be built from a fork, branch, or even a git commit hash.
-- Remote or local resources can be used to build and execute a simulation.
-- C-Star handles both partioned and unpartitioned data.
-- Runtime and compile-time behaviors can be customized
+- `ROMS` code can be built from a fork, branch, or even a git commit hash, by
+specifying :attr:`branch:` or :attr:`commit:`
+- Remote or local resources can be used to build and execute a simulation, under :attr:`compile_time:`
+- C-Star handles both partioned and unpartitioned data
+- Runtime and compile-time behaviors can be customized in the `.opt` and `.in` files
 
 .. code:: yaml
 
