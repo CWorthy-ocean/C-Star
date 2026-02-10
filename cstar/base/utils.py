@@ -46,7 +46,7 @@ class EnvItem(EnvVar):
         if self.default_factory and (factory_default := self.default_factory(self)):
             return factory_default
 
-        return self.default
+        return os.environ.get(self.name, self.default)
 
     @classmethod
     def from_env_var(cls, env_var: EnvVar, name: str) -> "EnvItem":
@@ -241,7 +241,6 @@ ENV_CSTAR_STATE_HOME: t.Annotated[
     ),
 ] = "CSTAR_STATE_HOME"
 """Environment variable used to override the home directory for C-Star state storage."""
-
 
 ENV_FF_DEVELOPER_MODE: t.Annotated[
     t.Literal["CSTAR_FF_DEVELOPER_MODE"],
