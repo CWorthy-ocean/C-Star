@@ -51,16 +51,6 @@ def _export(all_config: dict[str, list[EnvItem]]) -> None:
             print(f"{item_sep}\n{purpose}\n{item_sep}\n{export}")
 
 
-def _load_all() -> t.Iterable[EnvItem]:
-    """Load all environment variables from all groups.
-
-    Returns
-    -------
-    t.Iterable[EnvItem]
-    """
-    yield from discover_env_vars([base_utils, orch_utils])
-
-
 class DisplayFormat(StrEnum):
     """Supported display formats."""
 
@@ -76,7 +66,7 @@ def show(
     display: DisplayFormat = DisplayFormat.INTERACTIVE,
 ) -> None:
     """Display the active environment configuration."""
-    all_items = list(_load_all())
+    all_items = discover_env_vars([base_utils, orch_utils])
 
     if group != "all":
         all_items = [
