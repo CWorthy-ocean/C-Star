@@ -1,5 +1,6 @@
 import types
 import typing as t
+from collections import defaultdict
 from enum import StrEnum, auto
 
 import typer
@@ -149,10 +150,8 @@ def show(
         ]
 
     # Group items by their group name for display
-    group_map: dict[str, list[EnvItem]] = {}
+    group_map: dict[str, list[EnvItem]] = defaultdict(list)
     for item in all_items:
-        if item.group not in group_map:
-            group_map[item.group] = []
         group_map[item.group].append(item)
 
     if not group_map:
