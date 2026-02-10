@@ -12,10 +12,16 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
+import importlib
 import logging
 import os
 import pathlib
 import sys
+import textwrap
+import typing as t
+
+from docutils import nodes  # noqa: F401
+from docutils.parsers.rst import Directive
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -28,6 +34,78 @@ os.environ["OMP_DISPLAY_ENV"] = "FALSE"
 os.environ["OMP_DISPLAY_AFFINITY"] = "FALSE"
 
 import cstar  # isort:skip
+
+
+log = logging.getLogger(__name__)
+
+
+class EnvVarTableDirective(Directive):
+    """A custom Sphinx directive to generate a table of environment variables from a module."""
+
+    required_arguments = 1
+
+    def run(self) -> list:
+        module_name = self.arguments[0]
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            log.exception("Could not import module %s", module_name)
+            return []
+
+        from cstar.base.utils import EnvVar
+
+        hints = t.get_type_hints(module, include_extras=True)
+
+        # Group items by their group name
+        groups = {}
+        for name, hint in hints.items():
+            if name.startswith("ENV_"):
+                metadata = getattr(hint, "__metadata__", None)
+                if metadata and isinstance(metadata[0], EnvVar):
+                    meta = metadata[0]
+                    var_name = getattr(module, name)
+
+                    default = meta.default
+                    if meta.default_factory:
+                        default = (
+                            f"{default} or <generated>" if default else "<generated>"
+                        )
+
+                    if meta.group not in groups:
+                        groups[meta.group] = []
+                    groups[meta.group].append(
+                        {
+                            "name": var_name,
+                            "default": str(default) if default else "(no default)",
+                            "effect": meta.description,
+                        },
+                    )
+
+        if not groups:
+            return []
+
+        output = []
+        for group_name, items in groups.items():
+            output.append(group_name)
+            output.append("^" * len(group_name))
+            output.append("")
+            output.append(".. list-table::")
+            output.append("   :header-rows: 1")
+            output.append("   :widths: 30 20 50")
+            output.append("")
+            output.append("   * - Variable")
+            output.append("     - Default")
+            output.append("     - Effect")
+
+            for item in items:
+                output.append(f"   * - ``{item['name']}``")
+                output.append(f"     - {item['default']}")
+                output.append(f"     - {item['effect']}")
+
+            output.append("")
+
+        self.state_machine.insert_input(output, module_name)
+        return []
 
 
 project = "C-Star"
@@ -119,6 +197,7 @@ def autodoc_skip_member(app, what, name, obj, skip, options) -> bool:
 def setup(app) -> None:
     """Configure the Sphinx app."""
     app.connect("autodoc-skip-member", autodoc_skip_member)
+    app.add_directive("envvar-table", EnvVarTableDirective)
 
 
 numpydoc_show_class_members = True
