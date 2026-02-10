@@ -25,7 +25,7 @@ from docutils import nodes  # noqa: F401
 from docutils.parsers.rst import Directive
 from sphinx.application import Sphinx
 
-from cstar.base.utils import EnvVar
+from cstar.base.utils import EnvItem, EnvVar, discover_env_vars
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -44,20 +44,17 @@ log = logging.getLogger(__name__)
 
 
 class EnvVarRow(t.NamedTuple):
-    name: str
-    default: str
-    effect: str
+    env_var: EnvItem
 
+    @property
+    def name(self) -> str:
+        return self.env_var.name
 
-class EnvVarTableDirective(Directive):
-    """A custom Sphinx directive to generate a table of environment variables from a module."""
+    @property
+    def default(self) -> str:
+        """Convert the default / default_factory into a docs-ready value."""
+        env_var = self.env_var
 
-    required_arguments = 1
-    optional_arguments = 100
-
-    @classmethod
-    def _get_display_default(cls, env_var: "EnvVar") -> str:
-        """Convert the default / default_factory into a doc-ready value."""
         if env_var.default_factory and env_var.default:
             docs_default = f"{env_var.default} or <generated>"
         elif env_var.default_factory:
@@ -69,26 +66,27 @@ class EnvVarTableDirective(Directive):
 
         return docs_default
 
+    @property
+    def effect(self) -> str:
+        return self.env_var.description
+
+
+class EnvVarTableDirective(Directive):
+    """A custom Sphinx directive to generate a table of environment variables from a module."""
+
+    required_arguments = 1
+    optional_arguments = 100
+
     def _load_variable_groups(
         self,
         module: ModuleType,
         groups: dict[str, list[EnvVarRow]],
     ) -> None:
         """Reflect through the supplied module to discover all environment variables."""
-        all_hints = t.get_type_hints(module, include_extras=True)
-        hints = (x for x in all_hints.items() if x[0].startswith("ENV_"))
+        env_vars = discover_env_vars([module])
 
-        for name, hint in hints:
-            metadata = getattr(hint, "__metadata__", None)
-
-            if metadata and isinstance(metadata[0], EnvVar):
-                env_var = t.cast("EnvVar", metadata[0])
-                default = self._get_display_default(env_var)
-                description = env_var.description
-
-                groups[env_var.group].append(EnvVarRow(name, default, description))
-            else:
-                groups["Uncategorized"].append(EnvVarRow(name, "unknown", "unknown"))
+        for var in env_vars:
+            groups[var.group].append(EnvVarRow(var))
 
     def _render_table(self, groups: dict[str, list[EnvVarRow]]) -> list[str]:
         """Render restructuredText for all discovered environment variables."""
