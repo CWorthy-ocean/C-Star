@@ -1,3 +1,4 @@
+import textwrap
 import typing as t
 from collections import defaultdict
 from enum import StrEnum, auto
@@ -28,11 +29,16 @@ def _interactive(all_config: dict[str, list[EnvItem]]) -> None:
             print(f"[underline]{group_name}[/underline]")
 
         for item in sorted(items, key=lambda x: x.name):
-            val_in = "[bold red]" if item.value != item.default else ""
-            val_out = "[/bold red]" if val_in else ""
+            val_in = "[bold red]" if item.value != item.default else "[green]"
+            val_out = "[/bold red]" if "red" in val_in else "[/green]"
+            def_in, def_out = "[blue]", "[/blue]"
+            desc_in, desc_out = "[yellow italic]", "[/yellow italic]"
 
-            default = f"(default: {item.default}, {item.description})"
-            print(f"- {item.name}: {val_in}{item.value}{val_out} {default}")
+            kvp_detail = f"{item.name}: {val_in}{item.value or '<not-set>'}{val_out}"
+            default_detail = f"(default: {def_in}{item.default or '<none>'}{def_out})"
+            desc_detail = f"{desc_in}{item.description}{desc_out}"
+            details = f"{default_detail}, {desc_detail}"
+            print(f"- {kvp_detail} {details}")
 
         print("\n")
 
@@ -46,9 +52,22 @@ def _export(all_config: dict[str, list[EnvItem]]) -> None:
         print(f"{header_sep}\n# {group_name}\n{header_sep}\n")
 
         for item in sorted(items, key=lambda x: x.name):
-            purpose = f"# {item.description}\n# default: {item.default}"
+            default_detail = f"(default: {item.default or '<none>'})"
+            wrapped_header = textwrap.fill(
+                item.description, width=68, initial_indent="# ", subsequent_indent="# "
+            )
             export = f'export {item.name}="{item.value}"\n'
-            print(f"{item_sep}\n{purpose}\n{item_sep}\n{export}")
+            print(
+                textwrap.dedent(
+                    f"""\
+                    {item_sep}
+                    # {item.name} {default_detail}
+                    <H>
+                    {item_sep}
+                    {export}
+                    """,
+                ).replace("<H>", wrapped_header),
+            )
 
 
 class DisplayFormat(StrEnum):
