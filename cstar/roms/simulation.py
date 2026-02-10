@@ -23,7 +23,6 @@ from cstar.base.utils import (
     slugify,
 )
 from cstar.execution.file_system import (
-    DirectoryManager,
     JobFileSystemManager,
     RomsFileSystemManager,
 )
@@ -48,7 +47,6 @@ from cstar.orchestration.adapter import (
     TidalForcingAdapter,
 )
 from cstar.orchestration.models import RomsMarblBlueprint
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -1191,11 +1189,9 @@ class ROMSSimulation(Simulation):
         build : Compiles the ROMS model.
         is_setup : Checks if the simulation has been properly configured.
         """
-        run_id = os.environ[ENV_CSTAR_ORCH_RUNID]
         compile_time_code_dir = self.fs_manager.compile_time_code_dir
         runtime_code_dir = self.fs_manager.runtime_code_dir
-        input_datasets_dir = DirectoryManager.data_home() / run_id / "datasets"
-        # input_datasets_dir = self.fs_manager.input_datasets_dir
+        input_datasets_dir = self.fs_manager.input_datasets_dir
 
         compile_time_code_dir.mkdir(parents=True, exist_ok=True)
         runtime_code_dir.mkdir(parents=True, exist_ok=True)

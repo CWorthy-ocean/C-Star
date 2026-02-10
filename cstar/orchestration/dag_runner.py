@@ -212,7 +212,7 @@ async def build_and_run_dag(
     """
     configure_environment(output_dir, run_id)
     run_id = get_run_id()
-    output_dir = DirectoryManager.state_home()
+    output_dir = DirectoryManager.data_home()
     check_environment()
     wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 

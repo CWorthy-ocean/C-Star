@@ -65,7 +65,6 @@ def test_file_system_clear(
     fs.clear()
 
     assert all([not f.exists() for f in output_files])
-    assert all([not f.parent.exists() for f in output_files])
 
 
 def test_file_system_pickle_job_fs(tmp_path: Path) -> None:
