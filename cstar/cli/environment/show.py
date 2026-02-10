@@ -57,10 +57,10 @@ def _adapt_xdg_meta_to_env_item(
 ) -> t.Iterable[EnvItem]:
     return [
         EnvItem(
-            description=x.purpose,
+            description=x.description,
             group=x.env_item.group,
-            default=x.default_value,
-            name=x.var_name,
+            default=x.default,
+            name=x.name,
             default_factory=fs.DirectoryManager.xdg_dir(x).as_posix,
         )
         for x in xdg_metadata
@@ -101,26 +101,6 @@ def _discover_env_vars(
     return items
 
 
-def _load_flags() -> t.Iterable[EnvItem]:
-    """Load all feature flags declared in the cstar.base.utils module.
-
-    Returns
-    -------
-    t.Iterable[EnvItem]
-    """
-    return _discover_env_vars(base_utils, prefix="ENV_FF_")
-
-
-def _load_orchestration() -> t.Iterable[EnvItem]:
-    """Load all environment variables declared in the cstar.orchestration.utils module.
-
-    Returns
-    -------
-    t.Iterable[EnvItem]
-    """
-    return _discover_env_vars(orch_utils)
-
-
 def _load_xdg_meta() -> t.Iterable[EnvItem]:
     """Load all XDG environment variables and convert XDG metadata into generic EnvItem.
 
@@ -140,8 +120,8 @@ def _load_all() -> t.Iterable[EnvItem]:
     t.Iterable[EnvItem]
     """
     yield from _load_xdg_meta()
-    yield from _load_flags()
-    yield from _load_orchestration()
+    yield from _discover_env_vars(base_utils, prefix="ENV_FF_")
+    yield from _discover_env_vars(orch_utils)
 
 
 class DisplayFormat(StrEnum):

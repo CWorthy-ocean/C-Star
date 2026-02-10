@@ -27,17 +27,17 @@ class XdgEnvItem:
     cstar_subdirectory: str
 
     @property
-    def purpose(self) -> str:
+    def description(self) -> str:
         """Plain-text description of a setting."""
         return self.env_item.description
 
     @property
-    def default_value(self) -> str:
+    def default(self) -> str:
         """The default XDG-compliant value for the setting."""
         return self.env_item.default
 
     @property
-    def var_name(self) -> str:
+    def name(self) -> str:
         """The C-Star environment variable used to override default settings."""
         return self.env_item.name
 
@@ -123,9 +123,9 @@ class DirectoryManager:
         """
         dir_name = var_set.cstar_subdirectory
         override_fn = var_set.env_item.default_factory
-        path = Path(var_set.default_value) / dir_name
+        path = Path(var_set.default) / dir_name
 
-        if env_value := os.getenv(var_set.var_name, ""):
+        if env_value := os.getenv(var_set.name, ""):
             # check user-provided environment variables
             path = Path(env_value)
         elif override_fn and (override_value := override_fn()):
