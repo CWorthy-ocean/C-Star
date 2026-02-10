@@ -14,6 +14,6 @@ Frequent users may want to set preferred values for these variables in their ``.
 .. tip::
     Use ``CSTAR_FF_CLI_ENV_SHOW=1 cstar env show --display export`` to generate a starter script.
 
-.. envvar-table:: cstar.base.utils
-
-.. envvar-table:: cstar.orchestration.utils
+.. envvar-table::
+    cstar.base.utils
+    cstar.orchestration.utils
