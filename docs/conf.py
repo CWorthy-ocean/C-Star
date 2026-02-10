@@ -17,11 +17,15 @@ import logging
 import os
 import pathlib
 import sys
-import textwrap
 import typing as t
+from collections import defaultdict
+from types import ModuleType
 
 from docutils import nodes  # noqa: F401
 from docutils.parsers.rst import Directive
+from sphinx.application import Sphinx
+
+from cstar.base.utils import EnvVar
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -39,72 +43,96 @@ import cstar  # isort:skip
 log = logging.getLogger(__name__)
 
 
+class EnvVarRow(t.NamedTuple):
+    name: str
+    default: str
+    effect: str
+
+
 class EnvVarTableDirective(Directive):
     """A custom Sphinx directive to generate a table of environment variables from a module."""
 
     required_arguments = 1
+    optional_arguments = 100
 
-    def run(self) -> list:
-        module_name = self.arguments[0]
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError:
-            log.exception("Could not import module %s", module_name)
-            return []
+    @classmethod
+    def _get_display_default(cls, env_var: "EnvVar") -> str:
+        """Convert the default / default_factory into a doc-ready value."""
+        if env_var.default_factory and env_var.default:
+            docs_default = f"{env_var.default} or <generated>"
+        elif env_var.default_factory:
+            docs_default = "<generated>"
+        elif env_var.default:
+            docs_default = env_var.default
+        else:
+            docs_default = "(no default)"
 
-        from cstar.base.utils import EnvVar
+        return docs_default
 
-        hints = t.get_type_hints(module, include_extras=True)
+    def _load_variable_groups(
+        self,
+        module: ModuleType,
+        groups: dict[str, list[EnvVarRow]],
+    ) -> None:
+        """Reflect through the supplied module to discover all environment variables."""
+        all_hints = t.get_type_hints(module, include_extras=True)
+        hints = (x for x in all_hints.items() if x[0].startswith("ENV_"))
 
-        # Group items by their group name
-        groups = {}
-        for name, hint in hints.items():
-            if name.startswith("ENV_"):
-                metadata = getattr(hint, "__metadata__", None)
-                if metadata and isinstance(metadata[0], EnvVar):
-                    meta = metadata[0]
-                    var_name = getattr(module, name)
+        for name, hint in hints:
+            metadata = getattr(hint, "__metadata__", None)
 
-                    default = meta.default
-                    if meta.default_factory:
-                        default = (
-                            f"{default} or <generated>" if default else "<generated>"
-                        )
+            if metadata and isinstance(metadata[0], EnvVar):
+                env_var = t.cast("EnvVar", metadata[0])
+                default = self._get_display_default(env_var)
+                description = env_var.description
 
-                    if meta.group not in groups:
-                        groups[meta.group] = []
-                    groups[meta.group].append(
-                        {
-                            "name": var_name,
-                            "default": str(default) if default else "(no default)",
-                            "effect": meta.description,
-                        },
-                    )
+                groups[env_var.group].append(EnvVarRow(name, default, description))
+            else:
+                groups["Uncategorized"].append(EnvVarRow(name, "unknown", "unknown"))
+
+    def _render_table(self, groups: dict[str, list[EnvVarRow]]) -> list[str]:
+        """Render restructuredText for all discovered environment variables."""
+        input_lines: list[str] = []
 
         if not groups:
-            return []
+            return input_lines
 
-        output = []
-        for group_name, items in groups.items():
-            output.append(group_name)
-            output.append("^" * len(group_name))
-            output.append("")
-            output.append(".. list-table::")
-            output.append("   :header-rows: 1")
-            output.append("   :widths: 30 20 50")
-            output.append("")
-            output.append("   * - Variable")
-            output.append("     - Default")
-            output.append("     - Effect")
+        for group_name, items in sorted(groups.items()):
+            input_lines.append(group_name)
+            input_lines.append("^" * len(group_name))
+            input_lines.append("")
+            input_lines.append(".. list-table::")
+            input_lines.append("   :header-rows: 1")
+            input_lines.append("   :widths: 30 20 50")
+            input_lines.append("")
+            input_lines.append("   * - Variable")
+            input_lines.append("     - Default")
+            input_lines.append("     - Effect")
 
-            for item in items:
-                output.append(f"   * - ``{item['name']}``")
-                output.append(f"     - {item['default']}")
-                output.append(f"     - {item['effect']}")
+            for item in sorted(items, key=lambda x: x.name):
+                input_lines.append(f"   * - ``{item.name}``")
+                input_lines.append(f"     - {item.default}")
+                input_lines.append(f"     - {item.effect}")
 
-            output.append("")
+            input_lines.append("")
 
-        self.state_machine.insert_input(output, module_name)
+        return input_lines
+
+    def run(self) -> list:
+        """Build the content for the environment variable table."""
+        all_groups: dict[str, list[EnvVarRow]] = defaultdict(list)
+
+        try:
+            for module_name in self.arguments:
+                module = importlib.import_module(module_name)
+                self._load_variable_groups(module, all_groups)
+        except ImportError:
+            msg = f"Unable to import all modules from: {self.arguments}"
+            log.exception(msg)
+
+        if content := self._render_table(all_groups):
+            self.state_machine.insert_input(content, "envvar-table")
+
         return []
 
 
@@ -194,7 +222,7 @@ def autodoc_skip_member(app, what, name, obj, skip, options) -> bool:
     return skip
 
 
-def setup(app) -> None:
+def setup(app: Sphinx) -> None:
     """Configure the Sphinx app."""
     app.connect("autodoc-skip-member", autodoc_skip_member)
     app.add_directive("envvar-table", EnvVarTableDirective)
