@@ -1,89 +1,304 @@
 import datetime as dt
 import functools
 import hashlib
+import os
 import re
 import subprocess
+import sys
 import typing as t
 from os import PathLike
 from pathlib import Path
 
 import dateutil
+from attr import dataclass
 
 from cstar.base.log import get_logger
 
 log = get_logger(__name__)
 
 
-ENV_CSTAR_CONFIG_HOME: t.Final[str] = "CSTAR_CONFIG_HOME"
-"""Environment variable used to override the home directory for C-Star config storage."""
+@dataclass(slots=True)
+class EnvVar:
+    """Annotation for specifying metadata about an environment variable."""
 
-ENV_CSTAR_DATA_HOME: t.Final[str] = "CSTAR_DATA_HOME"
-"""Environment variable used to override the home directory for C-Star dataset storage."""
+    description: str
+    """Plain-text description of the setting."""
+    group: str
+    """A group name used to identify the variable use."""
+    default: str = ""
+    """The default value for the setting."""
+    default_factory: t.Callable[[], str | None] | None = None
+    """A function used at run-time to generate the default value."""
 
-ENV_CSTAR_STATE_HOME: t.Final[str] = "CSTAR_STATE_HOME"
-"""Environment variable used to override the home directory for C-Star state storage."""
 
-ENV_CSTAR_CACHE_HOME: t.Final[str] = "CSTAR_CACHE_HOME"
-"""Environment variable used to override the home directory for C-Star file cache."""
+@dataclass(slots=True)
+class EnvItem(EnvVar):
+    """Metadata specifying how to select a specific XDG-compliant setting."""
+
+    name: str = ""
+    """The standard environment variable name used for the setting."""
+
+    @property
+    def value(self) -> str:
+        if self.default_factory is None:
+            return self.default
+
+        if factory_default := self.default_factory():
+            return factory_default
+
+        return ""
+
+
+_GROUP_FS: t.Final[str] = "File System Configuration"
+_GROUP_FF: t.Final[str] = "Feature Flags"
+_GROUP_SIM: t.Final[str] = "Simulation Configuration"
+
+FF_OFF: t.Final[str] = "0"
+FF_ON: t.Final[str] = "1"
+
 
 DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
 
-DEFAULT_CACHE_HOME: t.Final[str] = "~/.cache"
-"""The default, XDG-compliant directory where c-star cache is written"""
-
-DEFAULT_CONFIG_HOME: t.Final[str] = "~/.config"
-"""The default, XDG-compliant directory where c-star config is written"""
-
-DEFAULT_DATA_HOME: t.Final[str] = "~/.local/share"
-"""The default, XDG-compliant directory where c-star data is written"""
-
-DEFAULT_STATE_HOME: t.Final[str] = "~/.local/state"
-"""The default, XDG-compliant directory where c-star state is written"""
-
 SCRATCH_DIRS: t.Final[list[str]] = ["SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"]
 """Common env var names identifying scratch paths on HPC systems, in order of precedence."""
 
-ENV_CSTAR_OUTDIR: t.Literal["CSTAR_OUTDIR"] = "CSTAR_OUTDIR"
-"""Environment variable containing a path to the root output directory."""
 
-ENV_FF_ORCH_TRX_TIMESPLIT: t.Final[str] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
-"""Enable automatic time-splitting of simulations."""
+def get_env_item(var_name: str) -> EnvItem:
+    """Retrieve the metadata for an environment variable constant.
 
-ENV_FF_ORCH_TRX_OVERRIDE: t.Final[str] = "CSTAR_FF_ORCH_TRX_OVERRIDE"
-"""Enable automatic overrides to blueprints contained in a workplan."""
+    Parameters:
+    -----------
+    var_name: str
+        The string value of the environment variable (e.g. "CSTAR_CACHE_HOME")
 
-ENV_FF_CLI_ENV_SHOW: t.Final[str] = "CSTAR_FF_CLI_ENV_SHOW"
+    Returns:
+    --------
+    env_item: EnvItem
+        The metadata associated with the environment variable
+    """
+    hints = t.get_type_hints(sys.modules[__name__], include_extras=True)
+    for name, hint in hints.items():
+        if name.startswith("ENV_") and getattr(sys.modules[__name__], name) == var_name:
+            metadata = getattr(hint, "__metadata__", None)
+            if metadata and isinstance(metadata[0], EnvVar):
+                meta: EnvVar = metadata[0]
+
+                return EnvItem(
+                    description=meta.description,
+                    group=meta.group,
+                    default=meta.default,
+                    default_factory=meta.default_factory,
+                    name=var_name,
+                )
+
+    msg = f"No environment variable metadata found for: {var_name}"
+    raise ValueError(msg)
+
+
+def hpc_data_directory() -> str | None:
+    """A path-locator function that looks for standard scratch file-systems.
+
+    Returns
+    -------
+    Path | None
+        If a scratch file system is identified, return it's paty, otherwise return None.
+    """
+    scratch_variables = get_env_item(ENV_CSTAR_SCRATCH_DIRS).value.split(",")
+
+    for env_var in scratch_variables:
+        if scratch_path := os.getenv(env_var, ""):
+            return Path(scratch_path).as_posix()
+
+    return None
+
+
+def nprocs_factory() -> str:
+    """Return the number of processors on the current machine, divided by 3."""
+    return str((os.cpu_count() or 3) // 3)
+
+
+ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
+    t.Literal["CSTAR_CLOBBER_WORKING_DIR"],
+    EnvVar(
+        "Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk.",
+        _GROUP_SIM,
+        default=FF_OFF,
+    ),
+] = "CSTAR_CLOBBER_WORKING_DIR"
+""""Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
+
+ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
+    t.Literal["CSTAR_FRESH_CODEBASES"],
+    EnvVar(
+        "Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`.",
+        _GROUP_SIM,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FRESH_CODEBASES"
+"""Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`."""
+
+ENV_CSTAR_IN_ACTIVE_ALLOCATION: t.Annotated[
+    t.Literal["CSTAR_IN_ACTIVE_ALLOCATION"],
+    EnvVar(
+        "Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation.",
+        _GROUP_SIM,
+        default="",
+    ),
+] = "CSTAR_IN_ACTIVE_ALLOCATION"
+"""""Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation."""
+
+ENV_CSTAR_NPROCS_POST: t.Annotated[
+    t.Literal["CSTAR_NPROCS_POST"],
+    EnvVar(
+        "Specify the number of processes to be used for post-processing simulation output files. Dynamic default ``os.cpu_count() // 3``",
+        _GROUP_SIM,
+        default_factory=nprocs_factory,  # type: ignore[reportOptionalOperand]
+    ),
+] = "CSTAR_NPROCS_POST"
+"""Specify the number of processes to be used for post-processing simulation output files."""
+
+ENV_CSTAR_SCRATCH_DIRS: t.Annotated[
+    t.Literal["CSTAR_SCRATCH_VARS"],
+    EnvVar(
+        "A comma-separated list of environment variable names used to identify scratch paths on HPC systems, in search order.",
+        _GROUP_FS,
+        "SCRATCH,SCRATCH_DIR,LOCAL_SCRATCH",
+    ),
+] = "CSTAR_SCRATCH_VARS"
+"""A comma-separated list of environment variable names used to identify scratch paths on HPC systems, in search order."""
+
+ENV_CSTAR_CACHE_HOME: t.Annotated[
+    t.Literal["CSTAR_CACHE_HOME"],
+    EnvVar(
+        "Environment variable used to override the home directory for C-Star file cache.",
+        _GROUP_FS,
+        "~/.cache",
+    ),
+] = "CSTAR_CACHE_HOME"
+"""Environment variable used to override the home directory for C-Star file cache."""
+
+ENV_CSTAR_CONFIG_HOME: t.Annotated[
+    t.Literal["CSTAR_CONFIG_HOME"],
+    EnvVar(
+        "Environment variable used to override the home directory for C-Star config storage.",
+        _GROUP_FS,
+        "~/.config",
+    ),
+] = "CSTAR_CONFIG_HOME"
+"""Environment variable used to override the home directory for C-Star config storage."""
+
+ENV_CSTAR_DATA_HOME: t.Annotated[
+    t.Literal["CSTAR_DATA_HOME"],
+    EnvVar(
+        "Environment variable used to override the home directory for C-Star dataset storage.",
+        _GROUP_FS,
+        "~/.local/share",
+        default_factory=hpc_data_directory,
+    ),
+] = "CSTAR_DATA_HOME"
+"""Environment variable used to override the home directory for C-Star dataset storage."""
+
+ENV_CSTAR_STATE_HOME: t.Annotated[
+    t.Literal["CSTAR_STATE_HOME"],
+    EnvVar(
+        "Environment variable used to override the home directory for C-Star state storage.",
+        _GROUP_FS,
+        "~/.local/state",
+    ),
+] = "CSTAR_STATE_HOME"
+"""Environment variable used to override the home directory for C-Star state storage."""
+
+
+ENV_FF_DEVELOPER_MODE: t.Annotated[
+    t.Literal["CSTAR_FF_DEVELOPER_MODE"],
+    EnvVar(
+        "Enable developer mode to enable all feature flags (not recommended).",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_DEVELOPER_MODE"
+"""Enable developer mode to enable all feature flags (not recommended)."""
+
+ENV_FF_CLI_ENV_SHOW: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_ENV_SHOW"],
+    EnvVar(
+        "Enable CLI for displaying environment configuration.",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_CLI_ENV_SHOW"
 """Enable CLI for displaying environment configuration."""
 
-ENV_FF_CLI_TEMPLATE_CREATE: t.Final[str] = "CSTAR_FF_CLI_TEMPLATE_CREATE"
+ENV_FF_CLI_TEMPLATE_CREATE: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_TEMPLATE_CREATE"],
+    EnvVar(
+        "Enable CLI for creating blueprints and workplans from standard templates.",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_CLI_TEMPLATE_CREATE"
 """Enable CLI for creating blueprints and workplans from standard templates."""
 
-ENV_FF_CLI_WORKPLAN_GEN: t.Final[str] = "CSTAR_FF_CLI_WORKPLAN_GEN"
-"""Enable CLI for generating a workplan from a directory of blueprints."""
-
-ENV_FF_CLI_WORKPLAN_PLAN: t.Final[str] = "CSTAR_FF_CLI_WORKPLAN_PLAN"
-"""Enable CLI for generating the execution plan of a workplan."""
-
-ENV_FF_CLI_WORKPLAN_STATUS: t.Final[str] = "CSTAR_FF_CLI_WORKPLAN_STATUS"
-"""Enable CLI for retrieving status about a workplan run."""
-
-ENV_FF_CLI_WORKPLAN_COMPOSE: t.Final[str] = "CSTAR_FF_CLI_WORKPLAN_COMPOSE"
+ENV_FF_CLI_WORKPLAN_COMPOSE: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_WORKPLAN_COMPOSE"],
+    EnvVar(
+        "Enable CLI for composing a workplan from pre-existing blueprints.",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_CLI_WORKPLAN_COMPOSE"
 """Enable CLI for composing a workplan from pre-existing blueprints."""
 
+ENV_FF_CLI_WORKPLAN_GEN: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_WORKPLAN_GEN"],
+    EnvVar(
+        "Enable CLI for generating a workplan from a directory of blueprints.",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_CLI_WORKPLAN_GEN"
+"""Enable CLI for generating a workplan from a directory of blueprints."""
 
-def get_ff_descriptions() -> dict[str, str]:
-    """Return user-friendly mapping of key-to-decription for all available feature flags."""
-    return {
-        ENV_FF_ORCH_TRX_TIMESPLIT: "Enable automatic time-splitting of simulations.",
-        ENV_FF_ORCH_TRX_OVERRIDE: "Enable automatic overrides to blueprints contained in a workplan.",
-        ENV_FF_CLI_ENV_SHOW: "Enable CLI for displaying environment configuration.",
-        ENV_FF_CLI_TEMPLATE_CREATE: "Enable CLI for creating blueprints and workplans from standard templates.",
-        ENV_FF_CLI_WORKPLAN_GEN: "Enable CLI for generating a workplan from a directory of blueprints.",
-        ENV_FF_CLI_WORKPLAN_PLAN: "Enable CLI for generating the execution plan of a workplan.",
-        ENV_FF_CLI_WORKPLAN_STATUS: "Enable CLI for retrieving status about a workplan run.",
-        ENV_FF_CLI_WORKPLAN_COMPOSE: "Enable CLI for composing a workplan from pre-existing blueprints.",
-    }
+ENV_FF_CLI_WORKPLAN_PLAN: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_WORKPLAN_PLAN"],
+    EnvVar(
+        "Enable CLI for generating the execution plan of a workplan.",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_CLI_WORKPLAN_PLAN"
+"""Enable CLI for generating the execution plan of a workplan."""
+
+ENV_FF_CLI_WORKPLAN_STATUS: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_WORKPLAN_STATUS"],
+    EnvVar(
+        "Enable CLI for retrieving status about a workplan run.",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_CLI_WORKPLAN_STATUS"
+"""Enable CLI for retrieving status about a workplan run."""
+
+ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
+    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT"],
+    EnvVar(
+        "Enable automatic time-splitting of simulations.",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
+"""Enable automatic time-splitting of simulations."""
+
+ENV_FF_ORCH_TRX_OVERRIDE: t.Annotated[
+    t.Literal["CSTAR_FF_ORCH_TRX_OVERRIDE"],
+    EnvVar(
+        "Enable automatic overrides to blueprints contained in a workplan.",
+        _GROUP_FF,
+        default=FF_OFF,
+    ),
+] = "CSTAR_FF_ORCH_TRX_OVERRIDE"
+"""Enable automatic overrides to blueprints contained in a workplan."""
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
