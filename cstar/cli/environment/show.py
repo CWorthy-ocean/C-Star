@@ -70,7 +70,6 @@ def _adapt_xdg_meta_to_env_item(
 def _discover_env_vars(
     module: types.ModuleType,
     prefix: str = "ENV_",
-    is_ff: bool = False,
 ) -> list[EnvItem]:
     """Locate all constants in a module that represent environment variables."""
     items = []
@@ -86,10 +85,6 @@ def _discover_env_vars(
                 if meta.default_factory and (factory_default := meta.default_factory()):
                     default = factory_default
 
-                # value = os.getenv(var_name, default)
-                # if is_ff:
-                #     value = FF_ON if is_feature_enabled(var_name) else FF_OFF
-
                 items.append(
                     EnvItem(
                         description=meta.description,
@@ -101,7 +96,6 @@ def _discover_env_vars(
                         else "<generated>",
                         default_factory=meta.default_factory,
                         name=var_name,
-                        # value=value,
                     ),
                 )
     return items
@@ -114,7 +108,7 @@ def _load_flags() -> t.Iterable[EnvItem]:
     -------
     t.Iterable[EnvItem]
     """
-    return _discover_env_vars(base_utils, prefix="ENV_FF_", is_ff=True)
+    return _discover_env_vars(base_utils, prefix="ENV_FF_")
 
 
 def _load_orchestration() -> t.Iterable[EnvItem]:
