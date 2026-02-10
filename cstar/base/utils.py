@@ -64,6 +64,7 @@ SCRATCH_DIRS: t.Final[list[str]] = ["SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"]
 """Common env var names identifying scratch paths on HPC systems, in order of precedence."""
 
 
+@functools.lru_cache
 def get_env_item(var_name: str) -> EnvItem:
     """Retrieve the metadata for an environment variable constant.
 
