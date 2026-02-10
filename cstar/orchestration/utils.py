@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from cstar.base.utils import EnvVar
 
 _GROUP_ORCH: t.Final[str] = "Orchestration"
+_GROUP_DEV: t.Final[str] = "Developer Only"
 
 
 def generate_run_id() -> str:
@@ -36,7 +37,7 @@ ENV_CSTAR_CMD_CONVERTER_OVERRIDE: t.Annotated[
     t.Literal["CSTAR_CMD_CONVERTER_OVERRIDE"],
     EnvVar(
         "Overridden mapping key to apply when converting applications into CLI commands.",
-        _GROUP_ORCH,
+        _GROUP_DEV,
         "",
     ),
 ] = "CSTAR_CMD_CONVERTER_OVERRIDE"
@@ -47,7 +48,7 @@ ENV_CSTAR_ORCH_RUNID: t.Annotated[
     t.Literal["CSTAR_RUNID"],
     EnvVar(
         description="Unique run identifier used by the orchestrator.",
-        group=_GROUP_ORCH,
+        group=_GROUP_DEV,
         default_factory=generate_run_id,
     ),
 ] = "CSTAR_RUNID"
