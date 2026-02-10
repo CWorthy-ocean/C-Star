@@ -17,84 +17,36 @@ from cstar.base.utils import (
 
 
 @dataclass(slots=True)
-class XdgEnvItem:
-    """Metadata specifying how to select a specific XDG-compliant setting."""
-
-    xdg_var_name: str
-    """The standard XDG environment variable name used for the setting."""
-    env_item: EnvItem
-    """Metadata about the environment variable used for overrides."""
-    cstar_subdirectory: str
-
-    @property
-    def description(self) -> str:
-        """Plain-text description of a setting."""
-        return self.env_item.description
-
-    @property
-    def default(self) -> str:
-        """The default XDG-compliant value for the setting."""
-        return self.env_item.default
-
-    @property
-    def name(self) -> str:
-        """The C-Star environment variable used to override default settings."""
-        return self.env_item.name
-
-
-@dataclass(slots=True)
 class XdgMetaContainer:
     """Collection of metadata used to locate configuration values related to
     the XDG-compliant directories C-Star will use at runtime.
     """
 
-    cache: XdgEnvItem
+    cache: EnvItem
     """Metadata used to identify the cache directory."""
-    config: XdgEnvItem
+    config: EnvItem
     """Metadata used to identify the config directory."""
-    data: XdgEnvItem
+    data: EnvItem
     """Metadata used to identify the data directory."""
-    state: XdgEnvItem
+    state: EnvItem
     """Metadata used to identify the state directory."""
 
-    def __iter__(self) -> t.Iterator[XdgEnvItem]:
+    def __iter__(self) -> t.Iterator[EnvItem]:
         """Return an iterable containing all settings contained in the instance."""
         yield self.cache
         yield self.config
         yield self.data
         yield self.state
 
-    def __getitem__(
-        self, key: t.Literal["cache", "config", "data", "state"]
-    ) -> XdgEnvItem:
-        """Return configuration sections by subscript."""
-        return getattr(self, key)
-
 
 @functools.cache
 def load_xdg_metadata() -> XdgMetaContainer:
     """Retrieve the configuration used to identify XDG-compliant directories."""
     return XdgMetaContainer(
-        cache=XdgEnvItem(
-            xdg_var_name="XDG_CACHE_HOME",
-            env_item=get_env_item(ENV_CSTAR_CACHE_HOME),
-            cstar_subdirectory="cstar",
-        ),
-        config=XdgEnvItem(
-            xdg_var_name="XDG_CONFIG_HOME",
-            env_item=get_env_item(ENV_CSTAR_CONFIG_HOME),
-            cstar_subdirectory="cstar",
-        ),
-        data=XdgEnvItem(
-            xdg_var_name="XDG_DATA_HOME",
-            env_item=get_env_item(ENV_CSTAR_DATA_HOME),
-            cstar_subdirectory="cstar",
-        ),
-        state=XdgEnvItem(
-            xdg_var_name="XDG_STATE_HOME",
-            env_item=get_env_item(ENV_CSTAR_STATE_HOME),
-            cstar_subdirectory="cstar",
-        ),
+        cache=get_env_item(ENV_CSTAR_CACHE_HOME),
+        config=get_env_item(ENV_CSTAR_CONFIG_HOME),
+        data=get_env_item(ENV_CSTAR_DATA_HOME),
+        state=get_env_item(ENV_CSTAR_STATE_HOME),
     )
 
 
@@ -102,7 +54,7 @@ class DirectoryManager:
     """Manage the directories used by C-Star."""
 
     @classmethod
-    def xdg_dir(cls, var_set: XdgEnvItem) -> Path:
+    def xdg_dir(cls, env_item: EnvItem) -> Path:
         """Calculate an XDG-compliant path honoring standard precedence rules.
 
         Returns a value in the order:
@@ -121,19 +73,19 @@ class DirectoryManager:
         -------
         Path
         """
-        dir_name = var_set.cstar_subdirectory
-        override_fn = var_set.env_item.default_factory
-        path = Path(var_set.default) / dir_name
+        dir_name = "cstar"
+        override_fn = env_item.default_factory
+        path = Path(env_item.default) / dir_name
 
-        if env_value := os.getenv(var_set.name, ""):
+        if env_value := os.getenv(env_item.name, ""):
             # check user-provided environment variables
             path = Path(env_value)
-        elif override_fn and (override_value := override_fn()):
+        elif override_fn and (override_value := override_fn(env_item)):
             # check functions that return alternative locations
             path = Path(override_value) / dir_name
-        elif xdg_value := os.getenv(var_set.xdg_var_name, ""):
+        elif env_value := os.getenv(env_item.indirect_var, ""):
             # check user provided XDG-.*-HOME environment variables
-            path = Path(xdg_value) / dir_name
+            path = Path(env_value) / dir_name
 
         return path.expanduser().resolve()
 

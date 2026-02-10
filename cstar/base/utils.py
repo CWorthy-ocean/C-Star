@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import types
 import typing as t
 from os import PathLike
 from pathlib import Path
@@ -27,31 +28,54 @@ class EnvVar:
     """A group name used to identify the variable use."""
     default: str = ""
     """The default value for the setting."""
-    default_factory: t.Callable[[], str | None] | None = None
+    default_factory: t.Callable[["EnvVar"], str | None] | None = None
     """A function used at run-time to generate the default value."""
+    indirect_var: str = ""
+    """An environment variable name to be used when the primary variable is not set."""
 
 
 @dataclass(slots=True)
 class EnvItem(EnvVar):
-    """Metadata specifying how to select a specific XDG-compliant setting."""
+    """Runtime wrapper for an `EnvVar` that determines the actual value."""
 
     name: str = ""
     """The standard environment variable name used for the setting."""
 
     @property
     def value(self) -> str:
-        if self.default_factory is None:
-            return self.default
-
-        if factory_default := self.default_factory():
+        if self.default_factory and (factory_default := self.default_factory(self)):
             return factory_default
 
-        return ""
+        return self.default
+
+    @classmethod
+    def from_env_var(cls, env_var: EnvVar, name: str) -> "EnvItem":
+        return EnvItem(
+            env_var.description,
+            env_var.group,
+            env_var.default,
+            env_var.default_factory,
+            env_var.indirect_var,
+            name,
+        )
+
+
+def indirect_default_factory(env_var: EnvVar) -> str:
+    """Retrieve the current value of the indirect variable.
+
+    Return empty-string when the indirect variable is not populated.
+    Returns
+    -------
+    str
+    """
+    var_name = env_var.indirect_var
+    return os.environ.get(var_name, "")
 
 
 _GROUP_FS: t.Final[str] = "File System Configuration"
 _GROUP_FF: t.Final[str] = "Feature Flags"
 _GROUP_SIM: t.Final[str] = "Simulation Configuration"
+_GROUP_UNK: t.Final[str] = "Uncategorized Configuration"
 
 FF_OFF: t.Final[str] = "0"
 FF_ON: t.Final[str] = "1"
@@ -64,8 +88,7 @@ SCRATCH_DIRS: t.Final[list[str]] = ["SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"]
 """Common env var names identifying scratch paths on HPC systems, in order of precedence."""
 
 
-@functools.lru_cache
-def get_env_item(var_name: str) -> EnvItem:
+def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
     """Retrieve the metadata for an environment variable constant.
 
     Parameters:
@@ -79,21 +102,23 @@ def get_env_item(var_name: str) -> EnvItem:
         The metadata associated with the environment variable
     """
     hints = t.get_type_hints(sys.modules[__name__], include_extras=True)
-    for name, hint in hints.items():
-        if name.startswith("ENV_") and getattr(sys.modules[__name__], name) == var_name:
-            metadata = getattr(hint, "__metadata__", None)
-            if metadata and isinstance(metadata[0], EnvVar):
-                meta: EnvVar = metadata[0]
 
-                return EnvItem(
-                    description=meta.description,
-                    group=meta.group,
-                    default=meta.default,
-                    default_factory=meta.default_factory,
-                    name=var_name,
-                )
+    constant_name = f"{prefix}{var_name}"
+    if hint := hints.get(constant_name, None):
+        metadata = getattr(hint, "__metadata__", None)
+        if not metadata:
+            return EnvItem(
+                description="unknown",
+                group=_GROUP_UNK,
+                default="unknown",
+                name=var_name,
+            )
 
-    msg = f"No environment variable metadata found for: {var_name}"
+        meta = metadata[0]
+        if isinstance(meta, EnvVar):
+            return EnvItem.from_env_var(meta, var_name)
+
+    msg = f"No environment variable metadata found for: {constant_name}"
     raise ValueError(msg)
 
 
@@ -154,19 +179,19 @@ ENV_CSTAR_NPROCS_POST: t.Annotated[
     EnvVar(
         "Specify the number of processes to be used for post-processing simulation output files. Dynamic default ``os.cpu_count() // 3``",
         _GROUP_SIM,
-        default_factory=nprocs_factory,  # type: ignore[reportOptionalOperand]
+        default_factory=lambda _: nprocs_factory(),  # type: ignore[reportOptionalOperand]
     ),
 ] = "CSTAR_NPROCS_POST"
 """Specify the number of processes to be used for post-processing simulation output files."""
 
 ENV_CSTAR_SCRATCH_DIRS: t.Annotated[
-    t.Literal["CSTAR_SCRATCH_VARS"],
+    t.Literal["CSTAR_SCRATCH_DIRS"],
     EnvVar(
         "A comma-separated list of environment variable names used to identify scratch paths on HPC systems, in search order.",
         _GROUP_FS,
         "SCRATCH,SCRATCH_DIR,LOCAL_SCRATCH",
     ),
-] = "CSTAR_SCRATCH_VARS"
+] = "CSTAR_SCRATCH_DIRS"
 """A comma-separated list of environment variable names used to identify scratch paths on HPC systems, in search order."""
 
 ENV_CSTAR_CACHE_HOME: t.Annotated[
@@ -175,6 +200,8 @@ ENV_CSTAR_CACHE_HOME: t.Annotated[
         "Environment variable used to override the home directory for C-Star file cache.",
         _GROUP_FS,
         "~/.cache",
+        indirect_var="XDG_CACHE_HOME",
+        default_factory=indirect_default_factory,
     ),
 ] = "CSTAR_CACHE_HOME"
 """Environment variable used to override the home directory for C-Star file cache."""
@@ -185,6 +212,8 @@ ENV_CSTAR_CONFIG_HOME: t.Annotated[
         "Environment variable used to override the home directory for C-Star config storage.",
         _GROUP_FS,
         "~/.config",
+        indirect_var="XDG_CONFIG_HOME",
+        default_factory=indirect_default_factory,
     ),
 ] = "CSTAR_CONFIG_HOME"
 """Environment variable used to override the home directory for C-Star config storage."""
@@ -195,7 +224,8 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
         "Environment variable used to override the home directory for C-Star dataset storage.",
         _GROUP_FS,
         "~/.local/share",
-        default_factory=hpc_data_directory,
+        indirect_var="XDG_DATA_HOME",
+        default_factory=lambda x: hpc_data_directory() or indirect_default_factory(x),
     ),
 ] = "CSTAR_DATA_HOME"
 """Environment variable used to override the home directory for C-Star dataset storage."""
@@ -206,6 +236,8 @@ ENV_CSTAR_STATE_HOME: t.Annotated[
         "Environment variable used to override the home directory for C-Star state storage.",
         _GROUP_FS,
         "~/.local/state",
+        indirect_var="XDG_STATE_HOME",
+        default_factory=indirect_default_factory,
     ),
 ] = "CSTAR_STATE_HOME"
 """Environment variable used to override the home directory for C-Star state storage."""
@@ -643,3 +675,31 @@ def additional_files_dir() -> Path:
     Path
     """
     return Path(__file__).parent.parent / "additional_files"
+
+
+def discover_env_vars(
+    modules: list[types.ModuleType],
+    prefix: str = "ENV_",
+) -> list[EnvItem]:
+    """Locate all constants in a module that represent environment variables."""
+    items = []
+    for module in modules:
+        hints = t.get_type_hints(module, include_extras=True)
+
+        for name, hint in hints.items():
+            if name.startswith(prefix):
+                metadata = getattr(hint, "__metadata__", None)
+                if metadata and isinstance(metadata[0], EnvVar):
+                    meta = metadata[0]
+                    items.append(EnvItem.from_env_var(meta, name))
+                elif not metadata:
+                    items.append(
+                        EnvItem(
+                            description="unknown",
+                            group=_GROUP_UNK,
+                            default="unknown",
+                            name=name,
+                        ),
+                    )
+
+    return items

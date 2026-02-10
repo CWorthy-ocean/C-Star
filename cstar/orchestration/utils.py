@@ -49,7 +49,7 @@ ENV_CSTAR_ORCH_RUNID: t.Annotated[
     EnvVar(
         description="Unique run identifier used by the orchestrator.",
         group=_GROUP_DEV,
-        default_factory=generate_run_id,
+        default_factory=lambda _: generate_run_id(),
     ),
 ] = "CSTAR_RUNID"
 """Environment variable containing a unique run identifier used by the orchestrator."""

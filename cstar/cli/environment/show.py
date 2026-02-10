@@ -1,4 +1,3 @@
-import types
 import typing as t
 from collections import defaultdict
 from enum import StrEnum, auto
@@ -7,8 +6,7 @@ import typer
 from rich import print  # noqa: A004, ignore shadowing of built-in print
 
 from cstar.base import utils as base_utils
-from cstar.base.utils import EnvItem
-from cstar.execution import file_system as fs
+from cstar.base.utils import EnvItem, discover_env_vars
 from cstar.orchestration import utils as orch_utils
 
 app = typer.Typer()
@@ -25,11 +23,11 @@ def _interactive(all_config: dict[str, list[EnvItem]]) -> None:
     if show_headers:
         print(f"[underline2]{H_CONFIG_ALL}[/underline2]\n")
 
-    for group_name, items in all_config.items():
+    for group_name, items in sorted(all_config.items()):
         if show_headers:
             print(f"[underline]{group_name}[/underline]")
 
-        for item in items:
+        for item in sorted(items, key=lambda x: x.name):
             val_in = "[bold red]" if item.value != item.default else ""
             val_out = "[/bold red]" if val_in else ""
 
@@ -44,73 +42,13 @@ def _export(all_config: dict[str, list[EnvItem]]) -> None:
     header_sep = "#" * 80
     item_sep = f"# {'-' * 68}"
 
-    for group_name, items in all_config.items():
+    for group_name, items in sorted(all_config.items()):
         print(f"{header_sep}\n# {group_name}\n{header_sep}\n")
 
-        for item in items:
+        for item in sorted(items, key=lambda x: x.name):
             purpose = f"# {item.description}\n# default: {item.default}"
             export = f'export {item.name}="{item.value}"\n'
             print(f"{item_sep}\n{purpose}\n{item_sep}\n{export}")
-
-
-def _adapt_xdg_meta_to_env_item(
-    xdg_metadata: fs.XdgMetaContainer,
-) -> t.Iterable[EnvItem]:
-    return [
-        EnvItem(
-            description=x.description,
-            group=x.env_item.group,
-            default=x.default,
-            name=x.name,
-            default_factory=fs.DirectoryManager.xdg_dir(x).as_posix,
-        )
-        for x in xdg_metadata
-    ]
-
-
-def _discover_env_vars(
-    module: types.ModuleType,
-    prefix: str = "ENV_",
-) -> list[EnvItem]:
-    """Locate all constants in a module that represent environment variables."""
-    items = []
-    hints = t.get_type_hints(module, include_extras=True)
-
-    for name, hint in hints.items():
-        if name.startswith(prefix):
-            metadata = getattr(hint, "__metadata__", None)
-            if metadata and isinstance(metadata[0], base_utils.EnvVar):
-                meta: base_utils.EnvVar = metadata[0]
-                var_name = getattr(module, name)
-                default = meta.default
-                if meta.default_factory and (factory_default := meta.default_factory()):
-                    default = factory_default
-
-                items.append(
-                    EnvItem(
-                        description=meta.description,
-                        group=meta.group,
-                        default=default
-                        if not meta.default_factory
-                        else f"{default} or <generated>"
-                        if default
-                        else "<generated>",
-                        default_factory=meta.default_factory,
-                        name=var_name,
-                    ),
-                )
-    return items
-
-
-def _load_xdg_meta() -> t.Iterable[EnvItem]:
-    """Load all XDG environment variables and convert XDG metadata into generic EnvItem.
-
-    Returns
-    -------
-    t.Iterable[EnvItem]
-    """
-    all_metadata = fs.load_xdg_metadata()
-    return _adapt_xdg_meta_to_env_item(all_metadata)
 
 
 def _load_all() -> t.Iterable[EnvItem]:
@@ -120,9 +58,7 @@ def _load_all() -> t.Iterable[EnvItem]:
     -------
     t.Iterable[EnvItem]
     """
-    yield from _load_xdg_meta()
-    yield from _discover_env_vars(base_utils, prefix="ENV_FF_")
-    yield from _discover_env_vars(orch_utils)
+    yield from discover_env_vars([base_utils, orch_utils])
 
 
 class DisplayFormat(StrEnum):
