@@ -153,7 +153,11 @@ class CachedRemoteRepositoryStager(Stager):
         if not cache_path.exists():
             cache_path = self.source.retriever.save(target_dir=cache_path)
         else:
-            self.source.retriever.refresh(target_dir=cache_path)
+            cached_data = StagedRepository(source=self.source, path=cache_path)
+            if cached_data.changed_from_source:
+                self.stage(target_dir=cache_path)
+
+            # self.source.retriever.refresh(target_dir=cache_path)
 
         shutil.copytree(cache_path, target_dir, symlinks=True, dirs_exist_ok=True)
 
