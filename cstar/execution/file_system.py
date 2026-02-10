@@ -10,27 +10,10 @@ from cstar.base.utils import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
-    # ENV_CSTAR_SCRATCH_DIRS,
     ENV_CSTAR_STATE_HOME,
     EnvItem,
     get_env_item,
 )
-
-# def hpc_data_directory() -> Path | None:
-#     """A path-locator function that looks for standard scratch file-systems.
-
-#     Returns
-#     -------
-#     Path | None
-#         If a scratch file system is identified, return it's paty, otherwise return None.
-#     """
-#     scratch_variables = get_env_item(ENV_CSTAR_SCRATCH_DIRS).value.split(",")
-
-#     for env_var in scratch_variables:
-#         if scratch_path := os.getenv(env_var, ""):
-#             return Path(scratch_path)hpc_data_directory
-
-#     return None
 
 
 @dataclass(slots=True)
