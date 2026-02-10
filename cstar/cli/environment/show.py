@@ -69,11 +69,7 @@ def show(
     all_items = discover_env_vars([base_utils, orch_utils])
 
     if group != "all":
-        all_items = [
-            item
-            for item in all_items
-            if item.group.lower().replace(" ", "-") == group.lower()
-        ]
+        all_items = [item for item in all_items if group.lower() in item.group.lower()]
 
     # Group items by their group name for display
     group_map: dict[str, list[EnvItem]] = defaultdict(list)
