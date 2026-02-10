@@ -14,7 +14,9 @@ import cstar.roms.runtime_settings
 from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.feature import FF_OFF
 from cstar.base.utils import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_NPROCS_POST,
     _dict_to_tree,
     _get_sha256_hash,
@@ -622,6 +624,15 @@ class ROMSSimulation(Simulation):
         """Return the file system manager for the simulation."""
         return cast(RomsFileSystemManager, self._fs_manager)
 
+    def _conditionally_clear_root(self):
+        env_item = get_env_item(ENV_CSTAR_CLOBBER_WORKING_DIR)
+        if env_item.value != FF_OFF and self.fs_manager.root.exists():
+            self.log.warning(
+                f"Clearing existing job directory: {self.fs_manager.root} ({env_item.name} is {env_item.value})"
+            )
+            shutil.rmtree(self.fs_manager.root)
+            self.fs_manager.root.mkdir()
+
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
         """Returns the default ROMS external codebase.
@@ -1192,6 +1203,8 @@ class ROMSSimulation(Simulation):
         compile_time_code_dir = self.fs_manager.compile_time_code_dir
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
+
+        self._conditionally_clear_root()
 
         compile_time_code_dir.mkdir(parents=True, exist_ok=True)
         runtime_code_dir.mkdir(parents=True, exist_ok=True)
