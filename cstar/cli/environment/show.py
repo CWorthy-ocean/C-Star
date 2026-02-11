@@ -6,6 +6,7 @@ from enum import StrEnum, auto
 import typer
 from rich import print  # noqa: A004, ignore shadowing of built-in print
 
+from cstar.base import feature
 from cstar.base import utils as base_utils
 from cstar.base.utils import EnvItem, discover_env_vars
 from cstar.orchestration import utils as orch_utils
@@ -85,7 +86,7 @@ def show(
     display: DisplayFormat = DisplayFormat.INTERACTIVE,
 ) -> None:
     """Display the active environment configuration."""
-    all_items = discover_env_vars([base_utils, orch_utils])
+    all_items = discover_env_vars([base_utils, feature, orch_utils])
 
     if group != "all":
         all_items = [item for item in all_items if group.lower() in item.group.lower()]
