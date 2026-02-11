@@ -29,6 +29,7 @@ Bug Fixes
 
 - Fix path concatenation bug resulting in invalid source data paths
 - Fix indentation creating an unreachable code block in git utils
+- Add conda installation of rsync to environment.yml (fixes bug related to a flag used in newer ucla-roms makefiles that is not available in MacOS's default rsync installation)
 
 Improvements
 ~~~~~~~~~~~~
@@ -41,6 +42,8 @@ Miscellaneous
 ~~~~~~~~~~~~~
 
 - Additional details added in docstrings
+- Silence OMP warning originating from numba
+- Modify a blueprint in the tests directory for a refactored layout in the remote data repository
 
 ---
 
