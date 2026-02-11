@@ -43,10 +43,16 @@ class EnvItem(EnvVar):
 
     @property
     def value(self) -> str:
+        if env_value := os.getenv(self.name, ""):
+            return env_value
+
         if self.default_factory and (factory_default := self.default_factory(self)):
             return factory_default
 
-        return os.environ.get(self.name, self.default)
+        if self.indirect_var and (indirect_value := os.getenv(self.indirect_var, "")):
+            return indirect_value
+
+        return self.default
 
     @classmethod
     def from_env_var(cls, env_var: EnvVar, name: str) -> "EnvItem":
@@ -73,13 +79,14 @@ def indirect_default_factory(env_var: EnvVar) -> str:
 
 
 _GROUP_FS: t.Final[str] = "File System Configuration"
-_GROUP_FF: t.Final[str] = "Feature Flags"
 _GROUP_SIM: t.Final[str] = "Simulation Configuration"
 _GROUP_UNK: t.Final[str] = "Uncategorized Configuration"
 
-FF_OFF: t.Final[str] = "0"
-FF_ON: t.Final[str] = "1"
+FLAG_ON: t.Final[str] = "1"
+"""Value indicating a feature flag is enabled."""
 
+FLAG_OFF: t.Final[str] = "0"
+"""Value indicating a feature flag is disabled."""
 
 DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
@@ -149,7 +156,7 @@ ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
     EnvVar(
         "Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk.",
         _GROUP_SIM,
-        default=FF_OFF,
+        default=FLAG_OFF,
     ),
 ] = "CSTAR_CLOBBER_WORKING_DIR"
 """"Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
@@ -159,7 +166,7 @@ ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
     EnvVar(
         "Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`.",
         _GROUP_SIM,
-        default=FF_OFF,
+        default=FLAG_OFF,
     ),
 ] = "CSTAR_FRESH_CODEBASES"
 """Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`."""
@@ -212,8 +219,8 @@ ENV_CSTAR_CONFIG_HOME: t.Annotated[
         "Environment variable used to override the home directory for C-Star config storage.",
         _GROUP_FS,
         "~/.config",
-        indirect_var="XDG_CONFIG_HOME",
         default_factory=indirect_default_factory,
+        indirect_var="XDG_CONFIG_HOME",
     ),
 ] = "CSTAR_CONFIG_HOME"
 """Environment variable used to override the home directory for C-Star config storage."""
@@ -241,96 +248,6 @@ ENV_CSTAR_STATE_HOME: t.Annotated[
     ),
 ] = "CSTAR_STATE_HOME"
 """Environment variable used to override the home directory for C-Star state storage."""
-
-ENV_FF_DEVELOPER_MODE: t.Annotated[
-    t.Literal["CSTAR_FF_DEVELOPER_MODE"],
-    EnvVar(
-        "Enable developer mode to enable all feature flags (not recommended).",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_DEVELOPER_MODE"
-"""Enable developer mode to enable all feature flags (not recommended)."""
-
-ENV_FF_CLI_ENV_SHOW: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_ENV_SHOW"],
-    EnvVar(
-        "Enable CLI for displaying environment configuration.",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_CLI_ENV_SHOW"
-"""Enable CLI for displaying environment configuration."""
-
-ENV_FF_CLI_TEMPLATE_CREATE: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_TEMPLATE_CREATE"],
-    EnvVar(
-        "Enable CLI for creating blueprints and workplans from standard templates.",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_CLI_TEMPLATE_CREATE"
-"""Enable CLI for creating blueprints and workplans from standard templates."""
-
-ENV_FF_CLI_WORKPLAN_COMPOSE: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_COMPOSE"],
-    EnvVar(
-        "Enable CLI for composing a workplan from pre-existing blueprints.",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_COMPOSE"
-"""Enable CLI for composing a workplan from pre-existing blueprints."""
-
-ENV_FF_CLI_WORKPLAN_GEN: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_GEN"],
-    EnvVar(
-        "Enable CLI for generating a workplan from a directory of blueprints.",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_GEN"
-"""Enable CLI for generating a workplan from a directory of blueprints."""
-
-ENV_FF_CLI_WORKPLAN_PLAN: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_PLAN"],
-    EnvVar(
-        "Enable CLI for generating the execution plan of a workplan.",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_PLAN"
-"""Enable CLI for generating the execution plan of a workplan."""
-
-ENV_FF_CLI_WORKPLAN_STATUS: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_STATUS"],
-    EnvVar(
-        "Enable CLI for retrieving status about a workplan run.",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_STATUS"
-"""Enable CLI for retrieving status about a workplan run."""
-
-ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
-    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT"],
-    EnvVar(
-        "Enable automatic time-splitting of simulations.",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
-"""Enable automatic time-splitting of simulations."""
-
-ENV_FF_ORCH_TRX_OVERRIDE: t.Annotated[
-    t.Literal["CSTAR_FF_ORCH_TRX_OVERRIDE"],
-    EnvVar(
-        "Enable automatic overrides to blueprints contained in a workplan.",
-        _GROUP_FF,
-        default=FF_OFF,
-    ),
-] = "CSTAR_FF_ORCH_TRX_OVERRIDE"
-"""Enable automatic overrides to blueprints contained in a workplan."""
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
@@ -681,13 +598,14 @@ def discover_env_vars(
     prefix: str = "ENV_",
 ) -> list[EnvItem]:
     """Locate all constants in a module that represent environment variables."""
-    items = []
+    items: list[EnvItem] = []
     for module in modules:
         hints = t.get_type_hints(module, include_extras=True)
 
         for name, hint in hints.items():
             if name.startswith(prefix):
                 metadata = getattr(hint, "__metadata__", None)
+                name = name.replace(prefix, "")
                 if metadata and isinstance(metadata[0], EnvVar):
                     meta = metadata[0]
                     items.append(EnvItem.from_env_var(meta, name))

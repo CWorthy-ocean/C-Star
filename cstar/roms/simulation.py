@@ -22,7 +22,10 @@ from cstar.base.utils import (
     get_env_item,
     slugify,
 )
-from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    RomsFileSystemManager,
+)
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -802,7 +805,7 @@ class ROMSSimulation(Simulation):
         return simulation_runtime_settings
 
     @property
-    def input_datasets(self) -> list:
+    def input_datasets(self) -> list[ROMSInputDataset]:
         """Retrieves all input datasets associated with this ROMS simulation.
 
         This property compiles a list of `ROMSInputDataset` instances that are used

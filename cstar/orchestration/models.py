@@ -24,7 +24,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
-from cstar.execution.file_system import DirectoryManager, RomsFileSystemManager
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.utils import get_run_id
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -483,11 +483,6 @@ class Step(BaseModel):
     def working_dir(self, bp: RomsMarblBlueprint) -> Path:
         """The step-relative directory for writing outputs.
 
-        Precedence:
-        1. Overrides provided via a workplan always overwrite blueprint-supplied paths.
-        2. The system may override with a path from the environment variables.
-        3. The output path from the blueprint runtime parameters is used.
-
         Parameters
         ----------
         bp : RomsMarblBlueprint
@@ -498,23 +493,9 @@ class Step(BaseModel):
         Path
             The path to the step working directory.
         """
-        # TODO: remove bp parameter
-        # TODO: consider removing this completely and ONLY storing relative paths
-        out_dir = DirectoryManager.state_home()
-
         run_dir = get_run_id()
         step_dir = self.safe_name
-        return Path(out_dir) / run_dir / step_dir
-
-        # runtime_params = self.blueprint_overrides.get("runtime_params", {})
-        # output_dir_override: str = runtime_params.get("output_dir", "")  # type: ignore[union-attr,assignment]
-
-        # od_path = Path(bp.runtime_params.output_dir)
-
-        # if output_dir_override:
-        #     od_path = Path(output_dir_override)
-
-        # return od_path
+        return Path(run_dir) / step_dir
 
     def file_system(self, bp: RomsMarblBlueprint) -> RomsFileSystemManager:
         """The directories used by this step.
