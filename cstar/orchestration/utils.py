@@ -85,6 +85,38 @@ ENV_CSTAR_SLURM_QUEUE: t.Annotated[
 """Environment variable containing the SLURM priority (queue) used by the SLURM scheduler."""
 
 
+ENV_CSTAR_MANAGED_ACCOUNT: t.Annotated[
+    t.Literal["CSTAR_MANAGED_ACCOUNT"],
+    EnvVar(
+        description="Not used at this time.",
+        group=_GROUP_ORCH,
+        default="",
+    ),
+] = "CSTAR_MANAGED_ACCOUNT"
+"""Not used at this time."""
+
+ENV_CSTAR_MANAGED_MAX_WALLTIME: t.Annotated[
+    t.Literal["CSTAR_MANAGED_MAX_WALLTIME"],
+    EnvVar(
+        description="Maximum walltime allowed by the managed scheduler in `HH:MM:SS` format.",
+        group=_GROUP_ORCH,
+        default="48:00:00",
+    ),
+] = "CSTAR_MANAGED_MAX_WALLTIME"
+"""Maximum walltime allowed by the managed scheduler in `HH:MM:SS` format."""
+
+
+ENV_CSTAR_MANAGED_QUEUE: t.Annotated[
+    t.Literal["CSTAR_MANAGED_QUEUE"],
+    EnvVar(
+        description="Not used at this time.",
+        group=_GROUP_ORCH,
+        default="",
+    ),
+] = "CSTAR_MANAGED_QUEUE"
+"""Not used at this time."""
+
+
 def get_run_id() -> str:
     """Retrieve the current run-id.
 
