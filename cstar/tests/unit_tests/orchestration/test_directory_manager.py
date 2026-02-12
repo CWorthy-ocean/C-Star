@@ -29,7 +29,6 @@ def test_directory_mgr_cachedir_no_config(
 ) -> None:
     """Verify the default state directory is returned if no environment config is set."""
     expected_path = (Path(default_value) / "cstar").expanduser().resolve()
-    # expected_path = (Path(default_value)).expanduser().resolve()
 
     with mock.patch.dict(os.environ, {}, clear=True):
         output_dir = fn_under_test()
@@ -54,7 +53,6 @@ def test_directory_mgr_cachedir_xdg_config(
     """Verify the XDG config is used instead of returning defaults when it is set."""
     # expect the output to be the base path from the XDG setting with a cstar subdir
     xdg_path = Path(xdg_value) / "cstar"
-    # xdg_path = Path(xdg_value)
     expected_path = xdg_path.expanduser().resolve()
 
     with mock.patch.dict(os.environ, {xdg_var: xdg_value}, clear=True):
@@ -135,7 +133,6 @@ def test_directory_mgr_datadir_hpc_override(
 
     # expect the output to be the base path from the hpc override with a cstar subdir
     expected_path = (hpc_path / "cstar").expanduser().resolve()
-    # expected_path = (hpc_path).expanduser().resolve()
 
     with mock.patch.dict(
         os.environ, {xdg_var: xdg_value, scratch_var: scratch_val}, clear=True
