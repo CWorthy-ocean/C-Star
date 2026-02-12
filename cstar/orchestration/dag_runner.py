@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
+from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
@@ -22,6 +23,7 @@ from cstar.orchestration.transforms import (
     WorkplanTransformer,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS, get_run_id
+from cstar.system.manager import cstar_sysmgr
 
 log = get_logger(__name__)
 
@@ -217,9 +219,8 @@ async def build_and_run_dag(
     wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 
     planner = Planner(workplan=wp)
-    # from cstar.orchestration.launch.local import LocalLauncher
-    # launcher: Launcher = LocalLauncher()
-    launcher = SlurmLauncher()
+    launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
+
     orchestrator = Orchestrator(planner, launcher)
 
     # schedule the tasks without waiting for completion
