@@ -11,9 +11,10 @@ from cstar.base.log import LoggingMixin
 from cstar.base.utils import ENV_CSTAR_STATE_HOME, slugify
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
+    ENV_CSTAR_ENV_REQD_CONFIG,
     ENV_CSTAR_ORCH_RUNID,
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_QUEUE,
+    # ENV_CSTAR_SLURM_ACCOUNT,
+    # ENV_CSTAR_SLURM_QUEUE,
 )
 
 KEY_STATUS: t.Literal["status"] = "status"
@@ -652,17 +653,18 @@ def check_environment() -> None:
     ValueError
         If required environment variables are missing or empty.
     """
-    required_vars = (
-        ENV_CSTAR_SLURM_ACCOUNT,
-        ENV_CSTAR_SLURM_QUEUE,
-        ENV_CSTAR_ORCH_RUNID,
-    )
+    required_config = os.getenv(ENV_CSTAR_ENV_REQD_CONFIG, "")
+    required_vars = [x.strip() for x in required_config.split(",") if x]
+    # required_vars = (
+    #     ENV_CSTAR_SLURM_ACCOUNT,
+    #     ENV_CSTAR_SLURM_QUEUE,
+    #     ENV_CSTAR_ORCH_RUNID,
+    # )
 
     for key in required_vars:
         if not os.getenv(key, ""):
-            raise ValueError(
-                f"Unable to run workplan. `{key}` not found in environment."
-            )
+            msg = f"Unable to run workplan. `{key}` not found in environment."
+            raise ValueError(msg)
 
 
 def configure_environment(

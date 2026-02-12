@@ -1,6 +1,5 @@
 import asyncio
 import datetime
-import random
 from multiprocessing import Process as MpProcess
 from subprocess import run as sprun
 
@@ -9,7 +8,10 @@ from psutil import Process as PsProcess
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.utils import slugify
-from cstar.orchestration.models import Step
+from cstar.orchestration.converter.converter import (
+    get_command_mapping,
+)
+from cstar.orchestration.models import Application, Step
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -90,8 +92,13 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        cmd = ["sleep", str(random.randint(1, 4))]
-        print(f"Creating local process from cmd: {' '.join(cmd)}")
+        # cmd = ["sleep", str(random.randint(1, 4))]
+        # print(f"Creating local process from cmd: {' '.join(cmd)}")
+        step_converter = get_command_mapping(
+            Application[step.application],
+            LocalLauncher,
+        )
+        cmd = step_converter(step)
 
         try:
             mp_process = MpProcess(

@@ -117,6 +117,17 @@ ENV_CSTAR_MANAGED_QUEUE: t.Annotated[
 """Not used at this time."""
 
 
+ENV_CSTAR_ENV_REQD_CONFIG: t.Annotated[
+    t.Literal["CSTAR_ENV_REQD_CONFIG"],
+    EnvVar(
+        "A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?).",
+        _GROUP_ORCH,
+        "",
+    ),
+] = "CSTAR_ENV_REQD_CONFIG"
+"""A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?)."""
+
+
 def get_run_id() -> str:
     """Retrieve the current run-id.
 
