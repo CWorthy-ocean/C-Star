@@ -207,7 +207,7 @@ class JobFileSystemManager(LoggingMixin):
             self.logs_dir,
             self.output_dir,
         ]:
-            shutil.rmtree(directory)
+            shutil.rmtree(directory, ignore_errors=True)
             directory.mkdir(parents=True)
         self.log.debug(f"Created empty working directories for job `{self.root.name}`")
 

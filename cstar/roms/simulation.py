@@ -632,8 +632,7 @@ class ROMSSimulation(Simulation):
             self.log.warning(
                 f"Clearing existing job directory: {self.fs_manager.root} ({env_item.name} is {env_item.value})"
             )
-            shutil.rmtree(self.fs_manager.root)
-            self.fs_manager.root.mkdir()
+            self.fs_manager.clear()
 
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
