@@ -11,17 +11,18 @@ from typing import Any, Optional, TypeVar, cast
 import yaml
 
 import cstar.roms.runtime_settings
-from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_NPROCS_POST,
+    get_env_item,
+)
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.feature import FF_OFF
 from cstar.base.utils import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_NPROCS_POST,
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
-    get_env_item,
     slugify,
 )
 from cstar.execution.file_system import (
@@ -63,6 +64,7 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
 )
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
+from cstar.simulation import Simulation
 from cstar.system.manager import cstar_sysmgr
 
 

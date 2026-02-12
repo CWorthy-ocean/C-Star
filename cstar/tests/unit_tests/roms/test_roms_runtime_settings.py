@@ -9,7 +9,8 @@ import pytest
 from pydantic import ValidationError
 
 import cstar.roms.runtime_settings as rrs
-from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _replace_text_in_file
+from cstar.base.env import DEFAULT_OUTPUT_ROOT_NAME
+from cstar.base.utils import _replace_text_in_file
 from cstar.roms.runtime_settings import (
     Forcing,
     InitialConditions,

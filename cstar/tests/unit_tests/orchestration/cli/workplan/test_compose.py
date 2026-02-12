@@ -6,7 +6,7 @@ from unittest import mock
 import pytest
 
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
-from cstar.base.utils import ENV_CSTAR_STATE_HOME, FLAG_ON
+from cstar.base.env import ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan

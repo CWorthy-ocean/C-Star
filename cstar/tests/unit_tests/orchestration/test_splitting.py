@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
+from cstar.base.env import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,

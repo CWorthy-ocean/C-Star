@@ -7,7 +7,9 @@ from typing import Any, Optional
 
 import dateutil
 
-from cstar.base import AdditionalCode, Discretization, ExternalCodeBase
+from cstar.base.additional_code import AdditionalCode
+from cstar.base.discretization import Discretization
+from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.log import LoggingMixin
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus

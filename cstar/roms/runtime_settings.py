@@ -21,8 +21,9 @@ from pydantic import (
 )
 from pydantic.alias_generators import to_snake
 
+from cstar.base.env import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.base.log import get_logger
-from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _list_to_concise_str
+from cstar.base.utils import _list_to_concise_str
 
 log = get_logger(__name__)
 

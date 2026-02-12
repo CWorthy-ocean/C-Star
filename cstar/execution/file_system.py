@@ -5,8 +5,7 @@ import typing as t
 from dataclasses import dataclass
 from pathlib import Path
 
-from cstar.base.log import LoggingMixin
-from cstar.base.utils import (
+from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
@@ -14,6 +13,7 @@ from cstar.base.utils import (
     EnvItem,
     get_env_item,
 )
+from cstar.base.log import LoggingMixin
 
 
 @dataclass(slots=True)

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from cstar.base import ExternalCodeBase
+from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
 from cstar.system.manager import cstar_sysmgr

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cstar.base import Discretization
+from cstar.base.discretization import Discretization
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.tests.unit_tests.fake_abc_subclasses import (
