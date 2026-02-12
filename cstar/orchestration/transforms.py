@@ -313,7 +313,7 @@ class WorkplanTransformer(LoggingMixin):
 
                 steps.extend(transformed_steps)
 
-        self._ensure_unique_paths(steps)  # HACK: remove when possible
+        # self._ensure_unique_paths(steps)  # HACK: remove when possible
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_OVERRIDE):
             override_transform = OverrideTransform()
