@@ -15,10 +15,10 @@ from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_NPROCS_POST,
+    FLAG_OFF,
     get_env_item,
 )
 from cstar.base.external_codebase import ExternalCodeBase
-from cstar.base.feature import FF_OFF
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -628,7 +628,7 @@ class ROMSSimulation(Simulation):
 
     def _conditionally_clear_root(self):
         env_item = get_env_item(ENV_CSTAR_CLOBBER_WORKING_DIR)
-        if env_item.value != FF_OFF and self.fs_manager.root.exists():
+        if env_item.value != FLAG_OFF and self.fs_manager.root.exists():
             self.log.warning(
                 f"Clearing existing job directory: {self.fs_manager.root} ({env_item.name} is {env_item.value})"
             )

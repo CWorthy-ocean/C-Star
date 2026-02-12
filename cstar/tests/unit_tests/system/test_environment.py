@@ -6,8 +6,13 @@ from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
 
-from cstar.base.env import get_env_item, ENV_CSTAR_CACHE_HOME, ENV_CSTAR_CONFIG_HOME, ENV_CSTAR_DATA_HOME, \
-    ENV_CSTAR_STATE_HOME
+from cstar.base.env import (
+    ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_STATE_HOME,
+    get_env_item,
+)
 from cstar.system.environment import CStarEnvironment
 
 

@@ -2,9 +2,8 @@ import os
 import sys
 import types
 import typing as t
-from pathlib import Path
-
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -149,7 +148,6 @@ ENV_CSTAR_LOG_LEVEL: t.Annotated[
     ),
 ] = "CSTAR_LOG_LEVEL"
 """Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
-
 
 
 ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
