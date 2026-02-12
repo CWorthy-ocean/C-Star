@@ -200,6 +200,8 @@ class JobFileSystemManager(LoggingMixin):
 
     def clear(self) -> None:
         """Ensure the job's working directories are empty."""
+        self.log.debug(f"Emptying working directories for job `{self.root.name}`")
+
         for directory in [
             self.input_dir,
             self.work_dir,
@@ -209,7 +211,6 @@ class JobFileSystemManager(LoggingMixin):
         ]:
             shutil.rmtree(directory)
             directory.mkdir(parents=True)
-        self.log.debug(f"Created empty working directories for job `{self.root.name}`")
 
     def __getstate__(self) -> dict[str, str]:
         """Return the state of the object."""
@@ -279,3 +280,11 @@ class RomsFileSystemManager(JobFileSystemManager):
         str
         """
         return self._codebases_dir / key
+
+    def clear(self) -> None:
+        """Ensure the job's working directories are empty."""
+        super().clear()
+
+        for directory in [self.joined_output_dir]:
+            shutil.rmtree(directory)
+            directory.mkdir(parents=True)
