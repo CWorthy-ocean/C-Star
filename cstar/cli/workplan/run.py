@@ -32,7 +32,7 @@ def run(
         asyncio.run(build_and_run_dag(path, run_id, output_path))
         print("Workplan run has completed.")
     except Exception as ex:
-        print(f"Workplan run has completed unsuccessfully: {ex}")
+        print(f"Workplan run has completed unsuccessfully: {ex!r}")
 
 
 if __name__ == "__main__":
