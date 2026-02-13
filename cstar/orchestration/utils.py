@@ -84,6 +84,16 @@ ENV_CSTAR_SLURM_QUEUE: t.Annotated[
 ] = "CSTAR_SLURM_QUEUE"
 """Environment variable containing the SLURM priority (queue) used by the SLURM scheduler."""
 
+ENV_CSTAR_ENV_REQD_CONFIG: t.Annotated[
+    t.Literal["CSTAR_ENV_REQD_CONFIG"],
+    EnvVar(
+        "A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?).",
+        _GROUP_ORCH,
+        "",
+    ),
+] = "CSTAR_ENV_REQD_CONFIG"
+"""A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?)."""
+
 
 def get_run_id() -> str:
     """Retrieve the current run-id.
