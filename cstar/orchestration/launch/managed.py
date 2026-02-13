@@ -250,7 +250,7 @@ class ManagedLauncher(Launcher[ManagedHandle]):
         step_fs = step.file_system(bp)
 
         step_converter = get_command_mapping(
-            Application[step.application], ManagedLauncher
+            Application(step.application), ManagedLauncher
         )
 
         script_path = step_fs.work_dir / "script.sh"

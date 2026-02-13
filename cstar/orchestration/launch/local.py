@@ -95,7 +95,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         # cmd = ["sleep", str(random.randint(1, 4))]
         # print(f"Creating local process from cmd: {' '.join(cmd)}")
         step_converter = get_command_mapping(
-            Application[step.application],
+            Application(step.application),
             LocalLauncher,
         )
         cmd = step_converter(step)

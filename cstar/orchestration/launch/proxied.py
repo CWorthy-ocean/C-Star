@@ -74,7 +74,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         # We reuse the conversion logic from SlurmLauncher to get the real command
 
         step_converter = get_command_mapping(
-            Application[step.application], LocalLauncher
+            Application(step.application), LocalLauncher
         )
         if step_converter is None:
             msg = f"No command converter found for application: {step.application}"

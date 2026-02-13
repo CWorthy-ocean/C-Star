@@ -81,8 +81,13 @@ app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
 
 launcher_aware_app_to_cmd_map: dict[
     type[Launcher],
-    dict[Application, StepToCommandConversionFn],
-] = defaultdict(lambda: {Application.SLEEP: convert_step_to_placeholder})
+    dict[str, StepToCommandConversionFn],
+] = defaultdict(
+    lambda: {
+        Application.SLEEP.value: convert_step_to_placeholder,
+        Application.ROMS_MARBL.value: convert_roms_step_to_command,
+    }
+)
 
 
 def register_command_mapping(
@@ -99,7 +104,7 @@ def get_command_mapping(
     launcher: type[Launcher],
 ) -> StepToCommandConversionFn:
     launcher_map = launcher_aware_app_to_cmd_map[launcher]
-    step_converter = launcher_map[application]
+    step_converter = launcher_map[application.value]
 
     if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
         converter = app_to_cmd_map[converter_override]

@@ -142,7 +142,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         step_fs = step.file_system(bp)
 
         step_converter = get_command_mapping(
-            Application[step.application], SlurmLauncher
+            Application(step.application), SlurmLauncher
         )
 
         script_path = step_fs.work_dir / "script.sh"
