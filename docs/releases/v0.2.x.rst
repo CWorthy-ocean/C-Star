@@ -41,6 +41,7 @@ Improvements
 - Update default log format to include file name and line number
 - Add constants for the set of available feature flags
 - Implement CSTAR_LOG_LEVEL env-var
+- Automatically retry partitioning without coarse dims if it fails when they are included
 
 Miscellaneous
 ~~~~~~~~~~~~~

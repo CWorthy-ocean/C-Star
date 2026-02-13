@@ -219,11 +219,33 @@ class ROMSInputDataset(InputDataset, ABC):
             """
             new_parted_files = []
 
+            include_coarse_dims = True
+
             for idfile in files:
                 self.log.info(f"Partitioning {idfile} into ({np_xi},{np_eta})")
-                new_parted_files.extend(
-                    roms_tools.partition_netcdf(idfile, np_xi=np_xi, np_eta=np_eta)
-                )
+                try:
+                    new_parted_files.extend(
+                        roms_tools.partition_netcdf(
+                            idfile,
+                            np_xi=np_xi,
+                            np_eta=np_eta,
+                            include_coarse_dims=include_coarse_dims,
+                        )
+                    )
+                except Exception as e:
+                    self.log.warning(
+                        f"Encountered error partitioning {idfile} with coarse dims; "
+                        f"retrying without coarse dims. Exception: {e}"
+                    )
+                    include_coarse_dims = False
+                    new_parted_files.extend(
+                        roms_tools.partition_netcdf(
+                            idfile,
+                            np_xi=np_xi,
+                            np_eta=np_eta,
+                            include_coarse_dims=include_coarse_dims,
+                        )
+                    )
 
             return [f.resolve() for f in new_parted_files]
 
