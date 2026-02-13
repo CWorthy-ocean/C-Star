@@ -1,3 +1,4 @@
+import os
 import typing as t
 from pathlib import Path
 
@@ -50,11 +51,10 @@ def orchestrated_step_cache_key_func(
     str
         The cache key for the current context.
     """
-    run_id = get_env_item(ENV_CSTAR_ORCH_RUNID).value
+    run_id = os.getenv(ENV_CSTAR_ORCH_RUNID)
     cache_key = f"{run_id}_{params['step'].name}_{context.task.name}"
 
-    msg = f"Cache check: {cache_key}"
-    log.debug(msg)
+    log.debug("Cache check: %s", cache_key)
     return cache_key
 
 
