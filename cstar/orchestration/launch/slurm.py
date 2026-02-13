@@ -204,8 +204,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         ExecutionStatus
             The current status of the step.
         """
-        status = ExecutionStatus.UNKNOWN
-
         msg = f"Requesting status of job {handle.pid} for step {step.name}"
         log.debug(msg)
 
