@@ -92,8 +92,6 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        # cmd = ["sleep", str(random.randint(1, 4))]
-        # print(f"Creating local process from cmd: {' '.join(cmd)}")
         step_converter = get_command_mapping(
             Application(step.application),
             LocalLauncher,
