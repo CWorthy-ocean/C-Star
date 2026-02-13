@@ -18,6 +18,7 @@ from cstar.base.env import (
     FLAG_OFF,
     get_env_item,
 )
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
@@ -1207,9 +1208,16 @@ class ROMSSimulation(Simulation):
 
         self._conditionally_clear_root()
 
-        compile_time_code_dir.mkdir(parents=True, exist_ok=True)
-        runtime_code_dir.mkdir(parents=True, exist_ok=True)
-        input_datasets_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            compile_time_code_dir.mkdir(parents=True)
+            runtime_code_dir.mkdir(parents=True)
+            input_datasets_dir.mkdir(parents=True)
+        except OSError as e:
+            raise CstarExpectationFailed(
+                f"The inputs directory ({self.fs_manager.input_dir}) is not empty and has an unknown state. "
+                f"Set {ENV_CSTAR_CLOBBER_WORKING_DIR} and rerun if you want to delete this directory and start from "
+                f"scratch."
+            ) from e
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
