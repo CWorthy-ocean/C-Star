@@ -8,7 +8,7 @@ import networkx as nx
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import ENV_CSTAR_STATE_HOME, slugify
+from cstar.base.utils import ENV_CSTAR_DATA_HOME, slugify
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
     ENV_CSTAR_ENV_REQD_CONFIG,
@@ -680,7 +680,7 @@ def configure_environment(
         The unique identifier for an execution of the workplan.
     """
     if output_dir:
-        os.environ[ENV_CSTAR_STATE_HOME] = output_dir.expanduser().resolve().as_posix()
+        os.environ[ENV_CSTAR_DATA_HOME] = output_dir.expanduser().resolve().as_posix()
 
     if run_id:
         os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)
