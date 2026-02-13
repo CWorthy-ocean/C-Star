@@ -81,7 +81,7 @@ class Status(IntEnum):
         return status in {Status.Done, Status.Cancelled, Status.Failed}
 
     @classmethod
-    def is_failure(cls, status) -> bool:
+    def is_failure(cls, status: "Status") -> bool:
         """Return `True` if a status is in the set of terminal statuses.
 
         Paramters
@@ -96,7 +96,7 @@ class Status(IntEnum):
         return status in {Status.Cancelled, Status.Failed}
 
     @classmethod
-    def is_running(cls, status) -> bool:
+    def is_running(cls, status: "Status") -> bool:
         """Return `True` if a status is in the set of in-progress statuses.
 
         Paramters
