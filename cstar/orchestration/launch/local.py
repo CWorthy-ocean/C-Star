@@ -104,7 +104,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             mp_process = MpProcess(
                 target=run_as_process,
                 name=slugify(step.name),
-                args=(step, cmd),
+                args=(step, cmd.split()),
                 daemon=True,
             )
             mp_process.start()
