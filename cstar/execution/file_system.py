@@ -200,6 +200,8 @@ class JobFileSystemManager(LoggingMixin):
 
     def clear(self) -> None:
         """Ensure the job's working directories are empty."""
+        self.log.debug(f"Emptying working directories for job `{self.root.name}`")
+
         for directory in [
             self.input_dir,
             self.work_dir,
@@ -207,9 +209,8 @@ class JobFileSystemManager(LoggingMixin):
             self.logs_dir,
             self.output_dir,
         ]:
-            shutil.rmtree(directory, ignore_errors=True)
+            shutil.rmtree(directory)
             directory.mkdir(parents=True)
-        self.log.debug(f"Created empty working directories for job `{self.root.name}`")
 
     def __getstate__(self) -> dict[str, str]:
         """Return the state of the object."""
@@ -269,7 +270,7 @@ class RomsFileSystemManager(JobFileSystemManager):
     @property
     def joined_output_dir(self) -> Path:
         """The directory for de-partitioned outputs."""
-        return self.output_dir / self._JOINED_OUTPUT_NAME
+        return DirectoryManager.data_home() / self.root / self._JOINED_OUTPUT_NAME
 
     def codebase_subdir(self, key: str) -> Path:
         """Return a codebase subdirectory path.
@@ -279,3 +280,11 @@ class RomsFileSystemManager(JobFileSystemManager):
         str
         """
         return self._codebases_dir / key
+
+    def clear(self) -> None:
+        """Ensure the job's working directories are empty."""
+        super().clear()
+
+        for directory in [self.joined_output_dir]:
+            shutil.rmtree(directory)
+            directory.mkdir(parents=True)
