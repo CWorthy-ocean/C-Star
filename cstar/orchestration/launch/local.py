@@ -19,7 +19,7 @@ from cstar.orchestration.orchestration import (
 
 
 def run_as_process(step: Step, cmd: list[str]) -> dict[str, int]:
-    p = sprun(args=cmd, text=True)
+    p = sprun(args=cmd, text=True, check=False)
     return {step.name: p.returncode}
 
 
@@ -67,23 +67,12 @@ class LocalHandle(ProcessHandle):
         -------
         float
         """
-        now = datetime.datetime.now().timestamp()
+        now = datetime.datetime.now(tz=datetime.timezone.utc).timestamp()
         return now - self.start_at
 
 
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
-
-    # processes: t.ClassVar[dict[str, MpProcess]] = {}
-    # """Mapping from step name to process."""
-    # schedule: dict[str, Step] = {}
-
-    # @staticmethod
-    # async def _update_processes() -> None:
-    #     """Update all process statuses."""
-    #     # for process in [p for p in LocalLauncher.processes.values() if p is not None]:
-    #     #     process.poll()
-    #     ...
 
     @staticmethod
     async def _submit(step: Step, dependencies: list[LocalHandle]) -> LocalHandle:
@@ -112,7 +101,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 daemon=True,
             )
             mp_process.start()
-            create_time = datetime.datetime.now()
+            create_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
             if pid := mp_process.pid:
                 print(f"Local run of `{step.application}` created pid: {pid}")
@@ -120,7 +109,9 @@ class LocalLauncher(Launcher[LocalHandle]):
                 try:
                     ps_process = PsProcess(pid)
                     create_timestamp = ps_process.create_time()
-                    create_time = datetime.datetime.fromtimestamp(create_timestamp)
+                    create_time = datetime.datetime.fromtimestamp(
+                        create_timestamp, tz=datetime.timezone.utc
+                    )
                 except NoSuchProcess:
                     print(f"Unable to retrieve exact start time for pid: {pid}")
 
@@ -133,7 +124,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         finally:
             ...
 
-        raise RuntimeError("Unable to retrieve process ID for local process.")
+        msg = "Unable to retrieve process ID for local process."
+        raise RuntimeError(msg)
 
     @staticmethod
     async def _status(step: Step, handle: LocalHandle) -> str:
@@ -196,9 +188,8 @@ class LocalLauncher(Launcher[LocalHandle]):
             failure_found = any(map(Status.is_failure, statuses))
 
         if failure_found:
-            raise CstarExpectationFailed(
-                f"Dependency of step {step.name} failed. Unable to continue."
-            )
+            msg = f"Dependency of step {step.name} failed. Unable to continue."
+            raise CstarExpectationFailed(msg)
 
         handle = await LocalLauncher._submit(step, dependencies)
         return Task(
@@ -231,9 +222,9 @@ class LocalLauncher(Launcher[LocalHandle]):
             return Status.Running
         if raw_status in ["COMPLETED", "FAILED"]:
             return Status.Done
-        if raw_status in ["CANCELLED"]:
+        if raw_status == "CANCELLED":
             return Status.Cancelled
-        if raw_status in ["FAILED"]:
+        if raw_status == "FAILED":
             return Status.Failed
 
         return Status.Unsubmitted
