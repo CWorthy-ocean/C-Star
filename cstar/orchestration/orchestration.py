@@ -661,7 +661,7 @@ def check_environment() -> None:
     for key in required_vars:
         if not os.getenv(key, ""):
             msg = f"Missing required environment variable: {key}"
-            raise KeyError(msg)
+            raise ValueError(msg)
 
 
 def configure_environment(
