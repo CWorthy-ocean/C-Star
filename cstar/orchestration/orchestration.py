@@ -652,7 +652,8 @@ def check_environment() -> None:
         If required environment variables are missing or empty.
     """
     required_config = os.getenv(ENV_CSTAR_ENV_REQD_CONFIG, "")
-    required_vars = [x.strip() for x in required_config.split(",") if x]
+    required_vars: set[str] = {ENV_CSTAR_ORCH_RUNID}
+    required_vars.update({x.strip() for x in required_config.split(",") if x})
 
     for key in required_vars:
         if not os.getenv(key, ""):
