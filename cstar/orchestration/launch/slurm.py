@@ -189,7 +189,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
     async def _submit(step: Step, dependencies: list[SlurmHandle]) -> SlurmHandle:
-        """Submit a step as a new batch allocation.
+        """Submit a step to SLURM as a new batch allocation.
 
         Parameters
         ----------
