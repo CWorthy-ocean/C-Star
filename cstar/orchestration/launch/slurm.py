@@ -59,13 +59,13 @@ def orchestrated_step_cache_key_func(
 
 
 class SlurmHandle(ProcessHandle):
-    """Handle enabling reference to a task managed by SLURM."""
+    """Handle enabling reference to a task running in SLURM."""
 
     job_name: str | None
     """The user-friendly, task-based job name."""
 
     def __init__(self, job_id: str, job_name: str | None = None) -> None:
-        """Initialize the handle.
+        """Initialize the SLURM handle.
 
         Parameters
         ----------
@@ -83,37 +83,40 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @staticmethod
     def configured_queue() -> str:
-        """Get the queue to use for jobs.
+        """Get the queue to use for SLURM jobs.
 
-        Read from environment variables.
+        Read from the environment variable `CSTAR_SLURM_QUEUE`.
 
         Returns
         -------
         str
+            The queue to use for SLURM jobs.
         """
         return get_env_item(ENV_CSTAR_SLURM_QUEUE).value
 
     @staticmethod
     def configured_walltime() -> str:
-        """Get the max-walltime to use for jobs.
+        """Get the max-walltime to use for SLURM jobs.
 
-        Read from environment variables.
+        Read from the environment variable `CSTAR_SLURM_MAX_WALLTIME`.
 
         Returns
         -------
         str
+            The max-walltime to use for SLURM jobs.
         """
         return get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
 
     @staticmethod
     def configured_account() -> str:
-        """Get the account to use jobs.
+        """Get the account to use for SLURM jobs.
 
-        Read from environment variables.
+        Read from the environment variable `CSTAR_SLURM_ACCOUNT`.
 
         Returns
         -------
         str
+            The account to use for SLURM jobs.
         """
         return get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
 
@@ -188,14 +191,14 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @staticmethod
     async def _status(step: Step, handle: SlurmHandle) -> ExecutionStatus:
-        """Retrieve the status of a step.
+        """Retrieve the status of a step running in SLURM.
 
         Parameters
         ----------
         step : Step
             The step triggering the job.
         handle : SlurmHandle
-            A handle object for a task.
+            A handle object for a SLURM-based task.
 
         Returns
         -------
@@ -218,12 +221,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     async def launch(
         cls, step: Step, dependencies: list[SlurmHandle]
     ) -> Task[SlurmHandle]:
-        """Launch a step.
+        """Launch a step in SLURM.
 
         Parameters
         ----------
         step : Step
-            The step to submit.
+            The step to submit to SLURM.
         dependencies : list[SlurmHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
 
