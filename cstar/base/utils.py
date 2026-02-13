@@ -4,12 +4,14 @@ import hashlib
 import re
 import subprocess
 import typing as t
-from os import PathLike
 from pathlib import Path
 
 import dateutil
 
 from cstar.base.log import get_logger
+
+if t.TYPE_CHECKING:
+    from os import PathLike
 
 log = get_logger(__name__)
 
