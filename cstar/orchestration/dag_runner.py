@@ -6,7 +6,7 @@ from itertools import cycle
 from pathlib import Path
 
 from cstar.base.log import get_logger
-from cstar.base.utils import get_output_dir
+from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
@@ -210,10 +210,9 @@ async def build_and_run_dag(
         The path to the workplan that was executed after any tranformations
         were applied.
     """
-    run_id = get_run_id(run_id)
-    output_dir = get_output_dir(output_dir)
-
     configure_environment(output_dir, run_id)
+    run_id = get_run_id()
+    output_dir = DirectoryManager.data_home()
     check_environment()
     wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 

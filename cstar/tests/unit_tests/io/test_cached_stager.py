@@ -13,13 +13,14 @@ def mock_home_dir(tmp_path: Path) -> t.Generator[t.Callable[[], Path], None, Non
     """Fixture that replaces the default home directory with a temporary
     home directory.
     """
-    home_dir = tmp_path / "test-asset-cache"
-    home_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "test-asset-cache"
+    state_dir.mkdir(parents=True, exist_ok=True)
 
     with mock.patch(
-        "cstar.base.utils.get_home_dir", return_value=home_dir
-    ) as mock_get_home_dir:
-        yield mock_get_home_dir
+        "cstar.execution.file_system.DirectoryManager.state_home",
+        return_value=state_dir,
+    ) as mock_state_home:
+        yield mock_state_home
 
 
 @pytest.mark.usefixtures("mock_home_dir")

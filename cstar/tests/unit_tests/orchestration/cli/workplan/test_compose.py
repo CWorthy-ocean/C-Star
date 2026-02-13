@@ -5,13 +5,15 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.utils import ENV_CSTAR_OUTDIR, get_output_dir
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.base.utils import ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
+from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import WorkplanTransformer
+from cstar.orchestration.transforms import SplitFrequency, WorkplanTransformer
 from cstar.orchestration.utils import (
     ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_RUNID,
@@ -120,7 +122,7 @@ async def test_compose_host_run_parameter(
 
     mock_run = mock.Mock()
     run_id = "my-run"
-    mock_env = {ENV_CSTAR_OUTDIR: output_override_dir.as_posix()}
+    mock_env = {ENV_CSTAR_STATE_HOME: output_override_dir.as_posix()}
 
     with (
         mock.patch("cstar.cli.workplan.compose._run", mock_run),
@@ -186,7 +188,7 @@ async def test_build_and_run_dag_env(
 
     mock_process = mock.AsyncMock()
     mock_env = {
-        ENV_CSTAR_OUTDIR: output_override_dir.as_posix(),
+        ENV_CSTAR_STATE_HOME: output_override_dir.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -244,12 +246,12 @@ async def test_prepare_composed_dag(
     run_id = "my-run"
 
     mock_env = {
-        ENV_CSTAR_OUTDIR: output_override_dir.as_posix(),
+        ENV_CSTAR_STATE_HOME: output_override_dir.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
-        "CSTAR_FF_ORCH_TRANSFORM_AUTO": "1",
-        ENV_CSTAR_ORCH_TRX_FREQ: "monthly",
+        ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
+        ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
     }
 
     def _raise_ex(*args, **kwargs):
@@ -267,10 +269,9 @@ async def test_prepare_composed_dag(
             template=WorkplanTemplate[workplan_name.upper()],
         )
 
-        run_id = get_run_id(run_id)
-        output_dir = get_output_dir(output_dir)
-
         configure_environment(output_dir, run_id)
+        run_id = get_run_id()
+        output_dir = DirectoryManager.data_home()
         check_environment()
         wp, wp_path = await prepare_workplan(generated_wp_path, output_dir, run_id)
 
@@ -326,8 +327,8 @@ async def test_run_composed_dag(
         ENV_CSTAR_SLURM_ACCOUNT: "ees250129",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
-        "CSTAR_FF_ORCH_TRANSFORM_AUTO": "1",
-        ENV_CSTAR_ORCH_TRX_FREQ: "monthly",
+        ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
+        ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
         ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
 

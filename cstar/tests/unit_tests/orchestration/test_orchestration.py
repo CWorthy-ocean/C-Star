@@ -1,5 +1,6 @@
 import os
 import typing as t
+import uuid
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -7,6 +8,11 @@ from unittest import mock
 import networkx as nx
 import pytest
 
+from cstar.base.feature import (
+    ENV_FF_ORCH_TRX_OVERRIDE,
+    ENV_FF_ORCH_TRX_TIMESPLIT,
+)
+from cstar.base.utils import FLAG_ON
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.orchestration import (
@@ -23,6 +29,7 @@ from cstar.orchestration.transforms import (
     WorkplanTransformer,
     get_time_slices,
 )
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 
 @pytest.fixture
@@ -314,7 +321,11 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
     with (
         mock.patch.dict(
             os.environ,
-            {"CSTAR_FF_ORCH_TRANSFORM_AUTO": "1", "CSTAR_FF_ORCH_TRANSFORM_OVR": "1"},
+            {
+                ENV_CSTAR_ORCH_RUNID: str(uuid.uuid4()),
+                ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
+                ENV_FF_ORCH_TRX_OVERRIDE: FLAG_ON,
+            },
         ),
     ):
         transformed = transformer.apply()

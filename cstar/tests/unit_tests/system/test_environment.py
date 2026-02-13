@@ -6,6 +6,13 @@ from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
 
+from cstar.base.utils import (
+    ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_STATE_HOME,
+    get_env_item,
+)
 from cstar.system.environment import CStarEnvironment
 
 
@@ -631,3 +638,148 @@ class TestExceptions:
             MockEnvironment()
 
         assert mock_open_file.called
+
+
+@pytest.mark.parametrize(
+    ("xdg_var", "xdg_value", "cstar_var", "cstar_val"),
+    [
+        (
+            "XDG_CACHE_HOME",
+            "/foo/boop",
+            ENV_CSTAR_CACHE_HOME,
+            "~/my-state/cstar-cache",
+        ),
+        (
+            "XDG_CONFIG_HOME",
+            "/foo/borp",
+            ENV_CSTAR_CONFIG_HOME,
+            "~/my-state/cstar-config",
+        ),
+        (
+            "XDG_DATA_HOME",
+            "/foo/blep",
+            ENV_CSTAR_DATA_HOME,
+            "~/my-state/cstar-data",
+        ),
+        (
+            "XDG_STATE_HOME",
+            "/foo/beep",
+            ENV_CSTAR_STATE_HOME,
+            "~/my-state/cstar-state",
+        ),
+    ],
+)
+def test_get_env_item_cstar_override(
+    xdg_var: str,
+    xdg_value: str,
+    cstar_var: str,
+    cstar_val: str,
+) -> None:
+    """Verify the XDG config is ignored when the CSTAR_XXX_HOME variables are set."""
+    with patch.dict(os.environ, {xdg_var: xdg_value, cstar_var: cstar_val}, clear=True):
+        env_item = get_env_item(cstar_var)
+        output_dir = env_item.value
+
+    assert output_dir == cstar_val
+
+
+@pytest.mark.parametrize(
+    ("xdg_var", "xdg_value", "cstar_var"),
+    [
+        (
+            "XDG_CACHE_HOME",
+            "/foo/boop",
+            ENV_CSTAR_CACHE_HOME,
+        ),
+        (
+            "XDG_CONFIG_HOME",
+            "/foo/borp",
+            ENV_CSTAR_CONFIG_HOME,
+        ),
+        (
+            "XDG_DATA_HOME",
+            "/foo/blep",
+            ENV_CSTAR_DATA_HOME,
+        ),
+        (
+            "XDG_STATE_HOME",
+            "/foo/beep",
+            ENV_CSTAR_STATE_HOME,
+        ),
+    ],
+)
+def test_get_env_item_indirect(
+    xdg_var: str,
+    xdg_value: str,
+    cstar_var: str,
+) -> None:
+    """Verify the XDG config is ignored when the CSTAR_XXX_HOME variables are set."""
+    with patch.dict(os.environ, {xdg_var: xdg_value, cstar_var: ""}, clear=True):
+        env_item = get_env_item(cstar_var)
+        output_dir = env_item.value
+
+    assert output_dir == xdg_value
+
+
+@pytest.mark.parametrize(
+    ("xdg_var", "xdg_value", "cstar_var"),
+    [
+        (
+            "XDG_CACHE_HOME",
+            "",
+            ENV_CSTAR_CACHE_HOME,
+        ),
+        (
+            "XDG_CONFIG_HOME",
+            "",
+            ENV_CSTAR_CONFIG_HOME,
+        ),
+        (
+            "XDG_DATA_HOME",
+            "",
+            ENV_CSTAR_DATA_HOME,
+        ),
+        (
+            "XDG_STATE_HOME",
+            "",
+            ENV_CSTAR_STATE_HOME,
+        ),
+    ],
+)
+def test_get_env_item_default(
+    xdg_var: str,
+    xdg_value: str,
+    cstar_var: str,
+) -> None:
+    """Verify the default is returned when XDG and CSTAR_XXX_HOME variables are not set."""
+    with patch.dict(os.environ, {xdg_var: xdg_value, cstar_var: ""}, clear=True):
+        env_item = get_env_item(cstar_var)
+        output_dir = env_item.value
+
+    assert output_dir == env_item.default
+
+    from cstar.cli.environment.show import show
+
+    show("file")
+
+
+@pytest.mark.parametrize(
+    ("xdg_var", "xdg_value", "cstar_var"),
+    [
+        (
+            "XDG_CACHE_HOME",
+            "",
+            ENV_CSTAR_CACHE_HOME,
+        )
+    ],
+)
+def test_env_show_default(
+    xdg_var: str,
+    xdg_value: str,
+    cstar_var: str,
+) -> None:
+    """Verify the XDG config is ignored when the CSTAR_XXX_HOME variables are set."""
+    with patch.dict(os.environ, {xdg_var: xdg_value, cstar_var: ""}, clear=True):
+        from cstar.cli.environment.show import show
+
+        show("file")

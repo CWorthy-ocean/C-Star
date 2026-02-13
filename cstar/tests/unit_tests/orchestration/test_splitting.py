@@ -1,3 +1,4 @@
+import os
 import typing as t
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from cstar.orchestration.transforms import (
     get_time_slices,
     get_transforms,
 )
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 
 @pytest.fixture
@@ -118,7 +120,9 @@ def test_splitter(single_step_workplan: Workplan) -> None:
     transform = RomsMarblTimeSplitter()
 
     step = single_step_workplan.steps[0]
-    transformed_steps = list(transform(step))
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_ORCH_RUNID: "12345"}, clear=True):
+        transformed_steps = list(transform(step))
 
     # one step transforms into 12 monthly steps
     assert len(transformed_steps) == 12

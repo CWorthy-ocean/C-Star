@@ -12,12 +12,13 @@ This is a bug-fix release focused on stabilizing the orchestration of blueprints
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+- Environment variables ``CSTAR_HOME`` and ``CSTAR_OUTDIR`` are deprecated in favor of ``CSTAR_CONFIG_HOME`` and ``CSTAR_STATE_HOME``
 
 New features
 ~~~~~~~~~~~~
 
 - Add remote repository caching for re-use across simulations
+- XDG base directory standard is implemented
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -37,6 +38,7 @@ Improvements
 - Avoid automatic failures by retrying failed git clone operations
 - Add informational logging when tasks fail and additional tasks are cancelled
 - Update default log format to include file name and line number
+- Add constants for the set of available feature flags
 
 Miscellaneous
 ~~~~~~~~~~~~~

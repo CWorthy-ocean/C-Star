@@ -15,12 +15,17 @@ from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
+    ENV_CSTAR_NPROCS_POST,
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
+    get_env_item,
     slugify,
 )
-from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    RomsFileSystemManager,
+)
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -57,8 +62,6 @@ from cstar.roms.input_dataset import (
 )
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.system.manager import cstar_sysmgr
-
-NPROCS_POST = int(os.getenv("CSTAR_NPROCS_POST", str(os.cpu_count() // 3)))  # type: ignore[operator]
 
 
 def _ncjoin_wildcard(
@@ -802,7 +805,7 @@ class ROMSSimulation(Simulation):
         return simulation_runtime_settings
 
     @property
-    def input_datasets(self) -> list:
+    def input_datasets(self) -> list[ROMSInputDataset]:
         """Retrieves all input datasets associated with this ROMS simulation.
 
         This property compiles a list of `ROMSInputDataset` instances that are used
@@ -1647,7 +1650,8 @@ class ROMSSimulation(Simulation):
                 output_dir=self.fs_manager.joined_output_dir,
             )
 
-            with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
+            nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
+            with ThreadPoolExecutor(max_workers=nprocs) as executor:
                 results = executor.map(spatial_joiner, unique_wildcards)
                 _ = [r for r in results]  # exhaust iterator
 

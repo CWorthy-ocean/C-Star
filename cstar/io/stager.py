@@ -2,11 +2,13 @@ import shutil
 from abc import ABC
 from typing import TYPE_CHECKING, ClassVar
 
+from cstar.execution.file_system import DirectoryManager
+
 if TYPE_CHECKING:
     from pathlib import Path
 
     from cstar.io.source_data import SourceData
-from cstar.base.utils import get_cache_dir, slugify
+from cstar.base.utils import slugify
 from cstar.io.constants import SourceClassification
 from cstar.io.staged_data import StagedFile, StagedRepository
 
@@ -164,6 +166,6 @@ class CachedRemoteRepositoryStager(Stager):
         -------
         Path
         """
-        cache_dir = get_cache_dir()
+        cache_dir = DirectoryManager.cache_home()
         source_key = slugify(self.source.location)
         return cache_dir / source_key
