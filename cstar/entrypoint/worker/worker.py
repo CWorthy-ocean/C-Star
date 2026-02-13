@@ -157,11 +157,9 @@ class SimulationRunner(Service):
         if disposition == ExecutionStatus.COMPLETED and not treat_as_failure:
             self.log.info("Simulation completed successfully.")
         elif disposition == ExecutionStatus.FAILED or treat_as_failure:
-            msg = "Simulation failed."
-            raise CstarError(msg)
+            self.log.error("Simulation failed.")
         else:
-            msg = f"Simulation ended with status: {disposition}."
-            raise CstarError(msg)
+            self.log.warning(f"Simulation ended with status: {disposition}.")
 
     @override
     def _on_start(self) -> None:
