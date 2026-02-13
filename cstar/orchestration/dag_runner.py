@@ -22,7 +22,7 @@ from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS, get_run_id
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import cstar_sysmgr
 
 log = get_logger(__name__)
@@ -213,7 +213,6 @@ async def build_and_run_dag(
         were applied.
     """
     configure_environment(output_dir, run_id)
-    run_id = get_run_id()
     output_dir = DirectoryManager.data_home()
     check_environment()
     wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
