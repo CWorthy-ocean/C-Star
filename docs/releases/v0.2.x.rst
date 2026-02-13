@@ -31,6 +31,7 @@ Bug Fixes
 - Fix path concatenation bug resulting in invalid source data paths
 - Fix indentation creating an unreachable code block in git utils
 - Add conda installation of rsync to environment.yml (fixes bug related to a flag used in newer ucla-roms makefiles that is not available in MacOS's default rsync installation)
+- Reimplement CSTAR_CLOBBER_WORKING_DIR for single-blueprint cases
 
 Improvements
 ~~~~~~~~~~~~
@@ -39,6 +40,7 @@ Improvements
 - Add informational logging when tasks fail and additional tasks are cancelled
 - Update default log format to include file name and line number
 - Add constants for the set of available feature flags
+- Implement CSTAR_LOG_LEVEL env-var
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -46,6 +48,11 @@ Miscellaneous
 - Additional details added in docstrings
 - Silence OMP warning originating from numba
 - Modify a blueprint in the tests directory for a refactored layout in the remote data repository
+- Use remote mypy precommit hook instead of relying on local installation
+- Move env-var handling methods to separate module to avoid circular imports
+- Remove excess new-lines while logging the ROMS handler
+- Remove __init__-based import shortcuts
+- Adjust error handling and presentation in the worker/service layer
 
 ---
 
