@@ -6,13 +6,13 @@ from pathlib import Path
 
 import networkx as nx
 
-from cstar.base.env import ENV_CSTAR_DATA_HOME
+from cstar.base.env import ENV_CSTAR_DATA_HOME, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
-    ENV_CSTAR_ENV_REQD_CONFIG,
+    ENV_CSTAR_ORCH_REQD_ENV,
     ENV_CSTAR_ORCH_RUNID,
 )
 
@@ -652,7 +652,7 @@ def check_environment() -> None:
     ValueError
         If required environment variables are missing or empty.
     """
-    required_config = os.getenv(ENV_CSTAR_ENV_REQD_CONFIG, "")
+    required_config = get_env_item(ENV_CSTAR_ORCH_REQD_ENV).value
     required_vars: set[str] = {ENV_CSTAR_ORCH_RUNID}
     required_vars.update({x.strip() for x in required_config.split(",") if x})
 

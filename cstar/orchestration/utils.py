@@ -84,14 +84,14 @@ ENV_CSTAR_SLURM_QUEUE: t.Annotated[
 ] = "CSTAR_SLURM_QUEUE"
 """Environment variable containing the SLURM priority (queue) used by the SLURM scheduler."""
 
-ENV_CSTAR_ENV_REQD_CONFIG: t.Annotated[
-    t.Literal["CSTAR_ENV_REQD_CONFIG"],
+ENV_CSTAR_ORCH_REQD_ENV: t.Annotated[
+    t.Literal["CSTAR_ORCH_REQD_ENV"],
     EnvVar(
         "A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?).",
         _GROUP_ORCH,
-        "",
+        "CSTAR_SLURM_ACCOUNT,CSTAR_SLURM_QUEUE",
     ),
-] = "CSTAR_ENV_REQD_CONFIG"
+] = "CSTAR_ORCH_REQD_ENV"
 """A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?)."""
 
 
