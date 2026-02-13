@@ -221,10 +221,17 @@ class ROMSInputDataset(InputDataset, ABC):
 
             for idfile in files:
                 self.log.info(f"Partitioning {idfile} into ({np_xi},{np_eta})")
-                new_parted_files.extend(
-                    roms_tools.partition_netcdf(idfile, np_xi=np_xi, np_eta=np_eta, 
-                    include_coarse_dims=False)
-                )
+                try:
+                    result = roms_tools.partition_netcdf(
+                        idfile, np_xi=np_xi, np_eta=np_eta)
+                except Exception:
+                    try:
+                        result = roms_tools.partition_netcdf(
+                            idfile, np_xi=np_xi, np_eta=np_eta,
+                            include_coarse_dims=False)
+                    except Exception:
+                        raise
+                new_parted_files.extend(result)
 
             return [f.resolve() for f in new_parted_files]
 
