@@ -181,8 +181,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job.submit()
 
         if job.id:
-            msg = f"Submission of `{step.name}` created Job ID `{job.id}`"
-            log.debug(msg)
+            log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
 
             return SlurmHandle(job_id=str(job.id), job_name=job_name)
 
