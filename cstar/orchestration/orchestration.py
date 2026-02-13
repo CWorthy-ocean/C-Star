@@ -13,8 +13,6 @@ from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
     ENV_CSTAR_ENV_REQD_CONFIG,
     ENV_CSTAR_ORCH_RUNID,
-    # ENV_CSTAR_SLURM_ACCOUNT,
-    # ENV_CSTAR_SLURM_QUEUE,
 )
 
 KEY_STATUS: t.Literal["status"] = "status"
@@ -655,11 +653,6 @@ def check_environment() -> None:
     """
     required_config = os.getenv(ENV_CSTAR_ENV_REQD_CONFIG, "")
     required_vars = [x.strip() for x in required_config.split(",") if x]
-    # required_vars = (
-    #     ENV_CSTAR_SLURM_ACCOUNT,
-    #     ENV_CSTAR_SLURM_QUEUE,
-    #     ENV_CSTAR_ORCH_RUNID,
-    # )
 
     for key in required_vars:
         if not os.getenv(key, ""):
