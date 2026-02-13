@@ -1,12 +1,9 @@
 import typing as t
 from pathlib import Path
 from unittest import mock
-from unittest.mock import MagicMock
 
 import pytest
-from pytest_mock import MockerFixture
 
-import cstar
 from cstar.io.source_data import SourceData
 from cstar.io.stager import CachedRemoteRepositoryStager as CRRS
 
@@ -54,7 +51,7 @@ def test_cached_stager(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("mock_home_dir")
-def test_cached_stager_reuse(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_cached_stager_reuse(tmp_path: Path) -> None:
     """Verify that the cached stager performs a single clone and
     re-uses the cached copy on repeat requests for the repository.
 
@@ -72,21 +69,20 @@ def test_cached_stager_reuse(tmp_path: Path, mocker: MockerFixture) -> None:
     source_data_2 = SourceData(repo_uri)
     stage_path_2 = tmp_path / "my-roms-2"
 
-    # set up spies on key functions to be called
-    spy_saver: MagicMock = mocker.spy(source_data_2.stager.source.retriever, "save")
-    spy_update_check: MagicMock = mocker.spy(
-        cstar.io.staged_data, "_check_local_repo_changed_from_remote"
-    )
+    fake_pull = mock.MagicMock()
+    fake_clone = mock.MagicMock()
 
-    # call the operation in question
-    staged_data_2 = source_data_2.stage(stage_path_2)
+    with (
+        mock.patch("cstar.io.retriever._pull", new=fake_pull) as mock_pull,
+        mock.patch("cstar.io.retriever._clone", new=fake_clone) as mock_clone,
+    ):
+        staged_data_2 = source_data_2.stage(stage_path_2)
 
-    # check that the repository hasn't changed, meaning we can rely on cache
-    spy_update_check.assert_called_once()
-    assert spy_update_check.spy_return_list[0] is False
+    # confirm the remote is not cloned
+    mock_clone.assert_not_called()
 
-    # check that .save() was not called again from the second sourcedata
-    spy_saver.assert_not_called()
+    # confirm the cached copy is updated
+    mock_pull.assert_called_once()
 
     # confirm both targets contain the same files.
     files_1 = {
@@ -99,44 +95,3 @@ def test_cached_stager_reuse(tmp_path: Path, mocker: MockerFixture) -> None:
     }
 
     assert files_1 == files_2
-
-
-@pytest.mark.usefixtures("mock_home_dir")
-def test_cached_stager_restage(tmp_path: Path, mocker: MockerFixture) -> None:
-    """Verify that the cached stager performs a fresh stage operation
-    if the local cache is stale compared to remote.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        A temporary path to store repository clones
-    """
-    repo_uri = "https://github.com/CWorthy-ocean/c-star"
-
-    source_data_1 = SourceData(repo_uri)
-    stage_path_1 = tmp_path / "my-roms-1"
-    staged_data_1 = source_data_1.stage(stage_path_1)
-
-    source_data_2 = SourceData(repo_uri)
-    stage_path_2 = tmp_path / "my-roms-2"
-
-    # set up spies on key functions to be called
-    mock_saver: MagicMock = MagicMock(source_data_2.stager.source.retriever.save)
-    spy_saver: MagicMock = mocker.spy(source_data_2.stager.source.retriever, "save")
-
-    mock_update_check: MagicMock = MagicMock(
-        cstar.io.staged_data._check_local_repo_changed_from_remote, return_value=True
-    )
-
-    with mock.patch(
-        "cstar.io.staged_data._check_local_repo_changed_from_remote", mock_update_check
-    ):
-        # mock.patch("cstar.io.retriever.RemoteRepositoryRetriever._save", mock_saver)):
-        # call the operation in question
-        staged_data_2 = source_data_2.stage(stage_path_2)
-
-        # check that mock claims the repo was changed
-        mock_update_check.assert_called_once()
-
-        spy_saver.assert_called_once()
-        # mock_saver.assert_called_once()
