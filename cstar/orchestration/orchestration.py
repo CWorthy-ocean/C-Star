@@ -657,8 +657,8 @@ def check_environment() -> None:
 
     for key in required_vars:
         if not os.getenv(key, ""):
-            msg = f"Unable to run workplan. `{key}` not found in environment."
-            raise ValueError(msg)
+            msg = f"Missing required environment variable: {key}"
+            raise KeyError(msg)
 
 
 def configure_environment(

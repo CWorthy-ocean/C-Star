@@ -128,7 +128,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Parameters
         ----------
         step : Step
-            The step to submit.
+            The step to submit to SLURM.
         dependencies : list[SlurmHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
 
@@ -182,7 +182,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if job.id:
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
-
             return SlurmHandle(job_id=str(job.id), job_name=job_name)
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
@@ -302,7 +301,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             )
             item.status = Status.Cancelled
         except RuntimeError:
-            msg = f"Unable to cancel the task `{handle.pid}`"
-            log.exception(msg)
+            log.exception("Unable to cancel the task `%s`", handle.pid)
 
         return item

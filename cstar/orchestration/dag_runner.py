@@ -219,7 +219,6 @@ async def build_and_run_dag(
 
     planner = Planner(workplan=wp)
     launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
-
     orchestrator = Orchestrator(planner, launcher)
 
     # schedule the tasks without waiting for completion
