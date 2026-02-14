@@ -16,6 +16,7 @@ from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_NPROCS_POST,
     FLAG_OFF,
+    FLAG_ON,
     get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
@@ -1210,11 +1211,11 @@ class ROMSSimulation(Simulation):
             runtime_code_dir.mkdir(parents=True)
             input_datasets_dir.mkdir(parents=True)
         except OSError as e:
-            raise CstarExpectationFailed(
-                f"The inputs directory ({self.fs_manager.input_dir}) is not empty and has an unknown state. "
-                f"Set {ENV_CSTAR_CLOBBER_WORKING_DIR} and rerun if you want to delete this directory and start from "
-                f"scratch."
-            ) from e
+            msg = (
+                f"The input directory is not empty. Re-run with {ENV_CSTAR_CLOBBER_WORKING_DIR}={FLAG_ON} "
+                "to delete the directory and continue."
+            )
+            raise CstarExpectationFailed(msg) from e
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
