@@ -1,7 +1,4 @@
 import os
-import random
-import sys
-import textwrap
 import typing as t
 from pathlib import Path
 
@@ -15,6 +12,7 @@ from cstar.execution.scheduler_job import (
     create_scheduler_job,
     get_status_of_slurm_job,
 )
+from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step
 from cstar.orchestration.orchestration import (
     Launcher,
@@ -24,7 +22,6 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
-    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_RUNID,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -74,73 +71,6 @@ class SlurmHandle(ProcessHandle):
         """
         super().__init__(pid=job_id)
         self.job_name = job_name
-
-
-StepToCommandConversionFn: t.TypeAlias = t.Callable[[Step], str]
-"""Convert a `Step` into a command to be executed.
-
-Parameters
-----------
-step : Step
-    The step to be converted.
-
-Returns
--------
-str
-    The complete CLI command.
-"""
-
-
-def convert_roms_step_to_command(step: Step) -> str:
-    """Convert a `Step` into a command to be executed.
-
-    This function converts ROMS/ROMS-MARBL applications into a command triggering
-    a C-Star worker to run a simulation.
-
-    Parameters
-    ----------
-    step : Step
-        The step to be converted.
-
-    Returns
-    -------
-    str
-        The complete CLI command.
-    """
-    bp_path = Path(step.blueprint_path).as_posix()
-    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {bp_path}"
-
-
-def convert_step_to_placeholder(step: Step) -> str:
-    """Convert a `Step` into a command to be executed.
-
-    This function converts applications into mocks by starting a process that
-    executes a blocking sleep.
-
-    Parameters
-    ----------
-    step : Step
-        The step to be converted.
-
-    Returns
-    -------
-    str
-        The complete CLI command.
-    """
-    sleep_time = random.randint(1, 10)
-    return textwrap.dedent(f"""\
-        # this is a mock application script that produces verifiable output
-        echo "{step.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
-        sleep {sleep_time};
-        echo "{step.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
-        """)
-
-
-app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
-    Application.ROMS_MARBL.value: convert_roms_step_to_command,
-    "sleep": convert_step_to_placeholder,
-}
-"""Map application types to a function that converts a step to a CLI command."""
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
@@ -209,10 +139,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         step_fs = step.file_system(bp)
 
-        step_converter = app_to_cmd_map[step.application]
-        if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
-            step_converter = app_to_cmd_map[converter_override]
-        print(f"Using `{step_converter.__name__}` for `{step.application}` commands.")
+        step_converter = get_command_mapping(
+            Application(step.application),
+            SlurmLauncher,
+        )
 
         script_path = step_fs.work_dir / "script.sh"
         output_file = step_fs.logs_dir / f"{job_name}.out"
