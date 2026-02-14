@@ -13,6 +13,7 @@ Breaking Changes
 ~~~~~~~~~~~~~~~~
 
 - Environment variables ``CSTAR_HOME`` and ``CSTAR_OUTDIR`` are deprecated in favor of ``CSTAR_CONFIG_HOME`` and ``CSTAR_STATE_HOME``
+- Relocated command conversion functions from `cstar.orchestration.launch.slurm` to `cstar.orchestration.converter`
 
 New features
 ~~~~~~~~~~~~
