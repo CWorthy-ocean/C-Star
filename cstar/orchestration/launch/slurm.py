@@ -8,8 +8,9 @@ from pathlib import Path
 from prefect import task
 from prefect.context import TaskRunContext
 
+from cstar.base.env import get_env_item
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd, get_env_item
+from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,

@@ -10,12 +10,6 @@ from importlib.metadata import version as _version
 # see https://github.com/numba/numba/issues/5275
 os.environ["KMP_WARNINGS"] = "off"
 
-from cstar.simulation import Simulation
-
-__all__ = [
-    "Simulation",
-]
-
 
 try:
     __version__ = _version("cstar-ocean")

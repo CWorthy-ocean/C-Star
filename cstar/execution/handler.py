@@ -189,7 +189,7 @@ class ExecutionHandler(ABC, LoggingMixin):
                     if self.status != ExecutionStatus.RUNNING:
                         return
                     elif line:
-                        self.log.info(line)
+                        self.log.info(line.rstrip())
                     else:
                         await asyncio.sleep(0.1)  # 100ms delay between updates
         except KeyboardInterrupt:

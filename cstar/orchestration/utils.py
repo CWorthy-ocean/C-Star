@@ -2,7 +2,7 @@ import os
 import typing as t
 from datetime import datetime, timezone
 
-from cstar.base.utils import EnvVar
+from cstar.base.env import EnvVar
 
 _GROUP_ORCH: t.Final[str] = "Orchestration"
 _GROUP_DEV: t.Final[str] = "Developer Only"

@@ -9,8 +9,6 @@ from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _get_sha256_hash, _run_cmd
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from cstar.io.source_data import SourceData
 
 

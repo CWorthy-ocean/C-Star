@@ -4,7 +4,7 @@ ci:
 files: '^cstar/'
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     
     hooks:
       - id: trailing-whitespace
@@ -17,18 +17,21 @@ repos:
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: v0.12.2
+    rev: v0.15.0
     hooks:
       - id: ruff-check
         args: ["--fix"]
       - id: ruff-format
 
-  - repo: local
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: 'v1.19.1'
     hooks:
       - id: mypy
         name: mypy
-        entry: mypy
-        language: system
+        additional_dependencies:
+          - types-python-dateutil
+          - types-requests
+          - types-pyyaml
         types: [python]
 
   - repo: https://github.com/MarcoGorelli/absolufy-imports

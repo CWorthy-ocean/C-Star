@@ -680,13 +680,13 @@ async def test_runner_shutdown_side_effects(
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_start", mock.Mock),
-        mock.patch.object(sim_runner, "_on_iteration", mock.Mock),
+        mock.patch.object(sim_runner, "_on_start", mock.Mock()),
+        mock.patch.object(sim_runner, "_on_iteration", mock.AsyncMock()),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_log_disposition", mock_disposition),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
     ):
-        # Trigger a run through the lifecycle as a task. This should triger
+        # Trigger a run through the lifecycle as a task. This should trigger
         # the complete set of shutdown behaviors.
         await sim_runner.execute()
 
@@ -734,7 +734,8 @@ async def test_runner_on_start_without_uri(
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
-        await sim_runner.execute()
+        with pytest.raises(Exception):
+            await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
         assert mock_iter.call_count == 0
@@ -782,7 +783,8 @@ async def test_runner_on_start_without_simulation(
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
-        await sim_runner.execute()
+        with pytest.raises(Exception):
+            await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
         assert mock_iter.call_count == 0
@@ -833,7 +835,8 @@ async def test_runner_on_start_user_unhandled_setup(
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
-        await sim_runner.execute()
+        with pytest.raises(Exception):
+            await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
         assert mock_simulation.setup.call_count == 1
@@ -883,7 +886,8 @@ async def test_runner_on_start_user_unhandled_build(
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
-        await sim_runner.execute()
+        with pytest.raises(Exception):
+            await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
         assert mock_simulation.setup.call_count == 1
@@ -933,7 +937,8 @@ async def test_runner_on_start_user_unhandled_pre_run(
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
-        await sim_runner.execute()
+        with pytest.raises(Exception):
+            await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
         assert mock_simulation.setup.call_count == 1

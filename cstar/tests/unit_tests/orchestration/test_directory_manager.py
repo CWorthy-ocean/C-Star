@@ -5,7 +5,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.utils import (
+from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,

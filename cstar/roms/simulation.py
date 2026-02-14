@@ -11,15 +11,20 @@ from typing import Any, Optional, TypeVar, cast
 import yaml
 
 import cstar.roms.runtime_settings
-from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_NPROCS_POST,
+    FLAG_OFF,
+    FLAG_ON,
+    get_env_item,
+)
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
-    ENV_CSTAR_NPROCS_POST,
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
-    get_env_item,
     slugify,
 )
 from cstar.execution.file_system import (
@@ -61,6 +66,7 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
 )
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
+from cstar.simulation import Simulation
 from cstar.system.manager import cstar_sysmgr
 
 
@@ -621,6 +627,11 @@ class ROMSSimulation(Simulation):
     def fs_manager(self) -> RomsFileSystemManager:
         """Return the file system manager for the simulation."""
         return cast(RomsFileSystemManager, self._fs_manager)
+
+    def _conditionally_clear_root(self):
+        env_item = get_env_item(ENV_CSTAR_CLOBBER_WORKING_DIR)
+        if env_item.value != FLAG_OFF:
+            self.fs_manager.clear()
 
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
@@ -1193,9 +1204,18 @@ class ROMSSimulation(Simulation):
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
 
-        compile_time_code_dir.mkdir(parents=True, exist_ok=True)
-        runtime_code_dir.mkdir(parents=True, exist_ok=True)
-        input_datasets_dir.mkdir(parents=True, exist_ok=True)
+        self._conditionally_clear_root()
+
+        try:
+            compile_time_code_dir.mkdir(parents=True)
+            runtime_code_dir.mkdir(parents=True)
+            input_datasets_dir.mkdir(parents=True)
+        except OSError as e:
+            msg = (
+                f"The input directory is not empty. Re-run with {ENV_CSTAR_CLOBBER_WORKING_DIR}={FLAG_ON} "
+                "to delete the directory and continue."
+            )
+            raise CstarExpectationFailed(msg) from e
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 

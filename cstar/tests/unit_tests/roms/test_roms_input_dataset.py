@@ -373,6 +373,7 @@ class TestROMSInputDatasetPartition:
                 dataset.working_copy.path,
                 np_xi=np_xi,
                 np_eta=np_eta,
+                include_coarse_dims=True,
             )
 
             assert dataset.partitioning.files == expected_partitioned_files

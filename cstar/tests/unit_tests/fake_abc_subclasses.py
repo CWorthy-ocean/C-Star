@@ -1,10 +1,11 @@
 from pathlib import Path
 
-from cstar import Simulation
-from cstar.base import ExternalCodeBase, InputDataset
+from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.input_dataset import InputDataset
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.roms import ROMSInputDataset
 from cstar.roms.runtime_settings import ROMSRuntimeSettingsSection
+from cstar.simulation import Simulation
 
 
 class FakeExternalCodeBase(ExternalCodeBase):

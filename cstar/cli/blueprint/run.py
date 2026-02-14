@@ -1,10 +1,10 @@
 import asyncio
-import logging
 import typing as t
 from pathlib import Path
 
 import typer
 
+from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.entrypoint.worker.worker import (
     SimulationStages,
     execute_runner,
@@ -32,7 +32,7 @@ def run(
     """Execute a blueprint in a local worker service."""
     print("Executing blueprint in a worker service")
     job_cfg = get_job_config()
-    service_cfg = get_service_config(logging.DEBUG)
+    service_cfg = get_service_config(get_env_item(ENV_CSTAR_LOG_LEVEL).value)
     request = get_request(path.as_posix(), stage)
 
     rc = asyncio.run(execute_runner(job_cfg, service_cfg, request))
