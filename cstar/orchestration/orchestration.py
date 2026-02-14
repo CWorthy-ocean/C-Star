@@ -83,7 +83,7 @@ class Status(IntEnum):
         return status in {Status.Done, Status.Cancelled, Status.Failed}
 
     @classmethod
-    def is_failure(cls, status) -> bool:
+    def is_failure(cls, status: "Status") -> bool:
         """Return `True` if a status is in the set of terminal statuses.
 
         Paramters
@@ -98,7 +98,7 @@ class Status(IntEnum):
         return status in {Status.Cancelled, Status.Failed}
 
     @classmethod
-    def is_running(cls, status) -> bool:
+    def is_running(cls, status: "Status") -> bool:
         """Return `True` if a status is in the set of in-progress statuses.
 
         Paramters
@@ -661,9 +661,8 @@ def check_environment() -> None:
 
     for key in required_vars:
         if not os.getenv(key, ""):
-            raise ValueError(
-                f"Unable to run workplan. `{key}` not found in environment."
-            )
+            msg = f"Missing required environment variable: {key}"
+            raise ValueError(msg)
 
 
 def configure_environment(
