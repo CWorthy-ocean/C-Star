@@ -109,7 +109,6 @@ def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
         The metadata associated with the environment variable
     """
     constant_mods = [__name__, "cstar.orchestration.utils", "cstar.base.feature"]
-    hints: dict[str, str] = {}
     constant_name = f"{prefix}{var_name}"
 
     for module_name in constant_mods:
