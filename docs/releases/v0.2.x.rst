@@ -49,9 +49,7 @@ Miscellaneous
 - Additional details added in docstrings
 - Silence OMP warning originating from numba
 - Modify a blueprint in the tests directory for a refactored layout in the remote data repository
-- Use remote mypy precommit hook instead of relying on local installation
 - Move env-var handling methods to separate module to avoid circular imports
-- Remove excess new-lines while logging the ROMS handler
 - Remove __init__-based import shortcuts
 - Adjust error handling and presentation in the worker/service layer
 
