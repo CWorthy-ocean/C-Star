@@ -245,8 +245,8 @@ class ROMSInputDataset(InputDataset, ABC):
                             include_coarse_dims=include_coarse_dims,
                         )
                     except Exception as e:
-                        self.log.error(
-                            f"Still encountered error during partitioning; aborting. Exception: {e}"
+                        self.log.exception(
+                            "Still encountered error during partitioning; aborting."
                         )
                         raise
 
