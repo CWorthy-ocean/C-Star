@@ -308,6 +308,21 @@ class RemoteRepositoryRetriever(Retriever):
                 f"All clone attempts have failed for: {self.source.location}"
             )
 
+        return target_dir
+
+    def checkout(self, target_dir: Path) -> Path:
+        """Perform a checkout on the repository cloned to `target_dir`.
+
+        Parameters
+        ----------
+        target_dir : pathlib.Path
+            The directory where this repository has been cloned
+
+        Returns
+        -------
+        pathlib.Path
+            The path to the local clone of the repository
+        """
         if self.source.checkout_target:
             _checkout(
                 source_repo=self.source.location,
