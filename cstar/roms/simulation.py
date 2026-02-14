@@ -629,10 +629,7 @@ class ROMSSimulation(Simulation):
 
     def _conditionally_clear_root(self):
         env_item = get_env_item(ENV_CSTAR_CLOBBER_WORKING_DIR)
-        if env_item.value != FLAG_OFF and self.fs_manager.root.exists():
-            self.log.warning(
-                f"Clearing existing job directory: {self.fs_manager.root} ({env_item.name} is {env_item.value})"
-            )
+        if env_item.value != FLAG_OFF:
             self.fs_manager.clear()
 
     @property
