@@ -76,12 +76,6 @@ FLAG_ON: t.Final[str] = "1"
 FLAG_OFF: t.Final[str] = "0"
 """Value indicating a feature flag is disabled."""
 
-DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
-"""A fixed `output_root_name` to be used when generating outputs with ROMS."""
-
-SCRATCH_DIRS: t.Final[list[str]] = ["SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"]
-"""Common env var names identifying scratch paths on HPC systems, in order of precedence."""
-
 
 def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
     """Retrieve the metadata for an environment variable constant.

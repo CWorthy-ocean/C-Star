@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
-from cstar.base.env import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_OVERRIDE,
     ENV_FF_ORCH_TRX_TIMESPLIT,
@@ -13,6 +12,7 @@ from cstar.base.feature import (
 )
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import (
+    DEFAULT_OUTPUT_ROOT_NAME,
     deep_merge,
     slugify,
 )
