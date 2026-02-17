@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 from pathlib import Path
+from typing import Protocol
 from unittest import mock
 
 import pytest
 
 from cstar.io import stager
 from cstar.io.constants import SourceClassification
+from cstar.io.source_data import SourceData
+
+
+class SourceDataFactory(Protocol):
+    def __call__(
+        self,
+        classification: SourceClassification | None = None,
+        location: str | Path | None = None,
+        identifier: str | None = None,
+    ) -> SourceData: ...
 
 
 class DummyStager(stager.Stager):
@@ -15,14 +26,18 @@ class DummyStager(stager.Stager):
 
 
 class TestRegistry:
-    def test_register_and_get_stager(self, mocksourcedata_local_text_file):
+    def test_register_and_get_stager(
+        self, mocksourcedata_local_text_file: SourceDataFactory
+    ) -> None:
         """Tests that new Stagers can be added and gotten from the registry"""
         with mock.patch.dict(stager._registry, {}, clear=True):
             stager.register_stager(DummyStager)
             result = stager.get_stager(mocksourcedata_local_text_file())
             assert isinstance(result, DummyStager)
 
-    def test_get_stager_not_registered(self, mocksourcedata_factory):
+    def test_get_stager_not_registered(
+        self, mocksourcedata_factory: SourceDataFactory
+    ) -> None:
         """Tests that get_stager raises if there is no registry item."""
         source = mocksourcedata_factory(
             location="somewhere", classification=SourceClassification.LOCAL_DIRECTORY
@@ -31,7 +46,7 @@ class TestRegistry:
             stager.get_stager(source)
 
     @pytest.mark.parametrize(
-        "classification, expected_stager_cls",
+        ("classification", "expected_stager_cls"),
         [
             (
                 SourceClassification.REMOTE_REPOSITORY,
@@ -44,8 +59,11 @@ class TestRegistry:
         ],
     )
     def test_get_stager_returns_expected_class(
-        self, classification, expected_stager_cls, mocksourcedata_factory
-    ):
+        self,
+        classification: SourceClassification,
+        expected_stager_cls: type[stager.Stager],
+        mocksourcedata_factory: SourceDataFactory,
+    ) -> None:
         """Tests that the `get_stager` method looks up the expected stager for several classifications."""
         source = mocksourcedata_factory(
             location="somewhere", classification=classification
@@ -56,8 +74,8 @@ class TestRegistry:
 
 class TestStagerABC:
     def test_stage_calls_retriever_and_returns_stagedfile(
-        self, mocksourcedata_remote_file
-    ):
+        self, tmp_path: Path, mocksourcedata_remote_file: SourceDataFactory
+    ) -> None:
         """Tests that Stager.stage() calls Stager.retriever.save() and returns a StagedFile"""
         source = mocksourcedata_remote_file()
 
@@ -75,9 +93,9 @@ class TestStagerABC:
             mock_ret.return_value = fake_retriever
             s = stager.RemoteBinaryFileStager(source)
 
-            result = s.stage(Path("/tmp"))
+            result = s.stage(tmp_path)
 
-        fake_retriever.save.assert_called_once_with(target_dir=Path("/tmp"))
+        fake_retriever.save.assert_called_once_with(target_dir=tmp_path)
         mock_staged.assert_called_once_with(
             source=source, path=fake_target, sha256="abc123", stat=None
         )
@@ -86,7 +104,9 @@ class TestStagerABC:
 
 
 class TestStagerSubclasses:
-    def test_registry_contains_all_stagers(self, mocksourcedata_factory):
+    def test_registry_contains_all_stagers(
+        self, mocksourcedata_factory: SourceDataFactory
+    ) -> None:
         """Tests that all defined stagers are registered."""
         for cls in [
             stager.RemoteBinaryFileStager,
@@ -102,8 +122,8 @@ class TestStagerSubclasses:
             assert isinstance(inst, cls)
 
     def test_local_binary_file_stager_creates_symlink(
-        self, tmp_path, mocksourcedata_local_file
-    ):
+        self, tmp_path: Path, mocksourcedata_local_file: SourceDataFactory
+    ) -> None:
         """Tests that LocalBinaryFileStager.stage() creates a symbolic link to the source file."""
         source_dir = tmp_path / "src"
         source_dir.mkdir()
@@ -124,8 +144,8 @@ class TestStagerSubclasses:
         assert result.path == target
 
     def test_remote_repository_stager_returns_stagedrepo(
-        self, tmp_path, mocksourcedata_remote_repo
-    ):
+        self, tmp_path: Path, mocksourcedata_remote_repo: SourceDataFactory
+    ) -> None:
         """Tests that RemoteRepositoryStager.stage calls .retriever.save returns a StagedRepository."""
         source = mocksourcedata_remote_repo()
         fake_path = tmp_path / "repo"
