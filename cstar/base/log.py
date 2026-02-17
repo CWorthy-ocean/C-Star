@@ -2,6 +2,8 @@ import logging
 import sys
 from pathlib import Path
 
+from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
+
 DEFAULT_LOG_LEVEL = logging.INFO
 DEFAULT_LOG_FORMAT = (
     "%(asctime)s [%(levelname)s] - %(filename)s:%(lineno)d - %(message)s"
@@ -77,7 +79,7 @@ def register_file_handler(
 
 def get_logger(
     name: str | None = None,
-    level: int = DEFAULT_LOG_LEVEL,
+    level: int | None = None,
     fmt: str | None = None,
     filename: str | None | Path = None,
 ) -> logging.Logger:
@@ -100,6 +102,8 @@ def get_logger(
         A logger instance with the specified name.
     """
     fmt = fmt or DEFAULT_LOG_FORMAT
+
+    level = level or parse_log_level_name(get_env_item(ENV_CSTAR_LOG_LEVEL).value)
 
     logger = logging.getLogger(name)
 
@@ -149,3 +153,12 @@ class LoggingMixin:
             name = f"{self.__class__.__module__}.{self.__class__.__name__}"
             self._log = get_logger(name)
         return self._log
+
+
+def parse_log_level_name(log_level: int | str) -> int:
+    level = (
+        logging.getLevelNamesMapping()[log_level.upper()]
+        if isinstance(log_level, str)
+        else log_level
+    )
+    return level

@@ -9,8 +9,9 @@ import sys
 from datetime import datetime, timezone
 from typing import Final, override
 
+from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import get_logger
+from cstar.base.log import get_logger, parse_log_level_name
 from cstar.base.utils import slugify
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
@@ -156,11 +157,9 @@ class SimulationRunner(Service):
         if disposition == ExecutionStatus.COMPLETED and not treat_as_failure:
             self.log.info("Simulation completed successfully.")
         elif disposition == ExecutionStatus.FAILED or treat_as_failure:
-            msg = "Simulation failed."
-            raise CstarError(msg)
+            self.log.error("Simulation failed.")
         else:
-            msg = f"Simulation ended with status: {disposition}."
-            raise CstarError(msg)
+            self.log.warning(f"Simulation ended with status: {disposition}.")
 
     @override
     def _on_start(self) -> None:
@@ -328,7 +327,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-l",
         "--log-level",
-        default="INFO",
+        default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
         type=str,
         required=False,
         help="Logging level for the simulation.",
@@ -367,11 +366,7 @@ def get_service_config(log_level: int | str) -> ServiceConfiguration:
     -------
     ServiceConfiguration
     """
-    level = (
-        logging.getLevelNamesMapping()[log_level]
-        if isinstance(log_level, str)
-        else log_level
-    )
+    level = parse_log_level_name(log_level)
 
     return ServiceConfiguration(
         as_service=True,

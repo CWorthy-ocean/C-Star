@@ -2,7 +2,7 @@ from textwrap import dedent
 from unittest import mock
 
 import cstar
-from cstar.base import AdditionalCode
+from cstar.base.additional_code import AdditionalCode
 from cstar.io.constants import SourceClassification
 from cstar.io.source_data import SourceDataCollection
 

@@ -8,7 +8,7 @@ from rich import print  # noqa: A004, ignore shadowing of built-in print
 
 from cstar.base import feature
 from cstar.base import utils as base_utils
-from cstar.base.utils import EnvItem, discover_env_vars
+from cstar.base.env import EnvItem, discover_env_vars
 from cstar.orchestration import utils as orch_utils
 
 app = typer.Typer()

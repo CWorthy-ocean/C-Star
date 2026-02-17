@@ -1,7 +1,7 @@
 import os
 import typing as t
 
-from cstar.base.utils import FLAG_OFF, FLAG_ON, EnvVar
+from cstar.base.env import FLAG_OFF, FLAG_ON, EnvVar
 
 FF_PREFIX: t.Literal["CSTAR_FF_"] = "CSTAR_FF_"
 """Conventional prefix of environment variables for feature flags."""

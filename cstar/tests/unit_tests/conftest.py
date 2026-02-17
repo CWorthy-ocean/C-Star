@@ -11,8 +11,11 @@ import dotenv
 import numpy as np
 import pytest
 
-from cstar.base import AdditionalCode, Discretization, ExternalCodeBase, InputDataset
+from cstar.base.additional_code import AdditionalCode
+from cstar.base.discretization import Discretization
+from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import git_location_to_raw
+from cstar.base.input_dataset import InputDataset
 from cstar.base.log import get_logger
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
@@ -24,7 +27,7 @@ from cstar.io.staged_data import (
     StagedRepository,
 )
 from cstar.io.stager import Stager
-from cstar.marbl import MARBLExternalCodeBase
+from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,

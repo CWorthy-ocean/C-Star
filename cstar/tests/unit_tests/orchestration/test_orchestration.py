@@ -8,11 +8,11 @@ from unittest import mock
 import networkx as nx
 import pytest
 
+from cstar.base.env import FLAG_ON
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_OVERRIDE,
     ENV_FF_ORCH_TRX_TIMESPLIT,
 )
-from cstar.base.utils import FLAG_ON
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.orchestration import (
