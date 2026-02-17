@@ -129,7 +129,7 @@ class RemoteRepositoryStager(Stager):
             The local directory in which to stage the repository
         """
         retrieved_path = self.source.retriever.save(target_dir=target_dir)
-        retriever = cast(RemoteRepositoryRetriever, self.source.retriever)
+        retriever = cast("RemoteRepositoryRetriever", self.source.retriever)
         retriever.checkout(target_dir=target_dir)
         return StagedRepository(source=self.source, path=retrieved_path)
 

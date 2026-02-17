@@ -168,3 +168,95 @@ class TestStagerSubclasses:
         fake_retriever.save.assert_called_once_with(target_dir=tmp_path)
         mock_staged_repo.assert_called_once_with(source=source, path=fake_path)
         assert result is mock_staged_repo.return_value
+
+    def test_cached_remote_repository_stager_writes_to_cache(
+        self,
+        tmp_path: Path,
+        mocksourcedata_remote_repo: SourceDataFactory,
+    ) -> None:
+        """Tests that CachedRemoteRepositoryStager.stage caches the retrieved repository
+        in the correct path.
+        """
+        source = mocksourcedata_remote_repo()
+        repo_name = "repo"
+        fake_path = tmp_path / repo_name
+        fake_cache_path = tmp_path / "cache" / repo_name
+        fake_retriever = mock.Mock()
+        fake_retriever.save.return_value = fake_cache_path
+
+        with (
+            mock.patch.object(
+                type(source),
+                "retriever",
+                new_callable=mock.PropertyMock,
+            ) as mock_ret,
+            mock.patch("cstar.io.stager.StagedRepository") as mock_staged_repo,
+            mock.patch("cstar.io.stager._run_cmd") as mock_run_cmd,
+            mock.patch(
+                "cstar.io.stager.CachedRemoteRepositoryStager._get_cache_path",
+            ) as mock_get_cache_path,
+        ):
+            mock_get_cache_path.return_value = fake_cache_path
+            mock_run_cmd.return_value = ""
+            mock_ret.return_value = fake_retriever
+            s = stager.CachedRemoteRepositoryStager(source)
+
+            result = s.stage(fake_path)
+
+        # confirm repo is put into cache
+        fake_retriever.save.assert_called_once_with(target_dir=fake_cache_path)
+
+        # confirm the content is copied from the cache to the target
+        mock_run_cmd.assert_called_once_with(f"cp -av {fake_cache_path}/ {fake_path}")
+
+        # confirm the result is a new path and the cached location is not leaked
+        mock_staged_repo.assert_called_once_with(source=source, path=fake_path)
+        assert result is mock_staged_repo.return_value
+
+    def test_cached_remote_repository_stager_reads_from_cache(
+        self,
+        tmp_path: Path,
+        mocksourcedata_remote_repo: SourceDataFactory,
+    ) -> None:
+        """Tests that CachedRemoteRepositoryStager.stage returns fresh content from
+        the cache if the remote repository has been previously staged.
+        """
+        source = mocksourcedata_remote_repo()
+        repo_name = "repo"
+        fake_path = tmp_path / repo_name
+
+        fake_cache_path = tmp_path / "cache" / repo_name
+        fake_cache_path.mkdir(parents=True, exist_ok=False)
+        fake_content_path = fake_cache_path / "foo.txt"
+        fake_content_path.touch()  # trick stager into believing content is cached.
+
+        fake_retriever = mock.Mock()
+        fake_retriever.save.return_value = fake_cache_path
+
+        with (
+            mock.patch.object(
+                type(source),
+                "retriever",
+                new_callable=mock.PropertyMock,
+            ) as mock_ret,
+            mock.patch("cstar.io.stager.StagedRepository"),  # avoid validation
+            mock.patch("cstar.io.stager._run_cmd") as mock_run_cmd,
+            mock.patch(
+                "cstar.io.stager.CachedRemoteRepositoryStager._get_cache_path",
+            ) as mock_get_cache_path,
+        ):
+            mock_get_cache_path.return_value = fake_cache_path
+            mock_run_cmd.return_value = ""
+            mock_ret.return_value = fake_retriever
+            s = stager.CachedRemoteRepositoryStager(source)
+
+            _ = s.stage(fake_path)
+
+        # confirm repo is not retrieved
+        fake_retriever.save.assert_not_called()
+
+        # confirm cached repo is updated with latest changes
+        fake_retriever.refresh.assert_called_once_with(target_dir=fake_cache_path)
+
+        # confirm the correct hash/branch is checked out from the copy (not cache)
+        fake_retriever.checkout.assert_called_once_with(target_dir=fake_path)
