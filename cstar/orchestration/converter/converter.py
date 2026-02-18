@@ -73,12 +73,6 @@ def convert_step_to_placeholder(step: Step) -> str:
         """)
 
 
-app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
-    Application.ROMS_MARBL.value: convert_roms_step_to_command,
-    "sleep": convert_step_to_placeholder,
-}
-"""Map application types to a function that converts a step to a CLI command."""
-
 launcher_aware_app_to_cmd_map: dict[
     type[Launcher],
     dict[str, StepToCommandConversionFn],
@@ -88,6 +82,7 @@ launcher_aware_app_to_cmd_map: dict[
         Application.ROMS_MARBL.value: convert_roms_step_to_command,
     },
 )
+"""Map application types to a function that converts a step to a CLI command."""
 
 
 def register_command_mapping(
@@ -107,7 +102,11 @@ def get_command_mapping(
     step_converter = launcher_map[application.value]
 
     if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
-        converter = app_to_cmd_map[converter_override]
+        if converter_override not in launcher_map:
+            msg = f"Override in env var `{ENV_CSTAR_CMD_CONVERTER_OVERRIDE}` has invalid value: {converter_override}"
+            raise ValueError(msg)
+
+        converter = launcher_map[converter_override]
         msg = f"Overriding step converter `{step_converter}` with `{converter}` for `{application}` commands."
         step_converter = converter
     else:
