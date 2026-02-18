@@ -11,6 +11,7 @@ from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
+    Launcher,
     Orchestrator,
     Planner,
     RunMode,
@@ -215,6 +216,7 @@ async def build_and_run_dag(
     configure_environment(output_dir, run_id)
     output_dir = DirectoryManager.data_home()
 
+    launcher: Launcher | None = None
     if cstar_sysmgr.scheduler:
         launcher = SlurmLauncher()
     else:
