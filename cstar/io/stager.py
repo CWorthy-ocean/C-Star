@@ -1,13 +1,15 @@
-import shutil
 from abc import ABC
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
+from cstar.base.utils import _run_cmd
 from cstar.execution.file_system import DirectoryManager
+from cstar.io.retriever import RemoteRepositoryRetriever
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from cstar.io.source_data import SourceData
+
 from cstar.base.utils import slugify
 from cstar.io.constants import SourceClassification
 from cstar.io.staged_data import StagedFile, StagedRepository
@@ -127,6 +129,8 @@ class RemoteRepositoryStager(Stager):
             The local directory in which to stage the repository
         """
         retrieved_path = self.source.retriever.save(target_dir=target_dir)
+        retriever = cast("RemoteRepositoryRetriever", self.source.retriever)
+        retriever.checkout(target_dir=target_dir)
         return StagedRepository(source=self.source, path=retrieved_path)
 
 
@@ -155,7 +159,12 @@ class CachedRemoteRepositoryStager(Stager):
         else:
             self.source.retriever.refresh(target_dir=cache_path)
 
-        shutil.copytree(cache_path, target_dir, symlinks=True, dirs_exist_ok=True)
+        if target_dir.exists():
+            target_dir.rmdir()
+
+        _run_cmd(f"cp -av {cache_path}/ {target_dir}")
+        remote = cast("RemoteRepositoryRetriever", self.source.retriever)
+        remote.checkout(target_dir=target_dir)
 
         return StagedRepository(source=self.source, path=target_dir)
 

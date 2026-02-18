@@ -157,11 +157,10 @@ class TestRemoteRepositoryRetriever:
             r.read()
 
     def test_save_clones_and_checkouts(self, tmp_path, mocksourcedata_remote_repo):
-        """Tests that RemoteRepositoryRetriever.save() clones the repo and checks out the target."""
+        """Test that RemoteRepositoryRetriever.save() clones the repo."""
         source = mocksourcedata_remote_repo()
         with (
             mock.patch("cstar.io.retriever._clone") as mock_clone,
-            mock.patch("cstar.io.retriever._checkout") as mock_checkout,
         ):
             r = retriever.RemoteRepositoryRetriever(source)
             result = r._save(tmp_path)
@@ -169,11 +168,7 @@ class TestRemoteRepositoryRetriever:
         mock_clone.assert_called_once_with(
             source_repo=source.location, local_path=tmp_path
         )
-        mock_checkout.assert_called_once_with(
-            source_repo=source.location,
-            local_path=tmp_path,
-            checkout_target="test_target",
-        )
+
         assert result == tmp_path
 
     def test_save_raises_if_dir_not_empty(self, tmp_path, mocksourcedata_remote_repo):
