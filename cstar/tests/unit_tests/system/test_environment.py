@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
+from _pytest.monkeypatch import MonkeyPatch
 
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
@@ -674,11 +675,13 @@ def test_get_env_item_cstar_override(
     xdg_value: str,
     cstar_var: str,
     cstar_val: str,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the XDG config is ignored when the CSTAR_XXX_HOME variables are set."""
-    with patch.dict(os.environ, {xdg_var: xdg_value, cstar_var: cstar_val}, clear=True):
-        env_item = get_env_item(cstar_var)
-        output_dir = env_item.value
+    monkeypatch.setenv(xdg_var, xdg_value)
+    monkeypatch.setenv(cstar_var, cstar_val)
+    env_item = get_env_item(cstar_var)
+    output_dir = env_item.value
 
     assert output_dir == cstar_val
 
@@ -712,11 +715,13 @@ def test_get_env_item_indirect(
     xdg_var: str,
     xdg_value: str,
     cstar_var: str,
+    monkeypatch: MonkeyPatch,
 ) -> None:
-    """Verify the XDG config is ignored when the CSTAR_XXX_HOME variables are set."""
-    with patch.dict(os.environ, {xdg_var: xdg_value, cstar_var: ""}, clear=True):
-        env_item = get_env_item(cstar_var)
-        output_dir = env_item.value
+    """Verify the XDG config is used when the CSTAR_XXX_HOME variables are not set."""
+    monkeypatch.delenv(xdg_var, raising=False)
+    monkeypatch.setenv(xdg_var, xdg_value)
+    env_item = get_env_item(cstar_var)
+    output_dir = env_item.value
 
     assert output_dir == xdg_value
 
@@ -750,11 +755,14 @@ def test_get_env_item_default(
     xdg_var: str,
     xdg_value: str,
     cstar_var: str,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the default is returned when XDG and CSTAR_XXX_HOME variables are not set."""
-    with patch.dict(os.environ, {xdg_var: xdg_value, cstar_var: ""}, clear=True):
-        env_item = get_env_item(cstar_var)
-        output_dir = env_item.value
+    monkeypatch.delenv(cstar_var, raising=False)
+    monkeypatch.setenv(xdg_var, xdg_value)
+
+    env_item = get_env_item(cstar_var)
+    output_dir = env_item.value
 
     assert output_dir == env_item.default
 
