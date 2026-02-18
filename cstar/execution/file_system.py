@@ -200,18 +200,22 @@ class JobFileSystemManager(LoggingMixin):
 
     def clear(self) -> None:
         """Ensure the job's working directories are empty."""
-        if self.root.exists():
-            self.log.debug(f"Emptying working directories for job `{self.root.name}`")
+        if not self.root.exists():
+            return
 
-            for directory in [
-                self.input_dir,
-                self.work_dir,
-                self.tasks_dir,
-                self.logs_dir,
-                self.output_dir,
-            ]:
+        msg = f"Emptying working directories for job `{self.root.name}`"
+        self.log.debug(msg)
+
+        for directory in [
+            self.input_dir,
+            self.work_dir,
+            self.tasks_dir,
+            self.logs_dir,
+            self.output_dir,
+        ]:
+            if directory.exists():
                 shutil.rmtree(directory)
-                directory.mkdir(parents=True)
+            directory.mkdir(parents=True)
 
     def __getstate__(self) -> dict[str, str]:
         """Return the state of the object."""
@@ -284,10 +288,14 @@ class RomsFileSystemManager(JobFileSystemManager):
 
     def clear(self) -> None:
         """Ensure the job's working directories are empty."""
-        if self.root.exists():
-            self.log.warning(f"Clearing existing job directory: {self.root}")
-            super().clear()
+        super().clear()
 
-            for directory in [self.joined_output_dir]:
+        for directory in [
+            self.compile_time_code_dir,
+            self.runtime_code_dir,
+            self.input_datasets_dir,
+            self._codebases_dir,
+            self.joined_output_dir,
+        ]:
+            if directory.exists():
                 shutil.rmtree(directory)
-                directory.mkdir(parents=True)
