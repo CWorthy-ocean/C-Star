@@ -22,7 +22,7 @@ from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS, ENV_CSTAR_ORCH_REQD_ENV
 from cstar.system.manager import cstar_sysmgr
 
 log = get_logger(__name__)
@@ -214,11 +214,18 @@ async def build_and_run_dag(
     """
     configure_environment(output_dir, run_id)
     output_dir = DirectoryManager.data_home()
+
+    if cstar_sysmgr.scheduler:
+        launcher = SlurmLauncher()
+    else:
+        launcher = LocalLauncher()
+        os.environ[ENV_CSTAR_ORCH_REQD_ENV] = ""
+
     check_environment()
     wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 
     planner = Planner(workplan=wp)
-    launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
+
     orchestrator = Orchestrator(planner, launcher)
 
     # schedule the tasks without waiting for completion

@@ -31,7 +31,7 @@ class EnvItem(EnvVar):
 
     @property
     def value(self) -> str:
-        if env_value := os.getenv(self.name, ""):
+        if (env_value := os.getenv(self.name)) is not None:
             return env_value
 
         if self.default_factory and (factory_default := self.default_factory(self)):
