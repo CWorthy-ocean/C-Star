@@ -77,9 +77,8 @@ class Retriever(ABC, LoggingMixin):
         """
         if target_dir.exists():
             if not target_dir.is_dir():
-                raise ValueError(
-                    f"Cannot save to target_dir={target_dir} (not a directory)"
-                )
+                msg = f"Cannot save to target_dir={target_dir} (not a directory)"
+                raise ValueError(msg)
         else:
             target_dir.mkdir(parents=True)
 
