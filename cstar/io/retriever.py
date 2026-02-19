@@ -77,15 +77,16 @@ class Retriever(ABC, LoggingMixin):
         """
         if target_dir.exists():
             if not target_dir.is_dir():
-                raise ValueError(
-                    f"Cannot save to target_dir={target_dir} (not a directory)"
-                )
+                msg = f"Cannot save to target_dir={target_dir} (not a directory)"
+                raise ValueError(msg)
         else:
             target_dir.mkdir(parents=True)
 
-        self.log.debug(f"Saving source `{self.source}` to: {target_dir}")
-        savepath = self._save(target_dir=target_dir)
-        return savepath
+        loc, has = self.source.location, self.source.checkout_hash
+        msg = f"Saving source `{loc}{f'@{has}' if has else ''}` to `{target_dir}`"
+        self.log.debug(msg)
+
+        return self._save(target_dir=target_dir)
 
     @abstractmethod
     def _save(self, target_dir: Path) -> Path:
@@ -308,6 +309,21 @@ class RemoteRepositoryRetriever(Retriever):
                 f"All clone attempts have failed for: {self.source.location}"
             )
 
+        return target_dir
+
+    def checkout(self, target_dir: Path) -> Path:
+        """Perform a checkout on the repository cloned to `target_dir`.
+
+        Parameters
+        ----------
+        target_dir : pathlib.Path
+            The directory where this repository has been cloned
+
+        Returns
+        -------
+        pathlib.Path
+            The path to the local clone of the repository
+        """
         if self.source.checkout_target:
             _checkout(
                 source_repo=self.source.location,

@@ -1,19 +1,19 @@
 import os
-import random
-import sys
-import textwrap
 import typing as t
 from pathlib import Path
 
 from prefect import task
 from prefect.context import TaskRunContext
 
+from cstar.base.env import get_env_item
+from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
     get_status_of_slurm_job,
 )
+from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step
 from cstar.orchestration.orchestration import (
     Launcher,
@@ -23,11 +23,13 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
-    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
+    ENV_CSTAR_ORCH_RUNID,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+
+log = get_logger(__name__)
 
 
 def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
@@ -45,8 +47,10 @@ def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
     str
         The cache key for the current context.
     """
-    cache_key = f"{os.getenv('CSTAR_RUNID')}_{params['step'].name}_{context.task.name}"
-    print(f"Cache check: {cache_key}")
+    run_id = os.getenv(ENV_CSTAR_ORCH_RUNID)
+    cache_key = f"{run_id}_{params['step'].name}_{context.task.name}"
+
+    log.debug("Cache check: %s", cache_key)
     return cache_key
 
 
@@ -64,77 +68,10 @@ class SlurmHandle(ProcessHandle):
         job_id : str
             The SLURM_JOB_ID identifying a job.
         job_name : str or None
-            The job name assigend to the job.
+            The job name assigned to the job.
         """
         super().__init__(pid=job_id)
         self.job_name = job_name
-
-
-StepToCommandConversionFn: t.TypeAlias = t.Callable[[Step], str]
-"""Convert a `Step` into a command to be executed.
-
-Parameters
-----------
-step : Step
-    The step to be converted.
-
-Returns
--------
-str
-    The complete CLI command.
-"""
-
-
-def convert_roms_step_to_command(step: Step) -> str:
-    """Convert a `Step` into a command to be executed.
-
-    This function converts ROMS/ROMS-MARBL applications into a command triggering
-    a C-Star worker to run a simulation.
-
-    Parameters
-    ----------
-    step : Step
-        The step to be converted.
-
-    Returns
-    -------
-    str
-        The complete CLI command.
-    """
-    bp_path = Path(step.blueprint_path).as_posix()
-    return f"{sys.executable} -m cstar.entrypoint.worker.worker -b {bp_path}"
-
-
-def convert_step_to_placeholder(step: Step) -> str:
-    """Convert a `Step` into a command to be executed.
-
-    This function converts applications into mocks by starting a process that
-    executes a blocking sleep.
-
-    Parameters
-    ----------
-    step : Step
-        The step to be converted.
-
-    Returns
-    -------
-    str
-        The complete CLI command.
-    """
-    sleep_time = random.randint(1, 10)
-    return textwrap.dedent(f"""\
-        # this is a mock application script that produces verifiable output
-        echo "{step.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
-        sleep {sleep_time};
-        echo "{step.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
-        """)
-
-
-app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
-    Application.ROMS_MARBL.value: convert_roms_step_to_command,
-    "sleep": convert_step_to_placeholder,
-}
-"""Map application types to a function that converts a step to a CLI command."""
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
@@ -151,7 +88,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         str
             The queue to use for SLURM jobs.
         """
-        return os.getenv(ENV_CSTAR_SLURM_QUEUE) or ""
+        return get_env_item(ENV_CSTAR_SLURM_QUEUE).value
 
     @staticmethod
     def configured_walltime() -> str:
@@ -164,7 +101,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         str
             The max-walltime to use for SLURM jobs.
         """
-        return os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME) or ""
+        return get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
 
     @staticmethod
     def configured_account() -> str:
@@ -177,7 +114,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         str
             The account to use for SLURM jobs.
         """
-        return os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or ""
+        return get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
 
     @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
@@ -203,10 +140,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         step_fs = step.file_system(bp)
 
-        step_converter = app_to_cmd_map[step.application]
-        if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
-            step_converter = app_to_cmd_map[converter_override]
-        print(f"Using `{step_converter.__name__}` for `{step.application}` commands.")
+        step_converter = get_command_mapping(
+            Application(step.application),
+            SlurmLauncher,
+        )
 
         script_path = step_fs.work_dir / "script.sh"
         output_file = step_fs.logs_dir / f"{job_name}.out"
@@ -235,16 +172,17 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         )
 
         short_command = command.replace("\n", "")[:40]  # shorten and omit newlines
-        print(f"Submitting command `{short_command}...` for step `{step.name}`.")
+
+        msg = f"Submitting command `{short_command}...` for step `{step.name}`."
+        log.debug(msg)
         job.submit()
 
         if job.id:
-            print(f"Submission of `{step.name}` created Job ID `{job.id}`")
-            handle = SlurmHandle(job_id=str(job.id), job_name=job_name)
-            return handle
+            log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
+            return SlurmHandle(job_id=str(job.id), job_name=job_name)
 
-        print(f"Job submission for step `{step.name}` failed: {job}")
-        raise RuntimeError(f"Unable to retrieve scheduled job ID for: {step.name}")
+        msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
+        raise RuntimeError(msg)
 
     @staticmethod
     async def _status(step: Step, handle: SlurmHandle) -> ExecutionStatus:
@@ -262,11 +200,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         ExecutionStatus
             The current status of the step.
         """
-        status = ExecutionStatus.UNKNOWN
-
-        print(f"requesting status of job {handle.pid} for step {step.name}")
         status = get_status_of_slurm_job(handle.pid)
-        print(f"status of job {handle.pid} is {status} for step {step.name}")
+
+        msg = f"Status of job {handle.pid} is {status} for step {step.name}"
+        log.debug(msg)
 
         return status
 
@@ -314,22 +251,23 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        slurm_status = await SlurmLauncher._status(step, handle)
+        exec_status = await SlurmLauncher._status(step, handle)
 
-        print(f"SLURM job `{handle.pid}` status is `{slurm_status}`")
+        msg = f"SLURM job `{handle.pid}` status is `{exec_status}`"
+        log.debug(msg)
 
-        if slurm_status in [
+        if exec_status in [
             ExecutionStatus.PENDING,
             ExecutionStatus.RUNNING,
             ExecutionStatus.ENDING,
             ExecutionStatus.HELD,
         ]:
             return Status.Running
-        if slurm_status in [ExecutionStatus.COMPLETED]:
+        if exec_status == ExecutionStatus.COMPLETED:
             return Status.Done
-        if slurm_status in [ExecutionStatus.CANCELLED]:
+        if exec_status == ExecutionStatus.CANCELLED:
             return Status.Cancelled
-        if slurm_status in [ExecutionStatus.FAILED]:
+        if exec_status == ExecutionStatus.FAILED:
             return Status.Failed
 
         return Status.Unsubmitted
@@ -360,6 +298,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             )
             item.status = Status.Cancelled
         except RuntimeError:
-            print(f"Unable to cancel the task `{handle.pid}`")
+            log.exception("Unable to cancel the task `%s`", handle.pid)
 
         return item

@@ -13,13 +13,14 @@ def mock_home_dir(tmp_path: Path) -> t.Generator[t.Callable[[], Path], None, Non
     """Fixture that replaces the default home directory with a temporary
     home directory.
     """
-    home_dir = tmp_path / "test-asset-cache"
-    home_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "test-asset-cache"
+    state_dir.mkdir(parents=True, exist_ok=True)
 
     with mock.patch(
-        "cstar.base.utils.get_home_dir", return_value=home_dir
-    ) as mock_get_home_dir:
-        yield mock_get_home_dir
+        "cstar.execution.file_system.DirectoryManager.state_home",
+        return_value=state_dir,
+    ) as mock_state_home:
+        yield mock_state_home
 
 
 @pytest.mark.usefixtures("mock_home_dir")
@@ -65,15 +66,17 @@ def test_cached_stager_reuse(tmp_path: Path) -> None:
     stage_path_1 = tmp_path / "my-roms-1"
     staged_data_1 = source_data_1.stage(stage_path_1)
 
-    source_data_2 = SourceData(repo_uri)
+    source_data_2 = SourceData(repo_uri, identifier="main")
     stage_path_2 = tmp_path / "my-roms-2"
 
     fake_pull = mock.MagicMock()
     fake_clone = mock.MagicMock()
+    fake_checkout = mock.MagicMock()
 
     with (
         mock.patch("cstar.io.retriever._pull", new=fake_pull) as mock_pull,
         mock.patch("cstar.io.retriever._clone", new=fake_clone) as mock_clone,
+        mock.patch("cstar.io.retriever._checkout", new=fake_checkout) as mock_checkout,
     ):
         staged_data_2 = source_data_2.stage(stage_path_2)
 
@@ -83,14 +86,15 @@ def test_cached_stager_reuse(tmp_path: Path) -> None:
     # confirm the cached copy is updated
     mock_pull.assert_called_once()
 
-    # confirm both targets contain the same files.
-    files_1 = {
-        x.resolve().relative_to(staged_data_1.path.resolve())
-        for x in staged_data_1.path.iterdir()
-    }
-    files_2 = {
-        x.resolve().relative_to(staged_data_2.path.resolve())
-        for x in staged_data_2.path.iterdir()
-    }
+    # confirm that checkout is called
+    mock_checkout.assert_called_once()
 
-    assert files_1 == files_2
+    # confirm both targets contain files.
+    files_1 = {x.resolve().as_posix() for x in staged_data_1.path.iterdir()}
+    files_2 = {x.resolve().as_posix() for x in staged_data_2.path.iterdir()}
+
+    assert files_1
+    assert files_2
+
+    # confirm the cache and target files do not resolve and overlap
+    assert not files_1.intersection(files_2)

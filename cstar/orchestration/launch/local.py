@@ -1,6 +1,5 @@
 import asyncio
 import datetime
-import random
 from multiprocessing import Process as MpProcess
 from subprocess import run as sprun
 
@@ -9,7 +8,8 @@ from psutil import Process as PsProcess
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.utils import slugify
-from cstar.orchestration.models import Step
+from cstar.orchestration.converter.converter import get_command_mapping
+from cstar.orchestration.models import Application, Step
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -19,7 +19,7 @@ from cstar.orchestration.orchestration import (
 
 
 def run_as_process(step: Step, cmd: list[str]) -> dict[str, int]:
-    p = sprun(args=cmd, text=True)
+    p = sprun(args=cmd, text=True, check=False)
     return {step.name: p.returncode}
 
 
@@ -67,23 +67,12 @@ class LocalHandle(ProcessHandle):
         -------
         float
         """
-        now = datetime.datetime.now().timestamp()
+        now = datetime.datetime.now(tz=datetime.timezone.utc).timestamp()
         return now - self.start_at
 
 
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
-
-    # processes: t.ClassVar[dict[str, MpProcess]] = {}
-    # """Mapping from step name to process."""
-    # schedule: dict[str, Step] = {}
-
-    # @staticmethod
-    # async def _update_processes() -> None:
-    #     """Update all process statuses."""
-    #     # for process in [p for p in LocalLauncher.processes.values() if p is not None]:
-    #     #     process.poll()
-    #     ...
 
     @staticmethod
     async def _submit(step: Step, dependencies: list[LocalHandle]) -> LocalHandle:
@@ -101,18 +90,21 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        cmd = ["sleep", str(random.randint(1, 4))]
-        print(f"Creating local process from cmd: {' '.join(cmd)}")
+        step_converter = get_command_mapping(
+            Application(step.application),
+            LocalLauncher,
+        )
+        cmd = step_converter(step)
 
         try:
             mp_process = MpProcess(
                 target=run_as_process,
                 name=slugify(step.name),
-                args=(step, cmd),
+                args=(step, cmd.split()),
                 daemon=True,
             )
             mp_process.start()
-            create_time = datetime.datetime.now()
+            create_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
             if pid := mp_process.pid:
                 print(f"Local run of `{step.application}` created pid: {pid}")
@@ -120,7 +112,9 @@ class LocalLauncher(Launcher[LocalHandle]):
                 try:
                     ps_process = PsProcess(pid)
                     create_timestamp = ps_process.create_time()
-                    create_time = datetime.datetime.fromtimestamp(create_timestamp)
+                    create_time = datetime.datetime.fromtimestamp(
+                        create_timestamp, tz=datetime.timezone.utc
+                    )
                 except NoSuchProcess:
                     print(f"Unable to retrieve exact start time for pid: {pid}")
 
@@ -133,7 +127,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         finally:
             ...
 
-        raise RuntimeError("Unable to retrieve process ID for local process.")
+        msg = "Unable to retrieve process ID for local process."
+        raise RuntimeError(msg)
 
     @staticmethod
     async def _status(step: Step, handle: LocalHandle) -> str:
@@ -196,9 +191,8 @@ class LocalLauncher(Launcher[LocalHandle]):
             failure_found = any(map(Status.is_failure, statuses))
 
         if failure_found:
-            raise CstarExpectationFailed(
-                f"Dependency of step {step.name} failed. Unable to continue."
-            )
+            msg = f"Dependency of step {step.name} failed. Unable to continue."
+            raise CstarExpectationFailed(msg)
 
         handle = await LocalLauncher._submit(step, dependencies)
         return Task(
@@ -231,9 +225,9 @@ class LocalLauncher(Launcher[LocalHandle]):
             return Status.Running
         if raw_status in ["COMPLETED", "FAILED"]:
             return Status.Done
-        if raw_status in ["CANCELLED"]:
+        if raw_status == "CANCELLED":
             return Status.Cancelled
-        if raw_status in ["FAILED"]:
+        if raw_status == "FAILED":
             return Status.Failed
 
         return Status.Unsubmitted

@@ -5,9 +5,17 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
-from cstar.base.feature import is_feature_enabled
+from cstar.base.feature import (
+    ENV_FF_ORCH_TRX_OVERRIDE,
+    ENV_FF_ORCH_TRX_TIMESPLIT,
+    is_feature_enabled,
+)
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, deep_merge, slugify
+from cstar.base.utils import (
+    DEFAULT_OUTPUT_ROOT_NAME,
+    deep_merge,
+    slugify,
+)
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import (
     Application,
@@ -291,7 +299,7 @@ class WorkplanTransformer(LoggingMixin):
 
         steps = list(self.original.steps)
 
-        if is_feature_enabled("CSTAR_FF_ORCH_TRANSFORM_AUTO"):
+        if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             steps = []
 
             for step in self.original.steps:
@@ -305,9 +313,7 @@ class WorkplanTransformer(LoggingMixin):
 
                 steps.extend(transformed_steps)
 
-        self._ensure_unique_paths(steps)  # HACK: remove when possible
-
-        if is_feature_enabled("CSTAR_FF_ORCH_TRANSFORM_OVR"):
+        if is_feature_enabled(ENV_FF_ORCH_TRX_OVERRIDE):
             override_transform = OverrideTransform()
 
             for i, step in enumerate(steps):

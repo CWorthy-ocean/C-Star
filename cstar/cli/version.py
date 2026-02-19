@@ -27,5 +27,4 @@ def common_callback(
         ),
     ] = False,
 ) -> None:
-    """Common callback for all commands."""
     pass

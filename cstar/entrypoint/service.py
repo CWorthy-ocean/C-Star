@@ -379,7 +379,7 @@ class Service(ABC, LoggingMixin):
             self._terminate_hc("Run complete")
             self._on_shutdown()
         except Exception:
-            self.log.exception("Service shutdown may not have completed.")
+            self.log.debug("Service shutdown may not have completed.")
             raise
 
     async def execute(self) -> None:
@@ -389,21 +389,25 @@ class Service(ABC, LoggingMixin):
         to subclass implementation of `_on_iteration`. Evaluates shutdown
         conditions to trigger automatic service termination.
         """
+        exc: Exception | None = None
+
         try:
             running = True
             self._on_start()
             self._start_healthcheck()
-        except Exception:
+        except Exception as e:
             self.log.exception("Unable to start service.")
             running = False
+            exc = e
 
         while running:
             try:
                 await self._on_iteration()
                 self._on_iteration_complete()
-            except Exception:
+            except Exception as e:
                 running = False
                 self.log.exception("Terminating service due to failure in event loop.")
+                exc = e
                 continue
 
             # shutdown if not set to run as a service
@@ -423,15 +427,19 @@ class Service(ABC, LoggingMixin):
                 try:
                     self._on_delay()
                     await asyncio.sleep(max(self._config.loop_delay, 0))
-                except Exception:
+                except Exception as e:
                     running = False
                     self.log.exception(
                         "Terminating service due to failure in _on_delay."
                     )
+                    exc = e
 
             self._send_update_to_hc({self.CMD_PREFIX: "heartbeat"})
 
         self._shutdown()
+
+        if exc:
+            raise exc
 
     def _handle_signal(self, sig_num: int, _frame: FrameType | None) -> None:
         """Handle OS signals requesting process shutdown.

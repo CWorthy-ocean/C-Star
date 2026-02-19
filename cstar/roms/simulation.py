@@ -11,8 +11,15 @@ from typing import Any, Optional, TypeVar, cast
 import yaml
 
 import cstar.roms.runtime_settings
-from cstar import Simulation
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_NPROCS_POST,
+    FLAG_OFF,
+    FLAG_ON,
+    get_env_item,
+)
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
@@ -20,7 +27,10 @@ from cstar.base.utils import (
     _run_cmd,
     slugify,
 )
-from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    RomsFileSystemManager,
+)
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -56,9 +66,8 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
 )
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
+from cstar.simulation import Simulation
 from cstar.system.manager import cstar_sysmgr
-
-NPROCS_POST = int(os.getenv("CSTAR_NPROCS_POST", str(os.cpu_count() // 3)))  # type: ignore[operator]
 
 
 def _ncjoin_wildcard(
@@ -619,6 +628,11 @@ class ROMSSimulation(Simulation):
         """Return the file system manager for the simulation."""
         return cast(RomsFileSystemManager, self._fs_manager)
 
+    def _conditionally_clear_root(self):
+        env_item = get_env_item(ENV_CSTAR_CLOBBER_WORKING_DIR)
+        if env_item.value != FLAG_OFF:
+            self.fs_manager.clear()
+
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
         """Returns the default ROMS external codebase.
@@ -802,7 +816,7 @@ class ROMSSimulation(Simulation):
         return simulation_runtime_settings
 
     @property
-    def input_datasets(self) -> list:
+    def input_datasets(self) -> list[ROMSInputDataset]:
         """Retrieves all input datasets associated with this ROMS simulation.
 
         This property compiles a list of `ROMSInputDataset` instances that are used
@@ -1190,9 +1204,18 @@ class ROMSSimulation(Simulation):
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
 
-        compile_time_code_dir.mkdir(parents=True, exist_ok=True)
-        runtime_code_dir.mkdir(parents=True, exist_ok=True)
-        input_datasets_dir.mkdir(parents=True, exist_ok=True)
+        self._conditionally_clear_root()
+
+        try:
+            compile_time_code_dir.mkdir(parents=True)
+            runtime_code_dir.mkdir(parents=True)
+            input_datasets_dir.mkdir(parents=True)
+        except OSError as e:
+            msg = (
+                f"The input directory is not empty. Re-run with {ENV_CSTAR_CLOBBER_WORKING_DIR}={FLAG_ON} "
+                "to delete the directory and continue."
+            )
+            raise CstarExpectationFailed(msg) from e
 
         self.log.info(f"🛠️ Configuring {self.__class__.__name__}")
 
@@ -1647,7 +1670,8 @@ class ROMSSimulation(Simulation):
                 output_dir=self.fs_manager.joined_output_dir,
             )
 
-            with ThreadPoolExecutor(max_workers=NPROCS_POST) as executor:
+            nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
+            with ThreadPoolExecutor(max_workers=nprocs) as executor:
                 results = executor.map(spatial_joiner, unique_wildcards)
                 _ = [r for r in results]  # exhaust iterator
 

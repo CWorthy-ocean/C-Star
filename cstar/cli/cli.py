@@ -1,6 +1,7 @@
 import typer
 
 from cstar.cli.blueprint import app as app_blueprint
+from cstar.cli.environment import app as app_env
 from cstar.cli.template import app as app_template
 from cstar.cli.version import common_callback
 from cstar.cli.workplan import app as app_workplan
@@ -12,6 +13,7 @@ def main() -> None:
 
     subcommands: list[tuple[typer.Typer, str]] = [
         (app_blueprint, "blueprint"),
+        (app_env, "env"),
         (app_template, "template"),
         (app_workplan, "workplan"),
     ]
