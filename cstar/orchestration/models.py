@@ -302,6 +302,15 @@ class RuntimeParameterSet(ParameterSet):
 
         return self
 
+    @field_validator("output_dir", mode="after")
+    @classmethod
+    def _resolve_out_dir(
+        cls,
+        value: Path,
+        _info: ValidationInfo,
+    ) -> Path:
+        return value.expanduser().resolve()
+
 
 class PartitioningParameterSet(ParameterSet):
     """Parameters for the partitioning of the model."""

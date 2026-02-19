@@ -31,7 +31,7 @@ class EnvItem(EnvVar):
 
     @property
     def value(self) -> str:
-        if env_value := os.getenv(self.name, ""):
+        if (env_value := os.getenv(self.name)) is not None:
             return env_value
 
         if self.default_factory and (factory_default := self.default_factory(self)):
@@ -90,22 +90,25 @@ def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
     env_item: EnvItem
         The metadata associated with the environment variable
     """
-    hints = t.get_type_hints(sys.modules[__name__], include_extras=True)
-
+    constant_mods = [__name__, "cstar.orchestration.utils", "cstar.base.feature"]
     constant_name = f"{prefix}{var_name}"
-    if hint := hints.get(constant_name, None):
-        metadata = getattr(hint, "__metadata__", None)
-        if not metadata:
-            return EnvItem(
-                description="unknown",
-                group=_GROUP_UNK,
-                default="unknown",
-                name=var_name,
-            )
 
-        meta = metadata[0]
-        if isinstance(meta, EnvVar):
-            return EnvItem.from_env_var(meta, var_name)
+    for module_name in constant_mods:
+        hints = t.get_type_hints(sys.modules[module_name], include_extras=True)
+
+        if hint := hints.get(constant_name, None):
+            metadata = getattr(hint, "__metadata__", None)
+            if not metadata:
+                return EnvItem(
+                    description="unknown",
+                    group=_GROUP_UNK,
+                    default="unknown",
+                    name=var_name,
+                )
+
+            meta = metadata[0]
+            if isinstance(meta, EnvVar):
+                return EnvItem.from_env_var(meta, var_name)
 
     msg = f"No environment variable metadata found for: {constant_name}"
     raise ValueError(msg)

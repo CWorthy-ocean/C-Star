@@ -6,15 +6,14 @@ from pathlib import Path
 
 import networkx as nx
 
-from cstar.base.env import ENV_CSTAR_STATE_HOME
+from cstar.base.env import ENV_CSTAR_DATA_HOME, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import (
+    ENV_CSTAR_ORCH_REQD_ENV,
     ENV_CSTAR_ORCH_RUNID,
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_QUEUE,
 )
 
 KEY_STATUS: t.Literal["status"] = "status"
@@ -653,11 +652,9 @@ def check_environment() -> None:
     ValueError
         If required environment variables are missing or empty.
     """
-    required_vars = (
-        ENV_CSTAR_SLURM_ACCOUNT,
-        ENV_CSTAR_SLURM_QUEUE,
-        ENV_CSTAR_ORCH_RUNID,
-    )
+    required_config = get_env_item(ENV_CSTAR_ORCH_REQD_ENV).value
+    required_vars: set[str] = {ENV_CSTAR_ORCH_RUNID}
+    required_vars.update({x.strip() for x in required_config.split(",") if x})
 
     for key in required_vars:
         if not os.getenv(key, ""):
@@ -678,7 +675,7 @@ def configure_environment(
         The unique identifier for an execution of the workplan.
     """
     if output_dir:
-        os.environ[ENV_CSTAR_STATE_HOME] = output_dir.expanduser().resolve().as_posix()
+        os.environ[ENV_CSTAR_DATA_HOME] = output_dir.expanduser().resolve().as_posix()
 
     if run_id:
         os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)
