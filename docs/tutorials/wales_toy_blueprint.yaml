@@ -83,4 +83,4 @@ model_params:
 runtime_params:
   start_date: "2012-01-01 00:00:00"
   end_date: "2012-01-01 00:30:00"
-  output_dir: "~/cstar/wales_toy_domain"
+  output_dir: "~/cstar/wales_toy_blueprint"
