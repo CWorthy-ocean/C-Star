@@ -7,7 +7,7 @@ Simulation
 .. autosummary::
    :toctree: generated/
 	     
-   cstar.Simulation
+   cstar.simulation.Simulation
    cstar.roms.ROMSSimulation
 
 External Codebases
@@ -16,9 +16,9 @@ External Codebases
 .. autosummary::
    :toctree: generated/
 
-   cstar.base.ExternalCodeBase
-   cstar.roms.ROMSExternalCodeBase
-   cstar.marbl.MARBLExternalCodeBase
+   cstar.base.external_codebase.ExternalCodeBase
+   cstar.roms.external_codebase.ROMSExternalCodeBase
+   cstar.marbl.external_codebase.MARBLExternalCodeBase
 
 Additional Code
 ------------------
@@ -26,7 +26,7 @@ Additional Code
 .. autosummary::
    :toctree: generated/
 
-   cstar.base.AdditionalCode
+   cstar.base.additional_code.AdditionalCode
 
 Input Datasets
 ----------------
@@ -34,16 +34,16 @@ Input Datasets
 .. autosummary::
    :toctree: generated/
 
-   cstar.base.InputDataset
-   cstar.roms.ROMSInputDataset
-   cstar.roms.ROMSModelGrid
-   cstar.roms.ROMSInitialConditions
-   cstar.roms.ROMSTidalForcing
-   cstar.roms.ROMSRiverForcing
-   cstar.roms.ROMSBoundaryForcing
-   cstar.roms.ROMSSurfaceForcing
-   cstar.roms.ROMSForcingCorrections
-   cstar.roms.ROMSRuntimeSettings
+   cstar.base.input_dataset.InputDataset
+   cstar.roms.input_dataset.ROMSInputDataset
+   cstar.roms.input_dataset.ROMSModelGrid
+   cstar.roms.input_dataset.ROMSInitialConditions
+   cstar.roms.input_dataset.ROMSTidalForcing
+   cstar.roms.input_dataset.ROMSRiverForcing
+   cstar.roms.input_dataset.ROMSBoundaryForcing
+   cstar.roms.input_dataset.ROMSSurfaceForcing
+   cstar.roms.input_dataset.ROMSForcingCorrections
+   cstar.roms.runtime_settings.ROMSRuntimeSettings
 
 Discretization
 ----------------
@@ -51,7 +51,7 @@ Discretization
 .. autosummary::
    :toctree: generated/
 
-   cstar.base.Discretization
+   cstar.base.discretization.Discretization
 
 Scheduler Job
 ----------------
