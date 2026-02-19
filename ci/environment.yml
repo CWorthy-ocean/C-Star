@@ -3,7 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - python>=3.10,<3.14
-  - numpy
+  - numpy>2.0,<2.4  # currently numba doesn't support 2.4
   - roms-tools
   - compilers
   - netcdf-fortran
