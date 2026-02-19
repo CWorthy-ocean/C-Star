@@ -2,7 +2,7 @@ Workplans
 =========
 
 Workplans define the contract for requesting the execution of one or more 
-:doc:`blueprints`. A user-configured workplan informs C-Star which `Blueprint` 
+:doc:`blueprints`. A user-configured workplan informs C-Star which ``Blueprint``
 to execute, and in what order.
 
 
@@ -183,7 +183,7 @@ Workplans can be checked for errors using the CLI and in code.
 
    .. tab-item:: Validating via CLI
 
-    Use the `check` command from the `cstar CLI`.
+    Use the ``check`` command from the ``cstar`` CLI.
 
     .. code-block:: console
 
@@ -191,7 +191,7 @@ Workplans can be checked for errors using the CLI and in code.
 
    .. tab-item:: Programmatic Validation
 
-    Use the `deserialize` method to validate a `YAML` file in Python.
+    Use the ``deserialize`` method to validate a YAML file in Python.
 
     .. code-block:: python
 
@@ -214,7 +214,7 @@ Execution
 
    .. tab-item:: Run via CLI
 
-    Use the ``run`` command from the cstar CLI to execute the workplan.
+    Use the ``run`` command from the ``cstar`` CLI to execute the workplan.
 
     .. code-block:: console
 
@@ -229,7 +229,7 @@ Execution
 
    .. tab-item:: Programmatic Execution
 
-    Use the `dag_runner` module to execute a Workplan in python.
+    Use the ``dag_runner`` module to execute a Workplan in python.
 
     .. code-block:: python
 
@@ -247,7 +247,7 @@ Checking Workplan Status
 
    .. tab-item:: CLI Status Check
 
-    Use the `status` command from the `cstar CLI` to retrieve the current
+    Use the ``status`` command from the ``cstar`` CLI to retrieve the current
     status of steps in a running workplan.
 
     .. code-block:: console

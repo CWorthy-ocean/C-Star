@@ -11,6 +11,7 @@ Core Blueprint Schema
 ---------------------
 
 The core attributes of a blueprint come from :class:`cstar.orchestration.models.Blueprint`.
+See the blueprint YAML below for example usage fo the attributes.
 
 .. rubric:: Core Blueprint Attributes
 
@@ -22,7 +23,7 @@ The core attributes of a blueprint come from :class:`cstar.orchestration.models.
   ~cstar.orchestration.models.Blueprint.state
   ~cstar.orchestration.models.Blueprint.cpus_needed
 
-The core blueprint attributes do not contain enough information to be executed.
+The core blueprint attributes do not contain enough information to be executed alone.
 
 Customizing Blueprints
 ----------------------
@@ -32,7 +33,7 @@ application. These classes are responsible for exposing the set of configurable
 parameters that are user-facing.
 
 
-Custom Blueprint Example: `RomsMarblBlueprint`
+Custom Blueprint Example: ``RomsMarblBlueprint``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 :class:`cstar.orchestration.models.RomsMarblBlueprint` contains all information
@@ -61,24 +62,22 @@ for more detail on each item.
 Preparing a Blueprint
 ---------------------
 
-A blueprint can be prepared for execution in two ways:
+A blueprint can be prepared for execution in a few ways:
 
-1. Create a `YAML` file with the desired blueprint configuration.
-2. Write `python` code to define a `RomsMarblBlueprint` instance.
-
-We recommend our users to create the `YAML` file directly and execute it 
-using the `cstar cli`.
+1. If you are creating a brand new domain, consider using `CSON-Forge <https://github.com/CWorthy-ocean/cson-forge/>`__ to prepare your input files and blueprint all at once.
+2. For an existing set of inputs, you manually write a YAML file with the desired blueprint configuration.
+3. Write python code to define a ``RomsMarblBlueprint`` instance and export it to YAML.
 
 
 RomsMarblBlueprint Example
 --------------------------
 
-This example demonstrates a configured `RomsMarblBlueprint`. Notice that:
+This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
 
-- `ROMS` code can be built from a fork, branch, or even a git commit hash.
-- Remote or local resources can be used to build and execute a simulation.
-- C-Star handles both partioned and unpartitioned data.
-- Runtime and compile-time behaviors can be customized
+- ROMS code can be built from a fork, branch, or even a git commit hash, by specifying :attr:`branch:` or :attr:`commit:`
+- Remote or local resources can be used to build and execute a simulation, under :attr:`compile_time:`
+- C-Star handles both partitioned and unpartitioned data
+- Runtime and compile-time behaviors can be customized in the ``.opt`` and ``.in`` files
 
 .. code:: yaml
 
@@ -168,7 +167,7 @@ Blueprints can be checked for errors using the CLI and in code.
 
    .. tab-item:: Validating via CLI
 
-    Use the `check` command from the `cstar CLI`.
+    Use the ``check`` command from the ``cstar`` CLI.
 
     .. code-block:: console
 
@@ -176,7 +175,7 @@ Blueprints can be checked for errors using the CLI and in code.
 
    .. tab-item:: Programmatic Validation
 
-    Use the `deserialize` method to validate a `YAML` file in Python.
+    Use the ``deserialize`` method to validate a YAML file in Python.
 
     .. code-block:: python
 
@@ -194,20 +193,20 @@ Execution
 .. warning::
     The post-processing step joining partitioned data may consume all available cores of a login node and be terminated (and make the admins angry).
 
-    - We *strongly* recommend setting ``CSTAR_NPROCS_POST`` to a small number (~2) when running a `ROMS-MARBL` blueprint directly on a HPC login node.
+    - We *strongly* recommend setting ``CSTAR_NPROCS_POST`` to a small number (~2) when running a ROMS-MARBL blueprint directly on a HPC login node.
     - Consider making a :ref:`single-step workplan <workplan_examples>` to run a simulation entirely on the compute cluster.
 
 CLI
 ^^^
 
-Use the `run` command from the `cstar CLI` to execute a blueprint.
+Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
 
 
 .. tab-set::
 
    .. tab-item:: Run via CLI
 
-    Use the `run` command from the `cstar CLI`.
+    Use the ``run`` command from the ``cstar` CLI.
 
     .. code-block:: console
 
@@ -215,10 +214,10 @@ Use the `run` command from the `cstar CLI` to execute a blueprint.
 
    .. tab-item:: Programmatic Execution
 
-    Use a `SimulationRunner` to execute the blueprint.
+    Use a ``SimulationRunner`` to execute the blueprint.
 
     .. code-block:: python
-      :caption: Executing a blueprint `YAML` file in python.
+      :caption: Executing a blueprint YAML file in python.
 
         from cstar.entrypoint.service import ServiceConfiguration
         from cstar.entrypoint.worker.worker import BlueprintRequest, JobConfig, SimulationRunner

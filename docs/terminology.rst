@@ -74,7 +74,7 @@ Example HPC Deployment
 .. image:: images/hpc_arch_diagram.png
     :alt: Components of a C-Star deployment in an HPC environment
 
-This diagram illustrates a user-initiated workflow on a HPC. It assumes that the user has already prepared their blueprints and a workplan, with all relevant input data in their HPC storage.
+This diagram illustrates a user-initiated workflow on a HPC. It assumes that the user has already prepared their blueprints and a workplan, with all relevant input data in their HPC storage. An example roms-marbl blueprint would specify the location of compile-time files, run-time files, and input data files such as surface forcing, initial conditions, etc. Again, see `blueprints page <blueprints.rst>`_ for an example. In this example, the user has already generated the aforementioned files and the blueprint points to them.  
 
 The user logs into the login node and initiate the workplan via the ``cstar cli``. This creates an orchestrator instance (an ephemeral prefect server) that reads their workplan, identifies the tasks that need to be executed, organizes per-task blueprints, and submits the entire set of tasks to SLURM.
 

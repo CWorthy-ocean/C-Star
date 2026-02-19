@@ -1,0 +1,79 @@
+name: wio_toy
+description: wio toy domain for laptop
+application: roms_marbl
+state: draft
+valid_start_date: 2012-01-01
+valid_end_date: 2012-01-02
+
+code:
+  roms:
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    branch: a338198af93a7b4cfa8f320a23f0f5623bc18152
+  marbl:
+    location: https://github.com/marbl-ecosys/MARBL.git
+    branch: marbl0.45.0
+
+  run_time:
+    location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
+    branch: main
+    filter:
+      directory: wio-toy-domain/runtime_code
+      files:
+        - cson_roms-marbl_v0.1_wio-toy_10procs.in
+        - marbl_in
+        - marbl_tracer_output_list
+        - marbl_diagnostic_output_list
+  compile_time:
+    location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
+    branch: main
+    filter:
+      directory: wio-toy-domain/compile_time_code
+      files:
+        - bgc.opt
+        - bulk_frc.opt
+        - cdr_frc.opt
+        - cppdefs.opt
+        - diagnostics.opt
+        - ocean_vars.opt
+        - param.opt
+        - river_frc.opt
+        - sponge_tune.opt
+        - surf_flux.opt
+        - tides.opt
+        - tracers.opt
+        - Makefile
+grid:
+  data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_grid.nc
+initial_conditions:
+  data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_initial_conditions.nc
+
+forcing:
+  tidal:
+    data:
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_tidal.nc
+  surface:
+    data:
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_surface-physics_201112.nc
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_surface-physics_201201.nc
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_surface-bgc_clim.nc
+  boundary:
+    data:
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_boundary-physics_201201.nc
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_boundary-bgc_clim.nc
+  river:
+    data:
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_river.nc
+
+partitioning:
+  n_procs_x: 2
+  n_procs_y: 5
+
+model_params:
+  time_step: 900
+
+runtime_params:
+  start_date: "2012-01-01 00:00:00"
+  end_date: "2012-01-01 00:30:00"
+  output_dir: "~/cstar/wio_toy_blueprint"

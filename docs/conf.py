@@ -25,7 +25,7 @@ from docutils import nodes  # noqa: F401
 from docutils.parsers.rst import Directive
 from sphinx.application import Sphinx
 
-from cstar.base.env import EnvVar, EnvItem, discover_env_vars
+from cstar.base.env import EnvItem, discover_env_vars
 
 logging.basicConfig(level=logging.DEBUG)
 
