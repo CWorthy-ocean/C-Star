@@ -254,11 +254,10 @@ class WorkplanTransformer(LoggingMixin):
             If the source and target paths are identical
         """
         if not target_dir and not suffix:
-            raise ValueError(
-                f"Identical source and target may result in overwriting the source: `{source}`"
-            )
+            msg = f"Identical source and target will destroy the source: `{source}`"
+            raise ValueError(msg)
 
-        directory = target_dir if target_dir else source.parent
+        directory = target_dir or source.parent
         filename = Path(source.name).with_stem(f"{source.stem}{suffix}")
         if extension:
             filename = filename.with_suffix(extension)
@@ -365,7 +364,8 @@ class RomsMarblTimeSplitter(Transform):
         n_slices = len(time_slices)
 
         if end_date <= start_date:
-            raise ValueError("end_date must be after start_date")
+            msg = "end_date must be after start_date"
+            raise ValueError(msg)
 
         depends_on = step.depends_on
         last_restart_file: Path | None = None
