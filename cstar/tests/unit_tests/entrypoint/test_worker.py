@@ -1,3 +1,4 @@
+# ruff: noqa: S101
 import itertools
 import logging
 import os
@@ -57,7 +58,7 @@ def valid_args_short() -> dict[str, str]:
     }
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def sim_runner(
     blueprint_path: Path,
     patch_romssimulation_init_sourcedata,
@@ -310,8 +311,6 @@ def test_start_runner(
     ----------
     blueprint_path: Path
         The path to the blueprint yaml file created by the fixture.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     request = BlueprintRequest(
         str(blueprint_path),
@@ -334,7 +333,6 @@ def test_start_runner(
 
 
 def test_runner_directory_check_ignore_logs(
-    tmp_path: Path,
     sim_runner: SimulationRunner,
 ) -> None:
     """Test the simulation runner's file system preparation.
@@ -346,8 +344,6 @@ def test_runner_directory_check_ignore_logs(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -360,7 +356,6 @@ def test_runner_directory_check_ignore_logs(
 
 
 def test_runner_directory_prep(
-    tmp_path: Path,
     sim_runner: SimulationRunner,
 ) -> None:
     """Test the simulation runner's file system preparation.
@@ -371,9 +366,6 @@ def test_runner_directory_prep(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
-
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -392,7 +384,6 @@ def test_runner_directory_prep(
 @pytest.mark.asyncio
 async def test_runner_can_shutdown_as_task(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the shutdown override of the base Service class.
 
@@ -403,8 +394,6 @@ async def test_runner_can_shutdown_as_task(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -431,7 +420,6 @@ async def test_runner_can_shutdown_as_task(
 @pytest.mark.asyncio
 async def test_runner_can_shutdown_as_task_null_sim(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the shutdown override of the base Service class.
 
@@ -442,8 +430,6 @@ async def test_runner_can_shutdown_as_task_null_sim(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -462,7 +448,6 @@ async def test_runner_can_shutdown_as_task_null_sim(
 @pytest.mark.asyncio
 async def test_runner_can_shutdown_as_service_null_sim(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the shutdown override of the base Service class.
 
@@ -474,8 +459,6 @@ async def test_runner_can_shutdown_as_service_null_sim(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -494,7 +477,6 @@ async def test_runner_can_shutdown_as_service_null_sim(
 @pytest.mark.asyncio
 async def test_runner_shutdown_no_update_handler(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the shutdown criteria of the SimulationRunner.
 
@@ -505,8 +487,6 @@ async def test_runner_shutdown_no_update_handler(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -541,7 +521,6 @@ async def test_runner_shutdown_no_update_handler(
 @pytest.mark.asyncio
 async def test_runner_shutdown_handler_complete(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
     status: ExecutionStatus,
 ) -> None:
     """Test the shutdown criteria of the SimulationRunner.
@@ -553,8 +532,6 @@ async def test_runner_shutdown_handler_complete(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
@@ -598,7 +575,6 @@ async def test_runner_shutdown_handler_complete(
 @pytest.mark.asyncio
 async def test_runner_shutdown_handler_not_complete(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
     status: ExecutionStatus,
 ) -> None:
     """Test the shutdown criteria of the SimulationRunner.
@@ -610,8 +586,6 @@ async def test_runner_shutdown_handler_not_complete(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
@@ -655,7 +629,6 @@ async def test_runner_shutdown_handler_not_complete(
 @pytest.mark.asyncio
 async def test_runner_shutdown_side_effects(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
     status: ExecutionStatus,
 ) -> None:
     """Test the shutdown behavior of the SimulationRunner.
@@ -667,8 +640,6 @@ async def test_runner_shutdown_side_effects(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
@@ -700,7 +671,6 @@ async def test_runner_shutdown_side_effects(
 @pytest.mark.asyncio
 async def test_runner_on_start_without_uri(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the error handling behavior of the SimulationRunner.
 
@@ -711,8 +681,6 @@ async def test_runner_on_start_without_uri(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -748,7 +716,6 @@ async def test_runner_on_start_without_uri(
 @pytest.mark.asyncio
 async def test_runner_on_start_without_simulation(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the error handling behavior of the SimulationRunner.
 
@@ -760,8 +727,6 @@ async def test_runner_on_start_without_simulation(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -797,7 +762,6 @@ async def test_runner_on_start_without_simulation(
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_setup(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the error handling behavior of the SimulationRunner.
 
@@ -809,8 +773,6 @@ async def test_runner_on_start_user_unhandled_setup(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -850,7 +812,6 @@ async def test_runner_on_start_user_unhandled_setup(
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_build(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the error handling behavior of the SimulationRunner.
 
@@ -862,8 +823,6 @@ async def test_runner_on_start_user_unhandled_build(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -901,7 +860,6 @@ async def test_runner_on_start_user_unhandled_build(
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_pre_run(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the error handling behavior of the SimulationRunner.
 
@@ -913,8 +871,6 @@ async def test_runner_on_start_user_unhandled_pre_run(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -952,7 +908,6 @@ async def test_runner_on_start_user_unhandled_pre_run(
 @pytest.mark.asyncio
 async def test_runner_on_iteration(
     sim_runner: SimulationRunner,
-    tmp_path: Path,
 ) -> None:
     """Test the main iteration behavior of the SimulationRunner.
 
@@ -963,8 +918,6 @@ async def test_runner_on_iteration(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     output_dir = sim_runner._simulation.fs_manager.output_dir
 
@@ -1039,8 +992,6 @@ async def test_runner_setup_stage(
     ----------
     sim_runner: SimulationRunner
         An instance of SimulationRunner to be used for the test.
-    tmp_path : Path
-        A temporary path to store simulation output and logs
     """
     mock_prep_fs = mock.Mock()
 
@@ -1126,7 +1077,6 @@ def test_worker_main(tmp_path: Path, sim_runner: SimulationRunner) -> None:
 
 def test_worker_main_exec(
     blueprint_path: Path,
-    tmp_path: Path,
 ) -> None:
     """Test the main entrypoint of the worker service.
 
