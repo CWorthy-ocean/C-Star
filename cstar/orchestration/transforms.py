@@ -6,7 +6,6 @@ from enum import StrEnum
 from pathlib import Path
 
 from cstar.base.feature import (
-    ENV_FF_ORCH_TRX_OVERRIDE,
     ENV_FF_ORCH_TRX_TIMESPLIT,
     is_feature_enabled,
 )
@@ -313,12 +312,11 @@ class WorkplanTransformer(LoggingMixin):
 
                 steps.extend(transformed_steps)
 
-        if is_feature_enabled(ENV_FF_ORCH_TRX_OVERRIDE):
-            override_transform = OverrideTransform()
+        override_transform = OverrideTransform()
 
-            for i, step in enumerate(steps):
-                overridden_step_result = list(override_transform(step))
-                steps[i] = overridden_step_result[0]
+        for i, step in enumerate(steps):
+            overridden_step_result = list(override_transform(step))
+            steps[i] = overridden_step_result[0]
 
         wp_attrs = self.original.model_dump()
         wp_attrs.update(

@@ -9,10 +9,7 @@ import networkx as nx
 import pytest
 
 from cstar.base.env import FLAG_ON
-from cstar.base.feature import (
-    ENV_FF_ORCH_TRX_OVERRIDE,
-    ENV_FF_ORCH_TRX_TIMESPLIT,
-)
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.orchestration import (
@@ -324,7 +321,6 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
             {
                 ENV_CSTAR_ORCH_RUNID: str(uuid.uuid4()),
                 ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
-                ENV_FF_ORCH_TRX_OVERRIDE: FLAG_ON,
             },
         ),
     ):
