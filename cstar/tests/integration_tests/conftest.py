@@ -17,6 +17,7 @@ def log() -> logging.Logger:
 
 @pytest.fixture(scope="session")
 def cstar_test_data_directory() -> Path:
+    """Fixture returning a durable path where downloaded data will be kept."""
     return Path(pooch.os_cache("cstar_test_case_data"))
 
 
