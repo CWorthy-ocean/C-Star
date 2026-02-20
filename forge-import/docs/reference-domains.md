@@ -1,7 +1,7 @@
-# Domains (`domains.yml`)
+# Domains (`domains-nested.yml`)
 
-`domains.yml`
+`workflows/generate-models/templates/domains-nested.yml`
 
-```{include} ../cson_forge/domains.yml
+```{include} ../workflows/generate-models/templates/domains-nested.yml
 :code: yaml
 ```
