@@ -1,4 +1,4 @@
-import typing as t
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -17,7 +17,7 @@ def tests_path() -> Path:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def skip_html_checks_for_performance() -> t.Generator[None]:
+def skip_html_checks_for_performance() -> Generator[None, None, None]:
     """
     Global auto-use that skips the head checks used to see if HTTP input datasets are HTML.
     For our test cases, they are always files, except for when we explicitly test that they,
