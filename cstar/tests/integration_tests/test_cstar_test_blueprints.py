@@ -1,11 +1,11 @@
 import logging
+import typing as t
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from cstar.roms.simulation import ROMSSimulation
-from cstar.tests.integration_tests.config import TEST_CONFIG
 
 
 class TestCStar:
@@ -20,12 +20,15 @@ class TestCStar:
     async def test_cstar(
         self,
         tmp_path: Path,
-        modify_template_blueprint,
+        modify_template_blueprint: t.Callable[
+            [Path | str, dict[str, str], Path | str], str
+        ],
         mock_lmod_path: Path,
-        fetch_remote_test_case_data,
-        test_config_key,
+        fetch_remote_test_case_data: t.Callable[[], None],
+        test_config_key: str,
         log: logging.Logger,
-    ):
+        integration_test_configuration: dict[str, dict[str, str | dict[str, str]]],
+    ) -> None:
         """Run the C-Star minimal test case from a selection of different blueprints.
 
         Parameters:
@@ -39,10 +42,10 @@ class TestCStar:
            Fixture to fetch data needed for the C-Star test case, such as additional
            code for compiling ROMS, yaml files to supply to roms-tools, etc.
            These are saved to a subdirectory of the system cache specified by
-           CSTAR_TEST_DATA_DIRECTORY in the config.py module
+           the `cstar_test_data_directory` fixture
         test_config_key (str):
            Key determining the specific variation of the test case that is run, as
-           defined in the dictionary TEST_CONFIG in the config.py module
+           defined in the `integration_test_configuration` fixture
         log (logging.Logger):
             Logger instance for logging messages during test execution.
         """
@@ -59,27 +62,28 @@ class TestCStar:
             if "local" in test_config_key:
                 fetch_remote_test_case_data()
 
-            config = TEST_CONFIG.get(test_config_key)
+            config = integration_test_configuration.get(test_config_key)
             if config is None:
-                raise ValueError(
+                msg = (
                     "No test configuration found for the provided key: "
                     f"{test_config_key}. Please check the TEST_CONFIG dictionary."
                 )
-            template_blueprint = config.get("template_blueprint_path")
-            strs_to_replace = config.get("strs_to_replace")
+                raise ValueError(msg)
 
-            log.info(f"Creating ROMSSimulation in {tmp_path / 'cstar_test_simulation'}")
+            template_blueprint_path = str(config.get("template_blueprint_path"))
+            strs_to_replace = t.cast("dict[str, str]", config.get("strs_to_replace"))
+            out_dir = tmp_path / "cstar_test_simulation"
+
+            msg = f"Creating ROMSSimulation in {tmp_path / 'cstar_test_simulation'}"
+            log.info(msg)
             modified_blueprint = modify_template_blueprint(
-                template_blueprint_path=template_blueprint,
-                strs_to_replace=strs_to_replace,
-                out_dir=tmp_path / "cstar_test_simulation",
+                template_blueprint_path,
+                strs_to_replace,
+                out_dir,
             )
-            cstar_test_case = ROMSSimulation.from_blueprint(
-                modified_blueprint,
-            )
+            cstar_test_case = ROMSSimulation.from_blueprint(modified_blueprint)
 
             cstar_test_case.setup()
-
             cstar_test_case.build()
             cstar_test_case.pre_run()
             test_process = cstar_test_case.run()
