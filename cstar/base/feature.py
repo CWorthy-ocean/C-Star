@@ -89,16 +89,6 @@ ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
 ] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
 """Enable automatic time-splitting of simulations."""
 
-ENV_FF_ORCH_TRX_OVERRIDE: t.Annotated[
-    t.Literal["CSTAR_FF_ORCH_TRX_OVERRIDE"],
-    EnvVar(
-        "Enable automatic overrides to blueprints contained in a workplan.",
-        _GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_ORCH_TRX_OVERRIDE"
-"""Enable automatic overrides to blueprints contained in a workplan."""
-
 
 def is_feature_enabled(flag: str) -> bool:
     """Determine if an environment variable for a feature is set.
