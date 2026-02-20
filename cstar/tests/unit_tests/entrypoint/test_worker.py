@@ -238,9 +238,9 @@ def test_get_service_config(
 @pytest.mark.parametrize(
     "blueprint_uri",
     [
-        ("blueprint1.yaml",),
-        ("blueprint2.yaml",),
-        ("blueprint3.yaml",),
+        "blueprint1.yaml",
+        "blueprint2.yaml",
+        "blueprint3.yaml",
     ],
 )
 def test_get_request(
