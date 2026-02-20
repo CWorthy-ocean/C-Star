@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
 
@@ -29,7 +30,7 @@ DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
 
 
 @pytest.fixture(scope="module", autouse=True)
-def clean_up_logs():
+def clean_up_logs() -> Generator[None, None, None]:
     """
     SimulationRunner sets up a log file during init. I could try to mock it out, but
     it's a bit hard to get at. For now, just clean things up after the module is done.
@@ -58,7 +59,8 @@ def valid_args_short() -> dict[str, str]:
 
 @pytest.fixture(scope="function")
 def sim_runner(
-    blueprint_path: Path, patch_romssimulation_init_sourcedata, tmp_path
+    blueprint_path: Path,
+    patch_romssimulation_init_sourcedata,
 ) -> SimulationRunner:
     """Fixture to create a SimulationRunner instance.
 
@@ -234,11 +236,11 @@ def test_get_service_config(
 
 
 @pytest.mark.parametrize(
-    ("blueprint_uri",),
+    "blueprint_uri",
     [
-        ("blueprint1.yaml",),
-        ("blueprint2.yaml",),
-        ("blueprint3.yaml",),
+        "blueprint1.yaml",
+        "blueprint2.yaml",
+        "blueprint3.yaml",
     ],
 )
 def test_get_request(
@@ -299,7 +301,8 @@ def test_configure_environment_prebuilt() -> None:
 
 
 def test_start_runner(
-    blueprint_path: Path, tmp_path: Path, patch_romssimulation_init_sourcedata
+    blueprint_path: Path,
+    patch_romssimulation_init_sourcedata,
 ) -> None:
     """Test creating a SimulationRunner and starting it.
 

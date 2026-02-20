@@ -7,16 +7,13 @@ import yaml
 from _pytest._py.path import LocalPath
 
 from cstar.execution.file_system import RomsFileSystemManager
-from cstar.tests.integration_tests.config import (
-    CSTAR_TEST_DATA_DIRECTORY,
-    TEST_DIRECTORY,
-)
 
 
 def test_modify_template_blueprint(
     modify_template_blueprint: Callable,
     tmp_path: Path,
-):
+    tests_path: Path,
+) -> None:
     """This test verifies that the modify_template_blueprint fixture correctly reads a
     specified blueprint, performs string replacements, and returns a Simulation instance
     with the correct parameters corresponding to the string replacements.
@@ -27,6 +24,9 @@ def test_modify_template_blueprint(
         A fixture that modifies a template blueprint with specific string replacements.
     tmpdir : Path
         Built-in pytest fixture for creating a temporary directory during the test
+    tests_path : Path
+        Fixture returning the directory containing c-star tests; used to build
+        absolute paths for other file located relative to the tests directory.
 
     Asserts
     -------
@@ -37,7 +37,7 @@ def test_modify_template_blueprint(
     fs.prepare()
 
     test_blueprint = modify_template_blueprint(
-        template_blueprint_path=TEST_DIRECTORY
+        template_blueprint_path=tests_path
         / "integration_tests/blueprints/blueprint_template.yaml",
         strs_to_replace={
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
@@ -48,8 +48,7 @@ def test_modify_template_blueprint(
     assert isinstance(test_blueprint, LocalPath), (
         f"Expected type LocalPath, but got {type(test_blueprint)}"
     )
-    with open(test_blueprint) as bpfile:
-        bpyaml = yaml.safe_load(bpfile)
+    bpyaml = yaml.safe_load(test_blueprint.read())
 
     assert (
         bpyaml["code"]["compile_time"]["location"]
@@ -63,7 +62,11 @@ class TestFetchData:
     file.
     """
 
-    def test_fetch_remote_test_case_data(self, fetch_remote_test_case_data):
+    def test_fetch_remote_test_case_data(
+        self,
+        cstar_test_data_directory: Path,
+        fetch_remote_test_case_data: Callable[[], None],
+    ) -> None:
         """Test the fetch_remote_test_case_data fixture.
 
         This test verifies that the fetch_remote_test_case_data fixture correctly downloads
@@ -82,7 +85,7 @@ class TestFetchData:
         """
         fetch_remote_test_case_data()
 
-        zip_files = list(CSTAR_TEST_DATA_DIRECTORY.glob("*.zip"))
+        zip_files = list(cstar_test_data_directory.glob("*.zip"))
         assert not zip_files, (
             f"Zip file was not removed: {zip_files[0] if zip_files else 'Unknown zip file'}"
         )
@@ -96,7 +99,7 @@ class TestFetchData:
 
         missing_items = []
         for expected_file in expected_files:
-            expected_path = CSTAR_TEST_DATA_DIRECTORY / expected_file
+            expected_path = cstar_test_data_directory / expected_file
             if not expected_path.exists():
                 missing_items.append(expected_file)
 

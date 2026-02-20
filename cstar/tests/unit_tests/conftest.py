@@ -34,25 +34,17 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
     StubSimulation,
 )
 
-################################################################################
-# SourceData
-################################################################################
-
 
 @pytest.fixture(scope="module")
-def blueprint_path() -> Path:
-    """Fixture that creates and returns a blueprint yaml location.
+def blueprint_path(tests_path: Path) -> Path:
+    """Fixture that returns the path to a valid, fully-populated blueprint.
 
     Returns
     -------
     Path
-        The path to the valid, complete blueprint yaml file.
     """
-    tests_root = Path(__file__).parent.parent
-    bp_path = (
-        tests_root / "integration_tests" / "blueprints" / "blueprint_complete.yaml"
-    )
-    return bp_path
+    relative_path = Path("integration_tests") / "blueprints" / "blueprint_complete.yaml"
+    return tests_path / relative_path
 
 
 ################################################################################
@@ -831,41 +823,6 @@ def custom_system_env(
         A function that will write a new env config file.
     """
     return functools.partial(_write_custom_env, system_dotenv_path)
-
-
-@pytest.fixture(scope="session")
-def mock_lmod_filename() -> str:
-    """Return a complete path to an empty, temporary .lmod config file for tests.
-
-    Returns
-    -------
-    str
-        The filename
-    """
-    return "mock.lmod"
-
-
-@pytest.fixture
-def mock_lmod_path(tmp_path: Path, mock_lmod_filename: str) -> Path:
-    """Create an empty, temporary .lmod file and return the path.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        The path to a temporary location to write the lmod file
-    mock_lmod_filename : str
-        The filename to use for the .lmod file
-
-    Returns
-    -------
-    str
-        The complete path to the file
-    """
-    tmp_path.mkdir(parents=True, exist_ok=True)
-
-    path = tmp_path / mock_lmod_filename
-    path.touch()  # CStarEnvironment expects the file to exist & opens it
-    return path
 
 
 ################################################################################
