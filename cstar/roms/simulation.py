@@ -28,6 +28,7 @@ from cstar.base.utils import (
     slugify,
 )
 from cstar.execution.file_system import (
+    DirectoryManager,
     JobFileSystemManager,
     RomsFileSystemManager,
 )
@@ -52,6 +53,7 @@ from cstar.orchestration.adapter import (
     TidalForcingAdapter,
 )
 from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -621,6 +623,10 @@ class ROMSSimulation(Simulation):
     @classmethod
     def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
         """Retrieve the manager for the simulation output directory structure."""
+        if not directory.is_absolute():
+            directory = DirectoryManager.data_home() / directory
+            if run_id := os.getenv(ENV_CSTAR_ORCH_RUNID, ""):
+                directory = directory / run_id
         return RomsFileSystemManager(directory)
 
     @property
@@ -1093,9 +1099,11 @@ class ROMSSimulation(Simulation):
         bp_dict = yaml.safe_load(data.decode("utf-8"))
 
         bp = RomsMarblBlueprint.model_validate(bp_dict)
+        fsm = cls._get_filesystem_manager(bp.runtime_params.output_dir)
+
         return cls(
             name=bp.name,
-            directory=bp.runtime_params.output_dir,
+            directory=fsm.root,
             discretization=DiscretizationAdapter(bp).adapt(),
             runtime_code=AddtlCodeAdapter(bp, "run_time").adapt(),
             compile_time_code=AddtlCodeAdapter(bp, "compile_time").adapt(),
