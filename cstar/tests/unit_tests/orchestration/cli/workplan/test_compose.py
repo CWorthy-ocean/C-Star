@@ -5,7 +5,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_STATE_HOME, FLAG_ON
+from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
@@ -16,13 +16,16 @@ from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import SplitFrequency, WorkplanTransformer
 from cstar.orchestration.utils import (
     ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
-    ENV_CSTAR_ORCH_RUNID,
     ENV_CSTAR_ORCH_TRX_FREQ,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
-    get_run_id,
 )
+
+
+def generate_run_id() -> str:
+    """Generate a unique run identifier based on the current time."""
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
 @pytest.mark.asyncio
@@ -197,7 +200,7 @@ async def test_build_and_run_dag_env(
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
-        ENV_CSTAR_ORCH_RUNID: run_id,
+        ENV_CSTAR_RUNID: run_id,
     }
 
     # get rid of one required env var.
@@ -276,7 +279,7 @@ async def test_prepare_composed_dag(
         )
 
         configure_environment(output_dir, run_id)
-        run_id = get_run_id()
+        run_id = generate_run_id()
         output_dir = DirectoryManager.data_home()
         check_environment()
         wp, wp_path = await prepare_workplan(generated_wp_path, output_dir, run_id)

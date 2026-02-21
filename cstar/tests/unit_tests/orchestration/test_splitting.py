@@ -6,6 +6,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.transforms import (
@@ -13,7 +14,6 @@ from cstar.orchestration.transforms import (
     get_time_slices,
     get_transforms,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ def test_splitter(single_step_workplan: Workplan) -> None:
 
     step = single_step_workplan.steps[0]
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_ORCH_RUNID: "12345"}, clear=True):
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
         transformed_steps = list(transform(step))
 
     # one step transforms into 12 monthly steps

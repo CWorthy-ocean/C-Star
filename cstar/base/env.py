@@ -245,6 +245,17 @@ ENV_CSTAR_STATE_HOME: t.Annotated[
 ] = "CSTAR_STATE_HOME"
 """Environment variable used to override the home directory for C-Star state storage."""
 
+ENV_CSTAR_RUNID: t.Annotated[
+    t.Literal["CSTAR_RUNID"],
+    EnvVar(
+        description="Unique run identifier used by the orchestrator.",
+        group=_GROUP_SIM,
+        default="",
+        # default_factory=lambda _: generate_run_id(),
+    ),
+] = "CSTAR_RUNID"
+"""Environment variable containing a unique run identifier used by the orchestrator."""
+
 
 def discover_env_vars(
     modules: list[types.ModuleType],

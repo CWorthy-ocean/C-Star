@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
@@ -12,7 +13,6 @@ from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     get_transforms,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_RUNID
 
 
 @pytest.fixture
@@ -151,7 +151,7 @@ def test_override_transform(
     transform = OverrideTransform()
     step = step_overiding_wp.steps[0]
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_ORCH_RUNID: "12345"}, clear=True):
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
         steps = transform(step)
 
     transformed = list(steps)[0]
@@ -212,7 +212,7 @@ def test_override_transform_system_precedence(
     transform = OverrideTransform(sys_overrides=system_od_override)
     step = step_overiding_wp.steps[0]
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_ORCH_RUNID: "12345"}, clear=True):
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
         steps = transform(step)
 
     transformed = list(steps)[0]
