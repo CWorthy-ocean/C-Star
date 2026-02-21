@@ -14,6 +14,7 @@ from cstar.base.env import (
     get_env_item,
 )
 from cstar.base.log import LoggingMixin
+from cstar.base.utils import slugify
 
 
 @dataclass(slots=True)
@@ -231,6 +232,23 @@ class JobFileSystemManager(LoggingMixin):
             if directory.exists():
                 shutil.rmtree(directory)
             directory.mkdir(parents=True)
+
+    def get_subtask_manager(self, task_name: str) -> t.Self:
+        """Create a JobFileSystemManager instance with a root directory
+        configured for a subtask.
+
+        Parameters
+        ----------
+        task_name : str
+            The subtask name
+
+        Returns
+        -------
+        JobFileSystemManager
+            A file system manager with a root directory relative to this instance.
+        """
+        task_dir = self.tasks_dir / slugify(task_name)
+        return self.__class__(task_dir)
 
     def __getstate__(self) -> dict[str, str]:
         """Return the state of the object."""
