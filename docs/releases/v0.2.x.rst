@@ -34,6 +34,7 @@ Bug Fixes
 - Fix indentation creating an unreachable code block in git utils
 - Add conda installation of rsync to environment.yml (fixes bug related to a flag used in newer ucla-roms makefiles that is not available in MacOS's default rsync installation)
 - Reimplement CSTAR_CLOBBER_WORKING_DIR for single-blueprint cases
+- Fix bug handling user-relative paths in `JobFileSystemManager`
 
 Improvements
 ~~~~~~~~~~~~
