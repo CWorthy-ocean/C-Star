@@ -128,13 +128,17 @@ class JobFileSystemManager(LoggingMixin):
     """
 
     _INPUT_NAME: t.ClassVar[t.Literal["input"]] = "input"
+    """The name of the subfolder where job inputs will be written."""
     _WORK_NAME: t.ClassVar[t.Literal["work"]] = "work"
+    """The name of the subfolder where job scripts will be written."""
     _TASKS_NAME: t.ClassVar[t.Literal["tasks"]] = "tasks"
+    """The name of the subfolder where job sub-tasks will be executed."""
     _LOGS_NAME: t.ClassVar[t.Literal["logs"]] = "logs"
+    """The name of the subfolder where job logs will be written."""
     _OUTPUT_NAME: t.ClassVar[t.Literal["output"]] = "output"
-
-    root: t.Final[Path]
-    """The root directory of the job. It is provided via user configuration."""
+    """The name of the subfolder where job outputs will be written."""
+    _root: t.Final[Path]
+    """The root directory of the job."""
 
     def __init__(self, root_directory: Path) -> None:
         """Initialize the job file system.
@@ -144,7 +148,7 @@ class JobFileSystemManager(LoggingMixin):
         root_directory : Path
             The root directory that contains all job byproducts.
         """
-        self.root = root_directory
+        self._root = root_directory.expanduser().resolve()
 
     def _dir_set(self) -> set[Path]:
         """Return the complete set of directories for the job.
@@ -160,6 +164,16 @@ class JobFileSystemManager(LoggingMixin):
             self.logs_dir,
             self.output_dir,
         }
+
+    @property
+    def root(self) -> Path:
+        """The root directory containing all job outputs.
+
+        Returns
+        -------
+        Path
+        """
+        return self._root
 
     @property
     def input_dir(self) -> Path:
@@ -219,11 +233,11 @@ class JobFileSystemManager(LoggingMixin):
 
     def __getstate__(self) -> dict[str, str]:
         """Return the state of the object."""
-        return {"root": self.root.as_posix()}
+        return {"_root": self._root.as_posix()}
 
     def __setstate__(self, state: dict[str, str]) -> None:
         """Restore the object from a pickle."""
-        self.__dict__.update({"root": Path(state["root"])})
+        self.__dict__.update({"_root": Path(state["_root"])})
 
 
 class RomsFileSystemManager(JobFileSystemManager):
