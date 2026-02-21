@@ -78,8 +78,6 @@ ENV_CSTAR_ORCH_REQD_ENV: t.Annotated[
 ] = "CSTAR_ORCH_REQD_ENV"
 """A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?)."""
 
-"""A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?)."""
-
 
 def get_run_id() -> str:
     """Retrieve the current run-id.
