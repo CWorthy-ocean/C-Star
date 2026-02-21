@@ -6,15 +6,12 @@ from pathlib import Path
 
 import networkx as nx
 
-from cstar.base.env import ENV_CSTAR_DATA_HOME, get_env_item
+from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify
 from cstar.orchestration.models import Step, Workplan
-from cstar.orchestration.utils import (
-    ENV_CSTAR_ORCH_REQD_ENV,
-    ENV_CSTAR_ORCH_RUNID,
-)
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
 
 KEY_STATUS: t.Literal["status"] = "status"
 KEY_STEP: t.Literal["step"] = "step"
@@ -653,7 +650,7 @@ def check_environment() -> None:
         If required environment variables are missing or empty.
     """
     required_config = get_env_item(ENV_CSTAR_ORCH_REQD_ENV).value
-    required_vars: set[str] = {ENV_CSTAR_ORCH_RUNID}
+    required_vars: set[str] = {ENV_CSTAR_RUNID}
     required_vars.update({x.strip() for x in required_config.split(",") if x})
 
     for key in required_vars:
@@ -678,4 +675,4 @@ def configure_environment(
         os.environ[ENV_CSTAR_DATA_HOME] = output_dir.expanduser().resolve().as_posix()
 
     if run_id:
-        os.environ[ENV_CSTAR_ORCH_RUNID] = slugify(run_id)
+        os.environ[ENV_CSTAR_RUNID] = slugify(run_id)

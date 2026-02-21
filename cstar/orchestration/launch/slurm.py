@@ -5,7 +5,7 @@ from pathlib import Path
 from prefect import task
 from prefect.context import TaskRunContext
 
-from cstar.base.env import get_env_item
+from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
@@ -23,7 +23,6 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
-    ENV_CSTAR_ORCH_RUNID,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
@@ -47,7 +46,7 @@ def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
     str
         The cache key for the current context.
     """
-    run_id = os.getenv(ENV_CSTAR_ORCH_RUNID)
+    run_id = os.getenv(ENV_CSTAR_RUNID)
     cache_key = f"{run_id}_{params['step'].name}_{context.task.name}"
 
     log.debug("Cache check: %s", cache_key)

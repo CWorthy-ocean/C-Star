@@ -24,7 +24,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
-from cstar.execution.file_system import RomsFileSystemManager
+from cstar.execution.file_system import DirectoryManager, RomsFileSystemManager
 from cstar.orchestration.utils import get_run_id
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -502,9 +502,8 @@ class Step(BaseModel):
         Path
             The path to the step working directory.
         """
-        run_dir = get_run_id()
-        step_dir = self.safe_name
-        return Path(run_dir) / step_dir
+        root_dir = DirectoryManager.data_home()
+        return root_dir / get_run_id() / self.safe_name
 
     def file_system(self, bp: RomsMarblBlueprint) -> RomsFileSystemManager:
         """The directories used by this step.
