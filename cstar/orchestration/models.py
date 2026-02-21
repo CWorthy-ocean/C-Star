@@ -503,7 +503,7 @@ class Step(BaseModel):
             The path to the step working directory.
         """
         root_dir = DirectoryManager.data_home()
-        return Path(root_dir) / get_run_id() / self.safe_name
+        return root_dir / get_run_id() / self.safe_name
 
     def file_system(self, bp: RomsMarblBlueprint) -> RomsFileSystemManager:
         """The directories used by this step.
