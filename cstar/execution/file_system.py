@@ -53,6 +53,8 @@ def load_xdg_metadata() -> XdgMetaContainer:
 class DirectoryManager:
     """Manage the directories used by C-Star."""
 
+    _PKG_SUBDIR: t.Literal["cstar"] = "cstar"
+
     @classmethod
     def xdg_dir(cls, env_item: EnvItem) -> Path:
         """Calculate an XDG-compliant path honoring standard precedence rules.
@@ -73,19 +75,18 @@ class DirectoryManager:
         -------
         Path
         """
-        dir_name = "cstar"
         override_fn = env_item.default_factory
-        path = Path(env_item.default) / dir_name
+        path = Path(env_item.default) / DirectoryManager._PKG_SUBDIR
 
         if os.getenv(env_item.name, ""):
             # check user-provided environment variables
             path = Path(env_item.value)
         elif override_fn and override_fn(env_item):
             # check functions that return alternative locations
-            path = Path(env_item.value) / dir_name
+            path = Path(env_item.value) / DirectoryManager._PKG_SUBDIR
         elif os.getenv(env_item.indirect_var, ""):
             # check user provided XDG-.*-HOME environment variables
-            path = Path(env_item.value) / dir_name
+            path = Path(env_item.value) / DirectoryManager._PKG_SUBDIR
 
         return path.expanduser().resolve()
 
