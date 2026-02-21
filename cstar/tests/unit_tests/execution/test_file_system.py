@@ -1,9 +1,14 @@
+import os
 import pickle
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from cstar.base.env import ENV_CSTAR_DATA_HOME
 from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
+from cstar.orchestration.models import Step
+from cstar.orchestration.orchestration import LiveStep
 
 
 @pytest.fixture
@@ -96,3 +101,56 @@ def test_file_system_pickle_roms_fs(tmp_path: Path) -> None:
 
     for k in fsm.__dict__:
         assert getattr(fsm, k) == getattr(unpickled, k)
+
+
+def test_live_step(tmp_path: Path) -> None:
+    """Verify parent-child traversal results in the correct root directories."""
+    bp = tmp_path / "bp.yml"
+    bp.touch()
+
+    data_home = tmp_path / "data"
+
+    step_1 = Step(name="A", application="roms_marbl", blueprint=bp.as_posix())
+    step_2 = Step(name="B", application="roms_marbl", blueprint=bp.as_posix())
+    step_3 = Step(name="C", application="roms_marbl", blueprint=bp.as_posix())
+
+    ls_1 = LiveStep.from_step(step_1)
+    ls_2 = LiveStep.from_step(step_2, step_1)  # use plan "Step" as parent
+    ls_3 = LiveStep.from_step(step_3, ls_2)  # use "LiveStep" as parent
+    ls_4 = LiveStep.from_step(ls_3)  # step from another live step
+
+    ls_5_name = "child of ls 2"
+    ls_5 = LiveStep.from_step(ls_1, update={"name": ls_5_name})  # override attributes
+
+    with mock.patch.dict(
+        os.environ,
+        {ENV_CSTAR_DATA_HOME: data_home.as_posix()},
+        clear=True,
+    ):
+        actual = ls_1.get_working_dir
+        expected = data_home / JobFileSystemManager._TASKS_NAME / ls_1.safe_name  # noqa: SLF001
+        assert actual == expected
+
+        actual = ls_2.get_working_dir
+        expected = (
+            ls_1.get_working_dir / JobFileSystemManager._TASKS_NAME / ls_2.safe_name
+        )  # noqa: SLF001
+        assert actual == expected
+
+        actual = ls_3.get_working_dir
+        expected = (
+            ls_2.get_working_dir / JobFileSystemManager._TASKS_NAME / ls_3.safe_name
+        )  # noqa: SLF001
+        assert actual == expected
+
+        actual = ls_4.get_working_dir
+        # confirm the parent carries over and ls4 is a child of ls2
+        expected = (
+            ls_2.get_working_dir / JobFileSystemManager._TASKS_NAME / ls_4.safe_name
+        )  # noqa: SLF001
+        assert actual == expected
+
+        actual = ls_5.get_working_dir
+        expected = data_home / JobFileSystemManager._TASKS_NAME / ls_5.safe_name  # noqa: SLF001
+        assert actual == expected
+        assert ls_5.name == ls_5_name  # confirm the update was honored
