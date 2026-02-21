@@ -10,6 +10,10 @@ from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify
+from cstar.execution.file_system import (
+    DirectoryManager,
+    JobFileSystemManager,
+)
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
 
@@ -110,6 +114,58 @@ class Status(IntEnum):
 
 
 _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
+
+
+class LiveStep(Step):
+    """A Step enriched with runtime metadata."""
+
+    parent: t.Self | None = None
+    _fsm: JobFileSystemManager | None = None
+    _wd: Path | None = None
+    _skip: bool = False
+
+    @property
+    def get_working_dir(self) -> Path:
+        if self._wd is None:
+            if self.parent:
+                root_fsm = self.parent.fsm
+            else:
+                root_dir = DirectoryManager.data_home()
+                if run_id := os.environ.get(ENV_CSTAR_RUNID, ""):
+                    root_dir = root_dir.joinpath(run_id)
+                root_fsm = JobFileSystemManager(root_dir)
+
+            self._wd = root_fsm.tasks_dir / self.safe_name
+
+        return self._wd
+
+    @property
+    def fsm(self) -> JobFileSystemManager:
+        if self._fsm is None:
+            self._fsm = JobFileSystemManager(self.get_working_dir)
+        return self._fsm
+
+    @classmethod
+    def from_step(
+        cls,
+        step: Step,
+        parent: "LiveStep | Step | None" = None,
+        update: t.Mapping[str, t.Any] | None = None,
+    ) -> "LiveStep":
+
+        if isinstance(step, LiveStep):
+            exclusions = {"_fsm", "_wd", "_skip"}
+            step_attrs = step.model_dump(exclude=exclusions, by_alias=True)
+        else:
+            step_attrs = step.model_dump(by_alias=True)
+
+        if update:
+            step_attrs.update(update)
+
+        if parent:
+            step_attrs["parent"] = LiveStep.from_step(parent).model_dump(by_alias=True)
+
+        return LiveStep(**step_attrs)
 
 
 class Task(t.Generic[_THandle]):
