@@ -24,8 +24,6 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
-from cstar.execution.file_system import DirectoryManager, RomsFileSystemManager
-from cstar.orchestration.utils import get_run_id
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -488,50 +486,6 @@ class Step(BaseModel):
         str
         """
         return slugify(self.name)
-
-    def working_dir(self, bp: RomsMarblBlueprint) -> Path:
-        """The step-relative directory for writing outputs.
-
-        Parameters
-        ----------
-        bp : RomsMarblBlueprint
-            The blueprint instance loaded by the step
-
-        Returns
-        -------
-        Path
-            The path to the step working directory.
-        """
-        root_dir = DirectoryManager.data_home()
-        return root_dir / get_run_id() / self.safe_name
-
-    def file_system(self, bp: RomsMarblBlueprint) -> RomsFileSystemManager:
-        """The directories used by this step.
-
-        Parameters
-        ----------
-        bp : RomsMarblBlueprint
-            The blueprint instance loaded by the step
-
-        Returns
-        -------
-        RomsJobFileSystem
-        """
-        return RomsFileSystemManager(self.working_dir(bp))
-
-
-class ChildStep(Step):
-    """An step spawned as a subtask of another step."""
-
-    parent: str = Field(frozen=True)
-    """The name of the parent step if this step was created via splitting."""
-
-    work_dir: Path
-    """The path to the working directory of the step."""
-
-    @t.override
-    def working_dir(self, bp: RomsMarblBlueprint) -> Path:
-        return self.work_dir
 
 
 class Workplan(BaseModel):

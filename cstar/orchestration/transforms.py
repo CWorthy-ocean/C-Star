@@ -18,11 +18,11 @@ from cstar.base.utils import (
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import (
     Application,
-    ChildStep,
     RomsMarblBlueprint,
     Step,
     Workplan,
 )
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
@@ -276,6 +276,14 @@ class WorkplanTransformer(LoggingMixin):
 
         steps = list(self.original.steps)
 
+        # automatically use standard directories for steps run by the orchestrator
+        for i, step in enumerate(steps):
+            live_step = LiveStep.from_step(step)
+            sys_overrides = {"runtime_params": {"output_dir": live_step.fsm.root}}
+            override_transform = OverrideTransform(sys_overrides)
+            overridden_step_result = list(override_transform(step))
+            steps[i] = overridden_step_result[0]
+
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             steps = []
 
@@ -334,9 +342,8 @@ class RomsMarblTimeSplitter(Transform):
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
-        job_fs = step.file_system(blueprint)
-
-        bp_path = job_fs.work_dir / Path(step.blueprint_path).name
+        live_step = LiveStep.from_step(step)
+        bp_path = live_step.fsm.work_dir / Path(step.blueprint_path).name
         serialize(bp_path, blueprint)
 
         time_slices = list(get_time_slices(start_date, end_date, self.frequency))
@@ -365,9 +372,8 @@ class RomsMarblTimeSplitter(Transform):
             dynamic_name = f"{i + 1:03d}_{step.safe_name}_{compact_sd}_{compact_ed}"
             child_step_name = slugify(dynamic_name)
 
-            child_root = job_fs.tasks_dir
-            child_out_dir = child_root / child_step_name
-            child_fs = RomsFileSystemManager(child_out_dir)
+            child_fs = live_step.fsm.get_subtask_manager(child_step_name)
+            child_fs = RomsFileSystemManager(child_fs.root)
 
             description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
             overrides = {
@@ -387,24 +393,13 @@ class RomsMarblTimeSplitter(Transform):
             child_bp_path = child_fs.work_dir / f"{child_step_name}_bp.yaml"
             serialize(child_bp_path, bp_copy)
 
-            attributes = step.model_dump(
-                exclude={
-                    "blueprint",
-                    "name",
-                    "depends_on",
-                    "blueprint_overrides",
-                }
-            )
-
-            child_step = ChildStep(
-                **attributes,
-                name=child_step_name,
-                blueprint=child_bp_path.as_posix(),
-                depends_on=depends_on,
-                parent=step.name,
-                blueprint_overrides=overrides,  # type: ignore[arg-type]
-                work_dir=child_out_dir,
-            )
+            updates = {
+                "blueprint": child_bp_path.as_posix(),
+                "blueprint_overrides": overrides,
+                "depends_on": depends_on,
+                "name": child_step_name,
+            }
+            child_step = LiveStep.from_step(step, parent=step, update=updates)
 
             yield child_step
             if i == len(time_slices) - 1:
@@ -500,19 +495,17 @@ class OverrideTransform(Transform):
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
 
-        fs_manager = step.file_system(blueprint)
-        bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
-        persist_as = fs_manager.work_dir / bp_renamed
+        update = {
+            "blueprint_overrides": {},
+            "_wd": updated_bp.runtime_params.output_dir,
+        }
+        ls = LiveStep.from_step(step, update=update)
 
-        serialize(persist_as, updated_bp)
-        clone = step.model_copy(
-            deep=True,
-            update={
-                "blueprint_path": persist_as,
-                "blueprint_overrides": {},
-            },
-        )
-        return [clone]
+        bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
+        ls.blueprint_path = ls.fsm.work_dir / bp_renamed
+
+        serialize(ls.blueprint_path, updated_bp)
+        return [ls]
 
     @staticmethod
     def suffix() -> str:
