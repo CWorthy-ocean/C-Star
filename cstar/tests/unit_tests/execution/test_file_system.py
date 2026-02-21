@@ -25,6 +25,15 @@ def populated_output_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
     return asset_root, files
 
 
+def test_file_system_root() -> None:
+    """Test that a user path is expanded to an absolute path."""
+    user_path = Path("~/cstar-directory")
+    fsm = JobFileSystemManager(user_path)
+
+    assert fsm.root.is_absolute()
+    assert "~" not in str(fsm.root)
+
+
 def test_file_system_prepare(
     tmp_path: Path,
 ) -> None:
@@ -64,7 +73,7 @@ def test_file_system_clear(
     fs = RomsFileSystemManager(output_dir)
     fs.clear()
 
-    assert all([not f.exists() for f in output_files])
+    assert all(not f.exists() for f in output_files)
 
 
 def test_file_system_pickle_job_fs(tmp_path: Path) -> None:
