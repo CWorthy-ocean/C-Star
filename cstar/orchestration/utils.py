@@ -1,6 +1,7 @@
+import os
 import typing as t
 
-from cstar.base.env import EnvVar
+from cstar.base.env import ENV_CSTAR_RUNID, EnvVar, generate_run_id
 
 _GROUP_ORCH: t.Final[str] = "Orchestration"
 _GROUP_DEV: t.Final[str] = "Developer Only"
@@ -76,3 +77,17 @@ ENV_CSTAR_ORCH_REQD_ENV: t.Annotated[
     ),
 ] = "CSTAR_ORCH_REQD_ENV"
 """A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?)."""
+
+"""A comma-delimited list of required env configuration values. TEMPORARY (move to CStarEnvironment / per-platform settings?)."""
+
+
+def get_run_id() -> str:
+    """Retrieve the current run-id.
+
+    Generate a new run-id if not found in the environment.
+
+    Returns
+    -------
+    str
+    """
+    return os.getenv(ENV_CSTAR_RUNID, generate_run_id())

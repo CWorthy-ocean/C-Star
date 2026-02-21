@@ -3,6 +3,7 @@ import sys
 import types
 import typing as t
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -136,6 +137,11 @@ def nprocs_factory() -> str:
     return str((os.cpu_count() or 3) // 3)
 
 
+def generate_run_id() -> str:
+    """Generate a unique run identifier based on the current time."""
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+
 ENV_CSTAR_LOG_LEVEL: t.Annotated[
     t.Literal["CSTAR_LOG_LEVEL"],
     EnvVar(
@@ -250,8 +256,7 @@ ENV_CSTAR_RUNID: t.Annotated[
     EnvVar(
         description="Unique run identifier used by the orchestrator.",
         group=_GROUP_SIM,
-        default="",
-        # default_factory=lambda _: generate_run_id(),
+        default_factory=lambda _: generate_run_id(),
     ),
 ] = "CSTAR_RUNID"
 """Environment variable containing a unique run identifier used by the orchestrator."""

@@ -20,12 +20,8 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
+    get_run_id,
 )
-
-
-def generate_run_id() -> str:
-    """Generate a unique run identifier based on the current time."""
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
 @pytest.mark.asyncio
@@ -279,7 +275,7 @@ async def test_prepare_composed_dag(
         )
 
         configure_environment(output_dir, run_id)
-        run_id = generate_run_id()
+        run_id = get_run_id()
         output_dir = DirectoryManager.data_home()
         check_environment()
         wp, wp_path = await prepare_workplan(generated_wp_path, output_dir, run_id)
