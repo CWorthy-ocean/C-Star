@@ -264,27 +264,6 @@ class WorkplanTransformer(LoggingMixin):
 
         return directory / filename
 
-    def _ensure_unique_paths(self, steps: list[Step]) -> None:
-        """Modify any steps that do not include the unique run-id in their
-        output directory.
-
-        Parameters
-        ----------
-        steps : list[Step]
-            The steps to be modified.
-        """
-        # HACK: force-update the step output directories to avoid collisions
-        for step in steps:
-            bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-            overrides = step.blueprint_overrides
-            if "runtime_params" not in overrides:
-                step.blueprint_overrides["runtime_params"] = {}
-            runtime_params = t.cast(
-                dict[str, Path], overrides.get("runtime_params", {})
-            )
-            if "output_dir" not in runtime_params:
-                runtime_params["output_dir"] = step.working_dir(bp)
-
     def apply(self) -> Workplan:
         """Create a new workplan with appropriate transforms applied.
 
