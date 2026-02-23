@@ -2,17 +2,17 @@ name: cstar_env
 channels:
   - conda-forge
 dependencies:
-  - python>=3.10,<3.14
-  - numpy>2.0,<2.4
-  - roms-tools>=3.5,<4
   - compilers
-  - netcdf-fortran
-  - mpich
-  - xarray
-  - netCDF4
-  - pip
-  - jupyterlab
   - ipykernel
+  - jupyterlab
+  - mpich
+  - netCDF4
+  - netcdf-fortran
+  - numpy>2.0,<2.4
+  - pip
+  - python>=3.10,<3.14
+  - roms-tools>=3.5,<4
   - rsync
+  - xarray
   # only needed for building docs
   - pandoc
