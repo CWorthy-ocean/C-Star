@@ -1,0 +1,46 @@
+.. _v0.4.0:
+
+v0.4.0
+------
+
+This is a bug-fix release focused on stabilizing the orchestration of blueprints.
+
+.. note:: 
+    This release is currently in development
+
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- N/A
+
+New features
+~~~~~~~~~~~~
+
+- N/A
+
+Security Fixes
+~~~~~~~~~~~~~~
+
+- N/A
+
+Bug Fixes
+~~~~~~~~~
+
+- N/A
+
+Improvements
+~~~~~~~~~~~~
+
+- N/A
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+- N/A
+
+---
+
+For more details, please refer to the `commit history`_.
+
+.. _commit history: https://github.com/CWorthy-ocean/C-Star/compare/v0.3.0...v0.4.0
