@@ -5,7 +5,7 @@ dependencies:
   - jupyterlab
   - numpy>2.0,<2.4  # currently numba doesn't support 2.4
   - xarray
-  - roms-tools
+  - roms-tools>=3.5,<4
   - netCDF4
   - pip
   - ipykernel
