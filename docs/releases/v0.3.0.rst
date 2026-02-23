@@ -29,9 +29,9 @@ Bug Fixes
 
 - Fix path concatenation bug resulting in invalid source data paths
 - Fix indentation creating an unreachable code block in git utils
-- Add conda installation of rsync to environment.yml (fixes bug related to a flag used in newer ucla-roms makefiles that is not available in MacOS's default rsync installation)
-- Reimplement CSTAR_CLOBBER_WORKING_DIR for single-blueprint cases
-- Fix bug handling user-relative paths in `JobFileSystemManager`
+- Add conda installation of rsync to `environment.yml` (fixes bug related to a flag used in newer ucla-roms makefiles that is not available in MacOS's default rsync installation)
+- Reimplement ``CSTAR_CLOBBER_WORKING_DIR`` for single-blueprint cases
+- Fix bug handling user-relative paths in ``JobFileSystemManager``
 
 Improvements
 ~~~~~~~~~~~~
@@ -40,7 +40,7 @@ Improvements
 - Add informational logging when tasks fail and additional tasks are cancelled
 - Update default log format to include file name and line number
 - Add constants for the set of available feature flags
-- Implement CSTAR_LOG_LEVEL env-var
+- Implement ``CSTAR_LOG_LEVEL`` env-var
 - Automatically retry partitioning without coarse dims if it fails when they are included
 - Enable orchestrated simulation execution using the local runner
 
@@ -51,7 +51,7 @@ Miscellaneous
 - Silence OMP warning originating from numba
 - Modify a blueprint in the tests directory for a refactored layout in the remote data repository
 - Move env-var handling methods to separate module to avoid circular imports
-- Remove __init__-based import shortcuts
+- Remove ``__init__``-based import shortcuts
 - Adjust error handling and presentation in the worker/service layer
 
 ---
