@@ -51,7 +51,7 @@ KeyValueStore: t.TypeAlias = dict[
 
 TargetDirectoryPath = t.Annotated[
     Path,
-    PlainSerializer(lambda p: str(p), return_type=str),
+    PlainSerializer(str, return_type=str),
     WithJsonSchema({"type": "string"}, mode="serialization"),
 ]
 """Path to a directory that may not exist until runtime."""
