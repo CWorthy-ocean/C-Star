@@ -1,16 +1,16 @@
+import shutil
 from abc import ABC
 from typing import TYPE_CHECKING, ClassVar, cast
 
-from cstar.base.utils import _run_cmd
+from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.file_system import DirectoryManager
-from cstar.io.retriever import RemoteRepositoryRetriever
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from cstar.io.retriever import RemoteRepositoryRetriever
     from cstar.io.source_data import SourceData
 
-from cstar.base.utils import slugify
 from cstar.io.constants import SourceClassification
 from cstar.io.staged_data import StagedFile, StagedRepository
 
@@ -156,8 +156,10 @@ class CachedRemoteRepositoryStager(Stager):
         cache_path = self._get_cache_path()
         if not cache_path.exists():
             cache_path = self.source.retriever.save(target_dir=cache_path)
-        else:
-            self.source.retriever.refresh(target_dir=cache_path)
+        elif not self.source.retriever.refresh(target_dir=cache_path):
+            # if cache cannot be refreshed, it may be incomplete or altered
+            shutil.rmtree(cache_path)
+            cache_path = self.source.retriever.save(target_dir=cache_path)
 
         if target_dir.exists():
             target_dir.rmdir()
