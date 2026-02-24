@@ -1,0 +1,16 @@
+name: example_workplan
+description: Runs a Wales model, then a WIO model, all on your laptop!
+state: draft
+
+steps:
+  - name: wales
+    application: roms_marbl
+    blueprint: ./wales_toy_blueprint.yaml
+    
+  - name: wio
+    application: roms_marbl
+    blueprint: ./wio_toy_blueprint.yaml
+    depends_on:
+      - wales
+
+
