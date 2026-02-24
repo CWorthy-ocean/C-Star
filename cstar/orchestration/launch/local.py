@@ -12,6 +12,7 @@ from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application, Step
 from cstar.orchestration.orchestration import (
     Launcher,
+    LiveStep,
     ProcessHandle,
     Status,
     Task,
@@ -161,7 +162,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         return status
 
     @classmethod
-    async def launch(cls, step: Step, dependencies: list[LocalHandle]) -> Task:
+    async def launch(cls, step: LiveStep, dependencies: list[LocalHandle]) -> Task:
         """Launch a step in local process.
 
         Parameters
