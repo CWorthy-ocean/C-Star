@@ -1,0 +1,13 @@
+name: Run 2 jobs
+description: Run two domains using ROMS-MARBL simulations
+state: draft
+
+steps:
+- name: wio
+  application: roms_marbl
+  blueprint: /Users/sam.maticka/workdir/C-Star/docs/tutorials/wio_toy_blueprint.yaml
+- name: wales
+  application: roms_marbl
+  blueprint: /Users/sam.maticka/workdir/C-Star/docs/tutorials/wales_toy_blueprint.yaml
+  depends_on:
+  - wio
