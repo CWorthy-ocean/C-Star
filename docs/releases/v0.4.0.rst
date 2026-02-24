@@ -27,7 +27,7 @@ Security Fixes
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+- Fix failure to override output directories for orchestrated blueprints
 
 Improvements
 ~~~~~~~~~~~~
