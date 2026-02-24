@@ -120,13 +120,12 @@ class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
     parent: t.Self | None = None
+    work_dir: Path | None = None
     _fsm: JobFileSystemManager | None = None
-    _wd: Path | None = None
-    _skip: bool = False
 
     @property
     def get_working_dir(self) -> Path:
-        if self._wd is None:
+        if self.work_dir is None:
             if self.parent:
                 root_fsm = self.parent.fsm
             else:
@@ -135,9 +134,9 @@ class LiveStep(Step):
                     root_dir = root_dir.joinpath(run_id)
                 root_fsm = JobFileSystemManager(root_dir)
 
-            self._wd = root_fsm.tasks_dir / self.safe_name
+            self.work_dir = root_fsm.tasks_dir / self.safe_name
 
-        return self._wd
+        return self.work_dir
 
     @property
     def fsm(self) -> JobFileSystemManager:
@@ -152,12 +151,7 @@ class LiveStep(Step):
         parent: "LiveStep | Step | None" = None,
         update: t.Mapping[str, t.Any] | None = None,
     ) -> "LiveStep":
-
-        if isinstance(step, LiveStep):
-            exclusions = {"_fsm", "_wd", "_skip"}
-            step_attrs = step.model_dump(exclude=exclusions, by_alias=True)
-        else:
-            step_attrs = step.model_dump(by_alias=True)
+        step_attrs = step.model_dump(by_alias=True)
 
         if update:
             step_attrs.update(update)
@@ -174,7 +168,7 @@ class Task(t.Generic[_THandle]):
     status: Status
     """Current task status."""
 
-    step: Step
+    step: LiveStep
     """The step containing task configuration."""
 
     handle: _THandle
@@ -182,7 +176,7 @@ class Task(t.Generic[_THandle]):
 
     def __init__(
         self,
-        step: Step,
+        step: LiveStep,
         handle: _THandle,
         status: Status = Status.Unsubmitted,
     ) -> None:
@@ -273,7 +267,7 @@ class Planner(LoggingMixin):
     def store(self, n: str, key: t.Literal["status"], value: Status) -> None: ...
 
     @t.overload
-    def store(self, n: str, key: t.Literal["step"], value: Step) -> None: ...
+    def store(self, n: str, key: t.Literal["step"], value: LiveStep) -> None: ...
 
     @t.overload
     def store(self, n: str, key: t.Literal["task"], value: Task) -> None: ...
@@ -310,8 +304,8 @@ class Planner(LoggingMixin):
         self,
         n: str,
         key: t.Literal["step"],
-        default: Step | None = None,
-    ) -> Step | None: ...
+        default: LiveStep | None = None,
+    ) -> LiveStep | None: ...
 
     @t.overload
     def retrieve(
@@ -402,7 +396,11 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     """Contract required to implement a task launcher."""
 
     @classmethod
-    async def launch(cls, step: Step, dependencies: list[_THandle]) -> Task[_THandle]:
+    async def launch(
+        cls,
+        step: LiveStep,
+        dependencies: list[_THandle],
+    ) -> Task[_THandle]:
         """Launch a process for a step.
 
         Parameters
@@ -418,7 +416,11 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ...
 
     @classmethod
-    async def query_status(cls, step: Step, item: Task[_THandle] | _THandle) -> Status:
+    async def query_status(
+        cls,
+        step: LiveStep,
+        item: Task[_THandle] | _THandle,
+    ) -> Status:
         """Retrieve the current status for a running task.
 
         Parameters
@@ -540,7 +542,7 @@ class Orchestrator(LoggingMixin):
             self.planner.retrieve_all(KEY_STATUS, filter_fn=lambda x: x in targets)
         )
 
-    def _locate_dependencies(self, step: Step) -> list[ProcessHandle] | None:
+    def _locate_dependencies(self, step: LiveStep) -> list[ProcessHandle] | None:
         """Look for the dependencies of the step.
 
         Returns

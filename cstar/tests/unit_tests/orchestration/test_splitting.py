@@ -9,6 +9,7 @@ import pytest
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     get_time_slices,
@@ -119,7 +120,7 @@ def test_splitter(single_step_workplan: Workplan) -> None:
     """Verify the splitter returns the expected steps for a given time range."""
     transform = RomsMarblTimeSplitter()
 
-    step = single_step_workplan.steps[0]
+    step = LiveStep.from_step(single_step_workplan.steps[0])
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
         transformed_steps = list(transform(step))

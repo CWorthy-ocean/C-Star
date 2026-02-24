@@ -313,6 +313,8 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
     for step in diamond_workplan.steps:
         step.application = Application.ROMS_MARBL.value
 
+    diamond_steps = {str(s.name) for s in diamond_workplan.steps}
+
     transformer = WorkplanTransformer(diamond_workplan, RomsMarblTimeSplitter())
     with (
         mock.patch.dict(
@@ -335,6 +337,9 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
     )
 
     for step in transformed.steps:
+        # confirm that the original dependencies were updated
+        assert not diamond_steps.intersection(step.depends_on)
+
         assert step.blueprint_overrides is not None
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
 
