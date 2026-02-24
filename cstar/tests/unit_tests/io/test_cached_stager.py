@@ -101,7 +101,7 @@ def test_cached_stager_reuse(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("mock_home_dir")
-def test_cached_stager_retry(tmp_path: Path) -> None:
+def test_cached_stager_refresh_failure(tmp_path: Path) -> None:
     """Verify that the cached stager re-clones a repository
     if an attempt to refresh fails.
 
