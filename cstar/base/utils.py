@@ -313,7 +313,7 @@ def slugify(source: str) -> str:
     if not source:
         raise ValueError
 
-    return re.sub(r"\W+", "-", source.strip().casefold())
+    return re.sub(r"\W+", "-", source.strip().casefold()).strip("-")
 
 
 def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
