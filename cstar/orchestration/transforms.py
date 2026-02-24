@@ -280,18 +280,23 @@ class WorkplanTransformer(LoggingMixin):
         )
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
-            split_steps = []
+            split_steps: list[Step] = []
+            named_dep_map: dict[str, str] = {}
 
             for step in steps:
                 transformed_steps = list(self.transform_fn(step))
-
-                # replace dependencies on the original step with the last transformed step
-                tweaks = [s for s in steps if step.name in s.depends_on]
-                for tweak in tweaks:
-                    tweak.depends_on.remove(step.name)
-                    tweak.depends_on.append(transformed_steps[-1].name)
-
+                named_dep_map[step.name] = transformed_steps[-1].name
                 split_steps.extend(transformed_steps)
+
+            for step in split_steps:
+                depends_on = {str(d) for d in step.depends_on}
+
+                if to_update := depends_on.intersection(named_dep_map):
+                    depends_on.update(named_dep_map[x] for x in to_update)
+                    depends_on.difference_update(to_update)
+
+                    step.depends_on.clear()
+                    step.depends_on.extend(depends_on)
 
             steps = split_steps
 
