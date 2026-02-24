@@ -6,7 +6,7 @@ from enum import StrEnum, auto
 import typer
 from rich import print  # noqa: A004, ignore shadowing of built-in print
 
-from cstar.base import feature
+from cstar.base import env, feature
 from cstar.base import utils as base_utils
 from cstar.base.env import EnvItem, discover_env_vars
 from cstar.orchestration import utils as orch_utils
@@ -25,7 +25,7 @@ def _interactive(all_config: dict[str, list[EnvItem]]) -> None:
     if show_headers:
         print(f"[underline2]{H_CONFIG_ALL}[/underline2]\n")
 
-    for group_name, items in sorted(all_config.items()):
+    for group_name, items in all_config.items():
         if show_headers:
             print(f"[underline]{group_name}[/underline]")
 
@@ -49,7 +49,7 @@ def _export(all_config: dict[str, list[EnvItem]]) -> None:
     header_sep = "#" * 80
     item_sep = f"# {'-' * 68}"
 
-    for group_name, items in sorted(all_config.items()):
+    for group_name, items in all_config.items():
         print(f"{header_sep}\n# {group_name}\n{header_sep}\n")
 
         for item in sorted(items, key=lambda x: x.name):
@@ -86,7 +86,7 @@ def show(
     display: DisplayFormat = DisplayFormat.INTERACTIVE,
 ) -> None:
     """Display the active environment configuration."""
-    all_items = discover_env_vars([base_utils, feature, orch_utils])
+    all_items = discover_env_vars([base_utils, env, orch_utils, feature])
 
     if group != "all":
         all_items = [item for item in all_items if group.lower() in item.group.lower()]
