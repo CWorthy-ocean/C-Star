@@ -16,7 +16,6 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import (
     Application,
     RomsMarblBlueprint,
@@ -369,7 +368,6 @@ class RomsMarblTimeSplitter(Transform):
             child_step_name = slugify(dynamic_name)
 
             child_fs = live_step.fsm.get_subtask_manager(child_step_name)
-            child_fs = RomsFileSystemManager(child_fs.root)
 
             description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
             overrides = {
