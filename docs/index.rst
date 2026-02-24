@@ -31,6 +31,7 @@ A key strength of C-Star lies in its ability to run regional ocean simulations u
     :caption: Laptop-Runnable Examples
 
     Run a ROMS-MARBL Blueprint <tutorials/tutorial_bp>
+    Orchestrate multiple blueprints <tutorials/tutorial_wp>
 
 .. toctree::
     :maxdepth: 1
