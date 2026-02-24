@@ -98,3 +98,58 @@ def test_cached_stager_reuse(tmp_path: Path) -> None:
 
     # confirm the cache and target files do not resolve and overlap
     assert not files_1.intersection(files_2)
+
+
+@pytest.mark.usefixtures("mock_home_dir")
+def test_cached_stager_refresh_failure(tmp_path: Path) -> None:
+    """Verify that the cached stager re-clones a repository
+    if an attempt to refresh fails.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to store repository clones
+    """
+    repo_uri = "https://github.com/CWorthy-ocean/c-star"
+
+    cache_path = tmp_path / ".cache" / "https-github-com-cworthy-ocean-cstar"
+    cached_junk = cache_path / ".git"
+    cached_junk.mkdir(parents=True)
+    (cached_junk / "garbage").touch()
+
+    source_data_1 = SourceData(repo_uri)
+    stage_path_1 = tmp_path / "my-roms-1"
+
+    def fail_pull(*args, **kwargs) -> None:
+        msg = "Simulating a failure to pull repo updates"
+        raise RuntimeError(msg)
+
+    with (
+        mock.patch("cstar.io.retriever._pull", side_effect=fail_pull) as mock_refresh,
+        mock.patch(
+            "cstar.io.retriever.RemoteRepositoryRetriever.save", return_value=cache_path
+        ) as mock_clone,
+        mock.patch(
+            "cstar.io.retriever.RemoteRepositoryRetriever.checkout"
+        ) as mock_checkout,
+        mock.patch("cstar.io.stager._run_cmd") as mock_copy_cache,
+        mock.patch("cstar.io.staged_data._run_cmd"),
+        mock.patch("shutil.rmtree") as mock_rmdir,
+        mock.patch.object(
+            source_data_1.stager, "_get_cache_path", return_value=cache_path
+        ),
+    ):
+        _ = source_data_1.stage(stage_path_1)
+
+    # confirm the refresh was attempted
+    mock_refresh.assert_called_once()
+
+    # confirm the cache is cleared and repo is re-cloned after refresh returns `False`
+    mock_rmdir.assert_called_once_with(cache_path)
+    mock_clone.assert_called_once()
+
+    # confirm the re-cloned repo is copied from cache to target dir
+    assert mock_copy_cache.call_count == 1  # cp -ar
+
+    # confirm that checkout was called after the cache was copied
+    mock_checkout.assert_called_once()

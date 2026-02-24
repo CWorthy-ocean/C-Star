@@ -19,7 +19,6 @@ from cstar.base.utils import (
 from cstar.orchestration.models import (
     Application,
     RomsMarblBlueprint,
-    Step,
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep
@@ -32,7 +31,7 @@ class Transform(t.Protocol):
     new steps.
     """
 
-    def __call__(self, step: Step) -> t.Iterable[Step]:
+    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -275,23 +274,29 @@ class WorkplanTransformer(LoggingMixin):
             return self._transformed
 
         # ensure consistent output targets for all steps in the workplan
-        steps: t.Iterable[Step] = list(
-            map(override_output_directory, self.original.steps),
+        live_steps = [LiveStep.from_step(s) for s in self.original.steps]
+        steps: t.Iterable[LiveStep] = list(
+            map(override_output_directory, live_steps),
         )
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
-            split_steps = []
+            split_steps: list[LiveStep] = []
+            named_dep_map: dict[str, str] = {}
 
             for step in steps:
                 transformed_steps = list(self.transform_fn(step))
-
-                # replace dependencies on the original step with the last transformed step
-                tweaks = [s for s in steps if step.name in s.depends_on]
-                for tweak in tweaks:
-                    tweak.depends_on.remove(step.name)
-                    tweak.depends_on.append(transformed_steps[-1].name)
-
+                named_dep_map[step.name] = transformed_steps[-1].name
                 split_steps.extend(transformed_steps)
+
+            for step in split_steps:
+                depends_on = {str(d) for d in step.depends_on}
+
+                if to_update := depends_on.intersection(named_dep_map):
+                    depends_on.update(named_dep_map[x] for x in to_update)
+                    depends_on.difference_update(to_update)
+
+                    step.depends_on.clear()
+                    step.depends_on.extend(depends_on)
 
             steps = split_steps
 
@@ -299,12 +304,13 @@ class WorkplanTransformer(LoggingMixin):
         override_transform = OverrideTransform()
         steps = list(itertools.chain.from_iterable(map(override_transform, steps)))
 
-        wp_attrs = self.original.model_dump()
-        wp_attrs.update(
-            {"steps": steps, "name": f"{self.original.name} (transformed)"},
+        self._transformed = self.original.model_copy(
+            update={
+                "steps": steps,
+                "name": f"{self.original.name} (transformed)",
+            },
         )
 
-        self._transformed = Workplan(**wp_attrs)
         return self._transformed
 
 
@@ -320,7 +326,7 @@ class RomsMarblTimeSplitter(Transform):
         """Initialize the transform instance."""
         self.frequency = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
 
-    def __call__(self, step: Step) -> t.Iterable[Step]:
+    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
         """Split a step into multiple sub-steps.
 
         Parameters
@@ -337,8 +343,7 @@ class RomsMarblTimeSplitter(Transform):
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
-        live_step = LiveStep.from_step(step)
-        bp_path = live_step.fsm.work_dir / Path(step.blueprint_path).name
+        bp_path = step.fsm.work_dir / Path(step.blueprint_path).name
         serialize(bp_path, blueprint)
 
         time_slices = list(get_time_slices(start_date, end_date, self.frequency))
@@ -367,7 +372,7 @@ class RomsMarblTimeSplitter(Transform):
             dynamic_name = f"{i + 1:03d}_{step.safe_name}_{compact_sd}_{compact_ed}"
             child_step_name = slugify(dynamic_name)
 
-            child_fs = live_step.fsm.get_subtask_manager(child_step_name)
+            child_fs = step.fsm.get_subtask_manager(child_step_name)
 
             description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
             overrides = {
@@ -471,7 +476,7 @@ class OverrideTransform(Transform):
 
         return RomsMarblBlueprint(**merged)
 
-    def __call__(self, step: Step) -> t.Iterable[Step]:
+    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -489,17 +494,19 @@ class OverrideTransform(Transform):
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
 
-        update = {
-            "blueprint_overrides": {},
-            "_wd": updated_bp.runtime_params.output_dir,
-        }
-        ls = LiveStep.from_step(step, update=update)
+        live_step = LiveStep.from_step(
+            step,
+            update={
+                "blueprint_overrides": {},
+                "work_dir": updated_bp.runtime_params.output_dir,
+            },
+        )
 
         bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
-        ls.blueprint_path = ls.fsm.work_dir / bp_renamed
+        live_step.blueprint_path = live_step.fsm.work_dir / bp_renamed
 
-        serialize(ls.blueprint_path, updated_bp)
-        return [ls]
+        serialize(live_step.blueprint_path, updated_bp)
+        return [live_step]
 
     @staticmethod
     def suffix() -> str:
@@ -509,7 +516,7 @@ class OverrideTransform(Transform):
         return "ovrd"
 
 
-def override_output_directory(step: Step) -> Step:
+def override_output_directory(step: LiveStep) -> LiveStep:
     """Automatically override the output directory specified in a blueprint
     to write to the C-Star home directories.
 
@@ -521,9 +528,7 @@ def override_output_directory(step: Step) -> Step:
     list[Step]
         The transformed steps.
     """
-    live_step = LiveStep.from_step(step)
-
-    sys_overrides = {"runtime_params": {"output_dir": live_step.fsm.root}}
+    sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
     override_transform = OverrideTransform(sys_overrides)
     overridden_step_result = iter(override_transform(step))
 

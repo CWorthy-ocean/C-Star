@@ -91,17 +91,22 @@ class Retriever(ABC, LoggingMixin):
     @abstractmethod
     def _save(self, target_dir: Path) -> Path:
         """Retrieve data to a local path"""
-        pass
 
-    def refresh(self, target_dir: Path) -> None:
+    def refresh(self, target_dir: Path) -> bool:
         """Refresh local data from the datasource.
 
         Parameters
         ----------
         target_dir: pathlib.Path
             The directory containing resources to refresh
+        Returns
+        -------
+        bool
+            `True` if the repository was successfully refreshed, `False` otherwise.
         """
-        self.log.debug(f"Skipping refresh of datasource in: {target_dir}")
+        msg = f"Skipping refresh of datasource in: {target_dir}"
+        self.log.debug(msg)
+        return False
 
 
 class RemoteFileRetriever(Retriever, ABC):
@@ -333,16 +338,25 @@ class RemoteRepositoryRetriever(Retriever):
         return target_dir
 
     @override
-    def refresh(self, target_dir: Path) -> None:
+    def refresh(self, target_dir: Path) -> bool:
         """Refresh local data from the datasource.
 
         Parameters
         ----------
         target_dir : pathlib.Path
             The directory containing resources to refresh
+
+        Returns
+        -------
+        bool
+            `True` if the repository was successfully refreshed, `False` otherwise.
         """
         try:
             _pull(local_path=target_dir)
         except Exception:
             msg = f"An error occurred while refreshing {self.source.location}"
             self.log.exception(msg)
+        else:
+            return True
+
+        return False

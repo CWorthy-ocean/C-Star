@@ -28,11 +28,12 @@ Bug Fixes
 ~~~~~~~~~
 
 - Fix failure to override output directories for orchestrated blueprints
+- Fix defect where steps defined before dependencies were not mapped correctly after time-splitting 
 
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+- Improve error handling when `CachedRemoteRepositoryRetriever.refresh` fails
 
 Miscellaneous
 ~~~~~~~~~~~~~

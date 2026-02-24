@@ -118,7 +118,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
-    async def _submit(step: Step, dependencies: list[SlurmHandle]) -> SlurmHandle:
+    async def _submit(step: LiveStep, dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
 
         Parameters
@@ -138,16 +138,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        live_step = LiveStep.from_step(step)
-        step_fs = live_step.fsm
-
         step_converter = get_command_mapping(
             Application(step.application),
             SlurmLauncher,
         )
 
-        script_path = step_fs.work_dir / "script.sh"
-        output_file = step_fs.logs_dir / f"{job_name}.out"
+        script_path = step.fsm.work_dir / "script.sh"
+        output_file = step.fsm.logs_dir / f"{job_name}.out"
 
         if not script_path.parent.exists():
             script_path.parent.mkdir(parents=True)
@@ -210,7 +207,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @classmethod
     async def launch(
-        cls, step: Step, dependencies: list[SlurmHandle]
+        cls,
+        step: LiveStep,
+        dependencies: list[SlurmHandle],
     ) -> Task[SlurmHandle]:
         """Launch a step in SLURM.
 
