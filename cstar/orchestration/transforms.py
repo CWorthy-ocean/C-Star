@@ -287,7 +287,7 @@ class WorkplanTransformer(LoggingMixin):
                 transformed_steps = list(self.transform_fn(step))
 
                 # replace dependencies on the original step with the last transformed step
-                tweaks = (s for s in self.original.steps if step.name in s.depends_on)
+                tweaks = [s for s in steps if step.name in s.depends_on]
                 for tweak in tweaks:
                     tweak.depends_on.remove(step.name)
                     tweak.depends_on.append(transformed_steps[-1].name)
