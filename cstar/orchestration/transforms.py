@@ -281,9 +281,9 @@ class WorkplanTransformer(LoggingMixin):
         )
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
-            steps = []
+            split_steps = []
 
-            for step in self.original.steps:
+            for step in steps:
                 transformed_steps = list(self.transform_fn(step))
 
                 # replace dependencies on the original step with the last transformed step
@@ -292,7 +292,9 @@ class WorkplanTransformer(LoggingMixin):
                     tweak.depends_on.remove(step.name)
                     tweak.depends_on.append(transformed_steps[-1].name)
 
-                steps.extend(transformed_steps)
+                split_steps.extend(transformed_steps)
+
+            steps = split_steps
 
         # apply any overrides produced in the transform function
         override_transform = OverrideTransform()
