@@ -152,12 +152,7 @@ class LiveStep(Step):
         parent: "LiveStep | Step | None" = None,
         update: t.Mapping[str, t.Any] | None = None,
     ) -> "LiveStep":
-
-        if isinstance(step, LiveStep):
-            exclusions = {"_fsm", "_wd", "_skip"}
-            step_attrs = step.model_dump(exclude=exclusions, by_alias=True)
-        else:
-            step_attrs = step.model_dump(by_alias=True)
+        step_attrs = step.model_dump(by_alias=True)
 
         if update:
             step_attrs.update(update)
