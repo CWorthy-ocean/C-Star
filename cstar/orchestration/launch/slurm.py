@@ -17,6 +17,7 @@ from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step
 from cstar.orchestration.orchestration import (
     Launcher,
+    LiveStep,
     ProcessHandle,
     Status,
     Task,
@@ -137,7 +138,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         bp = deserialize(bp_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        step_fs = step.file_system(bp)
+        live_step = LiveStep.from_step(step)
+        step_fs = live_step.fsm
 
         step_converter = get_command_mapping(
             Application(step.application),
