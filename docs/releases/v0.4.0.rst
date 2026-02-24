@@ -28,6 +28,7 @@ Bug Fixes
 ~~~~~~~~~
 
 - Fix failure to override output directories for orchestrated blueprints
+- Fix defect where steps defined before dependencies were not mapped correctly after time-splitting 
 
 Improvements
 ~~~~~~~~~~~~
