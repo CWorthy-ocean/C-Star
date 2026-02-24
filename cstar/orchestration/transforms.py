@@ -1,3 +1,4 @@
+import itertools
 import os
 import typing as t
 from collections import defaultdict
@@ -298,11 +299,9 @@ class WorkplanTransformer(LoggingMixin):
 
                 steps.extend(transformed_steps)
 
+        # apply any overrides produced in the transform function
         override_transform = OverrideTransform()
-
-        for i, step in enumerate(steps):
-            overridden_step_result = list(override_transform(step))
-            steps[i] = overridden_step_result[0]
+        steps = list(itertools.chain.from_iterable(map(override_transform, steps)))
 
         wp_attrs = self.original.model_dump()
         wp_attrs.update(
