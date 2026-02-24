@@ -275,15 +275,10 @@ class WorkplanTransformer(LoggingMixin):
         if self._transformed:
             return self._transformed
 
-        steps = list(self.original.steps)
-
-        # automatically use standard directories for steps run by the orchestrator
-        for i, step in enumerate(steps):
-            live_step = LiveStep.from_step(step)
-            sys_overrides = {"runtime_params": {"output_dir": live_step.fsm.root}}
-            override_transform = OverrideTransform(sys_overrides)
-            overridden_step_result = list(override_transform(step))
-            steps[i] = overridden_step_result[0]
+        # ensure consistent output targets for all steps in the workplan
+        steps: t.Iterable[Step] = list(
+            map(override_output_directory, self.original.steps),
+        )
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             steps = []
@@ -512,6 +507,27 @@ class OverrideTransform(Transform):
         a resource modified by this transform.
         """
         return "ovrd"
+
+
+def override_output_directory(step: Step) -> Step:
+    """Automatically override the output directory specified in a blueprint
+    to write to the C-Star home directories.
+
+    See `cstar.execution.file_system.DirectoryManager` for more detail
+    on the available set of home directories.
+
+    Returns
+    -------
+    list[Step]
+        The transformed steps.
+    """
+    live_step = LiveStep.from_step(step)
+
+    sys_overrides = {"runtime_params": {"output_dir": live_step.fsm.root}}
+    override_transform = OverrideTransform(sys_overrides)
+    overridden_step_result = iter(override_transform(step))
+
+    return next(overridden_step_result)
 
 
 register_transform(Application.ROMS_MARBL.value, RomsMarblTimeSplitter())
