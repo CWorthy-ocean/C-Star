@@ -494,17 +494,19 @@ class OverrideTransform(Transform):
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
 
-        update = {
+        live_step = LiveStep.from_step(
+            step,
+            update={
             "blueprint_overrides": {},
             "_wd": updated_bp.runtime_params.output_dir,
-        }
-        ls = LiveStep.from_step(step, update=update)
+            },
+        )
 
         bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
-        ls.blueprint_path = ls.fsm.work_dir / bp_renamed
+        live_step.blueprint_path = live_step.fsm.work_dir / bp_renamed
 
-        serialize(ls.blueprint_path, updated_bp)
-        return [ls]
+        serialize(live_step.blueprint_path, updated_bp)
+        return [live_step]
 
     @staticmethod
     def suffix() -> str:
