@@ -95,7 +95,7 @@ class EnvVarTableDirective(Directive):
         if not groups:
             return input_lines
 
-        for group_name, items in sorted(groups.items()):
+        for group_name, items in groups.items():
             input_lines.append(group_name)
             input_lines.append("^" * len(group_name))
             input_lines.append("")
