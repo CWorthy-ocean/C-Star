@@ -32,7 +32,7 @@ Bug Fixes
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+- Improve error handling when `CachedRemoteRepositoryRetriever.refresh` fails
 
 Miscellaneous
 ~~~~~~~~~~~~~
