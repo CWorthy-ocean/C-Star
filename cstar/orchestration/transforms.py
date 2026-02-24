@@ -498,7 +498,7 @@ class OverrideTransform(Transform):
             step,
             update={
             "blueprint_overrides": {},
-            "_wd": updated_bp.runtime_params.output_dir,
+                "work_dir": updated_bp.runtime_params.output_dir,
             },
         )
 

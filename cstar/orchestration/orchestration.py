@@ -121,12 +121,12 @@ class LiveStep(Step):
 
     parent: t.Self | None = None
     _fsm: JobFileSystemManager | None = None
-    _wd: Path | None = None
+    work_dir: Path | None = None
     _skip: bool = False
 
     @property
     def get_working_dir(self) -> Path:
-        if self._wd is None:
+        if self.work_dir is None:
             if self.parent:
                 root_fsm = self.parent.fsm
             else:
@@ -135,9 +135,9 @@ class LiveStep(Step):
                     root_dir = root_dir.joinpath(run_id)
                 root_fsm = JobFileSystemManager(root_dir)
 
-            self._wd = root_fsm.tasks_dir / self.safe_name
+            self.work_dir = root_fsm.tasks_dir / self.safe_name
 
-        return self._wd
+        return self.work_dir
 
     @property
     def fsm(self) -> JobFileSystemManager:
