@@ -498,7 +498,6 @@ class Workplan(BaseModel):
     """A user-friendly description of the workplan."""
 
     steps: t.Sequence[SerializeAsAny[Step]] = Field(
-        default_factory=list,
         min_length=1,
         frozen=True,
     )
