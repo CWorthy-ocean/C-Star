@@ -40,7 +40,7 @@ steps:
           num_nodes: 4
     - name: Aggregate Results
       application: sleep
-      depends_on: ["Ensemble X", "Ensembly Y"]
+      depends_on: ["Ensemble X", "Ensemble Y"]
       blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
       blueprint_overrides: {}
       workflow_overrides:
