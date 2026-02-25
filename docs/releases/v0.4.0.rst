@@ -30,6 +30,7 @@ Bug Fixes
 - Fix failure to override output directories for orchestrated blueprints
 - Fix defect where steps defined before dependencies were not mapped correctly after time-splitting
 - Fix unhandled exceptions in `cstar [blueprint|workplan] check` with invalid paths
+- Fix posix-path conversion bug when passing blueprint URLs to `cstar blueprint run` 
 
 Improvements
 ~~~~~~~~~~~~
