@@ -28,12 +28,14 @@ Bug Fixes
 ~~~~~~~~~
 
 - Fix failure to override output directories for orchestrated blueprints
-- Fix defect where steps defined before dependencies were not mapped correctly after time-splitting 
+- Fix defect where steps defined before dependencies were not mapped correctly after time-splitting
+- Fix unhandled exceptions in `cstar [blueprint|workplan] check` with invalid paths
 
 Improvements
 ~~~~~~~~~~~~
 
 - Improve error handling when `CachedRemoteRepositoryRetriever.refresh` fails
+- Validate inputs prior to execution with `cstar [blueprint|workplan] run`
 
 Miscellaneous
 ~~~~~~~~~~~~~
