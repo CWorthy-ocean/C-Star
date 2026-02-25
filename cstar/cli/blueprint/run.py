@@ -1,6 +1,5 @@
 import asyncio
 import typing as t
-from pathlib import Path
 
 import typer
 
@@ -20,7 +19,8 @@ app = typer.Typer()
 @app.command()
 def run(
     path: t.Annotated[
-        Path, typer.Argument(help="The path to the blueprint to execute")
+        str,
+        typer.Argument(help="The path to the blueprint to execute"),
     ],
     stage: t.Annotated[
         list[SimulationStages] | None,
@@ -37,7 +37,7 @@ def run(
     print("Executing blueprint in a worker service")
     job_cfg = get_job_config()
     service_cfg = get_service_config(get_env_item(ENV_CSTAR_LOG_LEVEL).value)
-    request = get_request(path.as_posix(), stage)
+    request = get_request(path, stage)
 
     rc = asyncio.run(execute_runner(job_cfg, service_cfg, request))
 
