@@ -6,14 +6,25 @@ import pytest
 
 
 @pytest.fixture(scope="session")
-def tests_path() -> Path:
+def package_path() -> Path:
+    """Fixture that returns the path to the repository root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return Path(__file__).parent.parent.parent
+
+
+@pytest.fixture(scope="session")
+def tests_path(package_path: Path) -> Path:
     """Fixture that returns the path to the directory containing C-Star tests.
 
     Returns
     -------
     Path
     """
-    return Path(__file__).parent
+    return package_path / "cstar" / "tests"
 
 
 @pytest.fixture(scope="session", autouse=True)
