@@ -17,7 +17,7 @@ it has been tested on a limited number.
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `RCAC Anvil <https://www.rcac.purdue.edu/anvil>`__                                   | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
-| `NERSC Perlmutter <https://docs.nersc.gov/systems/perlmutter/architecture/>`__       | ✅         | Untested                |
+| `NERSC Perlmutter <https://docs.nersc.gov/systems/perlmutter/architecture/>`__       | ✅         | Untested; should work   |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `NCAR                                                                                | ✅         | Untested                |
 | Derecho <https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/>`__ |            |                         |

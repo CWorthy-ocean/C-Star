@@ -19,7 +19,7 @@ Activate the conda environment::
 
 Install ``C-Star`` in the same environment::
 
-   pip install -e .
+   pip install -e ".[dev,docs]"
 
 This conda environment is useful for any of the following steps:
 

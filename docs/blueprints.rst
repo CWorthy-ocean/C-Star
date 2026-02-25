@@ -37,8 +37,8 @@ Custom Blueprint Example: ``RomsMarblBlueprint``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 :class:`cstar.orchestration.models.RomsMarblBlueprint` contains all information
-necessary to execute a coupled simulation using `UCLA-ROMS` with biogeochemistry
-handled by `MARBL`. It adds the following attributes:
+necessary to execute a coupled simulation using **UCLA-ROMS** with biogeochemistry
+handled by **MARBL**. It adds the following attributes:
 
 .. rubric:: RomsMarblBlueprint Attributes
 
@@ -64,7 +64,7 @@ Preparing a Blueprint
 
 A blueprint can be prepared for execution in a few ways:
 
-1. If you are creating a brand new domain, consider using `CSON-Forge <https://github.com/CWorthy-ocean/cson-forge/>`__ to prepare your input files and blueprint all at once.
+1. If you are creating a brand new domain, consider using `C-SON Forge <https://github.com/CWorthy-ocean/cson-forge/>`__ to prepare your input files and blueprint all at once.
 2. For an existing set of inputs, you manually write a YAML file with the desired blueprint configuration.
 3. Write python code to define a ``RomsMarblBlueprint`` instance and export it to YAML.
 
