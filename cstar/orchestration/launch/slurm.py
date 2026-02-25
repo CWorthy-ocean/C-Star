@@ -1,6 +1,5 @@
 import os
 import typing as t
-from pathlib import Path
 
 from prefect import task
 from prefect.context import TaskRunContext
@@ -134,8 +133,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             A ProcessHandle identifying the newly submitted job.
         """
         job_name = step.safe_name
-        bp_path = Path(step.blueprint_path)
-        bp = deserialize(bp_path, RomsMarblBlueprint)
+        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
         step_converter = get_command_mapping(
