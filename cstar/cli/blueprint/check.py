@@ -17,5 +17,7 @@ def check(
     try:
         _ = deserialize(path, RomsMarblBlueprint)
         print("The blueprint is valid")
+    except FileNotFoundError:
+        print(f"Blueprint not found at path: {path}")
     except ValueError as ex:
         print(f"The blueprint is invalid: {ex}")

@@ -17,5 +17,7 @@ def check(
     try:
         _ = deserialize(path, Workplan)
         print("The workplan is valid")
+    except FileNotFoundError:
+        print(f"Workplan not found at path: {path}")
     except ValueError as ex:
         print(f"The workplan is invalid: {ex}")
