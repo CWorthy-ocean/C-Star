@@ -4,6 +4,7 @@ from pathlib import Path
 
 import typer
 
+from cstar.cli.workplan.check import check
 from cstar.orchestration.dag_runner import build_and_run_dag
 
 app = typer.Typer()
@@ -27,6 +28,9 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
+    if not check(path):
+        return
+
     try:
         output_path = Path(output_dir) if output_dir else None
         asyncio.run(build_and_run_dag(path, run_id, output_path))

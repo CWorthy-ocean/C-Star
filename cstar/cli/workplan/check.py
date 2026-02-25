@@ -12,12 +12,21 @@ app = typer.Typer()
 @app.command()
 def check(
     path: t.Annotated[Path, typer.Argument(help="Path to the workplan")],
-) -> None:
-    """Perform content validation on the workplan supplied by the user."""
+) -> bool:
+    """Perform content validation on the workplan supplied by the user.
+
+    Returns
+    -------
+    bool
+        `True` if valid
+    """
     try:
         _ = deserialize(path, Workplan)
         print("The workplan is valid")
+        return True
     except FileNotFoundError:
         print(f"Workplan not found at path: {path}")
     except ValueError as ex:
         print(f"The workplan is invalid: {ex}")
+
+    return False

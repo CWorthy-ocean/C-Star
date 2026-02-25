@@ -12,12 +12,21 @@ app = typer.Typer()
 @app.command()
 def check(
     path: t.Annotated[Path, typer.Argument(help="Path to a blueprint file.")],
-) -> None:
-    """Perform content validation on a user-supplied blueprint."""
+) -> bool:
+    """Perform content validation on a user-supplied blueprint.
+
+    Returns
+    -------
+    bool
+        `True` if valid
+    """
     try:
         _ = deserialize(path, RomsMarblBlueprint)
         print("The blueprint is valid")
+        return True
     except FileNotFoundError:
         print(f"Blueprint not found at path: {path}")
     except ValueError as ex:
         print(f"The blueprint is invalid: {ex}")
+
+    return False

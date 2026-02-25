@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
+from cstar.cli.blueprint.check import check
 from cstar.entrypoint.worker.worker import (
     SimulationStages,
     execute_runner,
@@ -30,6 +31,9 @@ def run(
     ] = None,
 ) -> None:
     """Execute a blueprint in a local worker service."""
+    if not check(path):
+        return
+
     print("Executing blueprint in a worker service")
     job_cfg = get_job_config()
     service_cfg = get_service_config(get_env_item(ENV_CSTAR_LOG_LEVEL).value)
