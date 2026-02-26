@@ -294,8 +294,16 @@ def test_workplan_check_remote_workplan_dne(
     assert "not found" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "wp_uri",
+    [
+        "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml",
+        "HTTPS://raw.githubusercontent.com/cworthy-ocean/c-star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml",
+    ],
+)
 def test_workplan_check_remote_workplan(
     capsys: pytest.CaptureFixture,
+    wp_uri: str,
 ) -> None:
     """Verify that a URL to a remote workplan is handled properly and the
     workplan is executed.
@@ -304,9 +312,9 @@ def test_workplan_check_remote_workplan(
     ----------
     capsys : pytest.CaptureFixture
         Used to verify outputs from the CLI
+    wp_uri : str
+        A working URL referencing a valid workplan
     """
-    wp_path = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
-
-    check(wp_path)
+    check(wp_uri)
 
     assert "is valid" in capsys.readouterr().out

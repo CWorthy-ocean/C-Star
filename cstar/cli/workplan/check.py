@@ -1,10 +1,8 @@
 import typing as t
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import typer
 
-from cstar.base.utils import copy_local
+from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize
 
@@ -22,13 +20,10 @@ def check(
     bool
         `True` if valid
     """
-    is_remote = path.startswith("http")
     wp: Workplan | None = None
-    wp_path: Path | None = None
 
     try:
-        with TemporaryDirectory() as tmp_dir:
-            wp_path = copy_local(path, Path(tmp_dir)) if is_remote else Path(path)
+        with local_copy(path) as wp_path:
             wp = deserialize(wp_path, Workplan)
     except ValueError as ex:
         print(f"The workplan is invalid: {ex}")

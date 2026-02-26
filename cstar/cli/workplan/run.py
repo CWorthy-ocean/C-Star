@@ -1,12 +1,11 @@
 import asyncio
 import typing as t
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import typer
 
-from cstar.base.utils import copy_local
 from cstar.cli.workplan.check import check
+from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import build_and_run_dag
 
 app = typer.Typer()
@@ -33,12 +32,10 @@ def run(
     if not check(path):
         return
 
-    is_remote = path.startswith("http")
+    output_path = Path(output_dir) if output_dir else None
 
     try:
-        with TemporaryDirectory() as tmp_dir:
-            wp_path = copy_local(path, Path(tmp_dir)) if is_remote else Path(path)
-            output_path = Path(output_dir) if output_dir else None
+        with local_copy(path) as wp_path:
             asyncio.run(build_and_run_dag(wp_path, run_id, output_path))
         print("Workplan run has completed.")
     except Exception as ex:

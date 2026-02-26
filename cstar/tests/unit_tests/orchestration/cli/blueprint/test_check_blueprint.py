@@ -265,8 +265,16 @@ def test_blueprint_check_remote_blueprint_dne(
     assert "not found" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "bp_uri",
+    [
+        "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml",
+        "HTTPS://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml",
+    ],
+)
 def test_blueprint_check_remote_blueprint(
     capsys: pytest.CaptureFixture,
+    bp_uri: str,
 ) -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
     blueprint is executed.
@@ -275,9 +283,9 @@ def test_blueprint_check_remote_blueprint(
     ----------
     capsys : pytest.CaptureFixture
         Used to verify outputs from the CLI
+    bp_uri : str
+        A working URL referencing a valid blueprint
     """
-    bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
-
-    check(bp_path)
+    check(bp_uri)
 
     assert "is valid" in capsys.readouterr().out

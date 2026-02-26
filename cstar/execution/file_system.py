@@ -1,9 +1,16 @@
+import asyncio
 import functools
 import os
 import shutil
+import sys
 import typing as t
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
+
+from requests import request
 
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
@@ -332,3 +339,97 @@ class RomsFileSystemManager(JobFileSystemManager):
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
+
+
+def is_remote_resource(uri: str) -> bool:
+    """Determine if the supplied string contains a local or remote path.
+
+    Parameters
+    ----------
+    path : str
+        The string to be tested
+
+    Returns
+    -------
+    bool
+    """
+    remote_schemes = {"http", "https", "smb", "ftp", "s3"}
+    split_url = urlsplit(uri.casefold())
+    return split_url.scheme in remote_schemes
+
+
+def write_local_copy(url: str, directory: Path) -> Path:
+    """Copy a remote resource to a local file.
+
+    Returns
+    -------
+    Path
+        The local path where the remote resource was copied
+    """
+    parsed_url = urlsplit(url)
+    resource_path = Path(parsed_url.path)
+    resource_name = resource_path.name
+    http_ok: t.Final[int] = 200
+
+    get_request = request("GET", url, timeout=2.0)
+    if get_request.status_code != http_ok:
+        msg = f"Unable to retrieve file from: {url}"
+        raise FileNotFoundError(msg)
+
+    local_path = directory / resource_name
+    local_path.write_text(get_request.text)
+
+    return local_path.expanduser().resolve()
+
+
+@contextmanager
+def local_copy(uri: str) -> t.Generator[Path, None, None]:
+    """Context manager used to create a local copy of a remote resource.
+
+    When the uri references a local resource, it is used without being copied.
+
+    Parameters
+    ----------
+    uri_or_path : str
+        The resource URI
+
+    Returns
+    -------
+    Path
+        A path to a local copy of the resource
+    """
+    is_remote = is_remote_resource(uri)
+
+    with TemporaryDirectory() as tmp_dir:
+        bp_path = write_local_copy(uri, Path(tmp_dir)) if is_remote else Path(uri)
+        try:
+            yield bp_path
+        finally:
+            if is_remote and bp_path.exists():
+                bp_path.unlink()
+
+
+@asynccontextmanager
+async def local_copy_async(uri: str) -> t.AsyncGenerator[Path, None]:
+    """Asynchronous context manager used to create a local copy of a remote resource.
+
+    When the uri references a local resource, it is used without being copied.
+
+    Parameters
+    ----------
+    uri_or_path : str
+        The resource URI
+
+    Returns
+    -------
+    Path
+        A path to a local copy of the resource
+    """
+    sync_local_copy = local_copy(uri)
+    resource_path = await asyncio.to_thread(sync_local_copy.__enter__)
+
+    try:
+        yield resource_path
+    finally:
+        exc_type, exc_val, exc_tb = sys.exc_info()
+        await asyncio.to_thread(sync_local_copy.__exit__, exc_type, exc_val, exc_tb)
