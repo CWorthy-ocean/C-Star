@@ -20,7 +20,7 @@ def test_blueprint_check_file_dne(
     """
     blueprint_path = tmp_path / "blueprint-dne.yml"
 
-    check(blueprint_path)
+    check(blueprint_path.as_posix())
 
     assert "not found" in capsys.readouterr().out
 
@@ -41,7 +41,7 @@ def test_blueprint_check_file_no_content(
     blueprint_path = tmp_path / "empty_blueprint.yml"
     blueprint_path.touch()
 
-    check(blueprint_path)
+    check(blueprint_path.as_posix())
 
     assert "is invalid" in capsys.readouterr().out
 
@@ -67,7 +67,7 @@ def test_blueprint_check_file_bad_content(
     blueprint_path = tmp_path / "invalid_blueprint.yml"
     blueprint_path.write_text(content)
 
-    check(blueprint_path)
+    check(blueprint_path.as_posix())
 
     assert "is invalid" in capsys.readouterr().out
 
@@ -102,7 +102,7 @@ def test_blueprint_valid_input(
     """
     blueprint_path = package_path / repo_relative_path
 
-    check(Path(blueprint_path))
+    check(blueprint_path.as_posix())
 
     assert "is valid" in capsys.readouterr().out, (
         f"`{blueprint_path}` does not contain a valid blueprint"
@@ -179,7 +179,7 @@ def test_blueprint_incomplete_input(
     bp_path = tmp_path / "bp.yaml"
     bp_path.write_text("\n".join(remaining_content))
 
-    check(bp_path)
+    check(bp_path.as_posix())
 
     err_msg = f"{bp_path} should not pass validation"
     assert "is invalid" in capsys.readouterr().out, err_msg
@@ -241,7 +241,43 @@ def test_blueprint_optional_input(
     bp_path = tmp_path / "bp.yaml"
     bp_path.write_text("\n".join(remaining_content))
 
-    check(bp_path)
+    check(bp_path.as_posix())
 
     err_msg = f"{bp_path} should not pass validation"
     assert "is valid" in capsys.readouterr().out, err_msg
+
+
+def test_blueprint_check_remote_blueprint_dne(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Verify that a URL to a remote blueprint is handled properly and the
+    blueprint is not executed if the URL is invalid.
+
+    Parameters
+    ----------
+    capsys : pytest.CaptureFixture
+        Used to verify outputs from the CLI
+    """
+    bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint-X.yaml"
+
+    check(bp_path)
+
+    assert "not found" in capsys.readouterr().out
+
+
+def test_blueprint_check_remote_blueprint(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Verify that a URL to a remote blueprint is handled properly and the
+    blueprint is executed.
+
+    Parameters
+    ----------
+    capsys : pytest.CaptureFixture
+        Used to verify outputs from the CLI
+    """
+    bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
+
+    check(bp_path)
+
+    assert "is valid" in capsys.readouterr().out

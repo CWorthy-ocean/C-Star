@@ -365,7 +365,7 @@ def additional_files_dir() -> Path:
     return Path(__file__).parent.parent / "additional_files"
 
 
-def copy_local(url: str) -> Path:
+def copy_local(url: str, directory: Path) -> Path:
     """Copy a remote resource to a local file.
 
     Returns
@@ -383,7 +383,7 @@ def copy_local(url: str) -> Path:
         msg = f"Unable to retrieve file from: {url}"
         raise FileNotFoundError(msg)
 
-    local_path = Path(resource_name)
+    local_path = directory / resource_name
     local_path.write_text(get_request.text)
 
     return local_path.expanduser().resolve()

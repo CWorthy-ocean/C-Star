@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -21,6 +22,47 @@ def test_workplan_run_file_dne(
     """
     wp_path = tmp_path / "workplan-dne.yml"
 
-    run(wp_path, "test-run-id")
+    run(wp_path.as_posix(), "test-run-id")
 
     assert "not found" in capsys.readouterr().out
+
+
+def test_workplan_run_remote_workplan_dne(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Verify that a URL to a remote workplan is handled properly and the
+    workplan is not executed if the URL is invalid.
+
+    Parameters
+    ----------
+    capsys : pytest.CaptureFixture
+        Used to verify outputs from the CLI
+    """
+    wp_path = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml_XXX"
+
+    run(wp_path, "my-run-id")
+
+    assert "not found" in capsys.readouterr().out
+
+
+def test_workplan_run_remote_workplan(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Verify that a URL to a remote workplan is handled properly and the
+    workplan is executed.
+
+    Parameters
+    ----------
+    capsys : pytest.CaptureFixture
+        Used to verify outputs from the CLI
+    """
+    wp_path = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        return_value=0,
+    ) as mock_exec:
+        run(wp_path, "12345")
+
+    assert "is valid" in capsys.readouterr().out
+    mock_exec.assert_called_once()

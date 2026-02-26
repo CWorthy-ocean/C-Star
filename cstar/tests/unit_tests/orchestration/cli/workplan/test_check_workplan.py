@@ -32,7 +32,7 @@ def test_cli_workplan_check_action_tpl(
     wp_path = tmp_path / template_file
     wp_path.write_text(template_path.read_text())
 
-    check(wp_path)
+    check(wp_path.as_posix())
     captured = capsys.readouterr().out
     assert " valid" in captured
 
@@ -54,7 +54,7 @@ def test_cli_workplan_check_dne(
     """
     wp_path = tmp_path / "workplan-dne.yaml"
 
-    check(wp_path)
+    check(wp_path.as_posix())
     captured = capsys.readouterr().out
     assert " not found" in captured
 
@@ -75,7 +75,7 @@ def test_cli_workplan_check_file_no_content(
     wp_path = tmp_path / "empty_workplan.yml"
     wp_path.touch()
 
-    check(wp_path)
+    check(wp_path.as_posix())
 
     assert "is invalid" in capsys.readouterr().out
 
@@ -101,7 +101,7 @@ def test_cli_workplan_check_file_bad_content(
     wp_path = tmp_path / "invalid_workplan.yml"
     wp_path.write_text(content)
 
-    check(wp_path)
+    check(wp_path.as_posix())
 
     assert "is invalid" in capsys.readouterr().out
 
@@ -134,7 +134,7 @@ def test_cli_workplan_check_valid_input(
     """
     wp_path = package_path / repo_relative_path
 
-    check(Path(wp_path))
+    check(wp_path.as_posix())
 
     msg = f"`{wp_path}` does not contain a valid workplan"
     assert "is valid" in capsys.readouterr().out, msg
@@ -197,12 +197,12 @@ def test_workplan_incomplete_input(
         if end_removal is None or end_removal in line:
             cutting = False
 
-    bp_path = tmp_path / "bp.yaml"
-    bp_path.write_text("\n".join(remaining_content))
+    wp_path = tmp_path / "wp.yaml"
+    wp_path.write_text("\n".join(remaining_content))
 
-    check(bp_path)
+    check(wp_path.as_posix())
 
-    err_msg = f"{bp_path} should not pass validation"
+    err_msg = f"{wp_path} should not pass validation"
     assert "is invalid" in capsys.readouterr().out, err_msg
 
 
@@ -267,10 +267,46 @@ def test_workplan_optional_input(
         if end_removal is None or end_removal in line:
             cutting = False
 
-    bp_path = tmp_path / "bp.yaml"
-    bp_path.write_text("\n".join(remaining_content))
+    wp_path = tmp_path / "bp.yaml"
+    wp_path.write_text("\n".join(remaining_content))
 
-    check(bp_path)
+    check(wp_path.as_posix())
 
-    err_msg = f"{bp_path} should not pass validation"
+    err_msg = f"{wp_path} should not pass validation"
     assert "is valid" in capsys.readouterr().out, err_msg
+
+
+def test_workplan_check_remote_workplan_dne(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Verify that a URL to a remote workplan is handled properly and the
+    workplan is not executed if the URL is invalid.
+
+    Parameters
+    ----------
+    capsys : pytest.CaptureFixture
+        Used to verify outputs from the CLI
+    """
+    wp_path = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml_XXX"
+
+    check(wp_path)
+
+    assert "not found" in capsys.readouterr().out
+
+
+def test_workplan_check_remote_workplan(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Verify that a URL to a remote workplan is handled properly and the
+    workplan is executed.
+
+    Parameters
+    ----------
+    capsys : pytest.CaptureFixture
+        Used to verify outputs from the CLI
+    """
+    wp_path = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    check(wp_path)
+
+    assert "is valid" in capsys.readouterr().out
