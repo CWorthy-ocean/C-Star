@@ -2,6 +2,7 @@ import os
 import subprocess
 from collections.abc import Callable, Generator
 from pathlib import Path
+from unittest import mock
 from unittest.mock import Mock, PropertyMock, call, mock_open, patch
 
 import pytest
@@ -11,8 +12,10 @@ from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_NPROCS_POST,
     ENV_CSTAR_STATE_HOME,
     get_env_item,
+    hpc_data_directory,
 )
 from cstar.system.environment import CStarEnvironment
 
@@ -721,7 +724,9 @@ def test_get_env_item_indirect(
     monkeypatch.delenv(xdg_var, raising=False)
     monkeypatch.setenv(xdg_var, xdg_value)
     env_item = get_env_item(cstar_var)
-    output_dir = env_item.value
+
+    with mock.patch.object(env_item, "default_factory", None):
+        output_dir = env_item.value
 
     assert output_dir == xdg_value
 
@@ -762,13 +767,134 @@ def test_get_env_item_default(
     monkeypatch.setenv(xdg_var, xdg_value)
 
     env_item = get_env_item(cstar_var)
+
+    with mock.patch.object(env_item, "default_factory", None):
+        output_dir = env_item.value
+        assert output_dir == env_item.default
+
+
+@pytest.mark.parametrize(
+    ("xdg_var", "xdg_value", "cstar_var", "factory_value"),
+    [
+        (
+            "XDG_DATA_HOME",
+            "",
+            ENV_CSTAR_DATA_HOME,
+            hpc_data_directory(),
+        ),
+    ],
+)
+def test_get_env_item_default_from_factory(
+    xdg_var: str,
+    xdg_value: str,
+    cstar_var: str,
+    factory_value: str,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Verify the default factory is invoked."""
+    monkeypatch.delenv(cstar_var, raising=False)
+    monkeypatch.setenv(xdg_var, xdg_value)
+
+    env_item = get_env_item(cstar_var)
     output_dir = env_item.value
 
-    assert output_dir == env_item.default
+    if factory_value:
+        # ensure that a default factory function is evaluated
+        assert output_dir == factory_value
+    else:
+        assert output_dir == env_item.default
 
-    from cstar.cli.environment.show import show
 
-    show("file")
+def test_get_env_item_value_set(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Verify the default is not returned if an env item is set."""
+    cstar_var = ENV_CSTAR_NPROCS_POST
+    default_value = "default-value"
+    actual_value = "actual-value"
+
+    monkeypatch.delenv(cstar_var, raising=False)
+    monkeypatch.setenv(cstar_var, actual_value)
+
+    env_item = get_env_item(cstar_var)
+    with mock.patch.multiple(env_item, default=default_value, default_factory=None):
+        env_value = env_item.value
+
+    assert env_value == actual_value
+
+
+def test_get_env_item_value_not_set(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Verify the default is returned if an env item is not set."""
+    cstar_var = ENV_CSTAR_NPROCS_POST
+    default_value = "default-value"
+
+    monkeypatch.delenv(cstar_var, raising=False)
+
+    env_item = get_env_item(cstar_var)
+    with mock.patch.multiple(env_item, default=default_value, default_factory=None):
+        env_value = env_item.value
+
+    assert env_value == default_value
+
+
+def test_get_env_item_value_ignore_factory(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Verify the non-null factory value is not returned if the value is set."""
+    cstar_var = ENV_CSTAR_NPROCS_POST
+    default_value = "default-value"
+    actual_value = "actual-value"
+    factory_value = "factory-value"
+
+    monkeypatch.delenv(cstar_var, raising=False)
+    monkeypatch.setenv(cstar_var, actual_value)
+
+    env_item = get_env_item(cstar_var)
+    with mock.patch.multiple(
+        env_item, default=default_value, default_factory=lambda _item: factory_value
+    ):
+        env_value = env_item.value
+
+    assert env_value == actual_value
+
+
+def test_get_env_item_value_use_factory(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Verify the non-null factory value is returned if the value is not set."""
+    cstar_var = ENV_CSTAR_NPROCS_POST
+    default_value = "default-value"
+    factory_value = "factory-value"
+
+    monkeypatch.delenv(cstar_var, raising=False)
+
+    env_item = get_env_item(cstar_var)
+    with mock.patch.multiple(
+        env_item, default=default_value, default_factory=lambda _item: factory_value
+    ):
+        env_value = env_item.value
+
+    assert env_value == factory_value
+
+
+def test_get_env_item_value_ignore_null_factory(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Verify the null factory value is not returned and the default is returned."""
+    cstar_var = ENV_CSTAR_NPROCS_POST
+    default_value = "default-value"
+
+    monkeypatch.delenv(cstar_var, raising=False)
+
+    env_item = get_env_item(cstar_var)
+    with mock.patch.multiple(
+        env_item, default=default_value, default_factory=lambda _item: None
+    ):
+        env_value = env_item.value
+
+    assert env_value == default_value
 
 
 @pytest.mark.parametrize(
