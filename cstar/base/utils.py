@@ -5,8 +5,10 @@ import re
 import subprocess
 import typing as t
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import dateutil
+from requests import request
 
 from cstar.base.log import get_logger
 
@@ -361,3 +363,27 @@ def additional_files_dir() -> Path:
     Path
     """
     return Path(__file__).parent.parent / "additional_files"
+
+
+def copy_local(url: str) -> Path:
+    """Copy a remote resource to a local file.
+
+    Returns
+    -------
+    Path
+        The local path where the remote resource was copied
+    """
+    parsed_url = urlsplit(url)
+    resource_path = Path(parsed_url.path)
+    resource_name = resource_path.name
+    http_ok: t.Final[int] = 200
+
+    get_request = request("GET", url, timeout=2.0)
+    if get_request.status_code != http_ok:
+        msg = f"Unable to retrieve file from: {url}"
+        raise FileNotFoundError(msg)
+
+    local_path = Path(resource_name)
+    local_path.write_text(get_request.text)
+
+    return local_path.expanduser().resolve()
