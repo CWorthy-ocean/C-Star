@@ -4,12 +4,10 @@ import typing as t
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
-import networkx as nx
-
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import slugify
+from cstar.base.utils import lazy_import, slugify
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
@@ -17,9 +15,14 @@ from cstar.execution.file_system import (
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
 
+nx = lazy_import("networkx")
+
 KEY_STATUS: t.Literal["status"] = "status"
 KEY_STEP: t.Literal["step"] = "step"
 KEY_TASK: t.Literal["task"] = "task"
+
+if t.TYPE_CHECKING:
+    from networkx import DiGraph
 
 
 class RunMode(StrEnum):
@@ -202,7 +205,7 @@ class Planner(LoggingMixin):
     workplan: Workplan
     """The workplan to plan."""
 
-    graph: nx.DiGraph
+    graph: "DiGraph"
     """The graph used for task planning."""
 
     def __init__(
@@ -220,7 +223,7 @@ class Planner(LoggingMixin):
         self.graph = Planner._workplan_to_graph(workplan)
 
     @classmethod
-    def _workplan_to_graph(cls, workplan: Workplan) -> nx.DiGraph:
+    def _workplan_to_graph(cls, workplan: Workplan) -> "DiGraph":
         """Convert a workplan into a graph for planning.
 
         Parameters
@@ -230,7 +233,7 @@ class Planner(LoggingMixin):
 
         Returns
         -------
-        nx.DiGraph
+        DiGraph
             A graph of the execution plan.
         """
         data: t.Mapping[str, list[str]] = {s.name: [] for s in workplan.steps}

@@ -3,10 +3,9 @@ import typing as t
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import networkx as nx
 import typer
 
-from cstar.base.utils import slugify
+from cstar.base.utils import lazy_import, slugify
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
 from cstar.orchestration.serialization import deserialize
@@ -14,6 +13,8 @@ from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
+
+nx = lazy_import("networkx")
 
 app = typer.Typer()
 
