@@ -1,9 +1,8 @@
 import abc
 import types
-import typing as t
 from collections import defaultdict
 from pathlib import Path
-from typing import get_args, get_origin
+from typing import TYPE_CHECKING, Any, ClassVar, Self, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -18,7 +17,7 @@ from pydantic.alias_generators import to_snake
 from cstar.base.log import get_logger
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, _list_to_concise_str
 
-if t.TYPE_CHECKING:
+if TYPE_CHECKING:
     from pydantic import ModelWrapValidatorHandler
 
 log = get_logger(__name__)
@@ -48,7 +47,7 @@ def _format_float(val: float) -> str:
     return str(val)
 
 
-def _format_value(val: t.Any) -> str:
+def _format_value(val: Any) -> str:
     """Format floats using _format_float, otherwise just return the string of the
     value.
     """
@@ -78,7 +77,7 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
     subsections of the ROMS runtime input file.
     """
 
-    multi_line: t.ClassVar[bool] = False
+    multi_line: ClassVar[bool] = False
     """If true, multiple values are split across multiple lines in the inputs file; if
     false, they are space-delimited."""
 
@@ -98,8 +97,8 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
     @model_validator(mode="wrap")
     @classmethod
     def validate_from_lines(
-        cls, data: t.Any, handler: "ModelWrapValidatorHandler"
-    ) -> t.Self:
+        cls, data: Any, handler: "ModelWrapValidatorHandler"
+    ) -> Self:
         """This adapter allows class instantiation from a dict / kwargs, or from lines
         read from a ROMS input file.
 
@@ -194,7 +193,7 @@ class ROMSRuntimeSettingsSection(BaseModel, abc.ABC):
         return serialized
 
     @classmethod
-    def from_lines(cls, lines: list[str]) -> t.Self:
+    def from_lines(cls, lines: list[str]) -> Self:
         """This takes a list of lines as would be found under the section header of a
         roms.in file and returns a ROMSRuntimeSettingsSection instance.
 
@@ -384,7 +383,7 @@ class InitialConditions(ROMSRuntimeSettingsSection):
     multi_line = True
 
     @classmethod
-    def from_lines(cls, lines: list[str] | None) -> t.Self:
+    def from_lines(cls, lines: list[str] | None) -> Self:
         """Bespoke `from_lines` for the InitialConditions section, which may have a
         single '0' line, as in, e.g. `$ROMS_ROOT/Examples/Rivers_ana/river_ana.in`
 
@@ -402,7 +401,7 @@ class Forcing(ROMSRuntimeSettingsSection):
     multi_line = True
 
     @classmethod
-    def from_lines(cls, lines: list[str] | None) -> t.Self:
+    def from_lines(cls, lines: list[str] | None) -> Self:
         """Bespoke `from_lines` for the Forcing section, which must exist in ROMS but
         may be empty, as in, e.g. `$ROMS_ROOT/Examples/Rivers_ana/river_ana.in`
 
