@@ -2,6 +2,8 @@ import asyncio
 import typing as t
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import networkx as nx
 import typer
 
 from cstar.base.utils import slugify
@@ -83,8 +85,6 @@ def _initialize_from_graph(
     name_map = {step.name: step.name for step in workplan.steps}
     name_map.update({START_NODE: "start", TERMINAL_NODE: "end"})
 
-    import networkx as nx
-
     nx.set_node_attributes(graph, "task", "action")
     graph = _add_marker_nodes(graph)
     return graph, step_map, dep_map, name_map
@@ -158,9 +158,6 @@ async def render(
     Path
         The path to the output file
     """
-    import matplotlib.pyplot as plt
-    import networkx as nx
-
     plt.figure(figsize=(11, 8))
     plt.cla()
     plt.clf()
