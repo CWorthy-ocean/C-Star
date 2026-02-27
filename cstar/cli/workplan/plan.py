@@ -2,7 +2,6 @@ import asyncio
 import typing as t
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import typer
 
 from cstar.base.utils import lazy_import, slugify
@@ -15,6 +14,7 @@ from cstar.orchestration.transforms import (
 )
 
 nx = lazy_import("networkx")
+plt = lazy_import("matplotlib.pyplot")
 
 app = typer.Typer()
 
