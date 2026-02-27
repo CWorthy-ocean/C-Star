@@ -4,13 +4,13 @@ import tempfile
 from abc import ABC
 from pathlib import Path
 
-import roms_tools
-
 from cstar.base.input_dataset import InputDataset
-from cstar.base.utils import _list_to_concise_str, coerce_datetime
+from cstar.base.utils import _list_to_concise_str, coerce_datetime, lazy_import
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData, SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection
+
+roms_tools = lazy_import("roms_tools")
 
 
 class ROMSPartitioning:

@@ -4,6 +4,7 @@ from textwrap import dedent
 from unittest import mock
 
 import pytest
+import roms_tools  # noqa: F401, pre-load to avoid the lazy loader
 
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection

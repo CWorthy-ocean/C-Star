@@ -1,10 +1,13 @@
 import datetime as dt
 import functools
 import hashlib
+import importlib.util
 import re
 import subprocess
+import sys
 import typing as t
 from pathlib import Path
+from types import ModuleType
 
 import dateutil
 
@@ -361,3 +364,35 @@ def additional_files_dir() -> Path:
     Path
     """
     return Path(__file__).parent.parent / "additional_files"
+
+
+def lazy_import(module_name: str) -> ModuleType:
+    """Perform a lazy-load of an expensive module.
+
+    Parameters
+    ----------
+    module_name : str
+        The name of the module to be imported
+
+    Returns
+    -------
+    The lazy-loading module
+    """
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+
+    spec = importlib.util.find_spec(module_name)
+
+    if spec is None or spec.loader is None:
+        msg = f"Unable to lazy-load module: {module_name}"
+        raise ImportError(msg)
+
+    loader = importlib.util.LazyLoader(spec.loader)
+    spec.loader = loader
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+
+    loader.exec_module(module)
+
+    return module
