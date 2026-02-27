@@ -4,15 +4,14 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.file_system import DirectoryManager
+from cstar.io.constants import SourceClassification
+from cstar.io.staged_data import StagedFile, StagedRepository
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from cstar.io.retriever import RemoteRepositoryRetriever
     from cstar.io.source_data import SourceData
-
-from cstar.io.constants import SourceClassification
-from cstar.io.staged_data import StagedFile, StagedRepository
 
 _registry: dict[SourceClassification, type["Stager"]] = {}
 

@@ -87,7 +87,7 @@ show-fixes = true
 line-length = 88
 
 [tool.ruff.lint]
-extend-select = ["I", "F", "E", "W", "D", "UP"] #  "RUF", "UP"]
+extend-select = ["I", "F", "E", "W", "D", "UP", "TCH"] #  "RUF", "UP"]
 ignore = [
     # will fix eventually
     "E501",

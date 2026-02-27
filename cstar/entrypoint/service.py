@@ -7,12 +7,14 @@ from datetime import datetime, timezone
 from multiprocessing import Queue
 from queue import Empty
 from threading import Thread
-from types import FrameType
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, computed_field
 
 from cstar.base.log import LoggingMixin
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 
 class ServiceConfiguration(BaseModel):
@@ -441,7 +443,7 @@ class Service(ABC, LoggingMixin):
         if exc:
             raise exc
 
-    def _handle_signal(self, sig_num: int, _frame: FrameType | None) -> None:
+    def _handle_signal(self, sig_num: int, _frame: "FrameType | None") -> None:
         """Handle OS signals requesting process shutdown.
 
         Parameters

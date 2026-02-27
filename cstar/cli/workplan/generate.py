@@ -12,10 +12,11 @@ from cstar.orchestration.serialization import deserialize, serialize
 app = typer.Typer()
 console = Console()
 
-BPResult: t.TypeAlias = tuple[Path, RomsMarblBlueprint]
+if t.TYPE_CHECKING:
+    BPResult: t.TypeAlias = tuple[Path, RomsMarblBlueprint]
 
 
-def _locate_blueprints(search_dir: Path) -> t.Iterable[BPResult]:
+def _locate_blueprints(search_dir: Path) -> t.Iterable["BPResult"]:
     """Iterate through the contents of a directory to locate `Blueprints`.
 
     Parameters
@@ -36,7 +37,7 @@ def _locate_blueprints(search_dir: Path) -> t.Iterable[BPResult]:
     return valid_blueprints
 
 
-def _display_order(blueprints: list[BPResult]) -> None:
+def _display_order(blueprints: list["BPResult"]) -> None:
     """Display a table of the current execution order for the blueprints.
 
     Parameters
@@ -53,7 +54,7 @@ def _display_order(blueprints: list[BPResult]) -> None:
     console.print(table)
 
 
-def _populate_workplan(search_dir: Path, blueprints: list[BPResult]) -> Workplan:
+def _populate_workplan(search_dir: Path, blueprints: list["BPResult"]) -> Workplan:
     """Populate a new workplan.
 
     Parameters

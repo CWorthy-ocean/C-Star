@@ -1,14 +1,15 @@
 import os
 import shutil
+import typing as t
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _get_sha256_hash, _run_cmd
 
-if TYPE_CHECKING:
+if t.TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
     from cstar.io.source_data import SourceData
 
 
@@ -246,7 +247,7 @@ class StagedDataCollection:
         Unstages each StagedData item in the collection
     """
 
-    def __init__(self, items: Iterable[StagedData]):
+    def __init__(self, items: "Iterable[StagedData]"):
         self._items = list(items)
         self._validate()
 
@@ -263,7 +264,7 @@ class StagedDataCollection:
     def __getitem__(self, idx: int) -> StagedData:
         return self._items[idx]
 
-    def __iter__(self) -> Iterator[StagedData]:
+    def __iter__(self) -> "Iterator[StagedData]":
         return iter(self._items)
 
     def append(self, staged: StagedData):

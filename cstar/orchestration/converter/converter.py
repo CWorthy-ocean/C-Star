@@ -6,18 +6,21 @@ import typing as t
 from collections import defaultdict
 
 from cstar.base.log import get_logger
-from cstar.orchestration.models import Application, Step
-from cstar.orchestration.orchestration import Launcher
+from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
+
+if t.TYPE_CHECKING:
+    from cstar.orchestration.models import Step
+    from cstar.orchestration.orchestration import Launcher
 
 log = get_logger(__name__)
 
-StepToCommandConversionFn: t.TypeAlias = t.Callable[[Step], str]
+StepToCommandConversionFn: t.TypeAlias = "t.Callable[[Step], str]"
 """Convert a `Step` into a command to be executed.
 
 Parameters
 ----------
-step : Step
+step : "Step"
     The step to be converted.
 
 Returns
@@ -27,7 +30,7 @@ str
 """
 
 
-def convert_roms_step_to_command(step: Step) -> str:
+def convert_roms_step_to_command(step: "Step") -> str:
     """Convert a `Step` into a command to be executed.
 
     This function converts ROMS/ROMS-MARBL applications into a command triggering
@@ -47,7 +50,7 @@ def convert_roms_step_to_command(step: Step) -> str:
     return f"{sys.executable} -m {worker_module}  -b {step.blueprint_path}"
 
 
-def convert_step_to_placeholder(step: Step) -> str:
+def convert_step_to_placeholder(step: "Step") -> str:
     """Convert a `Step` into a command to be executed.
 
     This function converts applications into mocks by starting a process that
@@ -73,7 +76,7 @@ def convert_step_to_placeholder(step: Step) -> str:
 
 
 launcher_aware_app_to_cmd_map: dict[
-    type[Launcher],
+    type["Launcher"],
     dict[str, StepToCommandConversionFn],
 ] = defaultdict(
     lambda: {
@@ -86,7 +89,7 @@ launcher_aware_app_to_cmd_map: dict[
 
 def register_command_mapping(
     application: Application,
-    launcher: type[Launcher],
+    launcher: type["Launcher"],
     mapping_func: StepToCommandConversionFn,
 ) -> None:
     launcher_map = launcher_aware_app_to_cmd_map[launcher]
@@ -95,7 +98,7 @@ def register_command_mapping(
 
 def get_command_mapping(
     application: Application,
-    launcher: type[Launcher],
+    launcher: type["Launcher"],
 ) -> StepToCommandConversionFn:
     launcher_map = launcher_aware_app_to_cmd_map[launcher]
     step_converter = launcher_map[application.value]

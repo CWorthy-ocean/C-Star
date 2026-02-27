@@ -2,7 +2,6 @@ import os
 import typing as t
 
 from prefect import task
-from prefect.context import TaskRunContext
 
 from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
 from cstar.base.log import get_logger
@@ -13,10 +12,9 @@ from cstar.execution.scheduler_job import (
     get_status_of_slurm_job,
 )
 from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Application, RomsMarblBlueprint, Step
+from cstar.orchestration.models import Application, RomsMarblBlueprint
 from cstar.orchestration.orchestration import (
     Launcher,
-    LiveStep,
     ProcessHandle,
     Status,
     Task,
@@ -28,10 +26,16 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_QUEUE,
 )
 
+if t.TYPE_CHECKING:
+    from prefect.context import TaskRunContext
+
+    from cstar.orchestration.models import Step
+    from cstar.orchestration.orchestration import LiveStep
+
 log = get_logger(__name__)
 
 
-def cache_key_func(context: TaskRunContext, params: dict[str, t.Any]) -> str:
+def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
     """Cache on a combination of the task name and user-assigned run id.
 
     Parameters
@@ -117,12 +121,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @task(persist_result=True, cache_key_fn=cache_key_func)
     @staticmethod
-    async def _submit(step: LiveStep, dependencies: list[SlurmHandle]) -> SlurmHandle:
+    async def _submit(step: "LiveStep", dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
 
         Parameters
         ----------
-        step : Step
+        step : LiveStep
             The step to submit to SLURM.
         dependencies : list[SlurmHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
@@ -181,7 +185,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(step: Step, handle: SlurmHandle) -> ExecutionStatus:
+    async def _status(step: "Step", handle: SlurmHandle) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
@@ -206,14 +210,14 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     @classmethod
     async def launch(
         cls,
-        step: LiveStep,
+        step: "LiveStep",
         dependencies: list[SlurmHandle],
     ) -> Task[SlurmHandle]:
         """Launch a step in SLURM.
 
         Parameters
         ----------
-        step : Step
+        step : LiveStep
             The step to submit to SLURM.
         dependencies : list[SlurmHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
@@ -232,7 +236,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @classmethod
     async def query_status(
-        cls, step: Step, item: Task[SlurmHandle] | SlurmHandle
+        cls, step: "Step", item: Task[SlurmHandle] | SlurmHandle
     ) -> Status:
         """Retrieve the status of an item.
 

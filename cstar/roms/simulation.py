@@ -6,7 +6,7 @@ from datetime import datetime
 from functools import partial
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 
 import yaml
 
@@ -20,18 +20,14 @@ from cstar.base.env import (
     get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
     slugify,
 )
-from cstar.execution.file_system import (
-    JobFileSystemManager,
-    RomsFileSystemManager,
-)
-from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.execution.file_system import RomsFileSystemManager
+from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.constants import FileEncoding
@@ -68,6 +64,11 @@ from cstar.roms.input_dataset import (
 from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.simulation import Simulation
 from cstar.system.manager import cstar_sysmgr
+
+if TYPE_CHECKING:
+    from cstar.base.external_codebase import ExternalCodeBase
+    from cstar.execution.file_system import JobFileSystemManager
+    from cstar.execution.handler import ExecutionHandler
 
 
 def _ncjoin_wildcard(
@@ -619,14 +620,14 @@ class ROMSSimulation(Simulation):
         return repr_str
 
     @classmethod
-    def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
+    def _get_filesystem_manager(cls, directory: Path) -> "JobFileSystemManager":
         """Retrieve the manager for the simulation output directory structure."""
         return RomsFileSystemManager(directory)
 
     @property
     def fs_manager(self) -> RomsFileSystemManager:
         """Return the file system manager for the simulation."""
-        return cast(RomsFileSystemManager, self._fs_manager)
+        return cast("RomsFileSystemManager", self._fs_manager)
 
     def _conditionally_clear_root(self):
         env_item = get_env_item(ENV_CSTAR_CLOBBER_WORKING_DIR)
@@ -648,7 +649,7 @@ class ROMSSimulation(Simulation):
         return ROMSExternalCodeBase()
 
     @property
-    def codebases(self) -> list[ExternalCodeBase]:
+    def codebases(self) -> "list[ExternalCodeBase]":
         """Returns a list of external codebases associated with this ROMS simulation.
 
         This property includes both the primary ROMS external codebase and the
@@ -1727,7 +1728,7 @@ class ROMSSimulation(Simulation):
         post_run : Handles post-processing of ROMS output files.
         run : Executes the ROMS simulation.
         """
-        new_sim = cast(ROMSSimulation, super().restart(new_end_date=new_end_date))
+        new_sim = cast("ROMSSimulation", super().restart(new_end_date=new_end_date))
 
         restart_dir = self.fs_manager.output_dir
 

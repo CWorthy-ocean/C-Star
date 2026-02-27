@@ -279,7 +279,7 @@ class TestROMSSimulationInitialization:
             The name of the expected input dataset class for elements of the attribute.
         """
         expected_msg = f"must be a list of {expected_type_name} instances"
-        test_args = cast(dict[str, Any], {attrname: ["this", "is", "not", "valid"]})
+        test_args = cast("dict[str, Any]", {attrname: ["this", "is", "not", "valid"]})
 
         with pytest.raises(TypeError) as exception_info:
             ROMSSimulation(

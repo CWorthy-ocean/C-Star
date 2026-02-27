@@ -17,11 +17,13 @@ from cstar.base.env import (
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_STATE_HOME,
-    EnvItem,
     get_env_item,
 )
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify
+
+if t.TYPE_CHECKING:
+    from cstar.base.env import EnvItem
 
 
 @dataclass(slots=True)
@@ -30,16 +32,16 @@ class XdgMetaContainer:
     the XDG-compliant directories C-Star will use at runtime.
     """
 
-    cache: EnvItem
+    cache: "EnvItem"
     """Metadata used to identify the cache directory."""
-    config: EnvItem
+    config: "EnvItem"
     """Metadata used to identify the config directory."""
-    data: EnvItem
+    data: "EnvItem"
     """Metadata used to identify the data directory."""
-    state: EnvItem
+    state: "EnvItem"
     """Metadata used to identify the state directory."""
 
-    def __iter__(self) -> t.Iterator[EnvItem]:
+    def __iter__(self) -> t.Iterator["EnvItem"]:
         """Return an iterable containing all settings contained in the instance."""
         yield self.cache
         yield self.config
@@ -64,7 +66,7 @@ class DirectoryManager:
     _PKG_SUBDIR: t.Literal["cstar"] = "cstar"
 
     @classmethod
-    def xdg_dir(cls, env_item: EnvItem) -> Path:
+    def xdg_dir(cls, env_item: "EnvItem") -> Path:
         """Calculate an XDG-compliant path honoring standard precedence rules.
 
         Returns a value in the order:

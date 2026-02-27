@@ -16,7 +16,6 @@ from pydantic import (
     PositiveInt,
     SerializeAsAny,
     StringConstraints,
-    ValidationInfo,
     WithJsonSchema,
     field_validator,
     model_validator,
@@ -24,6 +23,9 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
+
+if t.TYPE_CHECKING:
+    from pydantic import ValidationInfo
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -276,7 +278,7 @@ class RuntimeParameterSet(ParameterSet):
     def _validate_checkpoint_frequency(
         cls,
         value: str,
-        _info: ValidationInfo,
+        _info: "ValidationInfo",
     ) -> str:
         """Verify a valid range string for the checkpoint frequency was supplied.
 
@@ -305,7 +307,7 @@ class RuntimeParameterSet(ParameterSet):
     def _resolve_out_dir(
         cls,
         value: Path,
-        _info: ValidationInfo,
+        _info: "ValidationInfo",
     ) -> Path:
         return value.expanduser().resolve()
 

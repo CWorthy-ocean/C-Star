@@ -3,17 +3,20 @@ import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import dateutil
 
-from cstar.base.additional_code import AdditionalCode
-from cstar.base.discretization import Discretization
-from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.log import LoggingMixin
-from cstar.execution.file_system import JobFileSystemManager
-from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
+
+if TYPE_CHECKING:
+    from cstar.base.additional_code import AdditionalCode
+    from cstar.base.discretization import Discretization
+    from cstar.base.external_codebase import ExternalCodeBase
+    from cstar.execution.file_system import JobFileSystemManager
+    from cstar.execution.handler import ExecutionHandler
 
 
 class Simulation(ABC, LoggingMixin):
@@ -70,8 +73,11 @@ class Simulation(ABC, LoggingMixin):
         Create a new Simulation instance starting from the end of this one.
     """
 
-    _fs_manager: JobFileSystemManager
+    _fs_manager: "JobFileSystemManager"
     """The file system manager ensures consistent directory structure for outputs."""
+
+    _execution_handler: "ExecutionHandler | None" = None
+    """The in-memory representation of a running process."""
 
     def __init__(
         self,
@@ -383,7 +389,7 @@ class Simulation(ABC, LoggingMixin):
 
     @property
     @abstractmethod
-    def default_codebase(self) -> ExternalCodeBase:
+    def default_codebase(self) -> "ExternalCodeBase":
         """Abstract property that must be implemented by subclasses to provide a default
         codebase.
 
@@ -538,7 +544,7 @@ class Simulation(ABC, LoggingMixin):
         restore : Restores a previously saved simulation state.
         """
         if (
-            (hasattr(self, "_execution_handler"))
+            self._execution_handler is not None
             and (isinstance(self._execution_handler, LocalProcess))
             and (self._execution_handler.status == ExecutionStatus.RUNNING)
         ):
@@ -670,7 +676,7 @@ class Simulation(ABC, LoggingMixin):
 
     @classmethod
     @abstractmethod
-    def _get_filesystem_manager(cls, directory: Path) -> JobFileSystemManager:
+    def _get_filesystem_manager(cls, directory: Path) -> "JobFileSystemManager":
         """Retrieve the manager for the simulation output directory structure."""
         raise NotImplementedError("Failed to implement abstract method.")
 

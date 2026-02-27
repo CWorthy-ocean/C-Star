@@ -8,8 +8,11 @@ from rich import print  # noqa: A004, ignore shadowing of built-in print
 
 from cstar.base import env, feature
 from cstar.base import utils as base_utils
-from cstar.base.env import EnvItem, discover_env_vars
+from cstar.base.env import discover_env_vars
 from cstar.orchestration import utils as orch_utils
+
+if t.TYPE_CHECKING:
+    from cstar.base.env import EnvItem
 
 app = typer.Typer()
 
@@ -18,7 +21,7 @@ H_CONFIG_ALL: t.Final[str] = "C-Star Environment Configuration"
 """Main header displayed before all configuration sections."""
 
 
-def _interactive(all_config: dict[str, list[EnvItem]]) -> None:
+def _interactive(all_config: dict[str, list["EnvItem"]]) -> None:
     """Format configuration for an interactive user."""
     show_headers = len(all_config) > 1
 
@@ -44,7 +47,7 @@ def _interactive(all_config: dict[str, list[EnvItem]]) -> None:
         print("\n")
 
 
-def _export(all_config: dict[str, list[EnvItem]]) -> None:
+def _export(all_config: dict[str, list["EnvItem"]]) -> None:
     """Format configuration as environment variable export statements."""
     header_sep = "#" * 80
     item_sep = f"# {'-' * 68}"

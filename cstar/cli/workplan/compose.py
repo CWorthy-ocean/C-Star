@@ -7,10 +7,7 @@ from pathlib import Path
 import typer
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME, get_env_item
-from cstar.base.utils import (
-    additional_files_dir,
-)
-from cstar.orchestration.dag_runner import build_and_run_dag
+from cstar.base.utils import additional_files_dir
 
 app = typer.Typer()
 
@@ -64,6 +61,8 @@ def create_host_workplan(
 
 def _run(wp_path: Path, output_path: Path, run_id: str) -> None:
     """Execute the DAG synchronously."""
+    from cstar.orchestration.dag_runner import build_and_run_dag
+
     try:
         asyncio.run(build_and_run_dag(wp_path, run_id, output_path))
         print(f"Completed execution of composed workplan: {wp_path}.")

@@ -5,7 +5,9 @@ from unittest import mock
 import pytest
 
 from cstar.io.source_data import SourceData
-from cstar.io.stager import CachedRemoteRepositoryStager as CRRS
+
+if t.TYPE_CHECKING:
+    from cstar.io.stager import CachedRemoteRepositoryStager as CRRS
 
 
 @pytest.fixture
@@ -36,7 +38,7 @@ def test_cached_stager(tmp_path: Path) -> None:
     stage_path = tmp_path / "my-roms"
 
     staged_data = source_data.stage(stage_path)
-    stager: CRRS = t.cast(CRRS, source_data.stager)
+    stager: CRRS = t.cast("CRRS", source_data.stager)
     cached_data_path = stager._get_cache_path()
 
     files_1 = {x.resolve().as_posix() for x in staged_data.path.iterdir()}

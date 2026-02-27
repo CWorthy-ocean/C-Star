@@ -1,15 +1,11 @@
 import datetime as dt
 from abc import ABC
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import coerce_datetime
 from cstar.io.source_data import SourceData
 from cstar.io.staged_data import StagedDataCollection, StagedFile
-
-if TYPE_CHECKING:
-    pass
 
 
 class InputDataset(ABC, LoggingMixin):

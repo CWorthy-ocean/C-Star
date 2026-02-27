@@ -1,4 +1,3 @@
-from collections.abc import Iterable, Iterator, Sequence
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,11 +16,14 @@ from cstar.io.constants import (
     SourceType,
 )
 from cstar.io.retriever import get_retriever
-from cstar.io.staged_data import StagedData, StagedDataCollection
+from cstar.io.staged_data import StagedDataCollection
 from cstar.io.stager import get_stager
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Sequence
+
     from cstar.io.retriever import Retriever
+    from cstar.io.staged_data import StagedData
     from cstar.io.stager import Stager
 
 
@@ -301,7 +303,7 @@ class SourceData:
 class SourceDataCollection:
     """Single class to hold a collection of related SourceData instances"""
 
-    def __init__(self, sources: Iterable[SourceData] = ()):
+    def __init__(self, sources: "Iterable[SourceData]" = ()):
         """Initialize the SourceDataCollection from a list of SourceData instances"""
         self._sources: list[SourceData] = list(sources)
         self._validate()
@@ -323,7 +325,7 @@ class SourceDataCollection:
     def __getitem__(self, idx: int) -> SourceData:
         return self._sources[idx]
 
-    def __iter__(self) -> Iterator[SourceData]:
+    def __iter__(self) -> "Iterator[SourceData]":
         return iter(self._sources)
 
     def append(self, source: SourceData) -> None:
@@ -338,8 +340,8 @@ class SourceDataCollection:
     @classmethod
     def from_locations(
         cls,
-        locations: Sequence[str | Path],
-        identifiers: Sequence[str | None] | None = None,
+        locations: "Sequence[str | Path]",
+        identifiers: "Sequence[str | None] | None" = None,
     ) -> "SourceDataCollection":
         """Create a SourceDataCollection from a list of locations with optional
         corresponding list of identifiers identifier list.
@@ -369,7 +371,7 @@ class SourceDataCollection:
         common_location: str,
         subdir: str = "",
         checkout_target: str = "",
-        files: Iterable[str] = (),
+        files: "Iterable[str]" = (),
     ) -> "SourceDataCollection":
         """Create a SourceDataCollection automatically by inspecting the contents of a common location.
 

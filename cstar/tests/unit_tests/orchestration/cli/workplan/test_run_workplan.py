@@ -67,7 +67,7 @@ def test_workplan_run_remote_workplan(
         A working URL referencing a valid workplan
     """
     with mock.patch(
-        "cstar.cli.workplan.run.build_and_run_dag",
+        "cstar.orchestration.dag_runner.build_and_run_dag",
         return_value=0,
     ) as mock_exec:
         run(wp_uri, "12345")

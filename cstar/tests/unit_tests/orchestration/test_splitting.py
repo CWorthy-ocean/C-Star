@@ -132,8 +132,8 @@ def test_splitter(single_step_workplan: Workplan) -> None:
 
     for i, step in enumerate(transformed_steps[:-1]):
         successor = transformed_steps[i + 1]
-        runtime_params = t.cast(dict, step.blueprint_overrides)["runtime_params"]
-        succ_runtime_params = t.cast(dict, successor.blueprint_overrides)[
+        runtime_params = t.cast("dict", step.blueprint_overrides)["runtime_params"]
+        succ_runtime_params = t.cast("dict", successor.blueprint_overrides)[
             "runtime_params"
         ]
 

@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import typing as t
 from multiprocessing import Process as MpProcess
 from subprocess import run as sprun
 
@@ -9,17 +10,15 @@ from psutil import Process as PsProcess
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Application, Step
-from cstar.orchestration.orchestration import (
-    Launcher,
-    LiveStep,
-    ProcessHandle,
-    Status,
-    Task,
-)
+from cstar.orchestration.models import Application
+from cstar.orchestration.orchestration import Launcher, ProcessHandle, Status, Task
+
+if t.TYPE_CHECKING:
+    from cstar.orchestration.models import Step
+    from cstar.orchestration.orchestration import LiveStep
 
 
-def run_as_process(step: Step, cmd: list[str]) -> dict[str, int]:
+def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
     p = sprun(args=cmd, text=True, check=False)
     return {step.name: p.returncode}
 
@@ -34,7 +33,7 @@ class LocalHandle(ProcessHandle):
 
     def __init__(
         self,
-        step: Step,
+        step: "Step",
         process: MpProcess,
         pid: int,
         start_at: datetime.datetime | float,
@@ -76,7 +75,7 @@ class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
     @staticmethod
-    async def _submit(step: Step, dependencies: list[LocalHandle]) -> LocalHandle:
+    async def _submit(step: "Step", dependencies: list[LocalHandle]) -> LocalHandle:
         """Submit a step to SLURM as a new batch allocation.
 
         Parameters
@@ -132,7 +131,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(step: Step, handle: LocalHandle) -> str:
+    async def _status(step: "Step", handle: LocalHandle) -> str:
         """Retrieve the status of a step running in local process.
 
         Parameters
@@ -162,7 +161,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         return status
 
     @classmethod
-    async def launch(cls, step: LiveStep, dependencies: list[LocalHandle]) -> Task:
+    async def launch(cls, step: "LiveStep", dependencies: list[LocalHandle]) -> Task:
         """Launch a step in local process.
 
         Parameters
@@ -204,7 +203,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
     @classmethod
     async def query_status(
-        cls, step: Step, item: Task[LocalHandle] | LocalHandle
+        cls, step: "Step", item: Task[LocalHandle] | LocalHandle
     ) -> Status:
         """Retrieve the status of an item.
 

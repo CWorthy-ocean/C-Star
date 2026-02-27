@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import typing as t
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from datetime import datetime, timedelta
@@ -12,12 +13,13 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.system.manager import cstar_sysmgr
 from cstar.system.scheduler import (
     PBSScheduler,
-    Queue,
-    Scheduler,
     SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
 )
+
+if t.TYPE_CHECKING:
+    from cstar.system.scheduler import Queue, Scheduler
 
 
 def get_status_of_slurm_job(job_id: str) -> ExecutionStatus:
@@ -428,12 +430,12 @@ class SchedulerJob(ExecutionHandler, ABC):
         return self._queue_name
 
     @property
-    def queue(self) -> Queue:
+    def queue(self) -> "Queue":
         """The queue to which the job will be submitted."""
         return self.scheduler.get_queue(self.queue_name)
 
     @property
-    def scheduler(self) -> Scheduler:
+    def scheduler(self) -> "Scheduler":
         """The scheduler managing this job (e.g., a SlurmScheduler or PBSScheduler
         instance)
         """

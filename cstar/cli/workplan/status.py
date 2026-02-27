@@ -8,8 +8,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from cstar.orchestration.dag_runner import load_dag_status
-
 app = typer.Typer()
 console = Console()
 
@@ -52,6 +50,8 @@ def status(
     if not path.exists():
         console.print(f"The workplan could not be found at `{path}`")
         raise typer.Exit(code=1)
+
+    from cstar.orchestration.dag_runner import load_dag_status
 
     try:
         status = asyncio.run(load_dag_status(path, run_id))

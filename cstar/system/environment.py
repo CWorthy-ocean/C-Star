@@ -106,7 +106,7 @@ class CStarEnvironment:
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nCompiler: {self.compiler}"
         base_str += f"\nMPI Exec Prefix: {self.mpi_exec_prefix}"
-        base_str += f"\nUses Lmod: {True if self.uses_lmod else False}"
+        base_str += f"\nUses Lmod: {self.uses_lmod}"
         base_str += "\nEnvironment Variables:"
         for key, value in self._env_vars.items():
             base_str += f"\n    {key}: {value}"

@@ -11,7 +11,6 @@ from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
-    Launcher,
     Orchestrator,
     Planner,
     RunMode,
@@ -25,6 +24,9 @@ from cstar.orchestration.transforms import (
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS, ENV_CSTAR_ORCH_REQD_ENV
 from cstar.system.manager import cstar_sysmgr
+
+if t.TYPE_CHECKING:
+    from cstar.orchestration.orchestration import Launcher
 
 log = get_logger(__name__)
 

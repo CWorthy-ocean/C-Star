@@ -6,7 +6,6 @@ import typer
 
 from cstar.cli.workplan.check import check
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.dag_runner import build_and_run_dag
 
 app = typer.Typer()
 
@@ -33,6 +32,8 @@ def run(
         return
 
     output_path = Path(output_dir) if output_dir else None
+
+    from cstar.orchestration.dag_runner import build_and_run_dag
 
     try:
         with local_copy(path) as wp_path:
