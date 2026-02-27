@@ -1,13 +1,13 @@
 import os
 import shutil
-import typing as t
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _get_sha256_hash, _run_cmd
 
-if t.TYPE_CHECKING:
+if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from cstar.io.source_data import SourceData
