@@ -37,6 +37,7 @@ Improvements
 
 - Improve error handling when `CachedRemoteRepositoryRetriever.refresh` fails
 - Validate inputs prior to execution with `cstar [blueprint|workplan] run`
+- Improve module load times
 
 Miscellaneous
 ~~~~~~~~~~~~~
