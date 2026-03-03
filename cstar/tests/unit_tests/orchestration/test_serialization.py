@@ -3,13 +3,31 @@ import uuid
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from cstar.orchestration.models import Application, Workplan
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
 
 
-def test_workplan_no_data(
+def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
+    """Verify that an aliased field is serialized and deserialized."""
+    exp_value = "foo"
+
+    class FakeModel(BaseModel):
+        value: str = Field(alias="the_value")
+
+    model = FakeModel(the_value=exp_value)
+    assert model.value == exp_value
+
+    serialize_to = tmp_path / "fake.json"
+
+    serialize(serialize_to, model, mode=PersistenceMode.auto)
+    reloaded = deserialize(serialize_to, FakeModel)
+
+    assert reloaded.value == model.value
+
+
+def test_serialization_workplan_no_data(
     tmp_path: Path,
 ) -> None:
     """Verify that an empty workplan yaml file fails to deserialize."""
@@ -35,7 +53,7 @@ def test_workplan_no_data(
         ),
     ],
 )
-def test_workplan_required_fields(
+def test_serialization_workplan_required_fields(
     tmp_path: Path,
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     attr_to_exclude: str,
@@ -70,7 +88,7 @@ def test_workplan_required_fields(
         "runtime_vars",
     ],
 )
-def test_workplan_optional_fields(
+def test_serialization_workplan_optional_fields(
     tmp_path: Path,
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     attr_to_empty: str,
@@ -97,7 +115,7 @@ def test_workplan_optional_fields(
     assert workplan.name == data["name"]
 
 
-def test_workplan_happy_path(
+def test_serialization_workplan_happy_path(
     tmp_path: Path,
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
@@ -126,7 +144,7 @@ def test_workplan_happy_path(
     assert workplan.steps[0].compute_overrides["num_nodes"] == 4
 
 
-def test_workplan_compute_env(
+def test_serialization_workplan_compute_env(
     tmp_path: Path,
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
@@ -162,7 +180,7 @@ def test_workplan_compute_env(
     assert compute_env[cpus_var] == cpus_val
 
 
-def test_workplan_runtime_vars(
+def test_serialization_workplan_runtime_vars(
     tmp_path: Path,
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
