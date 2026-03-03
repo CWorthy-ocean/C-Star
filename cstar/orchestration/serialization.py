@@ -211,7 +211,7 @@ def serialize(
         mode = _mode_detect(path)
 
     handlers = {
-        PersistenceMode.json: lambda model: model.model_dump_json(),
+        PersistenceMode.json: lambda model: model.model_dump_json(by_alias=True),
         PersistenceMode.yaml: model_to_yaml,
     }
 
