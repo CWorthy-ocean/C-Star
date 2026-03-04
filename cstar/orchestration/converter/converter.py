@@ -10,12 +10,11 @@ from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 if t.TYPE_CHECKING:
-    from cstar.orchestration.models import Step
-    from cstar.orchestration.orchestration import Launcher
+    from cstar.orchestration.orchestration import Launcher, LiveStep
 
 log = get_logger(__name__)
 
-StepToCommandConversionFn: t.TypeAlias = "t.Callable[[Step], str]"
+StepToCommandConversionFn: t.TypeAlias = "t.Callable[[LiveStep], str]"
 """Convert a `Step` into a command to be executed.
 
 Parameters
@@ -30,7 +29,7 @@ str
 """
 
 
-def convert_roms_step_to_command(step: "Step") -> str:
+def convert_roms_step_to_command(step: "LiveStep") -> str:
     """Convert a `Step` into a command to be executed.
 
     This function converts ROMS/ROMS-MARBL applications into a command triggering
@@ -38,7 +37,7 @@ def convert_roms_step_to_command(step: "Step") -> str:
 
     Parameters
     ----------
-    step : Step
+    step : LiveStep
         The step to be converted.
 
     Returns
@@ -50,7 +49,7 @@ def convert_roms_step_to_command(step: "Step") -> str:
     return f"{sys.executable} -m {worker_module}  -b {step.blueprint_path}"
 
 
-def convert_step_to_placeholder(step: "Step") -> str:
+def convert_step_to_placeholder(step: "LiveStep") -> str:
     """Convert a `Step` into a command to be executed.
 
     This function converts applications into mocks by starting a process that
@@ -58,7 +57,7 @@ def convert_step_to_placeholder(step: "Step") -> str:
 
     Parameters
     ----------
-    step : Step
+    step : LiveStep
         The step to be converted.
 
     Returns

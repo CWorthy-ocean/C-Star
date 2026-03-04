@@ -29,7 +29,6 @@ from cstar.orchestration.utils import (
 if t.TYPE_CHECKING:
     from prefect.context import TaskRunContext
 
-    from cstar.orchestration.models import Step
     from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
@@ -172,12 +171,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(step: "Step", handle: SlurmHandle) -> ExecutionStatus:
+    async def _status(step: "LiveStep", handle: SlurmHandle) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
         ----------
-        step : Step
+        step : LiveStep
             The step triggering the job.
         handle : SlurmHandle
             A handle object for a SLURM-based task.
@@ -224,13 +223,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @classmethod
     async def query_status(
-        cls, step: "Step", item: Task[SlurmHandle] | SlurmHandle
+        cls, step: "LiveStep", item: Task[SlurmHandle] | SlurmHandle
     ) -> Status:
         """Retrieve the status of an item.
 
         Parameters
         ----------
-        step : Step
+        step : LiveStep
             The step that will be queried for.
         item : Task[SlurmHandle] | SlurmHandle
             An item with a handle to be used to execute a status query.
