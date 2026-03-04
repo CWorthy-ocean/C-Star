@@ -6,8 +6,9 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.transforms import (
@@ -116,14 +117,20 @@ def test_sleep_transform_registry(application: str) -> None:
     assert not transform
 
 
-def test_splitter(single_step_workplan: Workplan) -> None:
+def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
     """Verify the splitter returns the expected steps for a given time range."""
     transform = RomsMarblTimeSplitter()
 
-    step = LiveStep.from_step(single_step_workplan.steps[0])
+    original_step = LiveStep.from_step(single_step_workplan.steps[0])
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
-        transformed_steps = list(transform(step))
+    # mock data home to ensure test works on HPC if scratch directories are identified
+    data_home = tmp_path / "data"
+    with mock.patch.dict(
+        os.environ,
+        {ENV_CSTAR_RUNID: "12345", ENV_CSTAR_DATA_HOME: data_home.as_posix()},
+        clear=True,
+    ):
+        transformed_steps = list(transform(original_step))
 
     # one step transforms into 12 monthly steps
     assert len(transformed_steps) == 12
@@ -159,7 +166,10 @@ def test_splitter(single_step_workplan: Workplan) -> None:
             # verify the initial conditions reference the prior step's time slice
             compact_sd = ed.strftime("%Y%m%d%H%M%S")
 
-            expected = f"output/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
+            # verify the joined reset files are used
+            join_dir = RomsFileSystemManager(step.fsm.root).joined_output_dir
+            expected = f"{join_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
+
             assert expected in str(ic_loc_successor)
 
         # verify successor starts right where current step ends
