@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
+from cstar.orchestration.orchestration import LiveStep, Status, Task
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
 
 
@@ -208,3 +210,57 @@ def test_serialization_workplan_runtime_vars(
     expected = set(expected_vars)
 
     assert actual == expected
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        PersistenceMode.json,
+        PersistenceMode.yaml,
+    ],
+)
+def test_serialization_task(tmp_path: Path, mode: PersistenceMode) -> None:
+    """Verify that a task can be properly serialized to disk and reloaded."""
+    pid, job_name = "test-pid", "abc123"
+    name, app, path, status = (
+        "test-step",
+        Application.ROMS_MARBL,
+        tmp_path / "blueprint.yaml",
+        Status.Done,
+    )
+
+    path.touch()
+
+    step = LiveStep(name=name, application=app, blueprint=path, depends_on=[])
+    handle = SlurmHandle(pid=pid, job_name=job_name)
+    task: Task[SlurmHandle] = Task(
+        step=step,
+        handle=handle,
+        status=status,
+    )
+
+    persist_as = task.persist_as()
+
+    # confirm the parametrized serialization mode is supported
+    nbytes = serialize(
+        persist_as,
+        task,
+        mode,
+    )
+    assert nbytes > 0
+
+    print(f"Task persisted to: {path}")
+    print(persist_as.read_text(encoding="utf-8"))
+
+    # confirm the output from `serialize` is valid and can be deserialized
+    dtask: Task[SlurmHandle] = deserialize(
+        persist_as,
+        Task[SlurmHandle],
+        mode,
+    )
+
+    assert dtask.status == task.status
+    assert dtask.step.name == task.step.name
+    assert dtask.handle.pid == task.handle.pid
+
+    # assert False

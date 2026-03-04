@@ -6,6 +6,7 @@ from subprocess import run as sprun
 
 from psutil import NoSuchProcess
 from psutil import Process as PsProcess
+from pydantic import PrivateAttr
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.utils import slugify
@@ -26,38 +27,17 @@ def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
 class LocalHandle(ProcessHandle):
     """Handle enabling reference to a task running in local processes."""
 
-    process: MpProcess
-    """The process handle (used only for simulating local processes)."""
-    start_at: float
+    start_at: datetime.datetime | float
     """The process creation time as a posix timestamp (in seconds)."""
 
-    def __init__(
-        self,
-        step: "Step",
-        process: MpProcess,
-        pid: int,
-        start_at: datetime.datetime | float,
-    ) -> None:
-        """Initialize the local handle.
+    _process: MpProcess = PrivateAttr()
+    """The process handle (used only for simulating local processes)."""
 
-        Parameters
-        ----------
-        step : Step
-            The step used to create the task.
-        pid : int
-            The process ID.
-        start_at : datetime
-            The process start time.
-        """
-        super().__init__(pid=str(pid))
-
-        self.step = step
-        self.process = process
-        self.start_at = (
-            start_at.timestamp()
-            if isinstance(start_at, datetime.datetime)
-            else start_at
-        )
+    @property
+    def start_ts(self) -> float:
+        if isinstance(self.start_at, datetime.datetime):
+            self.start_at = self.start_at.timestamp()
+        return self.start_at
 
     @property
     def elapsed(self) -> float:
@@ -68,7 +48,15 @@ class LocalHandle(ProcessHandle):
         float
         """
         now = datetime.datetime.now(tz=datetime.timezone.utc).timestamp()
-        return now - self.start_at
+        return now - self.start_ts
+
+    @property
+    def process(self) -> MpProcess:
+        return self._process
+
+    @process.setter
+    def process(self, value: MpProcess) -> None:
+        self._process = value
 
 
 class LocalLauncher(Launcher[LocalHandle]):

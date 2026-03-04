@@ -4,6 +4,8 @@ import typing as t
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
@@ -35,21 +37,11 @@ class RunMode(StrEnum):
     """Block until tasks are scheduled."""
 
 
-class ProcessHandle:
+class ProcessHandle(BaseModel):
     """Contract used to identify processes created by any launcher."""
 
     pid: str
     """The process identifier."""
-
-    def __init__(self, pid: str) -> None:
-        """Initialize the handle.
-
-        Parameters
-        ----------
-        pid : str
-            A unique ID identifying a running process.
-        """
-        self.pid = pid
 
 
 class Status(IntEnum):
@@ -166,11 +158,8 @@ class LiveStep(Step):
         return LiveStep(**step_attrs)
 
 
-class Task(t.Generic[_THandle]):
+class Task(BaseModel, t.Generic[_THandle]):
     """A task represents a live-execution of a step."""
-
-    status: Status
-    """Current task status."""
 
     step: LiveStep
     """The step containing task configuration."""
@@ -178,26 +167,29 @@ class Task(t.Generic[_THandle]):
     handle: _THandle
     """The unique process identifier for the task."""
 
-    def __init__(
-        self,
-        step: LiveStep,
-        handle: _THandle,
-        status: Status = Status.Unsubmitted,
-    ) -> None:
-        """Initialize the Task record.
+    status: Status = Status.Unsubmitted
+    """Current task status."""
 
-        Parameters
-        ----------
-        step : Step
-            The workplan `Step` that triggered the task to run
-        handle : _THandle
-            A handle that used to identify the running task.
-        status : Status
-            The current status of the task
-        """
-        self.status = status
-        self.step = step
-        self.handle = handle
+    # def __init__(
+    #     self,
+    #     step: LiveStep,
+    #     handle: _THandle,
+    #     status: Status = Status.Unsubmitted,
+    # ) -> None:
+    #     """Initialize the Task record.
+
+    #     Parameters
+    #     ----------
+    #     step : Step
+    #         The workplan `Step` that triggered the task to run
+    #     handle : _THandle
+    #         A handle that used to identify the running task.
+    #     status : Status
+    #         The current status of the task
+    #     """
+    #     self.status = status
+    #     self.step = step
+    #     self.handle = handle
 
 
 class Planner(LoggingMixin):
