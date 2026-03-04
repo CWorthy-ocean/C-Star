@@ -18,6 +18,8 @@ from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
+    intenum_representer,
+    register_representer,
     serialize,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
@@ -743,4 +745,4 @@ def configure_environment(
         os.environ[ENV_CSTAR_RUNID] = slugify(run_id)
 
 
-# register_representer(Status, intenum_representer)
+register_representer(Status, intenum_representer)

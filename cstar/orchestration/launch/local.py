@@ -192,11 +192,11 @@ class LocalLauncher(Launcher[LocalHandle]):
             msg = f"Dependency of step {step.name} failed. Unable to continue."
             raise CstarExpectationFailed(msg)
 
-        # live_step = LiveStep.from_step(step)
-        handle = await LocalLauncher._submit(step, dependencies)
+        live_step = LiveStep.from_step(step)
+        handle = await LocalLauncher._submit(live_step, dependencies)
         return Task(
             status=Status.Submitted,
-            step=step,
+            step=live_step,
             handle=handle,
         )
 
