@@ -324,7 +324,8 @@ class RomsMarblTimeSplitter(Transform):
 
     def __init__(self, frequency: str = SplitFrequency.Monthly.value) -> None:
         """Initialize the transform instance."""
-        self.frequency = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
+        freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
+        self.frequency = freq_config.lower()
 
     def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
         """Split a step into multiple sub-steps.
