@@ -6,8 +6,6 @@ import yaml
 from pydantic import BaseModel
 from yaml import safe_load
 
-from cstar.orchestration import models
-
 
 class PersistenceMode(enum.StrEnum):
     """Supported serialization engines."""
@@ -112,9 +110,6 @@ def model_to_yaml(model: BaseModel) -> str:
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
 
     register_representer(PosixPath, path_representer)
-    register_representer(models.WorkplanState, strenum_representer)
-    register_representer(models.Application, strenum_representer)
-    register_representer(models.BlueprintState, strenum_representer)
 
     return yaml.dump(dumped, sort_keys=False)
 
