@@ -32,7 +32,9 @@ Bug Fixes
 - Fix unhandled exceptions in `cstar [blueprint|workplan] check` with invalid paths
 - Fix posix-path conversion bug when passing blueprint URLs to `cstar blueprint run`
 - Fix case-sensitivity bug when configuring split frequency via `CSTAR_ORCH_TRX_FREQ` env variable
-- Fix a `JSON` serialization bug with pydantic models using field aliases  
+- Fix a `JSON` serialization bug with pydantic models using field aliases
+- Fix incorrect initial-conditions file paths created in `RomsMarblTimeSplitter`
+- Fix incorrect working directories resulting from `LiveStep.from_step` when a parent is specified
 
 Improvements
 ~~~~~~~~~~~~

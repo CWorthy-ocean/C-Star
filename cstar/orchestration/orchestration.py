@@ -160,6 +160,7 @@ class LiveStep(Step):
             step_attrs.update(update)
 
         if parent:
+            step_attrs.pop("work_dir", None)
             step_attrs["parent"] = LiveStep.from_step(parent).model_dump(by_alias=True)
 
         return LiveStep(**step_attrs)
