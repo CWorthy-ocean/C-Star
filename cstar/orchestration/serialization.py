@@ -111,9 +111,6 @@ def model_to_yaml(model: BaseModel) -> str:
     return yaml.dump(dumped, sort_keys=False)
 
 
-_DT = t.TypeVar("_DT", models.RomsMarblBlueprint, models.Workplan)
-
-
 def _mode_detect(path: Path) -> PersistenceMode:
     """Use the file extension to select the persistence mode.
 
@@ -133,9 +130,9 @@ def _mode_detect(path: Path) -> PersistenceMode:
 
 def deserialize(
     path: Path | str,
-    klass: type[_DT],
+    klass: type[_T],
     mode: PersistenceMode = PersistenceMode.auto,
-) -> _DT:
+) -> _T:
     """Deserialize a blueprint into a Simulation instance.
 
     Parameters
