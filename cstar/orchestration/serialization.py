@@ -57,6 +57,34 @@ def _read_yaml(path: Path, klass: type[_T]) -> _T:
         return klass.model_validate(model_dict)
 
 
+def path_representer(
+    dumper: yaml.Dumper,
+    data: PosixPath,
+) -> yaml.ScalarNode:
+    """Create a representer for converting PosixPath values to a serialized string."""
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+
+def strenum_representer(
+    dumper: yaml.Dumper,
+    data: enum.StrEnum,
+) -> yaml.ScalarNode:
+    """Create a representer for converting StrEnum values to a serialized string."""
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+
+_RT = t.TypeVar("_RT", enum.IntEnum, enum.StrEnum, PosixPath)
+
+
+def register_representer(
+    model_type: type[_RT],
+    conversion_fn: t.Callable[[yaml.Dumper, _RT], yaml.ScalarNode],
+) -> None:
+    """Register a yaml representer for the serialization of a specific entity type."""
+    dumper = yaml.Dumper
+    dumper.add_representer(model_type, conversion_fn)
+
+
 def model_to_yaml(model: BaseModel) -> str:
     """Serialize a model to yaml.
 
@@ -72,42 +100,15 @@ def model_to_yaml(model: BaseModel) -> str:
     """
     dumped = model.model_dump(exclude_defaults=True, by_alias=True)
 
-    def path_representer(
-        dumper: yaml.Dumper,
-        data: PosixPath,
-    ) -> yaml.ScalarNode:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
-
-    def application_representer(
-        dumper: yaml.Dumper,
-        data: models.Application,
-    ) -> yaml.ScalarNode:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
-
-    def blueprintstate_representer(
-        dumper: yaml.Dumper,
-        data: models.BlueprintState,
-    ) -> yaml.ScalarNode:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
-
-    def workplanstate_representer(
-        dumper: yaml.Dumper,
-        data: models.WorkplanState,
-    ) -> yaml.ScalarNode:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
-
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
 
-    dumper.add_representer(PosixPath, path_representer)
-    dumper.add_representer(models.WorkplanState, workplanstate_representer)
-    dumper.add_representer(models.Application, application_representer)
-    dumper.add_representer(models.BlueprintState, blueprintstate_representer)
+    register_representer(PosixPath, path_representer)
+    register_representer(models.WorkplanState, strenum_representer)
+    register_representer(models.Application, strenum_representer)
+    register_representer(models.BlueprintState, strenum_representer)
 
     return yaml.dump(dumped, sort_keys=False)
-
-
-_DT = t.TypeVar("_DT", models.RomsMarblBlueprint, models.Workplan)
 
 
 def _mode_detect(path: Path) -> PersistenceMode:
@@ -129,9 +130,9 @@ def _mode_detect(path: Path) -> PersistenceMode:
 
 def deserialize(
     path: Path | str,
-    klass: type[_DT],
+    klass: type[_T],
     mode: PersistenceMode = PersistenceMode.auto,
-) -> _DT:
+) -> _T:
     """Deserialize a blueprint into a Simulation instance.
 
     Parameters
@@ -211,7 +212,7 @@ def serialize(
         mode = _mode_detect(path)
 
     handlers = {
-        PersistenceMode.json: lambda model: model.model_dump_json(),
+        PersistenceMode.json: lambda model: model.model_dump_json(by_alias=True),
         PersistenceMode.yaml: model_to_yaml,
     }
 
