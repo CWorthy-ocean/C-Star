@@ -73,6 +73,14 @@ def strenum_representer(
     return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
 
 
+def intenum_representer(
+    dumper: yaml.Dumper,
+    data: enum.IntEnum,
+) -> yaml.ScalarNode:
+    """Create a representer for converting IntEnum values to a serialized string."""
+    return dumper.represent_scalar("tag:yaml.org,2002:int", str(data.value))
+
+
 _RT = t.TypeVar("_RT", enum.IntEnum, enum.StrEnum, PosixPath)
 
 
