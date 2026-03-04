@@ -12,7 +12,7 @@ from cstar.orchestration.converter.converter import (
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Application, Step
-from cstar.orchestration.orchestration import Launcher
+from cstar.orchestration.orchestration import Launcher, LiveStep
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 
@@ -49,10 +49,11 @@ def test_converter_defaults(
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    step = Step(
+    step = LiveStep(
         name="test step",
         application=target_application.value,
         blueprint=bp_path,
+        work_dir=tmp_path / "unit-test-work-dir",
     )
 
     mapped_fn = get_command_mapping(target_application, launcher_type)
@@ -89,10 +90,11 @@ def test_converter_registration(
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    step = Step(
+    step = LiveStep(
         name="test step",
         application=target_application.value,
         blueprint=bp_path,
+        work_dir=tmp_path / "unit-test-work-dir",
     )
 
     # ensure registration doesn't persist after test completes.

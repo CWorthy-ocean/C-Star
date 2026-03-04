@@ -65,13 +65,22 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     str
         The complete CLI command.
     """
+    if not step.fsm.work_dir.exists():
+        step.fsm.work_dir.mkdir(parents=True)
+
     sleep_time = random.randint(1, 10)
-    return textwrap.dedent(f"""\
+    script = textwrap.dedent(f"""\
         # this is a mock application script that produces verifiable output
         echo "{step.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
         sleep {sleep_time};
         echo "{step.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
         """)
+
+    # write it to a script asset
+    script_path = step.fsm.work_dir / "script.sh"
+    script_path.write_text(script)
+
+    return f"sh {script_path}"
 
 
 launcher_aware_app_to_cmd_map: dict[
