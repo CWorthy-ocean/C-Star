@@ -90,6 +90,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         cmd = step_converter(step)
 
         try:
+            if not step.fsm.root.exists():
+                step.fsm.prepare()
+
             mp_process = MpProcess(
                 target=run_as_process,
                 name=slugify(step.name),
@@ -111,12 +114,13 @@ class LocalLauncher(Launcher[LocalHandle]):
                 except NoSuchProcess:
                     print(f"Unable to retrieve exact start time for pid: {pid}")
 
-                return LocalHandle(
-                    step,
-                    mp_process,
-                    pid,
-                    create_time,
+                handle = LocalHandle(
+                    pid=str(pid),
+                    start_at=create_time,
                 )
+                handle.process = mp_process
+                return handle
+
         finally:
             ...
 
@@ -170,7 +174,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         Task[LocalHandle]
             A Task containing information about the newly submitted job.
         """
-        tasks = [asyncio.Task(cls.query_status(h.step, h)) for h in dependencies]
+        tasks = [asyncio.Task(cls.query_status(step, h)) for h in dependencies]
         statuses = await asyncio.gather(*tasks)
         active_found = any(map(Status.is_running, statuses))
         failure_found = any(map(Status.is_failure, statuses))
@@ -179,7 +183,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         while active_found and not failure_found:
             await asyncio.sleep(1)
 
-            tasks = [asyncio.Task(cls.query_status(h.step, h)) for h in dependencies]
+            tasks = [asyncio.Task(cls.query_status(step, h)) for h in dependencies]
             statuses = await asyncio.gather(*tasks)
             active_found = any(map(Status.is_running, statuses))
             failure_found = any(map(Status.is_failure, statuses))
@@ -188,6 +192,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             msg = f"Dependency of step {step.name} failed. Unable to continue."
             raise CstarExpectationFailed(msg)
 
+        # live_step = LiveStep.from_step(step)
         handle = await LocalLauncher._submit(step, dependencies)
         return Task(
             status=Status.Submitted,

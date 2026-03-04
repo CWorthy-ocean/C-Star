@@ -214,12 +214,35 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
         """
-        handle = await SlurmLauncher._submit(step, dependencies)
-        return Task(
-            status=Status.Submitted,
+        # item is persisted to a name that is shared by all instances
+        persist_as = Task.persist_step_as(step)
+        prior = Task.load_persisted(persist_as)
+        handle: ProcessHandle | None = None
+        submit_fn = SlurmLauncher._submit
+
+        # TODO: consider loading persisted values all at once during startup instead
+        if prior:  #  and prior.task.status != Status.Done:
+            # always retrieve real-deal in case persisting status updates failed.
+            last_status = await SlurmLauncher.query_status(step, prior.handle)
+            if Status.is_failure(last_status):
+                # if the task terminated in a failure code, we'll re-run it.
+                # - we don't re-run successful tasks
+                persist_as.unlink()
+                submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
+
+        handle = await submit_fn(step, dependencies)
+
+        task: Task[SlurmHandle] = Task(
             step=step,
             handle=handle,
+            status=Status.Submitted,
         )
+        if not task.persist():
+            # todo: if i raise, it's not really necessary to raise.... ignore?
+            msg = f"Failure when persisting step: {step.safe_name}"
+            print(msg)
+
+        return task
 
     @classmethod
     async def query_status(

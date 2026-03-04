@@ -15,6 +15,11 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
 )
 from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    serialize,
+)
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
 
 nx = lazy_import("networkx")
@@ -170,26 +175,32 @@ class Task(BaseModel, t.Generic[_THandle]):
     status: Status = Status.Unsubmitted
     """Current task status."""
 
-    # def __init__(
-    #     self,
-    #     step: LiveStep,
-    #     handle: _THandle,
-    #     status: Status = Status.Unsubmitted,
-    # ) -> None:
-    #     """Initialize the Task record.
+    @classmethod
+    def persist_step_as(
+        cls,
+        step: LiveStep,
+        *,
+        mode: PersistenceMode = PersistenceMode.yaml,
+    ) -> Path:
+        extension = "yml" if mode == PersistenceMode.yaml else "json"
+        return step.fsm.tasks_dir / f"{step.safe_name}.{extension}"
 
-    #     Parameters
-    #     ----------
-    #     step : Step
-    #         The workplan `Step` that triggered the task to run
-    #     handle : _THandle
-    #         A handle that used to identify the running task.
-    #     status : Status
-    #         The current status of the task
-    #     """
-    #     self.status = status
-    #     self.step = step
-    #     self.handle = handle
+    def persist_as(
+        self,
+        *,
+        mode: PersistenceMode = PersistenceMode.yaml,
+    ) -> Path:
+        return Task.persist_step_as(self.step, mode=mode)
+
+    def persist(self, *, mode: PersistenceMode = PersistenceMode.yaml) -> bool:
+        return serialize(Task.persist_step_as(self.step, mode=mode), self) > 0
+
+    @classmethod
+    def load_persisted(cls, path: Path) -> "Task | None":
+        if not path.exists():
+            return None
+
+        return deserialize(path, Task)
 
 
 class Planner(LoggingMixin):
@@ -730,3 +741,6 @@ def configure_environment(
 
     if run_id:
         os.environ[ENV_CSTAR_RUNID] = slugify(run_id)
+
+
+# register_representer(Status, intenum_representer)
