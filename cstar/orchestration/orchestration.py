@@ -409,7 +409,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
         Parameters
         ----------
-        step : Step
+        step : LiveStep
             The step to launch
 
         Returns
