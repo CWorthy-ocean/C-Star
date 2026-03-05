@@ -16,7 +16,6 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import (
     Application,
     RomsMarblBlueprint,
@@ -413,8 +412,8 @@ class RomsMarblTimeSplitter(Transform):
             # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
             reset_file_name = f"{output_root_name}_rst.{compact_ed}.000.nc"
 
-            roms_fsm = RomsFileSystemManager(child_step.fsm.root)
-            restart_file_path = roms_fsm.joined_output_dir / reset_file_name
+            step_output_dir = child_fs.output_dir
+            restart_file_path = step_output_dir / reset_file_name
 
             # use output dir of the last step as the input for the next step
             last_restart_file = restart_file_path
