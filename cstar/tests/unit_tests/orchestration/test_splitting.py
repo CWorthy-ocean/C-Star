@@ -8,7 +8,6 @@ import pytest
 
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.transforms import (
@@ -167,8 +166,8 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
             compact_sd = ed.strftime("%Y%m%d%H%M%S")
 
             # verify the joined reset files are used
-            join_dir = RomsFileSystemManager(step.fsm.root).joined_output_dir
-            expected = f"{join_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
+            out_dir = step.fsm.output_dir
+            expected = f"{out_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
 
             assert expected in str(ic_loc_successor)
 
