@@ -264,7 +264,10 @@ class Service(ABC, LoggingMixin):
             """
             elapsed = time.time() - start_at
             user_freq = config.health_check_frequency or 0
-            return user_freq - elapsed
+            raw_remaining = user_freq - elapsed
+
+            # never allow exactly 0 wait (causing a busy-wait loop)
+            return max(raw_remaining, Service.MIN_HCF)
 
         last_health_check = time.time()  # timestamp of last health check
         num_missed = 0
