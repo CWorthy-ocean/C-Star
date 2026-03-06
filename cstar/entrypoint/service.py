@@ -384,10 +384,9 @@ class Service(ABC, LoggingMixin):
             try:
                 await self._on_iteration()
                 self._on_iteration_complete()
-            except Exception as e:
+            except Exception:
                 running = False
                 self.log.exception("Terminating service due to failure in event loop.")
-                exc = e
                 continue
 
             # shutdown if not set to run as a service
