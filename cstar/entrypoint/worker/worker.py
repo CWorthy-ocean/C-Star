@@ -258,7 +258,6 @@ class SimulationRunner(Service):
                     self.log.debug("Skipping simulation run")
             else:
                 await self._handler.updates(seconds=1.0)
-                self._send_update_to_hc({"status": str(self._handler.status)})
         except Exception:
             self.log.exception("An error occurred while running the simulation")
 
