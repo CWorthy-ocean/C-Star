@@ -3,11 +3,10 @@ import logging
 import signal
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
 from multiprocessing import Queue
-from queue import Empty
+from queue import Empty, Full
 from threading import Thread
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, ClassVar, Final, Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -43,6 +42,10 @@ class ServiceConfiguration(BaseModel):
     name: str = "Service"
     """A user-friendly name for logging."""
 
+    @property
+    def healthcheck_enabled(self) -> bool:
+        return self.health_check_frequency is not None
+
     @computed_field  # type: ignore[misc]
     @property
     def max_health_check_latency(self) -> float:
@@ -50,7 +53,7 @@ class ServiceConfiguration(BaseModel):
 
         When no healthcheck frequency is supplied, defaults to 1 second.
         """
-        if self.health_check_frequency is None or self.health_check_frequency == 0:
+        if not self.health_check_frequency:
             return 1.0
 
         return self.health_check_frequency * self.health_check_log_threshold
@@ -65,6 +68,7 @@ class Service(ABC, LoggingMixin):
 
     CMD_PREFIX: Literal["cmd"] = "cmd"
     CMD_QUIT: Literal["quit"] = "quit"
+    MIN_HCF: ClassVar[Final[float]] = 0.01
 
     def __init__(
         self,
@@ -204,56 +208,27 @@ class Service(ABC, LoggingMixin):
         """
         self.log.debug(f"Service delay for {self._service_type}")
 
-    def _create_hc_update(self, content: dict[str, str]) -> dict[str, str]:
-        """Create a health check update message.
-
-        Parameters
-        ----------
-        content: dict[str, str]
-            Key-value mapping of content to include in the health check update.
-
-        Returns
-        -------
-        dict[str, str]
-            The complete content of a health check update ready to be sent.
-        """
-        update_base = {"ts": datetime.now(tz=timezone.utc).isoformat()}
-        update_base.update(content)
-        return update_base
-
-    def _send_update_to_hc(self, content: dict[str, str]) -> None:
-        """Send an update to the health check thread.
-
-        Parameters
-        ----------
-        content: dict[str, str]
-            Key-value mapping of content to include in the health check update.
+    def _acknowledge_hc(self) -> None:
+        """Confirm any requests for an update from the health check queue.
 
         Returns
         -------
         None
         """
-        if self._hc_queue:
-            msg = self._create_hc_update(content)
-            self._hc_queue.put_nowait(msg)
-        else:
+        if not self._config.healthcheck_enabled:
+            return
+
+        if self._hc_queue is None:
             self.log.debug("No healthcheck queue available")
+            return
 
-    def _send_terminate_to_hc(self, reason: str) -> None:
-        """Send a termination message to the health check thread.
-
-        Parameters
-        ----------
-        reason: str
-            A string describing the reason for termination.
-
-        Returns
-        -------
-        None
-        """
-        self.log.debug("Terminating healthcheck")
-        self._send_update_to_hc({self.CMD_PREFIX: self.CMD_QUIT, "reason": reason})
-        self._send_update_to_hc({"cmd": "quit", "reason": reason})
+        # ACK any requests for HC updates
+        try:
+            if self._hc_queue.get_nowait():
+                self._on_health_check()
+        except Empty:
+            # nothing to ACK
+            ...
 
     def _healthcheck(
         self,
@@ -283,42 +258,43 @@ class Service(ABC, LoggingMixin):
             self.log.debug("Health check disabled.")
             return
 
+        def _get_remaining_wait(start_at: float) -> float:
+            """Determine the remaining time before the next health check message
+            is expected.
+            """
+            elapsed = time.time() - start_at
+            user_freq = config.health_check_frequency or 0
+            return user_freq - elapsed
+
         last_health_check = time.time()  # timestamp of last health check
+        num_missed = 0
         running = True
-        hc_elapsed = 0.0
 
         while running:
+            raw_remaining = _get_remaining_wait(last_health_check)
+            remaining = max(raw_remaining, Service.MIN_HCF)
+            time.sleep(remaining)
+
             try:
-                hc_elapsed = time.time() - last_health_check
-                hcf_remaining = config.health_check_frequency - hc_elapsed
-                remaining_wait = max(hcf_remaining, 0)
-
-                # report large gaps between updates.
-                if hc_elapsed > config.max_health_check_latency:
-                    self.log.warning(
-                        f"No health update in last {hc_elapsed:.2f} seconds."
-                    )
-
-                if msg := msg_queue.get_nowait():
-                    if hc_elapsed >= config.health_check_frequency:
-                        self._on_health_check()
-                        last_health_check = time.time()
-
-                    command = msg.get(self.CMD_PREFIX, None)
-                    if not command:
-                        self.log.info(
-                            f"Healthcheck thread received message: {msg}",
-                        )
-                    elif command == self.CMD_QUIT:
-                        running = False
-                else:
-                    time.sleep(remaining_wait)
-
-            except Empty:  # noqa: PERF203
-                ...  # ignore empty queue; just wait for shutdown msg
+                msg_queue.put(None, timeout=1.0)
+                self._on_health_check()
+            except Full:
+                # message was not acknowledged in expected timeframe
+                num_missed += 1
+                last_health_check = time.time()
             except Exception:  # noqa: BLE001
-                # queue was shutdown on other side. ignore and exit.
+                # queue was shutdown on other side, exit HC loop
                 running = False
+            else:
+                last_health_check = time.time()
+                num_missed = 0
+
+            # only report consecutive gaps.
+            if num_missed > config.health_check_log_threshold:
+                self.log.warning(
+                    f"No successful health checks in {num_missed} attempts."
+                )
+                num_missed = 0  # reset to avoid spamming log
 
     def _start_healthcheck(self) -> None:
         """Create a thread for health check updates.
@@ -326,10 +302,13 @@ class Service(ABC, LoggingMixin):
         The health check thread is not blocked by the main thread when service
         operations are blocking.
         """
-        if self._config.health_check_frequency is None:
+        if self.is_healthcheck_queue_ready:
+            # health check is already running
             return
 
-        if self._config.health_check_frequency >= 0:
+        freq = self._config.health_check_frequency
+
+        if freq is not None and freq >= 0:
             self.log.debug(
                 "Starting healthcheck thread w/frequency: %s.",
                 self._config.health_check_frequency,
@@ -344,6 +323,7 @@ class Service(ABC, LoggingMixin):
                 self._hc_thread = Thread(
                     target=self._healthcheck,
                     name=thread_name,
+                    daemon=True,
                     kwargs={
                         "config": self._config,
                         "msg_queue": self._hc_queue,
@@ -351,21 +331,15 @@ class Service(ABC, LoggingMixin):
                 )
                 self._hc_thread.start()
 
-    def _terminate_hc(self, reason: str) -> None:
+    def _terminate_hc(self) -> None:
         """Send a termination message to the healthcheck thread.
 
         After sending signal, waits for the thread to complete prior to returning.
-
-        Parameters
-        ----------
-        reason: str
-            A string describing the reason for termination.
 
         Returns
         -------
         None
         """
-        self._send_terminate_to_hc(reason=reason)
         if self._hc_thread and self._hc_thread.is_alive():
             self._hc_thread.join(timeout=1.0)
 
@@ -378,7 +352,7 @@ class Service(ABC, LoggingMixin):
         self.log.debug("Shutting down service.")
 
         try:
-            self._terminate_hc("Run complete")
+            self._terminate_hc()
             self._on_shutdown()
         except Exception:
             self.log.debug("Service shutdown may not have completed.")
@@ -403,6 +377,8 @@ class Service(ABC, LoggingMixin):
             exc = e
 
         while running:
+            self._acknowledge_hc()
+
             try:
                 await self._on_iteration()
                 self._on_iteration_complete()
@@ -435,8 +411,6 @@ class Service(ABC, LoggingMixin):
                         "Terminating service due to failure in _on_delay."
                     )
                     exc = e
-
-            self._send_update_to_hc({self.CMD_PREFIX: "heartbeat"})
 
         self._shutdown()
 

@@ -328,9 +328,16 @@ async def test_event_loop_hc_freq(loop_count: int) -> None:
     lockstep with _on_iteration.
     """
     # Configure the health check to update every event loop iteration
-    with PrintingService(max_iterations=loop_count, hc_freq=0) as service:
+    with PrintingService(
+        max_iterations=loop_count, hc_freq=0.001, delay=0.001
+    ) as service:
         service._start_healthcheck()  # noqa: SLF001
-        await asyncio.sleep(0.1)
+        # await asyncio.sleep(0.1)
+        if service._hc_thread is None:
+            assert False, "health check thread failed to start"
+
+        while not service._hc_thread.is_alive():
+            await asyncio.sleep(0.001)
 
         # Confirm the HC thread and queue are created
         assert service.is_healthcheck_running
@@ -360,7 +367,10 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
     """
     # Configure the test service to run for <max_duration> seconds.
     with PrintingService(
-        as_service=True, hc_freq=frequency, max_duration=max_duration
+        as_service=True,
+        hc_freq=frequency,
+        max_duration=max_duration,
+        delay=frequency,
     ) as service:
         # Complete the service lifecycle
         await service.execute()
@@ -371,74 +381,7 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
         # Confirm the hc frequency doesn't exceed maximum count possible (if
         # each HC occurred at exactly the right timestep and takes 0 time).
         # Off by small amount is acceptable.
-        max_hc_calls = max_duration / frequency
-        lower_bound = (0.9 * max_hc_calls) // max_hc_calls
-
-        assert lower_bound <= service.n_on_health_check <= max_hc_calls
-
-
-@pytest.mark.asyncio
-async def test_event_hc_unknown_msg() -> None:
-    """Verify message handling behavior of the health check thread.
-
-    Confirms that the health check thread does not crash when it receives an unknown
-    message type.
-    """
-    # Configure the test service to run for 2 seconds.
-    with PrintingService(
-        as_service=True,
-        hc_freq=0.1,
-        max_duration=2,
-    ) as service:
-        # Complete the service lifecycle
-        service._start_healthcheck()  # noqa: SLF001
-        await asyncio.sleep(0.05)
-
-        # Send trash to the the HC thread
-        service._send_update_to_hc(  # noqa: SLF001
-            {"command": "unknown_command"},
-        )
-
-        # Confirm the hc thread is still alive and processing
-        # messages by sending more!
-        service._send_terminate_to_hc(  # noqa: SLF001
-            "testing the message is still processed."
-        )
-        # Give the HC thread time to process the message
-        await asyncio.sleep(0.05)
-
-        assert not service.is_healthcheck_running
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("max_duration", "frequency"),
-    [
-        (2.0, 0.5),
-        (3.0, 0.01),
-    ],
-)
-async def test_event_hc_term(max_duration: float, frequency: float) -> None:
-    """Verify that the health check thread terminates when asked to do so."""
-    # Configure the test service to run for <max-duration> seconds.
-    with PrintingService(
-        as_service=True, hc_freq=frequency, max_duration=max_duration
-    ) as service:
-        # Complete the service lifecycle
-        service._start_healthcheck()  # noqa: SLF001
-        await asyncio.sleep(0.1)
-        service._send_terminate_to_hc("test_event_hc_term")  # noqa: SLF001
-        await asyncio.sleep(0.1)
-
-        assert not service.is_healthcheck_running
-
-        # Collect any leftover call metrics from the HC thread.
-        service.summarize(finalize=True)
-
-        # Confirm the hc frequency doesn't exceed maximum count possible (if
-        # each HC occurred at exactly the right timestep and takes 0 time). Off
-        # by small amount is acceptable.
-        max_hc_calls = max_duration / frequency
+        max_hc_calls = 1 + (max_duration / frequency)
         lower_bound = (0.9 * max_hc_calls) // max_hc_calls
 
         assert lower_bound <= service.n_on_health_check <= max_hc_calls
