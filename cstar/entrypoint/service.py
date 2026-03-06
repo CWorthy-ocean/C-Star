@@ -71,7 +71,6 @@ class Service(ABC, LoggingMixin):
     health checks, and for specifying shutdown criteria.
     """
 
-    CMD_KEY: Literal["cmd"] = "cmd"
     CMD_HEARTBEAT: Literal["heartbeat"] = "heartbeat"
     MIN_HCF: ClassVar[float] = 0.01
 
