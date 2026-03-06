@@ -3,8 +3,7 @@ import logging
 import signal
 import time
 from abc import ABC, abstractmethod
-from multiprocessing import Queue
-from queue import Empty, Full
+from queue import Empty, Full, Queue
 from threading import Thread
 from typing import TYPE_CHECKING, ClassVar, Final, Literal
 
