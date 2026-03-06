@@ -68,7 +68,14 @@ class Service(ABC, LoggingMixin):
 
     CMD_PREFIX: Literal["cmd"] = "cmd"
     CMD_QUIT: Literal["quit"] = "quit"
-    MIN_HCF: ClassVar[Final[float]] = 0.01
+    MIN_HCF: ClassVar[float] = 0.01
+
+    _config: Final[ServiceConfiguration]
+    """Runtime configuration of the `Service`"""
+    _hc_thread: Thread | None = None
+    """A thread for executing an unblocked healthcheck callback."""
+    _hc_queue: Queue | None = None
+    """A queue for sending shutdown messages to the healthcheck thread."""
 
     def __init__(
         self,
@@ -83,12 +90,6 @@ class Service(ABC, LoggingMixin):
         """
         self._config = config
         """Runtime configuration of the `Service`"""
-
-        self._hc_thread: Thread | None = None
-        """A thread for executing an unblocked healthcheck callback."""
-        self._hc_queue: Queue | None = None
-        """A queue for sending shutdown messages to the healthcheck thread."""
-
         self._register_signal_handlers()
 
     @property
