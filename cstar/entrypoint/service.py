@@ -4,7 +4,7 @@ import signal
 import time
 from abc import ABC, abstractmethod
 from queue import Empty, Full, Queue
-from threading import Thread
+from threading import Event, Thread
 from typing import TYPE_CHECKING, ClassVar, Final, Literal
 
 from pydantic import BaseModel, Field, computed_field
@@ -65,8 +65,8 @@ class Service(ABC, LoggingMixin):
     health checks, and for specifying shutdown criteria.
     """
 
-    CMD_PREFIX: Literal["cmd"] = "cmd"
-    CMD_QUIT: Literal["quit"] = "quit"
+    CMD_KEY: Literal["cmd"] = "cmd"
+    CMD_HEARTBEAT: Literal["heartbeat"] = "heartbeat"
     MIN_HCF: ClassVar[float] = 0.01
 
     _config: Final[ServiceConfiguration]
@@ -75,6 +75,8 @@ class Service(ABC, LoggingMixin):
     """A thread for executing an unblocked healthcheck callback."""
     _hc_queue: Queue | None = None
     """A queue for sending shutdown messages to the healthcheck thread."""
+    _hc_stop_event: Final[Event]
+    """An event triggering health-check thread termination."""
 
     def __init__(
         self,
@@ -88,7 +90,7 @@ class Service(ABC, LoggingMixin):
             Configuration to modify the behavior of the service.
         """
         self._config = config
-        """Runtime configuration of the `Service`"""
+        self._hc_stop_event = Event()
         self._register_signal_handlers()
 
     @property
@@ -208,7 +210,7 @@ class Service(ABC, LoggingMixin):
         """
         self.log.debug(f"Service delay for {self._service_type}")
 
-    def _acknowledge_hc(self) -> None:
+    def acknowledge_hc(self) -> None:
         """Confirm any requests for an update from the health check queue.
 
         Returns
@@ -222,10 +224,15 @@ class Service(ABC, LoggingMixin):
             self.log.debug("No healthcheck queue available")
             return
 
-        # ACK any requests for HC updates
         try:
-            if self._hc_queue.get_nowait():
-                self._on_health_check()
+            match self._hc_queue.get_nowait():
+                case Service.CMD_HEARTBEAT:
+                    # ACK any requests for HC updates
+                    self.log.debug("Health check succeeded")
+                    self._on_health_check()
+                case message:
+                    msg = f"Health check sent unknown message: {message}"
+                    self.log.debug(msg)
         except Empty:
             # nothing to ACK
             ...
@@ -271,25 +278,22 @@ class Service(ABC, LoggingMixin):
 
         last_health_check = time.time()  # timestamp of last health check
         num_missed = 0
-        running = True
 
-        while running:
-            raw_remaining = _get_remaining_wait(last_health_check)
-            remaining = max(raw_remaining, Service.MIN_HCF)
-            time.sleep(remaining)
+        while not self._hc_stop_event.is_set():
+            remaining = _get_remaining_wait(last_health_check)
+            if self._hc_stop_event.wait(timeout=remaining):
+                return
+
+            last_health_check = time.time()
 
             try:
-                msg_queue.put(None, timeout=1.0)
-                self._on_health_check()
+                msg_queue.put(self.CMD_HEARTBEAT, timeout=0.1)
             except Full:
                 # message was not acknowledged in expected timeframe
                 num_missed += 1
-                last_health_check = time.time()
             except Exception:  # noqa: BLE001
                 # queue was shutdown on other side, exit HC loop
-                running = False
-            else:
-                last_health_check = time.time()
+                self._hc_stop_event.set()
                 num_missed = 0
 
             # only report consecutive gaps.
@@ -342,8 +346,14 @@ class Service(ABC, LoggingMixin):
         -------
         None
         """
-        if self._hc_thread and self._hc_thread.is_alive():
-            self._hc_thread.join(timeout=1.0)
+        self._hc_stop_event.set()
+
+        if self._hc_thread is not None:
+            self._hc_thread.join(timeout=10)
+
+            if self._hc_thread.is_alive():
+                msg = "Health check thread did not terminate before timeout"
+                self.log.warning(msg)
 
     def _shutdown(self) -> None:
         """Perform a clean shutdown of the service.
@@ -379,9 +389,8 @@ class Service(ABC, LoggingMixin):
             exc = e
 
         while running:
-            self._acknowledge_hc()
-
             try:
+                self.acknowledge_hc()
                 await self._on_iteration()
                 self._on_iteration_complete()
             except Exception:
