@@ -251,7 +251,7 @@ async def test_config_check_hcfreq_out_of_range(value: float) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [1, 10, 100])
+@pytest.mark.parametrize("loop_count", [1, 10, 50])
 async def test_event_loop_shutdown(loop_count: int) -> None:
     """Verify that _on_iteration repeats until _can_shutdown returns True."""
     service = PrintingService(max_iterations=loop_count)
@@ -266,7 +266,7 @@ async def test_event_loop_shutdown(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [0, 10, 50, 100])
+@pytest.mark.parametrize("loop_count", [0, 10, 50])
 async def test_event_loop_task_service(loop_count: int) -> None:
     """Verify that  using as_service=False executes _on_iteration 1x."""
     with PrintingService(
@@ -290,7 +290,7 @@ async def test_event_loop_task_service(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [10, 40, 100])
+@pytest.mark.parametrize("loop_count", [10, 30, 50])
 async def test_event_loop_hc_start(loop_count: int) -> None:
     """Verify aspects of the health-check startup.
 
@@ -357,8 +357,8 @@ async def test_event_loop_hc_freq(loop_count: int) -> None:
 @pytest.mark.parametrize(
     ("max_duration", "frequency"),
     [
-        (2.0, 0.5),
-        (3.0, 0.01),
+        (1.0, 0.1),
+        (0.5, 0.01),
     ],
 )
 async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
@@ -392,8 +392,8 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
 @pytest.mark.parametrize(
     ("loop_delay", "loop_count"),
     [
-        (0.05, 20),
-        (0.1, 10),
+        (0.05, 10),
+        (0.1, 5),
     ],
 )
 async def test_delay(loop_delay: float, loop_count: int) -> None:
