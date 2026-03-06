@@ -7,18 +7,12 @@ import types
 import typing as t
 from collections import defaultdict
 from math import ceil
-from threading import Thread
 from unittest import mock
 
 import pytest
 from pydantic import ValidationError
 
 from cstar.entrypoint.service import Service, ServiceConfiguration
-
-
-def _wait_for_thread_alive(thread: Thread) -> None:
-    while not thread.is_alive():
-        time.sleep(0.00001)
 
 
 class PrintingService(Service):
