@@ -35,6 +35,7 @@ Bug Fixes
 - Fix a `JSON` serialization bug with pydantic models using field aliases
 - Fix incorrect initial-conditions file paths created in `RomsMarblTimeSplitter`
 - Fix incorrect working directories resulting from `LiveStep.from_step` when a parent is specified
+- Fix failure to terminate health check thread
 
 Improvements
 ~~~~~~~~~~~~
@@ -43,6 +44,8 @@ Improvements
 - Validate inputs prior to execution with `cstar [blueprint|workplan] run`
 - Improve module load times
 - Extract nested/duplicate `YAML` representer functions for re-use
+- Replace use of incorrect `mp.Queue` where `queue.Queue` is appropriate
+- Replace blocking `time.sleep` usage in health check thread 
 
 Miscellaneous
 ~~~~~~~~~~~~~
