@@ -4,6 +4,7 @@ import multiprocessing as mp
 import queue
 import time
 import types
+import typing as t
 from collections import defaultdict
 from unittest import mock
 
@@ -144,7 +145,7 @@ class PrintingService(Service):
 
         return self.metrics
 
-    def __enter__(self) -> "PrintingService":
+    def __enter__(self) -> t.Self:
         """Context manager entry point."""
         return self
 
