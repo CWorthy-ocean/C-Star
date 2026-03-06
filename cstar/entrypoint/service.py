@@ -294,9 +294,8 @@ class Service(ABC, LoggingMixin):
 
             # only report consecutive gaps.
             if num_missed > config.health_check_log_threshold:
-                self.log.warning(
-                    f"No successful health checks in {num_missed} attempts."
-                )
+                msg = f"No successful health checks in {num_missed} attempts."
+                self.log.warning(msg)
                 num_missed = 0  # reset to avoid spamming log
 
     def _start_healthcheck(self) -> None:
