@@ -7,7 +7,7 @@ from queue import Empty, Full, Queue
 from threading import Event, Thread
 from typing import TYPE_CHECKING, ClassVar, Final, Literal
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field
 
 from cstar.base.log import LoggingMixin
 
@@ -50,18 +50,6 @@ class ServiceConfiguration(BaseModel):
         bool
         """
         return self.health_check_frequency is not None
-
-    @computed_field  # type: ignore[misc]
-    @property
-    def max_health_check_latency(self) -> float:
-        """Get the max latency allowed before missed health checks should be logged.
-
-        When no healthcheck frequency is supplied, defaults to 1 second.
-        """
-        if not self.health_check_frequency:
-            return 1.0
-
-        return self.health_check_frequency * self.health_check_log_threshold
 
 
 class Service(ABC, LoggingMixin):
