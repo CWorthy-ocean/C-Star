@@ -43,6 +43,12 @@ class ServiceConfiguration(BaseModel):
 
     @property
     def healthcheck_enabled(self) -> bool:
+        """Return `True` when the health check frequency is non-null.
+
+        Returns
+        -------
+        bool
+        """
         return self.health_check_frequency is not None
 
     @computed_field  # type: ignore[misc]
