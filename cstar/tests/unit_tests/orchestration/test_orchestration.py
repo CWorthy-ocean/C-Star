@@ -286,7 +286,7 @@ def test_dep_keys(tmp_path: Path) -> None:
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    with pytest.raises(ValueError) as ex:
+    with pytest.raises(ValueError, match="unknown dep"):
         _ = Workplan(
             name="Invalid Dependency Key Example",
             description="Workplan with a dependency that doesn't match a step",
@@ -304,8 +304,6 @@ def test_dep_keys(tmp_path: Path) -> None:
                 ),
             ],
         )
-
-    assert "unknown dep" in str(ex).lower()
 
 
 def test_workplan_transformation(diamond_workplan: Workplan) -> None:

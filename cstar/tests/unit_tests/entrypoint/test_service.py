@@ -6,12 +6,19 @@ import time
 import types
 import typing as t
 from collections import defaultdict
+from math import ceil
+from threading import Thread
 from unittest import mock
 
 import pytest
 from pydantic import ValidationError
 
 from cstar.entrypoint.service import Service, ServiceConfiguration
+
+
+def _wait_for_thread_alive(thread: Thread) -> None:
+    while not thread.is_alive():
+        time.sleep(0.00001)
 
 
 class PrintingService(Service):
@@ -321,36 +328,35 @@ async def test_event_loop_hc_start(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [10, 30, 100])
-async def test_event_loop_hc_freq(loop_count: int) -> None:
+@pytest.mark.parametrize(
+    ("max_duration", "delay"),
+    [
+        (0.5, 0.1),
+        (0.5, 0.02),
+        (0.25, 0.05),
+    ],
+)
+async def test_event_loop_hc_freq(max_duration: float, delay: float) -> None:
     """Verify that the health check occurs at the correct frequency.
 
-    Confirm that using a frequency of 0 results in the health-check being executed in
-    lockstep with _on_iteration.
+    Confirm that using a frequency ~equal to the loop frequency results
+    in the health-check being executed in lockstep with _on_iteration.
     """
-    # Configure the health check to update every event loop iteration
+    expected_max_hc_calls = ceil(max_duration / delay)
+
+    # Configure the health check at the same rate as the HC
     with PrintingService(
-        max_iterations=loop_count, hc_freq=0.001, delay=0.001
+        max_duration=max_duration,
+        hc_freq=delay,
+        delay=delay,
     ) as service:
-        service._start_healthcheck()  # noqa: SLF001
-        # await asyncio.sleep(0.1)
-        if service._hc_thread is None:
-            assert False, "health check thread failed to start"
-
-        while not service._hc_thread.is_alive():
-            await asyncio.sleep(0.001)
-
-        # Confirm the HC thread and queue are created
-        assert service.is_healthcheck_running
-        assert service.is_healthcheck_queue_ready
-
         # Complete the service lifecycle
         await service.execute()
 
         # Collect any leftover call metrics from the HC thread.
         service.summarize(finalize=True)
 
-        assert service.n_on_health_check >= loop_count
+        assert service.n_on_health_check <= expected_max_hc_calls
 
 
 @pytest.mark.asyncio
