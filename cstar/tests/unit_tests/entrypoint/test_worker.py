@@ -19,11 +19,17 @@ from cstar.entrypoint.worker.worker import (
     SimulationStages,
     configure_environment,
     create_parser,
+    get_job_config,
     get_request,
     get_service_config,
     main,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+)
 from cstar.simulation import Simulation
 
 DEFAULT_LOOP_DELAY = 5
@@ -59,9 +65,26 @@ def valid_args_short() -> dict[str, str]:
 
 
 @pytest.fixture
+def fake_job_config() -> Generator[JobConfig, None, None]:
+    """Return a `JobConfig` instance configured with mocked
+    values for account, priority, and walltime.
+    """
+    with mock.patch.dict(
+        os.environ,
+        {
+            ENV_CSTAR_SLURM_ACCOUNT: "mock-account",
+            ENV_CSTAR_SLURM_MAX_WALLTIME: "01:00:00",
+            ENV_CSTAR_SLURM_QUEUE: "debug",
+        },
+    ):
+        yield get_job_config()
+
+
+@pytest.fixture
 def sim_runner(
     blueprint_path: Path,
     patch_romssimulation_init_sourcedata,
+    fake_job_config: JobConfig,
 ) -> SimulationRunner:
     """Fixture to create a SimulationRunner instance.
 
@@ -83,10 +106,9 @@ def sim_runner(
         health_check_log_threshold=10,
         name="test_simulation_runner",
     )
-    job_config = JobConfig()
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        runner = SimulationRunner(request, service_config, job_config)
+        runner = SimulationRunner(request, service_config, fake_job_config)
 
     output_path = runner._simulation.fs_manager.output_dir
 
@@ -304,6 +326,7 @@ def test_configure_environment_prebuilt() -> None:
 def test_start_runner(
     blueprint_path: Path,
     patch_romssimulation_init_sourcedata,
+    fake_job_config: JobConfig,
 ) -> None:
     """Test creating a SimulationRunner and starting it.
 
@@ -324,10 +347,9 @@ def test_start_runner(
         loop_delay=0,
         health_check_log_threshold=10,
     )
-    job_config = JobConfig()
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        runner = SimulationRunner(request, service_config, job_config)
+        runner = SimulationRunner(request, service_config, fake_job_config)
 
     assert runner._blueprint_uri == request.blueprint_uri
 
