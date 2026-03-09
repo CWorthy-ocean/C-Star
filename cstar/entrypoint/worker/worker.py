@@ -26,7 +26,6 @@ DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
 JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
 LOGS_DIRECTORY: Final[str] = "logs"
-DEFAULT_SLURM_MAX_WALLTIME: Final[str] = "48:00:00"
 
 
 def _generate_job_name() -> str:
@@ -68,14 +67,14 @@ class BlueprintRequest:
 class JobConfig:
     """Configuration required to submit HPC jobs."""
 
-    account_id: str = "m4746"
+    account_id: str
     """HPC account used for billing."""
-    walltime: str = "01:00:00"
+    walltime: str
     """Maximum walltime allowed for job."""
+    priority: str
+    """Job priority."""
     job_name: str = _generate_job_name()
     """User-friendly job name."""
-    priority: str = "regular"
-    """Job priority."""
 
 
 class SimulationRunner(Service):
@@ -411,9 +410,9 @@ def get_job_config() -> JobConfig:
     -------
     JobConfig
     """
-    account_id = os.getenv(ENV_CSTAR_SLURM_ACCOUNT, "")
-    walltime = os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME, DEFAULT_SLURM_MAX_WALLTIME)
-    priority = os.environ.get(ENV_CSTAR_SLURM_QUEUE, "")
+    account_id: str = get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
+    walltime: str = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
+    priority: str = get_env_item(ENV_CSTAR_SLURM_QUEUE).value
 
     return JobConfig(account_id, walltime, priority)
 
