@@ -109,7 +109,7 @@ class SlurmStep:
 
     @property
     def job_id(self) -> str:
-        """The batch job ID the task was run under.
+        """The batch job ID the step was run under.
 
         Returns
         -------
@@ -134,16 +134,22 @@ class SlurmStep:
 
 
 class SlurmBatch:
-    """Metadata for all tasks in a SLURM job."""
+    """Metadata for all steps in a SLURM batch."""
 
     steps: t.Iterable[SlurmStep]
-    """The collection of subtasks running under the job."""
+    """The collection of steps running in a batch."""
 
     _job: SlurmStep
-    """The primary job detail record."""
+    """The parent step for the batch."""
 
     def __init__(self, steps: t.Iterable[SlurmStep]) -> None:
-        """Initialize the instance."""
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        steps: t.Iterable[SlurmStep]
+            The steps belonging to the batch.
+        """
         job_ids = {x.job_id for x in steps}
         if len(job_ids) > 1:
             raise ValueError("Attempted to create batch from multiple batches")
@@ -153,25 +159,41 @@ class SlurmBatch:
 
     @property
     def job(self) -> SlurmStep:
-        """Return the primary task for the job.
+        """Return the parent step for the batch.
 
         Returns
         -------
-        SlurmJobDetail
+        SlurmStep
         """
         return self._job
 
     @classmethod
-    def from_multi_query(cls, tasks: t.Iterable[SlurmStep]) -> dict[str, "SlurmBatch"]:
-        """Create metadata for a multi-job query."""
+    def from_multi_query(cls, steps: t.Iterable[SlurmStep]) -> dict[str, "SlurmBatch"]:
+        """Create a mapping of job-id to Batch for all discovered job-ids
+        resulting from a multi-job query.
+
+        Parameters
+        ----------
+        steps: t.Iterable[SlurmStep]
+            The steps belonging to 1-to-many batches.
+
+        Returns
+        -------
+        dict[str, SlurmBatch]
+        """
         multi_map: dict[str, list[SlurmStep]] = defaultdict(lambda: [])
-        for item in tasks:
+        for item in steps:
             multi_map[item.job_id].append(item)
 
         return {k: SlurmBatch(multi_map[k]) for k in multi_map}
 
     def __iter__(self) -> t.Iterator["SlurmStep"]:
-        """Iterate through the steps associated with the batch."""
+        """Iterate through the steps associated with the batch.
+
+        Returns
+        -------
+        t.Iterator[SlurmStep]
+        """
         yield from self.steps
 
 
@@ -185,7 +207,8 @@ async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
 
     Returns
     -------
-    list[SlurmJobDetail]
+    tuple[SlurmJobDetail, ...]
+        All step metadata retrieved for the job_id
     """
     sacct_cmd = f"sacct -j {job_id} --format={','.join(SlurmStep.FIELDS)} --noheader"
     msg_err = f"Failed to retrieve job status using {sacct_cmd}."
@@ -197,25 +220,41 @@ async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
 
 
 async def get_slurm_batch(job_id: str | int) -> SlurmBatch:
-    """Retrieve the primary job metadata from SLURM.
+    """Retrieve batch job metadata from SLURM.
 
     Parameters
     ----------
     job_id : str
+
+    Returns
+    -------
+    SlurmBatch
     """
-    tasks = await get_slurm_steps(job_id)
-    return SlurmBatch(tasks)
+    steps = await get_slurm_steps(job_id)
+    return SlurmBatch(steps)
 
 
 async def get_slurm_batches(
     job_ids: t.Iterable[str | int],
 ) -> t.Mapping[str, SlurmBatch]:
+    """Query SLURM for job status.
+
+    Parameters
+    ----------
+    job_ids: t.Iterable[str | int]
+        A collection containing batch job ID's
+
+    Returns
+    -------
+    Mapping[str, SlurmBatch]:
+        A mapping of job-id to SlurmBatch for the supplied job ID's
+    """
     batch_ids = {str(x).split(".")[0] for x in job_ids}
     jobid_query = ",".join(batch_ids)
 
     # gross to send `jobid_query` as job_id, but making another method is... grosser?
-    all_tasks = await get_slurm_steps(jobid_query)
-    return SlurmBatch.from_multi_query(all_tasks)
+    all_steps = await get_slurm_steps(jobid_query)
+    return SlurmBatch.from_multi_query(all_steps)
 
 
 def create_scheduler_job(
