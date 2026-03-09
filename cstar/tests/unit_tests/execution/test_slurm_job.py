@@ -461,23 +461,41 @@ class TestSlurmJob:
         "job_id, sacct_output, return_code, expected_status, should_raise",
         [
             (None, "", 0, ExecutionStatus.UNSUBMITTED, False),  # Unsubmitted job
-            (12345, "PENDING\n", 0, ExecutionStatus.PENDING, False),  # Pending job
-            (12345, "RUNNING\n", 0, ExecutionStatus.RUNNING, False),  # Running job
             (
                 12345,
-                "COMPLETED\n",
+                "15514059 PENDING 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+\n",
+                0,
+                ExecutionStatus.PENDING,
+                False,
+            ),  # Pending job
+            (
+                12345,
+                "15514059 RUNNING 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+\n",
+                0,
+                ExecutionStatus.RUNNING,
+                False,
+            ),  # Running job
+            (
+                12345,
+                "15514059 COMPLETED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+\n",
                 0,
                 ExecutionStatus.COMPLETED,
                 False,
             ),  # Completed job
             (
                 12345,
-                "CANCELLED\n",
+                "15514059 CANCELLED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+\n",
                 0,
                 ExecutionStatus.CANCELLED,
                 False,
             ),  # Cancelled job
-            (12345, "FAILED\n", 0, ExecutionStatus.FAILED, False),  # Failed job
+            (
+                12345,
+                "15514059 FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+\n",
+                0,
+                ExecutionStatus.FAILED,
+                False,
+            ),  # Failed job
             (12345, "", 1, None, True),  # sacct command failure
         ],
     )

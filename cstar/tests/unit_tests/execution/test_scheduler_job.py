@@ -1,4 +1,5 @@
 import logging
+import textwrap
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -8,6 +9,9 @@ from cstar.execution.scheduler_job import (
     SchedulerJob,
     SlurmJob,
     create_scheduler_job,
+    get_slurm_batch,
+    get_slurm_batches,
+    get_slurm_steps,
 )
 from cstar.system.scheduler import (
     PBSQueue,
@@ -693,3 +697,149 @@ class TestCreateSchedulerJob:
                 account_key="test_account",
                 walltime="01:00:00",
             )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("job_id"), ["15527988", 15527988])
+async def test_get_slurm_steps_job_id_type(job_id: int | str) -> None:
+    """Verify both integer and string job ID values are accepted."""
+    job_id = "15527988"
+    slurm_output = textwrap.dedent(
+        """15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+"""
+    )
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=slurm_output):
+        results = await get_slurm_steps(job_id)
+
+    assert results
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sacct_output", "exp_num_steps"),
+    [
+        (
+            "15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+",
+            1,
+        ),
+        (
+            "15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+\n",
+            1,
+        ),
+        (
+            """\
+            15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+
+            15527988.ba+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09      batch
+            15527988.ex+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09     extern
+            15527988.0    COMPLETED 2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09       roms
+            """,
+            4,
+        ),
+    ],
+)
+async def test_get_slurm_steps_single_job_id(
+    sacct_output: str, exp_num_steps: int
+) -> None:
+    """Verify steps for single job are parsed correctly from sacct std output."""
+    job_id = "15527988"
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
+        results = await get_slurm_steps(job_id)
+
+    step_ids = {x.step_id for x in results}
+    assert len(step_ids) == exp_num_steps
+
+
+@pytest.mark.asyncio
+async def test_get_slurm_steps_multi_job_id() -> None:
+    """Verify multiple jobs are parsed correctly from sacct std output"""
+    job_id = "1552798,15527988"
+    sacct_output = textwrap.dedent("""\
+        15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
+        15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
+        15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
+        15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+
+        15527988.ba+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09      batch
+        15527988.ex+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09     extern
+        15527988.0    COMPLETED 2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09       roms
+        """)
+
+    exp_num_steps = 7
+    exp_num_jobs = 2
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
+        results = await get_slurm_steps(job_id)
+
+    step_ids = {x.step_id for x in results}
+    assert len(step_ids) == exp_num_steps
+
+    # confirm each step correctly parses it's job ID from the step ID
+    job_ids = {x.job_id for x in results}
+    assert len(job_ids) == exp_num_jobs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        15514059,
+        "15514059",
+    ],
+)
+async def test_get_slurm_batch(job_id: int | str) -> None:
+    """Verify multiple steps are parsed correctly from sacct std output with
+    both a string and integer job-id.
+    """
+    sacct_output = textwrap.dedent("""\
+        15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
+        15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
+        15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
+        """)
+
+    exp_num_steps = 2
+    exp_num_jobs = 1
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
+        result = await get_slurm_batch(job_id)
+
+    step_ids = {x.step_id for x in result}
+    assert len(step_ids) == exp_num_steps
+
+    # confirm each step correctly parses it's job ID from the step ID
+    job_ids = {x.job_id for x in result}
+    assert len(job_ids) == exp_num_jobs
+
+    assert result.job.job_id == str(job_id)
+
+
+@pytest.mark.asyncio
+async def test_get_slurm_batches() -> None:
+    """Verify multiple steps are parsed correctly from sacct std output with
+    both a string and integer job-id.
+    """
+    job_id_1, job_id_2 = 15514059, 15527988
+    sacct_output = textwrap.dedent("""\
+        15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
+        15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
+        15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
+        15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+
+        15527988.ba+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09      batch
+        15527988.ex+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09     extern
+        15527988.0    COMPLETED 2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09       roms
+        """)
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
+        result = await get_slurm_batches((job_id_1, job_id_2))
+
+    assert str(job_id_1) in result
+    assert str(job_id_2) in result
+
+    job_id = str(job_id_1)
+    batch = result[job_id]
+    # confirm the "job record" is not in the steps
+    assert len(list(batch.steps)) == 2
+
+    job_id = str(job_id_2)
+    batch = result[job_id]
+    # confirm the "job record" is not in the steps
+    assert len(list(batch.steps)) == 3
