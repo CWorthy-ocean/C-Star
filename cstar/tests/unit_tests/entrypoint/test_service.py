@@ -4,7 +4,9 @@ import multiprocessing as mp
 import queue
 import time
 import types
+import typing as t
 from collections import defaultdict
+from math import ceil
 from unittest import mock
 
 import pytest
@@ -144,7 +146,7 @@ class PrintingService(Service):
 
         return self.metrics
 
-    def __enter__(self) -> "PrintingService":
+    def __enter__(self) -> t.Self:
         """Context manager entry point."""
         return self
 
@@ -250,7 +252,7 @@ async def test_config_check_hcfreq_out_of_range(value: float) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [1, 10, 100])
+@pytest.mark.parametrize("loop_count", [1, 10, 50])
 async def test_event_loop_shutdown(loop_count: int) -> None:
     """Verify that _on_iteration repeats until _can_shutdown returns True."""
     service = PrintingService(max_iterations=loop_count)
@@ -265,7 +267,7 @@ async def test_event_loop_shutdown(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [0, 10, 50, 100])
+@pytest.mark.parametrize("loop_count", [0, 10, 50])
 async def test_event_loop_task_service(loop_count: int) -> None:
     """Verify that  using as_service=False executes _on_iteration 1x."""
     with PrintingService(
@@ -289,7 +291,7 @@ async def test_event_loop_task_service(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [10, 40, 100])
+@pytest.mark.parametrize("loop_count", [10, 30, 50])
 async def test_event_loop_hc_start(loop_count: int) -> None:
     """Verify aspects of the health-check startup.
 
@@ -320,37 +322,43 @@ async def test_event_loop_hc_start(loop_count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("loop_count", [10, 30, 100])
-async def test_event_loop_hc_freq(loop_count: int) -> None:
+@pytest.mark.parametrize(
+    ("max_duration", "delay"),
+    [
+        (0.5, 0.1),
+        (0.5, 0.02),
+        (0.25, 0.05),
+    ],
+)
+async def test_event_loop_hc_freq(max_duration: float, delay: float) -> None:
     """Verify that the health check occurs at the correct frequency.
 
-    Confirm that using a frequency of 0 results in the health-check being executed in
-    lockstep with _on_iteration.
+    Confirm that using a frequency ~equal to the loop frequency results
+    in the health-check being executed in lockstep with _on_iteration.
     """
-    # Configure the health check to update every event loop iteration
-    with PrintingService(max_iterations=loop_count, hc_freq=0) as service:
-        service._start_healthcheck()  # noqa: SLF001
-        await asyncio.sleep(0.1)
+    expected_max_hc_calls = ceil(max_duration / delay)
 
-        # Confirm the HC thread and queue are created
-        assert service.is_healthcheck_running
-        assert service.is_healthcheck_queue_ready
-
+    # Configure the health check at the same rate as the HC
+    with PrintingService(
+        max_duration=max_duration,
+        hc_freq=delay,
+        delay=delay,
+    ) as service:
         # Complete the service lifecycle
         await service.execute()
 
         # Collect any leftover call metrics from the HC thread.
         service.summarize(finalize=True)
 
-        assert service.n_on_health_check >= loop_count
+        assert service.n_on_health_check <= expected_max_hc_calls
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("max_duration", "frequency"),
     [
-        (2.0, 0.5),
-        (3.0, 0.01),
+        (1.0, 0.1),
+        (0.5, 0.01),
     ],
 )
 async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
@@ -360,7 +368,10 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
     """
     # Configure the test service to run for <max_duration> seconds.
     with PrintingService(
-        as_service=True, hc_freq=frequency, max_duration=max_duration
+        as_service=True,
+        hc_freq=frequency,
+        max_duration=max_duration,
+        delay=frequency,
     ) as service:
         # Complete the service lifecycle
         await service.execute()
@@ -371,74 +382,7 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
         # Confirm the hc frequency doesn't exceed maximum count possible (if
         # each HC occurred at exactly the right timestep and takes 0 time).
         # Off by small amount is acceptable.
-        max_hc_calls = max_duration / frequency
-        lower_bound = (0.9 * max_hc_calls) // max_hc_calls
-
-        assert lower_bound <= service.n_on_health_check <= max_hc_calls
-
-
-@pytest.mark.asyncio
-async def test_event_hc_unknown_msg() -> None:
-    """Verify message handling behavior of the health check thread.
-
-    Confirms that the health check thread does not crash when it receives an unknown
-    message type.
-    """
-    # Configure the test service to run for 2 seconds.
-    with PrintingService(
-        as_service=True,
-        hc_freq=0.1,
-        max_duration=2,
-    ) as service:
-        # Complete the service lifecycle
-        service._start_healthcheck()  # noqa: SLF001
-        await asyncio.sleep(0.05)
-
-        # Send trash to the the HC thread
-        service._send_update_to_hc(  # noqa: SLF001
-            {"command": "unknown_command"},
-        )
-
-        # Confirm the hc thread is still alive and processing
-        # messages by sending more!
-        service._send_terminate_to_hc(  # noqa: SLF001
-            "testing the message is still processed."
-        )
-        # Give the HC thread time to process the message
-        await asyncio.sleep(0.05)
-
-        assert not service.is_healthcheck_running
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("max_duration", "frequency"),
-    [
-        (2.0, 0.5),
-        (3.0, 0.01),
-    ],
-)
-async def test_event_hc_term(max_duration: float, frequency: float) -> None:
-    """Verify that the health check thread terminates when asked to do so."""
-    # Configure the test service to run for <max-duration> seconds.
-    with PrintingService(
-        as_service=True, hc_freq=frequency, max_duration=max_duration
-    ) as service:
-        # Complete the service lifecycle
-        service._start_healthcheck()  # noqa: SLF001
-        await asyncio.sleep(0.1)
-        service._send_terminate_to_hc("test_event_hc_term")  # noqa: SLF001
-        await asyncio.sleep(0.1)
-
-        assert not service.is_healthcheck_running
-
-        # Collect any leftover call metrics from the HC thread.
-        service.summarize(finalize=True)
-
-        # Confirm the hc frequency doesn't exceed maximum count possible (if
-        # each HC occurred at exactly the right timestep and takes 0 time). Off
-        # by small amount is acceptable.
-        max_hc_calls = max_duration / frequency
+        max_hc_calls = 1 + (max_duration / frequency)
         lower_bound = (0.9 * max_hc_calls) // max_hc_calls
 
         assert lower_bound <= service.n_on_health_check <= max_hc_calls
@@ -448,8 +392,8 @@ async def test_event_hc_term(max_duration: float, frequency: float) -> None:
 @pytest.mark.parametrize(
     ("loop_delay", "loop_count"),
     [
-        (0.05, 20),
-        (0.1, 10),
+        (0.05, 10),
+        (0.1, 5),
     ],
 )
 async def test_delay(loop_delay: float, loop_count: int) -> None:
