@@ -59,7 +59,7 @@ class SlurmStep:
 
     @classmethod
     def from_sacct(cls, sacct_stdout: str) -> "SlurmStep":
-        """Instntiate a SlurmStep by parsing attributes from a single line of sacct output.
+        """Instantiate a `SlurmStep` by parsing attributes from a single line of sacct output.
 
         Returns
         -------
