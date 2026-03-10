@@ -44,28 +44,34 @@ cson-forge/
 │   ├── domains.yml             # Established domain configurations
 │   ├── machines.yml            # Machine-specific settings
 │   ├── blueprints/             # Generated blueprint YAML files
-│   │   └── {model}_{grid}/
-│   │       ├── B_{name}_{stage}.yml      # Blueprint files (preconfig, postconfig, build, run)
-│   │       ├── settings_B_{name}_{stage}.yml  # Settings sidecar files (same directory)
-│   │       └── _{input_type}.yml         # Input-specific blueprints
+│   │   └── {machine}/
+│   │       └── {model}_{grid}/
+│   │           ├── B_{name}_{stage}.yml      # Blueprint files (preconfig, postconfig, build, run)
+│   │           ├── settings_B_{name}_{stage}.yml  # Settings sidecar files (same directory)
+│   │           └── _{input_type}.yml         # Input-specific blueprints
 │   ├── builds/                 # Model compilation directories
 │   │   └── {model}_{grid}/
-│   │       └── opt/            # Rendered configuration files
+│   │       └── compile-time/   # Rendered configuration files
 │   │           ├── *.opt       # Compile-time options (cppdefs, param, etc.)
-│   │           ├── roms.in     # Run-time configuration
 │   │           └── Makefile    # Build configuration
+│   │       └── run-time/       # ROMS-MARBL runtime files
+│   │           ├── roms.in     # Run-time configuration
+│   │           └── marbl_*     # MARBL input files
 │   └── model-configs/          # Model templates and defaults
 │       └── {model}/
 │           └── templates/
-│               ├── compile-time/        # Jinja2 templates for compile-time configs
+│               ├── compile-time/       # Jinja2 templates for compile-time configs
 │               │   └── *.j2
 │               ├── compile-time-defaults.yml
 │               ├── run-time/           # Jinja2 templates for run-time configs
 │               │   └── *.j2
 │               └── run-time-defaults.yaml
-├── workflows/                  # Example notebooks and workflows
+├── workflows/                 # Example notebooks and workflows
+│   ├── computing-benchmarks/
 │   ├── generate-models/       # Domain generation notebooks
-│   └── analysis/              # Analysis notebooks
+│   ├── skill-assessment/
+│   ├── source-data/
+│   └── visualization/
 ├── docs/                      # Documentation
 └── README.md
 ```

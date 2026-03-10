@@ -70,22 +70,14 @@ The `dev-setup.sh` script automates the setup process:
 - [Creating the conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file)
 - [Installing the `cson-forge` package in editable mode](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs)
 - [Installing `C-Star`](https://c-star.readthedocs.io)
-- [Setting up the Jupyter kernel](https://ipykernel.readthedocs.io/en/stable/user-guide.html#kernel-installation)
+- [Setting up the Jupyter kernel](https://ipython.readthedocs.io/en/stable/install/index.html)
 :::
 
 ### 4. Verify Installation
 
 To verify that everything is installed correctly:
 
-**a) Check that the Jupyter kernel is installed:**
-
-```bash
-jupyter kernelspec list | grep cson-forge-v0
-```
-
-You should see `cson-forge-v0` in the list. If not, the kernel installation may have failed.
-
-**b) Activate the environment and test the installation:**
+**a) Activate the environment and test the installation:**
 
 ```bash
 # Activate the environment (using micromamba or conda)
@@ -96,6 +88,14 @@ micromamba activate cson-forge-v0  # or: conda activate cson-forge-v0
 cd workflows
 python -c "import cson_forge; print('✓ cson_forge works')"
 ```
+
+**b) Check that the Jupyter kernel is installed:**
+
+```bash
+jupyter kernelspec list | grep cson-forge-v0
+```
+
+You should see `cson-forge-v0` in the list. If not, the kernel installation may have failed.
 
 **c) Check that the package can be imported in Python:**
 
@@ -151,7 +151,7 @@ Once your environment is set up, you can try running the `CStarSpecBuilder` demo
    ```
 
 3. **Open the demo notebook:**
-   - Open `CStarSpecBuilder-demo.ipynb` in Jupyter
+   - Open `CStarSpecBuilder-demo.ipynb` in Jupyter. Located at: `workflows/generate-models/templates/CStarSpecBuilder-demo.ipynb`
    - Make sure the kernel is set to `cson-forge-v0` (you can change it in the Kernel menu if needed)
 
 4. **Run the notebook:**
