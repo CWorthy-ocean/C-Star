@@ -23,7 +23,7 @@
 - N/A
 
 ## Miscellaneous
-
+<!-- List any non-code-related changes, such as CI, packaging, or documentation -->
 - N/A
 
 ## Code Review Checklist
