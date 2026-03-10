@@ -56,6 +56,7 @@ class SlurmStep:
     """The unique name of the step."""
 
     FIELDS: tuple[str, ...] = ("JobID", "State", "Submit", "Start", "End", "JobName")
+    FIELD_WIDTH: tuple[str, ...] = ("%15", "%20", "%20", "%20", "%20", "%100")
 
     @classmethod
     def from_sacct(cls, sacct_stdout: str) -> "SlurmStep":
@@ -207,10 +208,14 @@ async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
 
     Returns
     -------
-    tuple[SlurmJobDetail, ...]
+    tuple[SlurmStep, ...]
         All step metadata retrieved for the job_id
     """
-    sacct_cmd = f"sacct -j {job_id} --format={','.join(SlurmStep.FIELDS)} --noheader"
+    fields = [
+        f"{field}{spacing}"
+        for field, spacing in zip(SlurmStep.FIELDS, SlurmStep.FIELD_WIDTH)
+    ]
+    sacct_cmd = f"sacct -j {job_id} --format={','.join(fields)} --noheader"
     msg_err = f"Failed to retrieve job status using {sacct_cmd}."
     stdout = await asyncio.to_thread(
         _run_cmd, sacct_cmd, msg_err=msg_err, raise_on_error=True
