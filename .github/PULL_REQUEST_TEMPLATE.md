@@ -1,5 +1,4 @@
 # Summary
-
 <!-- Feel free to remove sections irrelevant to this PR or leave the default `N/A` content -->
 
 ## Breaking Changes
@@ -8,10 +7,6 @@
 
 ## New Features
 <!-- List any new capabilities added -->
-- N/A
-
-## Security Fixes
-<!-- List any changes resulting in a change of security posture -->
 - N/A
 
 ## Bug Fixes
@@ -24,6 +19,10 @@
 
 ## Miscellaneous
 <!-- List any non-code-related changes, such as CI, packaging, or documentation -->
+- N/A
+
+## Security Fixes
+<!-- List any changes resulting in a change of security posture -->
 - N/A
 
 ## Code Review Checklist
