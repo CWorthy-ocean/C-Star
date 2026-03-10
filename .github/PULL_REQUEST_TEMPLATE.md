@@ -7,7 +7,7 @@
 - N/A
 
 ## New Features
-
+<!-- List any new capabilities added -->
 - N/A
 
 ## Security Fixes
