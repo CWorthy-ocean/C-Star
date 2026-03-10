@@ -27,7 +27,7 @@
 - N/A
 
 ## Code Review Checklist
-
+<!-- Feel free to remove check-list items irrelevant to this PR -->
 - [ ] Closes #xxxx
 - [ ] Tests added
 - [ ] Tests passing
