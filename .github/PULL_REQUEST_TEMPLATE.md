@@ -15,7 +15,7 @@
 - N/A
 
 ## Bug Fixes
-
+<!-- List any behavioral changes resulting from pre-existing code performing in an unexpected manner  -->
 - N/A
 
 ## Improvements
