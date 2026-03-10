@@ -1,6 +1,6 @@
 # Summary
 
-<!-- Feel free to remove sections and check-list items irrelevant to this PR -->
+<!-- Feel free to remove sections irrelevant to this PR or leave the default `N/A` content -->
 
 ## Breaking Changes
 <!-- List any breaking changes to interfaces, changes to inputs or outputs, or procedural changes -->
