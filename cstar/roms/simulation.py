@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
     from cstar.execution.file_system import JobFileSystemManager
     from cstar.execution.handler import ExecutionHandler
+    from cstar.io.staged_data import StagedFile
 
 
 def _ncjoin_wildcard(
@@ -1289,6 +1290,88 @@ class ROMSSimulation(Simulation):
                 and (self.end_date >= self.start_date)
             ):
                 inp.get(local_dir=input_datasets_dir)
+
+        self._validate_and_symlink_supplementary_datasets(compile_time_code_dir)
+
+    def _validate_and_symlink_supplementary_datasets(
+        self, compile_time_code_dir: Path
+    ) -> None:
+        """Validate opt files and create output-dir symlinks for supplementary datasets.
+
+        For each of cdr_forcing and nesting_info, if the dataset is defined:
+        1. Verify the corresponding opt file (``cdr_frc.opt`` or ``extract_data.opt``)
+           is listed in ``compile_time_code``.
+        2. Verify that opt file's content includes the expected filename string
+           (``"cdr.nc"`` or ``"nesting.nc"``).
+        3. Create a symlink ``{output_dir}/<name>.nc`` pointing to the staged local file.
+
+        Parameters
+        ----------
+        compile_time_code_dir : Path
+            Directory where compile-time code files have been staged by ``setup()``.
+
+        Raises
+        ------
+        ValueError
+            If ``compile_time_code`` is None when a supplementary dataset is defined,
+            if the required opt file is not listed in ``compile_time_code``, or if the
+            opt file does not contain the expected filename string.
+        """
+        checks: list[tuple[ROMSInputDataset | None, str, str]] = [
+            (self.cdr_forcing, "cdr_frc.opt", "cdr.nc"),
+            (self.nesting_info, "extract_data.opt", "nesting.nc"),
+        ]
+
+        if not any(dataset is not None for dataset, _, _ in checks):
+            return
+
+        compile_time_filenames = (
+            [f.basename for f in self.compile_time_code.source]
+            if self.compile_time_code is not None
+            else []
+        )
+
+        output_dir = self.fs_manager.output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        for dataset, opt_filename, link_name in checks:
+            if dataset is None:
+                continue
+
+            if self.compile_time_code is None:
+                raise ValueError(
+                    f"{opt_filename!r} must be present in compile_time_code when "
+                    f"{dataset.__class__.__name__} is specified, but compile_time_code "
+                    "is not set."
+                )
+
+            if opt_filename not in compile_time_filenames:
+                raise ValueError(
+                    f"{opt_filename!r} must be listed in compile_time_code when "
+                    f"{dataset.__class__.__name__} is specified. "
+                    f"Found: {compile_time_filenames}"
+                )
+
+            opt_content = (compile_time_code_dir / opt_filename).read_text()
+            if link_name not in opt_content:
+                raise ValueError(
+                    f"{opt_filename!r} must contain the string {link_name!r} when "
+                    f"{dataset.__class__.__name__} is specified."
+                )
+
+            working_copy = cast("StagedFile", dataset.working_copy)
+
+            if not working_copy:
+                raise ValueError(
+                    f"No local copy of {dataset.__class__.__name__} found after "
+                    "fetching input datasets."
+                )
+
+            symlink_path = output_dir / link_name
+            if symlink_path.is_symlink() or symlink_path.exists():
+                symlink_path.unlink()
+            symlink_path.symlink_to(working_copy.path)
+            self.log.info(f"🔗 Created symlink: {symlink_path} → {working_copy.path}")
 
     @property
     def is_setup(self) -> bool:
