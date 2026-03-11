@@ -13,6 +13,7 @@ from cstar.roms.input_dataset import (
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSModelGrid,
+    ROMSNestingInfo,
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
@@ -264,6 +265,22 @@ class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing])
             location=str(self.model.cdr_forcing.data[0].location),
             file_hash=self.model.cdr_forcing.data[0].hash
             if isinstance(self.model.cdr_forcing.data[0], models.VersionedResource)
+            else None,
+            start_date=None,
+            end_date=None,
+        )
+
+
+class NestingInfoAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSNestingInfo]):
+    @t.override
+    def adapt(self) -> ROMSNestingInfo | None:
+        if self.model.nesting_info is None:
+            return None
+
+        return ROMSNestingInfo(
+            location=str(self.model.nesting_info.data[0].location),
+            file_hash=self.model.nesting_info.data[0].hash
+            if isinstance(self.model.nesting_info.data[0], models.VersionedResource)
             else None,
             start_date=None,
             end_date=None,

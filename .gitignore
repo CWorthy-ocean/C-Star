@@ -140,3 +140,7 @@ dask-worker-space/
 # C-Star specific
 cstar/externals/
 docs/generated/
+
+.claude/
+
+CLAUDE.md

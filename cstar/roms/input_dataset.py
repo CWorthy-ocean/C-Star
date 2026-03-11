@@ -434,3 +434,9 @@ class ROMSCdrForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for CDR forcing files."""
 
     pass
+
+
+class ROMSNestingInfo(ROMSInputDataset):
+    """An implementation of the ROMSInputDataset class for nesting info files."""
+
+    pass

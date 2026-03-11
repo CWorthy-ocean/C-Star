@@ -22,6 +22,7 @@ from cstar.roms.input_dataset import (
     ROMSInitialConditions,
     ROMSInputDataset,
     ROMSModelGrid,
+    ROMSNestingInfo,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
@@ -103,6 +104,10 @@ class TestROMSSimulationInitialization:
         assert isinstance(sim.cdr_forcing, ROMSCdrForcing)
         assert sim.cdr_forcing.source.location == "http://my.files/cdr.nc"
         assert sim.cdr_forcing.source.file_hash == "542"
+
+        assert isinstance(sim.nesting_info, ROMSNestingInfo)
+        assert sim.nesting_info.source.location == "http://my.files/nesting.nc"
+        assert sim.nesting_info.source.file_hash == "543"
 
         assert isinstance(sim.boundary_forcing, list)
         assert [isinstance(x, ROMSBoundaryForcing) for x in sim.boundary_forcing]
@@ -501,8 +506,10 @@ class TestROMSSimulationInitialization:
         bc = sim.boundary_forcing[0]
         sf = sim.surface_forcing[0]
         fc = sim.forcing_corrections[0]
+        cdr = sim.cdr_forcing
+        ni = sim.nesting_info
 
-        assert sim.input_datasets == [mg, ic, td, rf, bc, sf, fc]
+        assert sim.input_datasets == [mg, ic, td, rf, bc, sf, fc, cdr, ni]
 
     @pytest.mark.parametrize(
         "start_date, valid_start_date, end_date, valid_end_date, substring",
@@ -815,7 +822,9 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
     │   ├── river.nc
     │   ├── boundary.nc
     │   ├── surface.nc
-    │   └── sw_corr.nc
+    │   ├── sw_corr.nc
+    │   ├── cdr.nc
+    │   └── nesting.nc
     ├── runtime_code
     │   ├── file1
     │   ├── file2.in
@@ -1033,7 +1042,7 @@ class TestProcessingAndExecution:
 
         assert mock_externalcodebase_setup.call_count == 2
         assert mock_additionalcode_get.call_count == 2
-        assert mock_inputdataset_get.call_count == 7
+        assert mock_inputdataset_get.call_count == 9
 
     @pytest.mark.parametrize(
         "codebase_status, marbl_status, expected",
@@ -1448,9 +1457,9 @@ class TestProcessingAndExecution:
         )  # Should be ignored
         dataset_3 = mock.MagicMock(spec=ROMSInputDataset, exists_locally=True)
         with mock.patch.object(
-            ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
-        ) as mock_input_datasets:
-            mock_input_datasets.return_value = [dataset_1, dataset_2, dataset_3]
+            ROMSSimulation, "partitionable_datasets", new_callable=mock.PropertyMock
+        ) as mock_partitionable_datasets:
+            mock_partitionable_datasets.return_value = [dataset_1, dataset_2, dataset_3]
 
             # Call the method
             sim.pre_run()

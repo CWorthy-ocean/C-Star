@@ -43,6 +43,7 @@ from cstar.orchestration.adapter import (
     GridAdapter,
     InitialConditionAdapter,
     MARBLAdapter,
+    NestingInfoAdapter,
     RiverForcingAdapter,
     SurfaceForcingAdapter,
     TidalForcingAdapter,
@@ -57,6 +58,7 @@ from cstar.roms.input_dataset import (
     ROMSInitialConditions,
     ROMSInputDataset,
     ROMSModelGrid,
+    ROMSNestingInfo,
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
@@ -201,6 +203,7 @@ class ROMSSimulation(Simulation):
         tidal_forcing: Optional["ROMSTidalForcing"] = None,
         river_forcing: Optional["ROMSRiverForcing"] = None,
         cdr_forcing: Optional["ROMSCdrForcing"] = None,
+        nesting_info: Optional["ROMSNestingInfo"] = None,
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
@@ -303,6 +306,9 @@ class ROMSSimulation(Simulation):
 
         self._validate_input(cdr_forcing)
         self.cdr_forcing = cdr_forcing
+
+        self._validate_input(nesting_info)
+        self.nesting_info = nesting_info
 
         self._validate_input(surface_forcing, ROMSSurfaceForcing)
         self.surface_forcing: list[ROMSSurfaceForcing] = (
@@ -817,33 +823,53 @@ class ROMSSimulation(Simulation):
         return simulation_runtime_settings
 
     @property
+    def partitionable_datasets(self) -> list[ROMSInputDataset]:
+        """Retrieves input datasets that should be partitioned and added to runtime settings.
+
+        This excludes datasets like cdr_forcing and nesting_info which are staged
+        but not partitioned or included in ROMS runtime settings.
+
+        Returns
+        -------
+        list of ROMSInputDataset
+            A list containing input datasets that need partitioning.
+        """
+        datasets: list[ROMSInputDataset] = []
+        if self.model_grid is not None:
+            datasets.append(self.model_grid)
+        if self.initial_conditions is not None:
+            datasets.append(self.initial_conditions)
+        if self.tidal_forcing is not None:
+            datasets.append(self.tidal_forcing)
+        if self.river_forcing is not None:
+            datasets.append(self.river_forcing)
+        if len(self.boundary_forcing) > 0:
+            datasets.extend(self.boundary_forcing)
+        if len(self.surface_forcing) > 0:
+            datasets.extend(self.surface_forcing)
+        if len(self.forcing_corrections) > 0:
+            datasets.extend(self.forcing_corrections)
+        return datasets
+
+    @property
     def input_datasets(self) -> list[ROMSInputDataset]:
         """Retrieves all input datasets associated with this ROMS simulation.
 
         This property compiles a list of `ROMSInputDataset` instances that are used
         in the simulation, including model grids, initial conditions, tidal forcing,
-        surface forcing, and boundary forcing datasets.
+        surface forcing, boundary forcing datasets, as well as supplementary datasets
+        like cdr_forcing and nesting_info.
 
         Returns
         -------
         list of ROMSInputDataset
             A list containing all input datasets used in the simulation.
         """
-        input_datasets: list[ROMSInputDataset] = []
-        if self.model_grid is not None:
-            input_datasets.append(self.model_grid)
-        if self.initial_conditions is not None:
-            input_datasets.append(self.initial_conditions)
-        if self.tidal_forcing is not None:
-            input_datasets.append(self.tidal_forcing)
-        if self.river_forcing is not None:
-            input_datasets.append(self.river_forcing)
-        if len(self.boundary_forcing) > 0:
-            input_datasets.extend(self.boundary_forcing)
-        if len(self.surface_forcing) > 0:
-            input_datasets.extend(self.surface_forcing)
-        if len(self.forcing_corrections) > 0:
-            input_datasets.extend(self.forcing_corrections)
+        input_datasets: list[ROMSInputDataset] = list(self.partitionable_datasets)
+        if self.cdr_forcing is not None:
+            input_datasets.append(self.cdr_forcing)
+        if self.nesting_info is not None:
+            input_datasets.append(self.nesting_info)
         return input_datasets
 
     @classmethod
@@ -962,6 +988,11 @@ class ROMSSimulation(Simulation):
         if cdr_forcing_kwargs is not None:
             simulation_kwargs["cdr_forcing"] = ROMSCdrForcing(**cdr_forcing_kwargs)
 
+        # Construct any ROMSNestingInfo instance:
+        nesting_info_kwargs = simulation_dict.get("nesting_info")
+        if nesting_info_kwargs is not None:
+            simulation_kwargs["nesting_info"] = ROMSNestingInfo(**nesting_info_kwargs)
+
         # Construct any ROMSBoundaryForcing instances:
         boundary_forcing_entries = simulation_dict.get("boundary_forcing", [])
         if len(boundary_forcing_entries) > 0:
@@ -1044,6 +1075,8 @@ class ROMSSimulation(Simulation):
             simulation_dict["river_forcing"] = self.river_forcing.to_dict()
         if self.cdr_forcing is not None:
             simulation_dict["cdr_forcing"] = self.cdr_forcing.to_dict()
+        if self.nesting_info is not None:
+            simulation_dict["nesting_info"] = self.nesting_info.to_dict()
         if len(self.surface_forcing) > 0:
             simulation_dict["surface_forcing"] = [
                 sf.to_dict() for sf in self.surface_forcing
@@ -1114,6 +1147,7 @@ class ROMSSimulation(Simulation):
             boundary_forcing=BoundaryForcingAdapter(bp).adapt(),
             surface_forcing=SurfaceForcingAdapter(bp).adapt(),
             cdr_forcing=CdrForcingAdapter(bp).adapt(),
+            nesting_info=NestingInfoAdapter(bp).adapt(),
         )
 
     def tree(self):
@@ -1440,11 +1474,14 @@ class ROMSSimulation(Simulation):
         run : Executes the compiled ROMS model.
         post_run : Performs post-processing steps after execution.
         """
-        # Partition input datasets and add their paths to namelist
-        if self.input_datasets is not None and all(
-            [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
+        # Partition input datasets that require partitioning
+        # (excludes cdr_forcing, nesting_info, and similar datasets)
+        if self.partitionable_datasets is not None and all(
+            [isinstance(a, ROMSInputDataset) for a in self.partitionable_datasets]
         ):
-            datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
+            datasets_to_partition = [
+                d for d in self.partitionable_datasets if d.exists_locally
+            ]
             for f in datasets_to_partition:
                 f.partition(
                     np_xi=self.discretization.n_procs_x,

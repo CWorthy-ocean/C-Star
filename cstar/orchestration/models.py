@@ -389,6 +389,9 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     cdr_forcing: Dataset | None = Field(default=None)
     """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
 
+    nesting_info: Dataset | None = Field(default=None)
+    """Location of nesting info input file for this run. Optional."""
+
     @model_validator(mode="after")
     def _model_validator(self) -> "RomsMarblBlueprint":
         """Perform validation on the model after field-level validation is complete."""
