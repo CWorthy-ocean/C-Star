@@ -232,7 +232,7 @@ def test_serialization_task(tmp_path: Path, mode: PersistenceMode) -> None:
     path.touch()
 
     step = LiveStep(name=name, application=app, blueprint=path, depends_on=[])
-    handle = SlurmHandle(pid=pid, job_name=job_name)
+    handle = SlurmHandle(pid=pid, name=job_name)
     task: Task[SlurmHandle] = Task(
         step=step,
         handle=handle,

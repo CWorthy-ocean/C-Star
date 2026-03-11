@@ -50,6 +50,9 @@ class ProcessHandle(BaseModel):
     pid: str
     """The process identifier."""
 
+    name: str
+    """The name of the process."""
+
 
 class Status(IntEnum):
     """The state of a running task."""

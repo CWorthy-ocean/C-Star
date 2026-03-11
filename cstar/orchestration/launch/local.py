@@ -93,9 +93,10 @@ class LocalLauncher(Launcher[LocalHandle]):
             if not step.fsm.root.exists():
                 step.fsm.prepare()
 
+            process_name = slugify(step.name)
             mp_process = MpProcess(
                 target=run_as_process,
-                name=slugify(step.name),
+                name=process_name,
                 args=(step, cmd.split()),
                 daemon=True,
             )
@@ -116,6 +117,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
                 handle = LocalHandle(
                     pid=str(pid),
+                    name=process_name,
                     start_at=create_time,
                 )
                 handle.process = mp_process
