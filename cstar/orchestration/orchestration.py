@@ -427,7 +427,6 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     @classmethod
     async def query_status(
         cls,
-        step: LiveStep,
         item: Task[_THandle] | _THandle,
     ) -> Status:
         """Retrieve the current status for a running task.
@@ -603,7 +602,7 @@ class Orchestrator(LoggingMixin):
             return None
 
         if task := self.planner.retrieve(node, KEY_TASK):
-            status = await self.launcher.query_status(task.step, task)
+            status = await self.launcher.query_status(task.handle)
             task.status = status
         else:
             task = await self.launcher.launch(step, dependencies)

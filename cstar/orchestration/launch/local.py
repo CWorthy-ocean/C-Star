@@ -128,7 +128,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(step: "LiveStep", handle: LocalHandle) -> str:
+    async def _status(handle: LocalHandle) -> str:
         """Retrieve the status of a step running in local process.
 
         Parameters
@@ -145,7 +145,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         """
         # await LocalLauncher._update_processes()
         rc = handle.process.exitcode
-        step_name = step.name if step else handle.pid
+        step_name = handle.name
 
         if rc is None:
             status = "RUNNING"
@@ -174,7 +174,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         Task[LocalHandle]
             A Task containing information about the newly submitted job.
         """
-        tasks = [asyncio.Task(cls.query_status(step, h)) for h in dependencies]
+        tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
         statuses = await asyncio.gather(*tasks)
         active_found = any(map(Status.is_running, statuses))
         failure_found = any(map(Status.is_failure, statuses))
@@ -183,7 +183,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         while active_found and not failure_found:
             await asyncio.sleep(1)
 
-            tasks = [asyncio.Task(cls.query_status(step, h)) for h in dependencies]
+            tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
             statuses = await asyncio.gather(*tasks)
             active_found = any(map(Status.is_running, statuses))
             failure_found = any(map(Status.is_failure, statuses))
@@ -201,15 +201,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         )
 
     @classmethod
-    async def query_status(
-        cls, step: "LiveStep", item: Task[LocalHandle] | LocalHandle
-    ) -> Status:
+    async def query_status(cls, item: Task[LocalHandle] | LocalHandle) -> Status:
         """Retrieve the status of an item.
 
         Parameters
         ----------
-        step : LiveStep
-            The step that will be queried for.
         item : Task[LocalHandle] | LocalHandle
             An item with a handle to be used to execute a status query.
 
@@ -219,7 +215,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        raw_status = await LocalLauncher._status(step, handle)
+        raw_status = await LocalLauncher._status(handle)
         if raw_status in ["PENDING", "RUNNING", "ENDING"]:
             return Status.Running
         if raw_status in ["COMPLETED", "FAILED"]:

@@ -171,7 +171,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(step: "LiveStep", handle: SlurmHandle) -> ExecutionStatus:
+    async def _status(pid: str) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
@@ -186,10 +186,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         ExecutionStatus
             The current status of the step.
         """
-        batch = await get_slurm_batch(handle.pid)
+        batch = await get_slurm_batch(pid)
         status = batch.job.status
 
-        msg = f"Status of job {handle.pid} is {status} for step {step.name}"
+        msg = f"Status of job `{pid}` is {status}"
         log.debug(msg)
 
         return status
@@ -223,30 +223,45 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         # TODO: consider loading persisted values all at once during startup instead
         if prior:  #  and prior.task.status != Status.Done:
             # always retrieve real-deal in case persisting status updates failed.
-            last_status = await SlurmLauncher.query_status(step, prior.handle)
+            last_status = await SlurmLauncher.query_status(prior.handle)
             if Status.is_failure(last_status):
                 # if the task terminated in a failure code, we'll re-run it.
                 # - we don't re-run successful tasks
                 persist_as.unlink()
                 submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
+
         handle = await submit_fn(step, dependencies)
 
-        task: Task[SlurmHandle] = Task(
+        return Task(
             step=step,
             handle=handle,
             status=Status.Submitted,
         )
-        if not task.persist():
-            # todo: if i raise, it's not really necessary to raise.... ignore?
-            msg = f"Failure when persisting step: {step.safe_name}"
-            print(msg)
 
-        return task
+    @classmethod
+    def _map_status(cls, status: ExecutionStatus) -> Status:
+        match status:
+            case (
+                ExecutionStatus.PENDING
+                | ExecutionStatus.RUNNING
+                | ExecutionStatus.ENDING
+                | ExecutionStatus.HELD
+            ):
+                return Status.Running
+            case ExecutionStatus.COMPLETED:
+                return Status.Done
+            case ExecutionStatus.CANCELLED:
+                return Status.Cancelled
+            case ExecutionStatus.FAILED:
+                return Status.Failed
+
+        return Status.Unsubmitted
 
     @classmethod
     async def query_status(
-        cls, step: "LiveStep", item: Task[SlurmHandle] | SlurmHandle
+        cls,
+        item: Task[SlurmHandle] | SlurmHandle,
     ) -> Status:
         """Retrieve the status of an item.
 
@@ -263,26 +278,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        exec_status = await SlurmLauncher._status(step, handle)
+        exec_status = await SlurmLauncher._status(handle.pid)
 
         msg = f"SLURM job `{handle.pid}` status is `{exec_status}`"
         log.debug(msg)
 
-        if exec_status in [
-            ExecutionStatus.PENDING,
-            ExecutionStatus.RUNNING,
-            ExecutionStatus.ENDING,
-            ExecutionStatus.HELD,
-        ]:
-            return Status.Running
-        if exec_status == ExecutionStatus.COMPLETED:
-            return Status.Done
-        if exec_status == ExecutionStatus.CANCELLED:
-            return Status.Cancelled
-        if exec_status == ExecutionStatus.FAILED:
-            return Status.Failed
-
-        return Status.Unsubmitted
+        return SlurmLauncher._map_status(exec_status)
 
     @classmethod
     async def cancel(cls, item: Task[SlurmHandle]) -> Task[SlurmHandle]:
