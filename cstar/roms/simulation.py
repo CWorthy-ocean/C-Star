@@ -57,6 +57,7 @@ from cstar.roms.input_dataset import (
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSInputDataset,
+    ROMSInputDatasetWithOptSymlink,
     ROMSModelGrid,
     ROMSNestingInfo,
     ROMSRiverForcing,
@@ -1298,12 +1299,10 @@ class ROMSSimulation(Simulation):
     ) -> None:
         """Validate opt files and create output-dir symlinks for supplementary datasets.
 
-        For each of cdr_forcing and nesting_info, if the dataset is defined:
-        1. Verify the corresponding opt file (``cdr_frc.opt`` or ``extract_data.opt``)
-           is listed in ``compile_time_code``.
-        2. Verify that opt file's content includes the expected filename string
-           (``"cdr.nc"`` or ``"nesting.nc"``).
-        3. Create a symlink ``{output_dir}/<name>.nc`` pointing to the staged local file.
+        For each supplementary dataset (cdr_forcing, nesting_info) that is defined:
+        1. Verify the dataset's ``required_opt_file`` is listed in ``compile_time_code``.
+        2. Verify that opt file's content includes the dataset's ``symlink_name``.
+        3. Create a symlink ``{output_dir}/{symlink_name}`` pointing to the staged local file.
 
         Parameters
         ----------
@@ -1317,12 +1316,13 @@ class ROMSSimulation(Simulation):
             if the required opt file is not listed in ``compile_time_code``, or if the
             opt file does not contain the expected filename string.
         """
-        checks: list[tuple[ROMSInputDataset | None, str, str]] = [
-            (self.cdr_forcing, "cdr_frc.opt", "cdr.nc"),
-            (self.nesting_info, "extract_data.opt", "nesting.nc"),
+        supplementary: list[ROMSInputDatasetWithOptSymlink | None] = [
+            self.cdr_forcing,
+            self.nesting_info,
         ]
 
-        if not any(dataset is not None for dataset, _, _ in checks):
+        active = [d for d in supplementary if d is not None]
+        if not active:
             return
 
         compile_time_filenames = (
@@ -1334,9 +1334,9 @@ class ROMSSimulation(Simulation):
         output_dir = self.fs_manager.output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        for dataset, opt_filename, link_name in checks:
-            if dataset is None:
-                continue
+        for dataset in active:
+            opt_filename = dataset.required_opt_file
+            link_name = dataset.symlink_name
 
             if self.compile_time_code is None:
                 raise ValueError(

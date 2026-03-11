@@ -430,13 +430,29 @@ class ROMSForcingCorrections(ROMSInputDataset):
             )
 
 
-class ROMSCdrForcing(ROMSInputDataset):
+class ROMSInputDatasetWithOptSymlink(ROMSInputDataset):
+    """Input dataset that requires a compile-time path redirect"""
+
+    required_opt_file: str
+
+    symlink_name: str
+
+
+class ROMSCdrForcing(ROMSInputDatasetWithOptSymlink):
     """An implementation of the ROMSInputDataset class for CDR forcing files."""
 
-    pass
+    required_opt_file: str = "cdr_frc.opt"
+    """Compile-time opt file that must be present and reference ``symlink_name``."""
+
+    symlink_name: str = "cdr.nc"
+    """Filename ROMS expects in the run directory for this dataset."""
 
 
-class ROMSNestingInfo(ROMSInputDataset):
+class ROMSNestingInfo(ROMSInputDatasetWithOptSymlink):
     """An implementation of the ROMSInputDataset class for nesting info files."""
 
-    pass
+    required_opt_file: str = "extract_data.opt"
+    """Compile-time opt file that must be present and reference ``symlink_name``."""
+
+    symlink_name: str = "nesting.nc"
+    """Filename ROMS expects in the run directory for this dataset."""
