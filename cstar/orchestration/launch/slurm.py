@@ -59,9 +59,6 @@ def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
 class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
-    job_name: str = ""
-    """The user-friendly, task-based job name."""
-
 
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
@@ -165,7 +162,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if job.id:
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
-            return SlurmHandle(pid=str(job.id), job_name=job_name)
+            return SlurmHandle(pid=str(job.id), name=job_name)
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
         raise RuntimeError(msg)
