@@ -1,8 +1,12 @@
 import asyncio
 import os
 import typing as t
+from pathlib import Path
 
-from prefect import task
+import prefect.runtime
+from prefect import State, task
+from prefect import Task as PrefectTask
+from prefect.client.schemas import TaskRun
 
 from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
 from cstar.base.log import get_logger
@@ -11,6 +15,7 @@ from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
     get_slurm_batch,
+    get_slurm_batches,
 )
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application, RomsMarblBlueprint
@@ -19,6 +24,9 @@ from cstar.orchestration.orchestration import (
     ProcessHandle,
     Status,
     Task,
+    get_sentinel,
+    list_sentinels,
+    put_sentinel,
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
@@ -33,6 +41,27 @@ if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
+
+
+async def on_submit_complete(
+    task: PrefectTask, task_run: TaskRun, state: State, **kwargs: str
+) -> None:
+    """Perform actions required when a job submission completes
+    successfully.
+    """
+    if state.is_completed():
+        params = prefect.runtime.task_run.get_parameters()
+        step = t.cast("LiveStep", params.get("step"))
+
+        try:
+            result = await state.aresult()
+            handle = t.cast("SlurmHandle", result)
+            await put_sentinel(handle, step.sentinel_path)
+        except Exception:
+            log.exception("An error occurred during the post-submit hook")
+
+    if state.name == "Cached":
+        log.debug(f"Re-using result from cached SLURM job: {handle.pid}")
 
 
 def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
@@ -106,7 +135,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         return get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
 
-    @task(persist_result=True, cache_key_fn=cache_key_func)
+    @task(
+        persist_result=True,
+        cache_key_fn=cache_key_func,
+        on_completion=[on_submit_complete],
+    )
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
@@ -197,6 +230,23 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         return status
 
+    @staticmethod
+    async def _locate_priors(task_path: Path) -> t.Mapping[str, SlurmHandle]:
+        """Retrieve all task sentinels discovered in the output path.
+
+        Parameters
+        ----------
+        task_path : Path
+            The path to any asset in the output directory for the run.
+
+        Returns
+        -------
+        Mapping[str, Task[SlurmHandle]]
+            Mapping of all previously run PIDs to their sentinel content.
+        """
+        sentinels = await list_sentinels(task_path, SlurmHandle)
+        return {h.pid: h for h in sentinels}
+
     @classmethod
     async def launch(
         cls,
@@ -218,21 +268,33 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             A Task containing information about the newly submitted job.
         """
         # item is persisted to a name that is shared by all instances
-        persist_as = Task.persist_step_as(step)
-        prior = Task.load_persisted(persist_as)
-        handle: ProcessHandle | None = None
+        prior_handle = await get_sentinel(step.sentinel_path, SlurmHandle)
         submit_fn = SlurmLauncher._submit
         current_status = Status.Unsubmitted
 
-        # TODO: consider loading persisted values all at once during startup instead
-        if prior:  #  and prior.task.status != Status.Done:
-            # always retrieve real-deal in case persisting status updates failed.
-            last_status = await SlurmLauncher.query_status(prior.handle)
+        if prior_handle:
+            # use persisted task as sentinel only; query SLURM for up-to-date status
+            last_status = await SlurmLauncher.query_status(prior_handle)
+
             if Status.is_failure(last_status):
                 # force cache refresh for any tasks that didn't succeed
                 step.fsm.clear_prior()
                 submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
+                # SLURM cannot use dependencies on previously completed jobs
+                pid_to_task = await cls._locate_priors(step.fsm.root)
+                batch_map = await get_slurm_batches(pid_to_task.keys())
+                successes = {
+                    k
+                    for k, v in batch_map.items()
+                    if v.job.status == ExecutionStatus.COMPLETED
+                }
+                if dependencies and successes:
+                    # only keep dependencies that are not old/re-usable
+                    active = set(x.pid for x in dependencies).difference(successes)
+                    dependencies = list(filter(lambda x: x.pid in active, dependencies))
+            else:
+                current_status = last_status
 
         handle = await submit_fn(step, dependencies)
         if current_status == Status.Unsubmitted:

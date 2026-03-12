@@ -54,6 +54,71 @@ class ProcessHandle(BaseModel):
     """The name of the process."""
 
 
+_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
+
+
+async def put_sentinel(handle: _THandle, persist_to: Path) -> bool:
+    """Store a sentinel file on disk.
+
+    The sentinel indicates that a step has been previously executed.
+    """
+    if persist_to.exists():
+        persist_to.unlink()
+
+    num_bytes = await asyncio.to_thread(
+        serialize, persist_to, handle, mode=PersistenceMode.auto
+    )
+    return num_bytes > 0
+
+
+async def get_sentinel(
+    persist_to: Path,
+    klass: type[_THandle],
+    *,
+    mode: PersistenceMode = PersistenceMode.auto,
+) -> _THandle | None:
+    """Read a sentinel file from disk.
+
+    Parameters
+    ----------
+    persist_to : Path
+        Path to a sentinel file
+
+    Returns
+    -------
+    ProcessHandle | None
+        Returns the handle loaded from disk if the file exists,
+        otherwise `None`
+    """
+    if persist_to.exists():
+        return await asyncio.to_thread(deserialize, persist_to, klass, mode=mode)
+    return None
+
+
+async def list_sentinels(persist_to: Path, klass: type[_THandle]) -> list[_THandle]:
+    """Find all sentinel files located in the specified run directory.
+
+    Parameters
+    ----------
+    persist_to : Path
+        The path to any asset in the output directory for the run.
+    klass : type[_THandle]
+        The type of handles to deserialize
+
+    Returns
+    -------
+    list[_THandle]
+        All previously persisted sentinels
+    """
+    run_id = get_env_item(ENV_CSTAR_RUNID).value
+    run_directory = Path(str(persist_to).split(run_id)[0]) / run_id
+    fsm = JobFileSystemManager(run_directory)
+
+    coros = [get_sentinel(p, klass) for p in fsm.work_dir.rglob("*.sentinel.*")]
+    results = await asyncio.gather(*coros)
+    return [x for x in results if x]
+
+
 class Status(IntEnum):
     """The state of a running task."""
 
@@ -118,9 +183,6 @@ class Status(IntEnum):
         return status in {Status.Submitted, Status.Running, Status.Ending}
 
 
-_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
-
-
 class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
@@ -130,6 +192,8 @@ class LiveStep(Step):
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
+    _put_mode: PersistenceMode = PersistenceMode.yaml
+    """The serialization mode for sentinel values written to disk."""
 
     @property
     def get_working_dir(self) -> Path:
@@ -187,6 +251,24 @@ class LiveStep(Step):
 
         return LiveStep(**step_attrs)
 
+    @property
+    def sentinel_path(
+        self,
+    ) -> Path:
+        """Return the path to a file on disk where a sentinel value for this
+        step should reside.
+
+        Returns
+        -------
+        Path
+        """
+        extension = "yml" if self._put_mode == PersistenceMode.yaml else "json"
+        run_id = get_env_item(ENV_CSTAR_RUNID).value
+        run_root = Path(self.fsm.root.as_posix().split(run_id)[0]) / run_id
+        root_fsm = JobFileSystemManager(run_root)
+
+        return root_fsm.work_dir / f"{self.safe_name}.sentinel.{extension}"
+
 
 class Task(BaseModel, t.Generic[_THandle]):
     """A task represents a live-execution of a step."""
@@ -199,33 +281,6 @@ class Task(BaseModel, t.Generic[_THandle]):
 
     status: Status = Status.Unsubmitted
     """Current task status."""
-
-    @classmethod
-    def persist_step_as(
-        cls,
-        step: LiveStep,
-        *,
-        mode: PersistenceMode = PersistenceMode.yaml,
-    ) -> Path:
-        extension = "yml" if mode == PersistenceMode.yaml else "json"
-        return step.fsm.tasks_dir / f"{step.safe_name}.{extension}"
-
-    def persist_as(
-        self,
-        *,
-        mode: PersistenceMode = PersistenceMode.yaml,
-    ) -> Path:
-        return Task.persist_step_as(self.step, mode=mode)
-
-    def persist(self, *, mode: PersistenceMode = PersistenceMode.yaml) -> bool:
-        return serialize(Task.persist_step_as(self.step, mode=mode), self) > 0
-
-    @classmethod
-    def load_persisted(cls, path: Path) -> "Task | None":
-        if not path.exists():
-            return None
-
-        return deserialize(path, Task)
 
 
 class Planner(LoggingMixin):
