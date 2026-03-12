@@ -223,7 +223,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         batch = await get_slurm_batch(job_id)
         status = batch.job.status
 
-        log.debug(f"Status of job `{job_id}` is `{status}`")
         return status
 
     @staticmethod
