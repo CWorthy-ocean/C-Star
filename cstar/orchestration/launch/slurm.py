@@ -9,7 +9,7 @@ from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
-    get_status_of_slurm_job,
+    get_slurm_batch,
 )
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application, RomsMarblBlueprint
@@ -200,7 +200,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         ExecutionStatus
             The current status of the step.
         """
-        status = get_status_of_slurm_job(handle.pid)
+        batch = await get_slurm_batch(handle.pid)
+        status = batch.job.status
 
         msg = f"Status of job {handle.pid} is {status} for step {step.name}"
         log.debug(msg)

@@ -1,9 +1,12 @@
+import asyncio
 import json
 import os
 import re
 import typing as t
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
@@ -22,8 +25,181 @@ if t.TYPE_CHECKING:
     from cstar.system.scheduler import Queue, Scheduler
 
 
-def get_status_of_slurm_job(job_id: str) -> ExecutionStatus:
-    """Check the status of a Slurm job using sacct.
+sacct_status_map = defaultdict(
+    lambda: ExecutionStatus.UNKNOWN,
+    {
+        "PENDING": ExecutionStatus.PENDING,
+        "RUNNING": ExecutionStatus.RUNNING,
+        "COMPLETED": ExecutionStatus.COMPLETED,
+        "CANCELLED": ExecutionStatus.CANCELLED,
+        "FAILED": ExecutionStatus.FAILED,
+    },
+)
+"""Map sacct states to ExecutionStatus enum."""
+
+
+@dataclass
+class SlurmStep:
+    """Metadata for a SLURM job submission."""
+
+    step_id: str
+    """The SLURM job-id."""
+    raw_state: str
+    """The status of the job."""
+    submit_ts: str
+    """The timestamp for the time of submission."""
+    start_ts: str | None
+    """The timestamp for the time the job started."""
+    end_ts: str | None
+    """The timestamp for the time the job ended."""
+    job_name: str
+    """The unique name of the step."""
+
+    FIELDS: tuple[str, ...] = ("JobID", "State", "Submit", "Start", "End", "JobName")
+    FIELD_WIDTH: tuple[str, ...] = ("%15", "%20", "%20", "%20", "%20", "%100")
+
+    @classmethod
+    def from_sacct(cls, sacct_stdout: str) -> "SlurmStep":
+        """Instantiate a `SlurmStep` by parsing attributes from a single line of sacct output.
+
+        Returns
+        -------
+        SlurmStep
+        """
+        data = [item.strip() for item in sacct_stdout.split()]
+        ncols, nexpected = len(data), len(SlurmStep.FIELDS)
+        if ncols != nexpected:
+            msg = f"sacct output has {ncols} but {nexpected} were expected."
+            raise RuntimeError(msg)
+
+        job_id, raw_state, submit_ts, start_ts, end_ts, job_name = [
+            x.strip() for x in sacct_stdout.split()
+        ]
+
+        # TODO: parse the time strings from the format:
+        #  2026-03-02T20:36:32
+        #  YYYY-MM-DDTHH:MM:SS
+        return SlurmStep(
+            step_id=job_id,
+            raw_state=raw_state,
+            submit_ts=submit_ts,
+            start_ts=start_ts if submit_ts else None,
+            end_ts=end_ts if end_ts else None,
+            job_name=job_name,
+        )
+
+    @property
+    def is_job(self) -> bool:
+        """Return `True` when this job is the parent job of a batch.
+
+        Returns
+        -------
+        bool
+        """
+        return self.job_id == self.step_id
+
+    @property
+    def status(self) -> ExecutionStatus:
+        """Return the current status of the step.
+
+        Returns
+        -------
+        ExecutionStatus
+        """
+        return sacct_status_map[self.raw_state]
+
+    @property
+    def job_id(self) -> str:
+        """The batch job ID the step was run under.
+
+        Returns
+        -------
+        str
+        """
+        if "." not in self.step_id:
+            return self.step_id
+
+        return self.step_id.split(".")[0]
+
+    @classmethod
+    def many_from_sacct(cls, sacct_stdout: str) -> "tuple[SlurmStep, ...]":
+        """Parse sacct output into a collection of details items.
+
+        Returns
+        -------
+        t.Iterable[SlurmJobDetail]
+        """
+        return tuple(
+            cls.from_sacct(line) for line in sacct_stdout.split("\n") if line.strip()
+        )
+
+
+class SlurmBatch:
+    """Metadata for all steps in a SLURM batch."""
+
+    steps: t.Iterable[SlurmStep]
+    """The collection of steps running in a batch."""
+
+    _job: SlurmStep
+    """The parent step for the batch."""
+
+    def __init__(self, steps: t.Iterable[SlurmStep]) -> None:
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        steps: t.Iterable[SlurmStep]
+            The steps belonging to the batch.
+        """
+        job_ids = {x.job_id for x in steps}
+        if len(job_ids) > 1:
+            raise ValueError("Attempted to create batch from multiple batches")
+
+        self._job = next(t for t in steps if t.is_job)
+        self.steps = list(t for t in steps if not t.is_job)
+
+    @property
+    def job(self) -> SlurmStep:
+        """Return the parent step for the batch.
+
+        Returns
+        -------
+        SlurmStep
+        """
+        return self._job
+
+    @classmethod
+    def from_multi_query(cls, steps: t.Iterable[SlurmStep]) -> dict[str, "SlurmBatch"]:
+        """Create a mapping of job-id to Batch for all discovered job-ids
+        resulting from a multi-job query.
+
+        Parameters
+        ----------
+        steps: t.Iterable[SlurmStep]
+            The steps belonging to 1-to-many batches.
+
+        Returns
+        -------
+        dict[str, SlurmBatch]
+        """
+        multi_map: dict[str, list[SlurmStep]] = defaultdict(lambda: [])
+        for item in steps:
+            multi_map[item.job_id].append(item)
+
+        return {k: SlurmBatch(multi_map[k]) for k in multi_map}
+
+    def __iter__(self) -> t.Iterator["SlurmStep"]:
+        """Iterate through the steps associated with the batch.
+
+        Returns
+        -------
+        t.Iterator[SlurmStep]
+        """
+        yield from self.steps
+
+
+async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
+    """Retrieve job metadata from SLURM.
 
     Parameters
     ----------
@@ -32,27 +208,58 @@ def get_status_of_slurm_job(job_id: str) -> ExecutionStatus:
 
     Returns
     -------
-    status: ExecutionStatus
-        The status of the job
+    tuple[SlurmStep, ...]
+        All step metadata retrieved for the job_id
     """
-    sacct_cmd = f"sacct -j {job_id} --format=State%20 --noheader"
+    fields = [
+        f"{field}{spacing}"
+        for field, spacing in zip(SlurmStep.FIELDS, SlurmStep.FIELD_WIDTH)
+    ]
+    sacct_cmd = f"sacct -j {job_id} --format={','.join(fields)} --noheader"
     msg_err = f"Failed to retrieve job status using {sacct_cmd}."
-    stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
+    stdout = await asyncio.to_thread(
+        _run_cmd, sacct_cmd, msg_err=msg_err, raise_on_error=True
+    )
 
-    # Map sacct states to ExecutionStatus enum
-    sacct_status_map = {
-        "PENDING": ExecutionStatus.PENDING,
-        "RUNNING": ExecutionStatus.RUNNING,
-        "COMPLETED": ExecutionStatus.COMPLETED,
-        "CANCELLED": ExecutionStatus.CANCELLED,
-        "FAILED": ExecutionStatus.FAILED,
-    }
-    for state, status in sacct_status_map.items():
-        if state in stdout:
-            return status
+    return SlurmStep.many_from_sacct(stdout)
 
-    # Fallback if no known state is found
-    return ExecutionStatus.UNKNOWN
+
+async def get_slurm_batch(job_id: str | int) -> SlurmBatch:
+    """Retrieve batch job metadata from SLURM.
+
+    Parameters
+    ----------
+    job_id : str
+
+    Returns
+    -------
+    SlurmBatch
+    """
+    steps = await get_slurm_steps(job_id)
+    return SlurmBatch(steps)
+
+
+async def get_slurm_batches(
+    job_ids: t.Iterable[str | int],
+) -> t.Mapping[str, SlurmBatch]:
+    """Query SLURM for job status.
+
+    Parameters
+    ----------
+    job_ids: t.Iterable[str | int]
+        A collection containing batch job ID's
+
+    Returns
+    -------
+    Mapping[str, SlurmBatch]:
+        A mapping of job-id to SlurmBatch for the supplied job ID's
+    """
+    batch_ids = {str(x).split(".")[0] for x in job_ids}
+    jobid_query = ",".join(batch_ids)
+
+    # gross to send `jobid_query` as job_id, but making another method is... grosser?
+    all_steps = await get_slurm_steps(jobid_query)
+    return SlurmBatch.from_multi_query(all_steps)
 
 
 def create_scheduler_job(
@@ -608,6 +815,8 @@ class SlurmJob(SchedulerJob):
         Cancel the job using the SLURM `scancel` command.
     """
 
+    _batch: SlurmBatch | None = None
+
     @property
     def status(self) -> ExecutionStatus:
         """Retrieve the current status of the job from the SLURM scheduler.
@@ -631,9 +840,21 @@ class SlurmJob(SchedulerJob):
         RuntimeError
             If the command to retrieve the job status fails or returns an unexpected result.
         """
+        if batch := self.get_batch():
+            return batch.job.status
+
+        return ExecutionStatus.UNSUBMITTED
+
+    def get_batch(self) -> SlurmBatch | None:
         if self.id is None:
-            return ExecutionStatus.UNSUBMITTED
-        return get_status_of_slurm_job(str(self.id))
+            return None
+
+        # avoid refreshing status if the job is done
+        if self._batch is None or not ExecutionStatus.is_terminal(
+            self._batch.job.status
+        ):
+            self._batch = asyncio.run(get_slurm_batch(self.id))
+        return self._batch
 
     @property
     def script(self) -> str:

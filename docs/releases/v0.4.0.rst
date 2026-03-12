@@ -17,7 +17,7 @@ Breaking Changes
 New features
 ~~~~~~~~~~~~
 
-- N/A
+- Enable status retrieval for multiple SLURM jobs in a single `sacct` call
 
 Security Fixes
 ~~~~~~~~~~~~~~
