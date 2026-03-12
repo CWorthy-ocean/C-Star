@@ -72,7 +72,7 @@ class SlurmStep:
             msg = f"sacct output has {ncols} but {nexpected} were expected."
             raise RuntimeError(msg)
 
-        job_id, raw_state, submit_ts, start_ts, end_ts, job_name = [
+        job_id, submit_ts, start_ts, end_ts, job_name, raw_state = [
             x.strip() for x in sacct_stdout.split()
         ]
 
