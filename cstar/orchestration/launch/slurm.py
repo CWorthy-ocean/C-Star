@@ -222,6 +222,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         prior = Task.load_persisted(persist_as)
         handle: ProcessHandle | None = None
         submit_fn = SlurmLauncher._submit
+        current_status = Status.Unsubmitted
 
         # TODO: consider loading persisted values all at once during startup instead
         if prior:  #  and prior.task.status != Status.Done:
@@ -234,11 +235,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
 
         handle = await submit_fn(step, dependencies)
+        if current_status == Status.Unsubmitted:
+            current_status = await SlurmLauncher.query_status(handle)
 
         return Task(
             step=step,
             handle=handle,
-            status=Status.Submitted,
+            status=current_status,
         )
 
     @classmethod
