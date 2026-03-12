@@ -242,6 +242,23 @@ class JobFileSystemManager(LoggingMixin):
                 shutil.rmtree(directory)
             directory.mkdir(parents=True)
 
+    def clear_prior(self) -> None:
+        """Ensure the job's working directories are empty."""
+        if not self.root.exists():
+            return
+
+        msg = f"Emptying working directories of outputs for previous run of `{self.root.name}`"
+        self.log.debug(msg)
+
+        for directory in [
+            self.input_dir,
+            self.logs_dir,
+            self.output_dir,
+        ]:
+            if directory.exists():
+                shutil.rmtree(directory)
+            directory.mkdir(parents=True)
+
     def get_subtask_manager(self, task_name: str) -> t.Self:
         """Create a JobFileSystemManager instance with a root directory
         configured for a subtask.
