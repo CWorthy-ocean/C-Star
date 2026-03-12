@@ -6,22 +6,26 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID, get_env_item
+from cstar.base.env import (
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_RUNID,
+    get_env_item,
+)
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import lazy_import, slugify
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
+    StateDirectoryManager,
 )
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
-    deserialize,
     intenum_representer,
     register_representer,
-    serialize,
 )
+from cstar.orchestration.state import EXT_SENTINEL
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
 
 nx = lazy_import("networkx")
@@ -55,68 +59,6 @@ class ProcessHandle(BaseModel):
 
 
 _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
-
-
-async def put_sentinel(handle: _THandle, persist_to: Path) -> bool:
-    """Store a sentinel file on disk.
-
-    The sentinel indicates that a step has been previously executed.
-    """
-    if persist_to.exists():
-        persist_to.unlink()
-
-    num_bytes = await asyncio.to_thread(
-        serialize, persist_to, handle, mode=PersistenceMode.auto
-    )
-    return num_bytes > 0
-
-
-async def get_sentinel(
-    persist_to: Path,
-    klass: type[_THandle],
-    *,
-    mode: PersistenceMode = PersistenceMode.auto,
-) -> _THandle | None:
-    """Read a sentinel file from disk.
-
-    Parameters
-    ----------
-    persist_to : Path
-        Path to a sentinel file
-
-    Returns
-    -------
-    ProcessHandle | None
-        Returns the handle loaded from disk if the file exists,
-        otherwise `None`
-    """
-    if persist_to.exists():
-        return await asyncio.to_thread(deserialize, persist_to, klass, mode=mode)
-    return None
-
-
-async def list_sentinels(persist_to: Path, klass: type[_THandle]) -> list[_THandle]:
-    """Find all sentinel files located in the specified run directory.
-
-    Parameters
-    ----------
-    persist_to : Path
-        The path to any asset in the output directory for the run.
-    klass : type[_THandle]
-        The type of handles to deserialize
-
-    Returns
-    -------
-    list[_THandle]
-        All previously persisted sentinels
-    """
-    run_id = get_env_item(ENV_CSTAR_RUNID).value
-    run_directory = Path(str(persist_to).split(run_id)[0]) / run_id
-    fsm = JobFileSystemManager(run_directory)
-
-    coros = [get_sentinel(p, klass) for p in fsm.work_dir.rglob("*.sentinel.*")]
-    results = await asyncio.gather(*coros)
-    return [x for x in results if x]
 
 
 class Status(IntEnum):
@@ -262,12 +204,8 @@ class LiveStep(Step):
         -------
         Path
         """
-        extension = self._put_mode.value
-        run_id = get_env_item(ENV_CSTAR_RUNID).value
-        run_root = Path(self.fsm.root.as_posix().split(run_id)[0]) / run_id
-        root_fsm = JobFileSystemManager(run_root)
-
-        return root_fsm.work_dir / f"{self.safe_name}.sentinel.{extension}"
+        run_state = StateDirectoryManager.run_state()
+        return run_state / f"{self.safe_name}.{EXT_SENTINEL}"
 
 
 class Task(BaseModel, t.Generic[_THandle]):

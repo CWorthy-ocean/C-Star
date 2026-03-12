@@ -24,11 +24,9 @@ from cstar.orchestration.orchestration import (
     ProcessHandle,
     Status,
     Task,
-    get_sentinel,
-    list_sentinels,
-    put_sentinel,
 )
 from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.state import get_sentinel, list_sentinels, put_sentinel
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,

@@ -16,6 +16,7 @@ from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     get_env_item,
 )
@@ -358,6 +359,36 @@ class RomsFileSystemManager(JobFileSystemManager):
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
+
+
+class StateDirectoryManager:
+    """Manage the system file system."""
+
+    _RUN_STATE_NAME: t.Final[str] = "run_state"
+    """The name of the directory where run-state files are written."""
+
+    @staticmethod
+    def root() -> Path:
+        """The root directory containing all job outputs.
+
+        Returns
+        -------
+        Path
+        """
+        root = DirectoryManager.state_home()
+        run_id = get_env_item(ENV_CSTAR_RUNID).value
+        return root / run_id
+
+    @staticmethod
+    def run_state() -> Path:
+        """The directory for run-state files.
+
+        The result is a _run-specific_ directory that varies
+        based on the current value of environment variables.
+        """
+        root = DirectoryManager.state_home()
+        run_id = get_env_item(ENV_CSTAR_RUNID).value
+        return root / StateDirectoryManager._RUN_STATE_NAME / run_id
 
 
 def is_remote_resource(uri: str) -> bool:
