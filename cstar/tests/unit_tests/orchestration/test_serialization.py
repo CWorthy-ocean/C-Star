@@ -262,5 +262,3 @@ def test_serialization_task(tmp_path: Path, mode: PersistenceMode) -> None:
     assert dtask.status == task.status
     assert dtask.step.name == task.step.name
     assert dtask.handle.pid == task.handle.pid
-
-    # assert False

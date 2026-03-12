@@ -267,7 +267,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
         """
-        # item is persisted to a name that is shared by all instances
         prior_handle = await get_sentinel(step.sentinel_path, SlurmHandle)
         submit_fn = SlurmLauncher._submit
         current_status = Status.Unsubmitted
@@ -306,8 +305,20 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             status=current_status,
         )
 
-    @classmethod
-    def _map_status(cls, status: ExecutionStatus) -> Status:
+    @staticmethod
+    def _map_status(status: ExecutionStatus) -> Status:
+        """Map SLURM execution status to CSTAR status.
+
+        Parameters
+        ----------
+        status : ExecutionStatus
+            The raw SLURM status.
+
+        Returns
+        -------
+        Status
+            The C-Star status.
+        """
         match status:
             case (
                 ExecutionStatus.PENDING

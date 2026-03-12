@@ -145,18 +145,16 @@ class LocalLauncher(Launcher[LocalHandle]):
         str
             The current status of the step.
         """
-        # await LocalLauncher._update_processes()
         rc = handle.process.exitcode
-        step_name = handle.name
 
         if rc is None:
             status = "RUNNING"
         elif rc == 0:
             status = "COMPLETED"
-            print(f"Return code for pid `{handle.pid}` is `{rc}` for `{step_name}`")
+            print(f"Return code for pid `{handle.pid}` is `{rc}` for `{handle.name}`")
         else:
             status = "FAILED"
-            print(f"Failure code for pid `{handle.pid}` is `{rc}` for `{step_name}`")
+            print(f"Failure code for pid `{handle.pid}` is `{rc}` for `{handle.name}`")
 
         return status
 
