@@ -76,6 +76,12 @@ class SlurmStep:
             x.strip() for x in sacct_stdout.split()
         ]
 
+        UNKNOWN: t.Final[str] = "Unknown"
+        if start_ts == UNKNOWN:
+            start_ts = ""
+        if end_ts == UNKNOWN:
+            end_ts = ""
+
         # TODO: parse the time strings from the format:
         #  2026-03-02T20:36:32
         #  YYYY-MM-DDTHH:MM:SS
