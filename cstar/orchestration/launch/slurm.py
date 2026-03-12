@@ -93,7 +93,7 @@ class SlurmHandle(ProcessHandle):
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
 
-    POST_SUBMIT_DELAY: t.Final[float] = 0.25
+    POST_SUBMIT_DELAY: t.Final[float] = 1.0
     """Delay after a submission to ensure status for a SLURM job can be queried."""
 
     @staticmethod
