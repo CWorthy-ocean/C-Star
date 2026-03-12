@@ -56,7 +56,7 @@ class SlurmStep:
     """The unique name of the step."""
 
     FIELDS: tuple[str, ...] = ("JobID", "Submit", "Start", "End", "JobName", "State")
-    FIELD_WIDTH: tuple[int, ...] = (10, 20, 20, 20, 100, 9)
+    FIELD_WIDTH: tuple[int, ...] = (10, 20, 20, 20, 100, 30)
 
     @classmethod
     def from_sacct(cls, sacct_stdout: str) -> "SlurmStep":
@@ -66,15 +66,9 @@ class SlurmStep:
         -------
         SlurmStep
         """
-        data = [item.strip() for item in sacct_stdout.split()]
-        ncols, nexpected = len(data), len(SlurmStep.FIELDS)
-        if ncols != nexpected:
-            msg = f"sacct output has {ncols} but {nexpected} were expected."
-            raise RuntimeError(msg)
-
-        job_id, submit_ts, start_ts, end_ts, job_name, raw_state = [
-            x.strip() for x in sacct_stdout.split()
-        ]
+        num_fields = len(SlurmStep.FIELDS)
+        data = [item.strip() for item in sacct_stdout.split(maxsplit=num_fields - 1)]
+        job_id, submit_ts, start_ts, end_ts, job_name, raw_state = data
 
         UNKNOWN: t.Final[str] = "Unknown"
         if start_ts == UNKNOWN:
@@ -87,7 +81,7 @@ class SlurmStep:
         #  YYYY-MM-DDTHH:MM:SS
         return SlurmStep(
             step_id=job_id,
-            raw_state=raw_state,
+            raw_state=raw_state.split(" ", maxsplit=1)[0],
             submit_ts=submit_ts,
             start_ts=start_ts if submit_ts else None,
             end_ts=end_ts if end_ts else None,
