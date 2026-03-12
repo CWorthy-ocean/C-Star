@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
-from cstar.orchestration.orchestration import LiveStep, Status, Task
+from cstar.orchestration.orchestration import LiveStep, Status
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
 
 
@@ -219,10 +219,10 @@ def test_serialization_workplan_runtime_vars(
         PersistenceMode.yaml,
     ],
 )
-def test_serialization_task(tmp_path: Path, mode: PersistenceMode) -> None:
+def test_serialization_handle(tmp_path: Path, mode: PersistenceMode) -> None:
     """Verify that a task can be properly serialized to disk and reloaded."""
     pid, job_name = "test-pid", "abc123"
-    name, app, path, status = (
+    name, app, path, _ = (
         "test-step",
         Application.ROMS_MARBL,
         tmp_path / "blueprint.yaml",
@@ -233,18 +233,13 @@ def test_serialization_task(tmp_path: Path, mode: PersistenceMode) -> None:
 
     step = LiveStep(name=name, application=app, blueprint=path, depends_on=[])
     handle = SlurmHandle(pid=pid, name=job_name)
-    task: Task[SlurmHandle] = Task(
-        step=step,
-        handle=handle,
-        status=status,
-    )
 
-    persist_as = task.persist_as()
+    persist_as = step.sentinel_path
 
     # confirm the parametrized serialization mode is supported
     nbytes = serialize(
         persist_as,
-        task,
+        handle,
         mode,
     )
     assert nbytes > 0
@@ -253,12 +248,11 @@ def test_serialization_task(tmp_path: Path, mode: PersistenceMode) -> None:
     print(persist_as.read_text(encoding="utf-8"))
 
     # confirm the output from `serialize` is valid and can be deserialized
-    dtask: Task[SlurmHandle] = deserialize(
+    dhandle: SlurmHandle = deserialize(
         persist_as,
-        Task[SlurmHandle],
+        SlurmHandle,
         mode,
     )
 
-    assert dtask.status == task.status
-    assert dtask.step.name == task.step.name
-    assert dtask.handle.pid == task.handle.pid
+    assert dhandle.name == handle.name
+    assert dhandle.pid == handle.pid
