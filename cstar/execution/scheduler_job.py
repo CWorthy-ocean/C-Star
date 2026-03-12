@@ -55,8 +55,8 @@ class SlurmStep:
     job_name: str
     """The unique name of the step."""
 
-    FIELDS: tuple[str, ...] = ("JobID", "State", "Submit", "Start", "End", "JobName")
-    FIELD_WIDTH: tuple[str, ...] = ("%15", "%20", "%20", "%20", "%20", "%100")
+    FIELDS: tuple[str, ...] = ("JobID", "Submit", "Start", "End", "JobName", "State")
+    FIELD_WIDTH: tuple[int, ...] = (10, 20, 20, 20, 100, 9)
 
     @classmethod
     def from_sacct(cls, sacct_stdout: str) -> "SlurmStep":
@@ -212,7 +212,7 @@ async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
         All step metadata retrieved for the job_id
     """
     fields = [
-        f"{field}{spacing}"
+        f"{field}%{spacing}"
         for field, spacing in zip(SlurmStep.FIELDS, SlurmStep.FIELD_WIDTH)
     ]
     sacct_cmd = f"sacct -j {job_id} --format={','.join(fields)} --noheader"
