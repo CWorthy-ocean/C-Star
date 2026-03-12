@@ -1,3 +1,4 @@
+import asyncio
 import os
 import typing as t
 
@@ -62,6 +63,9 @@ class SlurmHandle(ProcessHandle):
 
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
+
+    POST_SUBMIT_DELAY: t.Final[float] = 0.25
+    """Delay after a submission to ensure status for a SLURM job can be queried."""
 
     @staticmethod
     def configured_queue() -> str:
@@ -162,6 +166,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if job.id:
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
+            # add a small delay so batch can be queried
+            await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
             return SlurmHandle(pid=str(job.id), name=job_name)
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"

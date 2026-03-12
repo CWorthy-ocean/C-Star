@@ -155,8 +155,13 @@ class SlurmBatch:
         if len(job_ids) > 1:
             raise ValueError("Attempted to create batch from multiple batches")
 
-        self._job = next(t for t in steps if t.is_job)
-        self.steps = list(t for t in steps if not t.is_job)
+        if all_steps := list(steps):
+            try:
+                # a queued job will not have any steps, default to using first result
+                self._job = next((t for t in all_steps if t.is_job), all_steps[0])
+                self.steps = list(t for t in all_steps if not t.is_job) or all_steps
+            except (StopIteration, IndexError):
+                ...  # if batch status is retrieved too quickly, steps may be empty
 
     @property
     def job(self) -> SlurmStep:
