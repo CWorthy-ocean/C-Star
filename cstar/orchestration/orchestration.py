@@ -125,8 +125,11 @@ class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
     parent: t.Self | None = None
+    """The step for which this step is a sub-task."""
     work_dir: Path | None = None
+    """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
+    """Manages the structure of outputs from the step."""
 
     @property
     def get_working_dir(self) -> Path:
@@ -145,6 +148,12 @@ class LiveStep(Step):
 
     @property
     def fsm(self) -> JobFileSystemManager:
+        """Retrieve a file system manager rooted on the step working directory.
+
+        Returns
+        -------
+        JobFileSystemManager
+        """
         if self._fsm is None:
             self._fsm = JobFileSystemManager(self.get_working_dir)
         return self._fsm
@@ -156,6 +165,17 @@ class LiveStep(Step):
         parent: "LiveStep | Step | None" = None,
         update: t.Mapping[str, t.Any] | None = None,
     ) -> "LiveStep":
+        """Convert a step from orchestration planning into a LiveStep.
+
+        Parameters
+        ----------
+        step : Step
+            The step to convert
+        parent : LiveStep | Step | None (default: None)
+            The parent of the converted step
+        update : Mapping[str, t.Any]
+            A mapping of updates to apply to the step
+        """
         step_attrs = step.model_dump(by_alias=True)
 
         if update:
