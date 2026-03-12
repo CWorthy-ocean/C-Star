@@ -511,7 +511,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
         Parameters
         ----------
-        item : Task[_THandle] or ProcessHandle
+        item : Task[_THandle] or _THandle
             A task or process handle to query for status updates.
 
         Returns
@@ -527,8 +527,8 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
         Parameters
         ----------
-        item : Task[_THandle] or ProcessHandle
-            A task or process handle to cancel.
+        item : Task[_THandle]
+            A task to cancel.
 
         Returns
         -------

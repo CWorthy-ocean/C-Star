@@ -9,7 +9,7 @@ from psutil import Process as PsProcess
 from pydantic import PrivateAttr
 
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.utils import slugify
+from cstar.base.log import get_logger
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application
 from cstar.orchestration.orchestration import (
@@ -22,6 +22,9 @@ from cstar.orchestration.orchestration import (
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
+
+
+log = get_logger(__name__)
 
 
 def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
@@ -93,10 +96,9 @@ class LocalLauncher(Launcher[LocalHandle]):
             if not step.fsm.root.exists():
                 step.fsm.prepare()
 
-            process_name = slugify(step.name)
             mp_process = MpProcess(
                 target=run_as_process,
-                name=process_name,
+                name=step.safe_name,
                 args=(step, cmd.split()),
                 daemon=True,
             )
@@ -117,7 +119,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
                 handle = LocalHandle(
                     pid=str(pid),
-                    name=process_name,
+                    name=step.safe_name,
                     start_at=create_time,
                 )
                 handle.process = mp_process
@@ -135,8 +137,6 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         Parameters
         ----------
-        step : LiveStep
-            The step triggering the job.
         handle : LocalHandle
             A handle object for a process-based task.
 
@@ -151,10 +151,10 @@ class LocalLauncher(Launcher[LocalHandle]):
             status = "RUNNING"
         elif rc == 0:
             status = "COMPLETED"
-            print(f"Return code for pid `{handle.pid}` is `{rc}` for `{handle.name}`")
+            log.debug(f"Return code for handle `{handle}` is `{rc}`.")
         else:
             status = "FAILED"
-            print(f"Failure code for pid `{handle.pid}` is `{rc}` for `{handle.name}`")
+            log.warning(f"Failure code for handle `{handle}` is `{rc}`.")
 
         return status
 
@@ -216,16 +216,18 @@ class LocalLauncher(Launcher[LocalHandle]):
         """
         handle = item.handle if isinstance(item, Task) else item
         raw_status = await LocalLauncher._status(handle)
-        if raw_status in ["PENDING", "RUNNING", "ENDING"]:
-            return Status.Running
-        if raw_status in ["COMPLETED", "FAILED"]:
-            return Status.Done
-        if raw_status == "CANCELLED":
-            return Status.Cancelled
-        if raw_status == "FAILED":
-            return Status.Failed
 
-        return Status.Unsubmitted
+        match raw_status:
+            case "PENDING" | "RUNNING" | "ENDING":
+                return Status.Running
+            case "COMPLETED" | "FAILED":
+                return Status.Done
+            case "CANCELLED":
+                return Status.Cancelled
+            case "FAILED":
+                return Status.Failed
+            case _:
+                return Status.Unsubmitted
 
     @classmethod
     async def cancel(cls, item: Task[LocalHandle]) -> Task[LocalHandle]:

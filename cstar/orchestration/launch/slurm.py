@@ -207,27 +207,23 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(pid: str) -> ExecutionStatus:
+    async def _status(job_id: str) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
         ----------
-        step : LiveStep
-            The step triggering the job.
-        handle : SlurmHandle
-            A handle object for a SLURM-based task.
+        job_id : str
+            The slurm job ID to retrieve status for.
 
         Returns
         -------
         ExecutionStatus
             The current status of the step.
         """
-        batch = await get_slurm_batch(pid)
+        batch = await get_slurm_batch(job_id)
         status = batch.job.status
 
-        msg = f"Status of job `{pid}` is {status}"
-        log.debug(msg)
-
+        log.debug(f"Status of job `{job_id}` is `{status}`")
         return status
 
     @staticmethod
@@ -345,8 +341,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         Parameters
         ----------
-        step : LiveStep
-            The step that will be queried for.
         item : Task[SlurmHandle] | SlurmHandle
             An item with a handle to be used to execute a status query.
 
