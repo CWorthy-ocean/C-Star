@@ -352,7 +352,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         handle = item.handle if isinstance(item, Task) else item
         exec_status = await SlurmLauncher._status(handle.pid)
 
-        msg = f"SLURM job `{handle.pid}` status is `{exec_status}`"
+        msg = f"SLURM job `{handle}` status is `{exec_status}`"
         log.debug(msg)
 
         return SlurmLauncher._map_status(exec_status)
