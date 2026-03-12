@@ -222,9 +222,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             # always retrieve real-deal in case persisting status updates failed.
             last_status = await SlurmLauncher.query_status(prior.handle)
             if Status.is_failure(last_status):
-                # if the task terminated in a failure code, we'll re-run it.
-                # - we don't re-run successful tasks
-                persist_as.unlink()
+                # force cache refresh for any tasks that didn't succeed
+                step.fsm.clear_prior()
                 submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
 
