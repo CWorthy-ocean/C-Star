@@ -262,7 +262,7 @@ class LiveStep(Step):
         -------
         Path
         """
-        extension = "yaml" if self._put_mode == PersistenceMode.yaml else "json"
+        extension = self._put_mode.value
         run_id = get_env_item(ENV_CSTAR_RUNID).value
         run_root = Path(self.fsm.root.as_posix().split(run_id)[0]) / run_id
         root_fsm = JobFileSystemManager(run_root)
