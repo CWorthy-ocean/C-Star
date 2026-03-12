@@ -4,11 +4,13 @@ from pathlib import Path
 
 import typer
 
+from cstar.base.log import get_logger
 from cstar.cli.workplan.check import check
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import build_and_run_dag
 
 app = typer.Typer()
+log = get_logger(__name__)
 
 
 @app.command()
@@ -37,9 +39,9 @@ def run(
     try:
         with local_copy(path) as wp_path:
             asyncio.run(build_and_run_dag(wp_path, run_id, output_path))
-        print("Workplan run has completed.")
-    except Exception as ex:
-        print(f"Workplan run has completed unsuccessfully: {ex!r}")
+        log.info(f"Workplan run `{run_id}` has completed")
+    except Exception:
+        log.exception(f"Workplan run `{run_id}` has completed unsuccessfully")
 
 
 if __name__ == "__main__":

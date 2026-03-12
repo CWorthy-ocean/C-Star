@@ -6,6 +6,10 @@ import yaml
 from pydantic import BaseModel
 from yaml import safe_load
 
+from cstar.base.log import get_logger
+
+log = get_logger(__name__)
+
 
 class PersistenceMode(enum.StrEnum):
     """Supported serialization engines."""
@@ -209,7 +213,7 @@ def serialize(
     """
     if path.exists():
         msg = f"Overwriting existing file at `{path}`"
-        print(msg)
+        log.debug(msg)
 
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
