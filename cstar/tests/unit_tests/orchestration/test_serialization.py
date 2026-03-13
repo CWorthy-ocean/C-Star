@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
-from cstar.orchestration.orchestration import LiveStep, Status
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+from cstar.orchestration.state import sentinel_path
 
 
 def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
@@ -222,19 +222,9 @@ def test_serialization_workplan_runtime_vars(
 def test_serialization_handle(tmp_path: Path, mode: PersistenceMode) -> None:
     """Verify that a task can be properly serialized to disk and reloaded."""
     pid, job_name = "test-pid", "abc123"
-    name, app, path, _ = (
-        "test-step",
-        Application.ROMS_MARBL,
-        tmp_path / "blueprint.yaml",
-        Status.Done,
-    )
-
-    path.touch()
-
-    step = LiveStep(name=name, application=app, blueprint=path, depends_on=[])
     handle = SlurmHandle(pid=pid, name=job_name)
 
-    persist_as = step.sentinel_path
+    persist_as = sentinel_path(handle, mode)
 
     # confirm the parametrized serialization mode is supported
     nbytes = serialize(
@@ -244,7 +234,7 @@ def test_serialization_handle(tmp_path: Path, mode: PersistenceMode) -> None:
     )
     assert nbytes > 0
 
-    print(f"Task persisted to: {path}")
+    print(f"Task persisted to: {persist_as}")
     print(persist_as.read_text(encoding="utf-8"))
 
     # confirm the output from `serialize` is valid and can be deserialized
