@@ -122,5 +122,5 @@ def get_command_mapping(
     else:
         msg = f"Using `{step_converter}` for `{application}` commands."
 
-    log.debug(msg)
+    log.trace(msg)
     return step_converter

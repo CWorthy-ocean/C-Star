@@ -11,7 +11,7 @@ from types import ModuleType
 
 import dateutil
 
-from cstar.base.log import TRACE_LOG_LEVEL, get_logger
+from cstar.base.log import get_logger
 
 if t.TYPE_CHECKING:
     from os import PathLike
@@ -263,7 +263,7 @@ def _run_cmd(
     Out: Running command: python return_nonzero.py
          Command `python return_nonzero.py` failed. STDERR: <stderror of foo.py>
     """
-    log.log(TRACE_LOG_LEVEL, msg_pre or f"Running command: {cmd}")
+    log.trace(msg_pre or f"Running command: {cmd}")
 
     stdout: str = ""
 
@@ -297,7 +297,7 @@ def _run_cmd(
 
         log.error(msg)
 
-    log.log(TRACE_LOG_LEVEL, msg_post or "Command completed successfully.")
+    log.trace(msg_post or "Command completed successfully.")
     return stdout
 
 
