@@ -1,16 +1,14 @@
 import asyncio
 import os
 import typing as t
-from pathlib import Path
 
-import prefect.runtime
 from prefect import State, task
 from prefect import Task as PrefectTask
 from prefect.client.schemas import TaskRun
 
 from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd
+from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
@@ -26,7 +24,11 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.state import get_sentinel, list_sentinels, put_sentinel
+from cstar.orchestration.state import (
+    get_sentinel,
+    list_sentinels,
+    put_sentinel,
+)
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -51,13 +53,16 @@ async def on_submit_complete(
         # add a small delay so batch can be queried
         await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
 
-        params = prefect.runtime.task_run.get_parameters()
-        step = t.cast("LiveStep", params.get("step"))
-
         try:
             result = await state.aresult()
             handle = t.cast("SlurmHandle", result)
-            await put_sentinel(handle, step.sentinel_path)
+
+            prev_status = handle.status
+            if handle.status == Status.Unsubmitted:
+                handle.status = await SlurmLauncher.query_status(handle)
+
+            if handle.status != prev_status:
+                await put_sentinel(handle)
         except Exception:
             log.exception("An error occurred during the post-submit hook")
 
@@ -89,6 +94,16 @@ def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
 
 class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
+
+    status: Status = Status.Unsubmitted
+
+    @property
+    def safe_name(self) -> str:
+        """Return the path-safe name for the handle.
+
+        Implements the `StateProxy` protocol.
+        """
+        return slugify(self.name)
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
@@ -225,20 +240,16 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return status
 
     @staticmethod
-    async def _locate_priors(task_path: Path) -> t.Mapping[str, SlurmHandle]:
+    async def _locate_priors() -> t.Mapping[str, SlurmHandle]:
         """Retrieve all task sentinels discovered in the output path.
 
-        Parameters
-        ----------
-        task_path : Path
-            The path to any asset in the output directory for the run.
 
         Returns
         -------
         Mapping[str, Task[SlurmHandle]]
             Mapping of all previously run PIDs to their sentinel content.
         """
-        sentinels = await list_sentinels(task_path, SlurmHandle)
+        sentinels = await list_sentinels(SlurmHandle)
         return {h.pid: h for h in sentinels}
 
     @classmethod
@@ -275,7 +286,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
                 # SLURM cannot use dependencies on previously completed jobs
-                pid_to_task = await cls._locate_priors(step.fsm.root)
+                pid_to_task = await cls._locate_priors()
                 batch_map = await get_slurm_batches(pid_to_task.keys())
                 successes = {
                     k
@@ -292,6 +303,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         handle = await submit_fn(step, dependencies)
         if current_status == Status.Unsubmitted:
             current_status = await SlurmLauncher.query_status(handle)
+            handle.status = current_status
 
         return Task(
             step=step,

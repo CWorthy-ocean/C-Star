@@ -17,15 +17,12 @@ from cstar.base.utils import lazy_import, slugify
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
-    StateDirectoryManager,
 )
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     intenum_representer,
     register_representer,
 )
-from cstar.orchestration.state import EXT_SENTINEL
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
 
 nx = lazy_import("networkx")
@@ -134,8 +131,6 @@ class LiveStep(Step):
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
-    _put_mode: PersistenceMode = PersistenceMode.yaml
-    """The serialization mode for sentinel values written to disk."""
 
     @property
     def get_working_dir(self) -> Path:
@@ -192,20 +187,6 @@ class LiveStep(Step):
             step_attrs["parent"] = LiveStep.from_step(parent).model_dump(by_alias=True)
 
         return LiveStep(**step_attrs)
-
-    @property
-    def sentinel_path(
-        self,
-    ) -> Path:
-        """Return the path to a file on disk where a sentinel value for this
-        step should reside.
-
-        Returns
-        -------
-        Path
-        """
-        run_state = StateDirectoryManager.run_state()
-        return run_state / f"{self.safe_name}.{EXT_SENTINEL}"
 
 
 class Task(BaseModel, t.Generic[_THandle]):
