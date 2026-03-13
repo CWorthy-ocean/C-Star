@@ -6,7 +6,11 @@ from prefect import State, task
 from prefect import Task as PrefectTask
 from prefect.client.schemas import TaskRun
 
-from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
+from cstar.base.env import (
+    ENV_CSTAR_RUNID,
+    ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
+    get_env_item,
+)
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.handler import ExecutionStatus
@@ -110,7 +114,9 @@ class SlurmHandle(ProcessHandle):
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
 
-    POST_SUBMIT_DELAY: t.Final[float] = 1.0
+    POST_SUBMIT_DELAY: t.Final[float] = float(
+        get_env_item(ENV_CSTAR_SLURM_POST_SUBMIT_DELAY).value
+    )
     """Delay after a submission to ensure status for a SLURM job can be queried."""
 
     @staticmethod
