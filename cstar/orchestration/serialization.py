@@ -3,7 +3,6 @@ import typing as t
 from pathlib import Path, PosixPath
 
 import yaml
-from pydantic import BaseModel
 from yaml import safe_load
 
 from cstar.base.log import get_logger
@@ -19,7 +18,33 @@ class PersistenceMode(enum.StrEnum):
     auto = enum.auto()
 
 
-_T = t.TypeVar("_T", bound=BaseModel)
+class SerializableModel(t.Protocol):
+    """Protocol defining API required to serialize and deserialize objects.
+
+    This is a stand-in for pydantic's BaseModel, as it can cause issues
+    with metacalases in a protocol.
+    """
+
+    def model_dump_json(self) -> str:
+        """Return a JSON string representation of the object."""
+        ...
+
+    def model_dump(self, *args: t.Any, **kwargs: t.Any) -> dict[str, t.Any]:
+        """Return a dictionary representation of the object."""
+        ...
+
+    @classmethod
+    def model_validate_json(cls, json_data: str) -> t.Any:
+        """Return a dictionary representation of the object."""
+        ...
+
+    @classmethod
+    def model_validate(cls, model_dict: dict[str, t.Any]) -> t.Any:
+        """Return a dictionary representation of the object."""
+        ...
+
+
+_T = t.TypeVar("_T", bound=SerializableModel)
 
 
 def _read_json(path: Path, klass: type[_T]) -> _T:
@@ -95,12 +120,12 @@ def register_representer(
     dumper.add_representer(model_type, conversion_fn)
 
 
-def model_to_yaml(model: BaseModel) -> str:
+def model_to_yaml(model: _T) -> str:
     """Serialize a model to yaml.
 
     Parameters
     ----------
-    model : BaseModel
+    model : _T
         The model to be serialized.
 
     Returns
@@ -192,7 +217,7 @@ def deserialize(
 
 def serialize(
     path: Path,
-    model: BaseModel,
+    model: _T,
     mode: PersistenceMode = PersistenceMode.yaml,
 ) -> int:
     """Serialize a model into a file.
@@ -201,7 +226,7 @@ def serialize(
     ----------
     path : Path
         The location to store the serialized model in
-    model : BaseModel
+    model : _T
         The model to serialize
     mode : PersistenceMode
         Specify the type of document to produce (yaml or json)
