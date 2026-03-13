@@ -48,6 +48,9 @@ async def on_submit_complete(
     successfully.
     """
     if state.is_completed():
+        # add a small delay so batch can be queried
+        await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
+
         params = prefect.runtime.task_run.get_parameters()
         step = t.cast("LiveStep", params.get("step"))
 
@@ -197,8 +200,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if job.id:
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
-            # add a small delay so batch can be queried
-            await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
             return SlurmHandle(pid=str(job.id), name=job_name)
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
