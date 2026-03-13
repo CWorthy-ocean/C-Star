@@ -15,12 +15,13 @@ GROUP_SIM: t.Final[str] = "Simulation Configuration"
 GROUP_UNK: t.Final[str] = "Uncategorized Configuration"
 """Group name for uncategorized environment variables in documentation."""
 
-
 FLAG_ON: t.Final[str] = "1"
 """Value indicating a toggle is enabled."""
-
 FLAG_OFF: t.Final[str] = "0"
 """Value indicating a toggle is disabled."""
+
+ENV_PREFIX: t.Final[str] = "CSTAR_"
+"""The common env var prefix that identifies a C-Star configuration setting."""
 
 
 @dataclass(slots=True)
@@ -69,6 +70,16 @@ class EnvItem(EnvVar):
             env_var.indirect_var,
             name,
         )
+
+
+def capture_environment() -> dict[str, str]:
+    """Capture the C-Star-owned environment variables at the current time.
+
+    Returns
+    -------
+    dict[str, str]
+    """
+    return {k: v for k, v in os.environ.items() if k.startswith(ENV_PREFIX)}
 
 
 def indirect_default_factory(env_var: EnvVar) -> str:

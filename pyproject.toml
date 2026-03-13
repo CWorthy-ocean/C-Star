@@ -26,6 +26,7 @@ classifiers = [
 requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
+    "networkx>=3.6.1",
     "prefect>=3.6.1",
     "pydantic>=2.12",
     "python-dateutil>=2.8.2",

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from prefect import flow
 
+from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
@@ -20,6 +21,7 @@ from cstar.orchestration.orchestration import (
     configure_environment,
 )
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
@@ -31,6 +33,7 @@ if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import Launcher
 
 log = get_logger(__name__)
+repo = TrackingRepository()
 
 
 @dataclass
@@ -228,11 +231,21 @@ async def build_and_run_dag(
         os.environ[ENV_CSTAR_ORCH_REQD_ENV] = ""
 
     check_environment()
-    wp, wp_path = await prepare_workplan(wp_path, output_dir, run_id)
+    wp, prepared_wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 
     planner = Planner(workplan=wp)
 
     orchestrator = Orchestrator(planner, launcher)
+
+    repo.put_workplan_run(
+        WorkplanRun(
+            workplan_path=wp_path,
+            trx_workplan_path=prepared_wp_path,
+            output_path=output_dir,
+            run_id=run_id,
+            environment=capture_environment(),
+        ),
+    )
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
@@ -240,4 +253,4 @@ async def build_and_run_dag(
     # monitor the scheduled tasks until they complete
     await process_plan(orchestrator, RunMode.Monitor)
 
-    return wp_path
+    return prepared_wp_path
