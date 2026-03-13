@@ -53,7 +53,7 @@ def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
     run_id = os.getenv(ENV_CSTAR_RUNID)
     cache_key = f"{run_id}_{params['step'].name}_{context.task.name}"
 
-    log.debug("Cache check: %s", cache_key)
+    log.trace("Cache check: %s", cache_key)
     return cache_key
 
 
@@ -256,8 +256,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         handle = item.handle if isinstance(item, Task) else item
         exec_status = await SlurmLauncher._status(step, handle)
 
-        msg = f"SLURM job `{handle.pid}` status is `{exec_status}`"
-        log.debug(msg)
+        msg = f"Retrieved status `{exec_status}` for SLURM job `{handle.pid}`"
+        log.trace(msg)
 
         if exec_status in [
             ExecutionStatus.PENDING,

@@ -291,7 +291,7 @@ class Planner(LoggingMixin):
         stored = self.graph.nodes[n].get(key, "")
         if key in {KEY_STATUS, KEY_STEP, KEY_TASK} and stored != value:
             msg = f"Updating reserved key `{key}` on node `{n}` with value `{value}`"
-            self.log.debug(msg)
+            self.log.trace(msg)
 
         self.graph.nodes[n][key] = value
 

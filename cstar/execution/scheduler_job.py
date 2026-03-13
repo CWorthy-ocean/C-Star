@@ -932,7 +932,7 @@ class SlurmJob(SchedulerJob):
 
         cmd = f"sbatch{dep_clause} {self.script_path}"
 
-        self.log.info(f"Submitting job: {cmd}")
+        self.log.debug(f"Submitting job: {cmd}")
         stdout = _run_cmd(
             cmd,
             cwd=self.run_path,
