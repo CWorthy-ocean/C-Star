@@ -55,6 +55,16 @@ class EnvItem(EnvVar):
         )
 
 
+def capture_environment() -> dict[str, str]:
+    """Capture the C-Star-owned environment variables at the current time.
+
+    Returns
+    -------
+    dict[str, str]
+    """
+    return {k: v for k, v in os.environ.items() if k.startswith(ENV_PREFIX)}
+
+
 def indirect_default_factory(env_var: EnvVar) -> str:
     """Retrieve the current value of the indirect variable.
 
@@ -76,6 +86,9 @@ FLAG_ON: t.Final[str] = "1"
 
 FLAG_OFF: t.Final[str] = "0"
 """Value indicating a feature flag is disabled."""
+
+ENV_PREFIX: t.Final[str] = "CSTAR_"
+"""The common env var prefix that identifies a C-Star configuration setting."""
 
 
 def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
