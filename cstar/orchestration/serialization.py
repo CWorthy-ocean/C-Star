@@ -25,7 +25,7 @@ class SerializableModel(t.Protocol):
     with metacalases in a protocol.
     """
 
-    def model_dump_json(self) -> str:
+    def model_dump_json(self, *args: t.Any, **kwargs: t.Any) -> str:
         """Return a JSON string representation of the object."""
         ...
 
@@ -34,12 +34,12 @@ class SerializableModel(t.Protocol):
         ...
 
     @classmethod
-    def model_validate_json(cls, json_data: str) -> t.Any:
+    def model_validate_json(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:
         """Return a dictionary representation of the object."""
         ...
 
     @classmethod
-    def model_validate(cls, model_dict: dict[str, t.Any]) -> t.Any:
+    def model_validate(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:
         """Return a dictionary representation of the object."""
         ...
 

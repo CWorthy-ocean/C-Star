@@ -22,6 +22,7 @@ class StateProxy(SerializableModel, t.Protocol):
     @property
     def safe_name(self) -> str:
         """Return a path-safe name for a state proxy object"""
+        ...
 
 
 _TStateProxy = t.TypeVar("_TStateProxy", bound=StateProxy)
@@ -31,7 +32,7 @@ the `StateProxy` protocol.
 
 
 def sentinel_path(
-    proxy: _TStateProxy, mode: PersistenceMode = PersistenceMode.yaml
+    proxy: StateProxy, mode: PersistenceMode = PersistenceMode.yaml
 ) -> Path:
     """Get the path to a sentinel file for a given handle.
 
@@ -54,7 +55,7 @@ def sentinel_path(
 
 
 async def put_sentinel(
-    proxy: _TStateProxy,
+    proxy: StateProxy,
     *,
     mode: PersistenceMode = PersistenceMode.yaml,
 ) -> bool:
