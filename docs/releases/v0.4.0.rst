@@ -18,6 +18,7 @@ New features
 ~~~~~~~~~~~~
 
 - Enable status retrieval for multiple SLURM jobs in a single `sacct` call
+- Add trace log level to reduce log frequency during `Workplan` execution
 
 Security Fixes
 ~~~~~~~~~~~~~~
