@@ -48,7 +48,7 @@ def sentinel_path(
         The path to the sentinel file
     """
     return (
-        StateDirectoryManager.run_state()
+        StateDirectoryManager.run_state_dir()
         / f"{proxy.safe_name}.{EXT_SENTINEL}.{mode.value}"
     )
 
@@ -130,7 +130,7 @@ async def list_sentinels(
     list[_TStateProxy]
         All previously persisted sentinels
     """
-    state_dir = StateDirectoryManager.run_state()
+    state_dir = StateDirectoryManager.run_state_dir()
     filter = f"*.{EXT_SENTINEL}.{mode.value}"
 
     coros = [get_sentinel(p, klass, mode=mode) for p in state_dir.rglob(filter)]

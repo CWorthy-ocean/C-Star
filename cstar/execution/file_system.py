@@ -368,27 +368,24 @@ class StateDirectoryManager:
     """The name of the directory where run-state files are written."""
 
     @staticmethod
-    def root() -> Path:
+    def root_dir() -> Path:
         """The root directory containing all job outputs.
 
         Returns
         -------
         Path
         """
-        root = DirectoryManager.state_home()
         run_id = get_env_item(ENV_CSTAR_RUNID).value
-        return root / run_id
+        return DirectoryManager.state_home() / run_id
 
     @staticmethod
-    def run_state() -> Path:
+    def run_state_dir() -> Path:
         """The directory for run-state files.
 
         The result is a _run-specific_ directory that varies
         based on the current value of environment variables.
         """
-        root = DirectoryManager.state_home()
-        run_id = get_env_item(ENV_CSTAR_RUNID).value
-        return root / StateDirectoryManager._RUN_STATE_NAME / run_id
+        return StateDirectoryManager.root_dir() / StateDirectoryManager._RUN_STATE_NAME
 
 
 def is_remote_resource(uri: str) -> bool:
