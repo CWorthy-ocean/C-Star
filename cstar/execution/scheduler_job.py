@@ -1,4 +1,5 @@
 import asyncio
+import enum
 import json
 import os
 import re
@@ -6,10 +7,11 @@ import typing as t
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
+
+from pydantic import BaseModel, Field, PrivateAttr
 
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
@@ -38,25 +40,56 @@ sacct_status_map = defaultdict(
 """Map sacct states to ExecutionStatus enum."""
 
 
-@dataclass
-class SlurmStep:
+class SacctFieldMeta(enum.Enum):
+    STEP_ID = ("JobID", 20)
+    JOB_NAME = ("JobName", 100)
+    SUBMIT_TS = ("Submit", 20)
+    START_TS = ("Start", 20)
+    END_TS = ("End", 20)
+    RAW_STATE = ("State", 30)
+
+    @staticmethod
+    def as_format_string() -> str:
+        return ",".join(f"{x.value[0]}%{x.value[1]}" for x in SacctFieldMeta)
+
+
+class SlurmStep(BaseModel):
     """Metadata for a SLURM job submission."""
 
-    step_id: str
+    step_id: t.Annotated[str, Field(alias="JobID")]
     """The SLURM job-id."""
-    raw_state: str
-    """The status of the job."""
-    submit_ts: str
-    """The timestamp for the time of submission."""
-    start_ts: str | None
-    """The timestamp for the time the job started."""
-    end_ts: str | None
-    """The timestamp for the time the job ended."""
-    job_name: str
+    job_name: t.Annotated[str, Field(alias="JobName")]
     """The unique name of the step."""
+    submit_ts: t.Annotated[str, Field(alias="Submit")]
+    """The timestamp for the time of submission."""
+    start_ts: t.Annotated[str | None, Field(alias="Start")]
+    """The timestamp for the time the job started."""
+    end_ts: t.Annotated[str | None, Field(alias="End")]
+    """The timestamp for the time the job ended."""
+    raw_state: t.Annotated[str, Field(alias="State")]
+    """The status of the job."""
 
-    FIELDS: tuple[str, ...] = ("JobID", "State", "Submit", "Start", "End", "JobName")
-    FIELD_WIDTH: tuple[str, ...] = ("%15", "%20", "%20", "%20", "%20", "%100")
+    _state: t.Annotated[str, PrivateAttr("Unsubmitted")]
+    """The short-form state of the job."""
+
+    TS_UNKNOWN: t.Final[str] = "Unknown"
+    """The value returned by SLURM when a timestamp is not yet set."""
+
+    @property
+    def state(self) -> str:
+        """Return the short-form SLURM state of the step.
+
+        This is the status as reported by SLURM, such as `PENDING` or `RUNNING`.
+
+        See `raw_state` for full status string (e.g. CANCELLED by Username).
+
+        Returns
+        -------
+        str
+        """
+        if self._state == "Unsubmitted":
+            self._state = self.raw_state.split(" ", maxsplit=1)[0]
+        return self._state
 
     @classmethod
     def from_sacct(cls, sacct_stdout: str) -> "SlurmStep":
@@ -66,27 +99,22 @@ class SlurmStep:
         -------
         SlurmStep
         """
-        data = [item.strip() for item in sacct_stdout.split()]
-        ncols, nexpected = len(data), len(SlurmStep.FIELDS)
-        if ncols != nexpected:
-            msg = f"sacct output has {ncols} but {nexpected} were expected."
-            raise RuntimeError(msg)
+        num_fields = len(SlurmStep.model_fields)
 
-        job_id, raw_state, submit_ts, start_ts, end_ts, job_name = [
-            x.strip() for x in sacct_stdout.split()
-        ]
+        alias_map = [v.alias or k for k, v in SlurmStep.model_fields.items()]
+        data = [item.strip() for item in sacct_stdout.split(maxsplit=num_fields - 1)]
+        data_map: dict[str, str | None] = dict(zip(alias_map, data))
+
+        if data_map["Start"] == cls.TS_UNKNOWN:
+            data_map["Start"] = None
+        if data_map["End"] == cls.TS_UNKNOWN:
+            data_map["End"] = None
 
         # TODO: parse the time strings from the format:
         #  2026-03-02T20:36:32
         #  YYYY-MM-DDTHH:MM:SS
-        return SlurmStep(
-            step_id=job_id,
-            raw_state=raw_state,
-            submit_ts=submit_ts,
-            start_ts=start_ts if submit_ts else None,
-            end_ts=end_ts if end_ts else None,
-            job_name=job_name,
-        )
+
+        return SlurmStep(**data_map, by_alias=True)
 
     @property
     def is_job(self) -> bool:
@@ -155,8 +183,13 @@ class SlurmBatch:
         if len(job_ids) > 1:
             raise ValueError("Attempted to create batch from multiple batches")
 
-        self._job = next(t for t in steps if t.is_job)
-        self.steps = list(t for t in steps if not t.is_job)
+        if all_steps := list(steps):
+            try:
+                # a queued job will not have any steps, default to using first result
+                self._job = next((t for t in all_steps if t.is_job), all_steps[0])
+                self.steps = list(t for t in all_steps if not t.is_job) or all_steps
+            except (StopIteration, IndexError):
+                pass  # if batch status is retrieved too quickly, steps may be empty
 
     @property
     def job(self) -> SlurmStep:
@@ -211,11 +244,8 @@ async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
     tuple[SlurmStep, ...]
         All step metadata retrieved for the job_id
     """
-    fields = [
-        f"{field}{spacing}"
-        for field, spacing in zip(SlurmStep.FIELDS, SlurmStep.FIELD_WIDTH)
-    ]
-    sacct_cmd = f"sacct -j {job_id} --format={','.join(fields)} --noheader"
+    format_string = SacctFieldMeta.as_format_string()
+    sacct_cmd = f"sacct -j {job_id} --format={format_string} --noheader"
     msg_err = f"Failed to retrieve job status using {sacct_cmd}."
     stdout = await asyncio.to_thread(
         _run_cmd, sacct_cmd, msg_err=msg_err, raise_on_error=True

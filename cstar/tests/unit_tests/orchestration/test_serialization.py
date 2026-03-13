@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+from cstar.orchestration.state import sentinel_path
 
 
 def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
@@ -208,3 +210,39 @@ def test_serialization_workplan_runtime_vars(
     expected = set(expected_vars)
 
     assert actual == expected
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        PersistenceMode.json,
+        PersistenceMode.yaml,
+    ],
+)
+def test_serialization_handle(tmp_path: Path, mode: PersistenceMode) -> None:
+    """Verify that a task can be properly serialized to disk and reloaded."""
+    pid, job_name = "test-pid", "abc123"
+    handle = SlurmHandle(pid=pid, name=job_name)
+
+    persist_as = sentinel_path(handle, mode)
+
+    # confirm the parametrized serialization mode is supported
+    nbytes = serialize(
+        persist_as,
+        handle,
+        mode,
+    )
+    assert nbytes > 0
+
+    print(f"Task persisted to: {persist_as}")
+    print(persist_as.read_text(encoding="utf-8"))
+
+    # confirm the output from `serialize` is valid and can be deserialized
+    dhandle: SlurmHandle = deserialize(
+        persist_as,
+        SlurmHandle,
+        mode,
+    )
+
+    assert dhandle.name == handle.name
+    assert dhandle.pid == handle.pid

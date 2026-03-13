@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from itertools import cycle
 from pathlib import Path
 
+from prefect import flow
+
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
@@ -194,7 +196,7 @@ async def prepare_workplan(
     return wp, persist_as
 
 
-# @flow(log_prints=True)
+@flow(log_prints=True)
 async def build_and_run_dag(
     wp_path: Path, run_id: str = "", output_dir: Path | None = None
 ) -> Path:

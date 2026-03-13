@@ -16,6 +16,7 @@ from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     get_env_item,
 )
@@ -242,6 +243,23 @@ class JobFileSystemManager(LoggingMixin):
                 shutil.rmtree(directory)
             directory.mkdir(parents=True)
 
+    def clear_prior(self) -> None:
+        """Ensure the job's working directories are empty."""
+        if not self.root.exists():
+            return
+
+        msg = f"Emptying working directories of outputs for previous run of `{self.root.name}`"
+        self.log.debug(msg)
+
+        for directory in [
+            self.input_dir,
+            self.logs_dir,
+            self.output_dir,
+        ]:
+            if directory.exists():
+                shutil.rmtree(directory)
+            directory.mkdir(parents=True)
+
     def get_subtask_manager(self, task_name: str) -> t.Self:
         """Create a JobFileSystemManager instance with a root directory
         configured for a subtask.
@@ -341,6 +359,33 @@ class RomsFileSystemManager(JobFileSystemManager):
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
+
+
+class StateDirectoryManager:
+    """Manage the system file system."""
+
+    _RUN_STATE_NAME: t.Final[str] = "run_state"
+    """The name of the directory where run-state files are written."""
+
+    @staticmethod
+    def root_dir() -> Path:
+        """The root directory containing all job outputs.
+
+        Returns
+        -------
+        Path
+        """
+        run_id = get_env_item(ENV_CSTAR_RUNID).value
+        return DirectoryManager.state_home() / run_id
+
+    @staticmethod
+    def run_state_dir() -> Path:
+        """The directory for run-state files.
+
+        The result is a _run-specific_ directory that varies
+        based on the current value of environment variables.
+        """
+        return StateDirectoryManager.root_dir() / StateDirectoryManager._RUN_STATE_NAME
 
 
 def is_remote_resource(uri: str) -> bool:
