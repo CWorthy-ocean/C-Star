@@ -28,6 +28,7 @@ from cstar.orchestration.state import (
     get_sentinel,
     list_sentinels,
     put_sentinel,
+    sentinel_path,
 )
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
@@ -272,7 +273,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
         """
-        prior_handle = await get_sentinel(step.sentinel_path, SlurmHandle)
+        prior_handle = await get_sentinel(sentinel_path(step), SlurmHandle)
         submit_fn = SlurmLauncher._submit
         current_status = Status.Unsubmitted
 
