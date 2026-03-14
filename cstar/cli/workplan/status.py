@@ -1,13 +1,18 @@
 import asyncio
+import os
 import typing as t
 from itertools import zip_longest
-from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from cstar.base.log import get_logger
+from cstar.cli.workplan.shared import list_runs
+from cstar.orchestration.tracking import TrackingRepository
+
+log = get_logger(__name__)
 app = typer.Typer()
 console = Console()
 
@@ -40,16 +45,31 @@ def display_summary(
 
 @app.command()
 def status(
-    path: t.Annotated[Path, typer.Argument(help="Path to a workplan file.")],
     run_id: t.Annotated[
         str,
-        typer.Option(help="The unique identifier of a specific workplan execution."),
+        typer.Option(
+            help="The unique identifier of a specific workplan execution.",
+            autocompletion=list_runs,
+        ),
     ] = "...",
 ) -> None:
     """Retrieve the current status of a workplan."""
+    repo = TrackingRepository()
+    workplan_run = asyncio.run(repo.get_workplan_run(run_id))
+
+    if workplan_run is None:
+        print("An unknown run-id was supplied.")
+        return
+
+    for k, v in workplan_run.environment.items():
+        os.environ[k] = v
+
+    path = workplan_run.trx_workplan_path
     if not path.exists():
         console.print(f"The workplan could not be found at `{path}`")
         raise typer.Exit(code=1)
+
+    log.debug(f"Checking status on workplan in: {path}")
 
     from cstar.orchestration.dag_runner import load_dag_status
 

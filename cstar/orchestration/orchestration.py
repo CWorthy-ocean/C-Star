@@ -246,7 +246,11 @@ class Planner(LoggingMixin):
 
         g = nx.DiGraph(data)
         defaults = {
-            n.name: {KEY_STATUS: Status.Unsubmitted, KEY_STEP: n, KEY_TASK: None}
+            n.name: {
+                KEY_STATUS: Status.Unsubmitted,
+                KEY_STEP: LiveStep.from_step(n),
+                KEY_TASK: None,
+            }
             for n in workplan.steps
         }
         nx.set_node_attributes(g, values=defaults)
