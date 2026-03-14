@@ -1,3 +1,4 @@
+import asyncio
 import typing as t
 from datetime import datetime, timezone
 from pathlib import Path
@@ -84,11 +85,17 @@ class TrackingRepository(LoggingMixin):
 
     @property
     def latest_dir(self) -> Path:
-        return self._root / self._LATEST_DIR
+        target_path = self._root / self._LATEST_DIR
+        if not target_path.exists():
+            target_path.mkdir(parents=True)
+        return target_path
 
     @property
     def history_dir(self) -> Path:
-        return self._root / self._HISTORY_DIR
+        target_path = self._root / self._HISTORY_DIR
+        if not target_path.exists():
+            target_path.mkdir(parents=True)
+        return target_path
 
     def _format_run_date_as_path(self, run_date: datetime) -> str:
         return run_date.strftime("%Y/%m/%d/%H/%M/%S")
@@ -116,7 +123,7 @@ class TrackingRepository(LoggingMixin):
 
         return self._latest_path(run_id)
 
-    def get_workplan_run(
+    async def get_workplan_run(
         self, run_id: str, run_date: datetime | None = None
     ) -> WorkplanRun | None:
         run_path = self._find_run_path(run_id, run_date)
@@ -127,21 +134,35 @@ class TrackingRepository(LoggingMixin):
             self.log.warning(msg)
             return None
 
-        return deserialize(run_path, WorkplanRun)
+        return await asyncio.to_thread(deserialize, run_path, WorkplanRun)
 
-    def put_workplan_run(self, run: WorkplanRun) -> Path:
+    async def put_workplan_run(self, run: WorkplanRun) -> Path:
         run_path = self._history_path(run.run_id, run.start_at)
         latest_path = self._latest_path(run.run_id)
 
-        if not serialize(run_path, run):
+        if not await asyncio.to_thread(serialize, run_path, run):
             self.log.warning("Run could not be persisted")
 
         if not latest_path.parent.exists():
             latest_path.parent.mkdir(parents=True)
 
-        latest_path.unlink(missing_ok=True)
-        latest_path.symlink_to(run_path)
+        await asyncio.to_thread(latest_path.unlink, missing_ok=True)
+        await asyncio.to_thread(latest_path.symlink_to, run_path)
 
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)
         return run_path
+
+    async def list_latest_runs(self) -> list[WorkplanRun]:
+        """Retrieve a list of the latest WorkplanRun for all known run-id's.
+
+        Returns
+        -------
+        list[WorkplanRun]
+        """
+        run_paths = list(self.latest_dir.glob(f"*.{self._MODE}"))
+        coros = [
+            asyncio.to_thread(deserialize, run_path, WorkplanRun)
+            for run_path in run_paths
+        ]
+        return await asyncio.gather(*coros)

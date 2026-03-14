@@ -237,7 +237,7 @@ async def build_and_run_dag(
 
     orchestrator = Orchestrator(planner, launcher)
 
-    repo.put_workplan_run(
+    await repo.put_workplan_run(
         WorkplanRun(
             workplan_path=wp_path,
             trx_workplan_path=prepared_wp_path,
