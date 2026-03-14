@@ -42,7 +42,7 @@ def display_summary(
     console.print(table)
 
 
-def list_runs(incomplete: str) -> list[str]:
+def list_runs(incomplete: str) -> list[tuple[str, str]]:
     """Retrieve a list of all recorded run-ids.
 
     Parameters
@@ -55,12 +55,14 @@ def list_runs(incomplete: str) -> list[str]:
     t.Iterable[str]
     """
     repo = TrackingRepository()
-    run_list = asyncio.run(repo.list_latest_runs())
-    if not run_list:
-        return ["run-id"]
+    run_list = asyncio.run(repo.list_latest_runs(incomplete))
 
-    run_ids = [r.run_id for r in run_list if r]
-    return run_ids
+    if not run_list and incomplete:
+        return [(incomplete, "no results found")]
+    elif not run_list:
+        return [("run-id", "no results found")]
+
+    return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list if r]
 
 
 @app.command()
