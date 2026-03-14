@@ -153,14 +153,14 @@ class TrackingRepository(LoggingMixin):
         self.log.debug(msg)
         return run_path
 
-    async def list_latest_runs(self) -> list[WorkplanRun]:
+    async def list_latest_runs(self, run_id_filter: str) -> list[WorkplanRun]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
 
         Returns
         -------
         list[WorkplanRun]
         """
-        run_paths = list(self.latest_dir.glob(f"*.{self._MODE}"))
+        run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
         coros = [
             asyncio.to_thread(deserialize, run_path, WorkplanRun)
             for run_path in run_paths
