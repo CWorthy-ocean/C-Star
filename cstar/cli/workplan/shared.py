@@ -1,14 +1,6 @@
 import asyncio
 
-import typer
-from rich.console import Console
-
-from cstar.base.log import get_logger
 from cstar.orchestration.tracking import TrackingRepository
-
-log = get_logger(__name__)
-app = typer.Typer()
-console = Console()
 
 
 def list_runs(incomplete: str) -> list[tuple[str, str]]:
