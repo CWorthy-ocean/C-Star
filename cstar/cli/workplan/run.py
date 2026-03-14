@@ -45,7 +45,7 @@ def run(
         else:
             run_id = WorkplanRun.get_default_run_id(path)
     elif not path:
-        workplan_run = repo.get_workplan_run(run_id)
+        workplan_run = asyncio.run(repo.get_workplan_run(run_id))
         if workplan_run is None:
             log.error(f"No runs with the id `{run_id}` could be found.")
             return

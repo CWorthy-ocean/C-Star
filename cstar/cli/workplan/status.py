@@ -8,8 +8,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from cstar.base.log import get_logger
 from cstar.orchestration.tracking import TrackingRepository
 
+log = get_logger(__name__)
 app = typer.Typer()
 console = Console()
 
@@ -40,17 +42,40 @@ def display_summary(
     console.print(table)
 
 
+def list_runs(incomplete: str) -> list[str]:
+    """Retrieve a list of all recorded run-ids.
+
+    Parameters
+    ----------
+    incomplete : str
+        Any value from the user is provided to autocompletion.
+
+    Returns
+    -------
+    t.Iterable[str]
+    """
+    repo = TrackingRepository()
+    run_list = asyncio.run(repo.list_latest_runs())
+    if not run_list:
+        return ["run-id"]
+
+    run_ids = [r.run_id for r in run_list if r]
+    return run_ids
+
+
 @app.command()
 def status(
-    # path: t.Annotated[Path, typer.Argument(help="Path to a workplan file.")],
     run_id: t.Annotated[
         str,
-        typer.Option(help="The unique identifier of a specific workplan execution."),
+        typer.Option(
+            help="The unique identifier of a specific workplan execution.",
+            autocompletion=list_runs,
+        ),
     ] = "...",
 ) -> None:
     """Retrieve the current status of a workplan."""
     repo = TrackingRepository()
-    workplan_run = repo.get_workplan_run(run_id)
+    workplan_run = asyncio.run(repo.get_workplan_run(run_id))
 
     if workplan_run is None:
         print("An unknown run-id was supplied.")
@@ -64,7 +89,7 @@ def status(
         console.print(f"The workplan could not be found at `{path}`")
         raise typer.Exit(code=1)
 
-    print(f"Checking status on workplan in: {path}")
+    log.debug(f"Checking status on workplan in: {path}")
 
     from cstar.orchestration.dag_runner import load_dag_status
 
