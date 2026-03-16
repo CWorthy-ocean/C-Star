@@ -1,15 +1,23 @@
+import asyncio
 import os
 import typing as t
 
-from prefect import task
+from prefect import State, task
+from prefect import Task as PrefectTask
+from prefect.client.schemas import TaskRun
 
-from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
+from cstar.base.env import (
+    ENV_CSTAR_RUNID,
+    ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
+    get_env_item,
+)
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd
+from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
     get_slurm_batch,
+    get_slurm_batches,
 )
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application, RomsMarblBlueprint
@@ -20,6 +28,12 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.state import (
+    get_sentinel,
+    list_sentinels,
+    put_sentinel,
+    sentinel_path,
+)
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -29,10 +43,36 @@ from cstar.orchestration.utils import (
 if t.TYPE_CHECKING:
     from prefect.context import TaskRunContext
 
-    from cstar.orchestration.models import Step
     from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
+
+
+async def on_submit_complete(
+    task: PrefectTask, task_run: TaskRun, state: State, **kwargs: str
+) -> None:
+    """Perform actions required when a job submission completes
+    successfully.
+    """
+    if state.is_completed():
+        # add a small delay so batch can be queried
+        await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
+
+        try:
+            result = await state.aresult()
+            handle = t.cast("SlurmHandle", result)
+
+            prev_status = handle.status
+            if handle.status == Status.Unsubmitted:
+                handle.status = await SlurmLauncher.query_status(handle)
+
+            if handle.status != prev_status:
+                await put_sentinel(handle)
+        except Exception:
+            log.exception("An error occurred during the post-submit hook")
+
+    if state.name == "Cached":
+        log.debug(f"Re-using result from cached SLURM job: {handle.pid}")
 
 
 def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
@@ -60,25 +100,24 @@ def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
 class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
-    job_name: str | None
-    """The user-friendly, task-based job name."""
+    status: Status = Status.Unsubmitted
 
-    def __init__(self, job_id: str, job_name: str | None = None) -> None:
-        """Initialize the SLURM handle.
+    @property
+    def safe_name(self) -> str:
+        """Return the path-safe name for the handle.
 
-        Parameters
-        ----------
-        job_id : str
-            The SLURM_JOB_ID identifying a job.
-        job_name : str or None
-            The job name assigned to the job.
+        Implements the `StateProxy` protocol.
         """
-        super().__init__(pid=job_id)
-        self.job_name = job_name
+        return slugify(self.name)
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
+
+    POST_SUBMIT_DELAY: t.Final[float] = float(
+        get_env_item(ENV_CSTAR_SLURM_POST_SUBMIT_DELAY).value
+    )
+    """Delay after a submission to ensure status for a SLURM job can be queried."""
 
     @staticmethod
     def configured_queue() -> str:
@@ -119,7 +158,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         return get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
 
-    @task(persist_result=True, cache_key_fn=cache_key_func)
+    @task(
+        persist_result=True,
+        cache_key_fn=cache_key_func,
+        on_completion=[on_submit_complete],
+    )
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
@@ -179,34 +222,42 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if job.id:
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
-            return SlurmHandle(job_id=str(job.id), job_name=job_name)
+            return SlurmHandle(pid=str(job.id), name=job_name)
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(step: "Step", handle: SlurmHandle) -> ExecutionStatus:
+    async def _status(job_id: str) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
         ----------
-        step : Step
-            The step triggering the job.
-        handle : SlurmHandle
-            A handle object for a SLURM-based task.
+        job_id : str
+            The slurm job ID to retrieve status for.
 
         Returns
         -------
         ExecutionStatus
             The current status of the step.
         """
-        batch = await get_slurm_batch(handle.pid)
+        batch = await get_slurm_batch(job_id)
         status = batch.job.status
 
-        msg = f"Status of job {handle.pid} is {status} for step {step.name}"
-        log.debug(msg)
-
         return status
+
+    @staticmethod
+    async def _locate_priors() -> t.Mapping[str, SlurmHandle]:
+        """Retrieve all task sentinels discovered in the output path.
+
+
+        Returns
+        -------
+        Mapping[str, Task[SlurmHandle]]
+            Mapping of all previously run PIDs to their sentinel content.
+        """
+        sentinels = await list_sentinels(SlurmHandle)
+        return {h.pid: h for h in sentinels}
 
     @classmethod
     async def launch(
@@ -228,23 +279,85 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
         """
-        handle = await SlurmLauncher._submit(step, dependencies)
+        prior_handle = await get_sentinel(sentinel_path(step), SlurmHandle)
+        submit_fn = SlurmLauncher._submit
+        current_status = Status.Unsubmitted
+
+        if prior_handle:
+            # use persisted task as sentinel only; query SLURM for up-to-date status
+            last_status = await SlurmLauncher.query_status(prior_handle)
+
+            if Status.is_failure(last_status):
+                # force cache refresh for any tasks that didn't succeed
+                step.fsm.clear_prior()
+                submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
+
+                # SLURM cannot use dependencies on previously completed jobs
+                pid_to_task = await cls._locate_priors()
+                batch_map = await get_slurm_batches(pid_to_task.keys())
+                successes = {
+                    k
+                    for k, v in batch_map.items()
+                    if v.job.status == ExecutionStatus.COMPLETED
+                }
+                if dependencies and successes:
+                    # only keep dependencies that are not old/re-usable
+                    active = set(x.pid for x in dependencies).difference(successes)
+                    dependencies = list(filter(lambda x: x.pid in active, dependencies))
+            else:
+                current_status = last_status
+
+        handle = await submit_fn(step, dependencies)
+        if current_status == Status.Unsubmitted:
+            current_status = await SlurmLauncher.query_status(handle)
+            handle.status = current_status
+
         return Task(
-            status=Status.Submitted,
             step=step,
             handle=handle,
+            status=current_status,
         )
+
+    @staticmethod
+    def _map_status(status: ExecutionStatus) -> Status:
+        """Map SLURM execution status to CSTAR status.
+
+        Parameters
+        ----------
+        status : ExecutionStatus
+            The raw SLURM status.
+
+        Returns
+        -------
+        Status
+            The C-Star status.
+        """
+        match status:
+            case (
+                ExecutionStatus.PENDING
+                | ExecutionStatus.RUNNING
+                | ExecutionStatus.ENDING
+                | ExecutionStatus.HELD
+            ):
+                return Status.Running
+            case ExecutionStatus.COMPLETED:
+                return Status.Done
+            case ExecutionStatus.CANCELLED:
+                return Status.Cancelled
+            case ExecutionStatus.FAILED:
+                return Status.Failed
+
+        return Status.Unsubmitted
 
     @classmethod
     async def query_status(
-        cls, step: "Step", item: Task[SlurmHandle] | SlurmHandle
+        cls,
+        item: Task[SlurmHandle] | SlurmHandle,
     ) -> Status:
         """Retrieve the status of an item.
 
         Parameters
         ----------
-        step : Step
-            The step that will be queried for.
         item : Task[SlurmHandle] | SlurmHandle
             An item with a handle to be used to execute a status query.
 
@@ -254,26 +367,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        exec_status = await SlurmLauncher._status(step, handle)
+        exec_status = await SlurmLauncher._status(handle.pid)
 
-        msg = f"SLURM job `{handle.pid}` status is `{exec_status}`"
+        msg = f"SLURM job `{handle}` status is `{exec_status}`"
         log.debug(msg)
 
-        if exec_status in [
-            ExecutionStatus.PENDING,
-            ExecutionStatus.RUNNING,
-            ExecutionStatus.ENDING,
-            ExecutionStatus.HELD,
-        ]:
-            return Status.Running
-        if exec_status == ExecutionStatus.COMPLETED:
-            return Status.Done
-        if exec_status == ExecutionStatus.CANCELLED:
-            return Status.Cancelled
-        if exec_status == ExecutionStatus.FAILED:
-            return Status.Failed
-
-        return Status.Unsubmitted
+        return SlurmLauncher._map_status(exec_status)
 
     @classmethod
     async def cancel(cls, item: Task[SlurmHandle]) -> Task[SlurmHandle]:

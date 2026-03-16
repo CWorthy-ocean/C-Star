@@ -3,10 +3,11 @@ import typing as t
 from pathlib import Path, PosixPath
 
 import yaml
-from pydantic import BaseModel
 from yaml import safe_load
 
-from cstar.orchestration import models
+from cstar.base.log import get_logger
+
+log = get_logger(__name__)
 
 
 class PersistenceMode(enum.StrEnum):
@@ -17,7 +18,33 @@ class PersistenceMode(enum.StrEnum):
     auto = enum.auto()
 
 
-_T = t.TypeVar("_T", bound=BaseModel)
+class SerializableModel(t.Protocol):
+    """Protocol defining API required to serialize and deserialize objects.
+
+    This is a stand-in for pydantic's BaseModel, as it can cause issues
+    with metacalases in a protocol.
+    """
+
+    def model_dump_json(self, *args: t.Any, **kwargs: t.Any) -> str:
+        """Return a JSON string representation of the object."""
+        ...
+
+    def model_dump(self, *args: t.Any, **kwargs: t.Any) -> dict[str, t.Any]:
+        """Return a dictionary representation of the object."""
+        ...
+
+    @classmethod
+    def model_validate_json(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:
+        """Return a dictionary representation of the object."""
+        ...
+
+    @classmethod
+    def model_validate(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:
+        """Return a dictionary representation of the object."""
+        ...
+
+
+_T = t.TypeVar("_T", bound=SerializableModel)
 
 
 def _read_json(path: Path, klass: type[_T]) -> _T:
@@ -73,6 +100,14 @@ def strenum_representer(
     return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
 
 
+def intenum_representer(
+    dumper: yaml.Dumper,
+    data: enum.IntEnum,
+) -> yaml.ScalarNode:
+    """Create a representer for converting IntEnum values to a serialized string."""
+    return dumper.represent_scalar("tag:yaml.org,2002:int", str(data.value))
+
+
 _RT = t.TypeVar("_RT", enum.IntEnum, enum.StrEnum, PosixPath)
 
 
@@ -85,12 +120,12 @@ def register_representer(
     dumper.add_representer(model_type, conversion_fn)
 
 
-def model_to_yaml(model: BaseModel) -> str:
+def model_to_yaml(model: _T) -> str:
     """Serialize a model to yaml.
 
     Parameters
     ----------
-    model : BaseModel
+    model : _T
         The model to be serialized.
 
     Returns
@@ -104,9 +139,6 @@ def model_to_yaml(model: BaseModel) -> str:
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
 
     register_representer(PosixPath, path_representer)
-    register_representer(models.WorkplanState, strenum_representer)
-    register_representer(models.Application, strenum_representer)
-    register_representer(models.BlueprintState, strenum_representer)
 
     return yaml.dump(dumped, sort_keys=False)
 
@@ -185,7 +217,7 @@ def deserialize(
 
 def serialize(
     path: Path,
-    model: BaseModel,
+    model: _T,
     mode: PersistenceMode = PersistenceMode.yaml,
 ) -> int:
     """Serialize a model into a file.
@@ -194,7 +226,7 @@ def serialize(
     ----------
     path : Path
         The location to store the serialized model in
-    model : BaseModel
+    model : _T
         The model to serialize
     mode : PersistenceMode
         Specify the type of document to produce (yaml or json)
@@ -206,7 +238,7 @@ def serialize(
     """
     if path.exists():
         msg = f"Overwriting existing file at `{path}`"
-        print(msg)
+        log.debug(msg)
 
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)

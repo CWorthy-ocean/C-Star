@@ -261,6 +261,16 @@ ENV_CSTAR_RUNID: t.Annotated[
 ] = "CSTAR_RUNID"
 """Environment variable containing a unique run identifier used by the orchestrator."""
 
+ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
+    t.Literal["CSTAR_SLURM_POST_SUBMIT_DELAY"],
+    EnvVar(
+        "Delay (in seconds) after a submission to ensure status for a SLURM job can be queried.",
+        _GROUP_SIM,
+        default="1.0",
+    ),
+] = "CSTAR_SLURM_POST_SUBMIT_DELAY"
+"""Delay (in seconds) after a submission to ensure status for a SLURM job can be queried."""
+
 
 def discover_env_vars(
     modules: list[types.ModuleType],

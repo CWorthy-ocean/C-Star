@@ -6,16 +6,25 @@ from subprocess import run as sprun
 
 from psutil import NoSuchProcess
 from psutil import Process as PsProcess
+from pydantic import PrivateAttr
 
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.utils import slugify
+from cstar.base.log import get_logger
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application
-from cstar.orchestration.orchestration import Launcher, ProcessHandle, Status, Task
+from cstar.orchestration.orchestration import (
+    Launcher,
+    LiveStep,
+    ProcessHandle,
+    Status,
+    Task,
+)
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
-    from cstar.orchestration.orchestration import LiveStep
+
+
+log = get_logger(__name__)
 
 
 def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
@@ -26,38 +35,17 @@ def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
 class LocalHandle(ProcessHandle):
     """Handle enabling reference to a task running in local processes."""
 
-    process: MpProcess
-    """The process handle (used only for simulating local processes)."""
-    start_at: float
+    start_at: datetime.datetime | float
     """The process creation time as a posix timestamp (in seconds)."""
 
-    def __init__(
-        self,
-        step: "Step",
-        process: MpProcess,
-        pid: int,
-        start_at: datetime.datetime | float,
-    ) -> None:
-        """Initialize the local handle.
+    _process: MpProcess = PrivateAttr()
+    """The process handle (used only for simulating local processes)."""
 
-        Parameters
-        ----------
-        step : Step
-            The step used to create the task.
-        pid : int
-            The process ID.
-        start_at : datetime
-            The process start time.
-        """
-        super().__init__(pid=str(pid))
-
-        self.step = step
-        self.process = process
-        self.start_at = (
-            start_at.timestamp()
-            if isinstance(start_at, datetime.datetime)
-            else start_at
-        )
+    @property
+    def start_ts(self) -> float:
+        if isinstance(self.start_at, datetime.datetime):
+            self.start_at = self.start_at.timestamp()
+        return self.start_at
 
     @property
     def elapsed(self) -> float:
@@ -68,19 +56,27 @@ class LocalHandle(ProcessHandle):
         float
         """
         now = datetime.datetime.now(tz=datetime.timezone.utc).timestamp()
-        return now - self.start_at
+        return now - self.start_ts
+
+    @property
+    def process(self) -> MpProcess:
+        return self._process
+
+    @process.setter
+    def process(self, value: MpProcess) -> None:
+        self._process = value
 
 
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
     @staticmethod
-    async def _submit(step: "Step", dependencies: list[LocalHandle]) -> LocalHandle:
+    async def _submit(step: "LiveStep", dependencies: list[LocalHandle]) -> LocalHandle:
         """Submit a step to SLURM as a new batch allocation.
 
         Parameters
         ----------
-        step : Step
+        step : LiveStep
             The step to execute in a local process.
         dependencies : list[LocalHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
@@ -97,9 +93,12 @@ class LocalLauncher(Launcher[LocalHandle]):
         cmd = step_converter(step)
 
         try:
+            if not step.fsm.root.exists():
+                step.fsm.prepare()
+
             mp_process = MpProcess(
                 target=run_as_process,
-                name=slugify(step.name),
+                name=step.safe_name,
                 args=(step, cmd.split()),
                 daemon=True,
             )
@@ -118,12 +117,14 @@ class LocalLauncher(Launcher[LocalHandle]):
                 except NoSuchProcess:
                     print(f"Unable to retrieve exact start time for pid: {pid}")
 
-                return LocalHandle(
-                    step,
-                    mp_process,
-                    pid,
-                    create_time,
+                handle = LocalHandle(
+                    pid=str(pid),
+                    name=step.safe_name,
+                    start_at=create_time,
                 )
+                handle.process = mp_process
+                return handle
+
         finally:
             ...
 
@@ -131,13 +132,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(step: "Step", handle: LocalHandle) -> str:
+    async def _status(handle: LocalHandle) -> str:
         """Retrieve the status of a step running in local process.
 
         Parameters
         ----------
-        step : Step
-            The step triggering the job.
         handle : LocalHandle
             A handle object for a process-based task.
 
@@ -146,17 +145,16 @@ class LocalLauncher(Launcher[LocalHandle]):
         str
             The current status of the step.
         """
-        # await LocalLauncher._update_processes()
         rc = handle.process.exitcode
 
         if rc is None:
             status = "RUNNING"
         elif rc == 0:
             status = "COMPLETED"
-            print(f"Return code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
+            log.debug(f"Return code for handle `{handle}` is `{rc}`.")
         else:
             status = "FAILED"
-            print(f"Failure code for pid `{handle.pid}` is `{rc}` for `{step.name}`")
+            log.warning(f"Failure code for handle `{handle}` is `{rc}`.")
 
         return status
 
@@ -166,7 +164,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         Parameters
         ----------
-        step : Step
+        step : LiveStep
             The step to run in a local process.
         dependencies : list[LocalHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
@@ -176,7 +174,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         Task[LocalHandle]
             A Task containing information about the newly submitted job.
         """
-        tasks = [asyncio.Task(cls.query_status(h.step, h)) for h in dependencies]
+        tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
         statuses = await asyncio.gather(*tasks)
         active_found = any(map(Status.is_running, statuses))
         failure_found = any(map(Status.is_failure, statuses))
@@ -185,7 +183,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         while active_found and not failure_found:
             await asyncio.sleep(1)
 
-            tasks = [asyncio.Task(cls.query_status(h.step, h)) for h in dependencies]
+            tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
             statuses = await asyncio.gather(*tasks)
             active_found = any(map(Status.is_running, statuses))
             failure_found = any(map(Status.is_failure, statuses))
@@ -194,23 +192,20 @@ class LocalLauncher(Launcher[LocalHandle]):
             msg = f"Dependency of step {step.name} failed. Unable to continue."
             raise CstarExpectationFailed(msg)
 
-        handle = await LocalLauncher._submit(step, dependencies)
+        live_step = LiveStep.from_step(step)
+        handle = await LocalLauncher._submit(live_step, dependencies)
         return Task(
             status=Status.Submitted,
-            step=step,
+            step=live_step,
             handle=handle,
         )
 
     @classmethod
-    async def query_status(
-        cls, step: "Step", item: Task[LocalHandle] | LocalHandle
-    ) -> Status:
+    async def query_status(cls, item: Task[LocalHandle] | LocalHandle) -> Status:
         """Retrieve the status of an item.
 
         Parameters
         ----------
-        step : Step
-            The step that will be queried for.
         item : Task[LocalHandle] | LocalHandle
             An item with a handle to be used to execute a status query.
 
@@ -220,17 +215,19 @@ class LocalLauncher(Launcher[LocalHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        raw_status = await LocalLauncher._status(step, handle)
-        if raw_status in ["PENDING", "RUNNING", "ENDING"]:
-            return Status.Running
-        if raw_status in ["COMPLETED", "FAILED"]:
-            return Status.Done
-        if raw_status == "CANCELLED":
-            return Status.Cancelled
-        if raw_status == "FAILED":
-            return Status.Failed
+        raw_status = await LocalLauncher._status(handle)
 
-        return Status.Unsubmitted
+        match raw_status:
+            case "PENDING" | "RUNNING" | "ENDING":
+                return Status.Running
+            case "COMPLETED" | "FAILED":
+                return Status.Done
+            case "CANCELLED":
+                return Status.Cancelled
+            case "FAILED":
+                return Status.Failed
+            case _:
+                return Status.Unsubmitted
 
     @classmethod
     async def cancel(cls, item: Task[LocalHandle]) -> Task[LocalHandle]:

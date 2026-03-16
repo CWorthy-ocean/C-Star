@@ -23,6 +23,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
+from cstar.orchestration.serialization import register_representer, strenum_representer
 
 if t.TYPE_CHECKING:
     from pydantic import ValidationInfo
@@ -601,3 +602,8 @@ class Workplan(BaseModel):
     def _model_validator(self) -> "Workplan":
         """Validate attribute relationships."""
         return self
+
+
+register_representer(WorkplanState, strenum_representer)
+register_representer(Application, strenum_representer)
+register_representer(BlueprintState, strenum_representer)

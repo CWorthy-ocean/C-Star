@@ -4,7 +4,13 @@ import typing as t
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID, get_env_item
+from pydantic import BaseModel
+
+from cstar.base.env import (
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_RUNID,
+    get_env_item,
+)
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import lazy_import, slugify
@@ -13,6 +19,10 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
 )
 from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.serialization import (
+    intenum_representer,
+    register_representer,
+)
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
 
 nx = lazy_import("networkx")
@@ -35,21 +45,17 @@ class RunMode(StrEnum):
     """Block until tasks are scheduled."""
 
 
-class ProcessHandle:
+class ProcessHandle(BaseModel):
     """Contract used to identify processes created by any launcher."""
 
     pid: str
     """The process identifier."""
 
-    def __init__(self, pid: str) -> None:
-        """Initialize the handle.
+    name: str
+    """The name of the process."""
 
-        Parameters
-        ----------
-        pid : str
-            A unique ID identifying a running process.
-        """
-        self.pid = pid
+
+_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 
 
 class Status(IntEnum):
@@ -116,15 +122,15 @@ class Status(IntEnum):
         return status in {Status.Submitted, Status.Running, Status.Ending}
 
 
-_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
-
-
 class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
     parent: t.Self | None = None
+    """The step for which this step is a sub-task."""
     work_dir: Path | None = None
+    """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
+    """Manages the structure of outputs from the step."""
 
     @property
     def get_working_dir(self) -> Path:
@@ -143,6 +149,12 @@ class LiveStep(Step):
 
     @property
     def fsm(self) -> JobFileSystemManager:
+        """Retrieve a file system manager rooted on the step working directory.
+
+        Returns
+        -------
+        JobFileSystemManager
+        """
         if self._fsm is None:
             self._fsm = JobFileSystemManager(self.get_working_dir)
         return self._fsm
@@ -154,6 +166,17 @@ class LiveStep(Step):
         parent: "LiveStep | Step | None" = None,
         update: t.Mapping[str, t.Any] | None = None,
     ) -> "LiveStep":
+        """Convert a step from orchestration planning into a LiveStep.
+
+        Parameters
+        ----------
+        step : Step
+            The step to convert
+        parent : LiveStep | Step | None (default: None)
+            The parent of the converted step
+        update : Mapping[str, t.Any]
+            A mapping of updates to apply to the step
+        """
         step_attrs = step.model_dump(by_alias=True)
 
         if update:
@@ -166,11 +189,8 @@ class LiveStep(Step):
         return LiveStep(**step_attrs)
 
 
-class Task(t.Generic[_THandle]):
+class Task(BaseModel, t.Generic[_THandle]):
     """A task represents a live-execution of a step."""
-
-    status: Status
-    """Current task status."""
 
     step: LiveStep
     """The step containing task configuration."""
@@ -178,26 +198,8 @@ class Task(t.Generic[_THandle]):
     handle: _THandle
     """The unique process identifier for the task."""
 
-    def __init__(
-        self,
-        step: LiveStep,
-        handle: _THandle,
-        status: Status = Status.Unsubmitted,
-    ) -> None:
-        """Initialize the Task record.
-
-        Parameters
-        ----------
-        step : Step
-            The workplan `Step` that triggered the task to run
-        handle : _THandle
-            A handle that used to identify the running task.
-        status : Status
-            The current status of the task
-        """
-        self.status = status
-        self.step = step
-        self.handle = handle
+    status: Status = Status.Unsubmitted
+    """Current task status."""
 
 
 class Planner(LoggingMixin):
@@ -409,7 +411,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
         Parameters
         ----------
-        step : Step
+        step : LiveStep
             The step to launch
 
         Returns
@@ -422,14 +424,13 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     @classmethod
     async def query_status(
         cls,
-        step: LiveStep,
         item: Task[_THandle] | _THandle,
     ) -> Status:
         """Retrieve the current status for a running task.
 
         Parameters
         ----------
-        item : Task[_THandle] or ProcessHandle
+        item : Task[_THandle] or _THandle
             A task or process handle to query for status updates.
 
         Returns
@@ -445,8 +446,8 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
         Parameters
         ----------
-        item : Task[_THandle] or ProcessHandle
-            A task or process handle to cancel.
+        item : Task[_THandle]
+            A task to cancel.
 
         Returns
         -------
@@ -598,7 +599,7 @@ class Orchestrator(LoggingMixin):
             return None
 
         if task := self.planner.retrieve(node, KEY_TASK):
-            status = await self.launcher.query_status(task.step, task)
+            status = await self.launcher.query_status(task.handle)
             task.status = status
         else:
             task = await self.launcher.launch(step, dependencies)
@@ -738,3 +739,6 @@ def configure_environment(
 
     if run_id:
         os.environ[ENV_CSTAR_RUNID] = slugify(run_id)
+
+
+register_representer(Status, intenum_representer)
