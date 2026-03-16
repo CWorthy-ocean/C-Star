@@ -70,7 +70,10 @@ def test_workplan_run_remote_workplan(
         "cstar.cli.workplan.run.build_and_run_dag",
         return_value=0,
     ) as mock_exec:
-        run(wp_uri, "12345")
+        run(
+            "12345",
+            wp_uri,
+        )
 
     assert "is valid" in capsys.readouterr().out
     mock_exec.assert_called_once()
