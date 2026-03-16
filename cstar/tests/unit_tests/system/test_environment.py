@@ -722,10 +722,11 @@ def test_get_env_item_indirect(
 ) -> None:
     """Verify the XDG config is used when the CSTAR_XXX_HOME variables are not set."""
     monkeypatch.delenv(xdg_var, raising=False)
+    monkeypatch.delenv(cstar_var, raising=False)
     monkeypatch.setenv(xdg_var, xdg_value)
     env_item = get_env_item(cstar_var)
 
-    with mock.patch.object(env_item, "default_factory", None):
+    with mock.patch("cstar.base.env.EnvItem.default_factory", None):
         output_dir = env_item.value
 
     assert output_dir == xdg_value
@@ -763,9 +764,8 @@ def test_get_env_item_default(
 
     env_item = get_env_item(cstar_var)
 
-    with mock.patch.object(env_item, "default_factory", None):
-        output_dir = env_item.value
-        assert output_dir == env_item.default
+    output_dir = env_item.value
+    assert output_dir == env_item.default
 
 
 @pytest.mark.parametrize(
