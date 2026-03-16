@@ -30,7 +30,7 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import (
     get_sentinel,
-    list_sentinels,
+    load_sentinels,
     put_sentinel,
     sentinel_path,
 )
@@ -56,14 +56,13 @@ async def on_submit_complete(
     """
     if state.is_completed():
         # add a small delay so batch can be queried
-        await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
+        result = await state.aresult()
+        handle = t.cast("SlurmHandle", result)
 
         try:
-            result = await state.aresult()
-            handle = t.cast("SlurmHandle", result)
-
             prev_status = handle.status
             if handle.status == Status.Unsubmitted:
+                await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
                 handle.status = await SlurmLauncher.query_status(handle)
 
             if handle.status != prev_status:
@@ -71,8 +70,8 @@ async def on_submit_complete(
         except Exception:
             log.exception("An error occurred during the post-submit hook")
 
-    if state.name == "Cached":
-        log.debug(f"Re-using result from cached SLURM job: {handle.pid}")
+        if state.name == "Cached":
+            log.debug(f"Re-using result from cached SLURM job: {handle.pid}")
 
 
 def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
@@ -256,7 +255,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Mapping[str, Task[SlurmHandle]]
             Mapping of all previously run PIDs to their sentinel content.
         """
-        sentinels = await list_sentinels(SlurmHandle)
+        sentinels = await load_sentinels(SlurmHandle)
         return {h.pid: h for h in sentinels}
 
     @classmethod
