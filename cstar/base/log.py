@@ -14,9 +14,14 @@ TRACE_LOG_NAME: t.Final[str] = "TRACE"
 
 
 class TraceLogger(logging.Logger):
+    """A customized logger type that offers a `trace` method used to emit
+    log entries that occur too frequently for debug level.
+    """
+
     def trace(
         self: logging.Logger, message: str, *args: t.Any, **kwargs: t.Any
     ) -> None:
+        """Emit a log entry at the `TRACE` log level."""
         if self.isEnabledFor(TRACE_LOG_LEVEL):
             self._log(TRACE_LOG_LEVEL, message, args, **kwargs)
 
