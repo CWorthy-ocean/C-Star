@@ -263,7 +263,8 @@ def _run_cmd(
     Out: Running command: python return_nonzero.py
          Command `python return_nonzero.py` failed. STDERR: <stderror of foo.py>
     """
-    log.debug(msg_pre or f"Running command: {cmd}")
+    log.trace(msg_pre or f"Running command: {cmd}")
+
     stdout: str = ""
 
     fn = functools.partial(
@@ -296,7 +297,7 @@ def _run_cmd(
 
         log.error(msg)
 
-    log.debug(msg_post or "Command completed successfully.")
+    log.trace(msg_post or "Command completed successfully.")
     return stdout
 
 

@@ -19,6 +19,7 @@ New features
 
 - Enable status retrieval for multiple SLURM jobs in a single `sacct` call
 - The orchestrator writes a sentinel file to disk to dynamically alter dependencies
+- Add trace log level to reduce log frequency during `Workplan` execution
 
 Security Fixes
 ~~~~~~~~~~~~~~

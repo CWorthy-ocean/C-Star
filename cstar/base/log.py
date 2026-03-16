@@ -1,5 +1,6 @@
 import logging
 import sys
+import typing as t
 from pathlib import Path
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
@@ -8,6 +9,25 @@ DEFAULT_LOG_LEVEL = logging.INFO
 DEFAULT_LOG_FORMAT = (
     "%(asctime)s [%(levelname)s] - %(filename)s:%(lineno)d - %(message)s"
 )
+TRACE_LOG_LEVEL: t.Final[int] = 5
+TRACE_LOG_NAME: t.Final[str] = "TRACE"
+
+
+class TraceLogger(logging.Logger):
+    """A customized logger type that offers a `trace` method used to emit
+    log entries that occur too frequently for debug level.
+    """
+
+    def trace(
+        self: logging.Logger, message: str, *args: t.Any, **kwargs: t.Any
+    ) -> None:
+        """Emit a log entry at the `TRACE` log level."""
+        if self.isEnabledFor(TRACE_LOG_LEVEL):
+            self._log(TRACE_LOG_LEVEL, message, args, **kwargs)
+
+
+logging.addLevelName(TRACE_LOG_LEVEL, TRACE_LOG_NAME)
+logging.setLoggerClass(TraceLogger)
 
 
 def register_file_handler(
@@ -82,7 +102,7 @@ def get_logger(
     level: int | None = None,
     fmt: str | None = None,
     filename: str | None | Path = None,
-) -> logging.Logger:
+) -> TraceLogger:
     """Get a logger instance with the specified name.
 
     Parameters
@@ -140,14 +160,14 @@ def get_logger(
 
     # Re-enable propagation on final logger
     logger.propagate = True
-    return logger
+    return t.cast("TraceLogger", logger)
 
 
 class LoggingMixin:
     """A mixin class that provides a logger instance for use in other classes."""
 
     @property
-    def log(self) -> logging.Logger:
+    def log(self) -> TraceLogger:
         """Return the logger instance for this class."""
         if not hasattr(self, "_log"):
             name = f"{self.__class__.__module__}.{self.__class__.__name__}"
