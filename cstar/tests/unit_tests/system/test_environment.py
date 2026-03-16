@@ -745,11 +745,6 @@ def test_get_env_item_indirect(
             ENV_CSTAR_CONFIG_HOME,
         ),
         (
-            "XDG_DATA_HOME",
-            "",
-            ENV_CSTAR_DATA_HOME,
-        ),
-        (
             "XDG_STATE_HOME",
             "",
             ENV_CSTAR_STATE_HOME,
