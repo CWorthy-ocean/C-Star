@@ -1,12 +1,10 @@
 import asyncio
 import os
 import typing as t
-from itertools import zip_longest
 
 import typer
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
+from rich.table import Column, Table
 
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import list_runs
@@ -32,13 +30,33 @@ def display_summary(
     open_set : Iterable[str] | None
         The names of jobs that have completed.
     """
-    open_closed = zip_longest(open_set or ["N/A"], closed_set or ["N/A"])
-    table = Table("Incomplete", "Complete")
+    lookup = {k: 1 for k in closed_set or []}
+    lookup.update({k: 0 for k in open_set or []})
 
-    console.print(Panel.fit(f"Run `{run_id}` Current Status"))
+    table = Table(
+        Column(header="Step", justify="right"),
+        Column(header="Incomplete", justify="center"),
+        Column(header="Complete", justify="center"),
+        title=f"Run [yellow]{run_id}[/yellow] Results",
+        show_lines=True,
+        padding=(0, 1),  # 0 pad T/B, 1 pad L/R
+        pad_edge=False,
+    )
 
-    for open_item, closed_item in open_closed:
-        table.add_row(open_item, closed_item)
+    for task_name, is_complete in sorted(lookup.items()):
+        RED_CHECK = "[red]:heavy_check_mark:"
+        GREEN_CHECK = "[green]:heavy_check_mark:"
+
+        table.add_row(
+            task_name,
+            RED_CHECK if not is_complete else "",
+            GREEN_CHECK if is_complete else "",
+        )
+
+    num_closed = sum(lookup.values())
+    num_open = len(lookup) - num_closed
+
+    table.add_row("[magenta]Total", f"[red]{num_open}", f"[green]{num_closed}")
 
     console.print(table)
 
