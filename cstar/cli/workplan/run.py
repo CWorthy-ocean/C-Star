@@ -41,7 +41,6 @@ def run(
         log.error("A run-id or workplan path is required.")
         return
 
-    repo = TrackingRepository()
     if not run_id:
         if is_remote_resource(path):
             with local_copy(path) as local_path:
@@ -49,6 +48,7 @@ def run(
         else:
             run_id = WorkplanRun.get_default_run_id(path)
     elif not path:
+        repo = TrackingRepository()
         workplan_run = asyncio.run(repo.get_workplan_run(run_id))
         if workplan_run is None:
             log.error(f"No runs with the id `{run_id}` could be found.")
