@@ -72,7 +72,7 @@ class SlurmStep(BaseModel):
     _state: t.Annotated[str, PrivateAttr("Unsubmitted")]
     """The short-form state of the job."""
 
-    TS_UNKNOWN: t.Final[str] = "Unknown"
+    TS_UNKNOWN: t.ClassVar[t.Literal["Unknown"]] = "Unknown"
     """The value returned by SLURM when a timestamp is not yet set."""
 
     @property
