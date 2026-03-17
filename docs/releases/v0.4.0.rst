@@ -12,7 +12,7 @@ This is a bug-fix release focused on stabilizing the orchestration of blueprints
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+- Rename env var group name constants to omit leading underscore
 
 New features
 ~~~~~~~~~~~~
@@ -38,6 +38,8 @@ Bug Fixes
 - Fix incorrect working directories resulting from `LiveStep.from_step` when a parent is specified
 - Fix failure to terminate health check thread
 - Fix issue when parsing SLURM status of the form `CANCELLED by <username>`
+- Fix incorrect env var discovery if `env_` appears repeatedly in variable name
+- Fix unhandled exception caused by attempting to execute `typer` app
 
 Improvements
 ~~~~~~~~~~~~
