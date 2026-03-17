@@ -49,7 +49,7 @@ log = get_logger(__name__)
 
 
 async def on_submit_complete(
-    task: PrefectTask, task_run: TaskRun, state: State, **kwargs: str
+    task: PrefectTask, task_run: TaskRun, state: State
 ) -> None:
     """Perform actions required when a job submission completes
     successfully.
