@@ -289,17 +289,17 @@ def discover_env_vars(
         for name, hint in hints.items():
             if name.startswith(prefix):
                 metadata = getattr(hint, "__metadata__", None)
-                name = name.replace(prefix, "")
+                value = getattr(module, name)
                 if metadata and isinstance(metadata[0], EnvVar):
                     meta = metadata[0]
-                    items.append(EnvItem.from_env_var(meta, name))
+                    items.append(EnvItem.from_env_var(meta, value))
                 elif not metadata:
                     items.append(
                         EnvItem(
                             description="unknown",
                             group=GROUP_UNK,
                             default="unknown",
-                            name=name,
+                            name=value,
                         ),
                     )
 
