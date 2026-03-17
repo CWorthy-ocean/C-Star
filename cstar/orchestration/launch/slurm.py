@@ -220,6 +220,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job.submit()
 
         if job.id:
+            # introduce slight delay so `sacct` queries can locate this job
+            await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
+
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
             return SlurmHandle(pid=str(job.id), name=job_name)
 
