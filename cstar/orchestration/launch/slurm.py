@@ -307,10 +307,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             else:
                 current_status = last_status
 
-        handle = await submit_fn(step, dependencies)
-        if current_status == Status.Unsubmitted:
-            current_status = await SlurmLauncher.query_status(handle)
-            handle.status = current_status
+        submitted = await submit_fn(step, dependencies)
+        handle = t.cast("SlurmHandle", await SlurmLauncher.update_status(submitted))
 
         return Task(
             step=step,
@@ -373,6 +371,32 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         log.trace(msg)
 
         return SlurmLauncher._map_status(exec_status)
+
+    @classmethod
+    async def update_status(
+        cls,
+        item: Task[SlurmHandle] | SlurmHandle,
+    ) -> Task[SlurmHandle] | SlurmHandle:
+        """Retrieve the status of an item and return the item with the updated state.
+
+        Parameters
+        ----------
+        item : Task[SlurmHandle] | SlurmHandle
+            An item with a handle to be used to execute a status query.
+
+        Returns
+        -------
+        Task[SlurmHandle] | SlurmHandle
+        """
+        handle = item.handle if isinstance(item, Task) else item
+        prior = handle.status
+        current = await SlurmLauncher.query_status(item)
+
+        if prior != current:
+            handle.status = current
+            await put_sentinel(handle)
+
+        return item
 
     @classmethod
     async def cancel(cls, item: Task[SlurmHandle]) -> Task[SlurmHandle]:
