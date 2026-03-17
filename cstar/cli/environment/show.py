@@ -112,4 +112,4 @@ def show(
 
 
 if __name__ == "__main__":
-    typer.run(app)
+    typer.run(show)
