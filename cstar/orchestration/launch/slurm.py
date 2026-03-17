@@ -241,9 +241,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the step.
         """
         batch = await get_slurm_batch(job_id)
-        status = batch.job.status
-
-        return status
+        return batch.job.status
 
     @staticmethod
     async def _locate_priors() -> t.Mapping[str, SlurmHandle]:
