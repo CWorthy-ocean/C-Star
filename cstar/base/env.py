@@ -7,6 +7,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+GROUP_FF: t.Final[str] = "Feature Flags"
+"""Group name for feature flag environment variables in documentation."""
+GROUP_FS: t.Final[str] = "File System Configuration"
+"""Group name for file system related environment variables in documentation."""
+GROUP_SIM: t.Final[str] = "Simulation Configuration"
+"""Group name for simulation-specific environment variables in documentation."""
+GROUP_UNK: t.Final[str] = "Uncategorized Configuration"
+"""Group name for uncategorized environment variables in documentation."""
+
+
+FLAG_ON: t.Final[str] = "1"
+"""Value indicating a toggle is enabled."""
+
+FLAG_OFF: t.Final[str] = "0"
+"""Value indicating a toggle is disabled."""
+
+
 @dataclass(slots=True)
 class EnvVar:
     """Annotation for specifying metadata about an environment variable."""
@@ -65,17 +82,6 @@ def indirect_default_factory(env_var: EnvVar) -> str:
     """
     var_name = env_var.indirect_var
     return os.environ.get(var_name, "")
-
-
-_GROUP_FS: t.Final[str] = "File System Configuration"
-_GROUP_SIM: t.Final[str] = "Simulation Configuration"
-_GROUP_UNK: t.Final[str] = "Uncategorized Configuration"
-
-FLAG_ON: t.Final[str] = "1"
-"""Value indicating a feature flag is enabled."""
-
-FLAG_OFF: t.Final[str] = "0"
-"""Value indicating a feature flag is disabled."""
 
 
 def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
