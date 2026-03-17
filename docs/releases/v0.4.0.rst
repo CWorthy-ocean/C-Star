@@ -51,6 +51,7 @@ Improvements
 - Replace use of incorrect `mp.Queue` where `queue.Queue` is appropriate
 - Replace blocking `time.sleep` usage in health check thread
 - Removed slow status retrieval loop for previously submitted jobs
+- Ensure env var display consistency in `cstar env show` output
 
 Miscellaneous
 ~~~~~~~~~~~~~
