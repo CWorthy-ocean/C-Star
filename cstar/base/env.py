@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 GROUP_FF: t.Final[str] = "Feature Flags"
 """Group name for feature flag environment variables in documentation."""
 GROUP_FS: t.Final[str] = "File System Configuration"
@@ -108,7 +107,7 @@ def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
             if not metadata:
                 return EnvItem(
                     description="unknown",
-                    group=_GROUP_UNK,
+                    group=GROUP_UNK,
                     default="unknown",
                     name=var_name,
                 )
@@ -152,7 +151,7 @@ ENV_CSTAR_LOG_LEVEL: t.Annotated[
     t.Literal["CSTAR_LOG_LEVEL"],
     EnvVar(
         "Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL.",
-        _GROUP_SIM,
+        GROUP_SIM,
         default="INFO",
     ),
 ] = "CSTAR_LOG_LEVEL"
@@ -163,7 +162,7 @@ ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
     t.Literal["CSTAR_CLOBBER_WORKING_DIR"],
     EnvVar(
         "Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk.",
-        _GROUP_SIM,
+        GROUP_SIM,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_CLOBBER_WORKING_DIR"
@@ -173,7 +172,7 @@ ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
     t.Literal["CSTAR_FRESH_CODEBASES"],
     EnvVar(
         "Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`.",
-        _GROUP_SIM,
+        GROUP_SIM,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FRESH_CODEBASES"
@@ -183,7 +182,7 @@ ENV_CSTAR_IN_ACTIVE_ALLOCATION: t.Annotated[
     t.Literal["CSTAR_IN_ACTIVE_ALLOCATION"],
     EnvVar(
         "Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation.",
-        _GROUP_SIM,
+        GROUP_SIM,
         default="",
     ),
 ] = "CSTAR_IN_ACTIVE_ALLOCATION"
@@ -193,7 +192,7 @@ ENV_CSTAR_NPROCS_POST: t.Annotated[
     t.Literal["CSTAR_NPROCS_POST"],
     EnvVar(
         "Specify the number of processes to be used for post-processing simulation output files. Dynamic default ``os.cpu_count() // 3``",
-        _GROUP_SIM,
+        GROUP_SIM,
         default_factory=lambda _: nprocs_factory(),  # type: ignore[reportOptionalOperand]
     ),
 ] = "CSTAR_NPROCS_POST"
@@ -203,7 +202,7 @@ ENV_CSTAR_SCRATCH_DIRS: t.Annotated[
     t.Literal["CSTAR_SCRATCH_DIRS"],
     EnvVar(
         "A comma-separated list of environment variable names used to identify scratch paths on HPC systems, in search order.",
-        _GROUP_FS,
+        GROUP_FS,
         "SCRATCH,SCRATCH_DIR,LOCAL_SCRATCH",
     ),
 ] = "CSTAR_SCRATCH_DIRS"
@@ -213,7 +212,7 @@ ENV_CSTAR_CACHE_HOME: t.Annotated[
     t.Literal["CSTAR_CACHE_HOME"],
     EnvVar(
         "Environment variable used to override the home directory for C-Star file cache.",
-        _GROUP_FS,
+        GROUP_FS,
         "~/.cache",
         indirect_var="XDG_CACHE_HOME",
         default_factory=indirect_default_factory,
@@ -225,7 +224,7 @@ ENV_CSTAR_CONFIG_HOME: t.Annotated[
     t.Literal["CSTAR_CONFIG_HOME"],
     EnvVar(
         "Environment variable used to override the home directory for C-Star config storage.",
-        _GROUP_FS,
+        GROUP_FS,
         "~/.config",
         default_factory=indirect_default_factory,
         indirect_var="XDG_CONFIG_HOME",
@@ -237,7 +236,7 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
     t.Literal["CSTAR_DATA_HOME"],
     EnvVar(
         "Environment variable used to override the home directory for C-Star dataset storage.",
-        _GROUP_FS,
+        GROUP_FS,
         "~/.local/share",
         indirect_var="XDG_DATA_HOME",
         default_factory=lambda x: hpc_data_directory() or indirect_default_factory(x),
@@ -249,7 +248,7 @@ ENV_CSTAR_STATE_HOME: t.Annotated[
     t.Literal["CSTAR_STATE_HOME"],
     EnvVar(
         "Environment variable used to override the home directory for C-Star state storage.",
-        _GROUP_FS,
+        GROUP_FS,
         "~/.local/state",
         indirect_var="XDG_STATE_HOME",
         default_factory=indirect_default_factory,
@@ -261,7 +260,7 @@ ENV_CSTAR_RUNID: t.Annotated[
     t.Literal["CSTAR_RUNID"],
     EnvVar(
         description="Unique run identifier used by the orchestrator.",
-        group=_GROUP_SIM,
+        group=GROUP_SIM,
         default_factory=lambda _: generate_run_id(),
     ),
 ] = "CSTAR_RUNID"
@@ -271,7 +270,7 @@ ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
     t.Literal["CSTAR_SLURM_POST_SUBMIT_DELAY"],
     EnvVar(
         "Delay (in seconds) after a submission to ensure status for a SLURM job can be queried.",
-        _GROUP_SIM,
+        GROUP_SIM,
         default="1.0",
     ),
 ] = "CSTAR_SLURM_POST_SUBMIT_DELAY"
@@ -298,7 +297,7 @@ def discover_env_vars(
                     items.append(
                         EnvItem(
                             description="unknown",
-                            group=_GROUP_UNK,
+                            group=GROUP_UNK,
                             default="unknown",
                             name=name,
                         ),
