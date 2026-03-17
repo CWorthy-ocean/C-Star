@@ -54,24 +54,10 @@ async def on_submit_complete(
     """Perform actions required when a job submission completes
     successfully.
     """
-    if state.is_completed():
-        # add a small delay so batch can be queried
+    if state.is_completed() and state.name == "Cached":
         result = await state.aresult()
         handle = t.cast("SlurmHandle", result)
-
-        try:
-            prev_status = handle.status
-            if handle.status == Status.Unsubmitted:
-                await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
-                handle.status = await SlurmLauncher.query_status(handle)
-
-            if handle.status != prev_status:
-                await put_sentinel(handle)
-        except Exception:
-            log.exception("An error occurred during the post-submit hook")
-
-        if state.name == "Cached":
-            log.debug(f"Re-using result from cached SLURM job: {handle.pid}")
+        log.debug(f"Re-using result from cached SLURM job: {handle}")
 
 
 def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
