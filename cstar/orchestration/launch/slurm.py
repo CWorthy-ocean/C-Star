@@ -227,7 +227,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(job_id: str) -> ExecutionStatus:
+    async def _get_status(job_id: str) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
@@ -366,7 +366,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        exec_status = await SlurmLauncher._status(handle.pid)
+        exec_status = await SlurmLauncher._get_status(handle.pid)
 
         msg = f"Retrieved status `{exec_status}` for SLURM job `{handle.pid}`"
         log.trace(msg)
