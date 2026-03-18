@@ -38,7 +38,7 @@ def sentinel_path(
 
     Parameters
     ----------
-    proxy : _TStateProxy
+    proxy : StateProxy
         The handle to serialize
     mode : PersistenceMode
         The persistence mode to use when serializing
@@ -65,7 +65,7 @@ async def put_sentinel(
 
     Parameters
     ----------
-    proxy : _TStateProxy
+    proxy : StateProxy
         The handle to serialize
     mode : PersistenceMode
         The persistence mode to use when serializing
