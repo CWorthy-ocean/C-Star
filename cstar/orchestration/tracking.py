@@ -166,3 +166,22 @@ class TrackingRepository(LoggingMixin):
             for run_path in run_paths
         ]
         return await asyncio.gather(*coros)
+
+    async def list_history_runs(self, run_id_filter: str) -> list[WorkplanRun]:
+        """Retrieve a list of the latest WorkplanRun for all known run-id's.
+
+        run_id_filter : str
+            A run-id used to filter records. Matches will be included in results.
+
+        Returns
+        -------
+        list[WorkplanRun]
+        """
+        # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
+        filter = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
+        run_paths = list(self.history_dir.rglob(filter))
+        coros = [
+            asyncio.to_thread(deserialize, run_path, WorkplanRun)
+            for run_path in run_paths
+        ]
+        return await asyncio.gather(*coros)
