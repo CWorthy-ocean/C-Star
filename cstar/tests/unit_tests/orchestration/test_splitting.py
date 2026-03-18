@@ -17,48 +17,6 @@ from cstar.orchestration.transforms import (
 )
 
 
-@pytest.fixture
-def single_step_workplan(
-    tmp_path: Path,
-    bp_templates_dir: Path,
-) -> Workplan:
-    """Generate a workplan that contains a single step.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs
-    bp_templates_dir : Path
-        Fixture returning the path to the directory containing blueprint template files
-
-    Returns
-    -------
-    Workplan
-    """
-    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    default_output_dir = "output_dir: ."
-
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_content = bp_tpl_path.read_text()
-    bp_content = bp_content.replace(
-        default_output_dir, f"output_dir: {tmp_path.as_posix()}"
-    )
-    bp_content.replace("sleep", Application.ROMS_MARBL.value)
-    bp_path.write_text(bp_content)
-
-    return Workplan(
-        name="single-step-workplan",
-        description="A workplan with a single step.",
-        steps=[
-            Step(
-                name="s-00",
-                application="sleep",
-                blueprint=bp_path.as_posix(),
-            ),
-        ],
-    )
-
-
 def test_time_splitting() -> None:
     """Verify that the time splitting function honors the start and end dates.
 
