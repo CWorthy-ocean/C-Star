@@ -85,6 +85,12 @@ class TrackingRepository(LoggingMixin):
 
     @property
     def latest_dir(self) -> Path:
+        """Return the path to the directory containing latest-run records.
+
+        Returns
+        -------
+        Path
+        """
         target_path = self._root / self._LATEST_DIR
         if not target_path.exists():
             target_path.mkdir(parents=True)
@@ -92,30 +98,98 @@ class TrackingRepository(LoggingMixin):
 
     @property
     def history_dir(self) -> Path:
+        """Return the path to the directory containing history records for all runs.
+
+        Returns
+        -------
+        Path
+        """
         target_path = self._root / self._HISTORY_DIR
         if not target_path.exists():
             target_path.mkdir(parents=True)
         return target_path
 
-    def _format_run_date_as_path(self, run_date: datetime) -> str:
-        return run_date.strftime("%Y/%m/%d/%H/%M/%S")
+    @classmethod
+    def _format_run_date(cls, run_date: datetime) -> str:
+        """Format a run date as a unique name for writing the run record to disk.
 
-    def _format_run_date(self, run_date: datetime) -> str:
-        return run_date.strftime("%Y%m%d%H%M%S")
+        Parameters
+        ----------
+        run_date : datetime
+            The date to format
+
+        Returns
+        -------
+        str
+        """
+        return run_date.strftime("%Y%m%d%H%M%S.%f")
 
     def _runfile_name(self, run_id: str) -> str:
+        """Generate the file name for persisting a `WorkplanRun` to disk.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+
+        Returns
+        -------
+        str
+        """
         return f"{run_id}.{TrackingRepository._MODE.value}"
 
     def _latest_path(self, run_id: str) -> Path:
+        """Generate the full path for persisting a `WorkplanRun` to disk as
+        the "latest run" record.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+
+        Returns
+        -------
+        Path
+        """
         runfile_name = self._runfile_name(run_id)
         return self.latest_dir / runfile_name
 
     def _history_path(self, run_id: str, run_date: datetime) -> Path:
+        """Generate the full path for persisting a `WorkplanRun` to disk as
+        a history record.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+        run_date : datetime
+            The datetime the run was executed
+
+        Returns
+        -------
+        Path
+        """
         formatted_dt = self._format_run_date(run_date)
         runfile_name = self._runfile_name(formatted_dt)
         return self.history_dir / run_id / runfile_name
 
     def _find_run_path(self, run_id: str, run_date: datetime | None) -> Path:
+        """Identify a path where a `WorkplanRun` is persisted to disk.
+
+        Looks for an exact match in history if `run_date` is supplied and falls back
+        to latest run if it cannot be found.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+        run_date : datetime | None
+            The datetime the run was executed or `None`.
+
+        Returns
+        -------
+        Path
+        """
         if run_date:
             path = self._history_path(run_id, run_date)
             if path.exists():
@@ -126,6 +200,20 @@ class TrackingRepository(LoggingMixin):
     async def get_workplan_run(
         self, run_id: str, run_date: datetime | None = None
     ) -> WorkplanRun | None:
+        """Locate a WorkplanRun record.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+        run_date : datetime | None
+            The datetime the run was executed or `None`.
+
+        Returns
+        -------
+        WorkplanRun | None
+            The record when it can be located in history or latest runs, otherwise `None`.
+        """
         run_path = self._find_run_path(run_id, run_date)
 
         if not run_path.exists():
@@ -137,6 +225,20 @@ class TrackingRepository(LoggingMixin):
         return await asyncio.to_thread(deserialize, run_path, WorkplanRun)
 
     async def put_workplan_run(self, run: WorkplanRun) -> Path:
+        """Persist a run record to disk.
+
+        Inserts a new history record and updates the "latest" record for the run-id
+
+        Parameters
+        ----------
+        run : WorkplanRun
+            The run to persist
+
+        Returns
+        -------
+        Path
+            The path to the persisted history record
+        """
         run_path = self._history_path(run.run_id, run.start_at)
         latest_path = self._latest_path(run.run_id)
 
@@ -155,6 +257,9 @@ class TrackingRepository(LoggingMixin):
 
     async def list_latest_runs(self, run_id_filter: str) -> list[WorkplanRun]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
+
+        run_id_filter : str
+            A run-id used to filter records. Matches will be included in results.
 
         Returns
         -------
