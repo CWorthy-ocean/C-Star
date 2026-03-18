@@ -47,17 +47,22 @@ def run(
                 run_id = WorkplanRun.get_default_run_id(local_path)
         else:
             run_id = WorkplanRun.get_default_run_id(path)
-    elif not path:
+
+        log.debug(f"Using default run-id: {run_id}")
+
+    if not path:
         repo = TrackingRepository()
-        workplan_run = asyncio.run(repo.get_workplan_run(run_id))
-        if workplan_run is None:
+        wp_run: WorkplanRun | None = asyncio.run(repo.get_workplan_run(run_id))
+        if wp_run is None:
             log.error(f"No runs with the id `{run_id}` could be found.")
             return
 
-        for k, v in workplan_run.environment.items():
+        # ensure the environment matches the prior run
+        for k, v in wp_run.environment.items():
             os.environ[k] = v
 
-        path = str(workplan_run.workplan_path)
+        path = str(wp_run.workplan_path)
+        log.debug(f"Starting run-id `{run_id}` with workplan at `{path}`")
 
     if not check(path):
         return
