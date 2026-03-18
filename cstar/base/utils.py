@@ -397,3 +397,13 @@ def lazy_import(module_name: str) -> ModuleType:
     loader.exec_module(module)
 
     return module
+
+
+def utc_now() -> dt.datetime:
+    """Return the current datetime for the UTC timezone.
+
+    Returns
+    -------
+    datetime
+    """
+    return dt.datetime.now(tz=dt.timezone.utc)

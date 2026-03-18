@@ -1,12 +1,12 @@
 import asyncio
 import typing as t
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import slugify
+from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     StateDirectoryManager,
     is_remote_resource,
@@ -14,10 +14,6 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
-
-
-def utc_now() -> datetime:
-    return datetime.now(tz=timezone.utc)
 
 
 class WorkplanRun(BaseModel):
