@@ -364,10 +364,10 @@ class RomsFileSystemManager(JobFileSystemManager):
 class StateDirectoryManager:
     """Manage the system file system."""
 
-    _RUN_STATE_NAME: t.Final[str] = "run_state"
+    _RUN_STATE_NAME: t.ClassVar[t.Literal["run_state"]] = "run_state"
     """The name of the directory where run-state files are written."""
 
-    _RUN_TRACKING_NAME: t.Final[str] = "run_tracking"
+    _RUN_TRACKING_NAME: t.ClassVar[t.Literal["run_tracking"]] = "run_tracking"
     """The name of the directory where run-tracking files are written."""
 
     @classmethod
