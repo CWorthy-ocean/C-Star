@@ -445,6 +445,25 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ...
 
     @classmethod
+    async def update_status(
+        cls,
+        item: Task[_THandle] | _THandle,
+    ) -> Task[_THandle] | _THandle:
+        """Query and update the status for a running task.
+
+        Parameters
+        ----------
+        item : Task[_THandle] or _THandle
+            A task or process handle to query for status updates.
+
+        Returns
+        -------
+        Status
+            The current status of the item.
+        """
+        ...
+
+    @classmethod
     async def cancel(cls, item: Task[_THandle]) -> Task[_THandle]:
         """Cancel a task, if possible.
 
@@ -518,10 +537,12 @@ class Orchestrator(LoggingMixin):
             in_degree = g.in_degree(n)
 
             satisfied = all(
-                Status.is_running(g.nodes[u][KEY_STATUS])
-                or Status.is_terminal(g.nodes[u][KEY_STATUS])
-                if mode == RunMode.Schedule
-                else Status.is_terminal(g.nodes[u][KEY_STATUS])
+                (
+                    Status.is_running(g.nodes[u][KEY_STATUS])
+                    or Status.is_terminal(g.nodes[u][KEY_STATUS])
+                    if mode == RunMode.Schedule
+                    else Status.is_terminal(g.nodes[u][KEY_STATUS])
+                )
                 for (u, _) in in_edges
             )
 
@@ -603,8 +624,7 @@ class Orchestrator(LoggingMixin):
             return None
 
         if task := self.planner.retrieve(node, KEY_TASK):
-            status = await self.launcher.query_status(task.handle)
-            task.status = status
+            task = await self.launcher.update_status(task.handle)
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)

@@ -230,6 +230,34 @@ class LocalLauncher(Launcher[LocalHandle]):
                 return Status.Unsubmitted
 
     @classmethod
+    async def update_status(
+        cls,
+        item: Task[LocalHandle] | LocalHandle,
+    ) -> Task[LocalHandle] | LocalHandle:
+        """Query and update the status for a running task.
+
+        Parameters
+        ----------
+        item : Task[LocalHandle] | LocalHandle
+            An item with a handle to be used to execute a status query.
+
+        Returns
+        -------
+        Task[LocalHandle] | LocalHandle
+        """
+        # handle = item.handle if isinstance(item, Task) else item
+        # prior = handle.status
+        # current = await LocalLauncher.query_status(item)
+
+        # if prior != current:
+        #     handle.status = current
+        #     await put_sentinel(handle)
+
+        # TODO: implement LocalLauncher.update_status
+
+        return item
+
+    @classmethod
     async def cancel(cls, item: Task[LocalHandle]) -> Task[LocalHandle]:
         """Cancel a task, if possible.
 

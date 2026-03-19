@@ -363,7 +363,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         cls,
         item: Task[SlurmHandle] | SlurmHandle,
     ) -> Task[SlurmHandle] | SlurmHandle:
-        """Retrieve the status of an item and return the item with the updated state.
+        """Query and update the status for a running task.
 
         Parameters
         ----------
