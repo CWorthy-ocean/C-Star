@@ -1,11 +1,13 @@
 import enum
 import typing as t
+from dataclasses import dataclass
 from pathlib import Path, PosixPath
 
 import yaml
 from yaml import safe_load
 
 from cstar.base.log import get_logger
+from cstar.execution.file_system import local_copy
 
 log = get_logger(__name__)
 
@@ -45,6 +47,26 @@ class SerializableModel(t.Protocol):
 
 
 _T = t.TypeVar("_T", bound=SerializableModel)
+
+
+@dataclass
+class ValidationResult(t.Generic[_T]):
+    """Disposition and reason for a validation failure."""
+
+    error_msg: str | None = None
+    """An error message that is populated if validation fails."""
+    item: _T | None = None
+    """The deserialized workplan if validation succeeds."""
+
+    @property
+    def is_valid(self) -> bool:
+        """Return `True` if the workplan was successfully validated.
+
+        Returns
+        -------
+        bool
+        """
+        return self.item is not None
 
 
 def _read_json(path: Path, klass: type[_T]) -> _T:
@@ -255,3 +277,34 @@ def serialize(
         nbytes = fp.write(content)
 
     return nbytes
+
+
+def validate_serialized_entity(
+    path: str | Path,
+    item_type: type[_T],
+) -> ValidationResult[_T]:
+    """Perform content validation on a deserialized `Workplan`.
+
+    Parameters
+    ----------
+    path : str
+        A path-like string supplied by a user.
+    item_type : type[_TValidating]
+        The type to deserialize the file content to
+
+    Returns
+    -------
+    ValidationResult
+        Result with a populated `error_msg` if validation has failed.
+    """
+    item: _T | None = None
+
+    try:
+        with local_copy(str(path)) as wp_path:
+            item = deserialize(wp_path, item_type)
+    except ValueError as ex:
+        return ValidationResult(f"The {item_type.__name__} is invalid: {ex}")
+    except FileNotFoundError:
+        return ValidationResult(f"File not found at path: {path}")
+
+    return ValidationResult(item=item)

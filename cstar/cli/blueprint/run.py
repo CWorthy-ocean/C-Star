@@ -4,7 +4,6 @@ import typing as t
 import typer
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
-from cstar.cli.blueprint.check import check
 from cstar.entrypoint.worker.worker import (
     SimulationStages,
     execute_runner,
@@ -12,6 +11,8 @@ from cstar.entrypoint.worker.worker import (
     get_request,
     get_service_config,
 )
+from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.orchestration.serialization import validate_serialized_entity
 
 app = typer.Typer()
 
@@ -31,7 +32,9 @@ def run(
     ] = None,
 ) -> None:
     """Execute a blueprint in a local worker service."""
-    if not check(path):
+    result = validate_serialized_entity(path, RomsMarblBlueprint)
+    if not result.is_valid:
+        print(result.error_msg)
         return
 
     print("Executing blueprint in a worker service")

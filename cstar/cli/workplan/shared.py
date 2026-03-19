@@ -4,9 +4,11 @@ import typing as t
 from rich.console import Console
 from rich.table import Column, Table
 
+from cstar.base.log import get_logger
 from cstar.orchestration.tracking import TrackingRepository
 
 console = Console()
+log = get_logger(__name__)
 
 
 def list_runs(incomplete: str) -> list[tuple[str, str]]:

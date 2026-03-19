@@ -6,10 +6,11 @@ from pathlib import Path
 import typer
 
 from cstar.base.log import get_logger
-from cstar.cli.workplan.check import check
 from cstar.cli.workplan.shared import list_runs
 from cstar.execution.file_system import is_remote_resource, local_copy
 from cstar.orchestration.dag_runner import build_and_run_dag
+from cstar.orchestration.models import Workplan
+from cstar.orchestration.serialization import validate_serialized_entity
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 app = typer.Typer()
@@ -64,7 +65,9 @@ def run(
         path = str(wp_run.workplan_path)
         log.debug(f"Starting run-id `{run_id}` with workplan at `{path}`")
 
-    if not check(path):
+    validation_result = validate_serialized_entity(path, Workplan)
+    if not validation_result.is_valid:
+        print(validation_result.error_msg)
         return
 
     output_path = Path(output_dir) if output_dir else None
