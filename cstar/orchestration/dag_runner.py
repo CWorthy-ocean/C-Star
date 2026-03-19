@@ -7,20 +7,22 @@ from pathlib import Path
 
 from prefect import flow
 
-from cstar.base.env import capture_environment
+from cstar.base.env import ENV_CSTAR_RUNID, capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import (
     Orchestrator,
     Planner,
     RunMode,
+    Status,
     check_environment,
     configure_environment,
 )
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.state import load_sentinels
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
@@ -90,6 +92,33 @@ async def attach_to_run(orchestrator: Orchestrator) -> DagStatus:
 
         closed_set = orchestrator.get_closed_nodes(mode=mode)
         open_set = orchestrator.get_open_nodes(mode=mode)
+
+    return DagStatus(open_set or [], closed_set)
+
+
+async def load_run_state(run_id: str) -> DagStatus:
+    """Load the run state.
+
+    Parameters
+    ----------
+    run_id : str
+        The run-id to load status for
+
+    Returns
+    -------
+    DagStatus
+    """
+    os.environ[ENV_CSTAR_RUNID] = run_id
+    sentinels = await load_sentinels(SlurmHandle)
+
+    open_set: list[str] = []
+    closed_set: list[str] = []
+
+    for sentinel in sentinels:
+        if Status.is_terminal(sentinel.status):
+            closed_set.append(sentinel.name)
+        else:
+            open_set.append(sentinel.name)
 
     return DagStatus(open_set or [], closed_set)
 
