@@ -63,8 +63,8 @@ def incremental_delays() -> t.Generator[float, None, None]:
     yield from delay_cycle
 
 
-async def retrieve_run_progress(orchestrator: Orchestrator) -> DagStatus:
-    """Load the run state.
+async def attach_to_run(orchestrator: Orchestrator) -> DagStatus:
+    """Load the run state and monitor until it completes.
 
     Parameters
     ----------
@@ -117,7 +117,7 @@ async def load_dag_status(path: Path, run_id: str) -> DagStatus:
     launcher = SlurmLauncher()
     orchestrator = Orchestrator(planner, launcher)
 
-    return await retrieve_run_progress(orchestrator)
+    return await attach_to_run(orchestrator)
 
 
 async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
