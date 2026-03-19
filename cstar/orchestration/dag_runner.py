@@ -94,7 +94,7 @@ async def attach_to_run(orchestrator: Orchestrator) -> DagStatus:
     return DagStatus(open_set or [], closed_set)
 
 
-async def load_dag_status(path: Path, run_id: str) -> DagStatus:
+async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
     """Determine the current status of a workplan run.
 
     Parameters
