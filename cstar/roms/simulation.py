@@ -822,6 +822,12 @@ class ROMSSimulation(Simulation):
         else:
             simulation_runtime_settings.marbl_biogeochemistry = None
 
+        simulation_runtime_settings.output_root_name = (
+            cstar.roms.runtime_settings.OutputRootName(
+                output_root_name=str(self.fs_manager.output_dir) + "/output"
+            )
+        )
+
         return simulation_runtime_settings
 
     @property
@@ -1331,8 +1337,8 @@ class ROMSSimulation(Simulation):
             else []
         )
 
-        output_dir = self.fs_manager.output_dir
-        output_dir.mkdir(parents=True, exist_ok=True)
+        work_dir = self.fs_manager.work_dir
+        work_dir.mkdir(parents=True, exist_ok=True)
 
         for dataset in active:
             opt_filename = dataset.required_opt_file
@@ -1367,7 +1373,7 @@ class ROMSSimulation(Simulation):
                     "fetching input datasets."
                 )
 
-            symlink_path = output_dir / link_name
+            symlink_path = work_dir / link_name
             if symlink_path.is_symlink() or symlink_path.exists():
                 symlink_path.unlink()
             symlink_path.symlink_to(working_copy.path)
@@ -1489,6 +1495,10 @@ class ROMSSimulation(Simulation):
                 + "\n Call ROMSSimulation.compile_time_code.get() and try again"
             )
         build_dir = self.compile_time_code.working_copy.common_parent
+        makefile_target = build_dir / "Makefile"
+        if not makefile_target.exists():
+            makefile_repo = self.codebase.working_copy.path / "Work" / "Makefile"  # type: ignore[union-attr]
+            shutil.copyfile(makefile_repo, makefile_target)
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())
@@ -1662,25 +1672,32 @@ class ROMSSimulation(Simulation):
                 "and try again"
             )
 
+        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.output_dir.mkdir(parents=True, exist_ok=True)
+
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
             queue_name = cstar_sysmgr.scheduler.primary_queue_name
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
-        # we run ROMS in the output dir
-        run_path = self.fs_manager.output_dir
+        # we run ROMS in the work dir
+        run_path = self.fs_manager.work_dir
+        old_runtime_settings_path = Path(self.runtime_code.working_copy[0].path)
         final_runtime_settings_file = (
-            Path(self.runtime_code.working_copy[0].path).parent / f"{self.name}.in"
+            old_runtime_settings_path.parent / f"PATCHED_{self.name}.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
+
+        old_runtime_settings_path.rename(
+            old_runtime_settings_path.parent
+            / f"ORIGINAL_{old_runtime_settings_path.name}"
+        )
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
         script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
-
-        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
-        self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
 
         ## 2: RUN ROMS
 

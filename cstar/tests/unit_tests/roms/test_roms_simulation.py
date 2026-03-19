@@ -1,6 +1,7 @@
 import logging
 import pickle
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -1277,7 +1278,16 @@ class TestProcessingAndExecution:
         )
         mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
         mock_get_hash.return_value = "mockhash123"
-        sim.build()
+
+        sim.persist = mock.MagicMock()  # type: ignore[method-assign]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            sim.build()
+
         assert mock_subprocess.call_count == 2
         mock_subprocess.assert_any_call(
             "make compile_clean",
@@ -1378,10 +1388,17 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(
-            RuntimeError, match="Error when cleaning existing ROMS compilation."
-        ):
-            sim.build()
+        sim.persist = mock.MagicMock()  # type: ignore[method-assign]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            with pytest.raises(
+                RuntimeError, match="Error when cleaning existing ROMS compilation."
+            ):
+                sim.build()
         assert mock_subprocess.call_count == 1
         mock_subprocess.assert_any_call(
             "make compile_clean",
@@ -1407,6 +1424,7 @@ class TestProcessingAndExecution:
         """
         sim = stub_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
+        build_dir.mkdir(exist_ok=True, parents=True)
 
         sim.compile_time_code._working_copy = stageddatacollection_remote_files(
             paths=[build_dir / f.basename for f in sim.compile_time_code.source]
@@ -1415,8 +1433,16 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
-            sim.build()
+        sim.persist = mock.MagicMock()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
+                sim.build()
+
         assert mock_subprocess.call_count == 1
 
         mock_subprocess.assert_any_call(
@@ -1476,195 +1502,6 @@ class TestProcessingAndExecution:
             dataset_3.partition.assert_called_once_with(
                 np_xi=2, np_eta=3, overwrite_existing_files=False
             )
-
-    class TestValidateAndSymlinkSupplementaryDatasets:
-        """Tests for ROMSSimulation._validate_and_symlink_supplementary_datasets."""
-
-        def _make_sim(self, tmp_path, stub_romssimulation, cdr=True, nesting=True):
-            """Return the stub sim with cdr/nesting optionally cleared."""
-            sim = stub_romssimulation
-            if not cdr:
-                sim.cdr_forcing = None
-            if not nesting:
-                sim.nesting_info = None
-            return sim
-
-        def _make_compile_time_dir(self, tmp_path, files: dict[str, str]) -> Path:
-            """Write opt files to a temp dir and return its path."""
-            d = tmp_path / "compile_time_code"
-            d.mkdir(parents=True, exist_ok=True)
-            for name, content in files.items():
-                (d / name).write_text(content)
-            return d
-
-        def test_no_supplementary_datasets_is_noop(self, tmp_path, stub_romssimulation):
-            """No validation or symlinking when both datasets are absent."""
-            sim = self._make_sim(
-                tmp_path, stub_romssimulation, cdr=False, nesting=False
-            )
-            ctc_dir = self._make_compile_time_dir(tmp_path, {})
-            # Should complete without error and not touch output_dir
-            sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-            assert not sim.fs_manager.output_dir.exists()
-
-        def test_cdr_forcing_missing_compile_time_code_raises(
-            self, tmp_path, stub_romssimulation
-        ):
-            """Raises ValueError when compile_time_code is None but cdr_forcing is set."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
-            sim.compile_time_code = None
-            ctc_dir = self._make_compile_time_dir(tmp_path, {})
-            with pytest.raises(ValueError, match="cdr_frc.opt"):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-        def test_nesting_info_missing_compile_time_code_raises(
-            self, tmp_path, stub_romssimulation
-        ):
-            """Raises ValueError when compile_time_code is None but nesting_info is set."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=True)
-            sim.compile_time_code = None
-            ctc_dir = self._make_compile_time_dir(tmp_path, {})
-            with pytest.raises(ValueError, match="extract_data.opt"):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-        def test_cdr_opt_not_listed_raises(self, tmp_path, stub_romssimulation):
-            """Raises ValueError when cdr_frc.opt is not in compile_time_code files."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
-            ctc_dir = self._make_compile_time_dir(tmp_path, {})
-            with pytest.raises(ValueError, match="cdr_frc.opt.*must be listed"):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-        def test_nesting_opt_not_listed_raises(self, tmp_path, stub_romssimulation):
-            """Raises ValueError when extract_data.opt is not in compile_time_code files."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=True)
-            ctc_dir = self._make_compile_time_dir(tmp_path, {})
-            with pytest.raises(ValueError, match="extract_data.opt.*must be listed"):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-        def test_cdr_opt_missing_string_raises(
-            self, tmp_path, stub_romssimulation, additionalcode_local
-        ):
-            """Raises ValueError when cdr_frc.opt doesn't contain 'cdr.nc'."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
-            sim.compile_time_code = additionalcode_local(
-                location="/some/dir", files=["cdr_frc.opt"]
-            )
-            ctc_dir = self._make_compile_time_dir(
-                tmp_path, {"cdr_frc.opt": "no match here"}
-            )
-            with pytest.raises(ValueError, match="cdr_frc.opt.*cdr.nc"):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-        def test_nesting_opt_missing_string_raises(
-            self, tmp_path, stub_romssimulation, additionalcode_local
-        ):
-            """Raises ValueError when extract_data.opt doesn't contain 'nesting.nc'."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=True)
-            sim.compile_time_code = additionalcode_local(
-                location="/some/dir", files=["extract_data.opt"]
-            )
-            ctc_dir = self._make_compile_time_dir(
-                tmp_path, {"extract_data.opt": "no match here"}
-            )
-            with pytest.raises(ValueError, match="extract_data.opt.*nesting.nc"):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-        def test_cdr_symlink_created(
-            self, tmp_path, stub_romssimulation, additionalcode_local
-        ):
-            """Creates output_dir/cdr.nc symlink pointing to staged cdr_forcing file."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
-            sim.compile_time_code = additionalcode_local(
-                location="/some/dir", files=["cdr_frc.opt"]
-            )
-            fake_cdr_file = tmp_path / "input_datasets" / "cdr.nc"
-            fake_cdr_file.parent.mkdir(parents=True, exist_ok=True)
-            fake_cdr_file.write_text("fake cdr data")
-
-            ctc_dir = self._make_compile_time_dir(
-                tmp_path, {"cdr_frc.opt": "uses cdr.nc for input"}
-            )
-
-            mock_staged_file = Mock()
-            mock_staged_file.path = fake_cdr_file
-            with mock.patch.object(
-                type(sim.cdr_forcing),
-                "working_copy",
-                new_callable=mock.PropertyMock,
-                return_value=mock_staged_file,
-            ):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-            symlink = sim.fs_manager.output_dir / "cdr.nc"
-            assert symlink.is_symlink()
-            assert symlink.resolve() == fake_cdr_file.resolve()
-
-        def test_nesting_symlink_created(
-            self, tmp_path, stub_romssimulation, additionalcode_local
-        ):
-            """Creates output_dir/nesting.nc symlink pointing to staged nesting_info file."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=True)
-            sim.compile_time_code = additionalcode_local(
-                location="/some/dir", files=["extract_data.opt"]
-            )
-            fake_nesting_file = tmp_path / "input_datasets" / "nesting.nc"
-            fake_nesting_file.parent.mkdir(parents=True, exist_ok=True)
-            fake_nesting_file.write_text("fake nesting data")
-
-            ctc_dir = self._make_compile_time_dir(
-                tmp_path, {"extract_data.opt": "uses nesting.nc for input"}
-            )
-
-            mock_staged_file = Mock()
-            mock_staged_file.path = fake_nesting_file
-
-            with mock.patch.object(
-                type(sim.nesting_info),
-                "working_copy",
-                new_callable=mock.PropertyMock,
-                return_value=mock_staged_file,
-            ):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-            symlink = sim.fs_manager.output_dir / "nesting.nc"
-            assert symlink.is_symlink()
-            assert symlink.resolve() == fake_nesting_file.resolve()
-
-        def test_symlink_replaced_if_exists(
-            self, tmp_path, stub_romssimulation, additionalcode_local
-        ):
-            """Existing symlink at output_dir/cdr.nc is replaced without error."""
-            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
-            sim.compile_time_code = additionalcode_local(
-                location="/some/dir", files=["cdr_frc.opt"]
-            )
-            fake_cdr_file = tmp_path / "input_datasets" / "cdr.nc"
-            fake_cdr_file.parent.mkdir(parents=True, exist_ok=True)
-            fake_cdr_file.write_text("fake cdr data")
-
-            ctc_dir = self._make_compile_time_dir(
-                tmp_path, {"cdr_frc.opt": "uses cdr.nc for input"}
-            )
-            # Pre-create a stale symlink
-            output_dir = sim.fs_manager.output_dir
-            output_dir.mkdir(parents=True, exist_ok=True)
-            stale_target = tmp_path / "old.nc"
-            stale_target.write_text("old")
-            (output_dir / "cdr.nc").symlink_to(stale_target)
-
-            mock_staged_file = Mock()
-            mock_staged_file.path = fake_cdr_file
-            with mock.patch.object(
-                type(sim.cdr_forcing),
-                "working_copy",
-                new_callable=mock.PropertyMock,
-                return_value=mock_staged_file,
-            ):
-                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-
-            symlink = output_dir / "cdr.nc"
-            assert symlink.is_symlink()
-            assert symlink.resolve() == fake_cdr_file.resolve()
 
     def test_run_raises_if_no_runtime_code_working_copy(self, stub_romssimulation):
         """Confirm that ROMSSimulation.run() raises a FileNotFoundError if
@@ -1742,6 +1579,7 @@ class TestProcessingAndExecution:
                 new_callable=mock.PropertyMock,
                 return_value=None,
             ),
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
             sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
             mock_process_instance = mock.MagicMock()
@@ -1756,8 +1594,8 @@ class TestProcessingAndExecution:
 
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
-                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest.in",
-                run_path=sim.fs_manager.output_dir,
+                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/PATCHED_ROMSTest.in",
+                run_path=sim.fs_manager.work_dir,
                 output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
 
@@ -1836,6 +1674,7 @@ class TestProcessingAndExecution:
                 new_callable=mock.PropertyMock,
                 return_value=mock_scheduler,
             ),
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
             sim.exe_path = build_dir / "roms"
             mock_job_instance = mock.MagicMock()
@@ -1844,11 +1683,11 @@ class TestProcessingAndExecution:
             # Call `run()` without explicitly passing `queue_name` and `walltime`
             execution_handler = sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
-                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/ROMSTest.in",
+                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/PATCHED_ROMSTest.in",
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
-                run_path=sim.fs_manager.output_dir,
+                run_path=sim.fs_manager.work_dir,
                 script_path=script_dir / "romstest.sh",
                 queue_name="default_queue",
                 walltime="12:00:00",
@@ -1893,6 +1732,7 @@ class TestProcessingAndExecution:
                 new_callable=mock.PropertyMock,
                 return_value=mock_scheduler,
             ),
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
             sim.exe_path = build_dir / "roms"
 
@@ -2215,3 +2055,192 @@ class TestROMSSimulationRestart:
             ValueError, match="Found multiple distinct restart files corresponding to"
         ):
             sim.restart(new_end_date=new_end_date)
+
+    class TestValidateAndSymlinkSupplementaryDatasets:
+        """Tests for ROMSSimulation._validate_and_symlink_supplementary_datasets."""
+
+        def _make_sim(self, tmp_path, stub_romssimulation, cdr=True, nesting=True):
+            """Return the stub sim with cdr/nesting optionally cleared."""
+            sim = stub_romssimulation
+            if not cdr:
+                sim.cdr_forcing = None
+            if not nesting:
+                sim.nesting_info = None
+            return sim
+
+        def _make_compile_time_dir(self, tmp_path, files: dict[str, str]) -> Path:
+            """Write opt files to a temp dir and return its path."""
+            d = tmp_path / "compile_time_code"
+            d.mkdir(parents=True, exist_ok=True)
+            for name, content in files.items():
+                (d / name).write_text(content)
+            return d
+
+        def test_no_supplementary_datasets_is_noop(self, tmp_path, stub_romssimulation):
+            """No validation or symlinking when both datasets are absent."""
+            sim = self._make_sim(
+                tmp_path, stub_romssimulation, cdr=False, nesting=False
+            )
+            ctc_dir = self._make_compile_time_dir(tmp_path, {})
+            # Should complete without error and not touch output_dir
+            sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+            assert not sim.fs_manager.output_dir.exists()
+
+        def test_cdr_forcing_missing_compile_time_code_raises(
+            self, tmp_path, stub_romssimulation
+        ):
+            """Raises ValueError when compile_time_code is None but cdr_forcing is set."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
+            sim.compile_time_code = None
+            ctc_dir = self._make_compile_time_dir(tmp_path, {})
+            with pytest.raises(ValueError, match="cdr_frc.opt"):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+        def test_nesting_info_missing_compile_time_code_raises(
+            self, tmp_path, stub_romssimulation
+        ):
+            """Raises ValueError when compile_time_code is None but nesting_info is set."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=True)
+            sim.compile_time_code = None
+            ctc_dir = self._make_compile_time_dir(tmp_path, {})
+            with pytest.raises(ValueError, match="extract_data.opt"):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+        def test_cdr_opt_not_listed_raises(self, tmp_path, stub_romssimulation):
+            """Raises ValueError when cdr_frc.opt is not in compile_time_code files."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
+            ctc_dir = self._make_compile_time_dir(tmp_path, {})
+            with pytest.raises(ValueError, match="cdr_frc.opt.*must be listed"):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+        def test_nesting_opt_not_listed_raises(self, tmp_path, stub_romssimulation):
+            """Raises ValueError when extract_data.opt is not in compile_time_code files."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=True)
+            ctc_dir = self._make_compile_time_dir(tmp_path, {})
+            with pytest.raises(ValueError, match="extract_data.opt.*must be listed"):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+        def test_cdr_opt_missing_string_raises(
+            self, tmp_path, stub_romssimulation, additionalcode_local
+        ):
+            """Raises ValueError when cdr_frc.opt doesn't contain 'cdr.nc'."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
+            sim.compile_time_code = additionalcode_local(
+                location="/some/dir", files=["cdr_frc.opt"]
+            )
+            ctc_dir = self._make_compile_time_dir(
+                tmp_path, {"cdr_frc.opt": "no match here"}
+            )
+            with pytest.raises(ValueError, match="cdr_frc.opt.*cdr.nc"):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+        def test_nesting_opt_missing_string_raises(
+            self, tmp_path, stub_romssimulation, additionalcode_local
+        ):
+            """Raises ValueError when extract_data.opt doesn't contain 'nesting.nc'."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=True)
+            sim.compile_time_code = additionalcode_local(
+                location="/some/dir", files=["extract_data.opt"]
+            )
+            ctc_dir = self._make_compile_time_dir(
+                tmp_path, {"extract_data.opt": "no match here"}
+            )
+            with pytest.raises(ValueError, match="extract_data.opt.*nesting.nc"):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+        def test_cdr_symlink_created(
+            self, tmp_path, stub_romssimulation, additionalcode_local
+        ):
+            """Creates output_dir/cdr.nc symlink pointing to staged cdr_forcing file."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
+            sim.compile_time_code = additionalcode_local(
+                location="/some/dir", files=["cdr_frc.opt"]
+            )
+            fake_cdr_file = tmp_path / "input_datasets" / "cdr.nc"
+            fake_cdr_file.parent.mkdir(parents=True, exist_ok=True)
+            fake_cdr_file.write_text("fake cdr data")
+
+            ctc_dir = self._make_compile_time_dir(
+                tmp_path, {"cdr_frc.opt": "uses cdr.nc for input"}
+            )
+
+            mock_staged_file = Mock()
+            mock_staged_file.path = fake_cdr_file
+            with mock.patch.object(
+                type(sim.cdr_forcing),
+                "working_copy",
+                new_callable=mock.PropertyMock,
+                return_value=mock_staged_file,
+            ):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+            symlink = sim.fs_manager.work_dir / "cdr.nc"
+            assert symlink.is_symlink()
+            assert symlink.resolve() == fake_cdr_file.resolve()
+
+        def test_nesting_symlink_created(
+            self, tmp_path, stub_romssimulation, additionalcode_local
+        ):
+            """Creates output_dir/nesting.nc symlink pointing to staged nesting_info file."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=True)
+            sim.compile_time_code = additionalcode_local(
+                location="/some/dir", files=["extract_data.opt"]
+            )
+            fake_nesting_file = tmp_path / "input_datasets" / "nesting.nc"
+            fake_nesting_file.parent.mkdir(parents=True, exist_ok=True)
+            fake_nesting_file.write_text("fake nesting data")
+
+            ctc_dir = self._make_compile_time_dir(
+                tmp_path, {"extract_data.opt": "uses nesting.nc for input"}
+            )
+
+            mock_staged_file = Mock()
+            mock_staged_file.path = fake_nesting_file
+
+            with mock.patch.object(
+                type(sim.nesting_info),
+                "working_copy",
+                new_callable=mock.PropertyMock,
+                return_value=mock_staged_file,
+            ):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+            symlink = sim.fs_manager.work_dir / "nesting.nc"
+            assert symlink.is_symlink()
+            assert symlink.resolve() == fake_nesting_file.resolve()
+
+        def test_symlink_replaced_if_exists(
+            self, tmp_path, stub_romssimulation, additionalcode_local
+        ):
+            """Existing symlink at output_dir/cdr.nc is replaced without error."""
+            sim = self._make_sim(tmp_path, stub_romssimulation, cdr=True, nesting=False)
+            sim.compile_time_code = additionalcode_local(
+                location="/some/dir", files=["cdr_frc.opt"]
+            )
+            fake_cdr_file = tmp_path / "input_datasets" / "cdr.nc"
+            fake_cdr_file.parent.mkdir(parents=True, exist_ok=True)
+            fake_cdr_file.write_text("fake cdr data")
+
+            ctc_dir = self._make_compile_time_dir(
+                tmp_path, {"cdr_frc.opt": "uses cdr.nc for input"}
+            )
+            # Pre-create a stale symlink
+            output_dir = sim.fs_manager.work_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+            stale_target = tmp_path / "old.nc"
+            stale_target.write_text("old")
+            (output_dir / "cdr.nc").symlink_to(stale_target)
+
+            mock_staged_file = Mock()
+            mock_staged_file.path = fake_cdr_file
+            with mock.patch.object(
+                type(sim.cdr_forcing),
+                "working_copy",
+                new_callable=mock.PropertyMock,
+                return_value=mock_staged_file,
+            ):
+                sim._validate_and_symlink_supplementary_datasets(ctc_dir)
+
+            symlink = output_dir / "cdr.nc"
+            assert symlink.is_symlink()
+            assert symlink.resolve() == fake_cdr_file.resolve()
