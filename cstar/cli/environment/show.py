@@ -20,6 +20,8 @@ app = typer.Typer()
 H_CONFIG_ALL: t.Final[str] = "C-Star Environment Configuration"
 """Main header displayed before all configuration sections."""
 
+NOT_SET: t.Literal["<not-set>"] = "<not-set>"
+
 
 def _interactive(all_config: dict[str, list["EnvItem"]]) -> None:
     """Format configuration for an interactive user."""
@@ -38,8 +40,11 @@ def _interactive(all_config: dict[str, list["EnvItem"]]) -> None:
             def_in, def_out = "[blue]", "[/blue]"
             desc_in, desc_out = "[yellow italic]", "[/yellow italic]"
 
-            kvp_detail = f"{item.name}: {val_in}{item.value or '<not-set>'}{val_out}"
-            default_detail = f"(default: {def_in}{item.default or '<none>'}{def_out})"
+            kvp_value = item.value or NOT_SET
+            def_value = item.default or NOT_SET
+
+            kvp_detail = f"{item.name}: {val_in}{kvp_value}{val_out}"
+            default_detail = f"(default: {def_in}{def_value}{def_out})"
             desc_detail = f"{desc_in}{item.description}{desc_out}"
             details = f"{default_detail}, {desc_detail}"
             print(f"- {kvp_detail} {details}")
@@ -56,7 +61,7 @@ def _export(all_config: dict[str, list["EnvItem"]]) -> None:
         print(f"{header_sep}\n# {group_name}\n{header_sep}\n")
 
         for item in sorted(items, key=lambda x: x.name):
-            default_detail = f"(default: {item.default or '<none>'})"
+            default_detail = f"(default: {item.default or NOT_SET})"
             wrapped_header = textwrap.fill(
                 item.description, width=68, initial_indent="# ", subsequent_indent="# "
             )
@@ -112,4 +117,4 @@ def show(
 
 
 if __name__ == "__main__":
-    typer.run(app)
+    typer.run(show)

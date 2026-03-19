@@ -1,19 +1,16 @@
 import os
 import typing as t
 
-from cstar.base.env import FLAG_OFF, FLAG_ON, EnvVar
+from cstar.base.env import FLAG_OFF, FLAG_ON, GROUP_FF, EnvVar
 
 FF_PREFIX: t.Literal["CSTAR_FF_"] = "CSTAR_FF_"
 """Conventional prefix of environment variables for feature flags."""
-
-_GROUP_FF: t.Final[str] = "Feature Flags"
-"""Group name for feature flag environment variables in documentation."""
 
 ENV_FF_DEVELOPER_MODE: t.Annotated[
     t.Literal["CSTAR_FF_DEVELOPER_MODE"],
     EnvVar(
         "Enable developer mode to enable all feature flags (not recommended).",
-        _GROUP_FF,
+        GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_DEVELOPER_MODE"
@@ -23,7 +20,7 @@ ENV_FF_CLI_ENV_SHOW: t.Annotated[
     t.Literal["CSTAR_FF_CLI_ENV_SHOW"],
     EnvVar(
         "Enable CLI for displaying environment configuration.",
-        _GROUP_FF,
+        GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_CLI_ENV_SHOW"
@@ -33,7 +30,7 @@ ENV_FF_CLI_TEMPLATE_CREATE: t.Annotated[
     t.Literal["CSTAR_FF_CLI_TEMPLATE_CREATE"],
     EnvVar(
         "Enable CLI for creating blueprints and workplans from standard templates.",
-        _GROUP_FF,
+        GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_CLI_TEMPLATE_CREATE"
@@ -43,7 +40,7 @@ ENV_FF_CLI_WORKPLAN_COMPOSE: t.Annotated[
     t.Literal["CSTAR_FF_CLI_WORKPLAN_COMPOSE"],
     EnvVar(
         "Enable CLI for composing a workplan from pre-existing blueprints.",
-        _GROUP_FF,
+        GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_CLI_WORKPLAN_COMPOSE"
@@ -53,7 +50,7 @@ ENV_FF_CLI_WORKPLAN_GEN: t.Annotated[
     t.Literal["CSTAR_FF_CLI_WORKPLAN_GEN"],
     EnvVar(
         "Enable CLI for generating a workplan from a directory of blueprints.",
-        _GROUP_FF,
+        GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_CLI_WORKPLAN_GEN"
@@ -63,7 +60,7 @@ ENV_FF_CLI_WORKPLAN_PLAN: t.Annotated[
     t.Literal["CSTAR_FF_CLI_WORKPLAN_PLAN"],
     EnvVar(
         "Enable CLI for generating the execution plan of a workplan.",
-        _GROUP_FF,
+        GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_CLI_WORKPLAN_PLAN"
@@ -73,7 +70,7 @@ ENV_FF_CLI_WORKPLAN_STATUS: t.Annotated[
     t.Literal["CSTAR_FF_CLI_WORKPLAN_STATUS"],
     EnvVar(
         "Enable CLI for retrieving status about a workplan run.",
-        _GROUP_FF,
+        GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_CLI_WORKPLAN_STATUS"
@@ -83,7 +80,7 @@ ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
     t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT"],
     EnvVar(
         "Enable automatic time-splitting of simulations.",
-        _GROUP_FF,
+        GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
