@@ -134,7 +134,8 @@ class SlurmStep(BaseModel):
         -------
         ExecutionStatus
         """
-        return sacct_status_map[self.raw_state]
+        state_base = self.raw_state.split(" ", maxsplit=1)[0]
+        return sacct_status_map[state_base]
 
     @property
     def job_id(self) -> str:
