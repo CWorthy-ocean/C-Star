@@ -46,7 +46,7 @@ def monitor(
 
     try:
         status = asyncio.run(reload_dag_status(path, run_id))
-        display_summary(run_id, status.open_items, status.closed_items)
+        display_summary(run_id, status)
     except FileNotFoundError:  # blueprint not found.
         console.print_exception()
 

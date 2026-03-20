@@ -6,7 +6,7 @@ from rich.console import Console
 
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import display_summary, list_runs
-from cstar.orchestration.dag_runner import load_run_state
+from cstar.orchestration.dag_runner import get_launcher, load_run_state
 from cstar.orchestration.tracking import TrackingRepository
 
 log = get_logger(__name__)
@@ -32,9 +32,11 @@ def status(
         print("An unknown run-id was supplied.")
         return
 
+    launcher = get_launcher()
+
     try:
-        status = asyncio.run(load_run_state(run_id))
-        display_summary(run_id, status.open_items, status.closed_items)
+        status = asyncio.run(load_run_state(run_id, launcher))
+        display_summary(run_id, status)
     except FileNotFoundError:  # blueprint not found.
         console.print_exception()
 

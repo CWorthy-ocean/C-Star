@@ -317,11 +317,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The C-Star status.
         """
         match status:
+            case ExecutionStatus.PENDING:
+                return Status.Submitted
             case (
-                ExecutionStatus.PENDING
-                | ExecutionStatus.RUNNING
-                | ExecutionStatus.ENDING
-                | ExecutionStatus.HELD
+                ExecutionStatus.RUNNING | ExecutionStatus.ENDING | ExecutionStatus.HELD
             ):
                 return Status.Running
             case ExecutionStatus.COMPLETED:
