@@ -701,7 +701,8 @@ class Orchestrator(LoggingMixin):
             return None
 
         if task := self.planner.retrieve(node, KEY_TASK):
-            task = await self.launcher.update_status(task.handle)
+            if updated := await self.launcher.update_status(task.handle):
+                task.status = updated.status
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)
