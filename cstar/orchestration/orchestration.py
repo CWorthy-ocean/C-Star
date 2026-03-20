@@ -77,6 +77,16 @@ class Status(IntEnum):
     """A task that terminated due to some failure in the task."""
 
     @classmethod
+    def terminal_states(cls) -> set["Status"]:
+        """Return the set of terminal statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Done, Status.Cancelled, Status.Failed}
+
+    @classmethod
     def is_terminal(cls, status: "Status") -> bool:
         """Return `True` if a status is in the set of terminal statuses.
 
@@ -89,7 +99,17 @@ class Status(IntEnum):
         -------
         bool
         """
-        return status in {Status.Done, Status.Cancelled, Status.Failed}
+        return status in cls.terminal_states()
+
+    @classmethod
+    def failure_states(cls) -> set["Status"]:
+        """Return the set of failure statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Cancelled, Status.Failed}
 
     @classmethod
     def is_failure(cls, status: "Status") -> bool:
@@ -104,11 +124,21 @@ class Status(IntEnum):
         -------
         bool
         """
-        return status in {Status.Cancelled, Status.Failed}
+        return status in cls.failure_states()
 
     @classmethod
-    def is_running(cls, status: "Status") -> bool:
-        """Return `True` if a status is in the set of in-progress statuses.
+    def ready_states(cls) -> set["Status"]:
+        """Return the set of ready statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Unsubmitted, Status.Submitted}
+
+    @classmethod
+    def is_ready(cls, status: "Status") -> bool:
+        """Return `True` if a status is in the set of ready statuses.
 
         Paramters
         ---------
@@ -119,7 +149,57 @@ class Status(IntEnum):
         -------
         bool
         """
-        return status in {Status.Submitted, Status.Running, Status.Ending}
+        return status in cls.ready_states()
+
+    @classmethod
+    def in_progress_states(cls) -> set["Status"]:
+        """Return the set of in-progress statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Submitted, Status.Running, Status.Ending}
+
+    @classmethod
+    def is_in_progress(cls, status: "Status") -> bool:
+        """Return `True` if a status is in the set of in-progress statuses (any non-terminal status).
+
+        Paramters
+        ---------
+        status : "Status"
+            The status to evaluate.
+
+        Returns
+        -------
+        bool
+        """
+        return status in cls.in_progress_states()
+
+    @classmethod
+    def running_states(cls) -> set["Status"]:
+        """Return the set of running statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Running, Status.Ending}
+
+    @classmethod
+    def is_running(cls, status: "Status") -> bool:
+        """Return `True` if a status is in the set of running statuses.
+
+        Paramters
+        ---------
+        status : "Status"
+            The status to evaluate.
+
+        Returns
+        -------
+        bool
+        """
+        return status in cls.running_states()
 
 
 class LiveStep(Step):
@@ -538,7 +618,7 @@ class Orchestrator(LoggingMixin):
 
             satisfied = all(
                 (
-                    Status.is_running(g.nodes[u][KEY_STATUS])
+                    Status.is_in_progress(g.nodes[u][KEY_STATUS])
                     or Status.is_terminal(g.nodes[u][KEY_STATUS])
                     if mode == RunMode.Schedule
                     else Status.is_terminal(g.nodes[u][KEY_STATUS])
@@ -563,10 +643,11 @@ class Orchestrator(LoggingMixin):
         set of str
             A set of node IDs identifying nodes with a Done status.
         """
-        targets = {Status.Done, Status.Cancelled, Status.Failed}
+        targets = Status.terminal_states()
 
         if mode == RunMode.Schedule:
-            targets.update({Status.Submitted, Status.Running})
+            # any "in progress" status is "closed" for scheduling purposes
+            targets.update(Status.in_progress_states())
 
         return set(
             self.planner.retrieve_all(KEY_STATUS, filter_fn=lambda x: x in targets)

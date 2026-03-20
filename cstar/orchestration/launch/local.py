@@ -176,7 +176,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         """
         tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
         statuses = await asyncio.gather(*tasks)
-        active_found = any(map(Status.is_running, statuses))
+        active_found = any(map(Status.is_in_progress, statuses))
         failure_found = any(map(Status.is_failure, statuses))
 
         # wait for the dependencies to complete before launching
@@ -185,7 +185,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
             tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
             statuses = await asyncio.gather(*tasks)
-            active_found = any(map(Status.is_running, statuses))
+            active_found = any(map(Status.is_in_progress, statuses))
             failure_found = any(map(Status.is_failure, statuses))
 
         if failure_found:
