@@ -13,6 +13,7 @@ Breaking Changes
 ~~~~~~~~~~~~~~~~
 
 - Rename env var group name constants to omit leading underscore
+- Modified the interpretation of `Status.is_running` to exclude `Unsubmitted`
 
 New features
 ~~~~~~~~~~~~
@@ -20,6 +21,8 @@ New features
 - Enable status retrieval for multiple SLURM jobs in a single `sacct` call
 - The orchestrator writes a sentinel file to disk to dynamically alter dependencies
 - Add trace log level to reduce log frequency during `Workplan` execution
+- Persist `WorkplanRun` record for every invocation of the orchestrator for run history and lookup
+- Add `cstar workplan monitor --run-id <run-id>` for reattaching to a running `Workplan`
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -40,6 +43,7 @@ Bug Fixes
 - Fix issue when parsing SLURM status of the form `CANCELLED by <username>`
 - Fix incorrect env var discovery if `env_` appears repeatedly in variable name
 - Fix unhandled exception caused by attempting to execute `typer` app
+- Fix `cstar workplan status ...` triggering a re-build of the entire workplan
 
 Improvements
 ~~~~~~~~~~~~
@@ -52,6 +56,8 @@ Improvements
 - Replace blocking `time.sleep` usage in health check thread
 - Removed slow status retrieval loop for previously submitted jobs
 - Ensure env var display consistency in `cstar env show` output
+- Enable "path-less" CLI commands, such as `cstar workplan status --run-id <id>`.
+- Display detailed status information for tasks in a `Workplan`
 
 Miscellaneous
 ~~~~~~~~~~~~~
