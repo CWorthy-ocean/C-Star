@@ -64,5 +64,4 @@ def test_blueprint_run_remote_blueprint(
     ) as mock_exec:
         run(bp_path)
 
-    assert "is valid" in capsys.readouterr().out
     mock_exec.assert_called_once()

@@ -364,28 +364,48 @@ class RomsFileSystemManager(JobFileSystemManager):
 class StateDirectoryManager:
     """Manage the system file system."""
 
-    _RUN_STATE_NAME: t.Final[str] = "run_state"
+    _RUN_STATE_NAME: t.ClassVar[t.Literal["run_state"]] = "run_state"
     """The name of the directory where run-state files are written."""
 
-    @staticmethod
-    def root_dir() -> Path:
+    _RUN_TRACKING_NAME: t.ClassVar[t.Literal["run_tracking"]] = "run_tracking"
+    """The name of the directory where run-tracking files are written."""
+
+    @classmethod
+    def root_dir(cls) -> Path:
         """The root directory containing all job outputs.
 
         Returns
         -------
         Path
         """
-        run_id = get_env_item(ENV_CSTAR_RUNID).value
-        return DirectoryManager.state_home() / run_id
+        return DirectoryManager.state_home()
 
-    @staticmethod
-    def run_state_dir() -> Path:
+    @classmethod
+    def run_state_dir(cls) -> Path:
         """The directory for run-state files.
 
         The result is a _run-specific_ directory that varies
         based on the current value of environment variables.
+
+        Returns
+        -------
+        Path
         """
-        return StateDirectoryManager.root_dir() / StateDirectoryManager._RUN_STATE_NAME
+        run_id = get_env_item(ENV_CSTAR_RUNID).value
+        return cls.root_dir() / cls._RUN_STATE_NAME / run_id
+
+    @classmethod
+    def tracking_dir(cls) -> Path:
+        """The directory for run-tracking files.
+
+        The result is a _non-run-specific_ directory.
+
+        Returns
+        -------
+        Path
+        """
+        root = cls.root_dir()
+        return root / cls._RUN_TRACKING_NAME
 
 
 def is_remote_resource(uri: str) -> bool:

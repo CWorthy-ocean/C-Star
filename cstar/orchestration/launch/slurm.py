@@ -30,7 +30,7 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import (
     get_sentinel,
-    list_sentinels,
+    load_sentinels,
     put_sentinel,
     sentinel_path,
 )
@@ -49,30 +49,15 @@ log = get_logger(__name__)
 
 
 async def on_submit_complete(
-    task: PrefectTask, task_run: TaskRun, state: State, **kwargs: str
+    task: PrefectTask, task_run: TaskRun, state: State
 ) -> None:
     """Perform actions required when a job submission completes
     successfully.
     """
-    if state.is_completed():
-        # add a small delay so batch can be queried
-        await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
-
-        try:
-            result = await state.aresult()
-            handle = t.cast("SlurmHandle", result)
-
-            prev_status = handle.status
-            if handle.status == Status.Unsubmitted:
-                handle.status = await SlurmLauncher.query_status(handle)
-
-            if handle.status != prev_status:
-                await put_sentinel(handle)
-        except Exception:
-            log.exception("An error occurred during the post-submit hook")
-
-    if state.name == "Cached":
-        log.debug(f"Re-using result from cached SLURM job: {handle.pid}")
+    if state.is_completed() and state.name == "Cached":
+        result = await state.aresult()
+        handle = t.cast("SlurmHandle", result)
+        log.debug(f"Re-using result from cached SLURM job: {handle}")
 
 
 def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
@@ -221,6 +206,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job.submit()
 
         if job.id:
+            # introduce slight delay so `sacct` queries can locate this job
+            await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
+
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
             return SlurmHandle(pid=str(job.id), name=job_name)
 
@@ -228,7 +216,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _status(job_id: str) -> ExecutionStatus:
+    async def _get_status(job_id: str) -> ExecutionStatus:
         """Retrieve the status of a step running in SLURM.
 
         Parameters
@@ -242,9 +230,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the step.
         """
         batch = await get_slurm_batch(job_id)
-        status = batch.job.status
-
-        return status
+        return batch.job.status
 
     @staticmethod
     async def _locate_priors() -> t.Mapping[str, SlurmHandle]:
@@ -256,7 +242,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Mapping[str, Task[SlurmHandle]]
             Mapping of all previously run PIDs to their sentinel content.
         """
-        sentinels = await list_sentinels(SlurmHandle)
+        sentinels = await load_sentinels(SlurmHandle)
         return {h.pid: h for h in sentinels}
 
     @classmethod
@@ -307,10 +293,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             else:
                 current_status = last_status
 
-        handle = await submit_fn(step, dependencies)
-        if current_status == Status.Unsubmitted:
-            current_status = await SlurmLauncher.query_status(handle)
-            handle.status = current_status
+        submitted = await submit_fn(step, dependencies)
+        handle = t.cast("SlurmHandle", await SlurmLauncher.update_status(submitted))
 
         return Task(
             step=step,
@@ -333,11 +317,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The C-Star status.
         """
         match status:
+            case ExecutionStatus.PENDING:
+                return Status.Submitted
             case (
-                ExecutionStatus.PENDING
-                | ExecutionStatus.RUNNING
-                | ExecutionStatus.ENDING
-                | ExecutionStatus.HELD
+                ExecutionStatus.RUNNING | ExecutionStatus.ENDING | ExecutionStatus.HELD
             ):
                 return Status.Running
             case ExecutionStatus.COMPLETED:
@@ -367,12 +350,38 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        exec_status = await SlurmLauncher._status(handle.pid)
+        exec_status = await SlurmLauncher._get_status(handle.pid)
 
         msg = f"Retrieved status `{exec_status}` for SLURM job `{handle.pid}`"
         log.trace(msg)
 
         return SlurmLauncher._map_status(exec_status)
+
+    @classmethod
+    async def update_status(
+        cls,
+        item: Task[SlurmHandle] | SlurmHandle,
+    ) -> Task[SlurmHandle] | SlurmHandle:
+        """Query and update the status for a running task.
+
+        Parameters
+        ----------
+        item : Task[SlurmHandle] | SlurmHandle
+            An item with a handle to be used to execute a status query.
+
+        Returns
+        -------
+        Task[SlurmHandle] | SlurmHandle
+        """
+        handle = item.handle if isinstance(item, Task) else item
+        prior = handle.status
+        current = await SlurmLauncher.query_status(item)
+
+        if prior != current:
+            handle.status = current
+            await put_sentinel(handle)
+
+        return item
 
     @classmethod
     async def cancel(cls, item: Task[SlurmHandle]) -> Task[SlurmHandle]:

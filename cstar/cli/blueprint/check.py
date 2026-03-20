@@ -2,9 +2,8 @@ import typing as t
 
 import typer
 
-from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import RomsMarblBlueprint
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import validate_serialized_entity
 
 app = typer.Typer()
 
@@ -12,7 +11,7 @@ app = typer.Typer()
 @app.command()
 def check(
     path: t.Annotated[str, typer.Argument(help="Path to a blueprint file.")],
-) -> bool:
+) -> None:
     """Perform content validation on a user-supplied blueprint.
 
     Returns
@@ -20,16 +19,9 @@ def check(
     bool
         `True` if valid
     """
-    bp: RomsMarblBlueprint | None = None
+    result = validate_serialized_entity(path, RomsMarblBlueprint)
+    if result.item is None:
+        print(result.error_msg)
+        return
 
-    try:
-        with local_copy(path) as bp_path:
-            bp = deserialize(bp_path, RomsMarblBlueprint)
-    except ValueError as ex:
-        print(f"The blueprint is invalid: {ex}")
-    except FileNotFoundError:
-        print(f"Blueprint not found at path: {path}")
-    else:
-        print("The blueprint is valid")
-
-    return bp is not None
+    print(f"The blueprint `{result.item.name}` is valid")

@@ -38,7 +38,7 @@ def sentinel_path(
 
     Parameters
     ----------
-    proxy : _TStateProxy
+    proxy : StateProxy
         The handle to serialize
     mode : PersistenceMode
         The persistence mode to use when serializing
@@ -65,7 +65,7 @@ async def put_sentinel(
 
     Parameters
     ----------
-    proxy : _TStateProxy
+    proxy : StateProxy
         The handle to serialize
     mode : PersistenceMode
         The persistence mode to use when serializing
@@ -112,12 +112,33 @@ async def get_sentinel(
     return None
 
 
-async def list_sentinels(
+def find_sentinels(
+    *,
+    mode: PersistenceMode = PersistenceMode.yaml,
+) -> t.Iterable[Path]:
+    """Find all sentinel files located in the run directory.
+
+    Parameters
+    ----------
+    mode : PersistenceMode
+        The persistence mode to use when deserializing
+
+    Returns
+    -------
+    list[Path]
+    """
+    state_dir = StateDirectoryManager.run_state_dir()
+    filter = f"*.{EXT_SENTINEL}.{mode.value}"
+
+    yield from state_dir.rglob(filter)
+
+
+async def load_sentinels(
     klass: type[_TStateProxy],
     *,
     mode: PersistenceMode = PersistenceMode.yaml,
 ) -> list[_TStateProxy]:
-    """Find all sentinel files located in the specified run directory.
+    """Load all sentinel files located in the run directory.
 
     Parameters
     ----------
@@ -131,9 +152,8 @@ async def list_sentinels(
     list[_TStateProxy]
         All previously persisted sentinels
     """
-    state_dir = StateDirectoryManager.run_state_dir()
-    filter = f"*.{EXT_SENTINEL}.{mode.value}"
+    sentinel_paths = find_sentinels(mode=mode)
 
-    coros = [get_sentinel(p, klass, mode=mode) for p in state_dir.rglob(filter)]
+    coros = [get_sentinel(p, klass, mode=mode) for p in sentinel_paths]
     results = await asyncio.gather(*coros)
     return [x for x in results if x]

@@ -1,12 +1,14 @@
 import asyncio
+import os
 import typing as t
 
 import typer
 from rich.console import Console
 
 from cstar.base.log import get_logger
-from cstar.cli.workplan.shared import display_summary, list_runs
-from cstar.orchestration.dag_runner import get_launcher, load_run_state
+from cstar.cli.workplan.shared import list_runs
+from cstar.cli.workplan.status import display_summary
+from cstar.orchestration.dag_runner import reload_dag_status
 from cstar.orchestration.tracking import TrackingRepository
 
 log = get_logger(__name__)
@@ -15,7 +17,7 @@ console = Console()
 
 
 @app.command()
-def status(
+def monitor(
     run_id: t.Annotated[
         str,
         typer.Option(
@@ -24,7 +26,7 @@ def status(
         ),
     ] = "...",
 ) -> None:
-    """Retrieve the current status of a workplan."""
+    """Reattach to a running workplan without triggering any new tasks."""
     repo = TrackingRepository()
     workplan_run = asyncio.run(repo.get_workplan_run(run_id))
 
@@ -32,14 +34,22 @@ def status(
         print("An unknown run-id was supplied.")
         return
 
-    launcher = get_launcher()
+    for k, v in workplan_run.environment.items():
+        os.environ[k] = v
+
+    path = workplan_run.trx_workplan_path
+    if not path.exists():
+        console.print(f"The workplan could not be found at `{path}`")
+        raise typer.Exit(code=1)
+
+    log.debug(f"Checking status on workplan in: {path}")
 
     try:
-        status = asyncio.run(load_run_state(run_id, launcher))
+        status = asyncio.run(reload_dag_status(path, run_id))
         display_summary(run_id, status)
     except FileNotFoundError:  # blueprint not found.
         console.print_exception()
 
 
 if __name__ == "__main__":
-    typer.run(status)
+    typer.run(monitor)

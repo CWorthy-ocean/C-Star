@@ -22,7 +22,7 @@ def test_workplan_run_file_dne(
     """
     wp_path = tmp_path / "workplan-dne.yml"
 
-    run(wp_path.as_posix(), "test-run-id")
+    run("test-run-id", wp_path.as_posix())
 
     assert "not found" in capsys.readouterr().out
 
@@ -40,7 +40,7 @@ def test_workplan_run_remote_workplan_dne(
     """
     wp_path = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml_XXX"
 
-    run(wp_path, "my-run-id")
+    run("my-run-id", wp_path)
 
     assert "not found" in capsys.readouterr().out
 
@@ -52,10 +52,7 @@ def test_workplan_run_remote_workplan_dne(
         "HTTPS://raw.githubusercontent.com/cworthy-ocean/c-star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml",
     ],
 )
-def test_workplan_run_remote_workplan(
-    capsys: pytest.CaptureFixture,
-    wp_uri: str,
-) -> None:
+def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     """Verify that a URL to a remote workplan is handled properly and the
     workplan is executed.
 
@@ -70,7 +67,9 @@ def test_workplan_run_remote_workplan(
         "cstar.cli.workplan.run.build_and_run_dag",
         return_value=0,
     ) as mock_exec:
-        run(wp_uri, "12345")
+        run(
+            "12345",
+            wp_uri,
+        )
 
-    assert "is valid" in capsys.readouterr().out
     mock_exec.assert_called_once()

@@ -77,6 +77,16 @@ class Status(IntEnum):
     """A task that terminated due to some failure in the task."""
 
     @classmethod
+    def terminal_states(cls) -> set["Status"]:
+        """Return the set of terminal statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Done, Status.Cancelled, Status.Failed}
+
+    @classmethod
     def is_terminal(cls, status: "Status") -> bool:
         """Return `True` if a status is in the set of terminal statuses.
 
@@ -89,7 +99,17 @@ class Status(IntEnum):
         -------
         bool
         """
-        return status in {Status.Done, Status.Cancelled, Status.Failed}
+        return status in cls.terminal_states()
+
+    @classmethod
+    def failure_states(cls) -> set["Status"]:
+        """Return the set of failure statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Cancelled, Status.Failed}
 
     @classmethod
     def is_failure(cls, status: "Status") -> bool:
@@ -104,11 +124,21 @@ class Status(IntEnum):
         -------
         bool
         """
-        return status in {Status.Cancelled, Status.Failed}
+        return status in cls.failure_states()
 
     @classmethod
-    def is_running(cls, status: "Status") -> bool:
-        """Return `True` if a status is in the set of in-progress statuses.
+    def ready_states(cls) -> set["Status"]:
+        """Return the set of ready statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Unsubmitted, Status.Submitted}
+
+    @classmethod
+    def is_ready(cls, status: "Status") -> bool:
+        """Return `True` if a status is in the set of ready statuses.
 
         Paramters
         ---------
@@ -119,7 +149,57 @@ class Status(IntEnum):
         -------
         bool
         """
-        return status in {Status.Submitted, Status.Running, Status.Ending}
+        return status in cls.ready_states()
+
+    @classmethod
+    def running_states(cls) -> set["Status"]:
+        """Return the set of running statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Running, Status.Ending}
+
+    @classmethod
+    def is_running(cls, status: "Status") -> bool:
+        """Return `True` if a status is in the set of running statuses.
+
+        Paramters
+        ---------
+        status : "Status"
+            The status to evaluate.
+
+        Returns
+        -------
+        bool
+        """
+        return status in cls.running_states()
+
+    @classmethod
+    def in_progress_states(cls) -> set["Status"]:
+        """Return the set of in-progress statuses.
+
+        Returns
+        -------
+        set["Status"]
+        """
+        return {Status.Submitted, Status.Running, Status.Ending}
+
+    @classmethod
+    def is_in_progress(cls, status: "Status") -> bool:
+        """Return `True` if a status is in the set of in-progress statuses (any non-terminal status).
+
+        Paramters
+        ---------
+        status : "Status"
+            The status to evaluate.
+
+        Returns
+        -------
+        bool
+        """
+        return status in cls.in_progress_states()
 
 
 class LiveStep(Step):
@@ -246,7 +326,11 @@ class Planner(LoggingMixin):
 
         g = nx.DiGraph(data)
         defaults = {
-            n.name: {KEY_STATUS: Status.Unsubmitted, KEY_STEP: n, KEY_TASK: None}
+            n.name: {
+                KEY_STATUS: Status.Unsubmitted,
+                KEY_STEP: LiveStep.from_step(n),
+                KEY_TASK: None,
+            }
             for n in workplan.steps
         }
         nx.set_node_attributes(g, values=defaults)
@@ -441,6 +525,25 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ...
 
     @classmethod
+    async def update_status(
+        cls,
+        item: Task[_THandle] | _THandle,
+    ) -> Task[_THandle] | _THandle:
+        """Query and update the status for a running task.
+
+        Parameters
+        ----------
+        item : Task[_THandle] or _THandle
+            A task or process handle to query for status updates.
+
+        Returns
+        -------
+        Status
+            The current status of the item.
+        """
+        ...
+
+    @classmethod
     async def cancel(cls, item: Task[_THandle]) -> Task[_THandle]:
         """Cancel a task, if possible.
 
@@ -479,7 +582,7 @@ class Orchestrator(LoggingMixin):
         self.planner = planner
         self.launcher = launcher
 
-    def get_open_nodes(self, *, mode: RunMode) -> set[str] | None:
+    def get_open_nodes(self, *, mode: RunMode) -> t.Mapping[str, Status] | None:
         """Retrieve the set of task nodes with a non-terminal state that are
         executing or ready to execute.
 
@@ -491,7 +594,7 @@ class Orchestrator(LoggingMixin):
             - Null indicates all nodes are closed (traversal is complete).
         """
         g = self.planner.graph
-        open_nodes: list[str] = []
+        open_nodes: dict[str, Status] = {}
         closed_set = self.get_closed_nodes(mode=mode)
 
         if self.planner.workplan:
@@ -499,13 +602,9 @@ class Orchestrator(LoggingMixin):
         else:
             nodes = {n for n in self.planner.graph}
 
-        working_list = set(nodes).difference(closed_set)
+        working_list = set(nodes).difference(closed_set.keys())
 
-        if failures := {
-            u: g.nodes[u][KEY_STATUS]
-            for u in closed_set
-            if Status.is_failure(g.nodes[u][KEY_STATUS])
-        }:
+        if failures := {u: s for u, s in closed_set.items() if Status.is_failure(s)}:
             self.log.error(f"Exiting due to task failures: {failures}")
             return None
 
@@ -514,23 +613,27 @@ class Orchestrator(LoggingMixin):
             in_degree = g.in_degree(n)
 
             satisfied = all(
-                Status.is_running(g.nodes[u][KEY_STATUS])
-                or Status.is_terminal(g.nodes[u][KEY_STATUS])
-                if mode == RunMode.Schedule
-                else Status.is_terminal(g.nodes[u][KEY_STATUS])
+                (
+                    Status.is_in_progress(g.nodes[u][KEY_STATUS])
+                    or Status.is_terminal(g.nodes[u][KEY_STATUS])
+                    if mode == RunMode.Schedule
+                    else Status.is_terminal(g.nodes[u][KEY_STATUS])
+                )
                 for (u, _) in in_edges
             )
 
-            if in_degree == 0 or satisfied:
-                open_nodes.append(n)
+            if in_degree == 0:
+                open_nodes[n] = Status.Unsubmitted
+            elif satisfied:
+                open_nodes[n] = g.nodes[n][KEY_STATUS]
 
         if working_list:
             # working list has options. if none are ready, return empty set.
-            return set(open_nodes)
+            return open_nodes
 
         return None
 
-    def get_closed_nodes(self, *, mode: RunMode) -> set[str]:
+    def get_closed_nodes(self, *, mode: RunMode) -> t.Mapping[str, Status]:
         """Retrieve the set of task nodes with a terminal state.
 
         Returns
@@ -538,14 +641,13 @@ class Orchestrator(LoggingMixin):
         set of str
             A set of node IDs identifying nodes with a Done status.
         """
-        targets = {Status.Done, Status.Cancelled, Status.Failed}
+        targets = Status.terminal_states()
 
         if mode == RunMode.Schedule:
-            targets.update({Status.Submitted, Status.Running})
+            # anything previously scheduled is "closed" when scheduling
+            targets.update({Status.Submitted, Status.Running, Status.Ending})
 
-        return set(
-            self.planner.retrieve_all(KEY_STATUS, filter_fn=lambda x: x in targets)
-        )
+        return self.planner.retrieve_all(KEY_STATUS, filter_fn=lambda x: x in targets)
 
     def _locate_dependencies(self, step: LiveStep) -> list[ProcessHandle] | None:
         """Look for the dependencies of the step.
@@ -599,8 +701,8 @@ class Orchestrator(LoggingMixin):
             return None
 
         if task := self.planner.retrieve(node, KEY_TASK):
-            status = await self.launcher.query_status(task.handle)
-            task.status = status
+            if updated := await self.launcher.update_status(task.handle):
+                task.status = updated.status
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)
@@ -658,11 +760,10 @@ class Orchestrator(LoggingMixin):
             )
 
         # Ensure task/result pairing is consistent with a list
-        open_nodes = list(open_set)
-        exec_tasks = [asyncio.Task(self.process_node(n)) for n in open_nodes]
+        exec_tasks = [asyncio.Task(self.process_node(n)) for n in open_set.keys()]
         exec_results = await asyncio.gather(*exec_tasks)
 
-        kvp = dict(zip(open_nodes, exec_results))
+        kvp = dict(zip(open_set.keys(), exec_results))
         postproc_tasks = [
             asyncio.Task(self.update_planner_state(n, t)) for n, t in kvp.items()
         ]
@@ -672,7 +773,7 @@ class Orchestrator(LoggingMixin):
             await asyncio.gather(*postproc_tasks)
         except CstarExpectationFailed:
             cancellations = {
-                v for v in kvp.values() if v and Status.is_running(v.status)
+                v for v in kvp.values() if v and Status.is_in_progress(v.status)
             }
             self.log.exception("A task has failed unexpectedly")
 
