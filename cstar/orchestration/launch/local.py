@@ -10,6 +10,7 @@ from pydantic import PrivateAttr
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
+from cstar.base.utils import slugify
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application
 from cstar.orchestration.orchestration import (
@@ -19,6 +20,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
+from cstar.orchestration.state import put_sentinel
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
@@ -40,6 +42,9 @@ class LocalHandle(ProcessHandle):
 
     _process: MpProcess = PrivateAttr()
     """The process handle (used only for simulating local processes)."""
+
+    status: Status = Status.Unsubmitted
+    """The current status of the task."""
 
     @property
     def start_ts(self) -> float:
@@ -64,7 +69,12 @@ class LocalHandle(ProcessHandle):
 
     @process.setter
     def process(self, value: MpProcess) -> None:
+        self.status = Status.Submitted
         self._process = value
+
+    @property
+    def safe_name(self) -> str:
+        return slugify(self.name)
 
 
 class LocalLauncher(Launcher[LocalHandle]):
@@ -121,6 +131,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     pid=str(pid),
                     name=step.safe_name,
                     start_at=create_time,
+                    status=Status.Submitted,
                 )
                 handle.process = mp_process
                 return handle
@@ -218,7 +229,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         raw_status = await LocalLauncher._status(handle)
 
         match raw_status:
-            case "PENDING" | "RUNNING" | "ENDING":
+            case "PENDING":
+                return Status.Submitted
+            case "RUNNING" | "ENDING":
                 return Status.Running
             case "COMPLETED" | "FAILED":
                 return Status.Done
@@ -245,15 +258,13 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         Task[LocalHandle] | LocalHandle
         """
-        # handle = item.handle if isinstance(item, Task) else item
-        # prior = handle.status
-        # current = await LocalLauncher.query_status(item)
+        handle = item.handle if isinstance(item, Task) else item
+        prior = handle.status
+        current = await LocalLauncher.query_status(item)
 
-        # if prior != current:
-        #     handle.status = current
-        #     await put_sentinel(handle)
-
-        # TODO: implement LocalLauncher.update_status
+        if prior != current:
+            handle.status = current
+            await put_sentinel(handle)
 
         return item
 
