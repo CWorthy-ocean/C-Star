@@ -1772,6 +1772,9 @@ class TestProcessingAndExecution:
         (output_dir / "ocean_his.20240101000000.002.nc").touch()
         (output_dir / "ocean_rst.20240101000000.001.nc").touch()
 
+        # Create fake partitioned ext files which shouldn't be joined
+        (output_dir / "ocean_ext.20240101000000.001.nc").touch()
+
         # Create fake output of join process to make sure it gets moved
         (output_dir / "ocean_his.20240101000000.nc").touch()
         (output_dir / "ocean_rst.20240101000000.nc").touch()
@@ -1802,11 +1805,16 @@ class TestProcessingAndExecution:
             shell=True,
         )
 
+        # check that ext files weren't joined
+        for call in mock_subprocess.call_args_list:
+            assert "ocean_ext" not in call.args[0]
+
         # Check that output file was moved
         new_out_dir = sim.fs_manager.joined_output_dir
         assert new_out_dir.exists()
         assert (new_out_dir / "ocean_his.20240101000000.nc").exists()
         assert (new_out_dir / "ocean_rst.20240101000000.nc").exists()
+        assert not (new_out_dir / "ocean_ext.20240101000000.nc").exists()
 
         mock_persist.assert_called_once()
 
