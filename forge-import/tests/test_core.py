@@ -2472,7 +2472,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
         mock_input_data_instance = MagicMock()
         mock_input_data_instance.generate_all.return_value = (None, {}, {})  # Simulates mismatch
         mock_input_data_class.return_value = mock_input_data_instance
-        
+
         with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
             with patch("cson_forge._core.rt.Grid") as mock_grid:
@@ -2480,12 +2480,101 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                 with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=False):
                     with patch.object(CstarSpecBuilder, 'ensure_source_data'):
                         builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                        
+
                         with pytest.raises(RuntimeError) as exc_info:
                             builder.generate_inputs(clobber=True)
                         # The error will be about settings not initialized, not blueprint mismatch
                         # because _file_blueprint_data_match returns False, triggering the settings check
                         assert "_settings_compile_time" in str(exc_info.value) or "Blueprint mismatch" in str(exc_info.value)
+
+    @patch('cson_forge._core.input_data.RomsMarblInputData')
+    def test_generate_inputs_nesting_info_serialized_to_blueprint_dict(
+        self,
+        mock_input_data_class,
+        minimal_cstar_spec_builder_args,
+        mock_model_spec,
+        tmp_path,
+    ):
+        """Test that nesting_info from blueprint_elements is written into the blueprint dict."""
+        nesting_file = tmp_path / "nesting.nc"
+        nesting_file.touch()
+        nesting_dataset = cstar_models.Dataset(
+            data=[cstar_models.Resource(location=str(nesting_file), partitioned=False)]
+        )
+
+        mock_blueprint_elements = MagicMock()
+        mock_blueprint_elements.grid = MagicMock()
+        mock_blueprint_elements.grid.model_dump.return_value = {}
+        mock_blueprint_elements.initial_conditions = MagicMock()
+        mock_blueprint_elements.initial_conditions.model_dump.return_value = {}
+        mock_blueprint_elements.forcing = MagicMock()
+        mock_blueprint_elements.forcing.model_dump.return_value = {}
+        mock_blueprint_elements.cdr_forcing = None
+        mock_blueprint_elements.nesting_info = nesting_dataset
+
+        mock_input_data_instance = MagicMock()
+        mock_input_data_instance.generate_all.return_value = (mock_blueprint_elements, {}, {})
+        mock_input_data_class.return_value = mock_input_data_instance
+
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=False):
+                    with patch.object(CstarSpecBuilder, 'ensure_source_data'):
+                        with patch('cson_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
+                            with patch('cson_forge._core.CstarSpecBuilder.persist'):
+                                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                                # Manually set settings so the guard passes
+                                builder._settings_compile_time = {"cppdefs": {}}
+                                builder._settings_run_time = {"roms.in": {}}
+
+                                builder.generate_inputs(clobber=True, test=False)
+
+                            # blueprint is built via model_construct (no validation), so nesting_info
+                            # is the raw dict from model_dump(), not a Dataset instance
+                            nesting_info = builder.blueprint.nesting_info
+                            assert nesting_info is not None
+                            assert nesting_info["data"][0]["location"] == str(nesting_file)
+
+    @patch('cson_forge._core.input_data.RomsMarblInputData')
+    def test_generate_inputs_nesting_info_none_in_blueprint_dict(
+        self,
+        mock_input_data_class,
+        minimal_cstar_spec_builder_args,
+        mock_model_spec,
+        tmp_path,
+    ):
+        """Test that nesting_info is None in blueprint when blueprint_elements.nesting_info is None."""
+        mock_blueprint_elements = MagicMock()
+        mock_blueprint_elements.grid = MagicMock()
+        mock_blueprint_elements.grid.model_dump.return_value = {}
+        mock_blueprint_elements.initial_conditions = MagicMock()
+        mock_blueprint_elements.initial_conditions.model_dump.return_value = {}
+        mock_blueprint_elements.forcing = MagicMock()
+        mock_blueprint_elements.forcing.model_dump.return_value = {}
+        mock_blueprint_elements.cdr_forcing = None
+        mock_blueprint_elements.nesting_info = None
+
+        mock_input_data_instance = MagicMock()
+        mock_input_data_instance.generate_all.return_value = (mock_blueprint_elements, {}, {})
+        mock_input_data_class.return_value = mock_input_data_instance
+
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=False):
+                    with patch.object(CstarSpecBuilder, 'ensure_source_data'):
+                        with patch('cson_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
+                            with patch('cson_forge._core.CstarSpecBuilder.persist'):
+                                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                                builder._settings_compile_time = {"cppdefs": {}}
+                                builder._settings_run_time = {"roms.in": {}}
+
+                                builder.generate_inputs(clobber=True, test=False)
+
+                            assert builder.blueprint.nesting_info is None
 
 
 class TestCstarSpecBuilderGetDsComprehensive:

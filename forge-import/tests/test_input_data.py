@@ -303,6 +303,7 @@ class TestRomsMarblBlueprintInputData:
         assert data.initial_conditions is None
         assert data.forcing is None
         assert data.cdr_forcing is None
+        assert data.nesting_info is None
     
     def test_romsmarblblueprintinputdata_creation_with_data(self):
         """Test creating RomsMarblBlueprintInputData with data."""
@@ -325,6 +326,13 @@ class TestRomsMarblBlueprintInputData:
         assert data.initial_conditions is not None
         assert data.forcing is not None
         assert data.cdr_forcing is not None
+
+    def test_romsmarblblueprintinputdata_creation_with_nesting_info(self):
+        """Test creating RomsMarblBlueprintInputData with nesting_info set."""
+        nesting_dataset = cstar_models.Dataset(data=[])
+        data = RomsMarblBlueprintInputData(nesting_info=nesting_dataset)
+        assert data.nesting_info is not None
+        assert data.nesting_info == nesting_dataset
 
 
 class TestInputStep:
@@ -841,6 +849,115 @@ class TestRomsMarblInputDataGeneration:
         """Test _generate_corrections raises NotImplementedError."""
         with pytest.raises(NotImplementedError):
             sample_roms_marbl_input_data._generate_corrections()
+
+    @patch('cson_forge.input_data.rt.Grid')
+    def test_generate_grid_with_child(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
+        """Test _generate_grid sets nesting_info and extract_data settings when grid_child is present."""
+        mock_grid = MagicMock()
+        mock_grid.nx = 20
+        mock_grid.ny = 20
+        mock_grid.N = 3
+        mock_grid.theta_s = 5.0
+        mock_grid.theta_b = 2.0
+        mock_grid.hc = 250.0
+        sample_roms_marbl_input_data.grid = mock_grid
+
+        mock_child = MagicMock()
+        mock_child.N = 5
+        mock_child.theta_s = 6.0
+        mock_child.theta_b = 3.0
+        mock_child.hc = 300.0
+        sample_roms_marbl_input_data.grid_child = mock_child
+
+        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create expected output files so Pydantic resource validation passes
+            out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.touch()
+            out_path_child = sample_roms_marbl_input_data._forcing_filename(input_name="grid_child")
+            out_path_child.touch()
+            out_path_nesting = sample_roms_marbl_input_data._forcing_filename(input_name="nesting")
+            out_path_nesting.touch()
+
+            mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+            with patch('xarray.open_dataset', return_value=mock_ds):
+                sample_roms_marbl_input_data._generate_grid()
+
+            # nesting_info should be set as a Dataset pointing to the nesting file
+            assert sample_roms_marbl_input_data.blueprint_elements.nesting_info is not None
+            nesting_resources = sample_roms_marbl_input_data.blueprint_elements.nesting_info.data
+            assert len(nesting_resources) == 1
+            assert str(out_path_nesting) in nesting_resources[0].location
+
+            # extract_data settings should be set
+            extract_data = sample_roms_marbl_input_data._settings_compile_time["extract_data"]
+            assert extract_data["do_extract"] is True
+            assert extract_data["N_chd"] == mock_child.N
+            assert extract_data["theta_s_chd"] == mock_child.theta_s
+            assert extract_data["theta_b_chd"] == mock_child.theta_b
+            assert extract_data["hc_chd"] == mock_child.hc
+
+    @patch('cson_forge.input_data.rt.Grid')
+    def test_generate_grid_extract_file_is_basename(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
+        """Test that extract_file in compile-time settings is the bare filename, not a full path."""
+        mock_grid = MagicMock()
+        mock_grid.nx = 20
+        mock_grid.ny = 20
+        mock_grid.N = 3
+        mock_grid.theta_s = 5.0
+        mock_grid.theta_b = 2.0
+        mock_grid.hc = 250.0
+        sample_roms_marbl_input_data.grid = mock_grid
+
+        mock_child = MagicMock()
+        mock_child.N = 5
+        mock_child.theta_s = 6.0
+        mock_child.theta_b = 3.0
+        mock_child.hc = 300.0
+        sample_roms_marbl_input_data.grid_child = mock_child
+
+        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+
+            for name in ("grid", "grid_child", "nesting"):
+                p = sample_roms_marbl_input_data._forcing_filename(input_name=name)
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.touch()
+
+            mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+            with patch('xarray.open_dataset', return_value=mock_ds):
+                sample_roms_marbl_input_data._generate_grid()
+
+            extract_file = sample_roms_marbl_input_data._settings_compile_time["extract_data"]["extract_file"]
+            # Should be just the filename, not an absolute path
+            assert extract_file == "nesting.nc"
+            assert "/" not in str(extract_file)
+
+    @patch('cson_forge.input_data.rt.Grid')
+    def test_generate_grid_without_child_nesting_info_is_none(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
+        """Test _generate_grid leaves nesting_info as None when no grid_child is set."""
+        mock_grid = MagicMock()
+        sample_roms_marbl_input_data.grid = mock_grid
+        sample_roms_marbl_input_data.grid_child = None
+
+        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+
+            out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.touch()
+
+            mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+            with patch('xarray.open_dataset', return_value=mock_ds):
+                sample_roms_marbl_input_data._generate_grid()
+
+        assert sample_roms_marbl_input_data.blueprint_elements.nesting_info is None
+        assert "extract_data" not in sample_roms_marbl_input_data._settings_compile_time
 
 
 class TestRomsMarblInputDataGenerateAll:
