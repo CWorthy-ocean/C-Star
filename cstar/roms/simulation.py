@@ -822,6 +822,7 @@ class ROMSSimulation(Simulation):
         else:
             simulation_runtime_settings.marbl_biogeochemistry = None
 
+        # explicitly set output dir and basename
         simulation_runtime_settings.output_root_name = (
             cstar.roms.runtime_settings.OutputRootName(
                 output_root_name=str(self.fs_manager.output_dir) + "/output"
@@ -1303,12 +1304,12 @@ class ROMSSimulation(Simulation):
     def _validate_and_symlink_supplementary_datasets(
         self, compile_time_code_dir: Path
     ) -> None:
-        """Validate opt files and create output-dir symlinks for supplementary datasets.
+        """Validate opt files and create work-dir symlinks for supplementary datasets.
 
         For each supplementary dataset (cdr_forcing, nesting_info) that is defined:
         1. Verify the dataset's ``required_opt_file`` is listed in ``compile_time_code``.
         2. Verify that opt file's content includes the dataset's ``symlink_name``.
-        3. Create a symlink ``{output_dir}/{symlink_name}`` pointing to the staged local file.
+        3. Create a symlink ``{work_dir}/{symlink_name}`` pointing to the staged local file.
 
         Parameters
         ----------
@@ -1317,7 +1318,7 @@ class ROMSSimulation(Simulation):
 
         Raises
         ------
-        ValueError
+        CstarExpectationFailed
             If ``compile_time_code`` is None when a supplementary dataset is defined,
             if the required opt file is not listed in ``compile_time_code``, or if the
             opt file does not contain the expected filename string.
@@ -1345,14 +1346,14 @@ class ROMSSimulation(Simulation):
             link_name = dataset.symlink_name
 
             if self.compile_time_code is None:
-                raise ValueError(
+                raise CstarExpectationFailed(
                     f"{opt_filename!r} must be present in compile_time_code when "
                     f"{dataset.__class__.__name__} is specified, but compile_time_code "
                     "is not set."
                 )
 
             if opt_filename not in compile_time_filenames:
-                raise ValueError(
+                raise CstarExpectationFailed(
                     f"{opt_filename!r} must be listed in compile_time_code when "
                     f"{dataset.__class__.__name__} is specified. "
                     f"Found: {compile_time_filenames}"
@@ -1360,7 +1361,7 @@ class ROMSSimulation(Simulation):
 
             opt_content = (compile_time_code_dir / opt_filename).read_text()
             if link_name not in opt_content:
-                raise ValueError(
+                raise CstarExpectationFailed(
                     f"{opt_filename!r} must contain the string {link_name!r} when "
                     f"{dataset.__class__.__name__} is specified."
                 )
@@ -1368,7 +1369,7 @@ class ROMSSimulation(Simulation):
             working_copy = cast("StagedFile", dataset.working_copy)
 
             if not working_copy:
-                raise ValueError(
+                raise CstarExpectationFailed(
                     f"No local copy of {dataset.__class__.__name__} found after "
                     "fetching input datasets."
                 )
@@ -1494,11 +1495,16 @@ class ROMSSimulation(Simulation):
                 + "\nROMSSimulation.compile_time_code is not staged locally."
                 + "\n Call ROMSSimulation.compile_time_code.get() and try again"
             )
+
         build_dir = self.compile_time_code.working_copy.common_parent
+
+        # in most cases, the Makefile in the ROMS repo is the right one to use.
+        # if they don't provide their own, copy the one from the repo's working copy to the build dir
         makefile_target = build_dir / "Makefile"
         if not makefile_target.exists():
             makefile_repo = self.codebase.working_copy.path / "Work" / "Makefile"  # type: ignore[union-attr]
             shutil.copyfile(makefile_repo, makefile_target)
+
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())
@@ -1683,6 +1689,8 @@ class ROMSSimulation(Simulation):
 
         # we run ROMS in the work dir
         run_path = self.fs_manager.work_dir
+
+        # save modified roms.in and rename original for clarity
         old_runtime_settings_path = Path(self.runtime_code.working_copy[0].path)
         final_runtime_settings_file = (
             old_runtime_settings_path.parent / f"PATCHED_{self.name}.in"
