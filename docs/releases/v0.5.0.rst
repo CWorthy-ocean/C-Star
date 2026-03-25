@@ -12,7 +12,7 @@ This is a bug-fix release focused on stabilizing the orchestration of blueprints
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+- Deprecated/removed `CSTAR_ORCH_REQD_ENV` environment variable
 
 New features
 ~~~~~~~~~~~~
@@ -27,12 +27,12 @@ Security Fixes
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+- Fix bug in `reload_dag_status` where the correct launcher may not be loaded
 
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+- Decouple launcher-specific precondition checks from the `dag_runner`
 
 Miscellaneous
 ~~~~~~~~~~~~~
