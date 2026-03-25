@@ -162,7 +162,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
         curr_closed = orchestrator.get_closed_nodes(mode=mode)
         curr_open = orchestrator.get_open_nodes(mode=mode)
 
-        if curr_closed != closed_set or curr_open != curr_open:
+        if curr_closed != closed_set or open_set != curr_open:
             # reset to initial delay when a task is found or completed
             delay_iter = iter(incremental_delays())
 
