@@ -34,7 +34,7 @@ class WorkplanRun(BaseModel):
     start_at: datetime = Field(default_factory=utc_now)
     """The date and time when the workplan run was triggered."""
 
-    environment: dict[str, str] = {}
+    environment: dict[str, str] = Field(default_factory=dict)
     """The environment variables at the time of the run."""
 
     @staticmethod
