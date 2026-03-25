@@ -55,8 +55,7 @@ def run(
             return
 
         # ensure the environment matches the prior run
-        for k, v in wp_run.environment.items():
-            os.environ[k] = v
+        os.environ.update(wp_run.environment)
 
         path = str(wp_run.workplan_path)
         log.debug(f"Starting run-id `{run_id}` with workplan at `{path}`")
