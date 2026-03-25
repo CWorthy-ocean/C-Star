@@ -40,12 +40,20 @@ repo = TrackingRepository()
 class DagStatus:
     """The current status of a workflow."""
 
-    open_items: t.Iterable[str]
-    closed_items: t.Iterable[str]
     details: t.Annotated[
         dict[str, Status],
         field(default_factory=dict, init=True, repr=True),
     ]
+
+    @property
+    def open_items(self) -> t.Iterable[str]:
+        """Return the name of all items that have not completed."""
+        return (k for k, v in self.details.items() if not Status.is_terminal(v))
+
+    @property
+    def closed_items(self) -> t.Iterable[str]:
+        """Return the name of all items that have completed."""
+        return (k for k, v in self.details.items() if Status.is_terminal(v))
 
 
 def get_launcher() -> "Launcher":
@@ -105,7 +113,7 @@ async def attach_to_run(orchestrator: Orchestrator) -> DagStatus:
     if open_set is None:
         open_set = {}
 
-    return DagStatus(open_set.keys(), closed_set.keys(), {**open_set, **closed_set})
+    return DagStatus({**open_set, **closed_set})
 
 
 async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
@@ -136,7 +144,7 @@ async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
         else:
             open_set[sentinel.name] = sentinel.status
 
-    return DagStatus(open_set.keys(), closed_set.keys(), {**open_set, **closed_set})
+    return DagStatus({**open_set, **closed_set})
 
 
 async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
@@ -165,7 +173,7 @@ async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
     return await attach_to_run(orchestrator)
 
 
-async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
+async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
     """Execute a plan from start to finish.
 
     Parameters
@@ -199,6 +207,11 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
         await asyncio.sleep(sleep_duration)
 
     log.info(f"Workplan {mode} is complete.")
+
+    if open_set is None:
+        open_set = {}
+
+    return DagStatus({**open_set, **closed_set})
 
 
 async def prepare_workplan(
