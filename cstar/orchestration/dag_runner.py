@@ -113,7 +113,7 @@ async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
     return DagStatus({**open_set, **closed_set})
 
 
-async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
+async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     """Determine the current status of a workplan run.
 
     Parameters
@@ -127,10 +127,10 @@ async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
     -------
     DagStatus
     """
-    wp = deserialize(path, Workplan)
-    log.info(f"Loading status of workplan: {wp.name}")
+    wp = deserialize(wp_run.trx_workplan_path, Workplan)
+    log.debug(f"Reloading workplan run: {wp.name}")
 
-    configure_environment(run_id=run_id)
+    configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
 
     planner = Planner(workplan=wp)
     launcher = get_launcher()
