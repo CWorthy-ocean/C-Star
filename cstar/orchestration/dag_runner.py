@@ -7,7 +7,7 @@ from pathlib import Path
 
 from prefect import flow
 
-from cstar.base.env import ENV_CSTAR_RUNID, capture_environment
+from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
@@ -94,7 +94,7 @@ async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
     -------
     DagStatus
     """
-    os.environ[ENV_CSTAR_RUNID] = run_id
+    configure_environment(run_id=run_id)
     sentinels = await load_sentinels(SlurmHandle)
 
     open_set: dict[str, Status] = {}
