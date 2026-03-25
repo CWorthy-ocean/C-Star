@@ -11,7 +11,6 @@ from cstar.base.env import (
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.handler import ExecutionStatus
@@ -120,7 +119,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         for key, value in config.items():
             if not value:
                 msg = f"Missing required environment variable: {key}"
-                raise CstarExpectationFailed(msg)
+                raise ValueError(msg)
 
     @staticmethod
     def configured_queue() -> str:
