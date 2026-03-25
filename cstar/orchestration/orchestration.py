@@ -825,7 +825,9 @@ def check_environment() -> None:
 
 
 def configure_environment(
-    output_dir: Path | None = None, run_id: str | None = None
+    output_dir: Path | None = None,
+    run_id: str | None = None,
+    updates: t.Mapping[str, str] | None = None,
 ) -> None:
     """Configure environment variables required by the runner.
 
@@ -835,12 +837,17 @@ def configure_environment(
         The directory where outputs will be written.
     run_id : str | None
         The unique identifier for an execution of the workplan.
+    updates : t.Mapping[str, str] | None
+        Additional environment variable updates.
     """
     if output_dir:
         os.environ[ENV_CSTAR_DATA_HOME] = output_dir.expanduser().resolve().as_posix()
 
     if run_id:
         os.environ[ENV_CSTAR_RUNID] = slugify(run_id)
+
+    if updates:
+        os.environ.update(updates)
 
 
 register_representer(Status, intenum_representer)
