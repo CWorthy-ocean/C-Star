@@ -82,40 +82,6 @@ def incremental_delays() -> t.Generator[float, None, None]:
     yield from delay_cycle
 
 
-async def attach_to_run(orchestrator: Orchestrator) -> DagStatus:
-    """Load the run state and monitor until it completes.
-
-    Parameters
-    ----------
-    orchestrator : Orchestrator
-        The orchestrator to be used for processing a plan.
-    mode : RunMode
-        The execution mode during processing.
-
-        - RunMode.Schedule submits all processes in the plan in a non-blocking manner.
-        - RunMode.Monitor waits for all processes in the plan to complete.
-
-    Returns
-    -------
-    DagStatus
-    """
-    mode = RunMode.Monitor
-    closed_set = orchestrator.get_closed_nodes(mode=mode)
-    open_set = orchestrator.get_open_nodes(mode=mode)
-
-    # Run through all the tasks until we're caught up
-    while open_set is not None:
-        await orchestrator.run(mode=mode)
-
-        closed_set = orchestrator.get_closed_nodes(mode=mode)
-        open_set = orchestrator.get_open_nodes(mode=mode)
-
-    if open_set is None:
-        open_set = {}
-
-    return DagStatus({**open_set, **closed_set})
-
-
 async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
     """Load the run state.
 
@@ -170,7 +136,7 @@ async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
     launcher = get_launcher()
     orchestrator = Orchestrator(planner, launcher)
 
-    return await attach_to_run(orchestrator)
+    return await process_plan(orchestrator, RunMode.Monitor)
 
 
 async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
@@ -259,7 +225,9 @@ async def prepare_workplan(
 
 @flow(log_prints=True)
 async def build_and_run_dag(
-    wp_path: Path, run_id: str = "", output_dir: Path | None = None
+    wp_path: Path,
+    run_id: str = "",
+    output_dir: Path | None = None,
 ) -> Path:
     """Execute the steps in the workplan.
 
