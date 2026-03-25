@@ -80,6 +80,10 @@ class LocalHandle(ProcessHandle):
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
+    @classmethod
+    def check_preconditions(cls) -> None:
+        """Perform launcher-specific startup validation."""
+
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[LocalHandle]) -> LocalHandle:
         """Submit a step to SLURM as a new batch allocation.

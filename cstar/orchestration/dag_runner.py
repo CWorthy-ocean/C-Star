@@ -29,7 +29,7 @@ from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS, ENV_CSTAR_ORCH_REQD_ENV
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import cstar_sysmgr
 
 log = get_logger(__name__)
@@ -50,12 +50,9 @@ class DagStatus:
 
 def get_launcher() -> "Launcher":
     """Get the appropriate launcher for the current environment."""
-    if cstar_sysmgr.scheduler:
-        return SlurmLauncher()
-    else:
-        os.environ[ENV_CSTAR_ORCH_REQD_ENV] = ""
-
-    return LocalLauncher()
+    launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
+    launcher.check_preconditions()
+    return launcher
 
 
 def incremental_delays() -> t.Generator[float, None, None]:
@@ -162,7 +159,7 @@ async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
     configure_environment(run_id=run_id)
 
     planner = Planner(workplan=wp)
-    launcher = SlurmLauncher()
+    launcher = get_launcher()
     orchestrator = Orchestrator(planner, launcher)
 
     return await attach_to_run(orchestrator)

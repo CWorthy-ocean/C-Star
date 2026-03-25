@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,
-    get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
@@ -23,7 +22,6 @@ from cstar.orchestration.serialization import (
     intenum_representer,
     register_representer,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_REQD_ENV
 
 nx = lazy_import("networkx")
 
@@ -486,6 +484,11 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     """Contract required to implement a task launcher."""
 
     @classmethod
+    def check_preconditions(cls) -> None:
+        """Perform launcher-specific startup validation."""
+        ...
+
+    @classmethod
     async def launch(
         cls,
         step: LiveStep,
@@ -813,9 +816,7 @@ def check_environment() -> None:
     ValueError
         If required environment variables are missing or empty.
     """
-    required_config = get_env_item(ENV_CSTAR_ORCH_REQD_ENV).value
     required_vars: set[str] = {ENV_CSTAR_RUNID}
-    required_vars.update({x.strip() for x in required_config.split(",") if x})
 
     for key in required_vars:
         if not os.getenv(key, ""):
