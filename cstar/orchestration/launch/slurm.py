@@ -11,6 +11,7 @@ from cstar.base.env import (
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.handler import ExecutionStatus
@@ -103,6 +104,23 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         get_env_item(ENV_CSTAR_SLURM_POST_SUBMIT_DELAY).value
     )
     """Delay after a submission to ensure status for a SLURM job can be queried."""
+
+    @classmethod
+    def check_preconditions(cls) -> None:
+        """Perform launcher-specific startup validation.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If an environment variable required by the launcher cannot be found.
+        """
+        keys = [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE]
+        config = {key: get_env_item(key).value for key in keys}
+
+        for key, value in config.items():
+            if not value:
+                msg = f"Missing required environment variable: {key}"
+                raise CstarExpectationFailed(msg)
 
     @staticmethod
     def configured_queue() -> str:
