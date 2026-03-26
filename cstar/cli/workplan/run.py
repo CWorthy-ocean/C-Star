@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 
 from cstar.base.log import get_logger
-from cstar.cli.workplan.shared import list_runs
+from cstar.cli.workplan.shared import DelimitedKeyValuePair, list_runs
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import build_and_run_dag
 from cstar.orchestration.models import Workplan
@@ -33,6 +33,16 @@ def run(
             help="Override the output directory specified in the environment with this path."
         ),
     ] = "",
+    var: t.Annotated[
+        list[str] | None,
+        typer.Option(
+            help=(
+                "Specify runtime variables as key-value pairs in the form `<key>=<value>`."
+                "\n\nThese values will be used to dynamically populate simulation "
+                "configuration at runtime."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Execute a workplan.
 
@@ -47,13 +57,16 @@ def run(
 
         log.debug(f"Using default run-id: {run_id}")
 
+    runtime_vars = DelimitedKeyValuePair.to_map(var or [])
+
     if not path:
         repo = TrackingRepository()
-        wp_run: WorkplanRun | None = asyncio.run(repo.get_workplan_run(run_id))
+        wp_run = asyncio.run(repo.get_workplan_run(run_id))
         if wp_run is None:
             log.error(f"No runs with the id `{run_id}` could be found.")
             return
 
+        runtime_vars = wp_run.runtime_vars
         # ensure the environment matches the prior run
         os.environ.update(wp_run.environment)
 
@@ -69,8 +82,7 @@ def run(
 
     try:
         with local_copy(path) as wp_path:
-            asyncio.run(build_and_run_dag(wp_path, run_id, output_path))
-        log.info(f"Workplan run `{run_id}` has completed")
+            asyncio.run(build_and_run_dag(wp_path, run_id, output_path, runtime_vars))
     except Exception:
         log.exception(f"Workplan run `{run_id}` has completed unsuccessfully")
 

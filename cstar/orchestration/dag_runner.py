@@ -228,6 +228,7 @@ async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
     output_dir: Path | None = None,
+    runtime_vars: t.Mapping[str, str] | None = None,
 ) -> Path:
     """Execute the steps in the workplan.
 
@@ -248,6 +249,7 @@ async def build_and_run_dag(
     """
     configure_environment(output_dir, run_id)
     output_dir = DirectoryManager.data_home()
+    runtime_vars = runtime_vars or {}
 
     launcher = get_launcher()
 

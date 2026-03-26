@@ -36,6 +36,9 @@ class WorkplanRun(BaseModel):
     environment: dict[str, str] = Field(default_factory=dict)
     """The environment variables at the time of the run."""
 
+    runtime_vars: t.Mapping[str, str] = Field(default_factory=dict)
+    """User-supplied runtime variable overrides."""
+
     @staticmethod
     def get_default_run_id(uri: str) -> str:
         """Generate a run-id based on the name of a `Workplan`
