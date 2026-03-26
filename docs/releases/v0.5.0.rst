@@ -13,6 +13,9 @@ Breaking Changes
 ~~~~~~~~~~~~~~~~
 
 - Deprecated/removed `CSTAR_ORCH_REQD_ENV` environment variable
+- Modified parameters to `DagStatus.__init__`
+- Removed `workplan-monitor` CLI command
+- Removed `dag_runner.attach_to_run` (duplicates `process_plan` functionality)
 
 New features
 ~~~~~~~~~~~~
@@ -28,11 +31,17 @@ Bug Fixes
 ~~~~~~~~~
 
 - Fix bug in `reload_dag_status` where the correct launcher may not be loaded
+- Fix comparison-to-self bug for orchestrator `open_set` 
+- Fix mutable default attribute value in `WorkplanRun`
 
 Improvements
 ~~~~~~~~~~~~
 
 - Decouple launcher-specific precondition checks from the `dag_runner`
+- Use computed attributes to in place of duplicating keys found in `DagStatus.details`
+- Re-use `configure_environment` where applicable
+
+
 
 Miscellaneous
 ~~~~~~~~~~~~~
