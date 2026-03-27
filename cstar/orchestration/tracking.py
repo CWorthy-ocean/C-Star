@@ -34,7 +34,7 @@ class WorkplanRun(BaseModel):
     start_at: datetime = Field(default_factory=utc_now)
     """The date and time when the workplan run was triggered."""
 
-    environment: dict[str, str] = {}
+    environment: dict[str, str] = Field(default_factory=dict)
     """The environment variables at the time of the run."""
 
     @staticmethod
@@ -213,7 +213,7 @@ class TrackingRepository(LoggingMixin):
         run_path = self._find_run_path(run_id, run_date)
 
         if not run_path.exists():
-            rd_out = run_date if run_date else "latest"
+            rd_out = run_date or "latest"
             msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
             self.log.warning(msg)
             return None

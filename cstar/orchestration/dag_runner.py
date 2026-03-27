@@ -7,7 +7,7 @@ from pathlib import Path
 
 from prefect import flow
 
-from cstar.base.env import ENV_CSTAR_RUNID, capture_environment
+from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
@@ -40,12 +40,20 @@ repo = TrackingRepository()
 class DagStatus:
     """The current status of a workflow."""
 
-    open_items: t.Iterable[str]
-    closed_items: t.Iterable[str]
     details: t.Annotated[
         dict[str, Status],
         field(default_factory=dict, init=True, repr=True),
     ]
+
+    @property
+    def open_items(self) -> t.Iterable[str]:
+        """Return the name of all items that have not completed."""
+        return (k for k, v in self.details.items() if not Status.is_terminal(v))
+
+    @property
+    def closed_items(self) -> t.Iterable[str]:
+        """Return the name of all items that have completed."""
+        return (k for k, v in self.details.items() if Status.is_terminal(v))
 
 
 def get_launcher() -> "Launcher":
@@ -74,40 +82,6 @@ def incremental_delays() -> t.Generator[float, None, None]:
     yield from delay_cycle
 
 
-async def attach_to_run(orchestrator: Orchestrator) -> DagStatus:
-    """Load the run state and monitor until it completes.
-
-    Parameters
-    ----------
-    orchestrator : Orchestrator
-        The orchestrator to be used for processing a plan.
-    mode : RunMode
-        The execution mode during processing.
-
-        - RunMode.Schedule submits all processes in the plan in a non-blocking manner.
-        - RunMode.Monitor waits for all processes in the plan to complete.
-
-    Returns
-    -------
-    DagStatus
-    """
-    mode = RunMode.Monitor
-    closed_set = orchestrator.get_closed_nodes(mode=mode)
-    open_set = orchestrator.get_open_nodes(mode=mode)
-
-    # Run through all the tasks until we're caught up
-    while open_set is not None:
-        await orchestrator.run(mode=mode)
-
-        closed_set = orchestrator.get_closed_nodes(mode=mode)
-        open_set = orchestrator.get_open_nodes(mode=mode)
-
-    if open_set is None:
-        open_set = {}
-
-    return DagStatus(open_set.keys(), closed_set.keys(), {**open_set, **closed_set})
-
-
 async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
     """Load the run state.
 
@@ -120,7 +94,7 @@ async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
     -------
     DagStatus
     """
-    os.environ[ENV_CSTAR_RUNID] = run_id
+    configure_environment(run_id=run_id)
     sentinels = await load_sentinels(SlurmHandle)
 
     open_set: dict[str, Status] = {}
@@ -136,10 +110,10 @@ async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
         else:
             open_set[sentinel.name] = sentinel.status
 
-    return DagStatus(open_set.keys(), closed_set.keys(), {**open_set, **closed_set})
+    return DagStatus({**open_set, **closed_set})
 
 
-async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
+async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     """Determine the current status of a workplan run.
 
     Parameters
@@ -153,19 +127,19 @@ async def reload_dag_status(path: Path, run_id: str) -> DagStatus:
     -------
     DagStatus
     """
-    wp = deserialize(path, Workplan)
-    log.info(f"Loading status of workplan: {wp.name}")
+    wp = deserialize(wp_run.trx_workplan_path, Workplan)
+    log.debug(f"Reloading workplan run: {wp.name}")
 
-    configure_environment(run_id=run_id)
+    configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
 
     planner = Planner(workplan=wp)
     launcher = get_launcher()
     orchestrator = Orchestrator(planner, launcher)
 
-    return await attach_to_run(orchestrator)
+    return await process_plan(orchestrator, RunMode.Monitor)
 
 
-async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
+async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
     """Execute a plan from start to finish.
 
     Parameters
@@ -188,7 +162,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
         curr_closed = orchestrator.get_closed_nodes(mode=mode)
         curr_open = orchestrator.get_open_nodes(mode=mode)
 
-        if curr_closed != closed_set or curr_open != curr_open:
+        if curr_closed != closed_set or open_set != curr_open:
             # reset to initial delay when a task is found or completed
             delay_iter = iter(incremental_delays())
 
@@ -199,6 +173,11 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> None:
         await asyncio.sleep(sleep_duration)
 
     log.info(f"Workplan {mode} is complete.")
+
+    if open_set is None:
+        open_set = {}
+
+    return DagStatus({**open_set, **closed_set})
 
 
 async def prepare_workplan(
@@ -246,7 +225,9 @@ async def prepare_workplan(
 
 @flow(log_prints=True)
 async def build_and_run_dag(
-    wp_path: Path, run_id: str = "", output_dir: Path | None = None
+    wp_path: Path,
+    run_id: str = "",
+    output_dir: Path | None = None,
 ) -> Path:
     """Execute the steps in the workplan.
 

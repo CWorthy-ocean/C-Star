@@ -22,7 +22,7 @@ def test_workplan_run_file_dne(
     """
     wp_path = tmp_path / "workplan-dne.yml"
 
-    run("test-run-id", wp_path.as_posix())
+    run(run_id="test-run-id", path=wp_path.as_posix())
 
     assert "not found" in capsys.readouterr().out
 
@@ -40,7 +40,7 @@ def test_workplan_run_remote_workplan_dne(
     """
     wp_path = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml_XXX"
 
-    run("my-run-id", wp_path)
+    run(run_id="my-run-id", path=wp_path)
 
     assert "not found" in capsys.readouterr().out
 
@@ -68,8 +68,8 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
         return_value=0,
     ) as mock_exec:
         run(
-            "12345",
-            wp_uri,
+            run_id="12345",
+            path=wp_uri,
         )
 
     mock_exec.assert_called_once()
