@@ -38,7 +38,7 @@ Improvements
 ~~~~~~~~~~~~
 
 - Decouple launcher-specific precondition checks from the `dag_runner`
-- Use computed attributes to in place of duplicating keys found in `DagStatus.details`
+- Use computed attributes in place of duplicating keys found in `DagStatus.details`
 - Re-use `configure_environment` where applicable
 
 
