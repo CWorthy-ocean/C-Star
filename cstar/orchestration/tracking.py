@@ -279,8 +279,8 @@ class TrackingRepository(LoggingMixin):
         list[WorkplanRun]
         """
         # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
-        filter = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
-        run_paths = list(self.history_dir.rglob(filter))
+        glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
+        run_paths = list(self.history_dir.rglob(glob_pattern))
         coros = [
             asyncio.to_thread(deserialize, run_path, WorkplanRun)
             for run_path in run_paths
