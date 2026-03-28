@@ -1,8 +1,7 @@
 import asyncio
-import re
 import typing as t
 
-from pydantic import BaseModel, ConfigDict, Field
+import typer
 from rich.console import Console
 from rich.table import Column, Table
 
@@ -30,9 +29,10 @@ def list_runs(incomplete: str) -> list[tuple[str, str]]:
     repo = TrackingRepository()
     run_list = asyncio.run(repo.list_latest_runs(incomplete))
 
-    if not run_list and incomplete:
-        return [(incomplete, "no results found")]
-    elif not run_list:
+    if not run_list:
+        if incomplete:
+            return [(incomplete, "no results found")]
+
         return [("run-id", "no results found")]
 
     return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list if r]
@@ -85,61 +85,103 @@ def display_summary(
     console.print(table)
 
 
-class DelimitedKeyValuePair(BaseModel):
-    """Model a delimited key-value pair in the form <key>=<value>, ensuring
-    the key and value are both non-empty.
+def check_and_capture_kvp(entry: str) -> tuple[str, str]:
+    """Perform validation on user-supplied configuration value supplied
+    as a key-value pair with the expected format `<key>=<value>`.
+
+    Returns
+    -------
+    tuple[str, str]
+        The whitespace-stripped key-value pair
+
+    Raises
+    ------
+    ValueError
+        - If key and value are missing (e.g. `entry=="="`)
+        - If no key is found (e.g. `entry=="=value"`)
+        - If no value is found (e.g. `entry=="key="`)
     """
+    splits = entry.split("=", 1)
+    kvp_size: t.Final[int] = 2
 
-    RE_KVP: t.ClassVar[t.Literal[r"(\w+)=(\w+)"]] = r"(\w+)=(\w+)"
-    """Regex used to parse key and value groups from raw input."""
+    if len(splits) != kvp_size:
+        msg = f"Variable `{entry}` not in expected format `<key>=<value>`"
+        raise typer.BadParameter(msg)
 
-    raw: t.Annotated[str, Field(kw_only=False, min_length=3, pattern=RE_KVP)]
-    """The raw key value pair, including delimiter."""
+    k, v = splits[0].strip(), splits[1].strip()
 
-    _kvp: tuple[str, str] | None = None
-    """The key-value pair parsed from the raw input."""
+    if not k and not v:
+        msg = "Found incomplete variable missing key and value"
+        raise typer.BadParameter(msg)
 
-    model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
-    """Model configuration ensuring keys and values have whitespace stripped."""
+    if not k:
+        msg = f"Found orphaned variable value without key: {entry}"
+        raise typer.BadParameter(msg)
 
-    def _to_tuple(self) -> tuple[str, str]:
-        """Split the raw value into a key and value.
+    if not v:
+        msg = f"Found variable with empty value for key: {entry}"
+        raise typer.BadParameter(msg)
 
-        Returns
-        -------
-        tuple[str, str]
-            Tuple containing key and value.
-        """
-        if match := re.search(DelimitedKeyValuePair.RE_KVP, self.raw):
-            return match.group(1), match.group(2)
+    return k, v
 
-        raise ValueError
 
-    @property
-    def kvp(self) -> tuple[str, str]:
-        """Return the key-value pair parsed from an input value as a [key, value] tuple.
+def check_and_capture_kvps(var: list[str]) -> t.Mapping[str, str] | None:
+    """Capture all unique keyj-value pairs from user-supplied configuration
+    supplied as a list of key-value pairs in the format ["key1=value", "key2=value"]
 
-        Returns
-        -------
-        tuple[str, str].
-        """
-        if not self._kvp:
-            self._kvp = self._to_tuple()
-        return self._kvp
+    Returns
+    -------
+    t.Mapping[str, str]
+        The key-value pairs from the list converted into a mapping containing
+        all unique key-value pairs
 
-    @staticmethod
-    def to_map(value: str | list[str], kvp_delimiter: str = ",") -> t.Mapping[str, str]:
-        """Convert the input into 1-to-many key-value pairs.
+    Raises
+    ------
+    ValueError
+        - If any <key>=<value> entry is invalid
+        - If any key is provided with multiple values
+    """
+    if not var:
+        return {}
 
-        Parameters
-        ----------
-        value : str | list[str]
-            A delimited string (e.g. "a=A,b=B") or a list of key-value pairs.
-        """
-        if isinstance(value, str):
-            value = value.strip().split(kvp_delimiter)
-        if not value:
-            return {}
+    captured_kvps = [check_and_capture_kvp(entry) for entry in var]
 
-        parsed = [DelimitedKeyValuePair(raw=value).kvp for value in value or []]
-        return {kvp[0]: kvp[1] for kvp in parsed}
+    variables = dict(captured_kvps)
+
+    if len(variables) < len(captured_kvps):
+        counter = t.Counter(k for k, _ in captured_kvps)
+        k, _ = counter.most_common(1)[0]
+        msg = f"Found variable with multiple values: {k}"
+        raise typer.BadParameter(msg)
+
+    return variables
+
+
+_TCommandContext = t.TypeVar("_TCommandContext")
+
+
+def upsert_command_context(
+    ctx: typer.Context,
+    klass: type[_TCommandContext],
+    **kwargs,  # noqa: ANN003
+) -> _TCommandContext:
+    """Instantiate a `_TCommandContext` and store it on the typer context if one
+    does not exist.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        A context object containing state for the typer app
+    klass : type
+        The type of context object to be stored in the typer app
+
+    Returns
+    -------
+    RunContext
+    """
+    if ctx.obj is None:
+        ctx.obj = klass(**kwargs)
+    else:
+        for k, v in kwargs.items():
+            setattr(ctx.obj, k, v)
+    return ctx.obj

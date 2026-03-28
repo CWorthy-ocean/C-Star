@@ -7,6 +7,7 @@ from pathlib import Path
 
 from prefect import flow
 
+from cstar.base import context
 from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
@@ -221,6 +222,14 @@ async def prepare_workplan(
     )
 
     return wp, persist_as
+
+
+def publish_context(
+    run_id: str,
+    user_vars: t.Mapping[str, str],
+) -> None:
+    ctx = context.WorkplanRuntimeContext(run_id=run_id, user_variables=user_vars)
+    context.put_workplan_context(ctx)
 
 
 @flow(log_prints=True)

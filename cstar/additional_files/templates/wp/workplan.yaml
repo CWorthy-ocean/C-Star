@@ -21,7 +21,7 @@ steps:
     - name: Ensemble X
       application: sleep
       depends_on: ["Prepare"]
-      blueprint: ./blueprint.yaml
+      blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
       blueprint_overrides: {}
       workflow_overrides:
           segment_length: 16

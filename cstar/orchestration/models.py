@@ -14,6 +14,7 @@ from pydantic import (
     HttpUrl,
     PlainSerializer,
     PositiveInt,
+    PrivateAttr,
     SerializeAsAny,
     StringConstraints,
     WithJsonSchema,
@@ -601,6 +602,120 @@ class Workplan(BaseModel):
     @model_validator(mode="after")
     def _model_validator(self) -> "Workplan":
         """Validate attribute relationships."""
+        return self
+
+
+class NamedConfigurationBuilder(BaseModel):
+    """A collection of key-value pairs that provides validation of the static
+    keys specified at design time and dynamically configured keys at runtime.
+
+    Verification checks:
+    - report keys that are configured but not declared (e.g. extra configuration).
+    - report keys that are declared but not configured (e.g. missing configuration).
+    """
+
+    keys: set[str] = Field(default_factory=set)
+    """The set of valid keys available for runtime replacement."""
+    mapping: t.Mapping[str, str] = Field(default_factory=dict)
+    """Key-value pairs specifying the value to be used for a key replacement."""
+
+    require_coverage: bool = Field(default=False, frozen=True)
+    """Flag indicating if all available keys must be provided."""
+    require_declaration: bool = Field(default=True, frozen=True)
+    """Flag indicating if unknown keys should be treated as errors."""
+
+    _unknown_keys: set[str] | None = PrivateAttr(None)
+    """The set of keys that are configured but not declared."""
+    _unconfigured_keys: set[str] | None = PrivateAttr(None)
+    """The set of keys that are declared but not configured."""
+    _error: str | None = PrivateAttr(None)
+    """An error message for the collection."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
+    """Configure the model to strip whitespace off inputs."""
+
+    def finalize(self) -> tuple[str, t.Mapping[str, str]]:
+        """Return a tuple containing an error message and the resulting mapping."""
+        return self.error, self.mapping
+
+    @property
+    def unknown_keys(self) -> set[str]:
+        """Return the set of keys that are configured but not declared.
+
+        Returns
+        -------
+        set[str]
+        """
+        if self._unknown_keys is None:
+            configured_keys = set(self.mapping.keys())
+            self._unknown_keys = configured_keys.difference(self.keys)
+        return self._unknown_keys
+
+    @property
+    def unconfigured_keys(self) -> set[str]:
+        """Return the set of keys that are declared but not configured.
+
+        Returns
+        -------
+        set[str]
+        """
+        if self._unconfigured_keys is None:
+            configured_keys = set(self.mapping.keys())
+            self._unconfigured_keys = self.keys.difference(configured_keys)
+        return self._unconfigured_keys
+
+    @property
+    def error(self) -> str:
+        """Generate the appropriate error message given the `require_xxx` settings.
+
+        Returns
+        -------
+        str
+            An error message when validation fails, otherwise an empty string.
+        """
+        if self._error is not None:
+            return self._error
+
+        unknown_msg = ""
+        if self.require_declaration and self.unknown_keys:
+            unknown_msg = ", ".join(self.unknown_keys)
+
+        missing_msg = ""
+        if self.require_coverage and self.unconfigured_keys:
+            missing_msg = ", ".join(self.unconfigured_keys)
+
+        self._error = ""
+
+        if unknown_msg and missing_msg:
+            self._error = f"Runtime configuration has unknown keys: {unknown_msg} and missing keys: {missing_msg}"
+
+        if unknown_msg:
+            self._error = f"Runtime configuration has unknown keys: {unknown_msg}"
+
+        if missing_msg:
+            self._error = f"Runtime configuration has missing keys: {missing_msg}"
+
+        return self._error
+
+    @model_validator(mode="after")
+    def _ensure_keys(self) -> "NamedConfigurationBuilder":
+        """Validate the complete set of runtime variables as a unit.
+
+        Returns
+        -------
+        NamedRuntimeConfiguration
+
+        Raises
+        ------
+        ValueError
+            - If an unknown variable is configured
+            - If configured to require all variables
+        """
+        # self.mapping = {k.strip(): v.strip() for k, v in self.mapping.items()}
+        configured_keys = set(self.mapping.keys())
+        self._unknown_keys = configured_keys.difference(self.keys)
+        self._unconfigured_keys = self.keys.difference(configured_keys)
+
         return self
 
 

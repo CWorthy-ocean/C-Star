@@ -10,7 +10,7 @@ import pytest
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.base.utils import slugify
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.serialization import serialize
+from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 
@@ -163,8 +163,7 @@ async def test_tracking_retrieve_variant(
 
 @pytest.mark.asyncio
 async def test_default_run_id(
-    tmp_path: Path,
-    single_step_workplan: Workplan,
+    wp_templates_dir: Path,
 ) -> None:
     """Verify the default run id matches the workplan safe name.
 
@@ -172,19 +171,40 @@ async def test_default_run_id(
     ----------
     tmp_path : Path
         Temporary directory for test outputs
-    single_step_workplan: Workplan
-        Fixture returning a simple workplan
+    wp_templates_dir : Path
+        Fixture returning the path to the directory containing workplan template files
     """
-    wp_path = tmp_path / "workplan.yaml"
-    run_id = "test-tracking-retrieve-run-id"
+    wp_path = wp_templates_dir / "workplan.yaml"
 
-    # create a workplan so the default run-id can be determined by loading the workplan
-    serialize(wp_path, single_step_workplan)
+    # load the sample workplan from disk to verify the default name provenance
+    wp = deserialize(wp_path, Workplan)
 
+    # generate the default run id from the source path
     run_id = WorkplanRun.get_default_run_id(wp_path.as_posix())
 
-    # verify it uses the supplied workplan
-    assert run_id == slugify(single_step_workplan.name)
+    # verify it matches the supplied workplan
+    assert run_id == slugify(wp.name)
+
+
+@pytest.mark.asyncio
+async def test_default_run_id_remote(
+    remote_workplan_uri: str,
+) -> None:
+    """Verify the default run id matches the workplan safe name when
+    the workplan is a remote resource.
+
+    Parameters
+    ----------
+    remote_workplan_uri : str
+        A fixture returning a known URI to a sample workplan
+    """
+    expected_name = "Sample Workplan"
+
+    # generate the default run id from the source URI
+    run_id = WorkplanRun.get_default_run_id(remote_workplan_uri)
+
+    # verify it matches the supplied workplan
+    assert run_id == slugify(expected_name)
 
 
 @pytest.mark.parametrize("num_runs", [1, 2, 4, 8])
