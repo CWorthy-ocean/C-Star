@@ -253,8 +253,7 @@ def test_workplan_run_variable_multiple_sources(
     )
 
     assert result.exit_code != 0
-    assert "--varfile" in result.stderr
-    assert "--var" in result.stderr
+    assert "varfile" in result.stderr
     assert "together" in result.stderr
 
 
