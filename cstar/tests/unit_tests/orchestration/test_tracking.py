@@ -181,7 +181,7 @@ async def test_default_run_id(
     # create a workplan so the default run-id can be determined by loading the workplan
     serialize(wp_path, single_step_workplan)
 
-    run_id = WorkplanRun.get_default_run_id(wp_path)
+    run_id = WorkplanRun.get_default_run_id(wp_path.as_posix())
 
     # verify it uses the supplied workplan
     assert run_id == slugify(single_step_workplan.name)
