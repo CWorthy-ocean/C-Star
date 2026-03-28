@@ -465,15 +465,12 @@ def local_copy(uri: str) -> t.Generator[Path, None, None]:
     Path
         A path to a local copy of the resource
     """
-    is_remote = is_remote_resource(uri)
-
-    with TemporaryDirectory() as tmp_dir:
-        bp_path = write_local_copy(uri, Path(tmp_dir)) if is_remote else Path(uri)
-        try:
+    if is_remote_resource(uri):
+        with TemporaryDirectory() as tmp_dir:
+            bp_path = write_local_copy(uri, Path(tmp_dir))
             yield bp_path
-        finally:
-            if is_remote and bp_path.exists():
-                bp_path.unlink()
+    else:
+        yield Path(uri)
 
 
 @asynccontextmanager

@@ -9,7 +9,6 @@ from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     StateDirectoryManager,
-    is_remote_resource,
     local_copy,
 )
 from cstar.orchestration.models import Workplan
@@ -38,24 +37,20 @@ class WorkplanRun(BaseModel):
     """The environment variables at the time of the run."""
 
     @staticmethod
-    def get_default_run_id(path: Path | str) -> str:
+    def get_default_run_id(uri: str) -> str:
         """Generate a run-id based on the name of a `Workplan`
 
         Parameters
         ----------
-        path : Path
-            The path to a persisted workplan.
+        uri : str
+            The local or remote path to a persisted workplan.
 
         Returns
         -------
         str
         """
-        path_string = str(path)
-        if is_remote_resource(path_string):
-            with local_copy(path_string) as local_path:
-                wp = deserialize(local_path, Workplan)
-        else:
-            wp = deserialize(Path(path), Workplan)
+        with local_copy(uri) as local_path:
+            wp = deserialize(local_path, Workplan)
 
         return slugify(wp.name)
 
