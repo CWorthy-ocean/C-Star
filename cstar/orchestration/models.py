@@ -634,10 +634,6 @@ class NamedConfigurationBuilder(BaseModel):
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Configure the model to strip whitespace off inputs."""
 
-    def finalize(self) -> tuple[str, t.Mapping[str, str]]:
-        """Return a tuple containing an error message and the resulting mapping."""
-        return self.error, self.mapping
-
     @property
     def unknown_keys(self) -> set[str]:
         """Return the set of keys that are configured but not declared.

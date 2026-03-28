@@ -36,7 +36,7 @@ class WorkplanRun(BaseModel):
     environment: dict[str, str] = Field(default_factory=dict)
     """The environment variables at the time of the run."""
 
-    runtime_vars: t.Mapping[str, str] = Field(default_factory=dict)
+    user_variables: t.Mapping[str, str] = Field(default_factory=dict)
     """User-supplied runtime variable overrides."""
 
     @staticmethod

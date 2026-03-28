@@ -228,6 +228,15 @@ def publish_context(
     run_id: str,
     user_vars: t.Mapping[str, str],
 ) -> None:
+    """Publish global configuration for the orchestrator into a context variable.
+
+    Parameters
+    ----------
+    run_id : str
+        The current run-id
+    user_vars : t.Mapping[str, str]
+        A mapping containing user-supplied variables
+    """
     ctx = context.WorkplanRuntimeContext(run_id=run_id, user_variables=user_vars)
     context.put_workplan_context(ctx)
 
@@ -237,18 +246,20 @@ async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
     output_dir: Path | None = None,
-    runtime_vars: t.Mapping[str, str] | None = None,
+    user_variables: t.Mapping[str, str] | None = None,
 ) -> Path:
     """Execute the steps in the workplan.
 
     Parameters
     ----------
-    path : Path
+    wp_path : Path
         The path to the blueprint to execute
     run_id : str | None
         The run-id to be used by the orchestrator.
     output_dir : Path | None
         The path to the output directory.
+    user_variables : t.Mapping[str, str] | None
+        User-provided key-value pairs for use during templating
 
     Returns
     -------
@@ -258,10 +269,11 @@ async def build_and_run_dag(
     """
     configure_environment(output_dir, run_id)
     output_dir = DirectoryManager.data_home()
-    runtime_vars = runtime_vars or {}
+    user_variables = user_variables or {}
 
     launcher = get_launcher()
 
+    publish_context(run_id, user_variables)
     check_environment()
     wp, prepared_wp_path = await prepare_workplan(wp_path, output_dir, run_id)
 

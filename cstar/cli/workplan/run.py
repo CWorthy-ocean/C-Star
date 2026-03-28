@@ -14,7 +14,7 @@ from cstar.cli.workplan.shared import (
     upsert_command_context,
 )
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.dag_runner import build_and_run_dag, publish_context
+from cstar.orchestration.dag_runner import build_and_run_dag
 from cstar.orchestration.models import NamedConfigurationBuilder, Workplan
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -24,12 +24,9 @@ log = get_logger(__name__)
 
 
 class RunContext(BaseModel):
-    run_id: str | None = None
     user_variables: t.Mapping[str, str] = Field(default_factory=dict)
-    user_variables_source: Path | list[str] | None = None
     workplan: Workplan | None = None
     workplan_source: str | Path | None = None
-    run: WorkplanRun | None = None
 
     def compute_user_variables(self) -> t.Mapping[str, str]:
         if self.workplan is None:
@@ -280,14 +277,12 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
-    runtime_vars: t.Mapping[str, str] | None = None
-
     if not path:
         repo = TrackingRepository()
         wp_run = asyncio.run(repo.get_workplan_run(run_id))
         if wp_run is None:
-            log.error(f"No runs with the id `{run_id}` could be found.")
-            return
+            msg = f"No runs with the id `{run_id}` could be found."
+            raise typer.BadParameter(msg)
 
         # if var is None and varfile is None and wp_run.runtime_vars:
         #     # assume user is re-running when no variables are passed
@@ -304,8 +299,7 @@ def run(
         run_context = upsert_command_context(
             ctx,
             RunContext,
-            wp_path=wp_run.workplan_path,
-            run=wp_run,
+            workplan_source=wp_run.workplan_path,
             workplan=deserialize(wp_run.trx_workplan_path, Workplan),
         )
     else:
@@ -315,9 +309,7 @@ def run(
         msg = f"Unable to load workplan from {path}"
         raise typer.BadParameter(msg)
 
-    config_map = run_context.compute_user_variables()
-
-    publish_context(run_id, config_map)
+    user_variables = run_context.compute_user_variables()
 
     try:
         with local_copy(path) as wp_path:
@@ -325,7 +317,7 @@ def run(
                 build_and_run_dag(
                     wp_path,
                     run_id,
-                    runtime_vars=runtime_vars,
+                    user_variables=user_variables,
                 ),
             )
     except CstarExpectationFailed as ex:
