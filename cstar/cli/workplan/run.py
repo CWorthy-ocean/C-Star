@@ -180,11 +180,10 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
         msg = "A run-id or workplan path is required"
         raise typer.BadParameter(msg)
 
-    if path:
-        run_id = WorkplanRun.get_default_run_id(path)
+    run_id = WorkplanRun.get_default_run_id(path)
 
-        msg = f"Generated a default run-id `{run_id}` from `{path}`"
-        log.debug(msg)
+    msg = f"Generated a default run-id `{run_id}` from `{path}`"
+    log.debug(msg)
 
     return run_id
 
