@@ -7,7 +7,7 @@ import typer
 
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import list_runs
-from cstar.execution.file_system import is_remote_resource, local_copy
+from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import build_and_run_dag
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import validate_serialized_entity
@@ -43,11 +43,7 @@ def run(
         return
 
     if not run_id:
-        if is_remote_resource(path):
-            with local_copy(path) as local_path:
-                run_id = WorkplanRun.get_default_run_id(local_path)
-        else:
-            run_id = WorkplanRun.get_default_run_id(path)
+        run_id = WorkplanRun.get_default_run_id(path)
 
         log.debug(f"Using default run-id: {run_id}")
 
