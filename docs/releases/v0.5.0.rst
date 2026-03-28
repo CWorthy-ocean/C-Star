@@ -33,6 +33,8 @@ Bug Fixes
 - Fix bug in `reload_dag_status` where the correct launcher may not be loaded
 - Fix comparison-to-self bug for orchestrator `open_set` 
 - Fix mutable default attribute value in `WorkplanRun`
+- Remove repeated check identifying remote workplan URI
+- Fix bug causing intermittent `FileNotFound` errors
 
 Improvements
 ~~~~~~~~~~~~
