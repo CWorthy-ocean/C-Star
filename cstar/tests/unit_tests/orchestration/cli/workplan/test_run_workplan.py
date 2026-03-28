@@ -30,7 +30,7 @@ def test_workplan_run_file_dne(
     result = runner.invoke(
         app,
         ["--run-id", "12345", wp_path.as_posix()],
-        catch_exceptions=False,
+        color=False,
     )
 
     assert "not found" in result.stderr
@@ -51,7 +51,7 @@ def test_workplan_run_remote_workplan_dne() -> None:
     result = runner.invoke(
         app,
         ["--run-id", "12345", wp_path],
-        catch_exceptions=False,
+        color=False,
     )
 
     assert "not found" in result.stderr
@@ -84,6 +84,7 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
         result = runner.invoke(
             app,
             ["--run-id", "12345", wp_uri],
+            color=False,
         )
 
     assert result.exit_code == 0
@@ -124,6 +125,7 @@ def test_workplan_run_variable_unknown(
     result = runner.invoke(
         app,
         ["--run-id", "12345", wp_path.as_posix(), *runtime_vars],
+        color=False,
     )
 
     assert result.exit_code != 0
@@ -176,6 +178,7 @@ def test_workplan_run_variable_validation_single(
     result = runner.invoke(
         app,
         ["--run-id", "12345", wp_path.as_posix(), *runtime_vars],
+        color=False,
     )
 
     assert result.exit_code != 0
@@ -211,6 +214,7 @@ def test_workplan_run_variable_validation_multi_value_mismatch(
     result = runner.invoke(
         app,
         ["--run-id", "12345", wp_path.as_posix(), *runtime_vars],
+        color=False,
     )
 
     assert result.exit_code != 0
@@ -245,6 +249,7 @@ def test_workplan_run_variable_multiple_sources(
     result = runner.invoke(
         app,
         ["--run-id", "12345", wp_path.as_posix(), *runtime_vars],
+        color=False,
     )
 
     assert result.exit_code != 0
@@ -356,9 +361,7 @@ def test_launcher_preconditions_local(
     mock_env : str
         Known, required env vars that should not cause the launcher to fail if not present.
     """
-    with (
-        mock.patch.dict(os.environ, mock_env),
-    ):
+    with mock.patch.dict(os.environ, mock_env):
         launcher = get_launcher()
 
     assert launcher, f"LocalLauncher unexpectedly failed without {missing_value}"

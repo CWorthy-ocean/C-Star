@@ -24,7 +24,11 @@ def test_blueprint_run_file_dne(
     bp_path = tmp_path / "blueprint-dne.yml"
 
     runner = CliRunner()
-    result = runner.invoke(app, [bp_path.as_posix()])
+    result = runner.invoke(
+        app,
+        [bp_path.as_posix()],
+        color=False,
+    )
 
     assert "not found" in result.stdout
 
@@ -43,7 +47,11 @@ def test_blueprint_run_remote_blueprint_dne(
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint-X.yaml"
 
     runner = CliRunner()
-    result = runner.invoke(app, [bp_path])
+    result = runner.invoke(
+        app,
+        [bp_path],
+        color=False,
+    )
 
     assert "not found" in result.stdout
 
@@ -59,6 +67,10 @@ def test_blueprint_run_remote_blueprint() -> None:
         return_value=0,
     ) as mock_exec:
         runner = CliRunner()
-        _ = runner.invoke(app, [bp_path])
+        _ = runner.invoke(
+            app,
+            [bp_path],
+            color=False,
+        )
 
     mock_exec.assert_called_once()
