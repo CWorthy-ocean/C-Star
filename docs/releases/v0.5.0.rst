@@ -20,7 +20,7 @@ Breaking Changes
 New features
 ~~~~~~~~~~~~
 
-- N/A
+- Enable user supplied variables for templating from `cstar workplan run ...`
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -35,6 +35,7 @@ Bug Fixes
 - Fix mutable default attribute value in `WorkplanRun`
 - Remove repeated check identifying remote workplan URI
 - Fix bug causing intermittent `FileNotFound` errors
+- Fix workplan template with inconsistent blueprint path 
 
 Improvements
 ~~~~~~~~~~~~
@@ -42,6 +43,7 @@ Improvements
 - Decouple launcher-specific precondition checks from the `dag_runner`
 - Use computed attributes in place of duplicating keys found in `DagStatus.details`
 - Re-use `configure_environment` where applicable
+- Refactor `cli.workplan.run` to make use of `typer` callbacks for input validation
 
 
 
