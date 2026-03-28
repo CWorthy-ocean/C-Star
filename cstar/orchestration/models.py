@@ -626,7 +626,7 @@ class NamedConfigurationBuilder(BaseModel):
 
     _unknown_keys: set[str] | None = PrivateAttr(None)
     """The set of keys that are configured but not declared."""
-    _unconfigured_keys: set[str] | None = PrivateAttr(None)
+    __missing_keys: set[str] | None = PrivateAttr(None)
     """The set of keys that are declared but not configured."""
     _error: str | None = PrivateAttr(None)
     """An error message for the collection."""
@@ -648,17 +648,17 @@ class NamedConfigurationBuilder(BaseModel):
         return self._unknown_keys
 
     @property
-    def unconfigured_keys(self) -> set[str]:
+    def missing_keys(self) -> set[str]:
         """Return the set of keys that are declared but not configured.
 
         Returns
         -------
         set[str]
         """
-        if self._unconfigured_keys is None:
+        if self.__missing_keys is None:
             configured_keys = set(self.mapping.keys())
-            self._unconfigured_keys = self.keys.difference(configured_keys)
-        return self._unconfigured_keys
+            self.__missing_keys = self.keys.difference(configured_keys)
+        return self.__missing_keys
 
     @property
     def error(self) -> str:
@@ -677,8 +677,8 @@ class NamedConfigurationBuilder(BaseModel):
             unknown_msg = ", ".join(self.unknown_keys)
 
         missing_msg = ""
-        if self.require_coverage and self.unconfigured_keys:
-            missing_msg = ", ".join(self.unconfigured_keys)
+        if self.require_coverage and self.missing_keys:
+            missing_msg = ", ".join(self.missing_keys)
 
         self._error = ""
 
@@ -710,7 +710,7 @@ class NamedConfigurationBuilder(BaseModel):
         # self.mapping = {k.strip(): v.strip() for k, v in self.mapping.items()}
         configured_keys = set(self.mapping.keys())
         self._unknown_keys = configured_keys.difference(self.keys)
-        self._unconfigured_keys = self.keys.difference(configured_keys)
+        self.__missing_keys = self.keys.difference(configured_keys)
 
         return self
 
