@@ -49,7 +49,7 @@ def preprocess_vars(
     ctx: typer.Context,
     var: list[str],
 ) -> list[str] | None:
-    """Perform validation and formatting on user-supplied runtime variables.
+    """Perform validation and formatting on user-supplied variables.
 
     Places the processed variables into a `RunContext` object stored
     in the user data slot of the typer context.
@@ -85,7 +85,7 @@ def preprocess_vars(
         _ = upsert_command_context(ctx, RunContext, user_variables=mapping)
 
     except ValueError as ex:
-        log.exception("Runtime variables failed validation")
+        log.exception("User variables failed validation")
         raise typer.BadParameter(ex.args[0]) from ex
 
     return var
@@ -95,7 +95,7 @@ def preprocess_varfile(
     ctx: typer.Context,
     varfile: Path | None,
 ) -> Path | None:
-    """Perform validation and formatting on user-supplied runtime variables
+    """Perform validation and formatting on user-supplied variables
     supplied through a path to a variables file.
 
     Places the processed variables into a `RunContext` object stored
@@ -142,7 +142,7 @@ def preprocess_varfile(
         _ = upsert_command_context(ctx, RunContext, user_variables=mapping)
 
     except ValueError as ex:
-        log.exception("Runtime variables failed validation")
+        log.exception("User variables file failed validation")
         raise typer.BadParameter(ex.args[0]) from ex
 
     return varfile
@@ -283,10 +283,8 @@ def run(
             msg = f"No runs with the id `{run_id}` could be found."
             raise typer.BadParameter(msg)
 
-        # if var is None and varfile is None and wp_run.runtime_vars:
-        #     # assume user is re-running when no variables are passed
-        #     log.info(f"Reusing runtime variables from prior run")
-        #     runtime_vars = wp_run.runtime_vars
+        # TODO @ankona: identify appropriate reloading behavior for user vars
+        # when re-using a run-id.
 
         # ensure the environment matches the prior run
         os.environ.update(wp_run.environment)
