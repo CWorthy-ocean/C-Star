@@ -4,45 +4,21 @@ import typing as t
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, Field
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import (
     check_and_capture_kvps,
     list_runs,
-    upsert_command_context,
 )
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import build_and_run_dag
-from cstar.orchestration.models import NamedConfigurationBuilder, Workplan
-from cstar.orchestration.serialization import deserialize, validate_serialized_entity
+from cstar.orchestration.models import Workplan
+from cstar.orchestration.serialization import validate_serialized_entity
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 app = typer.Typer()
 log = get_logger(__name__)
-
-
-class RunContext(BaseModel):
-    user_variables: t.Mapping[str, str] = Field(default_factory=dict)
-    workplan: Workplan | None = None
-    workplan_source: str | Path | None = None
-
-    def compute_user_variables(self) -> t.Mapping[str, str]:
-        if self.workplan is None:
-            msg = f"Unable to load workplan from {self.workplan_source}"
-            raise typer.BadParameter(msg)
-
-        config_builder = NamedConfigurationBuilder(
-            keys=set(self.workplan.runtime_vars),
-            mapping=self.user_variables,
-            require_coverage=False,
-            require_declaration=True,
-        )
-        if error := config_builder.error:
-            raise typer.BadParameter(error)
-
-        return config_builder.mapping
 
 
 def preprocess_vars(
@@ -51,7 +27,7 @@ def preprocess_vars(
 ) -> list[str] | None:
     """Perform validation and formatting on user-supplied variables.
 
-    Places the processed variables into a `RunContext` object stored
+    Places the processed variables into a `RunCmdContext` object stored
     in the user data slot of the typer context.
 
     Parameters
@@ -74,15 +50,8 @@ def preprocess_vars(
     if not var:
         return None
 
-    varfile = ctx.params.get("varfile", None)
-
-    if var is not None and varfile is not None:
-        msg = "`--var` and `--varfile` must not be supplied together"
-        raise typer.BadParameter(msg)
-
     try:
-        mapping = check_and_capture_kvps(var)
-        _ = upsert_command_context(ctx, RunContext, user_variables=mapping)
+        ctx.obj = check_and_capture_kvps(var)
 
     except ValueError as ex:
         log.exception("User variables failed validation")
@@ -98,7 +67,7 @@ def preprocess_varfile(
     """Perform validation and formatting on user-supplied variables
     supplied through a path to a variables file.
 
-    Places the processed variables into a `RunContext` object stored
+    Places the processed variables into a `RunCmdContext` object stored
     in the user data slot of the typer context.
 
     Parameters
@@ -121,12 +90,6 @@ def preprocess_varfile(
     if varfile is None:
         return None
 
-    var = ctx.params.get("var", None)
-
-    if varfile is not None and var is not None:
-        msg = "`--var` and `--varfile` must not be supplied together"
-        raise typer.BadParameter(msg)
-
     try:
         if isinstance(varfile, str):
             varfile = Path(varfile)
@@ -138,8 +101,7 @@ def preprocess_varfile(
         with varfile.open("r") as fp:
             lines = [x.strip() for x in fp.readlines() if x.strip()]
 
-        mapping = check_and_capture_kvps(lines)
-        _ = upsert_command_context(ctx, RunContext, user_variables=mapping)
+        ctx.obj = check_and_capture_kvps(lines)
 
     except ValueError as ex:
         log.exception("User variables file failed validation")
@@ -188,7 +150,7 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     return run_id
 
 
-def preprocess_path(ctx: typer.Context, path: str | None) -> str | None:
+def preprocess_path(path: str | None) -> str | None:
     """Perform validation related to the workplan path.
 
     Parameters
@@ -214,18 +176,39 @@ def preprocess_path(ctx: typer.Context, path: str | None) -> str | None:
                     msg = f"The workplan file in `{path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
-                _ = upsert_command_context(
-                    ctx,
-                    RunContext,
-                    workplan_source=path,
-                    workplan=validation_result.item,
-                )
-
         except FileNotFoundError as ex:
             msg = f"Workplan not found at path: {path}"
             raise typer.BadParameter(msg) from ex
 
     return path
+
+
+def handle_run_reloading(run_id: str) -> str:
+    """Locate a prior run for the run ID and update the `RunCmdContext` with
+    the correct `Workplan`.
+
+    Parameters
+    ----------
+    run_id : str
+        The run-id to reload
+    """
+    repo = TrackingRepository()
+    wp_run = asyncio.run(repo.get_workplan_run(run_id))
+    if wp_run is None:
+        msg = f"No runs with the id `{run_id}` could be found."
+        raise typer.BadParameter(msg)
+
+    # TODO @ankona: identify appropriate reloading behavior for user vars
+    # when re-using a run-id.
+
+    # ensure the environment matches the prior run
+    os.environ.update(wp_run.environment)
+
+    path = wp_run.workplan_path
+    msg = f"Re-starting run-id `{run_id}` with workplan originating in `{path}`"
+    log.info(msg)
+
+    return wp_run.trx_workplan_path.as_posix()
 
 
 @app.command()
@@ -271,42 +254,27 @@ def run(
             callback=preprocess_path,
         ),
     ] = "",
+    dry_run: t.Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            "-d",
+            help="Generate the execution plan without executing the workplan.",
+        ),
+    ] = False,
 ) -> None:
     """Execute a workplan.
 
     Specify a previously used run_id option to re-start a prior run.
     """
-    if not path:
-        repo = TrackingRepository()
-        wp_run = asyncio.run(repo.get_workplan_run(run_id))
-        if wp_run is None:
-            msg = f"No runs with the id `{run_id}` could be found."
-            raise typer.BadParameter(msg)
-
-        # TODO @ankona: identify appropriate reloading behavior for user vars
-        # when re-using a run-id.
-
-        # ensure the environment matches the prior run
-        os.environ.update(wp_run.environment)
-
-        path = str(wp_run.workplan_path)
-        msg = f"Re-starting run-id `{run_id}` with workplan at `{path}`"
-        log.info(msg)
-
-        run_context = upsert_command_context(
-            ctx,
-            RunContext,
-            workplan_source=wp_run.workplan_path,
-            workplan=deserialize(wp_run.trx_workplan_path, Workplan),
-        )
-    else:
-        run_context = upsert_command_context(ctx, RunContext)
-
-    if run_context.workplan is None:
-        msg = f"Unable to load workplan from {path}"
+    if var is not None and varfile is not None:
+        msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
-    user_variables = run_context.compute_user_variables()
+    if not path:
+        path = handle_run_reloading(run_id)
+
+    user_variables = t.cast("t.Mapping[str, str]", ctx.obj)
 
     try:
         with local_copy(path) as wp_path:
@@ -315,16 +283,19 @@ def run(
                     wp_path,
                     run_id,
                     user_variables=user_variables,
+                    dry_run=dry_run,
                 ),
             )
     except CstarExpectationFailed as ex:
         msg = f"An invalid request was made: {ex}"
         print(msg)
         raise typer.Exit(1) from ex
+    except ValueError as ex:
+        raise typer.BadParameter(ex.args[0]) from ex
     except Exception as ex:
-        msg = f"Workplan run `{run_id}` has completed unsuccessfully"
+        msg = f"Workplan run `{run_id}` has completed unsuccessfully: {ex}"
         print(msg)
-        raise typer.Exit(2) from ex
+        raise typer.Exit(3) from ex
     else:
         print(f"Workplan run `{run_id}` has completed")
 

@@ -605,7 +605,7 @@ class Workplan(BaseModel):
         return self
 
 
-class NamedConfigurationBuilder(BaseModel):
+class UserDefinedVariables(BaseModel):
     """A collection of key-value pairs that provides validation of the static
     keys specified at design time and dynamically configured keys at runtime.
 
@@ -626,7 +626,7 @@ class NamedConfigurationBuilder(BaseModel):
 
     _unknown_keys: set[str] | None = PrivateAttr(None)
     """The set of keys that are configured but not declared."""
-    __missing_keys: set[str] | None = PrivateAttr(None)
+    _missing_keys: set[str] | None = PrivateAttr(None)
     """The set of keys that are declared but not configured."""
     _error: str | None = PrivateAttr(None)
     """An error message for the collection."""
@@ -655,10 +655,10 @@ class NamedConfigurationBuilder(BaseModel):
         -------
         set[str]
         """
-        if self.__missing_keys is None:
+        if self._missing_keys is None:
             configured_keys = set(self.mapping.keys())
-            self.__missing_keys = self.keys.difference(configured_keys)
-        return self.__missing_keys
+            self._missing_keys = self.keys.difference(configured_keys)
+        return self._missing_keys
 
     @property
     def error(self) -> str:
@@ -682,19 +682,20 @@ class NamedConfigurationBuilder(BaseModel):
 
         self._error = ""
 
+        err_prefix = "User-defined variables have"
         if unknown_msg and missing_msg:
-            self._error = f"Runtime configuration has unknown keys: {unknown_msg} and missing keys: {missing_msg}"
+            self._error = f"{err_prefix} unknown keys: {unknown_msg} and missing keys: {missing_msg}"
 
         if unknown_msg:
-            self._error = f"Runtime configuration has unknown keys: {unknown_msg}"
+            self._error = f"{err_prefix} unknown keys: {unknown_msg}"
 
         if missing_msg:
-            self._error = f"Runtime configuration has missing keys: {missing_msg}"
+            self._error = f"{err_prefix}  missing keys: {missing_msg}"
 
         return self._error
 
     @model_validator(mode="after")
-    def _ensure_keys(self) -> "NamedConfigurationBuilder":
+    def _ensure_keys(self) -> "UserDefinedVariables":
         """Validate the complete set of runtime variables as a unit.
 
         Returns
@@ -710,7 +711,7 @@ class NamedConfigurationBuilder(BaseModel):
         # self.mapping = {k.strip(): v.strip() for k, v in self.mapping.items()}
         configured_keys = set(self.mapping.keys())
         self._unknown_keys = configured_keys.difference(self.keys)
-        self.__missing_keys = self.keys.difference(configured_keys)
+        self._missing_keys = self.keys.difference(configured_keys)
 
         return self
 

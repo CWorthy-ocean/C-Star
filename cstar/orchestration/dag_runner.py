@@ -7,13 +7,12 @@ from pathlib import Path
 
 from prefect import flow
 
-from cstar.base import context
 from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
     Launcher,
     Orchestrator,
@@ -185,6 +184,7 @@ async def prepare_workplan(
     wp_path: Path,
     output_dir: Path,
     run_id: str,
+    user_variables: t.Mapping | None = None,
 ) -> tuple[Workplan, Path]:
     """Load the workplan and apply any applicable transforms.
 
@@ -196,10 +196,13 @@ async def prepare_workplan(
         The directory where workplan outputs will be written.
     run_id : str
         The unique ID for the current run.
+    user_variables : t.Mapping | None
+        User-defined variables specified at runtime
 
     Returns
     -------
-    Workplan
+    tuple[Workplan, Path]
+        Tuple containing the resulting workplan and workplan file path
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
     run_root_dir = output_dir / run_id
@@ -216,29 +219,26 @@ async def prepare_workplan(
     )
     persist_as = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_transformed")
 
-    _ = await asyncio.gather(
+    file_io = [
         asyncio.to_thread(serialize, persist_orig, wp_orig),
         asyncio.to_thread(serialize, persist_as, wp),
-    )
+    ]
+
+    if user_variables is not None:
+        named_config = UserDefinedVariables(
+            keys=set(wp.runtime_vars), mapping=user_variables
+        )
+        if named_config.error:
+            raise ValueError(named_config.error)
+
+        persist_vars = WorkplanTransformer.derived_path(
+            wp_path, run_root_dir, suffix="", extension=".vars"
+        )
+        file_io.append(asyncio.to_thread(serialize, persist_vars, named_config))
+
+    _ = await asyncio.gather(*file_io)
 
     return wp, persist_as
-
-
-def publish_context(
-    run_id: str,
-    user_vars: t.Mapping[str, str],
-) -> None:
-    """Publish global configuration for the orchestrator into a context variable.
-
-    Parameters
-    ----------
-    run_id : str
-        The current run-id
-    user_vars : t.Mapping[str, str]
-        A mapping containing user-supplied variables
-    """
-    ctx = context.WorkplanRuntimeContext(run_id=run_id, user_variables=user_vars)
-    context.put_workplan_context(ctx)
 
 
 @flow(log_prints=True)
@@ -247,6 +247,7 @@ async def build_and_run_dag(
     run_id: str = "",
     output_dir: Path | None = None,
     user_variables: t.Mapping[str, str] | None = None,
+    dry_run: bool = False,
 ) -> Path:
     """Execute the steps in the workplan.
 
@@ -258,8 +259,11 @@ async def build_and_run_dag(
         The run-id to be used by the orchestrator.
     output_dir : Path | None
         The path to the output directory.
-    user_variables : t.Mapping[str, str] | None
-        User-provided key-value pairs for use during templating
+    user_variables : NamedConfiguration | None
+        User-provided key-value pairs for use during templating.
+    dry_run : bool
+        If set to `true`, the execution plan will be built and persisted to disk
+        but not executed.
 
     Returns
     -------
@@ -272,13 +276,19 @@ async def build_and_run_dag(
 
     launcher = get_launcher()
 
-    publish_context(run_id, user_variables or {})
     check_environment()
-    wp, prepared_wp_path = await prepare_workplan(wp_path, output_dir, run_id)
+    wp, prepared_wp_path = await prepare_workplan(
+        wp_path, output_dir, run_id, user_variables
+    )
 
     planner = Planner(workplan=wp)
 
     orchestrator = Orchestrator(planner, launcher)
+
+    if dry_run:
+        msg = f"Dry run complete. Prepared workplan location: {prepared_wp_path}"
+        log.debug(msg)
+        return prepared_wp_path
 
     await repo.put_workplan_run(
         WorkplanRun(

@@ -2,7 +2,7 @@ import typing as t
 
 import pytest
 
-from cstar.orchestration.models import NamedConfigurationBuilder
+from cstar.orchestration.models import UserDefinedVariables
 
 
 @pytest.mark.parametrize(
@@ -26,7 +26,7 @@ def test_namedruntimeconfiguration_valid_inputs(
     mapping : t.Mapping[str, str]
         A valid mapping of key-value pairs
     """
-    replacements = NamedConfigurationBuilder(
+    replacements = UserDefinedVariables(
         keys=keys,
         mapping=mapping,
         require_coverage=True,
@@ -82,7 +82,7 @@ def test_namedruntimeconfiguration_coverage_fail(
     matches : list[str]
         Strings that must be found in the error output
     """
-    replacements = NamedConfigurationBuilder(
+    replacements = UserDefinedVariables(
         keys=keys,
         mapping=mapping,
         require_coverage=True,
@@ -96,7 +96,7 @@ def test_namedruntimeconfiguration_coverage_fail(
     assert not not_matched
 
     # confirm that if require_coverage is False, the same input does not emit the error
-    forgiving_replacements = NamedConfigurationBuilder(
+    forgiving_replacements = UserDefinedVariables(
         keys=keys,
         mapping=mapping,
         require_coverage=False,
@@ -121,7 +121,7 @@ def test_namedruntimeconfiguration_coverage_impossible() -> None:
     keys: set[str] = set()
     mapping = {"a": "AA"}
 
-    replacements = NamedConfigurationBuilder(
+    replacements = UserDefinedVariables(
         keys=keys,
         mapping=mapping,
         require_coverage=True,
@@ -147,7 +147,7 @@ def test_namedruntimeconfiguration_no_declarations() -> None:
     keys: set[str] = set()
     mapping = {"a": "AA"}
 
-    replacements = NamedConfigurationBuilder(
+    replacements = UserDefinedVariables(
         keys=keys,
         mapping=mapping,
         require_coverage=False,
@@ -203,7 +203,7 @@ def test_namedruntimeconfiguration_declaration_fail(
     matches : list[str]
         Strings that must be found in the error output
     """
-    replacements = NamedConfigurationBuilder(
+    replacements = UserDefinedVariables(
         keys=keys,
         mapping=mapping,
         require_coverage=False,
@@ -216,7 +216,7 @@ def test_namedruntimeconfiguration_declaration_fail(
     assert not not_matched
 
     # confirm that if require_declaration is False, the same input does not emit the error
-    forgiving_replacements = NamedConfigurationBuilder(
+    forgiving_replacements = UserDefinedVariables(
         keys=keys,
         mapping=mapping,
         require_coverage=False,

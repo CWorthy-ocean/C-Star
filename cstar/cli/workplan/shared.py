@@ -155,33 +155,3 @@ def check_and_capture_kvps(var: list[str]) -> t.Mapping[str, str] | None:
         raise typer.BadParameter(msg)
 
     return variables
-
-
-_TCommandContext = t.TypeVar("_TCommandContext")
-
-
-def upsert_command_context(
-    ctx: typer.Context,
-    klass: type[_TCommandContext],
-    **kwargs,  # noqa: ANN003
-) -> _TCommandContext:
-    """Instantiate a `_TCommandContext` and store it on the typer context if one
-    does not exist.
-
-    Parameters
-    ----------
-    ctx : typer.Context
-        A context object containing state for the typer app
-    klass : type
-        The type of context object to be stored in the typer app
-
-    Returns
-    -------
-    RunContext
-    """
-    if ctx.obj is None:
-        ctx.obj = klass(**kwargs)
-    else:
-        for k, v in kwargs.items():
-            setattr(ctx.obj, k, v)
-    return ctx.obj

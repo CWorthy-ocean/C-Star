@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from cstar.cli.workplan.run import app
 from cstar.orchestration.dag_runner import cstar_sysmgr, get_launcher
-from cstar.orchestration.models import NamedConfigurationBuilder
+from cstar.orchestration.models import UserDefinedVariables
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 
 
@@ -264,7 +264,7 @@ def test_orch_ctx_runtime_vars_available_mismatch() -> None:
     available = {"yyy"}
     supplied_vars = {"xxx": "XxXx"}
 
-    variables = NamedConfigurationBuilder(
+    variables = UserDefinedVariables(
         keys=available,
         mapping=supplied_vars,
     )
@@ -289,7 +289,7 @@ def test_orch_ctx_runtime_vars_none_available() -> None:
     supplied_vars = {"  a": "  AAA", " b ": " BBB  ", "c": " xxx "}
 
     # no validation error should occur
-    replacements = NamedConfigurationBuilder(
+    replacements = UserDefinedVariables(
         keys=available,
         mapping=supplied_vars,
     )
