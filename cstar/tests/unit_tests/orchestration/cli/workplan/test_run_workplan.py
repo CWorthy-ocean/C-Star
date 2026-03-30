@@ -3,11 +3,14 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
+from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.workplan.run import app
 from cstar.orchestration.dag_runner import cstar_sysmgr, get_launcher
 from cstar.orchestration.models import UserDefinedVariables
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 
 
@@ -257,6 +260,88 @@ def test_workplan_run_variable_multiple_sources(
     assert "together" in result.stderr
 
 
+def test_workplan_run_variable_file_dne(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify that using an invalid varfile path results in the expected error.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    """
+    wp_template = wp_templates_dir / "workplan.yaml"
+    wp_path = tmp_path / "workplan.yml"
+    wp_path.write_text(wp_template.read_text())
+
+    varfile_path = tmp_path / "variables.env"
+
+    # template `workplan.yaml` declares: `runtime_vars: [var1, var2]`
+    var1 = "var2=xxx"
+    runtime_vars = ["--var", var1, "--varfile", varfile_path.as_posix()]
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["--run-id", "12345", wp_path.as_posix(), *runtime_vars],
+        color=False,
+    )
+
+    assert result.exit_code != 0
+    assert "Invalid" in result.stderr
+    assert "varfile" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("k=", id="no value"),
+        pytest.param("=v", id="no key"),
+        pytest.param("=", id="no key or value"),
+        pytest.param("", id="empty"),
+        pytest.param("", id="whitespace"),
+    ],
+)
+def test_workplan_run_variable_file_malformed(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    content: str,
+) -> None:
+    """Verify that using a varfile with invalid content
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    """
+    wp_template = wp_templates_dir / "workplan.yaml"
+    wp_path = tmp_path / "workplan.yml"
+    wp_path.write_text(wp_template.read_text())
+
+    varfile_path = tmp_path / "variables.env"
+    varfile_path.write_text(content)
+
+    # template `workplan.yaml` declares: `runtime_vars: [var1, var2]`
+    var1 = "var2=xxx"
+    runtime_vars = ["--var", var1, "--varfile", varfile_path.as_posix()]
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["--run-id", "12345", wp_path.as_posix(), *runtime_vars],
+        color=False,
+    )
+
+    assert result.exit_code != 0
+    assert "Invalid" in result.stderr
+    assert "varfile" in result.stderr
+
+
 def test_orch_ctx_runtime_vars_available_mismatch() -> None:
     """Verify that attempting to specify runtime variables that are
     not declared by the workplan results in a failure.
@@ -364,3 +449,183 @@ def test_launcher_preconditions_local(
         launcher = get_launcher()
 
     assert launcher, f"LocalLauncher unexpectedly failed without {missing_value}"
+
+
+def test_workplan_run_nonexistent_runid(
+    tmp_path: Path,
+) -> None:
+    """Verify that attempting to run with no path and an unknown run-id results
+    in the expected error.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    """
+    state_dir = tmp_path / "state"
+    mock_build_and_run_dag = mock.AsyncMock(return_value=0)
+
+    runner = CliRunner()
+    with (
+        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
+        mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag),
+    ):
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345"],
+            color=False,
+        )
+
+    assert result.exit_code != 0
+    assert "runs with the id" in result.stderr
+    assert "could be found" in result.stderr
+
+
+def test_workplan_run_default_run_id(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    bp_templates_dir: Path,
+    default_blueprint_path: str,
+) -> None:
+    """Verify that attempting to run without a run-id causes a default run-id to be
+    reused.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template blueprints
+    default_blueprint_path : str
+        The default path found in sample blueprints that must be replaced
+    """
+    state_dir = tmp_path / "state"
+    bp_path = bp_templates_dir / "blueprint.yaml"
+    wp_template = wp_templates_dir / "workplan.yaml"
+    wp_path = tmp_path / "workplan.yml"
+
+    content = wp_template.read_text()
+    content = content.replace(default_blueprint_path, bp_path.as_posix())
+    wp_path.write_text(content)
+
+    runner = CliRunner()
+
+    mock_build_and_run_dag = mock.AsyncMock(return_value=0)
+
+    with (
+        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
+        mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag),
+    ):
+        result = runner.invoke(
+            app,
+            ["--dry-run", wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    assert "sample-workplan" in result.stdout
+    mock_build_and_run_dag.assert_awaited_once()
+
+
+def test_workplan_run_invalid_file_content(
+    tmp_path: Path,
+) -> None:
+    """Verify passing an invalid workplan file results in an error.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    """
+    state_dir = tmp_path / "state"
+    wp_path = tmp_path / "workplan.yml"
+    wp_path.touch()
+
+    runner = CliRunner()
+
+    mock_build_and_run_dag = mock.AsyncMock(return_value=0)
+
+    with (
+        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
+        mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag),
+    ):
+        result = runner.invoke(
+            app,
+            ["--dry-run", wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code != 0
+    assert "improper" in result.stderr
+    assert "formatted" in result.stderr
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_workplan_run_reload_prior_run(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    bp_templates_dir: Path,
+    default_blueprint_path: str,
+) -> None:
+    """Verify that passing a valid run-id and no path causes the prior run to be loaded.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template blueprints
+    default_blueprint_path : str
+        The default path found in sample blueprints that must be replaced
+    """
+    state_dir = tmp_path / "state"
+    bp_path = bp_templates_dir / "blueprint.yaml"
+    wp_template = wp_templates_dir / "workplan.yaml"
+    wp_path = tmp_path / "workplan.yml"
+
+    content = wp_template.read_text()
+    content = content.replace(default_blueprint_path, bp_path.as_posix())
+    wp_path.write_text(content)
+
+    fake_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=wp_path,
+        output_path=wp_path.parent,
+        run_id="12345",
+        environment={"CSTAR_LOG_LEVEL": "TRACE"},
+    )
+
+    repo = TrackingRepository()
+    await repo.put_workplan_run(fake_run)
+
+    def typer_exit(*args, **kwargs) -> None:  # noqa: ANN002, ANN003, ARG001
+        raise typer.Exit(0)
+
+    mock_get_wp = mock.Mock(return_value=fake_run)
+
+    runner = CliRunner()
+    with (
+        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
+            mock_get_wp,
+        ),
+        mock.patch("cstar.cli.workplan.run.asyncio.run", side_effect=typer_exit),
+    ):
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345"],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+
+    # confirm the attempt to load the old record was made
+    mock_get_wp.assert_called()
