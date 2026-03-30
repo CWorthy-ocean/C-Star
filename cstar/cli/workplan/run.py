@@ -85,10 +85,6 @@ def preprocess_varfile(
     if varfile is None:
         return None
 
-    if not varfile.exists():
-        msg = f"File not found at: {varfile}"
-        raise typer.BadParameter(msg)
-
     with varfile.open("r") as fp:
         lines = [x.strip() for x in fp.readlines() if x.strip()]
 
