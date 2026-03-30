@@ -50,12 +50,7 @@ def preprocess_vars(
     if not var:
         return None
 
-    try:
-        ctx.obj = check_and_capture_kvps(var)
-
-    except ValueError as ex:
-        log.exception("User variables failed validation")
-        raise typer.BadParameter(ex.args[0]) from ex
+    ctx.obj = check_and_capture_kvps(var)
 
     return var
 
@@ -90,19 +85,14 @@ def preprocess_varfile(
     if varfile is None:
         return None
 
-    try:
-        if not varfile.exists():
-            msg = f"File not found at: {varfile}"
-            raise typer.BadParameter(msg)
+    if not varfile.exists():
+        msg = f"File not found at: {varfile}"
+        raise typer.BadParameter(msg)
 
-        with varfile.open("r") as fp:
-            lines = [x.strip() for x in fp.readlines() if x.strip()]
+    with varfile.open("r") as fp:
+        lines = [x.strip() for x in fp.readlines() if x.strip()]
 
-        ctx.obj = check_and_capture_kvps(lines)
-
-    except ValueError as ex:
-        log.exception("User variables file failed validation")
-        raise typer.BadParameter(ex.args[0]) from ex
+    ctx.obj = check_and_capture_kvps(lines)
 
     return varfile
 
