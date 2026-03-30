@@ -91,9 +91,6 @@ def preprocess_varfile(
         return None
 
     try:
-        if isinstance(varfile, str):
-            varfile = Path(varfile)
-
         if not varfile.exists():
             msg = f"File not found at: {varfile}"
             raise typer.BadParameter(msg)
