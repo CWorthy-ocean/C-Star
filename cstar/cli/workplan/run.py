@@ -124,12 +124,8 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     -------
     str
     """
-    if run_id is not None:
-        if run_id := run_id.strip():
-            return run_id
-
-        msg = "An empty run-id was supplied"
-        raise typer.BadParameter(msg)
+    if run_id := run_id.strip():
+        return run_id
 
     path: str | None = ctx.params.get("path", None)
     if isinstance(path, str):
