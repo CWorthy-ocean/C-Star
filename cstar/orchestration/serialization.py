@@ -134,7 +134,7 @@ def set_representer(
     dumper: yaml.Dumper,
     data: set,
 ) -> yaml.SequenceNode:
-    """Create a representer for converting PosixPath values to a serialized string."""
+    """Create a representer for converting sets values to a list representation."""
     return dumper.represent_list(list(data))
 
 
