@@ -690,7 +690,7 @@ class UserDefinedVariables(BaseModel):
             self._error = f"{err_prefix} unknown keys: {unknown_msg}"
 
         if missing_msg:
-            self._error = f"{err_prefix}  missing keys: {missing_msg}"
+            self._error = f"{err_prefix} missing keys: {missing_msg}"
 
         return self._error
 
@@ -708,7 +708,6 @@ class UserDefinedVariables(BaseModel):
             - If an unknown variable is configured
             - If configured to require all variables
         """
-        # self.mapping = {k.strip(): v.strip() for k, v in self.mapping.items()}
         configured_keys = set(self.mapping.keys())
         self._unknown_keys = configured_keys.difference(self.keys)
         self._missing_keys = self.keys.difference(configured_keys)
