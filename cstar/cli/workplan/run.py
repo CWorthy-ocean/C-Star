@@ -178,9 +178,6 @@ def handle_run_reloading(run_id: str) -> str:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
 
-    # TODO @ankona: identify appropriate reloading behavior for user vars
-    # when re-using a run-id.
-
     # ensure the environment matches the prior run
     os.environ.update(wp_run.environment)
 
