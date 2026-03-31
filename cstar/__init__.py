@@ -10,6 +10,10 @@ from importlib.metadata import version as _version
 # see https://github.com/numba/numba/issues/5275
 os.environ["KMP_WARNINGS"] = "off"
 
+# Disable prefect analytics, see: https://docs.prefect.io/v3/concepts/telemetry
+os.environ["PREFECT_SERVER_ANALYTICS_ENABLED"] = "false"
+os.environ["DO_NOT_TRACK"] = "1"
+
 
 try:
     __version__ = _version("cstar-ocean")
