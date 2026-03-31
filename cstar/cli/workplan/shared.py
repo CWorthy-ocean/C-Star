@@ -131,9 +131,14 @@ def check_and_capture_kvp(entry: str) -> tuple[str, str]:
     return k, v
 
 
-def check_and_capture_kvps(var: list[str]) -> t.Mapping[str, str] | None:
+def check_and_capture_kvps(entries: list[str]) -> t.Mapping[str, str] | None:
     """Capture all unique keyj-value pairs from user-supplied configuration
     supplied as a list of key-value pairs in the format ["key1=value", "key2=value"]
+
+    Parameters
+    ----------
+    entries : list[str]
+        A list of strings, each containing a key-value pair to be parsed.
 
     Returns
     -------
@@ -147,10 +152,10 @@ def check_and_capture_kvps(var: list[str]) -> t.Mapping[str, str] | None:
         - If a <key>=<value> entry is malformed
         - If a key is provided more than once
     """
-    if not var:
+    if not entries:
         return {}
 
-    captured_kvps = [check_and_capture_kvp(entry) for entry in var]
+    captured_kvps = [check_and_capture_kvp(entry) for entry in entries]
 
     variables = dict(captured_kvps)
 

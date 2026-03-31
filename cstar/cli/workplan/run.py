@@ -23,7 +23,7 @@ log = get_logger(__name__)
 
 def preprocess_vars(
     ctx: typer.Context,
-    var: list[str],
+    user_variables: list[str],
 ) -> list[str] | None:
     """Perform validation and formatting on user-supplied variables.
 
@@ -34,7 +34,7 @@ def preprocess_vars(
     ----------
     ctx : typer.Context
         A context object containing state for the typer app
-    var : list[str]
+    user_variables : list[str]
         A list of key-value pairs supplied by a user.
 
     Returns
@@ -48,17 +48,17 @@ def preprocess_vars(
     typer.BadParameter
         - If the key-value pair does not meet `key=value` convention
     """
-    if not var:
+    if not user_variables:
         return None
 
-    ctx.obj = check_and_capture_kvps(var)
+    ctx.obj = check_and_capture_kvps(user_variables)
 
-    return var
+    return user_variables
 
 
 def preprocess_varfile(
     ctx: typer.Context,
-    varfile: Path | None,
+    user_varfile_path: Path | None,
 ) -> Path | None:
     """Perform validation and formatting on user-supplied variables
     supplied through a path to a variables file.
@@ -70,8 +70,8 @@ def preprocess_varfile(
     ----------
     ctx : typer.Context
         A context object containing state for the typer app.
-    varfile : Path | None
-        A path to a file containing the variable configuration
+    user_varfile_path : Path | None
+        A path to a file containing the variable configuration.
 
     Returns
     -------
@@ -83,15 +83,15 @@ def preprocess_varfile(
         - If the source file does not exist
         - If any individual key-value pair is malformed
     """
-    if varfile is None:
+    if user_varfile_path is None:
         return None
 
-    with varfile.open("r") as fp:
+    with user_varfile_path.open("r") as fp:
         lines = [x.strip() for x in fp.readlines() if x.strip()]
 
     ctx.obj = check_and_capture_kvps(lines)
 
-    return varfile
+    return user_varfile_path
 
 
 def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
@@ -130,37 +130,37 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     return run_id
 
 
-def preprocess_path(path: str | None) -> str | None:
+def preprocess_path(workplan_path: str | None) -> str | None:
     """Perform validation related to the workplan path.
 
     Parameters
     ----------
     ctx : typer.Context
         A context object containing state for the typer app.
-    path : str | None
+    workplan_path : str | None
         The user-supplied path to a workplan file.
 
     Returns
     -------
     str
     """
-    if path:
+    if workplan_path:
         try:
-            with local_copy(path) as local_path:
+            with local_copy(workplan_path) as local_path:
                 if not local_path.exists():
-                    msg = f"Workplan not found at path: {path}"
+                    msg = f"Workplan not found at path: {workplan_path}"
                     raise typer.BadParameter(msg)
 
                 validation_result = validate_serialized_entity(local_path, Workplan)
                 if not validation_result.item:
-                    msg = f"The workplan file in `{path}` is improperly formatted"
+                    msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
         except FileNotFoundError as ex:
-            msg = f"Workplan not found at path: {path}"
+            msg = f"Workplan not found at path: {workplan_path}"
             raise typer.BadParameter(msg) from ex
 
-    return path
+    return workplan_path
 
 
 def handle_run_reloading(run_id: str) -> str:
