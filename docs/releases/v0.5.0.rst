@@ -43,12 +43,10 @@ Improvements
 - Use computed attributes in place of duplicating keys found in `DagStatus.details`
 - Re-use `configure_environment` where applicable
 
-
-
 Miscellaneous
 ~~~~~~~~~~~~~
 
-- N/A
+- Default to having prefect analytics collection disabled
 
 ---
 
