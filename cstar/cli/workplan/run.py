@@ -201,9 +201,11 @@ def run(
             callback=preprocess_runid,
         ),
     ] = "",
-    var: t.Annotated[
+    user_variables: t.Annotated[
         list[str] | None,
         typer.Option(
+            "--var",
+            "-v",
             help=(
                 "Specify 0-to-many replacements as key-value pairs in "
                 "the form `<key>=<value>`."
@@ -211,9 +213,11 @@ def run(
             callback=preprocess_vars,
         ),
     ] = None,
-    varfile: t.Annotated[
+    user_variables_path: t.Annotated[
         Path | None,
         typer.Option(
+            "--varfile",
+            "-f",
             help=(
                 "Specify the path to a file containing one replacements per line "
                 "as key-value pairs in the form `<key>=<value>`."
@@ -246,14 +250,12 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
-    if var is not None and varfile is not None:
+    if user_variables is not None and user_variables_path is not None:
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
     if not path:
         path = handle_run_reloading(run_id)
-
-    user_variables = t.cast("t.Mapping[str, str]", ctx.obj)
 
     try:
         with local_copy(path) as wp_path:
@@ -261,7 +263,7 @@ def run(
                 build_and_run_dag(
                     wp_path,
                     run_id,
-                    user_variables=user_variables,
+                    user_variables=t.cast("t.Mapping[str, str]", ctx.obj),
                     dry_run=dry_run,
                 ),
             )
