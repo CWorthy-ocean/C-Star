@@ -24,7 +24,8 @@ def list_runs(incomplete: str) -> list[tuple[str, str]]:
 
     Returns
     -------
-    t.Iterable[str]
+    list[tuple[str, str]]
+        A tuple for each run-id discovered containing [run-id, workplan-path]
     """
     repo = TrackingRepository()
     run_list = asyncio.run(repo.list_latest_runs(incomplete))
@@ -51,10 +52,10 @@ def display_summary(
 
     Parameters
     ----------
-    open_set : Iterable[str] | None
-        The names of jobs that are unstarted or incomplete.
-    open_set : Iterable[str] | None
-        The names of jobs that have completed.
+    run_id : str
+        The run-id to retrieve the status for.
+    dag_status : DagStatus
+        The status object produced by the DAG runner containing task status details.
     """
     # don't pad the top and bottom but give some horizontal space
     padding = (0, 1)
@@ -89,6 +90,11 @@ def check_and_capture_kvp(entry: str) -> tuple[str, str]:
     """Perform validation on user-supplied configuration value supplied
     as a key-value pair with the expected format `<key>=<value>`.
 
+    Parameters
+    ----------
+    entry : str
+        A string containing a key-value pair to be parsed.
+
     Returns
     -------
     tuple[str, str]
@@ -96,7 +102,7 @@ def check_and_capture_kvp(entry: str) -> tuple[str, str]:
 
     Raises
     ------
-    ValueError
+    typer.BadParameter
         - If key and value are missing (e.g. `entry=="="`)
         - If no key is found (e.g. `entry=="=value"`)
         - If no value is found (e.g. `entry=="key="`)
@@ -137,9 +143,9 @@ def check_and_capture_kvps(var: list[str]) -> t.Mapping[str, str] | None:
 
     Raises
     ------
-    ValueError
-        - If any <key>=<value> entry is invalid
-        - If any key is provided with multiple values
+    typer.BadParameter
+        - If a <key>=<value> entry is malformed
+        - If a key is provided more than once
     """
     if not var:
         return {}

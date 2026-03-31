@@ -45,7 +45,8 @@ def preprocess_vars(
 
     Raises
     ------
-    ValueError
+    typer.BadParameter
+        - If the key-value pair does not meet `key=value` convention
     """
     if not var:
         return None
@@ -68,7 +69,7 @@ def preprocess_varfile(
     Parameters
     ----------
     ctx : typer.Context
-        A context object containing state for the typer app
+        A context object containing state for the typer app.
     varfile : Path | None
         A path to a file containing the variable configuration
 
@@ -79,8 +80,8 @@ def preprocess_varfile(
     Raises
     ------
     typer.BadParameter
-        - If `--var` and `--varfile` are supplied simultaneously
         - If the source file does not exist
+        - If any individual key-value pair is malformed
     """
     if varfile is None:
         return None
@@ -102,9 +103,9 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     Parameters
     ----------
     ctx : typer.Context
-        A context object containing state for the typer app
+        A context object containing state for the typer app.
     run_id : str
-        The user-supplied run-id
+        The user-supplied run-id.
 
     Returns
     -------
@@ -135,7 +136,7 @@ def preprocess_path(path: str | None) -> str | None:
     Parameters
     ----------
     ctx : typer.Context
-        A context object containing state for the typer app
+        A context object containing state for the typer app.
     path : str | None
         The user-supplied path to a workplan file.
 
