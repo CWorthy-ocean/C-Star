@@ -13,7 +13,7 @@ from cstar.orchestration.models import UserDefinedVariables
         pytest.param({"a", "b"}, {"a": "A", "b": "B"}, id="multi key"),
     ],
 )
-def test_namedruntimeconfiguration_valid_inputs(
+def test_userdefinedvariables_valid_inputs(
     keys: set[str],
     mapping: t.Mapping[str, str],
 ) -> None:
@@ -65,7 +65,7 @@ def test_namedruntimeconfiguration_valid_inputs(
         ),
     ],
 )
-def test_namedruntimeconfiguration_coverage_fail(
+def test_userdefinedvariables_coverage_fail(
     keys: set[str],
     mapping: t.Mapping[str, str],
     matches: set[str],
@@ -79,7 +79,7 @@ def test_namedruntimeconfiguration_coverage_fail(
         A valid set of "declared keys"
     mapping : t.Mapping[str, str]
         A valid mapping of key-value pairs
-    matches : list[str]
+    matches : set[str]
         Strings that must be found in the error output
     """
     replacements = UserDefinedVariables(
@@ -105,18 +105,9 @@ def test_namedruntimeconfiguration_coverage_fail(
     assert not forgiving_replacements.error
 
 
-def test_namedruntimeconfiguration_coverage_impossible() -> None:
+def test_userdefinedvariables_coverage_impossible() -> None:
     """Verify that an empty declared variables set does not result
     in a coverage error if `require_declaration` is `False`.
-
-    Parameters
-    ----------
-    keys : set[str]
-        A valid set of "declared keys"
-    mapping : t.Mapping[str, str]
-        A valid mapping of key-value pairs
-    matches : list[str]
-        Strings that must be found in the error output
     """
     keys: set[str] = set()
     mapping = {"a": "AA"}
@@ -131,18 +122,9 @@ def test_namedruntimeconfiguration_coverage_impossible() -> None:
     assert not replacements.error
 
 
-def test_namedruntimeconfiguration_no_declarations() -> None:
+def test_userdefinedvariables_no_declarations() -> None:
     """Verify that an empty declared variables set results
     in a declaration error if `require_declaration` is `True`.
-
-    Parameters
-    ----------
-    keys : set[str]
-        A valid set of "declared keys"
-    mapping : t.Mapping[str, str]
-        A valid mapping of key-value pairs
-    matches : list[str]
-        Strings that must be found in the error output
     """
     keys: set[str] = set()
     mapping = {"a": "AA"}
@@ -186,7 +168,7 @@ def test_namedruntimeconfiguration_no_declarations() -> None:
         ),
     ],
 )
-def test_namedruntimeconfiguration_declaration_fail(
+def test_userdefinedvariables_declaration_fail(
     keys: set[str],
     mapping: t.Mapping[str, str],
     matches: set[str],
@@ -200,7 +182,7 @@ def test_namedruntimeconfiguration_declaration_fail(
         A valid set of "declared keys"
     mapping : t.Mapping[str, str]
         A valid mapping of key-value pairs
-    matches : list[str]
+    matches : set[str]
         Strings that must be found in the error output
     """
     replacements = UserDefinedVariables(
