@@ -58,14 +58,21 @@ class ROMSPartitioning:
 
 @dataclass
 class DatasetLinker(LoggingMixin):
+    """DatasetLinker manages sym-linking a needed file from the work directory to the real dataset location."""
+
     opt_file_name: str
+    """Name of the opt file specifying that must align with the conventional symlink name"""
     symlink_name: str
+    """Name of the symlink to create in workdir. Must align with the name in the opt file"""
     opt_file_dir: Path
+    """Location to look for the required optfile"""
     workdir: Path
+    """Location to create the symlink"""
 
     def validate_opt(
         self,
     ):
+        """Validate that the opt file exists in the work directory and that it contains the conventional symlink name."""
         opt_file = self.opt_file_dir / self.opt_file_name
 
         if not opt_file.exists():
@@ -78,10 +85,9 @@ class DatasetLinker(LoggingMixin):
             )
 
     def link(self, dataset_path: Path):
-
+        """Create symlink to dataset_path in the work directory."""
         symlink_path = self.workdir / self.symlink_name
-        if symlink_path.is_symlink() or symlink_path.exists():
-            symlink_path.unlink()
+        symlink_path.unlink(missing_ok=True)
         symlink_path.symlink_to(dataset_path)
         self.log.info(f"🔗 Created symlink: {symlink_path} → {dataset_path}")
 

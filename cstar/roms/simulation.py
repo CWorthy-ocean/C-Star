@@ -1396,12 +1396,7 @@ class ROMSSimulation(Simulation):
 
         build_dir = self.compile_time_code.working_copy.common_parent
 
-        # in most cases, the Makefile in the ROMS repo is the right one to use.
-        # if they don't provide their own, copy the one from the repo's working copy to the build dir
-        makefile_target = build_dir / "Makefile"
-        if not makefile_target.exists():
-            makefile_repo = self.codebase.working_copy.path / "Work" / "Makefile"  # type: ignore[union-attr]
-            shutil.copyfile(makefile_repo, makefile_target)
+        self._ensure_makefile(build_dir)
 
         exe_path = build_dir / "roms"
         if (
@@ -1441,6 +1436,23 @@ class ROMSSimulation(Simulation):
 
         self.persist()
 
+    def _ensure_makefile(self, build_dir: Path):
+        """If a Makefile was not supplied, copy the correct one from the ROMS repo.
+
+        Parameters
+        ----------
+        build_dir : Path
+            Location where a Makefile should be present or copied to.
+        """
+        if self.codebase.working_copy is None:
+            raise ValueError("Unable to copy makefile with null working copy")
+
+        makefile_target = build_dir / "Makefile"
+
+        if not makefile_target.exists():
+            makefile_repo = self.codebase.working_copy.path / "Work" / "Makefile"
+            shutil.copyfile(makefile_repo, makefile_target)
+
     def pre_run(self, overwrite_existing_files=False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
@@ -1471,9 +1483,6 @@ class ROMSSimulation(Simulation):
         run : Executes the compiled ROMS model.
         post_run : Performs post-processing steps after execution.
         """
-        # Partition input datasets that require partitioning
-        # (excludes cdr_forcing, nesting_info, and similar datasets)
-
         datasets_to_partition = [
             d for d in self.input_datasets if d.exists_locally and d.partitionable
         ]
@@ -1589,13 +1598,13 @@ class ROMSSimulation(Simulation):
         # save modified roms.in and rename original for clarity
         old_runtime_settings_path = Path(self.runtime_code.working_copy[0].path)
         final_runtime_settings_file = (
-            old_runtime_settings_path.parent / f"PATCHED_{self.name}.in"
+            old_runtime_settings_path.parent / f"{self.name}_PATCHED.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
 
         old_runtime_settings_path.rename(
             old_runtime_settings_path.parent
-            / f"ORIGINAL_{old_runtime_settings_path.name}"
+            / f"{old_runtime_settings_path.stem}_ORIGINAL.in"
         )
 
         script_name = job_name or self.name

@@ -102,7 +102,7 @@ DataResource: t.TypeAlias = Resource | VersionedResource
 class Dataset(DocLocMixin):
     """A dataset contains a data block alongside documentation and locking fields."""
 
-    data: list[DataResource]
+    data: list[DataResource] = Field(min_length=1)
     """A list of one or more data resources."""
 
     def __len__(self) -> int:
