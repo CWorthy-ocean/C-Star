@@ -130,6 +130,14 @@ def intenum_representer(
     return dumper.represent_scalar("tag:yaml.org,2002:int", str(data.value))
 
 
+def set_representer(
+    dumper: yaml.Dumper,
+    data: set,
+) -> yaml.SequenceNode:
+    """Create a representer for converting sets values to a list representation."""
+    return dumper.represent_list(list(data))
+
+
 _RT = t.TypeVar("_RT", enum.IntEnum, enum.StrEnum, PosixPath)
 
 
@@ -159,6 +167,7 @@ def model_to_yaml(model: _T) -> str:
 
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
+    dumper.add_representer(set, set_representer)
 
     register_representer(PosixPath, path_representer)
 

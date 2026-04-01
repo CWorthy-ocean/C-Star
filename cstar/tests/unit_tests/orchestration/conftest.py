@@ -464,3 +464,9 @@ def single_step_workplan(
             ),
         ],
     )
+
+
+@pytest.fixture
+def remote_workplan_uri() -> str:
+    """Fixture for returning a URL to a valid remote workplan for testing."""
+    return "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
