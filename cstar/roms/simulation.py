@@ -57,7 +57,6 @@ from cstar.roms.input_dataset import (
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSInputDataset,
-    ROMSInputDatasetWithOptSymlink,
     ROMSModelGrid,
     ROMSNestingInfo,
     ROMSRiverForcing,
@@ -72,7 +71,6 @@ if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
     from cstar.execution.file_system import JobFileSystemManager
     from cstar.execution.handler import ExecutionHandler
-    from cstar.io.staged_data import StagedFile
 
 
 def _ncjoin_wildcard(
@@ -832,35 +830,6 @@ class ROMSSimulation(Simulation):
         return simulation_runtime_settings
 
     @property
-    def partitionable_datasets(self) -> list[ROMSInputDataset]:
-        """Retrieves input datasets that should be partitioned and added to runtime settings.
-
-        This excludes datasets like cdr_forcing and nesting_info which are staged
-        but not partitioned or included in ROMS runtime settings.
-
-        Returns
-        -------
-        list of ROMSInputDataset
-            A list containing input datasets that need partitioning.
-        """
-        datasets: list[ROMSInputDataset] = []
-        if self.model_grid is not None:
-            datasets.append(self.model_grid)
-        if self.initial_conditions is not None:
-            datasets.append(self.initial_conditions)
-        if self.tidal_forcing is not None:
-            datasets.append(self.tidal_forcing)
-        if self.river_forcing is not None:
-            datasets.append(self.river_forcing)
-        if len(self.boundary_forcing) > 0:
-            datasets.extend(self.boundary_forcing)
-        if len(self.surface_forcing) > 0:
-            datasets.extend(self.surface_forcing)
-        if len(self.forcing_corrections) > 0:
-            datasets.extend(self.forcing_corrections)
-        return datasets
-
-    @property
     def input_datasets(self) -> list[ROMSInputDataset]:
         """Retrieves all input datasets associated with this ROMS simulation.
 
@@ -874,12 +843,21 @@ class ROMSSimulation(Simulation):
         list of ROMSInputDataset
             A list containing all input datasets used in the simulation.
         """
-        input_datasets: list[ROMSInputDataset] = list(self.partitionable_datasets)
-        if self.cdr_forcing is not None:
-            input_datasets.append(self.cdr_forcing)
-        if self.nesting_info is not None:
-            input_datasets.append(self.nesting_info)
-        return input_datasets
+        return [
+            x
+            for x in [
+                self.model_grid,
+                self.initial_conditions,
+                self.tidal_forcing,
+                self.river_forcing,
+                self.cdr_forcing,
+                self.nesting_info,
+                *self.boundary_forcing,
+                *self.surface_forcing,
+                *self.forcing_corrections,
+            ]
+            if x is not None
+        ]
 
     @classmethod
     def from_dict(
@@ -1136,6 +1114,7 @@ class ROMSSimulation(Simulation):
         bp_dict = yaml.safe_load(data.decode("utf-8"))
 
         bp = RomsMarblBlueprint.model_validate(bp_dict)
+
         return cls(
             name=bp.name,
             directory=bp.runtime_params.output_dir,
@@ -1298,87 +1277,6 @@ class ROMSSimulation(Simulation):
                 and (self.end_date >= self.start_date)
             ):
                 inp.get(local_dir=input_datasets_dir)
-
-        self._validate_and_symlink_supplementary_datasets(compile_time_code_dir)
-
-    def _validate_and_symlink_supplementary_datasets(
-        self, compile_time_code_dir: Path
-    ) -> None:
-        """Validate opt files and create work-dir symlinks for supplementary datasets.
-
-        For each supplementary dataset (cdr_forcing, nesting_info) that is defined:
-        1. Verify the dataset's ``required_opt_file`` is listed in ``compile_time_code``.
-        2. Verify that opt file's content includes the dataset's ``symlink_name``.
-        3. Create a symlink ``{work_dir}/{symlink_name}`` pointing to the staged local file.
-
-        Parameters
-        ----------
-        compile_time_code_dir : Path
-            Directory where compile-time code files have been staged by ``setup()``.
-
-        Raises
-        ------
-        CstarExpectationFailed
-            If ``compile_time_code`` is None when a supplementary dataset is defined,
-            if the required opt file is not listed in ``compile_time_code``, or if the
-            opt file does not contain the expected filename string.
-        """
-        supplementary: list[ROMSInputDatasetWithOptSymlink | None] = [
-            self.cdr_forcing,
-            self.nesting_info,
-        ]
-
-        active = [d for d in supplementary if d is not None]
-        if not active:
-            return
-
-        compile_time_filenames = (
-            [f.basename for f in self.compile_time_code.source]
-            if self.compile_time_code is not None
-            else []
-        )
-
-        work_dir = self.fs_manager.work_dir
-        work_dir.mkdir(parents=True, exist_ok=True)
-
-        for dataset in active:
-            opt_filename = dataset.required_opt_file
-            link_name = dataset.symlink_name
-
-            if self.compile_time_code is None:
-                raise CstarExpectationFailed(
-                    f"{opt_filename!r} must be present in compile_time_code when "
-                    f"{dataset.__class__.__name__} is specified, but compile_time_code "
-                    "is not set."
-                )
-
-            if opt_filename not in compile_time_filenames:
-                raise CstarExpectationFailed(
-                    f"{opt_filename!r} must be listed in compile_time_code when "
-                    f"{dataset.__class__.__name__} is specified. "
-                    f"Found: {compile_time_filenames}"
-                )
-
-            opt_content = (compile_time_code_dir / opt_filename).read_text()
-            if link_name not in opt_content:
-                raise CstarExpectationFailed(
-                    f"{opt_filename!r} must contain the string {link_name!r} when "
-                    f"{dataset.__class__.__name__} is specified."
-                )
-
-            working_copy = cast("StagedFile", dataset.working_copy)
-
-            if not working_copy:
-                raise CstarExpectationFailed(
-                    f"No local copy of {dataset.__class__.__name__} found after "
-                    "fetching input datasets."
-                )
-
-            symlink_path = work_dir / link_name
-            if symlink_path.is_symlink() or symlink_path.exists():
-                symlink_path.unlink()
-            symlink_path.symlink_to(working_copy.path)
-            self.log.info(f"🔗 Created symlink: {symlink_path} → {working_copy.path}")
 
     @property
     def is_setup(self) -> bool:
@@ -1575,18 +1473,16 @@ class ROMSSimulation(Simulation):
         """
         # Partition input datasets that require partitioning
         # (excludes cdr_forcing, nesting_info, and similar datasets)
-        if self.partitionable_datasets is not None and all(
-            [isinstance(a, ROMSInputDataset) for a in self.partitionable_datasets]
-        ):
-            datasets_to_partition = [
-                d for d in self.partitionable_datasets if d.exists_locally
-            ]
-            for f in datasets_to_partition:
-                f.partition(
-                    np_xi=self.discretization.n_procs_x,
-                    np_eta=self.discretization.n_procs_y,
-                    overwrite_existing_files=overwrite_existing_files,
-                )
+
+        datasets_to_partition = [
+            d for d in self.input_datasets if d.exists_locally and d.partitionable
+        ]
+        for f in datasets_to_partition:
+            f.partition(
+                np_xi=self.discretization.n_procs_x,
+                np_eta=self.discretization.n_procs_y,
+                overwrite_existing_files=overwrite_existing_files,
+            )
 
         self.persist()
 
