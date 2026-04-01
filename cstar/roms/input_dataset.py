@@ -56,7 +56,7 @@ class ROMSPartitioning:
         return len(self.files)
 
 
-@dataclass(frozen=True)
+@dataclass
 class DatasetLinker(LoggingMixin):
     opt_file_name: str
     symlink_name: str
