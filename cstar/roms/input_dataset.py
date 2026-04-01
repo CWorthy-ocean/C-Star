@@ -85,7 +85,12 @@ class DatasetLinker(LoggingMixin):
             )
 
     def link(self, dataset_path: Path):
-        """Create symlink to dataset_path in the work directory."""
+        """Create symlink to dataset_path in the work directory.
+        Parameters
+        ----------
+        dataset_path : Path
+            Location of the dataset to symlink to.
+        """
         symlink_path = self.workdir / self.symlink_name
         symlink_path.unlink(missing_ok=True)
         symlink_path.symlink_to(dataset_path)

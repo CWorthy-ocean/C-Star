@@ -258,6 +258,8 @@ class SurfaceForcingAdapter(
 
 
 class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing]):
+    """Create a ROMSCdrForcing from a blueprint model."""
+
     @t.override
     def adapt(self) -> ROMSCdrForcing | None:
         if self.model.cdr_forcing is None:
@@ -282,6 +284,8 @@ class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing])
 
 
 class NestingInfoAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSNestingInfo]):
+    """Create a ROMSNestingInfo from a blueprint model."""
+
     @t.override
     def adapt(self) -> ROMSNestingInfo | None:
         if self.model.nesting_info is None:
@@ -308,6 +312,8 @@ class NestingInfoAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSNestingInfo
 class ForcingCorrectionAdapter(
     ModelAdapter[models.RomsMarblBlueprint, list[ROMSForcingCorrections]]
 ):
+    """Create a ROMSForcingCorrections from a blueprint model."""
+
     @t.override
     def adapt(self) -> list[ROMSForcingCorrections] | None:
         if self.model.forcing.corrections is None:
