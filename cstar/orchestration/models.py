@@ -700,7 +700,7 @@ class UserDefinedVariables(BaseModel):
 
         Returns
         -------
-        NamedRuntimeConfiguration
+        UserDefinedVariables
 
         Raises
         ------

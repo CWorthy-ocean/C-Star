@@ -27,8 +27,7 @@ def preprocess_vars(
 ) -> list[str] | None:
     """Perform validation and formatting on user-supplied variables.
 
-    Places the processed variables into a `RunCmdContext` object stored
-    in the user data slot of the typer context.
+    Places the processed variables into the user data slot of the typer context object.
 
     Parameters
     ----------
@@ -63,8 +62,7 @@ def preprocess_varfile(
     """Perform validation and formatting on user-supplied variables
     supplied through a path to a variables file.
 
-    Places the processed variables into a `RunCmdContext` object stored
-    in the user data slot of the typer context.
+    Places the processed variables into the user data slot of the typer context object.
 
     Parameters
     ----------
