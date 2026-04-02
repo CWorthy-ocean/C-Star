@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from textwrap import dedent
 from unittest import mock
@@ -8,9 +9,9 @@ import roms_tools  # noqa: F401, pre-load to avoid the lazy loader
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.io.source_data import SourceDataCollection
-from cstar.io.staged_data import StagedDataCollection
+from cstar.io.staged_data import StagedDataCollection, StagedFile
 from cstar.roms import ROMSPartitioning
-from cstar.roms.input_dataset import DatasetLinker
+from cstar.roms.input_dataset import DatasetLinker, ROMSInputDataset
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
 
 
@@ -298,8 +299,11 @@ class TestROMSInputDatasetGet:
         assert dataset.working_copy.paths == expected_paths
 
     def test_get_calls_linker_when_set(
-        self, romsinputdataset_local_netcdf, stagedfile_remote_source, mock_path_resolve
-    ):
+        self,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        stagedfile_remote_source: Callable[..., StagedFile],
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
         """get() calls linker.validate_opt() and linker.link() when linker is set."""
         dataset = romsinputdataset_local_netcdf
         mock_linker = mock.Mock(spec=DatasetLinker)
@@ -318,8 +322,10 @@ class TestROMSInputDatasetGet:
         mock_linker.link.assert_called_once_with(staged.path)
 
     def test_get_skips_linker_when_not_set(
-        self, romsinputdataset_local_netcdf, mock_path_resolve
-    ):
+        self,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
         """get() does not call any linker methods when linker is None."""
         dataset = romsinputdataset_local_netcdf
         assert dataset.linker is None
@@ -328,10 +334,10 @@ class TestROMSInputDatasetGet:
 
     def test_get_raises_if_linker_set_but_working_copy_is_not_staged_file(
         self,
-        romsinputdataset_local_netcdf,
-        stageddatacollection_remote_files,
-        mock_path_resolve,
-    ):
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        stageddatacollection_remote_files: Callable[..., StagedDataCollection],
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
         """get() raises CstarExpectationFailed when linker is set but working_copy is a collection."""
         dataset = romsinputdataset_local_netcdf
         mock_linker = mock.Mock(spec=DatasetLinker)
@@ -700,8 +706,10 @@ class TestROMSInputDatasetPartition:
 
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_skips_if_not_partitionable(
-        self, mock_partition_netcdf, romsinputdataset_local_netcdf
-    ):
+        self,
+        mock_partition_netcdf: mock.MagicMock,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+    ) -> None:
         """partition() returns immediately without partitioning when partitionable=False."""
         romsinputdataset_local_netcdf.partitionable = False
         romsinputdataset_local_netcdf.partition(np_xi=2, np_eta=3)
@@ -736,13 +744,15 @@ class TestDatasetLinker:
             workdir=workdir,
         )
 
-    def test_validate_opt_raises_if_opt_file_missing(self, tmp_path):
+    def test_validate_opt_raises_if_opt_file_missing(self, tmp_path: Path) -> None:
         """validate_opt raises FileNotFoundError when the opt file does not exist."""
         linker = self._make_linker(opt_file_dir=tmp_path, workdir=tmp_path)
         with pytest.raises(FileNotFoundError, match="cdr_frc.opt"):
             linker.validate_opt()
 
-    def test_validate_opt_raises_if_symlink_name_not_in_content(self, tmp_path):
+    def test_validate_opt_raises_if_symlink_name_not_in_content(
+        self, tmp_path: Path
+    ) -> None:
         """validate_opt raises CstarExpectationFailed when symlink_name is absent from opt content."""
         opt_file = tmp_path / "cdr_frc.opt"
         opt_file.write_text("no match here")
@@ -750,14 +760,14 @@ class TestDatasetLinker:
         with pytest.raises(CstarExpectationFailed, match="cdr_frc.opt.*cdr.nc"):
             linker.validate_opt()
 
-    def test_validate_opt_passes_when_valid(self, tmp_path):
+    def test_validate_opt_passes_when_valid(self, tmp_path: Path) -> None:
         """validate_opt succeeds when the opt file exists and contains symlink_name."""
         opt_file = tmp_path / "cdr_frc.opt"
         opt_file.write_text("uses cdr.nc for input")
         linker = self._make_linker(opt_file_dir=tmp_path, workdir=tmp_path)
         linker.validate_opt()  # should not raise
 
-    def test_link_creates_symlink(self, tmp_path):
+    def test_link_creates_symlink(self, tmp_path: Path) -> None:
         """link() creates a symlink in workdir pointing to the dataset path."""
         target = tmp_path / "input_datasets" / "cdr.nc"
         target.parent.mkdir()
@@ -772,7 +782,7 @@ class TestDatasetLinker:
         assert symlink.is_symlink()
         assert symlink.resolve() == target.resolve()
 
-    def test_link_replaces_existing_symlink(self, tmp_path):
+    def test_link_replaces_existing_symlink(self, tmp_path: Path) -> None:
         """link() replaces a stale symlink without raising an error."""
         target = tmp_path / "input_datasets" / "cdr.nc"
         target.parent.mkdir()
