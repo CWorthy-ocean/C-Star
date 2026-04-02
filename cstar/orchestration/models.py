@@ -43,12 +43,7 @@ KeyValueStore: t.TypeAlias = dict[
     | list[float]
     | dict[
         str,
-        str
-        | float
-        | datetime
-        | list[str]
-        | list[dict[str, str | float]]
-        | dict[str, str | float | list[str]],
+        t.Any,
     ],
 ]
 """A collection of user-defined key-value pairs."""
