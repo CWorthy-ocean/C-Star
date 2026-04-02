@@ -5,6 +5,7 @@ from pathlib import Path, PosixPath
 
 import yaml
 from yaml import safe_load
+from yaml.scanner import ScannerError
 
 from cstar.base.log import get_logger
 from cstar.execution.file_system import local_copy
@@ -102,7 +103,14 @@ def _read_yaml(path: Path, klass: type[_T]) -> _T:
     _T
     """
     with path.open("r", encoding="utf-8") as fp:
-        model_dict = safe_load(fp)
+        try:
+            model_dict = safe_load(fp)
+        except ScannerError as e:
+            msg = (
+                f"Failed to load yaml from {path}. If are loading a remote YAML, your URL "
+                f"may point to a HTML page instead of the raw YAML content."
+            )
+            raise RuntimeError(msg) from e
         return klass.model_validate(model_dict)
 
 
