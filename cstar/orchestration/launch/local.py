@@ -30,7 +30,7 @@ log = get_logger(__name__)
 
 
 def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
-    p = sprun(args=cmd, text=True, check=False)
+    p = sprun(args=cmd, text=True, check=True)
     return {step.name: p.returncode}
 
 
@@ -193,7 +193,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         statuses = await asyncio.gather(*tasks)
         active_found = any(map(Status.is_in_progress, statuses))
         failure_found = any(map(Status.is_failure, statuses))
-
+        log.warning(f"failures: {failure_found}")
         # wait for the dependencies to complete before launching
         while active_found and not failure_found:
             await asyncio.sleep(1)
@@ -202,7 +202,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             statuses = await asyncio.gather(*tasks)
             active_found = any(map(Status.is_in_progress, statuses))
             failure_found = any(map(Status.is_failure, statuses))
-
+        log.warning(f"failures: {failure_found}")
         if failure_found:
             msg = f"Dependency of step {step.name} failed. Unable to continue."
             raise CstarExpectationFailed(msg)
@@ -237,7 +237,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 return Status.Submitted
             case "RUNNING" | "ENDING":
                 return Status.Running
-            case "COMPLETED" | "FAILED":
+            case "COMPLETED":
                 return Status.Done
             case "CANCELLED":
                 return Status.Cancelled
