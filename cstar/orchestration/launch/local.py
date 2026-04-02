@@ -193,7 +193,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         statuses = await asyncio.gather(*tasks)
         active_found = any(map(Status.is_in_progress, statuses))
         failure_found = any(map(Status.is_failure, statuses))
-        log.warning(f"failures: {failure_found}")
+
         # wait for the dependencies to complete before launching
         while active_found and not failure_found:
             await asyncio.sleep(1)
@@ -202,7 +202,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             statuses = await asyncio.gather(*tasks)
             active_found = any(map(Status.is_in_progress, statuses))
             failure_found = any(map(Status.is_failure, statuses))
-        log.warning(f"failures: {failure_found}")
+
         if failure_found:
             msg = f"Dependency of step {step.name} failed. Unable to continue."
             raise CstarExpectationFailed(msg)
