@@ -36,8 +36,7 @@ class MockSchedulerJob(SchedulerJob):
         A mocked method returning "mock_submit".
     """
 
-    @property
-    def status(self):
+    async def get_status(self):
         return "mock_status"
 
     def submit(self):
@@ -754,7 +753,8 @@ async def test_get_slurm_steps_single_job_id(
 async def test_get_slurm_steps_multi_job_id() -> None:
     """Verify multiple jobs are parsed correctly from sacct std output"""
     job_id = "1552798,15527988"
-    sacct_output = textwrap.dedent("""\
+    sacct_output = textwrap.dedent(
+        """\
         15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
         15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
         15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
@@ -762,7 +762,8 @@ async def test_get_slurm_steps_multi_job_id() -> None:
         15527988.ba+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09      batch
         15527988.ex+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09     extern
         15527988.0    COMPLETED 2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09       roms
-        """)
+        """
+    )
 
     exp_num_steps = 7
     exp_num_jobs = 2
@@ -790,11 +791,13 @@ async def test_get_slurm_batch(job_id: int | str) -> None:
     """Verify multiple steps are parsed correctly from sacct std output with
     both a string and integer job-id.
     """
-    sacct_output = textwrap.dedent("""\
+    sacct_output = textwrap.dedent(
+        """\
         15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
         15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
         15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
-        """)
+        """
+    )
 
     exp_num_steps = 2
     exp_num_jobs = 1
@@ -818,7 +821,8 @@ async def test_get_slurm_batches() -> None:
     both a string and integer job-id.
     """
     job_id_1, job_id_2 = 15514059, 15527988
-    sacct_output = textwrap.dedent("""\
+    sacct_output = textwrap.dedent(
+        """\
         15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
         15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
         15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
@@ -826,7 +830,8 @@ async def test_get_slurm_batches() -> None:
         15527988.ba+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09      batch
         15527988.ex+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09     extern
         15527988.0    COMPLETED 2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09       roms
-        """)
+        """
+    )
 
     with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
         result = await get_slurm_batches((job_id_1, job_id_2))

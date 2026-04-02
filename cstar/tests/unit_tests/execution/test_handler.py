@@ -2,7 +2,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from unittest.mock import PropertyMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -16,8 +16,7 @@ class MockExecutionHandler(ExecutionHandler):
         self._status = status
         self._output_file = Path(output_file)
 
-    @property
-    def status(self):
+    async def get_status(self):
         return self._status
 
     @property
@@ -193,18 +192,18 @@ class TestExecutionHandlerUpdates:
         # Mock the `status` property to return "running"
         with (
             patch.object(
-                MockExecutionHandler, "status", new_callable=PropertyMock
-            ) as mock_status,
+                MockExecutionHandler,
+                "get_status",
+                AsyncMock(return_value=ExecutionStatus.RUNNING),
+            ),
             caplog.at_level(logging.INFO),
+            patch("asyncio.sleep", side_effect=KeyboardInterrupt),
         ):
-            mock_status.return_value = ExecutionStatus.RUNNING
-
             # Simulate a KeyboardInterrupt during the updates call
-            with patch("asyncio.sleep", side_effect=KeyboardInterrupt):
-                await handler.updates(seconds=0)  # Run updates indefinitely
+            await handler.updates(seconds=0)  # Run updates indefinitely
 
-                # Assert that the "stopped by user" message was printed
-                assert "Live status updates stopped by user." in caplog.text
+            # Assert that the "stopped by user" message was printed
+            assert "Live status updates stopped by user." in caplog.text
 
     @pytest.mark.asyncio
     async def test_updates_stops_when_status_changes(

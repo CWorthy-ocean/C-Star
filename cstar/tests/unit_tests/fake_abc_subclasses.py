@@ -109,23 +109,23 @@ class StubSimulation(Simulation):
         """No-op implementation of abstract method."""
         pass
 
-    def setup(self):
+    async def setup(self):
         """No-op implementation of abstract method."""
         pass
 
-    def build(self, rebuild=False):
+    async def build(self, rebuild=False):
         """No-op implementation of abstract method."""
         pass
 
-    def pre_run(self):
+    async def pre_run(self):
         """No-op implementation of abstract method."""
         pass
 
-    def run(self):
+    async def run(self):
         """No-op implementation of abstract method."""
         pass
 
-    def post_run(self):
+    async def post_run(self):
         """No-op implementation of abstract method."""
         pass
 

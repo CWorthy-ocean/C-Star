@@ -427,16 +427,18 @@ async def test_runner_can_shutdown_as_task(
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_start", mock.Mock),
-        mock.patch.object(sim_runner, "_on_iteration", mock.Mock),
-        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock),
-        mock.patch.object(sim_runner, "_can_shutdown", mock.Mock(return_value=True)),
+        mock.patch.object(sim_runner, "_on_start", mock.AsyncMock),
+        mock.patch.object(sim_runner, "_on_iteration", mock.AsyncMock),
+        mock.patch.object(sim_runner, "_on_shutdown", mock.AsyncMock),
+        mock.patch.object(
+            sim_runner, "_can_shutdown", mock.AsyncMock(return_value=True)
+        ),
     ):
         # And confirm it already says it can exit
-        assert sim_runner.can_shutdown
+        assert await sim_runner.can_shutdown
 
         # but, the (mocked) internal method says it should keep running
-        assert sim_runner._can_shutdown()
+        assert await sim_runner._can_shutdown()
 
 
 @pytest.mark.asyncio
@@ -463,7 +465,7 @@ async def test_runner_can_shutdown_as_task_null_sim(
 
     with mock.patch.object(sim_runner, "_simulation", None):
         # and confirm it exits immediately when the simulation is None
-        assert sim_runner._can_shutdown()
+        assert await sim_runner._can_shutdown()
         assert sim_runner._is_status_complete()
 
 
@@ -492,7 +494,7 @@ async def test_runner_can_shutdown_as_service_null_sim(
 
     with mock.patch.object(sim_runner, "_simulation", None):
         # and confirm it exits immediately when the simulation is None
-        assert sim_runner._can_shutdown()
+        assert await sim_runner._can_shutdown()
         assert sim_runner._is_status_complete()
 
 
@@ -525,10 +527,10 @@ async def test_runner_shutdown_no_update_handler(
         mock.patch.object(sim_runner, "_on_shutdown", mock.Mock),
     ):
         # And confirm it already says it can exit
-        assert sim_runner.can_shutdown
+        assert await sim_runner.can_shutdown
 
         # and the (mocked) internal state says it should keep running
-        assert sim_runner._can_shutdown()
+        assert await sim_runner._can_shutdown()
         assert sim_runner._handler is None
 
 
@@ -565,25 +567,26 @@ async def test_runner_shutdown_handler_complete(
     # Configure the SimulationRunner to run as a service
     sim_runner._config.as_service = True
 
-    mock_status_attr = mock.PropertyMock(return_value=status)
-    assert mock_status_attr.call_count == 0
+    mock_status_fn = mock.AsyncMock(return_value=status)
+    # assert mock_status_fn.call_count == 0
 
     mock_handler = mock.Mock(spec=ExecutionHandler)
-    type(mock_handler).status = mock_status_attr
+    mock_handler._status = status
+    mock_handler.get_status = mock_status_fn
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_start", mock.Mock),
-        mock.patch.object(sim_runner, "_on_iteration", mock.Mock),
-        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock),
+        mock.patch.object(sim_runner, "_on_start", mock.AsyncMock),
+        mock.patch.object(sim_runner, "_on_iteration", mock.AsyncMock),
+        mock.patch.object(sim_runner, "_on_shutdown", mock.AsyncMock),
         mock.patch.object(sim_runner, "_handler", mock_handler),
     ):
         # and confirm it already says it can exit
-        assert sim_runner.can_shutdown
+        assert await sim_runner.can_shutdown
 
         # ... and confirm the can_shutdown didn't short-circuit before looking
         # the handler.status property by checking the call count
-        assert mock_status_attr.call_count > 0
+        assert mock_status_fn.call_count > 0
 
 
 @pytest.mark.parametrize(
@@ -619,25 +622,25 @@ async def test_runner_shutdown_handler_not_complete(
     # Configure the SimulationRunner to run as a service
     sim_runner._config.as_service = True
 
-    mock_status_attr = mock.PropertyMock(return_value=status)
-    assert mock_status_attr.call_count == 0
+    mock_status_fn = mock.AsyncMock(return_value=status)
+    assert mock_status_fn.call_count == 0
 
     mock_handler = mock.Mock(spec=ExecutionHandler)
-    type(mock_handler).status = mock_status_attr
+    type(mock_handler).get_status = mock_status_fn
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_start", mock.Mock),
-        mock.patch.object(sim_runner, "_on_iteration", mock.Mock),
-        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock),
+        mock.patch.object(sim_runner, "_on_start", mock.AsyncMock),
+        mock.patch.object(sim_runner, "_on_iteration", mock.AsyncMock),
+        mock.patch.object(sim_runner, "_on_shutdown", mock.AsyncMock),
         mock.patch.object(sim_runner, "_handler", mock_handler),
     ):
         # and confirm it already says it can exit
-        assert not sim_runner.can_shutdown
+        assert not await sim_runner.can_shutdown
 
         # ... and confirm the can_shutdown didn't short-circuit before looking
         # the handler.status property by checking the call count
-        assert mock_status_attr.call_count > 0
+        assert mock_status_fn.call_count > 0
 
 
 @pytest.mark.parametrize(
@@ -670,13 +673,13 @@ async def test_runner_shutdown_side_effects(
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
-    mock_handler = mock.Mock(spec=ExecutionHandler, status=status)
-    mock_disposition = mock.Mock()
+    mock_handler = mock.AsyncMock(spec=ExecutionHandler, status=status)
+    mock_disposition = mock.AsyncMock()
     mock_simulation = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_start", mock.Mock()),
+        mock.patch.object(sim_runner, "_on_start", mock.AsyncMock()),
         mock.patch.object(sim_runner, "_on_iteration", mock.AsyncMock()),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_log_disposition", mock_disposition),
@@ -946,12 +949,12 @@ async def test_runner_on_iteration(
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
-    mock_simulation = mock.Mock()
-    mock_shutdown = mock.Mock()
+    mock_simulation = mock.AsyncMock()
+    mock_shutdown = mock.AsyncMock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
+        mock.patch.object(sim_runner, "_start_healthcheck", mock.AsyncMock()),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_simulation", mock_simulation),
     ):

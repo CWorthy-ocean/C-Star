@@ -75,9 +75,10 @@ class ExecutionHandler(ABC, LoggingMixin):
         Stream live updates from the task's output file for a specified duration.
     """
 
-    @property
+    _status: ExecutionStatus = ExecutionStatus.UNKNOWN
+
     @abstractmethod
-    def status(self) -> ExecutionStatus:
+    async def get_status(self) -> ExecutionStatus:
         """Abstract property representing the current status of the task.
 
         Subclasses must implement this property to query the underlying
@@ -132,15 +133,15 @@ class ExecutionHandler(ABC, LoggingMixin):
         - When streaming indefinitely (`seconds=0`), user confirmation is
           required before proceeding.
         """
-        _status = self.status
-        if _status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
-            error_msg = f"This job is currently not running ({_status}). Live updates cannot be provided."
-            is_complete = _status in {
+        self._status = await self.get_status()
+        if self._status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
+            error_msg = f"This job is currently not running ({self._status}). Live updates cannot be provided."
+            is_complete = self._status in {
                 ExecutionStatus.FAILED,
                 ExecutionStatus.COMPLETED,
             }
             is_cancelled = (
-                _status == ExecutionStatus.CANCELLED and self.output_file.exists()
+                self._status == ExecutionStatus.CANCELLED and self.output_file.exists()
             )
 
             if is_complete or is_cancelled:
@@ -149,15 +150,15 @@ class ExecutionHandler(ABC, LoggingMixin):
             self.log.warning(error_msg)
             return
 
-        if _status == ExecutionStatus.PENDING:
+        if self._status == ExecutionStatus.PENDING:
             start_time = time.time()
             msg = "This job is still pending. Updates will be available after it starts running."
             while seconds == 0 or (time.time() - start_time < seconds):
                 self.log.info(msg)
                 await asyncio.sleep(STATUS_RECHECK_SECONDS)
-                _status = self.status
-                if _status != ExecutionStatus.PENDING:
-                    msg = f"Job status is now {_status}"
+                self._status = await self.get_status()
+                if self._status != ExecutionStatus.PENDING:
+                    msg = f"Job status is now {self._status}"
                     self.log.info(msg)
                     break
 
@@ -166,29 +167,19 @@ class ExecutionHandler(ABC, LoggingMixin):
                 self.log.info(msg)
                 return
 
-        if _status == ExecutionStatus.PENDING:
-            start_time = time.time()
-            msg = "This job is still pending. Updates will be available after it starts running."
-            while seconds == 0 or (time.time() - start_time < seconds):
-                self.log.info(msg)
-                time.sleep(STATUS_RECHECK_SECONDS)
-                _status = self.status
-                if _status != ExecutionStatus.PENDING:
-                    msg = f"Job status is now {_status}"
-                    self.log.info(msg)
-                    break
-
         try:
-            with open(self.output_file) as f:
+            with self.output_file.open() as f:
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):
+                    line = ""
                     if self.output_file.exists():
                         line = f.readline()
 
-                    if self.status != ExecutionStatus.RUNNING:
+                    self._status = await self.get_status()
+                    if self._status != ExecutionStatus.RUNNING:
                         return
-                    elif line:
+                    if line:
                         self.log.info(line.rstrip())
                     else:
                         await asyncio.sleep(0.1)  # 100ms delay between updates

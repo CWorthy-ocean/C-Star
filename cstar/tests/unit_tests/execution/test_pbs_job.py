@@ -1,6 +1,6 @@
 import json
 import logging
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -214,8 +214,9 @@ class TestPBSJob:
             job.submit()
 
     @patch("subprocess.run")
-    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
-    def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
+    @patch("cstar.execution.scheduler_job.PBSJob.get_status", return_value=AsyncMock())
+    @pytest.mark.asyncio
+    async def test_cancel_running_job(self, mock_status, mock_subprocess, tmp_path):
         """Tests that the `cancel` method successfully cancels a running PBS job.
 
         This test ensures that when the job status is `RUNNING`, the `cancel` method
@@ -247,7 +248,7 @@ class TestPBSJob:
         job._id = 12345  # Manually set the job ID
 
         # Cancel the job
-        job.cancel()
+        await job.cancel()
 
         # Verify qdel was called correctly
         mock_subprocess.assert_called_once_with(
@@ -259,8 +260,9 @@ class TestPBSJob:
         )
 
     @patch("subprocess.run")
-    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
-    def test_cancel_completed_job(
+    @patch("cstar.execution.scheduler_job.PBSJob.get_status", return_value=AsyncMock())
+    @pytest.mark.asyncio
+    async def test_cancel_completed_job(
         self,
         mock_status,
         mock_subprocess,
@@ -303,7 +305,7 @@ class TestPBSJob:
         caplog.set_level(logging.INFO, logger=job.log.name)
 
         # Attempt to cancel the job
-        job.cancel()
+        await job.cancel()
 
         # Verify the message was printed
         captured = caplog.text
@@ -314,8 +316,9 @@ class TestPBSJob:
 
     ##
     @patch("subprocess.run")
-    @patch("cstar.execution.scheduler_job.PBSJob.status", new_callable=PropertyMock)
-    def test_cancel_failure(self, mock_status, mock_subprocess, tmp_path):
+    @patch("cstar.execution.scheduler_job.PBSJob.get_status", return_value=AsyncMock())
+    @pytest.mark.asyncio
+    async def test_cancel_failure(self, mock_status, mock_subprocess, tmp_path):
         """Ensures that a `RuntimeError` is raised if the `qdel` command fails to cancel
         a job.
 
@@ -354,9 +357,10 @@ class TestPBSJob:
         with pytest.raises(
             RuntimeError, match="Non-zero exit code when cancelling job"
         ):
-            job.cancel()
+            await job.cancel()
 
     ##
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "qstat_output, exit_status, expected_status, should_raise, expected_exception, expected_message",
         [
@@ -451,7 +455,7 @@ class TestPBSJob:
         ],
     )
     @patch("subprocess.run")
-    def test_status(
+    async def test_status(
         self,
         mock_subprocess,
         qstat_output,
@@ -506,15 +510,17 @@ class TestPBSJob:
         # Check the expected outcome
         if should_raise:
             with pytest.raises(expected_exception, match=expected_message):
-                job.status
+                await job.get_status()
         else:
-            assert job.status == expected_status, (
-                f"Expected status '{expected_status}' but got '{job.status}'"
+            actual = await job.get_status()
+            assert actual == expected_status, (
+                f"Expected status '{expected_status}' but got '{actual}'"
             )
 
     @patch("json.loads", side_effect=json.JSONDecodeError("Expecting value", "", 0))
     @patch("subprocess.run")
-    def test_status_json_decode_error(self, mock_subprocess, mock_json_loads):
+    @pytest.mark.asyncio
+    async def test_status_json_decode_error(self, mock_subprocess, mock_json_loads):
         """Confirms that a `RuntimeError` is raised when the `qstat` output cannot be
         parsed as JSON.
 
@@ -547,4 +553,4 @@ class TestPBSJob:
         with pytest.raises(
             RuntimeError, match="Failed to parse JSON from qstat output"
         ):
-            job.status
+            await job.get_status()

@@ -144,10 +144,12 @@ class SimulationRunner(Service):
         current_time = datetime.now(timezone.utc)
         return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
 
-    def _log_disposition(self, treat_as_failure: bool = False) -> None:
+    async def _log_disposition(self, treat_as_failure: bool = False) -> None:
         """Log the status of the simulation at shutdown time."""
         disposition: ExecutionStatus = (
-            self._handler.status if self._handler else ExecutionStatus.UNKNOWN
+            await self._handler.get_status()
+            if self._handler
+            else ExecutionStatus.UNKNOWN
         )
 
         if self._handler:
@@ -161,7 +163,7 @@ class SimulationRunner(Service):
             self.log.warning(f"Simulation ended with status: {disposition}.")
 
     @override
-    def _on_start(self) -> None:
+    async def _on_start(self) -> None:
         """Prepare the simulation for execution.
 
         Verifies the simulation loaded properly, configuring the file system, retrieving
@@ -178,19 +180,19 @@ class SimulationRunner(Service):
         try:
             if SimulationStages.SETUP in self._stages:
                 self.log.debug("Setting up simulation")
-                self._simulation.setup()
+                await self._simulation.setup()
             else:
                 self.log.debug("Skipping simulation setup")
 
             if SimulationStages.BUILD in self._stages:
                 self.log.debug("Building simulation")
-                self._simulation.build()
+                await self._simulation.build()
             else:
                 self.log.debug("Skipping simulation build")
 
             if SimulationStages.PRE_RUN in self._stages:
                 self.log.debug("Executing simulation pre-run")
-                self._simulation.pre_run()
+                await self._simulation.pre_run()
             else:
                 self.log.debug("Skipping simulation pre_run")
 
@@ -202,7 +204,7 @@ class SimulationRunner(Service):
             raise CstarError(msg) from ex
 
     @override
-    def _on_shutdown(self) -> None:
+    async def _on_shutdown(self) -> None:
         """Perform activities required for clean shutdown.
 
         Execute simulation post-run behavior and log the final disposition of the
@@ -221,14 +223,14 @@ class SimulationRunner(Service):
                 self.log.debug("Skipping simulation post-run; handler not found.")
                 return
 
-            if self._handler.status != ExecutionStatus.COMPLETED:
+            if self._handler.get_status() != ExecutionStatus.COMPLETED:
                 self.log.debug(
                     "Skipping simulation post-run; simulation is not complete."
                 )
                 return
 
             if stage_enabled:
-                self._simulation.post_run()
+                await self._simulation.post_run()
                 self.log.debug("Executing simulation post-run")
             else:
                 self.log.debug("Skipping simulation post-run")
@@ -237,7 +239,7 @@ class SimulationRunner(Service):
             self.log.exception("Simulation post_run failed.")
         finally:
             # ensure status is logged even if _handler updates are suppressed.
-            self._log_disposition(treat_as_failure=treat_as_failure)
+            await self._log_disposition(treat_as_failure=treat_as_failure)
 
     @override
     async def _on_iteration(self) -> None:
@@ -252,7 +254,7 @@ class SimulationRunner(Service):
 
                 if SimulationStages.RUN in self._stages:
                     self.log.debug("Running simulation.")
-                    self._handler = self._simulation.run(**run_params)
+                    self._handler = await self._simulation.run(**run_params)
                 else:
                     self.log.debug("Skipping simulation run")
             else:
@@ -260,7 +262,7 @@ class SimulationRunner(Service):
         except Exception:
             self.log.exception("An error occurred while running the simulation")
 
-    def _is_status_complete(self) -> bool:
+    async def _is_status_complete(self) -> bool:
         """Determine if the simulation has completed.
 
         Returns
@@ -271,14 +273,11 @@ class SimulationRunner(Service):
         if self._handler is None:
             return True
 
-        return self._handler.status in [
-            ExecutionStatus.COMPLETED,
-            ExecutionStatus.CANCELLED,
-            ExecutionStatus.FAILED,
-        ]
+        status = await self._handler.get_status()
+        return ExecutionStatus.is_terminal(status)
 
     @override
-    def _can_shutdown(self) -> bool:
+    async def _can_shutdown(self) -> bool:
         """Determine if the service can shutdown.
 
         Returns
@@ -294,8 +293,8 @@ class SimulationRunner(Service):
             self.log.error("Execution handler is not set. Allowing shutdown.")
             return True
 
-        status = self._handler.status
-        if self._is_status_complete():
+        status = await self._handler.get_status()
+        if await self._is_status_complete():
             self.log.info(f"Simulation is not running ({status}). Allowing shutdown.")
             return True
 

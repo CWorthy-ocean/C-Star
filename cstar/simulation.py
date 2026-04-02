@@ -500,7 +500,7 @@ class Simulation(ABC, LoggingMixin):
         pass
 
     @abstractmethod
-    def setup(self) -> None:
+    async def setup(self) -> None:
         """Abstract method to set up the Simulation.
 
         This method should be implemented in subclasses to handle tasks such as
@@ -526,7 +526,7 @@ class Simulation(ABC, LoggingMixin):
         """Restore the object from a pickle."""
         self.__dict__.update(state)
 
-    def persist(self) -> None:
+    async def persist(self) -> None:
         """Save the current state of the simulation to a file.
 
         This method serializes the simulation object and writes it to a file named
@@ -543,10 +543,13 @@ class Simulation(ABC, LoggingMixin):
         --------
         restore : Restores a previously saved simulation state.
         """
+        handler = self._execution_handler
+        status = await handler.get_status() if handler else ExecutionStatus.UNKNOWN
+
         if (
             self._execution_handler is not None
-            and (isinstance(self._execution_handler, LocalProcess))
-            and (self._execution_handler.status == ExecutionStatus.RUNNING)
+            and isinstance(self._execution_handler, LocalProcess)
+            and status == ExecutionStatus.RUNNING
         ):
             raise RuntimeError(
                 "Simulation.persist() was called, but at least one "
@@ -555,11 +558,11 @@ class Simulation(ABC, LoggingMixin):
             )
 
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.state_file, "wb") as state_file:
+        with self.state_file.open("wb") as state_file:
             pickle.dump(self, state_file)
 
     @classmethod
-    def restore(cls, directory: str | Path) -> "Simulation":
+    async def restore(cls, directory: str | Path) -> "Simulation":
         """Restore a previously saved simulation state.
 
         This method loads a serialized simulation object from the `simulation_state.pkl`
@@ -587,13 +590,14 @@ class Simulation(ABC, LoggingMixin):
         persist : Saves the current simulation state.
         """
         directory = Path(directory)
-        with open(cls.state_file_from(directory), "rb") as state_file:
+        state_file_path = cls.state_file_from(directory)
+        with state_file_path.open("rb") as state_file:
             simulation: Simulation = pickle.load(state_file)
 
         return simulation
 
     @abstractmethod
-    def build(self, rebuild=False) -> None:
+    async def build(self, rebuild=False) -> None:
         """Abstract method to compile any necessary code for this simulation.
 
         This method should be implemented by subclasses to handle steps
@@ -613,7 +617,7 @@ class Simulation(ABC, LoggingMixin):
         pass
 
     @abstractmethod
-    def pre_run(self) -> None:
+    async def pre_run(self) -> None:
         """Abstract method to perform any necessary pre-processing steps before running
         the simulation.
 
@@ -634,7 +638,7 @@ class Simulation(ABC, LoggingMixin):
         pass
 
     @abstractmethod
-    def run(self) -> "ExecutionHandler":
+    async def run(self) -> "ExecutionHandler":
         """Abstract method to begin execution of the simulation.
 
         This method should be implemented by subclasses to handle the execution
@@ -660,7 +664,7 @@ class Simulation(ABC, LoggingMixin):
         pass
 
     @abstractmethod
-    def post_run(self) -> None:
+    async def post_run(self) -> None:
         """Abstract method to perform post-processing actions after the simulation run.
 
         This method should be implemented by subclasses to handle any necessary

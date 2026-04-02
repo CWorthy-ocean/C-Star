@@ -1,5 +1,5 @@
 import logging
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -342,8 +342,13 @@ class TestSlurmJob:
             job.submit()
 
     @patch("subprocess.run")
-    @patch("cstar.execution.scheduler_job.SlurmJob.status", new_callable=PropertyMock)
-    def test_cancel(self, mock_status, mock_subprocess, tmp_path, log: logging.Logger):
+    @patch(
+        "cstar.execution.scheduler_job.SlurmJob.get_status", return_value=AsyncMock()
+    )
+    @pytest.mark.asyncio
+    async def test_cancel(
+        self, mock_status, mock_subprocess, tmp_path, log: logging.Logger
+    ):
         """Verifies that the `cancel` method cancels a SLURM job and raises an exception
         if it fails.
 
@@ -383,7 +388,7 @@ class TestSlurmJob:
         job._id = 12345  # Manually set the job ID
 
         # Call cancel
-        job.cancel()
+        await job.cancel()
 
         # Log mock call arguments
         log.info(f"Mock call args after success: {mock_subprocess.call_args_list}")
@@ -409,7 +414,7 @@ class TestSlurmJob:
         with pytest.raises(
             RuntimeError, match="Non-zero exit code when cancelling job."
         ):
-            job.cancel()
+            await job.cancel()
 
         # Verify that scancel was still called
         mock_subprocess.assert_called_once_with(
@@ -499,7 +504,8 @@ class TestSlurmJob:
             (12345, "", 1, None, True),  # sacct command failure
         ],
     )
-    def test_status(
+    @pytest.mark.asyncio
+    async def test_status(
         self,
         mock_subprocess,
         job_id,
@@ -548,8 +554,9 @@ class TestSlurmJob:
             with pytest.raises(
                 RuntimeError, match="Failed to retrieve job status using sacct"
             ):
-                job.status
+                await job.get_status()
         else:
-            assert job.status == expected_status, (
-                f"Expected status '{expected_status}' but got '{job.status}'"
+            actual = await job.get_status()
+            assert actual == expected_status, (
+                f"Expected status '{expected_status}' but got '{actual}'"
             )

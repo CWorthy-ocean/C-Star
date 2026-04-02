@@ -105,7 +105,7 @@ class Service(ABC, LoggingMixin):
         """
         self.log.debug(f"Performing main iteration of {self._service_type}")
 
-    def _on_iteration_complete(self) -> None:
+    async def _on_iteration_complete(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called in main event loop after `_on_iteration` is invoked.
@@ -113,7 +113,7 @@ class Service(ABC, LoggingMixin):
         self.log.debug(f"Performing post-iteration tasks of {self._service_type}")
 
     @abstractmethod
-    def _can_shutdown(self) -> bool:
+    async def _can_shutdown(self) -> bool:
         """Determine if the service has met shutdown criteria.
 
         This empty hook method must be implemented by subclasses.
@@ -125,7 +125,7 @@ class Service(ABC, LoggingMixin):
         """
 
     @property
-    def can_shutdown(self) -> bool:
+    async def can_shutdown(self) -> bool:
         """Determine if the service is ready to shut down.
 
         User-defined shutdown criteria will not be evaluated when the service is
@@ -140,7 +140,7 @@ class Service(ABC, LoggingMixin):
             return True
 
         try:
-            return self._can_shutdown()
+            return await self._can_shutdown()
         except Exception:
             self.log.exception(
                 "Terminating service due to failure in shutdown check. "
@@ -172,7 +172,7 @@ class Service(ABC, LoggingMixin):
         """
         return self._hc_queue is not None
 
-    def _on_start(self) -> None:
+    async def _on_start(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called on initial entry into Service lifecycle before the main service logic
@@ -181,21 +181,21 @@ class Service(ABC, LoggingMixin):
         """
         self.log.debug(f"Starting {self._service_type}")
 
-    def _on_shutdown(self) -> None:
+    async def _on_shutdown(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called immediately after exiting the main event loop.
         """
         self.log.debug(f"Shutting down {self._service_type}")
 
-    def _on_health_check(self) -> None:
+    async def _on_health_check(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called by the health check thread at the configured frequency.
         """
         self.log.debug(f"Performing health check for {self._service_type}")
 
-    def _on_delay(self) -> None:
+    async def _on_delay(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called at the completion of every event loop iteration when a user-defined delay
@@ -203,7 +203,7 @@ class Service(ABC, LoggingMixin):
         """
         self.log.debug(f"Service delay for {self._service_type}")
 
-    def acknowledge_hc(self) -> None:
+    async def acknowledge_hc(self) -> None:
         """Confirm any requests for an update from the health check queue.
 
         Returns
@@ -222,7 +222,7 @@ class Service(ABC, LoggingMixin):
                 case Service.CMD_HEARTBEAT:
                     # ACK any requests for HC updates
                     self.log.debug("Health check succeeded")
-                    self._on_health_check()
+                    await self._on_health_check()
                 case message:
                     msg = f"Health check sent unknown message: {message}"
                     self.log.debug(msg)
@@ -295,7 +295,7 @@ class Service(ABC, LoggingMixin):
                 self.log.warning(msg)
                 num_missed = 0  # reset to avoid spamming log
 
-    def _start_healthcheck(self) -> None:
+    async def _start_healthcheck(self) -> None:
         """Create a thread for health check updates.
 
         The health check thread is not blocked by the main thread when service
@@ -330,7 +330,7 @@ class Service(ABC, LoggingMixin):
                 )
                 self._hc_thread.start()
 
-    def _terminate_hc(self) -> None:
+    async def _terminate_hc(self) -> None:
         """Send a termination message to the healthcheck thread.
 
         After sending signal, waits for the thread to complete prior to returning.
@@ -348,7 +348,7 @@ class Service(ABC, LoggingMixin):
                 msg = "Health check thread did not terminate before timeout"
                 self.log.warning(msg)
 
-    def _shutdown(self) -> None:
+    async def _shutdown(self) -> None:
         """Perform a clean shutdown of the service.
 
         This method is called when the service is ready to shut down, either the service
@@ -357,8 +357,8 @@ class Service(ABC, LoggingMixin):
         self.log.debug("Shutting down service.")
 
         try:
-            self._terminate_hc()
-            self._on_shutdown()
+            await self._terminate_hc()
+            await self._on_shutdown()
         except Exception:
             self.log.debug("Service shutdown may not have completed.")
             raise
@@ -374,8 +374,8 @@ class Service(ABC, LoggingMixin):
 
         try:
             running = True
-            self._on_start()
-            self._start_healthcheck()
+            await self._on_start()
+            await self._start_healthcheck()
         except Exception as e:
             self.log.exception("Unable to start service.")
             running = False
@@ -383,9 +383,11 @@ class Service(ABC, LoggingMixin):
 
         while running:
             try:
-                self.acknowledge_hc()
-                await self._on_iteration()
-                self._on_iteration_complete()
+                await asyncio.gather(
+                    self.acknowledge_hc(),
+                    self._on_iteration(),
+                )
+                await self._on_iteration_complete()
             except Exception:
                 running = False
                 self.log.exception("Terminating service due to failure in event loop.")
@@ -398,7 +400,7 @@ class Service(ABC, LoggingMixin):
                 continue
 
             # shutdown if service reports completion
-            if self.can_shutdown:
+            if await self.can_shutdown:
                 self.log.info("Service is ready for shutdown.")
                 running = False
                 continue
@@ -406,8 +408,10 @@ class Service(ABC, LoggingMixin):
             # execute delay before next iteration
             if self._config.loop_delay:
                 try:
-                    self._on_delay()
-                    await asyncio.sleep(max(self._config.loop_delay, 0))
+                    await asyncio.gather(
+                        self._on_delay(),
+                        asyncio.sleep(max(self._config.loop_delay, 0)),
+                    )
                 except Exception as e:
                     running = False
                     self.log.exception(
@@ -415,12 +419,12 @@ class Service(ABC, LoggingMixin):
                     )
                     exc = e
 
-        self._shutdown()
+        await self._shutdown()
 
         if exc:
             raise exc
 
-    def _handle_signal(self, sig_num: int, _frame: "FrameType | None") -> None:
+    async def _handle_signal(self, sig_num: int, _frame: "FrameType | None") -> None:
         """Handle OS signals requesting process shutdown.
 
         Parameters
@@ -439,7 +443,7 @@ class Service(ABC, LoggingMixin):
 
         try:
             # perform sub-class specific clean-up
-            self._shutdown()
+            await self._shutdown()
         except Exception:
             print("Unable to perform a clean shutdown for signal.")
 

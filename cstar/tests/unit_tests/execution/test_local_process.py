@@ -2,7 +2,7 @@ import logging
 import subprocess
 from pathlib import Path
 from textwrap import dedent
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -70,7 +70,8 @@ class TestLocalProcess:
         self.mock_popen = self.patcher.start()
         self.mock_popen.return_value = self.mock_subprocess
 
-    def test_initialization_defaults(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_initialization_defaults(self, tmp_path):
         """Ensures that default attributes are correctly applied during initialization.
 
         This test verifies that if `run_path` and `output_file` are not explicitly
@@ -85,9 +86,10 @@ class TestLocalProcess:
         mock_local_process = LocalProcess(
             commands='echo "Hello, World"', run_path=None, output_file=None
         )
+        actual = await mock_local_process.get_status()
         assert mock_local_process.run_path == Path.cwd()
         assert mock_local_process.output_file.name.startswith("cstar_process_")
-        assert mock_local_process.status == ExecutionStatus.UNSUBMITTED
+        assert actual == ExecutionStatus.UNSUBMITTED
 
     def test_str(self):
         mock_local_process = LocalProcess(
@@ -104,6 +106,7 @@ class TestLocalProcess:
         Output file: outfile.out
         Status: unsubmitted"""
         )
+        mock_local_process._status = ExecutionStatus.UNSUBMITTED
 
         assert mock_local_process.__str__() == test_str
 
@@ -123,11 +126,17 @@ class TestLocalProcess:
         State: <status = <ExecutionStatus.UNSUBMITTED: 1>>"""
         )
 
+        mock_local_process.get_status = AsyncMock(
+            return_value=ExecutionStatus.UNSUBMITTED
+        )
+        mock_local_process._status = ExecutionStatus.UNSUBMITTED
+
         assert mock_local_process.__repr__() == test_repr, (
             f"expected \n{test_repr}\n, got \n{mock_local_process.__repr__()}\n"
         )
 
-    def test_start_success(self, tmp_path, mock_local_process):
+    @pytest.mark.asyncio
+    async def test_start_success(self, tmp_path, mock_local_process):
         """Verifies that the subprocess starts successfully with valid commands.
 
         This test ensures that the `start` method:
@@ -165,9 +174,10 @@ class TestLocalProcess:
             stdout=mock_open.return_value,
             stderr=subprocess.STDOUT,
         )
-        assert mock_local_process.status == ExecutionStatus.RUNNING
+        assert await mock_local_process.get_status() == ExecutionStatus.RUNNING
 
-    def test_status(self, tmp_path, mock_local_process):
+    @pytest.mark.asyncio
+    async def test_status(self, tmp_path, mock_local_process):
         """Tests that the `status` property reflects the subprocess lifecycle.
 
         This test covers the following states:
@@ -194,12 +204,12 @@ class TestLocalProcess:
         - That the `status` property reflects the correct `ExecutionStatus` for
           each stage of the process lifecycle.
         """
-        assert mock_local_process.status == ExecutionStatus.UNSUBMITTED
+        assert await mock_local_process.get_status() == ExecutionStatus.UNSUBMITTED
 
         # After starting: RUNNING
         self.mock_subprocess.poll.return_value = None  # Simulate running process
         mock_local_process.start()
-        assert mock_local_process.status == ExecutionStatus.RUNNING
+        assert await mock_local_process.get_status() == ExecutionStatus.RUNNING
         assert mock_local_process._process is not None
 
         # After completion: COMPLETED
@@ -207,7 +217,7 @@ class TestLocalProcess:
         self.mock_subprocess.returncode = 0
 
         mock_local_process.start()
-        assert mock_local_process.status == ExecutionStatus.COMPLETED
+        assert await mock_local_process.get_status() == ExecutionStatus.COMPLETED
         assert mock_local_process._process is None
 
         # After failure: FAILED
@@ -215,7 +225,7 @@ class TestLocalProcess:
         self.mock_subprocess.returncode = 1
 
         mock_local_process.start()
-        assert mock_local_process.status == ExecutionStatus.FAILED
+        assert await mock_local_process.get_status() == ExecutionStatus.FAILED
 
     def test_drop_process(self, tmp_path, mock_local_process):
         """Tests the behavior of the private _drop_process method.
@@ -267,7 +277,8 @@ class TestLocalProcess:
                 "Await completion or use LocalProcess.cancel()"
             )
 
-    def test_cancel_graceful_termination(self, tmp_path, mock_local_process):
+    @pytest.mark.asyncio
+    async def test_cancel_graceful_termination(self, mock_local_process):
         """Ensures that the `cancel` method gracefully terminates a running process.
 
         This test verifies:
@@ -298,7 +309,8 @@ class TestLocalProcess:
         mock_local_process.start()
 
         # Verify the process has started
-        assert mock_local_process.status == ExecutionStatus.RUNNING
+        status = await mock_local_process.get_status()
+        assert status == ExecutionStatus.RUNNING
         assert (
             mock_local_process._process is self.mock_subprocess
         )  # Ensure the process was assigned
@@ -307,12 +319,14 @@ class TestLocalProcess:
         # once while still running [None], once in _drop_process() [termination code]:
         self.mock_subprocess.poll.side_effect = [None, -15]
         # Test graceful termination
-        mock_local_process.cancel()
+        await mock_local_process.cancel()
         self.mock_subprocess.terminate.assert_called_once()  # Ensure terminate() was called
         self.mock_subprocess.kill.assert_not_called()  # kill() should not be called if terminate succeeds
-        assert mock_local_process.status == ExecutionStatus.CANCELLED
+        status = await mock_local_process.get_status()
+        assert status == ExecutionStatus.CANCELLED
 
-    def test_cancel_forceful_termination(self, tmp_path, mock_local_process):
+    @pytest.mark.asyncio
+    async def test_cancel_forceful_termination(self, tmp_path, mock_local_process):
         """Ensures that the `cancel` method forcefully terminates a process if needed.
 
         This test verifies:
@@ -347,7 +361,7 @@ class TestLocalProcess:
         mock_local_process.start()
 
         # Verify the process has started
-        assert mock_local_process.status == ExecutionStatus.RUNNING
+        assert await mock_local_process.get_status() == ExecutionStatus.RUNNING
         assert (
             mock_local_process._process is self.mock_subprocess
         )  # Ensure the process was assigned
@@ -357,15 +371,16 @@ class TestLocalProcess:
         self.mock_subprocess.poll.side_effect = [None, -15]
 
         # Test forceful termination
-        mock_local_process.cancel()
+        await mock_local_process.cancel()
 
         self.mock_subprocess.terminate.assert_called_once()  # Ensure terminate() was called
         self.mock_subprocess.kill.assert_called_once()  # Ensure kill() was called after terminate timeout
 
-        assert mock_local_process.status == ExecutionStatus.CANCELLED
+        assert await mock_local_process.get_status() == ExecutionStatus.CANCELLED
 
-    def test_cancel_non_running_process(
-        self, tmp_path, mock_local_process, caplog: pytest.LogCaptureFixture
+    @pytest.mark.asyncio
+    async def test_cancel_non_running_process(
+        self, mock_local_process, caplog: pytest.LogCaptureFixture
     ):
         """Ensures that `cancel` does not attempt to terminate a non-running process.
 
@@ -402,16 +417,16 @@ class TestLocalProcess:
         caplog.set_level(logging.INFO, logger=mock_local_process.log.name)
 
         # Test cancel on a completed process
-        mock_local_process.cancel()
+        await mock_local_process.cancel()
 
         captured = caplog.text
-        assert (
-            f"Cannot cancel job with status '{mock_local_process.status}'" in captured
-        )
+        actual = await mock_local_process.get_status()
+        assert f"Cannot cancel job with status '{actual}'" in captured
         self.mock_subprocess.terminate.assert_not_called()
         self.mock_subprocess.kill.assert_not_called()
 
-    def test_wait_running_process(self, tmp_path, mock_local_process):
+    @pytest.mark.asyncio
+    async def test_wait_running_process(self, tmp_path, mock_local_process):
         """Ensures that `wait` correctly waits for a running process to complete.
 
         This test verifies:
@@ -441,10 +456,11 @@ class TestLocalProcess:
         mock_local_process._cancelled = False
 
         # Test wait on a running process
-        mock_local_process.wait()
+        await mock_local_process.wait()
         self.mock_subprocess.wait.assert_called_once()  # Ensure `wait` was called on the process
 
-    def test_wait_non_running_process(
+    @pytest.mark.asyncio
+    async def test_wait_non_running_process(
         self, tmp_path, mock_local_process, caplog: pytest.LogCaptureFixture
     ):
         """Ensures that `wait` does not perform actions for non-running processes.
@@ -476,7 +492,7 @@ class TestLocalProcess:
         mock_local_process._cancelled = True
         caplog.set_level(logging.INFO, logger=mock_local_process.log.name)
 
-        mock_local_process.wait()
+        await mock_local_process.wait()
         captured = caplog.text
         assert (
             f"Cannot wait for process with execution status '{ExecutionStatus.CANCELLED}'"

@@ -76,7 +76,7 @@ class LocalProcess(ExecutionHandler):
         base_str += f"\nCommands: {self.commands}"
         base_str += f"\nRun path: {self.run_path}"
         base_str += f"\nOutput file: {self.output_file}"
-        base_str += f"\nStatus: {self.status}"
+        base_str += f"\nStatus: {self._status}"
 
         return base_str
 
@@ -87,7 +87,7 @@ class LocalProcess(ExecutionHandler):
         repr_str += f"\nrun_path = {self.run_path!r}"
         repr_str += "\n)"
 
-        repr_str += f"\nState: <status = {self.status!r}>"
+        repr_str += f"\nState: <status = {self._status!r}>"
 
         return repr_str
 
@@ -131,8 +131,19 @@ class LocalProcess(ExecutionHandler):
             else self._output_file
         )
 
-    @property
-    def status(self) -> ExecutionStatus:
+    # @property
+    # def status(self) -> ExecutionStatus:
+    #     """Return the last status retrieved for this process.
+
+    #     Call `get_status` when an update is required.
+
+    #     Returns
+    #     -------
+    #     ExecutionStatus
+    #     """
+    #     return self._status
+
+    async def get_status(self) -> ExecutionStatus:
         """Retrieve the current status of the local process.
 
         This property determines the status of the process based on its
@@ -151,20 +162,25 @@ class LocalProcess(ExecutionHandler):
         """
         if self._process is not None:
             if self._process.poll() is None:
-                return ExecutionStatus.RUNNING
-            else:
-                self._drop_process()
+                self._status = ExecutionStatus.RUNNING
+                return self._status
+
+            self._drop_process()
 
         if self._cancelled:
-            return ExecutionStatus.CANCELLED
+            self._status = ExecutionStatus.CANCELLED
+            return self._status
 
         match self._returncode:
             case None:
-                return ExecutionStatus.UNSUBMITTED
+                self._status = ExecutionStatus.UNSUBMITTED
+                return self._status
             case 0:
-                return ExecutionStatus.COMPLETED
+                self._status = ExecutionStatus.COMPLETED
+                return self._status
             case _:
-                return ExecutionStatus.FAILED
+                self._status = ExecutionStatus.FAILED
+                return self._status
 
     def _drop_process(self) -> None:
         """Un-sets private attributes associated with a completed subprocess.
@@ -192,7 +208,7 @@ class LocalProcess(ExecutionHandler):
             self._output_file_handle.close()
             self._output_file_handle = None
 
-    def cancel(self):
+    async def cancel(self) -> None:
         """Cancel the local process.
 
         This method terminates the subprocess if it is currently running.
@@ -211,7 +227,7 @@ class LocalProcess(ExecutionHandler):
         --------
         wait : Wait for the local process to finish
         """
-        if self._process and self.status == ExecutionStatus.RUNNING:
+        if self._process and await self.get_status() == ExecutionStatus.RUNNING:
             try:
                 self._process.terminate()  # Send SIGTERM to allow graceful shutdown
                 self._process.wait(timeout=5)  # Wait for it to terminate
@@ -224,19 +240,19 @@ class LocalProcess(ExecutionHandler):
                 self._cancelled = True
                 self._drop_process()
         else:
-            self.log.info(f"Cannot cancel job with status '{self.status}'")
+            self.log.info(f"Cannot cancel job with status '{self._status}'")
             return
 
-    def wait(self):
+    async def wait(self):
         """Wait for the local process to finish.
 
         See Also
         --------
         cancel : end the current process
         """
-        if self.status == ExecutionStatus.RUNNING:
+        if await self.get_status() == ExecutionStatus.RUNNING:
             self._process.wait()
         else:
             self.log.info(
-                f"Cannot wait for process with execution status '{self.status}'"
+                f"Cannot wait for process with execution status '{self._status}'"
             )

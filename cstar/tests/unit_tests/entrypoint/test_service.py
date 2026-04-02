@@ -54,13 +54,13 @@ class PrintingService(Service):
         """Return the number of iterations executed."""
         return self.metrics["_on_iteration"]
 
-    def _on_start(self) -> None:
-        super()._on_start()
+    async def _on_start(self) -> None:
+        await super()._on_start()
         self.log.debug("Running PrintingService._on_start")
         self.start_time = time.time()
 
-    def _on_delay(self) -> None:
-        super()._on_delay()
+    async def _on_delay(self) -> None:
+        await super()._on_delay()
         self.log.debug("Running PrintingService._on_delay")
         self.test_queue.put_nowait("_on_delay")
 
@@ -75,8 +75,8 @@ class PrintingService(Service):
         self.test_queue.put_nowait("_on_iteration")
         self.summarize()  # update each loop; don't let queues grow too large
 
-    def _on_iteration_complete(self) -> None:
-        super()._on_iteration_complete()
+    async def _on_iteration_complete(self) -> None:
+        await super()._on_iteration_complete()
         self.log.debug("Running PrintingService._on_iteration_complete")
         self.test_queue.put_nowait("_on_iteration_complete")
         self.summarize()
@@ -86,8 +86,8 @@ class PrintingService(Service):
         """Return the number of health-checks executed."""
         return self.metrics["_on_health_check"]
 
-    def _on_health_check(self) -> None:
-        super()._on_health_check()
+    async def _on_health_check(self) -> None:
+        await super()._on_health_check()
         self.log.debug("Running PrintingService._on_health_check")
         self.test_queue.put_nowait("_on_health_check")
 
@@ -96,8 +96,8 @@ class PrintingService(Service):
         """Return the number of shutdown checks executed."""
         return self.metrics["_can_shutdown"]
 
-    def _can_shutdown(self) -> bool:
-        super()._can_shutdown()  # type: ignore[safe-super]
+    async def _can_shutdown(self) -> bool:
+        await super()._can_shutdown()  # type: ignore[safe-super]
         self.log.debug("Running PrintingService._can_shutdown")
         self.test_queue.put_nowait("_can_shutdown")
 
@@ -113,8 +113,8 @@ class PrintingService(Service):
 
         return self._do_shutdown
 
-    def _on_shutdown(self) -> None:
-        super()._on_shutdown()
+    async def _on_shutdown(self) -> None:
+        await super()._on_shutdown()
         self.log.debug("Running PrintingService._on_shutdown")
         self.test_queue.put_nowait("_on_shutdown")
         self.summarize()
@@ -146,11 +146,11 @@ class PrintingService(Service):
 
         return self.metrics
 
-    def __enter__(self) -> t.Self:
+    async def __aenter__(self) -> t.Self:
         """Context manager entry point."""
         return self
 
-    def __exit__(
+    async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
@@ -162,7 +162,7 @@ class PrintingService(Service):
                 "Exception occurred in service context: %s",
                 exc_value,
             )
-        self._shutdown()
+        await self._shutdown()
 
 
 async def run_a_printer() -> None:
@@ -258,11 +258,11 @@ async def test_event_loop_shutdown(loop_count: int) -> None:
     service = PrintingService(max_iterations=loop_count)
 
     # Service should run until `loop_count` is exceeded
-    assert not service.can_shutdown
+    assert not await service.can_shutdown
 
     await service.execute()
 
-    assert service.can_shutdown
+    assert await service.can_shutdown
     assert service.n_on_iteration >= loop_count - 1
 
 
@@ -270,7 +270,7 @@ async def test_event_loop_shutdown(loop_count: int) -> None:
 @pytest.mark.parametrize("loop_count", [0, 10, 50])
 async def test_event_loop_task_service(loop_count: int) -> None:
     """Verify that  using as_service=False executes _on_iteration 1x."""
-    with PrintingService(
+    async with PrintingService(
         max_iterations=loop_count,
         as_service=False,
     ) as service:
@@ -279,7 +279,7 @@ async def test_event_loop_task_service(loop_count: int) -> None:
 
         # Service should run until _on_iteration is invoked
         # ...but internally it should aggregate the service config.
-        assert not service._can_shutdown()  # noqa: SLF001
+        assert not await service._can_shutdown()  # noqa: SLF001
         assert service.can_shutdown
 
         # .execute should run the complete service life-cycle
@@ -287,7 +287,7 @@ async def test_event_loop_task_service(loop_count: int) -> None:
 
         # Service should ignore the "max iter" shutdown clause and use the
         # _as_service flag to exit after one invocation
-        assert service.can_shutdown
+        assert await service.can_shutdown
 
 
 @pytest.mark.asyncio
@@ -299,26 +299,26 @@ async def test_event_loop_hc_start(loop_count: int) -> None:
     execute a single time.
     """
     # mock up the HC start method to count calls
-    mock_hc_start = mock.MagicMock()
+    mock_hc_start = mock.AsyncMock()
 
     # Configure the health check to update every event loop iteration
     # (number of start calls shouldn't be affected)
-    with (
-        mock.patch.object(
+    async with (
+        PrintingService(max_iterations=loop_count, hc_freq=1) as service,
+    ):
+        with mock.patch.object(
             Service,
             "_start_healthcheck",
             mock_hc_start,
-        ),
-        PrintingService(max_iterations=loop_count, hc_freq=1) as service,
-    ):
-        # Confirm it isn't called on instantiation
-        assert mock_hc_start.call_count == 0
+        ):
+            # Confirm it isn't called on instantiation
+            assert mock_hc_start.call_count == 0
 
-        # .execute starts the health check thread
-        await service.execute()
+            # .execute starts the health check thread
+            await service.execute()
 
-        # Confirm it was called a single time during `execute`
-        assert mock_hc_start.call_count == 1
+            # Confirm it was called a single time during `execute`
+            assert mock_hc_start.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -339,7 +339,7 @@ async def test_event_loop_hc_freq(max_duration: float, delay: float) -> None:
     expected_max_hc_calls = ceil(max_duration / delay)
 
     # Configure the health check at the same rate as the HC
-    with PrintingService(
+    async with PrintingService(
         max_duration=max_duration,
         hc_freq=delay,
         delay=delay,
@@ -367,7 +367,7 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
     Confirm a frequency greater than zero is honored.
     """
     # Configure the test service to run for <max_duration> seconds.
-    with PrintingService(
+    async with PrintingService(
         as_service=True,
         hc_freq=frequency,
         max_duration=max_duration,
@@ -403,7 +403,7 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
     expected_duration = loop_delay * n_loops
 
     # Configure the test service to run for a fixed number of loops
-    with PrintingService(
+    async with PrintingService(
         as_service=True,
         delay=loop_delay,
         max_iterations=loop_count,

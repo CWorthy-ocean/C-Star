@@ -1019,7 +1019,8 @@ class TestProcessingAndExecution:
     @mock.patch.object(ROMSInputDataset, "get")
     @mock.patch.object(AdditionalCode, "get")
     @mock.patch.object(ExternalCodeBase, "setup")
-    def test_setup(
+    @pytest.mark.asyncio
+    async def test_setup(
         self,
         mock_externalcodebase_setup,
         mock_additionalcode_get,
@@ -1029,7 +1030,7 @@ class TestProcessingAndExecution:
         """Tests that `setup` correctly fetches and organizes simulation components."""
         sim = stub_romssimulation
 
-        sim.setup()
+        await sim.setup()
 
         assert mock_externalcodebase_setup.call_count == 2
         assert mock_additionalcode_get.call_count == 2
@@ -1240,7 +1241,8 @@ class TestProcessingAndExecution:
 
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @mock.patch("subprocess.run")
-    def test_build(
+    @pytest.mark.asyncio
+    async def test_build(
         self,
         mock_subprocess,
         mock_get_hash,
@@ -1264,7 +1266,7 @@ class TestProcessingAndExecution:
         )
         mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
         mock_get_hash.return_value = "mockhash123"
-        sim.build()
+        await sim.build()
         assert mock_subprocess.call_count == 2
         mock_subprocess.assert_any_call(
             "make compile_clean",
@@ -1288,7 +1290,8 @@ class TestProcessingAndExecution:
         "cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash"
     )  # Mock hash function
     @mock.patch("subprocess.run")  # Mock subprocess (should not be called)
-    def test_build_no_rebuild(
+    @pytest.mark.asyncio
+    async def test_build_no_rebuild(
         self,
         mock_subprocess,
         mock_get_hash,
@@ -1325,7 +1328,7 @@ class TestProcessingAndExecution:
                 paths=[build_dir / f.basename for f in sim.compile_time_code.source]
             )
             sim.runtime_code._working_copy = stageddatacollection_remote_files()
-            sim.build(rebuild=False)
+            await sim.build(rebuild=False)
 
             # Ensure early exit exception was triggered
             expected_msg = (
@@ -1340,9 +1343,10 @@ class TestProcessingAndExecution:
             # Ensure subprocess.run was *not* called
             mock_subprocess.assert_not_called()
 
+    @pytest.mark.asyncio
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @mock.patch("subprocess.run")
-    def test_build_raises_if_make_clean_error(
+    async def test_build_raises_if_make_clean_error(
         self,
         mock_subprocess,
         mock_get_hash,
@@ -1368,7 +1372,7 @@ class TestProcessingAndExecution:
         with pytest.raises(
             RuntimeError, match="Error when cleaning existing ROMS compilation."
         ):
-            sim.build()
+            await sim.build()
         assert mock_subprocess.call_count == 1
         mock_subprocess.assert_any_call(
             "make compile_clean",
@@ -1380,7 +1384,8 @@ class TestProcessingAndExecution:
 
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @mock.patch("subprocess.run")
-    def test_build_raises_if_make_error(
+    @pytest.mark.asyncio
+    async def test_build_raises_if_make_error(
         self,
         mock_subprocess,
         mock_get_hash,
@@ -1403,7 +1408,7 @@ class TestProcessingAndExecution:
         mock_get_hash.return_value = "mockhash123"
 
         with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
-            sim.build()
+            await sim.build()
         assert mock_subprocess.call_count == 1
 
         mock_subprocess.assert_any_call(
@@ -1414,7 +1419,8 @@ class TestProcessingAndExecution:
             text=True,
         )
 
-    def test_build_raises_if_no_build_dir(self, stub_romssimulation):
+    @pytest.mark.asyncio
+    async def test_build_raises_if_no_build_dir(self, stub_romssimulation):
         """Tests that `build` raises an error if no build directory is set.
 
         This test verifies that calling `build` without a valid `compile_time_code.working_path`
@@ -1430,10 +1436,11 @@ class TestProcessingAndExecution:
         """
         sim = stub_romssimulation
         with pytest.raises(ValueError, match="Unable to compile ROMSSimulation"):
-            sim.build()
+            await sim.build()
 
     @mock.patch.object(ROMSInputDataset, "partition")  # Mock partition method
-    def test_pre_run(self, mock_partition, stub_romssimulation):
+    @pytest.mark.asyncio
+    async def test_pre_run(self, mock_partition, stub_romssimulation):
         """Tests that `pre_run` partitions any locally available input datasets.
 
         This test verifies that `pre_run` correctly calls `partition()` on input datasets
@@ -1453,7 +1460,7 @@ class TestProcessingAndExecution:
             mock_input_datasets.return_value = [dataset_1, dataset_2, dataset_3]
 
             # Call the method
-            sim.pre_run()
+            await sim.pre_run()
 
             # Assert that partition() was called only on datasets that exist locally
             dataset_1.partition.assert_called_once_with(
@@ -1464,7 +1471,10 @@ class TestProcessingAndExecution:
                 np_xi=2, np_eta=3, overwrite_existing_files=False
             )
 
-    def test_run_raises_if_no_runtime_code_working_copy(self, stub_romssimulation):
+    @pytest.mark.asyncio
+    async def test_run_raises_if_no_runtime_code_working_copy(
+        self, stub_romssimulation
+    ):
         """Confirm that ROMSSimulation.run() raises a FileNotFoundError if
         ROMSSimulation.runtime_code does not exist locally.
         """
@@ -1474,9 +1484,10 @@ class TestProcessingAndExecution:
             FileNotFoundError,
             match="Local copy of ROMSSimulation.runtime_code does not exist.",
         ):
-            sim.run()
+            await sim.run()
 
-    def test_run_raises_if_no_executable(self, stub_romssimulation):
+    @pytest.mark.asyncio
+    async def test_run_raises_if_no_executable(self, stub_romssimulation):
         """Tests that `run` raises an error if no executable is found.
 
         This test ensures that calling `run` without a defined `exe_path` results in
@@ -1492,9 +1503,10 @@ class TestProcessingAndExecution:
         """
         sim = stub_romssimulation
         with pytest.raises(ValueError, match="unable to find ROMS executable"):
-            sim.run()
+            await sim.run()
 
-    def test_run_raises_if_no_node_distribution(self, stub_romssimulation):
+    @pytest.mark.asyncio
+    async def test_run_raises_if_no_node_distribution(self, stub_romssimulation):
         """Tests that `run` raises an error if node distribution is not set.
 
         This test ensures that if `n_procs_tot` is `None`, calling `run` will
@@ -1510,13 +1522,14 @@ class TestProcessingAndExecution:
             with pytest.raises(
                 ValueError, match="Unable to calculate node distribution"
             ):
-                sim.run()
+                await sim.run()
 
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
-    def test_run_local_execution(
+    @pytest.mark.asyncio
+    async def test_run_local_execution(
         self,
         mock_runtime_settings,
         mock_persist,
@@ -1550,7 +1563,7 @@ class TestProcessingAndExecution:
                 sources=sim.runtime_code.source,
             )
 
-            execution_handler = sim.run()
+            execution_handler = await sim.run()
 
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
@@ -1580,7 +1593,8 @@ class TestProcessingAndExecution:
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
-    def test_run_with_scheduler(
+    @pytest.mark.asyncio
+    async def test_run_with_scheduler(
         self,
         mock_runtime_settings,
         mock_persist,
@@ -1640,7 +1654,7 @@ class TestProcessingAndExecution:
             mock_create_job.return_value = mock_job_instance
 
             # Call `run()` without explicitly passing `queue_name` and `walltime`
-            execution_handler = sim.run(account_key="some_key")
+            execution_handler = await sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
                 commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/ROMSTest.in",
                 job_name=None,
@@ -1662,7 +1676,8 @@ class TestProcessingAndExecution:
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
-    def test_run_with_scheduler_raises_if_no_account_key(
+    @pytest.mark.asyncio
+    async def test_run_with_scheduler_raises_if_no_account_key(
         self,
         mock_runtime_settings,
         stub_romssimulation,
@@ -1701,10 +1716,11 @@ class TestProcessingAndExecution:
                     "please call Simulation.run() with a value for account_key"
                 ),
             ):
-                sim.run()
+                await sim.run()
             mock_create_job.assert_not_called()
 
-    def test_post_run_raises_if_called_before_run(self, stub_romssimulation):
+    @pytest.mark.asyncio
+    async def test_post_run_raises_if_called_before_run(self, stub_romssimulation):
         """Tests that `post_run` raises a `RuntimeError` if called before `run`.
 
         This test ensures that attempting to execute `post_run` before the simulation has been run
@@ -1726,9 +1742,10 @@ class TestProcessingAndExecution:
                 "Cannot call 'ROMSSimulation.post_run()' before calling 'ROMSSimulation.run()'"
             ),
         ):
-            sim.post_run()
+            await sim.post_run()
 
-    def test_post_run_raises_if_still_running(self, stub_romssimulation):
+    @pytest.mark.asyncio
+    async def test_post_run_raises_if_still_running(self, stub_romssimulation):
         """Tests that `post_run` raises a `RuntimeError` if the simulation is still
         running.
 
@@ -1739,7 +1756,9 @@ class TestProcessingAndExecution:
 
         # Mock `_execution_handler` and set its `status` attribute to something *not* COMPLETED
         sim._execution_handler = mock.MagicMock()
-        sim._execution_handler.status = ExecutionStatus.RUNNING
+        sim._execution_handler.get_status = mock.AsyncMock(
+            return_value=ExecutionStatus.RUNNING
+        )
 
         # Ensure RuntimeError is raised
         with pytest.raises(
@@ -1748,11 +1767,12 @@ class TestProcessingAndExecution:
                 "Cannot call 'ROMSSimulation.post_run()' until the ROMS run is completed"
             ),
         ):
-            sim.post_run()
+            await sim.post_run()
 
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch("subprocess.run")  # Mock ncjoin execution
-    def test_post_run_merges_netcdf_files(
+    @pytest.mark.asyncio
+    async def test_post_run_merges_netcdf_files(
         self, mock_subprocess, mock_persist, stub_romssimulation: ROMSSimulation
     ):
         """Tests that `post_run` correctly merges partitioned NetCDF output files.
@@ -1781,13 +1801,13 @@ class TestProcessingAndExecution:
 
         # Mock execution handler
         sim._execution_handler = mock.MagicMock()
-        sim._execution_handler.status = (
-            ExecutionStatus.COMPLETED
+        sim._execution_handler.get_status = mock.AsyncMock(
+            return_value=ExecutionStatus.COMPLETED
         )  # Ensure run is complete
 
         mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
         # Call post_run
-        sim.post_run()
+        await sim.post_run()
 
         # Check that ncjoin was called correctly
         mock_subprocess.assert_any_call(
@@ -1820,7 +1840,8 @@ class TestProcessingAndExecution:
 
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
-    def test_post_run_prints_message_if_no_files(
+    @pytest.mark.asyncio
+    async def test_post_run_prints_message_if_no_files(
         self,
         mock_glob,
         mock_persist,
@@ -1836,13 +1857,13 @@ class TestProcessingAndExecution:
         # Setup
         sim = stub_romssimulation
         sim._execution_handler = mock.MagicMock()
-        sim._execution_handler.status = (
-            ExecutionStatus.COMPLETED
+        sim._execution_handler.get_status = mock.AsyncMock(
+            return_value=ExecutionStatus.COMPLETED
         )  # Ensure simulation is complete
         caplog.set_level(logging.WARNING)
 
         # Call post_run
-        sim.post_run()
+        await sim.post_run()
 
         # Check that the expected messages were logged
         captured = caplog.text
@@ -1855,7 +1876,8 @@ class TestProcessingAndExecution:
 
     @mock.patch("subprocess.run")  # Mock subprocess.run to simulate a failure
     @mock.patch.object(Path, "glob")  # Mock glob to return fake files
-    def test_post_run_raises_error_if_ncjoin_fails(
+    @pytest.mark.asyncio
+    async def test_post_run_raises_error_if_ncjoin_fails(
         self, mock_glob, mock_subprocess, stub_romssimulation
     ):
         """Tests that `post_run` raises a `RuntimeError` if `ncjoin` fails during file
@@ -1883,15 +1905,16 @@ class TestProcessingAndExecution:
 
         # Mock execution handler
         sim._execution_handler = mock.MagicMock()
-        sim._execution_handler.status = (
-            ExecutionStatus.COMPLETED
-        )  # Ensure run is complete
+        # Simulate a completed run
+        sim._execution_handler.get_status = mock.AsyncMock(
+            return_value=ExecutionStatus.COMPLETED
+        )
 
         # Call post_run and expect error
         with pytest.raises(
             RuntimeError, match="Command `ncjoin ocean_his.20240101000000.*.nc` failed."
         ):
-            sim.post_run()
+            await sim.post_run()
 
         mock_subprocess.assert_called_once_with(
             "ncjoin ocean_his.20240101000000.*.nc",

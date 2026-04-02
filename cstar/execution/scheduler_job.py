@@ -232,6 +232,27 @@ class SlurmBatch:
         yield from self.steps
 
 
+def get_slurm_steps_sync(job_id: str | int) -> tuple[SlurmStep, ...]:
+    """Retrieve job metadata from SLURM synchronously.
+
+    Parameters
+    ----------
+    job_id: str | int
+        The job_id to check
+
+    Returns
+    -------
+    tuple[SlurmStep, ...]
+        All step metadata retrieved for the job_id
+    """
+    format_string = SacctFieldMeta.as_format_string()
+    sacct_cmd = f"sacct -j {job_id} --format={format_string} --noheader"
+    msg_err = f"Failed to retrieve job status using {sacct_cmd}."
+    stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
+
+    return SlurmStep.many_from_sacct(stdout)
+
+
 async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
     """Retrieve job metadata from SLURM.
 
@@ -245,14 +266,22 @@ async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
     tuple[SlurmStep, ...]
         All step metadata retrieved for the job_id
     """
-    format_string = SacctFieldMeta.as_format_string()
-    sacct_cmd = f"sacct -j {job_id} --format={format_string} --noheader"
-    msg_err = f"Failed to retrieve job status using {sacct_cmd}."
-    stdout = await asyncio.to_thread(
-        _run_cmd, sacct_cmd, msg_err=msg_err, raise_on_error=True
-    )
+    return await asyncio.to_thread(get_slurm_steps_sync, job_id)
 
-    return SlurmStep.many_from_sacct(stdout)
+
+def get_slurm_batch_sync(job_id: str | int) -> SlurmBatch:
+    """Retrieve batch job metadata from SLURM synchronously.
+
+    Parameters
+    ----------
+    job_id : str | int
+
+    Returns
+    -------
+    SlurmBatch
+    """
+    steps = get_slurm_steps_sync(job_id)
+    return SlurmBatch(steps)
 
 
 async def get_slurm_batch(job_id: str | int) -> SlurmBatch:
@@ -266,8 +295,7 @@ async def get_slurm_batch(job_id: str | int) -> SlurmBatch:
     -------
     SlurmBatch
     """
-    steps = await get_slurm_steps(job_id)
-    return SlurmBatch(steps)
+    return await asyncio.to_thread(get_slurm_batch_sync, job_id)
 
 
 async def get_slurm_batches(
@@ -743,9 +771,8 @@ class SchedulerJob(ExecutionHandler, ABC):
         """
         pass
 
-    @property
     @abstractmethod
-    def status(self) -> ExecutionStatus:
+    async def get_status(self) -> ExecutionStatus:
         """Retrieve the current status of the job.
 
         This method queries the underlying scheduler to determine the current status of
@@ -848,8 +875,7 @@ class SlurmJob(SchedulerJob):
 
     _batch: SlurmBatch | None = None
 
-    @property
-    def status(self) -> ExecutionStatus:
+    async def get_status(self) -> ExecutionStatus:
         """Retrieve the current status of the job from the SLURM scheduler.
 
         This property queries SLURM using the `sacct` command to determine the job's
@@ -872,9 +898,22 @@ class SlurmJob(SchedulerJob):
             If the command to retrieve the job status fails or returns an unexpected result.
         """
         if batch := self.get_batch():
-            return batch.job.status
+            self._status = batch.job.status
+            return self._status
 
-        return ExecutionStatus.UNSUBMITTED
+        self._status = ExecutionStatus.UNSUBMITTED
+        return self._status
+
+    async def async_get_batch(self) -> SlurmBatch | None:
+        if self.id is None:
+            return None
+
+        # avoid refreshing status if the job is done
+        if self._batch is None or not ExecutionStatus.is_terminal(
+            self._batch.job.status
+        ):
+            self._batch = await get_slurm_batch(self.id)
+        return self._batch
 
     def get_batch(self) -> SlurmBatch | None:
         if self.id is None:
@@ -884,7 +923,7 @@ class SlurmJob(SchedulerJob):
         if self._batch is None or not ExecutionStatus.is_terminal(
             self._batch.job.status
         ):
-            self._batch = asyncio.run(get_slurm_batch(self.id))
+            self._batch = get_slurm_batch_sync(self.id)
         return self._batch
 
     @property
@@ -980,7 +1019,7 @@ class SlurmJob(SchedulerJob):
         else:
             raise RuntimeError(f"Failed to parse job ID from sbatch output: {stdout}")
 
-    def cancel(self):
+    async def cancel(self):
         """Cancel the job in the SLURM scheduler.
 
         This method cancels the job using the SLURM `scancel` command and provides
@@ -993,8 +1032,11 @@ class SlurmJob(SchedulerJob):
         RuntimeError
             If the `scancel` command fails or returns a non-zero exit code.
         """
-        if self.status not in {ExecutionStatus.RUNNING, ExecutionStatus.PENDING}:
-            self.log.info(f"Cannot cancel job with status '{self.status}'")
+        if await self.get_status() not in {
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.PENDING,
+        }:
+            self.log.info(f"Cannot cancel job with status '{self._status}'")
             return
 
         _run_cmd(
@@ -1089,8 +1131,7 @@ class PBSJob(SchedulerJob):
         scheduler_script += f"\n\n{self.commands}"
         return scheduler_script
 
-    @property
-    def status(self) -> ExecutionStatus:
+    async def get_status(self) -> ExecutionStatus:
         """Retrieve the current status of the job from the PBS scheduler.
 
         This property queries PBS using the `qstat` command to determine the job's
@@ -1115,7 +1156,8 @@ class PBSJob(SchedulerJob):
             If the `qstat` command fails or the job cannot be found in the scheduler's records.
         """
         if self.id is None:
-            return ExecutionStatus.UNSUBMITTED
+            self._status = ExecutionStatus.UNSUBMITTED
+            return self._status
 
         qstat_cmd = f"qstat -x -f -F json {self.id}"
         msg_err = f"Failed to retrieve job status using {qstat_cmd}."
@@ -1142,17 +1184,19 @@ class PBSJob(SchedulerJob):
             # Handle specific cases for "F" (Finished)
             if job_state == "F":
                 exit_status = job_info.get("Exit_status", 1)
-                return (
+                self._status = (
                     ExecutionStatus.COMPLETED
                     if exit_status == 0
                     else ExecutionStatus.FAILED
                 )
+                return self._status
             else:
                 # Default to UNKNOWN for unmapped states
-                return pbs_status_map.get(job_state, ExecutionStatus.UNKNOWN)
+                self._status = pbs_status_map.get(job_state, ExecutionStatus.UNKNOWN)
+                return self._status
 
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"Failed to parse JSON from qstat output: {e}")
+            raise RuntimeError(f"Failed to parse JSON from qstat output: {e}") from e
 
     def submit(self) -> int | None:
         """Submit the job to the PBS scheduler.
@@ -1190,7 +1234,7 @@ class PBSJob(SchedulerJob):
         self._id = int(job_id_full.split(".")[0])
         return self._id
 
-    def cancel(self):
+    async def cancel(self):
         """Cancel the job in the PBS scheduler.
 
         This method cancels the job using the PBS `qdel` command and provides feedback
@@ -1202,12 +1246,13 @@ class PBSJob(SchedulerJob):
         RuntimeError
             If the `qdel` command fails or returns a non-zero exit code.
         """
-        if self.status not in {
+        self._status = await self.get_status()
+        if self._status not in {
             ExecutionStatus.RUNNING,
             ExecutionStatus.PENDING,
             ExecutionStatus.HELD,
         }:
-            self.log.info(f"Cannot cancel job with status {self.status}")
+            self.log.info(f"Cannot cancel job with status {self._status}")
             return
 
         _run_cmd(

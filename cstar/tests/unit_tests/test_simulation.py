@@ -2,7 +2,7 @@ import logging
 import pickle
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -492,7 +492,8 @@ class TestSimulationPersistence:
         sim.persist()
         assert sim.directory / "simulation_state.pkl", "Persisted file was not created."
 
-    def test_persist_and_restore(self, stub_simulation):
+    @pytest.mark.asyncio
+    async def test_persist_and_restore(self, stub_simulation):
         """Test that `persist()` and `restore()` correctly save and reload a
         `Simulation`.
 
@@ -509,8 +510,8 @@ class TestSimulationPersistence:
         - The serialized version of the restored instance matches the original.
         """
         sim = stub_simulation
-        sim.persist()
-        restored_sim = StubSimulation.restore(sim.directory)
+        await sim.persist()
+        restored_sim = await StubSimulation.restore(sim.directory)
 
         # Also compare serialized versions
         assert sim.to_dict() == restored_sim.to_dict(), "Data mismatch after restore"
@@ -519,7 +520,8 @@ class TestSimulationPersistence:
             "Serialized data mismatch after restore"
         )
 
-    def test_restore_missing_file(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_restore_missing_file(self, tmp_path):
         """Test that `restore()` raises an error when the state file is missing.
 
         This test ensures that attempting to restore a `Simulation` instance fails
@@ -535,9 +537,10 @@ class TestSimulationPersistence:
           without a saved state file.
         """
         with pytest.raises(FileNotFoundError):
-            StubSimulation.restore(tmp_path)
+            await StubSimulation.restore(tmp_path)
 
-    def test_persist_raises_error_if_simulation_is_running(self, stub_simulation):
+    @pytest.mark.asyncio
+    async def test_persist_raises_error_if_simulation_is_running(self, stub_simulation):
         """Test `persist()` raises an error if it is running in a local process.
 
         This test ensures that calling `persist()` while the simulation has an
@@ -556,7 +559,7 @@ class TestSimulationPersistence:
         """
         sim = stub_simulation
         mock_handler = MagicMock(spec=LocalProcess)
-        mock_handler.status = ExecutionStatus.RUNNING
+        mock_handler.get_status = AsyncMock(return_value=ExecutionStatus.RUNNING)
 
         # Assign our mock execution handler to the simulation
         sim._execution_handler = mock_handler
@@ -564,7 +567,7 @@ class TestSimulationPersistence:
         with pytest.raises(
             RuntimeError, match="at least one local process is currently running"
         ):
-            sim.persist()
+            await sim.persist()
 
 
 class TestSimulationRestart:

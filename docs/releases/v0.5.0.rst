@@ -16,6 +16,7 @@ Breaking Changes
 - Modified parameters to `DagStatus.__init__`
 - Removed `workplan-monitor` CLI command
 - Removed `dag_runner.attach_to_run` (duplicates `process_plan` functionality)
+- Public API of `Simulation`, `Service`, `ExecutionHandler` (and subclasses thereof) converted to `async`
 
 New features
 ~~~~~~~~~~~~
