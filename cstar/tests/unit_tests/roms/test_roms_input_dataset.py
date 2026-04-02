@@ -698,6 +698,15 @@ class TestROMSInputDatasetPartition:
         ):
             romsinputdataset_local_netcdf.path_for_roms
 
+    @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
+    def test_partition_skips_if_not_partitionable(
+        self, mock_partition_netcdf, romsinputdataset_local_netcdf
+    ):
+        """partition() returns immediately without partitioning when partitionable=False."""
+        romsinputdataset_local_netcdf.partitionable = False
+        romsinputdataset_local_netcdf.partition(np_xi=2, np_eta=3)
+        mock_partition_netcdf.assert_not_called()
+
 
 def test_correction_cannot_be_yaml(
     mocksourcedata_remote_text_file, roms_forcing_corrections

@@ -211,6 +211,9 @@ class ROMSInputDataset(InputDataset, ABC):
         - This method sets the ROMSInputDataset.partitioning attribute
         """
         if not self.partitionable:
+            self.log.info(
+                f"⏭️  {self.__class__.__name__} does not need to be partitioned, skipping"
+            )
             return
 
         # Helper functions
