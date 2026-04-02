@@ -17,7 +17,7 @@ code:
 
   run_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
-    branch: main
+    branch: 9c92011c10400b3f39f59247c41de7d67e3c220c
     filter:
       files:
         - roms.in
@@ -27,7 +27,7 @@ code:
       directory: wales-toy-domain/roms_runtime_code
   compile_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
-    branch: main
+    branch: 9c92011c10400b3f39f59247c41de7d67e3c220c
     filter:
       directory: wales-toy-domain/roms_compile_time_code
       files:
