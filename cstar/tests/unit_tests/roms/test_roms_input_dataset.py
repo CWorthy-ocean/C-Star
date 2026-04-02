@@ -297,6 +297,56 @@ class TestROMSInputDatasetGet:
         ]
         assert dataset.working_copy.paths == expected_paths
 
+    def test_get_calls_linker_when_set(
+        self, romsinputdataset_local_netcdf, stagedfile_remote_source, mock_path_resolve
+    ):
+        """get() calls linker.validate_opt() and linker.link() when linker is set."""
+        dataset = romsinputdataset_local_netcdf
+        mock_linker = mock.Mock(spec=DatasetLinker)
+        dataset.linker = mock_linker
+
+        staged = stagedfile_remote_source()
+        with mock.patch.object(
+            type(dataset),
+            "working_copy",
+            new_callable=mock.PropertyMock,
+            return_value=staged,
+        ):
+            dataset.get(local_dir=Path("some/local/dir"))
+
+        mock_linker.validate_opt.assert_called_once()
+        mock_linker.link.assert_called_once_with(staged.path)
+
+    def test_get_skips_linker_when_not_set(
+        self, romsinputdataset_local_netcdf, mock_path_resolve
+    ):
+        """get() does not call any linker methods when linker is None."""
+        dataset = romsinputdataset_local_netcdf
+        assert dataset.linker is None
+        # No linker calls should happen; just verify get() completes without error
+        dataset.get(local_dir=Path("some/local/dir"))
+
+    def test_get_raises_if_linker_set_but_working_copy_is_not_staged_file(
+        self,
+        romsinputdataset_local_netcdf,
+        stageddatacollection_remote_files,
+        mock_path_resolve,
+    ):
+        """get() raises CstarExpectationFailed when linker is set but working_copy is a collection."""
+        dataset = romsinputdataset_local_netcdf
+        mock_linker = mock.Mock(spec=DatasetLinker)
+        dataset.linker = mock_linker
+
+        collection = stageddatacollection_remote_files()
+        with mock.patch.object(
+            type(dataset),
+            "working_copy",
+            new_callable=mock.PropertyMock,
+            return_value=collection,
+        ):
+            with pytest.raises(CstarExpectationFailed, match="non-file datasets"):
+                dataset.get(local_dir=Path("some/local/dir"))
+
 
 class TestROMSInputDatasetPartition:
     """Test class for the `ROMSInputDataset.partition` method."""
