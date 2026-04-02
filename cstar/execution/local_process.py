@@ -131,18 +131,6 @@ class LocalProcess(ExecutionHandler):
             else self._output_file
         )
 
-    # @property
-    # def status(self) -> ExecutionStatus:
-    #     """Return the last status retrieved for this process.
-
-    #     Call `get_status` when an update is required.
-
-    #     Returns
-    #     -------
-    #     ExecutionStatus
-    #     """
-    #     return self._status
-
     async def get_status(self) -> ExecutionStatus:
         """Retrieve the current status of the local process.
 
