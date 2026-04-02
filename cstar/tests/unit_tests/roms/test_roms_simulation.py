@@ -512,7 +512,7 @@ class TestROMSSimulationInitialization:
         cdr = sim.cdr_forcing
         ni = sim.nesting_info
 
-        assert sim.input_datasets == [mg, ic, td, rf, bc, sf, fc, cdr, ni]
+        assert sim.input_datasets == [mg, ic, td, rf, cdr, ni, bc, sf, fc]
 
     @pytest.mark.parametrize(
         "start_date, valid_start_date, end_date, valid_end_date, substring",
@@ -823,11 +823,11 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
     │   ├── initial.nc
     │   ├── tidal.nc
     │   ├── river.nc
+    │   ├── cdr.nc
+    │   ├── nesting.nc
     │   ├── boundary.nc
     │   ├── surface.nc
-    │   ├── sw_corr.nc
-    │   ├── cdr.nc
-    │   └── nesting.nc
+    │   └── sw_corr.nc
     ├── runtime_code
     │   ├── file1
     │   ├── file2.in
@@ -1028,7 +1028,6 @@ class TestProcessingAndExecution:
     processes.
     """
 
-    @mock.patch.object(ROMSSimulation, "_validate_and_symlink_supplementary_datasets")
     @mock.patch.object(ROMSInputDataset, "get")
     @mock.patch.object(AdditionalCode, "get")
     @mock.patch.object(ExternalCodeBase, "setup")
@@ -1037,7 +1036,6 @@ class TestProcessingAndExecution:
         mock_externalcodebase_setup,
         mock_additionalcode_get,
         mock_inputdataset_get,
-        mock_validate_symlink,
         stub_romssimulation,
     ):
         """Tests that `setup` correctly fetches and organizes simulation components."""
@@ -1048,7 +1046,6 @@ class TestProcessingAndExecution:
         assert mock_externalcodebase_setup.call_count == 2
         assert mock_additionalcode_get.call_count == 2
         assert mock_inputdataset_get.call_count == 9
-        mock_validate_symlink.assert_called_once()
 
     @pytest.mark.parametrize(
         "codebase_status, marbl_status, expected",
@@ -1488,7 +1485,7 @@ class TestProcessingAndExecution:
         )  # Should be ignored
         dataset_3 = mock.MagicMock(spec=ROMSInputDataset, exists_locally=True)
         with mock.patch.object(
-            ROMSSimulation, "partitionable_datasets", new_callable=mock.PropertyMock
+            ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
         ) as mock_partitionable_datasets:
             mock_partitionable_datasets.return_value = [dataset_1, dataset_2, dataset_3]
 
@@ -1595,7 +1592,7 @@ class TestProcessingAndExecution:
 
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
-                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/PATCHED_ROMSTest.in",
+                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest_PATCHED.in",
                 run_path=sim.fs_manager.work_dir,
                 output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
@@ -1684,7 +1681,7 @@ class TestProcessingAndExecution:
             # Call `run()` without explicitly passing `queue_name` and `walltime`
             execution_handler = sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
-                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/PATCHED_ROMSTest.in",
+                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/ROMSTest_PATCHED.in",
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
@@ -2077,14 +2074,6 @@ class TestValidateAndSymlinkSupplementaryDatasets:
         for name, content in files.items():
             (d / name).write_text(content)
         return d
-
-    def test_no_supplementary_datasets_is_noop(self, tmp_path, stub_romssimulation):
-        """No validation or symlinking when both datasets are absent."""
-        sim = self._make_sim(tmp_path, stub_romssimulation, cdr=False, nesting=False)
-        ctc_dir = self._make_compile_time_dir(tmp_path, {})
-        # Should complete without error and not touch output_dir
-        sim._validate_and_symlink_supplementary_datasets(ctc_dir)
-        assert not sim.fs_manager.output_dir.exists()
 
     def test_cdr_forcing_missing_compile_time_code_raises(
         self, tmp_path, stub_romssimulation

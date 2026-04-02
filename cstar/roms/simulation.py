@@ -1396,8 +1396,6 @@ class ROMSSimulation(Simulation):
 
         build_dir = self.compile_time_code.working_copy.common_parent
 
-        self._ensure_makefile(build_dir)
-
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())
@@ -1421,6 +1419,8 @@ class ROMSSimulation(Simulation):
                 msg_err="Error when cleaning existing ROMS compilation.",
                 raise_on_error=True,
             )
+
+        self._ensure_makefile(build_dir)
 
         _run_cmd(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
