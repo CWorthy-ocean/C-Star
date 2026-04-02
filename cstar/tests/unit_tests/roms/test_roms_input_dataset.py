@@ -6,9 +6,11 @@ from unittest import mock
 import pytest
 import roms_tools  # noqa: F401, pre-load to avoid the lazy loader
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection
 from cstar.roms import ROMSPartitioning
+from cstar.roms.input_dataset import DatasetLinker
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
 
 
@@ -662,3 +664,71 @@ def test_correction_cannot_be_yaml(
         "ROMSForcingCorrections cannot be initialized with a source YAML file."
     )
     assert expected_msg in str(exception_info.value)
+
+
+class TestDatasetLinker:
+    """Tests for DatasetLinker.validate_opt() and DatasetLinker.link()."""
+
+    def _make_linker(self, opt_file_dir: Path, workdir: Path) -> DatasetLinker:
+        return DatasetLinker(
+            opt_file_name="cdr_frc.opt",
+            symlink_name="cdr.nc",
+            opt_file_dir=opt_file_dir,
+            workdir=workdir,
+        )
+
+    def test_validate_opt_raises_if_opt_file_missing(self, tmp_path):
+        """validate_opt raises FileNotFoundError when the opt file does not exist."""
+        linker = self._make_linker(opt_file_dir=tmp_path, workdir=tmp_path)
+        with pytest.raises(FileNotFoundError, match="cdr_frc.opt"):
+            linker.validate_opt()
+
+    def test_validate_opt_raises_if_symlink_name_not_in_content(self, tmp_path):
+        """validate_opt raises CstarExpectationFailed when symlink_name is absent from opt content."""
+        opt_file = tmp_path / "cdr_frc.opt"
+        opt_file.write_text("no match here")
+        linker = self._make_linker(opt_file_dir=tmp_path, workdir=tmp_path)
+        with pytest.raises(CstarExpectationFailed, match="cdr_frc.opt.*cdr.nc"):
+            linker.validate_opt()
+
+    def test_validate_opt_passes_when_valid(self, tmp_path):
+        """validate_opt succeeds when the opt file exists and contains symlink_name."""
+        opt_file = tmp_path / "cdr_frc.opt"
+        opt_file.write_text("uses cdr.nc for input")
+        linker = self._make_linker(opt_file_dir=tmp_path, workdir=tmp_path)
+        linker.validate_opt()  # should not raise
+
+    def test_link_creates_symlink(self, tmp_path):
+        """link() creates a symlink in workdir pointing to the dataset path."""
+        target = tmp_path / "input_datasets" / "cdr.nc"
+        target.parent.mkdir()
+        target.write_text("fake data")
+
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        linker = self._make_linker(opt_file_dir=tmp_path, workdir=workdir)
+        linker.link(target)
+
+        symlink = workdir / "cdr.nc"
+        assert symlink.is_symlink()
+        assert symlink.resolve() == target.resolve()
+
+    def test_link_replaces_existing_symlink(self, tmp_path):
+        """link() replaces a stale symlink without raising an error."""
+        target = tmp_path / "input_datasets" / "cdr.nc"
+        target.parent.mkdir()
+        target.write_text("new data")
+
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+
+        stale_target = tmp_path / "old.nc"
+        stale_target.write_text("old data")
+        (workdir / "cdr.nc").symlink_to(stale_target)
+
+        linker = self._make_linker(opt_file_dir=tmp_path, workdir=workdir)
+        linker.link(target)
+
+        symlink = workdir / "cdr.nc"
+        assert symlink.is_symlink()
+        assert symlink.resolve() == target.resolve()
