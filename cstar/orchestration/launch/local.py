@@ -86,7 +86,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[LocalHandle]) -> LocalHandle:
-        """Submit a step to SLURM as a new batch allocation.
+        """Submit a step to a local process.
 
         Parameters
         ----------
