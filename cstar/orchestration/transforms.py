@@ -431,7 +431,7 @@ class OverrideTransform(Transform):
 
     _system_overrides: dict[str, t.Any] = {}
 
-    def __init__(self, sys_overrides: dict[str, t.Any] = {}) -> None:
+    def __init__(self, sys_overrides: dict[str, t.Any] = None) -> None:  # type: ignore[assignment]
         """Initialize the instance.
 
         Parameters
@@ -440,10 +440,12 @@ class OverrideTransform(Transform):
             System-level blueprint overrides that will be applied after
             the user-supplied values.
         """
-        self._system_overrides = sys_overrides
+        self._system_overrides = sys_overrides or {}
 
     def apply(
-        self, bp: RomsMarblBlueprint, overrides: dict[str, t.Any] = {}
+        self,
+        bp: RomsMarblBlueprint,
+        overrides: dict[str, t.Any] = None,  # type: ignore[assignment]
     ) -> RomsMarblBlueprint:
         """Apply all overrides from a blueprint.
 
@@ -462,6 +464,7 @@ class OverrideTransform(Transform):
         RomsMarblBlueprint
             The blueprint with all overrides applied.
         """
+        overrides = overrides or {}
         overrides = overrides.copy()
 
         model = bp.model_dump(exclude_defaults=True, exclude_unset=True)
