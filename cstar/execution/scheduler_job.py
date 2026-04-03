@@ -232,7 +232,7 @@ class SlurmBatch:
         yield from self.steps
 
 
-async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
+def get_slurm_steps_sync(job_id: str | int) -> tuple[SlurmStep, ...]:
     """Retrieve job metadata from SLURM.
 
     Parameters
@@ -248,11 +248,25 @@ async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
     format_string = SacctFieldMeta.as_format_string()
     sacct_cmd = f"sacct -j {job_id} --format={format_string} --noheader"
     msg_err = f"Failed to retrieve job status using {sacct_cmd}."
-    stdout = await asyncio.to_thread(
-        _run_cmd, sacct_cmd, msg_err=msg_err, raise_on_error=True
-    )
+    stdout = _run_cmd(sacct_cmd, msg_err=msg_err, raise_on_error=True)
 
     return SlurmStep.many_from_sacct(stdout)
+
+
+async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
+    """Retrieve job metadata from SLURM.
+
+    Parameters
+    ----------
+    job_id: str
+        The job_id to check
+
+    Returns
+    -------
+    tuple[SlurmStep, ...]
+        All step metadata retrieved for the job_id
+    """
+    return await asyncio.to_thread(get_slurm_steps_sync, job_id)
 
 
 async def get_slurm_batch(job_id: str | int) -> SlurmBatch:
@@ -267,6 +281,21 @@ async def get_slurm_batch(job_id: str | int) -> SlurmBatch:
     SlurmBatch
     """
     steps = await get_slurm_steps(job_id)
+    return SlurmBatch(steps)
+
+
+def get_slurm_batch_sync(job_id: str | int) -> SlurmBatch:
+    """Retrieve batch job metadata from SLURM.
+
+    Parameters
+    ----------
+    job_id : str
+
+    Returns
+    -------
+    SlurmBatch
+    """
+    steps = get_slurm_steps_sync(job_id)
     return SlurmBatch(steps)
 
 
@@ -882,9 +911,9 @@ class SlurmJob(SchedulerJob):
 
         # avoid refreshing status if the job is done
         if self._batch is None or not ExecutionStatus.is_terminal(
-            self._batch.job.status
+            self._batch.job.status,
         ):
-            self._batch = asyncio.run(get_slurm_batch(self.id))
+            self._batch = get_slurm_batch_sync(self.id)
         return self._batch
 
     @property
