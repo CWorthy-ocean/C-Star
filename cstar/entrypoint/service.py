@@ -374,8 +374,10 @@ class Service(ABC, LoggingMixin):
 
         try:
             running = True
-            await self._on_start()
-            await self._start_healthcheck()
+            await asyncio.gather(
+                self._on_start(),
+                self._start_healthcheck(),
+            )
         except Exception as e:
             self.log.exception("Unable to start service.")
             running = False
