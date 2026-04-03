@@ -10,6 +10,7 @@ from cstar.execution.scheduler_job import (
     SlurmJob,
     create_scheduler_job,
     get_slurm_batch,
+    get_slurm_batch_sync,
     get_slurm_batches,
     get_slurm_steps,
 )
@@ -843,3 +844,43 @@ async def test_get_slurm_batches() -> None:
     batch = result[job_id]
     # confirm the "job record" is not in the steps
     assert len(list(batch.steps)) == 3
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        15514059,
+        "15514059",
+    ],
+)
+def test_get_slurm_batch_sync(job_id: str) -> None:
+    """Verify multiple steps are parsed correctly from sacct std output with
+    both a string and integer job-id when using the synchronous batch API
+
+    Parameters
+    ----------
+    job_id : str
+        Parameterized job ID to verify correct handling of [int|str] Union type
+    """
+    sacct_output = textwrap.dedent(
+        """\
+        15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
+        15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
+        15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
+        """
+    )
+
+    exp_num_steps = 2
+    exp_num_jobs = 1
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
+        result = get_slurm_batch_sync(job_id)
+
+    step_ids = {x.step_id for x in result}
+    assert len(step_ids) == exp_num_steps
+
+    # confirm each step correctly parses it's job ID from the step ID
+    job_ids = {x.job_id for x in result}
+    assert len(job_ids) == exp_num_jobs
+
+    assert result.job.job_id == str(job_id)
