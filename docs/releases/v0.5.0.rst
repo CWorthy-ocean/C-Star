@@ -35,7 +35,8 @@ Bug Fixes
 - Fix mutable default attribute value in `WorkplanRun`
 - Remove repeated check identifying remote workplan URI
 - Fix bug causing intermittent `FileNotFound` errors
-- Fix workplan template with inconsistent blueprint path 
+- Fix workplan template with inconsistent blueprint path
+- Fix bug causing failures when invoking blueprints via `cstar blueprint run`
 
 Improvements
 ~~~~~~~~~~~~
