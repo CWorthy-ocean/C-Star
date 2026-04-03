@@ -843,6 +843,7 @@ from cstar.roms.input_dataset import (  # noqa: E402
     ROMSInitialConditions,
     ROMSInputDataset,
     ROMSModelGrid,
+    ROMSNestingInfo,
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
@@ -1273,6 +1274,43 @@ def roms_cdr_forcing(
 
 
 @pytest.fixture
+def roms_nesting_info(
+    mocksourcedata_remote_file,
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSNestingInfo
+]:
+    """Provides a ROMSNestingInfo instance with fake attrs for testing"""
+    default_location = "http://my.files/nesting.nc"
+    default_hash = "543"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
+    )
+
+    def _create(
+        location=default_location,
+        file_hash=default_hash,
+        sourcedata=default_sourcedata,
+        start_date=default_start_date,
+        end_date=default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSNestingInfo(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+    return _create
+
+
+@pytest.fixture
 def roms_river_forcing(
     mocksourcedata_remote_file,
 ) -> Callable[
@@ -1438,6 +1476,7 @@ def stub_romssimulation(
     roms_boundary_forcing,
     roms_surface_forcing,
     roms_cdr_forcing,
+    roms_nesting_info,
     roms_forcing_corrections,
     tmp_path,
 ) -> ROMSSimulation:
@@ -1483,6 +1522,7 @@ def stub_romssimulation(
             roms_forcing_corrections(),
         ],
         cdr_forcing=roms_cdr_forcing(),
+        nesting_info=roms_nesting_info(),
     )
 
     return sim
@@ -1551,6 +1591,10 @@ def stub_romssimulation_dict(stub_romssimulation) -> dict[str, Any]:
         "cdr_forcing": {
             "location": sim.cdr_forcing.source.location,
             "file_hash": sim.cdr_forcing.source.file_hash,
+        },
+        "nesting_info": {
+            "location": sim.nesting_info.source.location,
+            "file_hash": sim.nesting_info.source.file_hash,
         },
     }
     return return_dict
@@ -1625,6 +1669,11 @@ def patch_romssimulation_init_sourcedata(
         identifier=sim.cdr_forcing.source.identifier,
     )
 
+    mock_nesting_info_sourcedata = mocksourcedata_remote_file(
+        location=sim.nesting_info.source.location,
+        identifier=sim.nesting_info.source.identifier,
+    )
+
     # AdditionalCode SourceData mocks
     mock_runtime_code_sourcedata = mock_sourcedatacollection(
         locations=sim.runtime_code.source.locations,
@@ -1687,6 +1736,7 @@ def patch_romssimulation_init_sourcedata(
                     mock_tidal_forcing_sourcedata,
                     mock_river_forcing_sourcedata,
                     mock_cdr_forcing_sourcedata,
+                    mock_nesting_info_sourcedata,
                     mock_boundary_forcing_sourcedata,
                     mock_surface_forcing_sourcedata,
                     mock_forcing_corrections_sourcedata,

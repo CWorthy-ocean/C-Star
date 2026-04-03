@@ -43,6 +43,7 @@ from cstar.orchestration.adapter import (
     GridAdapter,
     InitialConditionAdapter,
     MARBLAdapter,
+    NestingInfoAdapter,
     RiverForcingAdapter,
     SurfaceForcingAdapter,
     TidalForcingAdapter,
@@ -57,6 +58,7 @@ from cstar.roms.input_dataset import (
     ROMSInitialConditions,
     ROMSInputDataset,
     ROMSModelGrid,
+    ROMSNestingInfo,
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
@@ -201,6 +203,7 @@ class ROMSSimulation(Simulation):
         tidal_forcing: Optional["ROMSTidalForcing"] = None,
         river_forcing: Optional["ROMSRiverForcing"] = None,
         cdr_forcing: Optional["ROMSCdrForcing"] = None,
+        nesting_info: Optional["ROMSNestingInfo"] = None,
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
@@ -303,6 +306,9 @@ class ROMSSimulation(Simulation):
 
         self._validate_input(cdr_forcing)
         self.cdr_forcing = cdr_forcing
+
+        self._validate_input(nesting_info)
+        self.nesting_info = nesting_info
 
         self._validate_input(surface_forcing, ROMSSurfaceForcing)
         self.surface_forcing: list[ROMSSurfaceForcing] = (
@@ -814,6 +820,13 @@ class ROMSSimulation(Simulation):
         else:
             simulation_runtime_settings.marbl_biogeochemistry = None
 
+        # explicitly set output dir and basename
+        simulation_runtime_settings.output_root_name = (
+            cstar.roms.runtime_settings.OutputRootName(
+                output_root_name=str(self.fs_manager.output_dir) + "/output"
+            )
+        )
+
         return simulation_runtime_settings
 
     @property
@@ -822,29 +835,29 @@ class ROMSSimulation(Simulation):
 
         This property compiles a list of `ROMSInputDataset` instances that are used
         in the simulation, including model grids, initial conditions, tidal forcing,
-        surface forcing, and boundary forcing datasets.
+        surface forcing, boundary forcing datasets, as well as supplementary datasets
+        like cdr_forcing and nesting_info.
 
         Returns
         -------
         list of ROMSInputDataset
             A list containing all input datasets used in the simulation.
         """
-        input_datasets: list[ROMSInputDataset] = []
-        if self.model_grid is not None:
-            input_datasets.append(self.model_grid)
-        if self.initial_conditions is not None:
-            input_datasets.append(self.initial_conditions)
-        if self.tidal_forcing is not None:
-            input_datasets.append(self.tidal_forcing)
-        if self.river_forcing is not None:
-            input_datasets.append(self.river_forcing)
-        if len(self.boundary_forcing) > 0:
-            input_datasets.extend(self.boundary_forcing)
-        if len(self.surface_forcing) > 0:
-            input_datasets.extend(self.surface_forcing)
-        if len(self.forcing_corrections) > 0:
-            input_datasets.extend(self.forcing_corrections)
-        return input_datasets
+        return [
+            x
+            for x in [
+                self.model_grid,
+                self.initial_conditions,
+                self.tidal_forcing,
+                self.river_forcing,
+                self.cdr_forcing,
+                self.nesting_info,
+                *self.boundary_forcing,
+                *self.surface_forcing,
+                *self.forcing_corrections,
+            ]
+            if x is not None
+        ]
 
     @classmethod
     def from_dict(
@@ -962,6 +975,11 @@ class ROMSSimulation(Simulation):
         if cdr_forcing_kwargs is not None:
             simulation_kwargs["cdr_forcing"] = ROMSCdrForcing(**cdr_forcing_kwargs)
 
+        # Construct any ROMSNestingInfo instance:
+        nesting_info_kwargs = simulation_dict.get("nesting_info")
+        if nesting_info_kwargs is not None:
+            simulation_kwargs["nesting_info"] = ROMSNestingInfo(**nesting_info_kwargs)
+
         # Construct any ROMSBoundaryForcing instances:
         boundary_forcing_entries = simulation_dict.get("boundary_forcing", [])
         if len(boundary_forcing_entries) > 0:
@@ -1044,6 +1062,8 @@ class ROMSSimulation(Simulation):
             simulation_dict["river_forcing"] = self.river_forcing.to_dict()
         if self.cdr_forcing is not None:
             simulation_dict["cdr_forcing"] = self.cdr_forcing.to_dict()
+        if self.nesting_info is not None:
+            simulation_dict["nesting_info"] = self.nesting_info.to_dict()
         if len(self.surface_forcing) > 0:
             simulation_dict["surface_forcing"] = [
                 sf.to_dict() for sf in self.surface_forcing
@@ -1094,6 +1114,7 @@ class ROMSSimulation(Simulation):
         bp_dict = yaml.safe_load(data.decode("utf-8"))
 
         bp = RomsMarblBlueprint.model_validate(bp_dict)
+
         return cls(
             name=bp.name,
             directory=bp.runtime_params.output_dir,
@@ -1114,6 +1135,7 @@ class ROMSSimulation(Simulation):
             boundary_forcing=BoundaryForcingAdapter(bp).adapt(),
             surface_forcing=SurfaceForcingAdapter(bp).adapt(),
             cdr_forcing=CdrForcingAdapter(bp).adapt(),
+            nesting_info=NestingInfoAdapter(bp).adapt(),
         )
 
     def tree(self):
@@ -1371,7 +1393,9 @@ class ROMSSimulation(Simulation):
                 + "\nROMSSimulation.compile_time_code is not staged locally."
                 + "\n Call ROMSSimulation.compile_time_code.get() and try again"
             )
+
         build_dir = self.compile_time_code.working_copy.common_parent
+
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())
@@ -1396,6 +1420,8 @@ class ROMSSimulation(Simulation):
                 raise_on_error=True,
             )
 
+        self._ensure_makefile(build_dir)
+
         _run_cmd(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
@@ -1409,6 +1435,23 @@ class ROMSSimulation(Simulation):
         self._exe_hash = _get_sha256_hash(exe_path)
 
         self.persist()
+
+    def _ensure_makefile(self, build_dir: Path):
+        """If a Makefile was not supplied, copy the correct one from the ROMS repo.
+
+        Parameters
+        ----------
+        build_dir : Path
+            Location where a Makefile should be present or copied to.
+        """
+        if self.codebase.working_copy is None:
+            raise ValueError("Unable to copy makefile with null working copy")
+
+        makefile_target = build_dir / "Makefile"
+
+        if not makefile_target.exists():
+            makefile_repo = self.codebase.working_copy.path / "Work" / "Makefile"
+            shutil.copyfile(makefile_repo, makefile_target)
 
     def pre_run(self, overwrite_existing_files=False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
@@ -1440,17 +1483,15 @@ class ROMSSimulation(Simulation):
         run : Executes the compiled ROMS model.
         post_run : Performs post-processing steps after execution.
         """
-        # Partition input datasets and add their paths to namelist
-        if self.input_datasets is not None and all(
-            [isinstance(a, ROMSInputDataset) for a in self.input_datasets]
-        ):
-            datasets_to_partition = [d for d in self.input_datasets if d.exists_locally]
-            for f in datasets_to_partition:
-                f.partition(
-                    np_xi=self.discretization.n_procs_x,
-                    np_eta=self.discretization.n_procs_y,
-                    overwrite_existing_files=overwrite_existing_files,
-                )
+        datasets_to_partition = [
+            d for d in self.input_datasets if d.exists_locally and d.partitionable
+        ]
+        for f in datasets_to_partition:
+            f.partition(
+                np_xi=self.discretization.n_procs_x,
+                np_eta=self.discretization.n_procs_y,
+                overwrite_existing_files=overwrite_existing_files,
+            )
 
         self.persist()
 
@@ -1542,25 +1583,34 @@ class ROMSSimulation(Simulation):
                 "and try again"
             )
 
+        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.output_dir.mkdir(parents=True, exist_ok=True)
+
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
             queue_name = cstar_sysmgr.scheduler.primary_queue_name
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
-        # we run ROMS in the output dir
-        run_path = self.fs_manager.output_dir
+        # we run ROMS in the work dir
+        run_path = self.fs_manager.work_dir
+
+        # save modified roms.in and rename original for clarity
+        old_runtime_settings_path = Path(self.runtime_code.working_copy[0].path)
         final_runtime_settings_file = (
-            Path(self.runtime_code.working_copy[0].path).parent / f"{self.name}.in"
+            old_runtime_settings_path.parent / f"{self.name}_PATCHED.in"
         )
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
+
+        old_runtime_settings_path.rename(
+            old_runtime_settings_path.parent
+            / f"{old_runtime_settings_path.stem}_ORIGINAL.in"
+        )
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
         script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
-
-        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
-        self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
 
         ## 2: RUN ROMS
 

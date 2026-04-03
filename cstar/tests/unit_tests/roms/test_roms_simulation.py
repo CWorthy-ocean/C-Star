@@ -1,6 +1,7 @@
 import logging
 import pickle
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -22,6 +23,7 @@ from cstar.roms.input_dataset import (
     ROMSInitialConditions,
     ROMSInputDataset,
     ROMSModelGrid,
+    ROMSNestingInfo,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
@@ -103,6 +105,10 @@ class TestROMSSimulationInitialization:
         assert isinstance(sim.cdr_forcing, ROMSCdrForcing)
         assert sim.cdr_forcing.source.location == "http://my.files/cdr.nc"
         assert sim.cdr_forcing.source.file_hash == "542"
+
+        assert isinstance(sim.nesting_info, ROMSNestingInfo)
+        assert sim.nesting_info.source.location == "http://my.files/nesting.nc"
+        assert sim.nesting_info.source.file_hash == "543"
 
         assert isinstance(sim.boundary_forcing, list)
         assert [isinstance(x, ROMSBoundaryForcing) for x in sim.boundary_forcing]
@@ -501,8 +507,10 @@ class TestROMSSimulationInitialization:
         bc = sim.boundary_forcing[0]
         sf = sim.surface_forcing[0]
         fc = sim.forcing_corrections[0]
+        cdr = sim.cdr_forcing
+        ni = sim.nesting_info
 
-        assert sim.input_datasets == [mg, ic, td, rf, bc, sf, fc]
+        assert sim.input_datasets == [mg, ic, td, rf, cdr, ni, bc, sf, fc]
 
     @pytest.mark.parametrize(
         "start_date, valid_start_date, end_date, valid_end_date, substring",
@@ -813,6 +821,8 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
     │   ├── initial.nc
     │   ├── tidal.nc
     │   ├── river.nc
+    │   ├── cdr.nc
+    │   ├── nesting.nc
     │   ├── boundary.nc
     │   ├── surface.nc
     │   └── sw_corr.nc
@@ -1033,7 +1043,7 @@ class TestProcessingAndExecution:
 
         assert mock_externalcodebase_setup.call_count == 2
         assert mock_additionalcode_get.call_count == 2
-        assert mock_inputdataset_get.call_count == 7
+        assert mock_inputdataset_get.call_count == 9
 
     @pytest.mark.parametrize(
         "codebase_status, marbl_status, expected",
@@ -1264,7 +1274,16 @@ class TestProcessingAndExecution:
         )
         mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
         mock_get_hash.return_value = "mockhash123"
-        sim.build()
+
+        sim.persist = mock.MagicMock()  # type: ignore[method-assign]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            sim.build()
+
         assert mock_subprocess.call_count == 2
         mock_subprocess.assert_any_call(
             "make compile_clean",
@@ -1365,10 +1384,17 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(
-            RuntimeError, match="Error when cleaning existing ROMS compilation."
-        ):
-            sim.build()
+        sim.persist = mock.MagicMock()  # type: ignore[method-assign]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            with pytest.raises(
+                RuntimeError, match="Error when cleaning existing ROMS compilation."
+            ):
+                sim.build()
         assert mock_subprocess.call_count == 1
         mock_subprocess.assert_any_call(
             "make compile_clean",
@@ -1394,6 +1420,7 @@ class TestProcessingAndExecution:
         """
         sim = stub_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
+        build_dir.mkdir(exist_ok=True, parents=True)
 
         sim.compile_time_code._working_copy = stageddatacollection_remote_files(
             paths=[build_dir / f.basename for f in sim.compile_time_code.source]
@@ -1402,8 +1429,16 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
-            sim.build()
+        sim.persist = mock.MagicMock()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
+                sim.build()
+
         assert mock_subprocess.call_count == 1
 
         mock_subprocess.assert_any_call(
@@ -1449,8 +1484,8 @@ class TestProcessingAndExecution:
         dataset_3 = mock.MagicMock(spec=ROMSInputDataset, exists_locally=True)
         with mock.patch.object(
             ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
-        ) as mock_input_datasets:
-            mock_input_datasets.return_value = [dataset_1, dataset_2, dataset_3]
+        ) as mock_partitionable_datasets:
+            mock_partitionable_datasets.return_value = [dataset_1, dataset_2, dataset_3]
 
             # Call the method
             sim.pre_run()
@@ -1540,6 +1575,7 @@ class TestProcessingAndExecution:
                 new_callable=mock.PropertyMock,
                 return_value=None,
             ),
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
             sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
             mock_process_instance = mock.MagicMock()
@@ -1554,8 +1590,8 @@ class TestProcessingAndExecution:
 
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
-                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest.in",
-                run_path=sim.fs_manager.output_dir,
+                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest_PATCHED.in",
+                run_path=sim.fs_manager.work_dir,
                 output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
 
@@ -1634,6 +1670,7 @@ class TestProcessingAndExecution:
                 new_callable=mock.PropertyMock,
                 return_value=mock_scheduler,
             ),
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
             sim.exe_path = build_dir / "roms"
             mock_job_instance = mock.MagicMock()
@@ -1642,11 +1679,11 @@ class TestProcessingAndExecution:
             # Call `run()` without explicitly passing `queue_name` and `walltime`
             execution_handler = sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
-                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/ROMSTest.in",
+                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/ROMSTest_PATCHED.in",
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
-                run_path=sim.fs_manager.output_dir,
+                run_path=sim.fs_manager.work_dir,
                 script_path=script_dir / "romstest.sh",
                 queue_name="default_queue",
                 walltime="12:00:00",
@@ -1691,6 +1728,7 @@ class TestProcessingAndExecution:
                 new_callable=mock.PropertyMock,
                 return_value=mock_scheduler,
             ),
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
             sim.exe_path = build_dir / "roms"
 

@@ -3,16 +3,19 @@ import typing as t
 from pydantic import BaseModel
 
 from cstar.base.additional_code import AdditionalCode
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration import models
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
+    DatasetLinker,
     ROMSBoundaryForcing,
     ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
     ROMSModelGrid,
+    ROMSNestingInfo,
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
@@ -255,10 +258,14 @@ class SurfaceForcingAdapter(
 
 
 class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing]):
+    """Create a ROMSCdrForcing from a blueprint model."""
+
     @t.override
     def adapt(self) -> ROMSCdrForcing | None:
         if self.model.cdr_forcing is None:
             return None
+
+        fs_manager = RomsFileSystemManager(self.model.runtime_params.output_dir)
 
         return ROMSCdrForcing(
             location=str(self.model.cdr_forcing.data[0].location),
@@ -267,12 +274,46 @@ class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing])
             else None,
             start_date=None,
             end_date=None,
+            linker=DatasetLinker(
+                opt_file_name="cdr_frc.opt",
+                symlink_name="cdr.nc",
+                workdir=fs_manager.work_dir,
+                opt_file_dir=fs_manager.compile_time_code_dir,
+            ),
+        )
+
+
+class NestingInfoAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSNestingInfo]):
+    """Create a ROMSNestingInfo from a blueprint model."""
+
+    @t.override
+    def adapt(self) -> ROMSNestingInfo | None:
+        if self.model.nesting_info is None:
+            return None
+
+        fs_manager = RomsFileSystemManager(self.model.runtime_params.output_dir)
+
+        return ROMSNestingInfo(
+            location=str(self.model.nesting_info.data[0].location),
+            file_hash=self.model.nesting_info.data[0].hash
+            if isinstance(self.model.nesting_info.data[0], models.VersionedResource)
+            else None,
+            start_date=None,
+            end_date=None,
+            linker=DatasetLinker(
+                opt_file_name="extract_data.opt",
+                symlink_name="nesting.nc",
+                workdir=fs_manager.work_dir,
+                opt_file_dir=fs_manager.compile_time_code_dir,
+            ),
         )
 
 
 class ForcingCorrectionAdapter(
     ModelAdapter[models.RomsMarblBlueprint, list[ROMSForcingCorrections]]
 ):
+    """Create a ROMSForcingCorrections from a blueprint model."""
+
     @t.override
     def adapt(self) -> list[ROMSForcingCorrections] | None:
         if self.model.forcing.corrections is None:

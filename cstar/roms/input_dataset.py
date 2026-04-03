@@ -2,13 +2,16 @@ import datetime as dt
 import shutil
 import tempfile
 from abc import ABC
+from dataclasses import dataclass
 from pathlib import Path
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.input_dataset import InputDataset
+from cstar.base.log import LoggingMixin
 from cstar.base.utils import _list_to_concise_str, coerce_datetime, lazy_import
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData, SourceDataCollection
-from cstar.io.staged_data import StagedDataCollection
+from cstar.io.staged_data import StagedDataCollection, StagedFile
 
 roms_tools = lazy_import("roms_tools")
 
@@ -53,6 +56,47 @@ class ROMSPartitioning:
         return len(self.files)
 
 
+@dataclass
+class DatasetLinker(LoggingMixin):
+    """DatasetLinker manages sym-linking a needed file from the work directory to the real dataset location."""
+
+    opt_file_name: str
+    """Name of the opt file specifying that must align with the conventional symlink name"""
+    symlink_name: str
+    """Name of the symlink to create in workdir. Must align with the name in the opt file"""
+    opt_file_dir: Path
+    """Location to look for the required optfile"""
+    workdir: Path
+    """Location to create the symlink"""
+
+    def validate_opt(
+        self,
+    ):
+        """Validate that the opt file exists in the work directory and that it contains the conventional symlink name."""
+        opt_file = self.opt_file_dir / self.opt_file_name
+
+        if not opt_file.exists():
+            raise FileNotFoundError(f"Opt file {opt_file} does not exist")
+
+        opt_content = opt_file.read_text()
+        if self.symlink_name not in opt_content:
+            raise CstarExpectationFailed(
+                f"{self.opt_file_name} must contain the string {self.symlink_name}."
+            )
+
+    def link(self, dataset_path: Path):
+        """Create symlink to dataset_path in the work directory.
+        Parameters
+        ----------
+        dataset_path : Path
+            Location of the dataset to symlink to.
+        """
+        symlink_path = self.workdir / self.symlink_name
+        symlink_path.unlink(missing_ok=True)
+        symlink_path.symlink_to(dataset_path)
+        self.log.info(f"🔗 Created symlink: {symlink_path} → {dataset_path}")
+
+
 class ROMSInputDataset(InputDataset, ABC):
     (
         (
@@ -66,6 +110,9 @@ class ROMSInputDataset(InputDataset, ABC):
         + (InputDataset.__doc__ or "")
     )
 
+    partitionable: bool = True
+    """Set to False if the input dataset should not be partitioned."""
+
     def __init__(
         self,
         location: str,
@@ -74,6 +121,7 @@ class ROMSInputDataset(InputDataset, ABC):
         end_date: str | dt.datetime | None = None,
         source_np_xi: int | None = None,
         source_np_eta: int | None = None,
+        linker: DatasetLinker | None = None,
     ):
         self.start_date = coerce_datetime(start_date) if start_date else None
         self.end_date = coerce_datetime(end_date) if end_date else None
@@ -82,6 +130,7 @@ class ROMSInputDataset(InputDataset, ABC):
         self.source_np_eta = source_np_eta
         self.partitioning: ROMSPartitioning | None = None
         self.source = SourceData(location=location, identifier=file_hash)
+        self.linker = linker
 
         if self.source_partitioning:
             if file_hash:
@@ -161,6 +210,11 @@ class ROMSInputDataset(InputDataset, ABC):
            to locally available files, i.e. ROMSInputDataset.get() has been called.
         - This method sets the ROMSInputDataset.partitioning attribute
         """
+        if not self.partitionable:
+            self.log.info(
+                f"⏭️  {self.__class__.__name__} does not need to be partitioned, skipping"
+            )
+            return
 
         # Helper functions
         def validate_partitioning_request() -> bool:
@@ -325,6 +379,15 @@ class ROMSInputDataset(InputDataset, ABC):
         else:
             super().get(local_dir=local_dir)
 
+        if self.linker:
+            self.linker.validate_opt()
+            working_copy = self.working_copy
+            if not isinstance(working_copy, StagedFile):
+                raise CstarExpectationFailed(
+                    "Cannot use a linker for non-file datasets"
+                )
+            self.linker.link(working_copy.path)
+
     def _get_from_partitioned_source(self, local_dir: Path) -> None:
         """Stages partitioned source files, checking pre-existence individually."""
         # If some (or all) files exist, go through and check which ones (if any) to stage:
@@ -433,4 +496,10 @@ class ROMSForcingCorrections(ROMSInputDataset):
 class ROMSCdrForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for CDR forcing files."""
 
-    pass
+    partitionable = False
+
+
+class ROMSNestingInfo(ROMSInputDataset):
+    """An implementation of the ROMSInputDataset class for nesting info files."""
+
+    partitionable = False

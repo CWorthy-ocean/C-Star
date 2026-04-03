@@ -99,7 +99,7 @@ DataResource: t.TypeAlias = Resource | VersionedResource
 class Dataset(DocLocMixin):
     """A dataset contains a data block alongside documentation and locking fields."""
 
-    data: list[DataResource]
+    data: list[DataResource] = Field(min_length=1)
     """A list of one or more data resources."""
 
     def __len__(self) -> int:
@@ -385,6 +385,9 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
 
     cdr_forcing: Dataset | None = Field(default=None)
     """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
+
+    nesting_info: Dataset | None = Field(default=None)
+    """Location of nesting info input file for this run. Optional."""
 
     @model_validator(mode="after")
     def _model_validator(self) -> "RomsMarblBlueprint":
