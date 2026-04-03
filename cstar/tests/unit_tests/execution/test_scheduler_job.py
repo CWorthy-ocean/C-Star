@@ -853,13 +853,13 @@ async def test_get_slurm_batches() -> None:
         "15514059",
     ],
 )
-def test_get_slurm_batch_sync(job_id: str) -> None:
+def test_get_slurm_batch_sync(job_id: str | int) -> None:
     """Verify multiple steps are parsed correctly from sacct std output with
     both a string and integer job-id when using the synchronous batch API
 
     Parameters
     ----------
-    job_id : str
+    job_id : str | int
         Parameterized job ID to verify correct handling of [int|str] Union type
     """
     sacct_output = textwrap.dedent(
