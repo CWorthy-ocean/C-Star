@@ -45,6 +45,7 @@ Improvements
 - Re-use `configure_environment` where applicable
 - Refactor `cli.workplan.run` to make use of `typer` callbacks for input validation
 - Add `--dry-run` option to test workplan generation in `cstar workplan run`
+- Fix unexpected linting warnings about missing required parameters to `ServiceConfiguration`
 
 Miscellaneous
 ~~~~~~~~~~~~~
