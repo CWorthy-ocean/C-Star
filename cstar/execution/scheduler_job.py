@@ -237,7 +237,7 @@ def get_slurm_steps_sync(job_id: str | int) -> tuple[SlurmStep, ...]:
 
     Parameters
     ----------
-    job_id: str
+    job_id: str | int
         The job_id to check
 
     Returns
@@ -258,7 +258,7 @@ async def get_slurm_steps(job_id: str | int) -> tuple[SlurmStep, ...]:
 
     Parameters
     ----------
-    job_id: str
+    job_id: str | int
         The job_id to check
 
     Returns
@@ -274,7 +274,7 @@ async def get_slurm_batch(job_id: str | int) -> SlurmBatch:
 
     Parameters
     ----------
-    job_id : str
+    job_id : str | int
 
     Returns
     -------
@@ -289,7 +289,7 @@ def get_slurm_batch_sync(job_id: str | int) -> SlurmBatch:
 
     Parameters
     ----------
-    job_id : str
+    job_id : str | int
 
     Returns
     -------
