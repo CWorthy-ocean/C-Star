@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.workplan.run import app
-from cstar.orchestration.dag_runner import cstar_sysmgr, get_launcher
+from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.models import UserDefinedVariables
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
@@ -386,16 +386,26 @@ def test_orch_ctx_runtime_vars_none_available() -> None:
 @pytest.mark.parametrize(
     ("mock_env", "exp_missing"),
     [
-        (
+        pytest.param(
             {ENV_CSTAR_SLURM_QUEUE: "xxx", ENV_CSTAR_SLURM_ACCOUNT: ""},
             ENV_CSTAR_SLURM_ACCOUNT,
+            id=f"{ENV_CSTAR_SLURM_ACCOUNT}::empty",
         ),
-        (
+        pytest.param(
             {ENV_CSTAR_SLURM_QUEUE: "", ENV_CSTAR_SLURM_ACCOUNT: "xxx"},
             ENV_CSTAR_SLURM_QUEUE,
+            id=f"{ENV_CSTAR_SLURM_QUEUE}::empty",
         ),
-        ({ENV_CSTAR_SLURM_QUEUE: "xxx"}, ENV_CSTAR_SLURM_ACCOUNT),
-        ({ENV_CSTAR_SLURM_ACCOUNT: "xxx"}, ENV_CSTAR_SLURM_QUEUE),
+        pytest.param(
+            {ENV_CSTAR_SLURM_QUEUE: "xxx"},
+            ENV_CSTAR_SLURM_ACCOUNT,
+            id=f"{ENV_CSTAR_SLURM_ACCOUNT}::not-provided",
+        ),
+        pytest.param(
+            {ENV_CSTAR_SLURM_ACCOUNT: "xxx"},
+            ENV_CSTAR_SLURM_QUEUE,
+            id=f"{ENV_CSTAR_SLURM_QUEUE}::not-provided",
+        ),
     ],
 )
 def test_launcher_preconditions_slurm(
@@ -410,9 +420,12 @@ def test_launcher_preconditions_slurm(
     var_name : str
         Known, required env vars that should cause the run to fail if not present.
     """
+    mock_launcher = mock.MagicMock()
+    mock_scheduler = mock.PropertyMock(return_value=mock_launcher)
+
     with (
-        mock.patch.dict(os.environ, mock_env),
-        mock.patch.object(cstar_sysmgr, "_scheduler", return_value="any-non-null"),
+        mock.patch.dict(os.environ, mock_env, clear=True),
+        mock.patch("cstar.system.manager.CStarSystemManager.scheduler", mock_scheduler),
         pytest.raises(ValueError, match=exp_missing),
     ):
         _ = get_launcher()
@@ -421,16 +434,26 @@ def test_launcher_preconditions_slurm(
 @pytest.mark.parametrize(
     ("mock_env", "missing_value"),
     [
-        (
+        pytest.param(
             {ENV_CSTAR_SLURM_QUEUE: "xxx", ENV_CSTAR_SLURM_ACCOUNT: ""},
             ENV_CSTAR_SLURM_ACCOUNT,
+            id=f"{ENV_CSTAR_SLURM_ACCOUNT}::empty",
         ),
-        (
+        pytest.param(
             {ENV_CSTAR_SLURM_QUEUE: "", ENV_CSTAR_SLURM_ACCOUNT: "xxx"},
             ENV_CSTAR_SLURM_QUEUE,
+            id=f"{ENV_CSTAR_SLURM_QUEUE}::empty",
         ),
-        ({ENV_CSTAR_SLURM_QUEUE: "xxx"}, ENV_CSTAR_SLURM_ACCOUNT),
-        ({ENV_CSTAR_SLURM_ACCOUNT: "xxx"}, ENV_CSTAR_SLURM_QUEUE),
+        pytest.param(
+            {ENV_CSTAR_SLURM_QUEUE: "xxx"},
+            ENV_CSTAR_SLURM_ACCOUNT,
+            id=f"{ENV_CSTAR_SLURM_ACCOUNT}::not-provided",
+        ),
+        pytest.param(
+            {ENV_CSTAR_SLURM_ACCOUNT: "xxx"},
+            ENV_CSTAR_SLURM_QUEUE,
+            id=f"{ENV_CSTAR_SLURM_QUEUE}::not-provided",
+        ),
     ],
 )
 def test_launcher_preconditions_local(
@@ -445,7 +468,11 @@ def test_launcher_preconditions_local(
     mock_env : str
         Known, required env vars that should not cause the launcher to fail if not present.
     """
-    with mock.patch.dict(os.environ, mock_env):
+    mock_scheduler = mock.PropertyMock(return_value=None)
+    with (
+        mock.patch.dict(os.environ, mock_env, clear=True),
+        mock.patch("cstar.system.manager.CStarSystemManager.scheduler", mock_scheduler),
+    ):
         launcher = get_launcher()
 
     assert launcher, f"LocalLauncher unexpectedly failed without {missing_value}"
