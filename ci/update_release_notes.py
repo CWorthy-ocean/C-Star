@@ -130,17 +130,43 @@ def make_session() -> requests.Session:
 
 
 def get_last_tag_date(session: requests.Session) -> tuple[str, str]:
-    """Return *(tag_name, ISO-8601 commit date)* for the most recent tag."""
-    resp = session.get(
-        f"{GITHUB_API}/repos/{REPO}/tags",
-        params={"per_page": 10},
-    )
-    resp.raise_for_status()
-    tags = resp.json()
-    if not tags:
-        raise RuntimeError(f"No tags found in {REPO}")
+    """
+    Return *(tag_name, ISO-8601 commit date)* for the highest-versioned tag.
 
-    latest = tags[0]
+    GitHub's tags API returns tags in commit-date order, which can surface
+    old pre-release tags ahead of newer stable releases.  We fetch all tags,
+    sort them by semantic version (reusing ``_version_key``), and pick the
+    highest one instead.
+    """
+    versioned: list[tuple] = []
+    page = 1
+    while True:
+        resp = session.get(
+            f"{GITHUB_API}/repos/{REPO}/tags",
+            params={"per_page": 100, "page": page},
+        )
+        resp.raise_for_status()
+        batch = resp.json()
+        if not batch:
+            break
+        for tag in batch:
+            try:
+                # Skip pre-release tags (e.g. -alpha, -beta, -rc); only stable
+                # releases mark the boundary for collecting PR notes.
+                if "-" in tag["name"].lstrip("v"):
+                    continue
+                versioned.append((_version_key(tag["name"]), tag))
+            except (ValueError, TypeError):
+                pass  # skip non-semver tags
+        if len(batch) < 100:
+            break
+        page += 1
+
+    if not versioned:
+        raise RuntimeError(f"No semver tags found in {REPO}")
+
+    versioned.sort(key=lambda x: x[0])
+    latest = versioned[-1][1]
     tag_name: str = latest["name"]
 
     # Resolve the tag to its commit to get the commit date
