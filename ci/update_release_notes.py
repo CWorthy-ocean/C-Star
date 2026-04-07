@@ -199,9 +199,14 @@ def get_merged_prs_since(session: requests.Session, since: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def parse_pr_body(body: str | None) -> dict[str, list[str]]:
+def parse_pr_body(
+    body: str | None,
+) -> dict[str, list[tuple[str, list[str]]]]:
     """
-    Parse a PR description into ``{section_name: [bullet_text, …]}``.
+    Parse a PR description into ``{section_name: [(text, [sub_item, …]), …]}``.
+
+    Each top-level bullet is stored as a ``(text, sub_items)`` tuple where
+    *sub_items* contains any indented child bullets directly beneath it.
 
     - Recognises both ``#`` and ``##`` level Markdown headings as section
       boundaries so that non-standard headers (e.g. ``# Review Checklist``)
@@ -215,18 +220,24 @@ def parse_pr_body(body: str | None) -> dict[str, list[str]]:
     if not body:
         return {}
 
-    result: dict[str, list[str]] = {}
+    result: dict[str, list[tuple[str, list[str]]]] = {}
     current: str | None = None
-    items: list[str] = []
+    # Each element: [top_level_text, [sub_item, …]] — mutable for sub-item appends
+    items: list[list] = []
 
     def _flush() -> None:
         if current and not _should_skip_section(current):
-            good = [i for i in items if i.strip().lower() != "n/a"]
+            good = [
+                (t, s) for t, s in items if t.strip().lower() != "n/a"
+            ]
             if good:
-                result[current] = good
+                result[current] = [(t, s) for t, s in good]
 
     for raw in body.splitlines():
-        line = re.sub(r"<!--.*?-->", "", raw).strip()
+        # Measure indentation on the comment-stripped version *before* stripping
+        cleaned = re.sub(r"<!--.*?-->", "", raw).rstrip()
+        indent = len(cleaned) - len(cleaned.lstrip())
+        line = cleaned.strip()
 
         # Match # or ## (and ###) level headings
         heading = re.match(r"^#{1,3}\s+(.+)$", line)
@@ -246,8 +257,13 @@ def parse_pr_body(body: str | None) -> dict[str, list[str]]:
         bullet = re.match(r"^[-*]\s+(.+)$", line)
         if bullet and current is not None:
             text = bullet.group(1).strip()
-            if text:
-                items.append(text)
+            if not text:
+                continue
+            if indent == 0:
+                items.append([text, []])
+            elif items:
+                # Attach as a sub-bullet of the most recent top-level item
+                items[-1][1].append(text)
 
     _flush()
     return result
@@ -322,6 +338,23 @@ def get_section_bullets(lines: list[str], section_title: str) -> set[str]:
     return bullets
 
 
+def _bullet_block_to_lines(block: str) -> list[str]:
+    """
+    Convert a pre-formatted RST bullet block (from ``format_rst_bullet``) into
+    a list of newline-terminated lines ready for splicing into the file.
+
+    Simple bullets produce one line; bullets with sub-items produce several
+    lines with a required blank line before the sub-list and after it.
+    """
+    parts = block.split("\n")
+    result = [p + "\n" for p in parts]
+    if len(parts) > 1:
+        # RST requires a trailing blank line after a nested list so the next
+        # top-level bullet is not swallowed into the sub-list.
+        result.append("\n")
+    return result
+
+
 def insert_bullets_into_section(
     lines: list[str],
     section_title: str,
@@ -329,6 +362,9 @@ def insert_bullets_into_section(
 ) -> list[str]:
     """
     Return a new line list with *new_bullets* appended to *section_title*.
+
+    *new_bullets* are pre-formatted RST bullet blocks as returned by
+    ``format_rst_bullet`` — they may be multi-line (when sub-items are present).
 
     If the section contains only a ``- N/A`` placeholder, it is removed first.
     """
@@ -355,16 +391,46 @@ def insert_bullets_into_section(
     title_idx = positions[section_title]
     start, end = _section_bounds(positions, title_idx, len(cleaned))
 
-    # Insert after the last existing bullet; if none, after leading blank lines
+    # Find the true end of the last bullet block (including any sub-items and
+    # their trailing blank line) so we don't insert mid-block.
     insert_at = start
-    for i in range(start, end):
+    i = start
+    while i < end:
         if re.match(r"^-\s+", cleaned[i]):
-            insert_at = i + 1
+            # Scan forward to find where this bullet block ends: the next
+            # top-level bullet or the section boundary, whichever comes first.
+            j = i + 1
+            while j < end and not re.match(r"^-\s+", cleaned[j]):
+                j += 1
+            # Strip trailing blank lines from the block so insert_at points to
+            # the last content line + 1, not into trailing whitespace.
+            block_end = j
+            while block_end > i + 1 and not cleaned[block_end - 1].strip():
+                block_end -= 1
+            insert_at = block_end
+            i = j
+        else:
+            i += 1
+
+    # If no bullets found at all, skip leading blank lines and insert there.
     if insert_at == start:
         while insert_at < end and not cleaned[insert_at].strip():
             insert_at += 1
 
-    new_lines = [f"- {b}\n" for b in new_bullets]
+    # If the line just before our insertion point is an indented sub-bullet,
+    # RST needs a blank line to separate it from the new top-level bullet.
+    needs_leading_blank = (
+        insert_at > 0
+        and cleaned[insert_at - 1].strip()
+        and cleaned[insert_at - 1].startswith(" ")
+    )
+
+    new_lines: list[str] = []
+    if needs_leading_blank:
+        new_lines.append("\n")
+    for block in new_bullets:
+        new_lines.extend(_bullet_block_to_lines(block))
+
     return cleaned[:insert_at] + new_lines + cleaned[insert_at:]
 
 
@@ -373,10 +439,25 @@ def insert_bullets_into_section(
 # ---------------------------------------------------------------------------
 
 
-def build_bullet(text: str, pr_number: int) -> str:
-    """Append a RST inline hyperlink to *text* referencing *pr_number*."""
+def format_rst_bullet(text: str, sub_items: list[str], pr_number: int) -> str:
+    """
+    Return the complete RST text for one bullet item (no trailing newline).
+
+    The PR link is appended to the top-level text.  Sub-items are formatted as
+    an RST nested list, indented by two spaces with a required blank line
+    separating them from the parent line::
+
+        - Parent text (`#NNN <url>`_)
+
+          - sub item 1
+          - sub item 2
+    """
     link = f"`#{pr_number} <{PR_URL_BASE}/{pr_number}>`_"
-    return f"{text} ({link})"
+    top = f"- {text} ({link})"
+    if not sub_items:
+        return top
+    sub_block = "\n".join(f"  - {s}" for s in sub_items)
+    return f"{top}\n\n{sub_block}"
 
 
 def main() -> None:
@@ -435,13 +516,13 @@ def main() -> None:
 
             existing = get_section_bullets(lines, rst_section)
             to_add: list[str] = []
-            for item in items:
-                if _normalize(item) in existing:
+            for item_text, sub_items in items:
+                if _normalize(item_text) in existing:
                     print(
-                        f"  #{pr_num:5d} [{pr_section}] duplicate — '{item[:70]}'"
+                        f"  #{pr_num:5d} [{pr_section}] duplicate — '{item_text[:70]}'"
                     )
                     continue
-                to_add.append(build_bullet(item, pr_num))
+                to_add.append(format_rst_bullet(item_text, sub_items, pr_num))
 
             if to_add:
                 lines = insert_bullets_into_section(lines, rst_section, to_add)
