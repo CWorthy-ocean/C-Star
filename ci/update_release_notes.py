@@ -33,6 +33,8 @@ REPO_NAME = "C-Star"
 REPO = f"{REPO_OWNER}/{REPO_NAME}"
 GITHUB_API = "https://api.github.com"
 RELEASES_DIR = Path(__file__).resolve().parent.parent / "docs" / "releases"
+RELEASES_INDEX = Path(__file__).resolve().parent.parent / "docs" / "releases.rst"
+UNRELEASED_RST = RELEASES_DIR / "unreleased.rst"
 PR_URL_BASE = f"https://github.com/{REPO}/pull"
 
 # PR template section heading  →  RST section heading
@@ -486,6 +488,79 @@ def format_rst_bullet(text: str, sub_items: list[str], pr_number: int) -> str:
     return f"{top}\n\n{sub_block}"
 
 
+_UNRELEASED_TEMPLATE = """\
+.. _unreleased:
+
+Unreleased
+----------
+
+.. note::
+    This release is currently in development
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- N/A
+
+New features
+~~~~~~~~~~~~
+
+- N/A
+
+Security Fixes
+~~~~~~~~~~~~~~
+
+- N/A
+
+Bug Fixes
+~~~~~~~~~
+
+- N/A
+
+Improvements
+~~~~~~~~~~~~
+
+- N/A
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+- N/A
+"""
+
+
+def create_unreleased_rst(dry_run: bool = False) -> Path:
+    """
+    Create ``docs/releases/unreleased.rst`` from the standard template and
+    add a ``.. include::`` directive for it at the top of ``docs/releases.rst``.
+
+    Returns the path to the (possibly just-created) file.
+    """
+    if not UNRELEASED_RST.exists():
+        print(f"Creating {UNRELEASED_RST.relative_to(Path.cwd())}")
+        if not dry_run:
+            UNRELEASED_RST.write_text(_UNRELEASED_TEMPLATE)
+
+    # Add the include to docs/releases.rst if not already present
+    index_text = RELEASES_INDEX.read_text()
+    include_line = ".. include:: releases/unreleased.rst\n"
+    if include_line not in index_text:
+        # Insert after the title block (first blank line following the heading)
+        lines = index_text.splitlines(keepends=True)
+        insert_at = 0
+        for i, line in enumerate(lines):
+            # Find the first ``.. include::`` directive and insert before it
+            if line.startswith(".. include::"):
+                insert_at = i
+                break
+        new_index = "".join(lines[:insert_at]) + include_line + "\n" + "".join(lines[insert_at:])
+        print(f"Adding include to {RELEASES_INDEX.relative_to(Path.cwd())}")
+        if not dry_run:
+            RELEASES_INDEX.write_text(new_index)
+
+    return UNRELEASED_RST
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Update the active release .rst with notes from merged PRs."
@@ -497,15 +572,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Locate the active (highest-version) release .rst
-    version_stem, rst_path = get_latest_rst()
-    print(f"Target release file : {rst_path.relative_to(Path.cwd())} ({version_stem})")
-
     session = make_session()
 
-    # Determine the cutoff: date of the most recent git tag
+    # Determine the cutoff: date of the most recent stable tag
     tag_name, tag_date = get_last_tag_date(session)
     print(f"Last tagged release : {tag_name}  (commit date {tag_date})")
+
+    # Locate the active release .rst — the highest-versioned file that is
+    # strictly newer than the last tag.  If none exists yet, use (or create)
+    # unreleased.rst.
+    version_stem, candidate_path = get_latest_rst()
+    if _version_key(version_stem) > _version_key(tag_name):
+        rst_path = candidate_path
+    else:
+        rst_path = create_unreleased_rst(dry_run=args.dry_run)
+
+    print(f"Target release file : {rst_path.relative_to(Path.cwd())}")
 
     # Fetch all PRs merged after that date
     print("Fetching merged PRs…")
@@ -516,7 +598,7 @@ def main() -> None:
         print("Nothing to do.")
         return
 
-    rst_text = rst_path.read_text()
+    rst_text = rst_path.read_text() if rst_path.exists() else _UNRELEASED_TEMPLATE
     lines = rst_text.splitlines(keepends=True)
     known_prs = get_known_pr_numbers(rst_text)
     total_added = 0
