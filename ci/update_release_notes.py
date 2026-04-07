@@ -45,8 +45,16 @@ SECTION_MAP: dict[str, str] = {
     "Security Fixes": "Security Fixes",
 }
 
-# PR template sections to skip entirely
-_SKIP_SECTIONS = frozenset({"Summary", "Code Review Checklist"})
+# PR template sections to skip entirely.
+# Exact names are matched case-insensitively; any section whose name contains
+# "checklist" is also skipped, catching variants like "Review Checklist".
+_SKIP_SECTION_EXACT = frozenset({"summary", "code review checklist"})
+_SKIP_SECTION_SUBSTRINGS = ("checklist",)
+
+
+def _should_skip_section(name: str) -> bool:
+    lower = name.lower()
+    return lower in _SKIP_SECTION_EXACT or any(s in lower for s in _SKIP_SECTION_SUBSTRINGS)
 
 # RST underline characters that mark a section heading
 _RST_UNDERLINE_RE = re.compile(r"^[~=\-`#^*+<>]{2,}$")
@@ -195,8 +203,13 @@ def parse_pr_body(body: str | None) -> dict[str, list[str]]:
     """
     Parse a PR description into ``{section_name: [bullet_text, …]}``.
 
-    - Skips the Summary and Code Review Checklist sections.
+    - Recognises both ``#`` and ``##`` level Markdown headings as section
+      boundaries so that non-standard headers (e.g. ``# Review Checklist``)
+      are handled correctly.
+    - Skips the Summary and any section whose name contains "checklist".
     - Drops bullets whose stripped text is exactly ``N/A`` (case-insensitive).
+    - Drops checklist-style bullets (``- [ ]`` / ``- [x]``) even if they
+      appear under a content section, as a belt-and-suspenders guard.
     - Strips inline HTML comments (``<!-- … -->``) before processing.
     """
     if not body:
@@ -207,7 +220,7 @@ def parse_pr_body(body: str | None) -> dict[str, list[str]]:
     items: list[str] = []
 
     def _flush() -> None:
-        if current and current not in _SKIP_SECTIONS:
+        if current and not _should_skip_section(current):
             good = [i for i in items if i.strip().lower() != "n/a"]
             if good:
                 result[current] = good
@@ -215,14 +228,19 @@ def parse_pr_body(body: str | None) -> dict[str, list[str]]:
     for raw in body.splitlines():
         line = re.sub(r"<!--.*?-->", "", raw).strip()
 
-        heading = re.match(r"^##\s+(.+)$", line)
+        # Match # or ## (and ###) level headings
+        heading = re.match(r"^#{1,3}\s+(.+)$", line)
         if heading:
             _flush()
             current = heading.group(1).strip()
             items = []
             continue
 
-        if current in _SKIP_SECTIONS:
+        if current is not None and _should_skip_section(current):
+            continue
+
+        # Skip checklist-style bullets regardless of which section they appear in
+        if re.match(r"^[-*]\s+\[[ xX]\]", line):
             continue
 
         bullet = re.match(r"^[-*]\s+(.+)$", line)
