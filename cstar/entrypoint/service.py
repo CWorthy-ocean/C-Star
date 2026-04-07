@@ -25,9 +25,9 @@ class ServiceConfiguration(BaseModel):
     shutdown criteria are met. When `False`, the service completes a single
     pass through the service lifecycle and automatically exits.
     """
-    loop_delay: float = Field(0.0, ge=0.0)
+    loop_delay: float = Field(default=0.0, ge=0.0)
     """Duration (in seconds) of a delay between iterations of the main event loop."""
-    health_check_frequency: float | None = Field(None, ge=0.0)
+    health_check_frequency: float | None = Field(default=None, ge=0.0)
     """Time (in seconds) between calls to a health check handler.
 
     NOTE:
@@ -36,7 +36,7 @@ class ServiceConfiguration(BaseModel):
     """
     log_level: int = logging.INFO
     """The logging level used by the service."""
-    health_check_log_threshold: int = Field(10, ge=3)
+    health_check_log_threshold: int = Field(default=10, ge=3)
     """The number of health-checks that may be missed before logging."""
     name: str = "Service"
     """A user-friendly name for logging."""
