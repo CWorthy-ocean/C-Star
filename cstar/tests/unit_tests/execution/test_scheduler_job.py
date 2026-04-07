@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     PBSJob,
     SchedulerJob,
@@ -810,7 +811,7 @@ async def test_get_slurm_batch(job_id: int | str) -> None:
     job_ids = {x.job_id for x in result}
     assert len(job_ids) == exp_num_jobs
 
-    assert result.job.job_id == str(job_id)
+    assert result.job_id == str(job_id)
 
 
 @pytest.mark.asyncio
@@ -883,4 +884,23 @@ def test_get_slurm_batch_sync(job_id: str | int) -> None:
     job_ids = {x.job_id for x in result}
     assert len(job_ids) == exp_num_jobs
 
-    assert result.job.job_id == str(job_id)
+    assert result.job_id == str(job_id)
+
+
+def test_get_slurm_batch_sync_no_steps() -> None:
+    """Verify retrieving a batch does not blow up if no steps are located.
+
+    This is possible when the query occurs too quickly after a job is submitted.
+    """
+    sacct_output = ""
+    job_id = 15514059
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
+        result = get_slurm_batch_sync(job_id)
+
+    # confirm that job_id and steps are accessible (but empty/null)
+    assert result.job_id is None
+    assert not result.steps
+
+    # confirm that status is reported as unsubmitted
+    assert result.status == ExecutionStatus.UNSUBMITTED
