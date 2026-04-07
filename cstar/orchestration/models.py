@@ -216,6 +216,8 @@ class Application(StrEnum):
     """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
     SLEEP = auto()
     """A call to the hostname executable to simplify testing."""
+    HELLO_WORLD = auto()
+    """Sample custom application."""
 
 
 class ParameterSet(DocLocMixin, ConfiguredBaseModel):

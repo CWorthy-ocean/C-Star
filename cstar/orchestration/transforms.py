@@ -1,4 +1,3 @@
-import itertools
 import os
 import typing as t
 from collections import defaultdict
@@ -273,22 +272,42 @@ class WorkplanTransformer(LoggingMixin):
         if self._transformed:
             return self._transformed
 
+        apply_to = {
+            Application.ROMS_MARBL.value,
+            Application.SLEEP.value,
+        }
+
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]
-        steps: t.Iterable[LiveStep] = list(
-            map(override_output_directory, live_steps),
-        )
+
+        steps = []
+        for step in live_steps:
+            if step.application in apply_to:
+                override_output_directory(step)
+            steps.append(step)
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             split_steps: list[LiveStep] = []
             named_dep_map: dict[str, str] = {}
 
             for step in steps:
-                transformed_steps = list(self.transform_fn(step))
-                named_dep_map[step.name] = transformed_steps[-1].name
-                split_steps.extend(transformed_steps)
+                if step.application in apply_to:
+                    transformed_steps = list(self.transform_fn(step))
+                    named_dep_map[step.name] = transformed_steps[-1].name
+                    split_steps.extend(transformed_steps)
+                else:
+                    split_steps.append(step)
+
+            # apply any overrides produced in the transform function
+            override_transform = OverrideTransform()
+
+            steps = []
 
             for step in split_steps:
+                if step.application not in apply_to:
+                    steps.append(step)
+                    continue
+
                 depends_on = {str(d) for d in step.depends_on}
 
                 if to_update := depends_on.intersection(named_dep_map):
@@ -298,11 +317,7 @@ class WorkplanTransformer(LoggingMixin):
                     step.depends_on.clear()
                     step.depends_on.extend(depends_on)
 
-            steps = split_steps
-
-        # apply any overrides produced in the transform function
-        override_transform = OverrideTransform()
-        steps = list(itertools.chain.from_iterable(map(override_transform, steps)))
+                steps.extend(override_transform(step))
 
         self._transformed = self.original.model_copy(
             update={
