@@ -393,7 +393,7 @@ class Service(ABC, LoggingMixin):
 
             # shutdown if not set to run as a service
             if not self._config.as_service:
-                self.log.debug("Terminating non-service immediately.")
+                self.log.debug("Service has completed its work and will exit.")
                 running = False
                 continue
 
