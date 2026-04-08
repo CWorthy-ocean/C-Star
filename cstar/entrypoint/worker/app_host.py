@@ -100,7 +100,7 @@ class BlueprintRunner(Service):
         Parameters
         ----------
         request: BlueprintRequest
-            A request containing information about the simulation to run
+            A request containing information about the blueprint to run
 
         service_cfg: ServiceConfiguration
             Configuration for modifying behavior of the service process.
@@ -160,7 +160,7 @@ class BlueprintRunner(Service):
 
     def _log_disposition(self) -> None:
         """Log the status of the runner's work at the current time."""
-        msg = f"Disposition of service `{self._config.name}` is: {self.status}"
+        msg = f"Final disposition of task executed by service {self._config.name!r} is {self.status.name!r}"
         self.log.debug(msg)
 
     @override
@@ -253,8 +253,8 @@ def create_parser() -> argparse.ArgumentParser:
     Returns
     -------
     argparse.ArgumentParser
-        An argument parser configured with the expected arguments for the
-        SimulationRunner service.
+        An argument parser configured with the standard arguments for the
+        BlueprintRunner service.
     """
     parser = argparse.ArgumentParser(
         description="Execute a blueprint.",
@@ -265,7 +265,7 @@ def create_parser() -> argparse.ArgumentParser:
         "--blueprint-uri",
         type=str,
         required=True,
-        help="The URI of a blueprint.",
+        help="The URI of the blueprint to execute.",
     )
     parser.add_argument(
         "-l",
@@ -273,16 +273,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
         type=str,
         required=False,
-        help="Logging level for the simulation.",
-        choices=[
-            logging.getLevelName(i)
-            for i in [
-                logging.DEBUG,
-                logging.INFO,
-                logging.WARNING,
-                logging.ERROR,
-            ]
-        ],
+        help="Set the logging level for the worker.",
     )
     return parser
 
@@ -320,7 +311,7 @@ def get_request(blueprint_uri: str) -> BlueprintRequest:
     Returns
     -------
     BlueprintRequest
-        A request configured to run a c-star simulation via a blueprint.
+        A request configured to run a C-Star blueprint.
     """
     return BlueprintRequest(blueprint_uri=blueprint_uri)
 
@@ -349,7 +340,7 @@ def configure_environment(log: logging.Logger) -> None:
     """
     # ensure git works on distributed file-system, e.g. lustre
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
-    log.debug("Git discovery configured.")
+    log.debug("Git discovery across file-system enabled.")
 
 
 def create_runner(
@@ -368,16 +359,12 @@ def create_runner(
 
 
 async def execute_runner(klass: type[BlueprintRunner]) -> RunnerResult:
-    """Execute a blueprint with a SimulationRunner.
+    """Execute a blueprint with a BlueprintRunner.
 
     Parameters
     ----------
-    job_cfg : JobConfig
-        Configuration applied to the scheduler
-    service_cfg : ServiceConfiguration
-        Configuration applied to the service
-    request : BlueprintRequest
-        A request specifying the blueprint to be executed
+    klass : type[BlueprintRunner]
+        The BlueprintRunner to use for execution.
     """
     try:
         parser = create_parser()
@@ -399,10 +386,10 @@ async def execute_runner(klass: type[BlueprintRunner]) -> RunnerResult:
         job_cfg,
     )
 
-    log.debug(f"Job config: {job_cfg}")
-    log.debug(f"Service config: {service_cfg}")
-    log.debug(f"Request: {request}")
-    log.debug(f"os.environ: {os.environ}")
+    log.debug(f"Job config: {job_cfg!r}")
+    log.debug(f"Service config: {service_cfg!r}")
+    log.debug(f"Request: {request!r}")
+    log.trace(f"Environment: {os.environ}")
 
     try:
         configure_environment(log)
@@ -415,6 +402,6 @@ async def execute_runner(klass: type[BlueprintRunner]) -> RunnerResult:
         log.exception(msg, exc_info=ex)
         return bp_runner.set_result(ExecutionStatus.FAILED, [msg, str(ex)])
     except Exception as ex:
-        msg = "An unexpected exception occurred during the simulation"
+        msg = "An unexpected exception occurred while processing the blueprint"
         log.exception(msg, exc_info=ex)
         return bp_runner.set_result(ExecutionStatus.FAILED, [msg, str(ex)])
