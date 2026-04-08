@@ -6,8 +6,8 @@ import logging
 import os
 import pathlib
 import sys
+import typing as t
 from datetime import datetime, timezone
-from typing import Final, override
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
@@ -22,10 +22,10 @@ from cstar.orchestration.utils import (
 )
 from cstar.roms import ROMSSimulation
 
-DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
-WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
-JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
-LOGS_DIRECTORY: Final[str] = "logs"
+DATE_FORMAT: t.Final[str] = "%Y-%m-%d %H:%M:%S"
+WORKER_LOG_FILE_TPL: t.Final[str] = "cstar-worker.{0}.log"
+JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
+LOGS_DIRECTORY: t.Final[str] = "logs"
 
 
 def _generate_job_name() -> str:
@@ -80,17 +80,17 @@ class JobConfig:
 class SimulationRunner(Service):
     """Worker class to run c-star simulations."""
 
-    _blueprint_uri: Final[str]
+    _blueprint_uri: t.Final[str]
     """The URI of the blueprint to run."""
-    _output_root: Final[pathlib.Path]
+    _output_root: t.Final[pathlib.Path]
     """The root directory where simulation outputs will be written."""
-    _simulation: Final[ROMSSimulation]
+    _simulation: t.Final[ROMSSimulation]
     """The simulation instance created from the blueprint."""
-    _stages: Final[tuple[SimulationStages, ...]]
+    _stages: t.Final[tuple[SimulationStages, ...]]
     """The simulation stages that should be executed."""
     _handler: ExecutionHandler | None
     """The execution handler for the simulation."""
-    _job_config: Final[JobConfig]
+    _job_config: t.Final[JobConfig]
     """Configuration for submitting jobs to an HPC."""
 
     def __init__(
@@ -160,7 +160,7 @@ class SimulationRunner(Service):
         else:
             self.log.warning(f"Simulation ended with status: {disposition}.")
 
-    @override
+    @t.override
     def _on_start(self) -> None:
         """Prepare the simulation for execution.
 
@@ -201,7 +201,7 @@ class SimulationRunner(Service):
             msg = "Failed to prepare simulation"
             raise CstarError(msg) from ex
 
-    @override
+    @t.override
     def _on_shutdown(self) -> None:
         """Perform activities required for clean shutdown.
 
@@ -239,7 +239,7 @@ class SimulationRunner(Service):
             # ensure status is logged even if _handler updates are suppressed.
             self._log_disposition(treat_as_failure=treat_as_failure)
 
-    @override
+    @t.override
     async def _on_iteration(self) -> None:
         """Execute the c-star simulation."""
         try:
@@ -277,7 +277,7 @@ class SimulationRunner(Service):
             ExecutionStatus.FAILED,
         ]
 
-    @override
+    @t.override
     def _can_shutdown(self) -> bool:
         """Determine if the service can shutdown.
 

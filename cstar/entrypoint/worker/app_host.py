@@ -2,9 +2,9 @@ import argparse
 import dataclasses as dc
 import logging
 import os
+import typing as t
 from abc import abstractmethod
 from datetime import datetime, timezone
-from typing import ClassVar, Final, Protocol, override
 
 from pydantic import BaseModel, ConfigDict
 
@@ -21,10 +21,10 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_QUEUE,
 )
 
-DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
-WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
-JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
-LOGS_DIRECTORY: Final[str] = "logs"
+DATE_FORMAT: t.Final[str] = "%Y-%m-%d %H:%M:%S"
+WORKER_LOG_FILE_TPL: t.Final[str] = "cstar-worker.{0}.log"
+JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
+LOGS_DIRECTORY: t.Final[str] = "logs"
 
 
 def _generate_job_name() -> str:
@@ -34,7 +34,7 @@ def _generate_job_name() -> str:
     return f"cstar_worker_{formatted_now_utc}"
 
 
-class WorkRequest(Protocol):
+class WorkRequest(t.Protocol):
     """Core API of a request to run a blueprint via worker."""
 
     @property
@@ -49,7 +49,7 @@ class BlueprintRequest(BaseModel):
     blueprint_uri: str
     """The location of the blueprint."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
 
 
 @dc.dataclass
@@ -163,7 +163,7 @@ class BlueprintRunner(Service):
         msg = f"Final disposition of task executed by service {self._config.name!r} is {self.status.name!r}"
         self.log.debug(msg)
 
-    @override
+    @t.override
     def _can_shutdown(self) -> bool:
         """Determine if the service can shutdown.
 
@@ -178,7 +178,7 @@ class BlueprintRunner(Service):
 
         return False
 
-    @override
+    @t.override
     def _on_start(self) -> None:
         """Prepare the runner for execution.
 
@@ -190,7 +190,7 @@ class BlueprintRunner(Service):
 
         self._blueprint = deserialize(self.blueprint_uri, self._blueprint_type())
 
-    @override
+    @t.override
     async def _on_iteration(self) -> None:
         """Execute the blueprint processing implemented in the subclass."""
         try:
@@ -200,7 +200,7 @@ class BlueprintRunner(Service):
             self.log.exception(msg)
             self.set_result(ExecutionStatus.FAILED, [msg])
 
-    @override
+    @t.override
     def _on_shutdown(self) -> None:
         """Perform actions required when shutting down the service.
 
