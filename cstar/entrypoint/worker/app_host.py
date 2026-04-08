@@ -44,7 +44,7 @@ class WorkRequest(t.Protocol):
         ...
 
 
-class BlueprintRequest(BaseModel):
+class BaseBlueprintRequest(BaseModel):
     """A request to run a blueprint."""
 
     blueprint_uri: str
@@ -287,8 +287,8 @@ def get_service_config(log_level: int | str) -> ServiceConfiguration:
     )
 
 
-def get_request(blueprint_uri: str) -> BlueprintRequest:
-    """Create a BlueprintRequest instance from CLI arguments.
+def get_base_request(blueprint_uri: str) -> WorkRequest:
+    """Create a BaseBlueprintRequest instance from CLI arguments.
 
     Parameters
     ----------
@@ -297,10 +297,10 @@ def get_request(blueprint_uri: str) -> BlueprintRequest:
 
     Returns
     -------
-    BlueprintRequest
+    WorkRequest
         A request configured to run a C-Star blueprint.
     """
-    return BlueprintRequest(blueprint_uri=blueprint_uri)
+    return BaseBlueprintRequest(blueprint_uri=blueprint_uri)
 
 
 def get_job_config() -> JobConfig:
@@ -331,7 +331,7 @@ def configure_environment(log: logging.Logger) -> None:
 
 
 def create_runner(
-    request: BlueprintRequest,
+    request: WorkRequest,
     klass: type[BlueprintRunner],
     service_cfg: ServiceConfiguration | None = None,
     job_cfg: JobConfig | None = None,
@@ -345,7 +345,12 @@ def create_runner(
     return klass(request, service_cfg, job_cfg)
 
 
-async def execute_runner(klass: type[BlueprintRunner]) -> RunnerResult:
+async def execute_runner(
+    klass: type[BlueprintRunner],
+    job_cfg: JobConfig,
+    service_cfg: ServiceConfiguration,
+    request: WorkRequest,
+) -> RunnerResult:
     """Execute a blueprint with a BlueprintRunner.
 
     Parameters
@@ -353,17 +358,6 @@ async def execute_runner(klass: type[BlueprintRunner]) -> RunnerResult:
     klass : type[BlueprintRunner]
         The BlueprintRunner to use for execution.
     """
-    try:
-        parser = create_parser()
-        args = parser.parse_args()
-    except SystemExit as ex:
-        msg = "Parsing CLI arguments failed."
-        return RunnerResult(None, ExecutionStatus.FAILED, [msg, str(ex)])
-
-    job_cfg = get_job_config()
-    service_cfg = get_service_config(args.log_level)
-    request = get_request(args.blueprint_uri)
-
     log = get_logger(__name__, level=service_cfg.log_level)
 
     bp_runner = create_runner(

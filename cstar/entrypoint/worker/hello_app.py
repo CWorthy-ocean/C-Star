@@ -5,7 +5,11 @@ import typing as t
 from cstar.entrypoint.worker.app_host import (
     BlueprintRunner,
     RunnerResult,
+    create_parser,
     execute_runner,
+    get_base_request,
+    get_job_config,
+    get_service_config,
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Application, Blueprint
@@ -85,7 +89,18 @@ async def main() -> int:
     int
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
-    result = await execute_runner(HelloWorldRunner)
+    try:
+        parser = create_parser()
+        args = parser.parse_args()
+    except SystemExit as ex:
+        print(f"Parsing CLI arguments failed: {ex}")
+        return 1
+
+    job_cfg = get_job_config()
+    service_cfg = get_service_config(args.log_level)
+    request = get_base_request(args.blueprint_uri)
+
+    result = await execute_runner(HelloWorldRunner, job_cfg, service_cfg, request)
     if result.errors:
         return 1
     return 0
