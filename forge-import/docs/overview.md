@@ -53,7 +53,6 @@ cson-forge/
 │   │   └── {model}_{grid}/
 │   │       └── compile-time/   # Rendered configuration files
 │   │           ├── *.opt       # Compile-time options (cppdefs, param, etc.)
-│   │           └── Makefile    # Build configuration
 │   │       └── run-time/       # ROMS-MARBL runtime files
 │   │           ├── roms.in     # Run-time configuration
 │   │           └── marbl_*     # MARBL input files

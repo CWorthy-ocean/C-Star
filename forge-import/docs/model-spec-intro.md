@@ -25,7 +25,6 @@ model_name:
           - cppdefs.opt.j2
           - param.opt.j2
           - tracers.opt.j2
-          - Makefile
     run_time:
       location: "{{ config.path.model_configs }}/{{ model.name }}/templates/run-time"
       filter:
