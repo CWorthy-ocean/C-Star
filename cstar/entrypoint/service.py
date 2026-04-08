@@ -103,14 +103,14 @@ class Service(ABC, LoggingMixin):
 
         It is executed continuously until shutdown conditions are satisfied.
         """
-        self.log.debug(f"Performing main iteration of {self._service_type}")
+        self.log.trace(f"Performing main iteration of {self._service_type}")
 
     def _on_iteration_complete(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called in main event loop after `_on_iteration` is invoked.
         """
-        self.log.debug(f"Performing post-iteration tasks of {self._service_type}")
+        self.log.trace(f"Performing post-iteration tasks of {self._service_type}")
 
     @abstractmethod
     def _can_shutdown(self) -> bool:
@@ -179,21 +179,21 @@ class Service(ABC, LoggingMixin):
         begins execution. Allows for subclasses to perform any required initialization
         logic.
         """
-        self.log.debug(f"Starting {self._service_type}")
+        self.log.trace(f"Starting {self._service_type}")
 
     def _on_shutdown(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called immediately after exiting the main event loop.
         """
-        self.log.debug(f"Shutting down {self._service_type}")
+        self.log.trace(f"Shutting down {self._service_type}")
 
     def _on_health_check(self) -> None:
         """Empty hook method for use by subclasses.
 
         Called by the health check thread at the configured frequency.
         """
-        self.log.debug(f"Performing health check for {self._service_type}")
+        self.log.trace(f"Performing health check for {self._service_type}")
 
     def _on_delay(self) -> None:
         """Empty hook method for use by subclasses.
@@ -201,7 +201,7 @@ class Service(ABC, LoggingMixin):
         Called at the completion of every event loop iteration when a user-defined delay
         is configured.
         """
-        self.log.debug(f"Service delay for {self._service_type}")
+        self.log.trace(f"Service delay for {self._service_type}")
 
     def acknowledge_hc(self) -> None:
         """Confirm any requests for an update from the health check queue.
