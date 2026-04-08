@@ -430,7 +430,7 @@ def configure_environment(log: logging.Logger) -> None:
     """
     # ensure git works on distributed file-system, e.g. lustre
     os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
-    log.debug("Git discovery configured.")
+    log.debug("Git discovery across file-system enabled.")
 
 
 async def execute_runner(
@@ -449,10 +449,10 @@ async def execute_runner(
     """
     log = get_logger(__name__, level=service_cfg.log_level)
 
-    log.debug(f"Job config: {job_cfg}")
-    log.debug(f"Simulation runner service config: {service_cfg}")
-    log.debug(f"Simulation request: {request}")
-    log.debug(f"os.environ: {os.environ}")
+    log.debug(f"Job config: {job_cfg!r}")
+    log.debug(f"Service config: {service_cfg!r}")
+    log.debug(f"Request: {request!r}")
+    log.trace(f"Environment: {os.environ}")
 
     try:
         configure_environment(log)
