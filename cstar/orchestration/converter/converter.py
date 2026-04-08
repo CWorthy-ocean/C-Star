@@ -49,6 +49,25 @@ def convert_roms_step_to_command(step: "LiveStep") -> str:
     return f"{sys.executable} -m {worker_module}  -b {step.blueprint_path}"
 
 
+def convert_step_to_blueprint_run_command(step: "LiveStep") -> str:
+    """Convert a generic blueprint execution step to a CLI command.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step to be converted.
+
+    Returns
+    -------
+    str
+        The complete CLI command.
+    """
+    # return f"cstar blueprint run {step.blueprint_path}"
+
+    worker_module = "cstar.entrypoint.worker.hello_app"  # TODO: this isn't generic...
+    return f"{sys.executable} -m {worker_module} -b {step.blueprint_path}"
+
+
 def convert_step_to_placeholder(step: "LiveStep") -> str:
     """Convert a `Step` into a command to be executed.
 
@@ -90,6 +109,7 @@ launcher_aware_app_to_cmd_map: dict[
     lambda: {
         Application.SLEEP.value: convert_step_to_placeholder,
         Application.ROMS_MARBL.value: convert_roms_step_to_command,
+        Application.HELLO_WORLD.value: convert_step_to_blueprint_run_command,
     },
 )
 """Map application types to a function that converts a step to a CLI command."""
