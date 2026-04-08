@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import get_logger, parse_log_level_name
+from cstar.base.log import LogLevelChoices, get_logger, parse_log_level_name
 from cstar.base.utils import slugify
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
@@ -328,16 +328,8 @@ def create_parser() -> argparse.ArgumentParser:
         default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
         type=str,
         required=False,
-        help="Logging level for the simulation.",
-        choices=[
-            logging.getLevelName(i)
-            for i in [
-                logging.DEBUG,
-                logging.INFO,
-                logging.WARNING,
-                logging.ERROR,
-            ]
-        ],
+        help="Set the logging level for the worker.",
+        choices=[x.value for x in LogLevelChoices],
     )
     parser.add_argument(
         "-g",

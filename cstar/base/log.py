@@ -1,3 +1,4 @@
+import enum
 import logging
 import sys
 import typing as t
@@ -7,10 +8,22 @@ from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 
 DEFAULT_LOG_LEVEL = logging.INFO
 DEFAULT_LOG_FORMAT = (
-    "%(asctime)s [%(levelname)s] - %(filename)s:%(lineno)d - %(message)s"
+    "%(asctime)s [%(levelname)8s] - %(filename)20s:%(lineno)4d - %(message)s"
 )
 TRACE_LOG_LEVEL: t.Final[int] = 5
 TRACE_LOG_NAME: t.Final[str] = "TRACE"
+
+
+class LogLevelChoices(enum.StrEnum):
+    """Log levels for C-Star. Used by CLI and entrypoints to display and validate
+    a set of fixed choices.
+    """
+
+    TRACE = "TRACE"
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
 
 
 class TraceLogger(logging.Logger):

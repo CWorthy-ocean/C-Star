@@ -5,8 +5,10 @@ from pathlib import Path
 
 import typer
 
+from cstar.base.env import ENV_CSTAR_LOG_LEVEL
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.log import get_logger
+from cstar.base.log import LogLevelChoices, get_logger
+from cstar.cli.common import log_level_callback
 from cstar.cli.workplan.shared import (
     check_and_capture_kvps,
     list_runs,
@@ -248,6 +250,16 @@ def run(
             help="Generate the execution plan without executing the workplan.",
         ),
     ] = False,
+    log_level: t.Annotated[
+        LogLevelChoices,
+        typer.Option(
+            "--log-level",
+            "-l",
+            callback=log_level_callback,
+            help="Set the log level for C-Star.",
+            envvar=ENV_CSTAR_LOG_LEVEL,
+        ),
+    ] = LogLevelChoices.INFO,
 ) -> None:
     """Execute a workplan.
 

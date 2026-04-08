@@ -4,6 +4,8 @@ import typing as t
 import typer
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
+from cstar.base.log import LogLevelChoices
+from cstar.cli.common import log_level_callback
 from cstar.entrypoint.worker.worker import (
     SimulationStages,
     execute_runner,
@@ -30,6 +32,16 @@ def run(
             case_sensitive=False,
         ),
     ] = None,
+    log_level: t.Annotated[
+        LogLevelChoices,
+        typer.Option(
+            "--log-level",
+            "-l",
+            callback=log_level_callback,
+            help="Set the log level for C-Star.",
+            envvar=ENV_CSTAR_LOG_LEVEL,
+        ),
+    ] = LogLevelChoices.INFO,
 ) -> None:
     """Execute a blueprint in a local worker service."""
     result = validate_serialized_entity(path, RomsMarblBlueprint)
