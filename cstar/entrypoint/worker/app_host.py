@@ -12,6 +12,7 @@ from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.base.log import get_logger, parse_log_level_name
 from cstar.entrypoint.service import Service, ServiceConfiguration
+from cstar.entrypoint.worker.worker import JobConfig
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize
@@ -50,20 +51,6 @@ class BlueprintRequest(BaseModel):
     """The location of the blueprint."""
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
-
-
-@dc.dataclass
-class JobConfig:
-    """Configuration required to submit HPC jobs."""
-
-    account_id: str
-    """HPC account used for billing."""
-    walltime: str
-    """Maximum walltime allowed for job."""
-    priority: str
-    """Job priority."""
-    job_name: str = _generate_job_name()
-    """User-friendly job name."""
 
 
 @dc.dataclass
