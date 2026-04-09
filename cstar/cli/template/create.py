@@ -152,7 +152,7 @@ def generate_template(path: Path | None, template_type: TemplateType) -> str:
 app = Typer()
 
 
-@app.command()
+@app.command(name="create", help="Generate a template document as a starting point.")
 def create(
     path: t.Annotated[
         Path,

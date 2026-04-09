@@ -14,7 +14,7 @@ app = typer.Typer()
 console = Console()
 
 
-@app.command()
+@app.command(name="status", help="Retrieve the current status of a workplan.")
 def status(
     run_id: t.Annotated[
         str,
