@@ -100,10 +100,12 @@ def compose(
         WorkplanTemplate | None,
         typer.Option(help="Specify the workplan template to populate."),
     ] = None,
-    run_plan: t.Annotated[
-        str,
-        typer.Option(help="Specify `1` to execute the workplan"),
-    ] = "0",
+    execute: t.Annotated[
+        bool,
+        typer.Option(
+            help="Set this flag to automatically execute the generated workplan."
+        ),
+    ] = False,
 ) -> Path:
     """Execute a workplan composed of user-supplied blueprints.
 
@@ -135,7 +137,7 @@ def compose(
     if wp_path is None or not wp_path.exists():
         raise ValueError("Workplan path is malformed.")
 
-    if run_plan == "1":
+    if execute:
         _run(wp_path, output_path, run_id)
 
     return wp_path
