@@ -20,6 +20,13 @@ from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 app = typer.Typer()
 log = get_logger(__name__)
 
+HELP_SHORT = "Execute a workplan."
+HELP_LONG = f"""\
+{HELP_SHORT}
+
+Specify a previously used `run_id` to re-start a prior run.
+"""
+
 
 def preprocess_vars(
     ctx: typer.Context,
@@ -186,7 +193,7 @@ def handle_run_reloading(run_id: str) -> str:
     return wp_run.trx_workplan_path.as_posix()
 
 
-@app.command()
+@app.command(name="run", help=HELP_LONG, short_help=HELP_SHORT)
 def run(
     ctx: typer.Context,
     run_id: t.Annotated[

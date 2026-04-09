@@ -214,7 +214,10 @@ async def render(
     return write_to
 
 
-@app.command()
+@app.command(
+    name="plan",
+    help="Review the execution plan generated for a workplan.",
+)
 def plan(
     path: t.Annotated[
         Path,

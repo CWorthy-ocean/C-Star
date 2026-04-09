@@ -83,7 +83,10 @@ def _populate_workplan(search_dir: Path, blueprints: list["BPResult"]) -> Workpl
     )
 
 
-@app.command()
+@app.command(
+    name="generate",
+    help="Interactively generate a new workplan using pre-existing blueprints.",
+)
 def generate(
     search_directory: t.Annotated[
         str,

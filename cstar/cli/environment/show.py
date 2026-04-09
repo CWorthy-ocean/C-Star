@@ -88,7 +88,7 @@ class DisplayFormat(StrEnum):
     """Display a series of export statements."""
 
 
-@app.command()
+@app.command(name="show", help="Display the active environment configuration.")
 def show(
     group: str = "all",
     display: DisplayFormat = DisplayFormat.INTERACTIVE,

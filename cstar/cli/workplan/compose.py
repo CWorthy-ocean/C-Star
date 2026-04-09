@@ -17,6 +17,13 @@ BP_DEFAULT: t.Final[str] = (
 )
 BP_OUTDIR_DEFAULT: t.Final[str] = "output_dir: ."
 
+HELP_SHORT = "Execute a workplan composed of user-supplied blueprints."
+HELP_LONG = f"""\
+{HELP_SHORT}
+
+Specify a previously used `run_id` to re-start a prior run.
+"""
+
 
 class WorkplanTemplate(StrEnum):
     FANOUT = auto()
@@ -71,7 +78,7 @@ def _run(wp_path: Path, output_path: Path, run_id: str) -> None:
         )
 
 
-@app.command()
+@app.command(name="compose", help=HELP_LONG, short_help=HELP_SHORT)
 def compose(
     workplan: t.Annotated[
         str | None, typer.Argument(help="Path to a workplan file.")
@@ -98,9 +105,9 @@ def compose(
         typer.Option(help="Specify `1` to execute the workplan"),
     ] = "0",
 ) -> Path:
-    """Execute a workplan composed with a user-supplied blueprint.
+    """Execute a workplan composed of user-supplied blueprints.
 
-    Specify a previously used run_id option to re-start a prior run.
+    Specify a previously used `run_id` option to re-start a prior run.
 
     Returns
     -------

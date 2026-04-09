@@ -17,7 +17,7 @@ from cstar.orchestration.serialization import validate_serialized_entity
 app = typer.Typer()
 
 
-@app.command()
+@app.command(name="run", help="Execute a blueprint in a local worker service.")
 def run(
     path: t.Annotated[
         str,
