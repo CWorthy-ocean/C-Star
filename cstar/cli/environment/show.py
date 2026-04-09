@@ -88,10 +88,27 @@ class DisplayFormat(StrEnum):
     """Display a series of export statements."""
 
 
+ALL_GROUPS = t.Literal["all", "flags", "file", "orch", "sim", "dev"]
+
+
 @app.command(name="show", help="Display the active environment configuration.")
 def show(
-    group: str = "all",
-    display: DisplayFormat = DisplayFormat.INTERACTIVE,
+    group: t.Annotated[
+        ALL_GROUPS,
+        typer.Option(
+            "-g",
+            "--group",
+            help="Specify a group key to retrieve a subset of available configuration.",
+        ),
+    ] = "all",
+    display: t.Annotated[
+        DisplayFormat,
+        typer.Option(
+            "-d",
+            "--display",
+            help="Specify the desired format for displaying the configuration.",
+        ),
+    ] = DisplayFormat.INTERACTIVE,
 ) -> None:
     """Display the active environment configuration."""
     all_items = discover_env_vars([base_utils, env, orch_utils, feature])
