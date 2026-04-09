@@ -53,7 +53,7 @@ def test_blueprint_run_remote_blueprint_dne(
         color=False,
     )
 
-    assert "not found" in result.stdout
+    assert "not found" in result.stderr
 
 
 def test_blueprint_run_remote_blueprint() -> None:

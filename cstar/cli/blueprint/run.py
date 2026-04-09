@@ -26,6 +26,7 @@ from cstar.entrypoint.worker.worker import (
 from cstar.entrypoint.worker.worker import (
     execute_runner as execute_runner_rm,
 )
+from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.serialization import (
     deserialize_discriminated,
@@ -65,7 +66,14 @@ def path_callback(
         The path to the blueprint.
     """
     try:
-        loader = deserialize_discriminated(path, BlueprintDiscriminator, "blueprint")
+        with local_copy(path) as local_path:
+            if not local_path.exists():
+                msg = f"Blueprint not found at path: {path}"
+                raise typer.BadParameter(msg)
+
+            loader = deserialize_discriminated(
+                local_path, BlueprintDiscriminator, "blueprint"
+            )
     except FileNotFoundError:
         raise typer.BadParameter(f"Blueprint file not found: {path}")
     except ValidationError as ex:
