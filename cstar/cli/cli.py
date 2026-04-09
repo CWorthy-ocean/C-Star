@@ -9,7 +9,10 @@ from cstar.cli.workplan import app as app_workplan
 
 def main() -> None:
     """Main entrypoint for the complete C-Star CLI."""
-    app = typer.Typer(callback=common_callback)
+    app = typer.Typer(
+        callback=common_callback,
+        help="The C-Star CLI (installed as 'cstar') enables command-line management and execution of C-Star workplans and blueprints.",
+    )
 
     subcommands: list[tuple[typer.Typer, str]] = [
         (app_blueprint, "blueprint"),
