@@ -48,6 +48,9 @@ Improvements
 - Refactor `cli.workplan.run` to make use of `typer` callbacks for input validation
 - Add `--dry-run` option to test workplan generation in `cstar workplan run`
 - Fix unexpected linting warnings about missing required parameters to `ServiceConfiguration`
+- Improve naming of module containing shared CLI callbacks
+- Add callbacks for automatic export of pertinent environment variables from CLI parameters
+
 
 Miscellaneous
 ~~~~~~~~~~~~~
