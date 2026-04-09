@@ -4,16 +4,19 @@ from pathlib import Path
 import pytest
 from pytest import CaptureFixture
 
-from cstar.entrypoint.worker.app_host import BlueprintRequest as BlueprintRequestV2
 from cstar.entrypoint.worker.app_host import (
-    create_runner,
+    BaseBlueprintRequest as BlueprintRequestV2,
 )
+from cstar.entrypoint.worker.app_host import create_runner
 from cstar.entrypoint.worker.hello_app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.converter.converter import get_command_mapping
+from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
 
 
@@ -113,3 +116,46 @@ async def test_execute_runner_happy_path(
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()
+
+
+@pytest.mark.asyncio
+async def test_hello_world_command_converter(
+    tmp_path: Path,
+    capsys: CaptureFixture,
+    hello_world_bp_path: Path,
+    hello_world_default_target: str,
+) -> None:
+    """Verify that the command converter produces a working CLI
+    command.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary output location for writing the test blueprint.
+    capsys : CaptureFixture
+        Fixture for capturing stdout and stderr.
+    hello_world_bp_path : Path
+        Path to the hello world blueprint.
+    """
+    work_dir = tmp_path / "work"
+
+    step = LiveStep(
+        name=f"{__name__}",
+        application=Application.HELLO_WORLD,
+        blueprint=hello_world_bp_path.as_posix(),
+        work_dir=work_dir,
+    )
+
+    # find the registered command converter for this application and launcher type
+    cmd_converter = get_command_mapping(Application.HELLO_WORLD, LocalLauncher)
+    assert cmd_converter is not None, "Command converter not found"
+
+    # use the converter function to generate the command
+    command = cmd_converter(step)
+
+    # confirm the retrieved converter produces the output expected
+    # from the function: convert_step_to_blueprint_run_command
+    assert "python -m " in command
+    assert "cstar.entrypoint.worker.hello_app" in command
+    assert f"-b {hello_world_bp_path.as_posix()}" in command
+    # assert command == f"cstar blueprint run {hello_world_bp_path.as_posix()}"

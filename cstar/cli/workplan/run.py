@@ -5,10 +5,10 @@ from pathlib import Path
 
 import typer
 
-from cstar.base.env import ENV_CSTAR_LOG_LEVEL
+from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR, ENV_CSTAR_LOG_LEVEL
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
-from cstar.cli.common import log_level_callback
+from cstar.cli.common import clobber_callback, log_level_callback
 from cstar.cli.workplan.shared import (
     check_and_capture_kvps,
     list_runs,
@@ -260,6 +260,15 @@ def run(
             envvar=ENV_CSTAR_LOG_LEVEL,
         ),
     ] = LogLevelChoices.INFO,
+    clobber: t.Annotated[
+        bool,
+        typer.Option(
+            "--clobber",
+            callback=clobber_callback,
+            help="Clobber the working directory if it exists.",
+            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ),
+    ] = False,
 ) -> None:
     """Execute a workplan.
 
@@ -289,11 +298,11 @@ def run(
     except ValueError as ex:
         raise typer.BadParameter(ex.args[0]) from ex
     except Exception as ex:
-        msg = f"Workplan run `{run_id}` has completed unsuccessfully: {ex}"
+        msg = f"Workplan run {run_id!r} has failed: {ex}"
         print(msg)
         raise typer.Exit(3) from ex
     else:
-        print(f"Workplan run `{run_id}` has completed")
+        print(f"Workplan run {run_id!r} has completed")
 
 
 if __name__ == "__main__":

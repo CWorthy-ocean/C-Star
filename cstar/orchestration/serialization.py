@@ -1,4 +1,5 @@
 import enum
+import json
 import typing as t
 from dataclasses import dataclass
 from pathlib import Path, PosixPath
@@ -197,6 +198,50 @@ def _mode_detect(path: Path) -> PersistenceMode:
 
     print("Using default persistence mode `yaml` for file `{path}`")
     return PersistenceMode.yaml
+
+
+_TD = t.TypeVar("_TD", bound=SerializableModel)
+
+
+def deserialize_discriminated(
+    path: Path | str,
+    discriminator: type[_TD],
+    field_name: str,
+    mode: PersistenceMode = PersistenceMode.auto,
+) -> _TD:
+    """Deserialize a discriminated model from a file.
+
+    Parameters
+    ----------
+    path : Path | str
+        The path to a file containing content.
+    discriminator : type[_TD]
+        The type to instantiate from the content.
+    mode : PersistenceMode
+        The persistence mode to use.
+
+    Returns
+    -------
+    _TD
+    """
+    if isinstance(path, str):
+        path = Path(path)
+
+    if not path.exists():
+        msg = f"No file found at path `{path}` to deserialize to `{discriminator.__name__}`"
+        raise FileNotFoundError(msg)
+
+    if mode == PersistenceMode.auto:
+        mode = _mode_detect(path)
+
+    content = path.read_text()
+
+    if mode == PersistenceMode.yaml:
+        attributes = safe_load(content)
+    else:
+        attributes = json.loads(content)
+
+    return discriminator(**{field_name: attributes})
 
 
 def deserialize(

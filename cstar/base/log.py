@@ -8,7 +8,7 @@ from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 
 DEFAULT_LOG_LEVEL = logging.INFO
 DEFAULT_LOG_FORMAT = (
-    "%(asctime)s [%(levelname)8s] - %(filename)20s:%(lineno)4d - %(message)s"
+    "%(asctime)s [%(levelname)s] - %(filename)s:%(lineno)d - %(message)s"
 )
 TRACE_LOG_LEVEL: t.Final[int] = 5
 TRACE_LOG_NAME: t.Final[str] = "TRACE"

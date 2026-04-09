@@ -11,8 +11,8 @@ app = typer.Typer()
 HELP_SHORT = "Print the current version of the C-Star package and exit."
 
 
-def version_callback(value: bool) -> None:
-    """Print the current version of the C-Star package and exit."""
+def version_callback(value: bool) -> bool:
+    """Print the version of C-Star and exit."""
     if value:
         typer.echo(cstar.__version__)
         raise typer.Exit()

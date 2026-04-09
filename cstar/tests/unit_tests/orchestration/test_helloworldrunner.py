@@ -2,6 +2,7 @@
 import os
 import sys
 import typing as t
+import uuid
 from pathlib import Path
 from unittest import mock
 
@@ -11,11 +12,8 @@ from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.workplan.run import app
-from cstar.entrypoint.worker.app_host import BlueprintRequest as BlueprintRequestV2
-from cstar.entrypoint.worker.app_host import (
-    BlueprintRunner,
-    create_runner,
-)
+from cstar.entrypoint.worker.app_host import BaseBlueprintRequest as BlueprintRequestV2
+from cstar.entrypoint.worker.app_host import BlueprintRunner, create_runner
 from cstar.entrypoint.worker.hello_app import (
     HelloWorldRunner,
 )
@@ -23,8 +21,14 @@ from cstar.entrypoint.worker.hello_app import (
     main as hw_main,
 )
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import Workplan, WorkplanState
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.utils import (
+    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
+    ENV_CSTAR_ORCH_DELAYS,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+)
 
 
 @pytest.fixture
@@ -33,7 +37,12 @@ def hw_single_step_wp_path(
     hello_world_bp_content: str,
     fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
 ) -> Path:
-    """Return the path to a workplan containing a single step that runs the hello_world application."""
+    """Return the path to a workplan containing a single step that runs the hello_world application.
+
+    Returns
+    -------
+    Path
+    """
     bp_content = hello_world_bp_content
     bp_path = tmp_path / "hw.yaml"
     bp_path.write_text(bp_content)
@@ -69,8 +78,45 @@ def hw_single_step_wp_path(
 def hw_single_step_wp(
     hw_single_step_wp_path: Path,
 ) -> Workplan:
-    """Return a workplan containing a single step that runs the hello_world application."""
+    """Return a workplan containing a single step that runs the hello_world application.
+
+    Returns
+    -------
+    Workplan
+    """
     return deserialize(hw_single_step_wp_path, Workplan)
+
+
+@pytest.fixture
+def heterogeneous_workplan_path(
+    tmp_path: Path,
+    hw_single_step_wp: Workplan,
+    single_step_workplan: Workplan,
+) -> Path:
+    """Return the path to a workplan containing steps triggering different applications.
+
+    Returns
+    -------
+    Path
+    """
+    wp = Workplan(
+        name="heterogeneous-workplan",
+        description="This is a test workplan containing steps triggering different applications",
+        state=WorkplanState.Draft,
+        compute_environment={
+            "num_nodes": 4,
+            "num_cpus_per_process": 16,
+        },
+        runtime_vars=["var1", "var2"],
+        steps=[
+            hw_single_step_wp.steps[0],
+            single_step_workplan.steps[0],
+        ],
+    )
+    wp_path = tmp_path / f"{wp.name}.yaml"
+    serialize(wp_path, wp)
+
+    return wp_path
 
 
 @pytest.mark.asyncio
@@ -229,9 +275,17 @@ async def test_hello_world_workplan(
     )
 
 
+@pytest.mark.parametrize(
+    "dry_run",
+    [
+        pytest.param(True, id="dry-run only"),
+        pytest.param(False, id="full execution"),
+    ],
+)
 def test_hello_world_workplan_dry_run(
     tmp_path: Path,
     hw_single_step_wp_path: Path,
+    dry_run: bool,
 ) -> None:
     """Test the preparation of a workplan containing a non ROMS-MARBL application (--dry-run).
 
@@ -241,21 +295,93 @@ def test_hello_world_workplan_dry_run(
         Temporary output location for writing the test workplan and outputs from the run.
     hw_single_step_wp_path : Path
         The path to the workplan containing a single step that runs the hello_world application.
+    dry_run : bool
+        Whether to run the workplan in dry-run mode.
     """
     state_dir = tmp_path / "state"
     runner = CliRunner()
+    custom_env = {
+        ENV_CSTAR_ORCH_DELAYS: "3,5",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
+        ENV_CSTAR_SLURM_QUEUE: "debug",
+        ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
+        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
+    }
 
+    run_id = str(uuid.uuid4())
     with (
-        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
+        mock.patch.dict(os.environ, custom_env),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=None),
+        ),
     ):
+        args = [hw_single_step_wp_path.as_posix(), "--run-id", run_id]
+        if dry_run:
+            args.append("--dry-run")
+
         result = runner.invoke(
             app,
-            [
-                "--dry-run",
-                hw_single_step_wp_path.as_posix(),
-            ],
+            args,
             color=False,
         )
 
     assert result.exit_code == 0
-    assert "hw-workplan" in result.stdout
+    assert run_id in result.stdout
+    assert "completed" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "dry_run",
+    [
+        pytest.param(True, id="dry-run only"),
+        pytest.param(False, id="full execution"),
+    ],
+)
+def test_heterogeneous_workplan(
+    tmp_path: Path,
+    heterogeneous_workplan_path: Path,
+    dry_run: bool,
+) -> None:
+    """Test the preparation of a workplan containing multiple applications (--dry-run).
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary output location for writing the test workplan and outputs from the run.
+    heterogeneous_workplan_path : Path
+        The path to the workplan containing a step relying on the hello_world application
+        and a step relying on the ROMS-MARBL application.
+    dry_run : bool
+        Whether to run the workplan in dry-run mode.
+    """
+    state_dir = tmp_path / "state"
+    runner = CliRunner()
+    custom_env = {
+        ENV_CSTAR_ORCH_DELAYS: "3,5",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
+        ENV_CSTAR_SLURM_QUEUE: "debug",
+        ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
+        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
+    }
+    run_id = str(uuid.uuid4())
+    with (
+        mock.patch.dict(os.environ, custom_env),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=None),
+        ),
+    ):
+        args = [heterogeneous_workplan_path.as_posix(), "--run-id", run_id]
+        if dry_run:
+            args.append("--dry-run")
+
+        result = runner.invoke(
+            app,
+            args,
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    assert run_id in result.stdout
+    assert "completed" in result.stdout

@@ -5,9 +5,15 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from cstar.entrypoint.worker.hello_app import HelloWorldBlueprint
 from cstar.orchestration.launch.slurm import SlurmHandle
-from cstar.orchestration.models import Application, Workplan
-from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    deserialize_discriminated,
+    serialize,
+)
 from cstar.orchestration.state import sentinel_path
 
 
@@ -246,3 +252,99 @@ def test_serialization_handle(tmp_path: Path, mode: PersistenceMode) -> None:
 
     assert dhandle.name == handle.name
     assert dhandle.pid == handle.pid
+
+
+@pytest.fixture
+def hello_world_default_target() -> str:
+    """Return the default target for the hello world blueprint."""
+    return "@ankona"
+
+
+import textwrap  # noqa: E402
+
+from cstar.base.utils import additional_files_dir  # noqa: E402
+
+
+@pytest.fixture
+def hello_world_bp_content(hello_world_default_target: str) -> str:
+    """Return the minimal content for a HW blueprint.
+
+    Parameters
+    ----------
+    hello_world_default_target : str
+        The default target for the hello world blueprint.
+    """
+    return textwrap.dedent(f"""\
+        name: Say hello to my little friend!
+        description: This blueprint says hello to a very nice guy
+        application: hello_world
+        state: draft
+        target: '{hello_world_default_target}'
+        """)
+
+
+@pytest.fixture
+def hello_world_bp_path(tmp_path: Path, hello_world_bp_content: str) -> Path:
+    """Return a fresh copy of the HW blueprint in the current test's temp dir."""
+    path = tmp_path / "helloworld.yaml"
+    path.write_text(hello_world_bp_content)
+    return path
+
+
+@pytest.fixture
+def templates_dir() -> Path:
+    """Return the path to the templates directory contained in the package
+    "additional files."
+
+    Returns
+    -------
+    Path
+    """
+    return additional_files_dir() / "templates"
+
+
+@pytest.fixture
+def bp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Blueprint` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "bp"
+
+
+AllBlueprints = RomsMarblBlueprint | HelloWorldBlueprint
+
+
+class BlueprintDiscriminator(BaseModel):
+    blueprint: t.Annotated[AllBlueprints, Field(discriminator="application")]
+
+
+def test_deserialize_discriminated(tmp_path: Path, hello_world_bp_path: Path) -> None:
+    """Verify that a discriminated union can be properly deserialized."""
+    bpd = deserialize_discriminated(
+        hello_world_bp_path, BlueprintDiscriminator, "blueprint"
+    )
+    assert isinstance(bpd.blueprint, HelloWorldBlueprint)
+    assert bpd.blueprint.target == "@ankona"
+
+
+def test_deserialize_discriminated_roms(tmp_path: Path, bp_templates_dir: Path) -> None:
+    """Verify that a discriminated union can be properly deserialized."""
+    # bpd = deserialize(hello_world_bp_path, BlueprintDiscriminator)
+    roms_bp_path = bp_templates_dir / "blueprint.yaml"
+    content = roms_bp_path.read_text(encoding="utf-8").replace("sleep", "roms_marbl")
+
+    test_bp_path = tmp_path / "roms_marbl.yaml"
+    test_bp_path.write_text(content)
+
+    bpd = deserialize_discriminated(test_bp_path, BlueprintDiscriminator, "blueprint")
+    assert isinstance(bpd.blueprint, RomsMarblBlueprint)
+    assert bpd.blueprint is not None

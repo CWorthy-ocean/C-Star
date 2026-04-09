@@ -12,7 +12,7 @@ from cstar.entrypoint.worker.app_host import (
     get_service_config,
 )
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import Application, Blueprint
+from cstar.orchestration.models import Blueprint
 
 
 class HelloWorldBlueprint(Blueprint):
@@ -20,7 +20,8 @@ class HelloWorldBlueprint(Blueprint):
     runner application.
     """
 
-    application: Application = Application.HELLO_WORLD
+    application: t.Literal["hello_world"] = "hello_world"
+
     """The application identifier."""
     target: str
     """The person to say hello to."""
