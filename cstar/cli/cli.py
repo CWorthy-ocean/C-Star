@@ -7,13 +7,10 @@ from cstar.cli.version import common_callback
 from cstar.cli.workplan import app as app_workplan
 
 
-def main() -> None:
-    """Main entrypoint for the complete C-Star CLI."""
-    app = typer.Typer(
-        callback=common_callback,
-        help="The C-Star CLI (installed as 'cstar') enables command-line management and execution of C-Star workplans and blueprints.",
-    )
-
+def attach_subcommands(app: typer.Typer) -> None:
+    """Attach subcommands dynamically to the main typer app and configure
+    the command callback to enable shared options.
+    """
     subcommands: list[tuple[typer.Typer, str]] = [
         (app_blueprint, "blueprint"),
         (app_env, "env"),
@@ -29,9 +26,22 @@ def main() -> None:
                     name=command_name,
                     callback=common_callback,
                 )
-        app()
+        # app()
     except Exception as ex:
         print(f"An error occurred while handling request: {ex}")
+
+
+app = typer.Typer(
+    callback=common_callback,
+    help="The C-Star CLI (installed as 'cstar') enables command-line management and execution of C-Star workplans and blueprints.",
+)
+attach_subcommands(app)
+
+
+def main() -> None:
+    """Main entrypoint for the complete C-Star CLI."""
+    global app
+    app()
 
 
 if __name__ == "__main__":
