@@ -37,7 +37,7 @@ jobs:
       - name: Install C-Star
         shell: micromamba-shell {0}
         run: |
-           python - V
+           python -V
            python -m pip install -e ".[dev]" --force-reinstall
 
       - name: Running Tests
