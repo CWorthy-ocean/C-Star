@@ -37,6 +37,7 @@ Bug Fixes
 - Fix bug causing intermittent `FileNotFound` errors
 - Fix workplan template with inconsistent blueprint path
 - Fix bug causing failures when invoking blueprints via `cstar blueprint run`
+- Fix uninitialized attributes error in `SlurmBatch`
 
 Improvements
 ~~~~~~~~~~~~

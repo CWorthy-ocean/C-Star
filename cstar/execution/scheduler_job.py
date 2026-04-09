@@ -169,7 +169,7 @@ class SlurmBatch:
     steps: t.Iterable[SlurmStep]
     """The collection of steps running in a batch."""
 
-    _job: SlurmStep
+    _job: SlurmStep | None = None
     """The parent step for the batch."""
 
     def __init__(self, steps: t.Iterable[SlurmStep]) -> None:
@@ -184,6 +184,9 @@ class SlurmBatch:
         if len(job_ids) > 1:
             raise ValueError("Attempted to create batch from multiple batches")
 
+        self._job = None
+        self.steps = []
+
         if all_steps := list(steps):
             try:
                 # a queued job will not have any steps, default to using first result
@@ -193,14 +196,23 @@ class SlurmBatch:
                 pass  # if batch status is retrieved too quickly, steps may be empty
 
     @property
-    def job(self) -> SlurmStep:
-        """Return the parent step for the batch.
+    def status(self) -> ExecutionStatus:
+        """Return the status of the parent job."""
+        if self._job is not None:
+            return self._job.status
+        return ExecutionStatus.UNSUBMITTED
+
+    @property
+    def job_id(self) -> str | None:
+        """Return the ID of the parent job.
 
         Returns
         -------
-        SlurmStep
+        str
         """
-        return self._job
+        if self._job is None:
+            return None
+        return self._job.job_id
 
     @classmethod
     def from_multi_query(cls, steps: t.Iterable[SlurmStep]) -> dict[str, "SlurmBatch"]:
@@ -901,7 +913,7 @@ class SlurmJob(SchedulerJob):
             If the command to retrieve the job status fails or returns an unexpected result.
         """
         if batch := self.get_batch():
-            return batch.job.status
+            return batch.status
 
         return ExecutionStatus.UNSUBMITTED
 
@@ -911,7 +923,7 @@ class SlurmJob(SchedulerJob):
 
         # avoid refreshing status if the job is done
         if self._batch is None or not ExecutionStatus.is_terminal(
-            self._batch.job.status,
+            self._batch.status,
         ):
             self._batch = get_slurm_batch_sync(self.id)
         return self._batch
