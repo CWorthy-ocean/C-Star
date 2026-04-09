@@ -99,6 +99,7 @@ def test_workplan_run_variable_unknown(
     bp_templates_dir: Path,
     wp_templates_dir: Path,
     default_blueprint_path: str,
+    prefect_server_url: str,
 ) -> None:
     """Verify that attempting to run a workplan with runtime variables that are
     not declared by the workplan results in a failure.

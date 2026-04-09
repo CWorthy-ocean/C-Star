@@ -1,9 +1,11 @@
 import functools
 import logging
+import os
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
+from subprocess import Popen
 from typing import Any
 from unittest import mock
 
@@ -1767,3 +1769,41 @@ def mock_placeholder_delay() -> Generator[None, None, None]:
         return_value=0.01,
     ):
         yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def prefect_server() -> Generator[str, None, None]:
+    """Starts a Prefect server and stops it when the tests are done."""
+    if "PREFECT_API_URL" in os.environ:
+        # use a running local prefect server if one exists
+        yield os.environ["PREFECT_API_URL"]
+        return
+
+    prefect_port = "12345"
+    api_url = f"http://127.0.0.1:{prefect_port}/api"
+
+    try:
+        process = Popen(
+            [
+                "prefect",
+                "server",
+                "start",
+                "--port",
+                prefect_port,
+            ],
+            text=True,
+            encoding="utf-8",
+        )
+        yield api_url
+    except Exception as ex:
+        print(f"Failed to start Prefect server: {ex}")
+    finally:
+        if process and process.returncode is None:
+            process.terminate()
+
+
+@pytest.fixture
+def prefect_server_url(prefect_server: str) -> Generator[str, None, None]:
+    """Configure the Prefect API URL for the duration of the tests."""
+    os.environ["PREFECT_API_URL"] = prefect_server
+    yield prefect_server
