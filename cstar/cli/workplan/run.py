@@ -211,7 +211,7 @@ def run(
             "-v",
             help=(
                 "Specify 0-to-many replacements as key-value pairs in "
-                "the form `<key>=<value>`."
+                "the form `key=value`."
             ),
             callback=preprocess_vars,
         ),
@@ -223,7 +223,7 @@ def run(
             "-f",
             help=(
                 "Specify the path to a file containing one replacements per line "
-                "as key-value pairs in the form `<key>=<value>`."
+                "as key-value pairs in the form `key=value`."
             ),
             callback=preprocess_varfile,
             exists=True,
