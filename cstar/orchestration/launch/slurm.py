@@ -13,6 +13,7 @@ from cstar.base.env import (
 )
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd, slugify
+from cstar.entrypoint.worker.hello_app import HelloWorldBlueprint
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
@@ -20,7 +21,7 @@ from cstar.execution.scheduler_job import (
     get_slurm_batches,
 )
 from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Application, RomsMarblBlueprint
+from cstar.orchestration.models import Application, Blueprint, RomsMarblBlueprint
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -182,7 +183,18 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             A ProcessHandle identifying the newly submitted job.
         """
         job_name = step.safe_name
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        bp_type: type[Blueprint]
+
+        if step.application == Application.ROMS_MARBL:
+            bp_type = RomsMarblBlueprint
+        elif step.application == Application.HELLO_WORLD:
+            bp_type = HelloWorldBlueprint
+        elif step.application == Application.SLEEP:
+            bp_type = RomsMarblBlueprint  # TODO: this is not good
+        else:
+            raise ValueError(f"Unknown application: {step.application}")
+
+        bp = deserialize(step.blueprint_path, bp_type)
         job_dep_ids = [d.pid for d in dependencies]
 
         step_converter = get_command_mapping(
