@@ -2,7 +2,7 @@ import asyncio
 import typing as t
 
 import typer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -44,11 +44,47 @@ class BlueprintDiscriminator(BaseModel):
     blueprint: t.Annotated[AllBlueprints, Field(discriminator="application")]
 
 
+def path_callback(
+    ctx: typer.Context,
+    path: str,
+) -> str:
+    """Validate the blueprint content after typer has parsed the path.
+
+    Additionally, loads the blueprint and stores in the context for later use.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        The context of the command.
+    path : str
+        The path to the blueprint.
+
+    Returns
+    -------
+    str
+        The path to the blueprint.
+    """
+    try:
+        loader = deserialize_discriminated(path, BlueprintDiscriminator, "blueprint")
+    except FileNotFoundError:
+        raise typer.BadParameter(f"Blueprint file not found: {path}")
+    except ValidationError as ex:
+        raise typer.BadParameter(f"Blueprint file is malformed: {ex}")
+
+    ctx.obj = loader.blueprint
+
+    return path
+
+
 @app.command(name="run", help="Execute a blueprint in a local worker service.")
 def run(
+    ctx: typer.Context,
     path: t.Annotated[
         str,
-        typer.Argument(help="The path to the blueprint to execute"),
+        typer.Argument(
+            help="The path to the blueprint to execute",
+            callback=path_callback,
+        ),
     ],
     stage: t.Annotated[
         list[SimulationStages] | None,
@@ -81,8 +117,7 @@ def run(
     job_cfg = get_job_config()
     service_cfg = get_service_config(get_env_item(ENV_CSTAR_LOG_LEVEL).value)
 
-    loader = deserialize_discriminated(path, BlueprintDiscriminator, "blueprint")
-    bp = loader.blueprint
+    bp: AllBlueprints = ctx.obj
     application = bp.application
 
     print(f"Executing {application!r} blueprint in a worker service")
