@@ -131,7 +131,6 @@ class LocalLauncher(Launcher[LocalHandle]):
             )
             mp_process.start()
             create_time = datetime.datetime.now(tz=datetime.timezone.utc)
-            mp_process.join()
             if pid := mp_process.pid:
                 print(f"Local run of `{step.application}` created pid: {pid}")
 
