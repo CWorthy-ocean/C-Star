@@ -1771,7 +1771,7 @@ def mock_placeholder_delay() -> Generator[None, None, None]:
         yield
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def prefect_server() -> Generator[str, None, None]:
     """Starts a Prefect server and stops it when the tests are done."""
     if "PREFECT_API_URL" in os.environ:
