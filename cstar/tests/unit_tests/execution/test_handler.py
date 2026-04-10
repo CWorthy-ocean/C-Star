@@ -244,7 +244,7 @@ class TestExecutionHandlerUpdates:
                     f.flush()
 
                 # Change the status to `COMPLETED` after writing running updates
-                time.sleep(0.1)
+                time.sleep(0.15)
                 handler._status = ExecutionStatus.COMPLETED
                 for line in completed_updates:
                     time.sleep(0.05)
