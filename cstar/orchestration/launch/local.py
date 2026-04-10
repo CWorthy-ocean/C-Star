@@ -1,7 +1,7 @@
 import asyncio
 import datetime
+import multiprocessing as _mp
 import typing as t
-from multiprocessing import Process as MpProcess
 from subprocess import run as sprun
 
 from psutil import NoSuchProcess
@@ -28,6 +28,8 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+mp = _mp.get_context("spawn")
+
 
 def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
     p = sprun(args=cmd, text=True, check=True, capture_output=True)
@@ -40,7 +42,7 @@ class LocalHandle(ProcessHandle):
     start_at: datetime.datetime | float
     """The process creation time as a posix timestamp (in seconds)."""
 
-    _process: MpProcess = PrivateAttr()
+    _process: _mp.Process = PrivateAttr()
     """The process handle (used only for simulating local processes)."""
 
     status: Status = Status.Unsubmitted
@@ -64,11 +66,11 @@ class LocalHandle(ProcessHandle):
         return now - self.start_ts
 
     @property
-    def process(self) -> MpProcess:
+    def process(self) -> _mp.Process:
         return self._process
 
     @process.setter
-    def process(self, value: MpProcess) -> None:
+    def process(self, value: _mp.Process) -> None:
         self.status = Status.Submitted
         self._process = value
 
@@ -110,7 +112,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             if not step.fsm.root.exists():
                 step.fsm.prepare()
 
-            mp_process = MpProcess(
+            mp_process = mp.Process(
                 target=run_as_process,
                 name=step.safe_name,
                 args=(step, cmd.split()),
@@ -136,7 +138,8 @@ class LocalLauncher(Launcher[LocalHandle]):
                     start_at=create_time,
                     status=Status.Submitted,
                 )
-                handle.process = mp_process
+
+                handle.process = mp_process  # type: ignore[assignment]
                 return handle
 
         finally:

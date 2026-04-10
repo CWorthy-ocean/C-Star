@@ -1,11 +1,8 @@
-import multiprocessing as mp
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
-
-mp.set_start_method("spawn")
 
 
 @pytest.fixture(scope="session")
