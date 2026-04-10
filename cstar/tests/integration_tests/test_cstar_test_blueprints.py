@@ -21,7 +21,7 @@ class TestCStar:
         self,
         tmp_path: Path,
         modify_template_blueprint: t.Callable[
-            [Path | str, dict[str, str], Path | str], str
+            [Path | str, dict[str, str], Path | str], Path
         ],
         mock_lmod_path: Path,
         fetch_remote_test_case_data: t.Callable[[], None],
@@ -81,7 +81,7 @@ class TestCStar:
                 strs_to_replace,
                 out_dir,
             )
-            cstar_test_case = ROMSSimulation.from_blueprint(modified_blueprint)
+            cstar_test_case = ROMSSimulation.from_blueprint(str(modified_blueprint))
 
             cstar_test_case.setup()
             cstar_test_case.build()
