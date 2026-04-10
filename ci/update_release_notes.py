@@ -267,6 +267,10 @@ def parse_pr_body(
     if not body:
         return {}
 
+    # Strip multiline HTML comments before line-by-line processing so that
+    # comments spanning several lines don't leave orphaned <!-- or --> fragments.
+    body = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
+
     result: dict[str, list[tuple[str, list[str]]]] = {}
     current: str | None = None
     # Each element: [top_level_text, [sub_item, …]] — mutable for sub-item appends
@@ -281,8 +285,7 @@ def parse_pr_body(
                 result[current] = [(t, s) for t, s in good]
 
     for raw in body.splitlines():
-        # Measure indentation on the comment-stripped version *before* stripping
-        cleaned = re.sub(r"<!--.*?-->", "", raw).rstrip()
+        cleaned = raw.rstrip()
         indent = len(cleaned) - len(cleaned.lstrip())
         line = cleaned.strip()
 
@@ -409,6 +412,34 @@ def get_section_bullets(lines: list[str], section_title: str) -> set[str]:
     return bullets
 
 
+def format_rst_bullet(text: str, sub_items: list[str], pr_number: int) -> str:
+    """
+    Return the complete RST text for one bullet item (no trailing newline).
+
+    The PR link is appended to the top-level text.  Sub-items are formatted as
+    an RST nested list, indented by two spaces with a required blank line
+    separating them from the parent line.
+
+    Args:
+        text: Top-level bullet text (plain prose, no leading ``-``).
+        sub_items: Indented child bullet texts, if any.
+        pr_number: GitHub PR number used to build the hyperlink reference.
+
+    Example output::
+
+        - Parent text (`#NNN <url>`_)
+
+          - sub item 1
+          - sub item 2
+    """
+    link = f"`#{pr_number} <{PR_URL_BASE}/{pr_number}>`_"
+    top = f"- {text} ({link})"
+    if not sub_items:
+        return top
+    sub_block = "\n".join(f"  - {s}" for s in sub_items)
+    return f"{top}\n\n{sub_block}"
+
+
 def _bullet_block_to_lines(block: str) -> list[str]:
     """
     Convert a pre-formatted RST bullet block (from ``format_rst_bullet``) into
@@ -519,34 +550,6 @@ def insert_bullets_into_section(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
-
-def format_rst_bullet(text: str, sub_items: list[str], pr_number: int) -> str:
-    """
-    Return the complete RST text for one bullet item (no trailing newline).
-
-    The PR link is appended to the top-level text.  Sub-items are formatted as
-    an RST nested list, indented by two spaces with a required blank line
-    separating them from the parent line.
-
-    Args:
-        text: Top-level bullet text (plain prose, no leading ``-``).
-        sub_items: Indented child bullet texts, if any.
-        pr_number: GitHub PR number used to build the hyperlink reference.
-
-    Example output::
-
-        - Parent text (`#NNN <url>`_)
-
-          - sub item 1
-          - sub item 2
-    """
-    link = f"`#{pr_number} <{PR_URL_BASE}/{pr_number}>`_"
-    top = f"- {text} ({link})"
-    if not sub_items:
-        return top
-    sub_block = "\n".join(f"  - {s}" for s in sub_items)
-    return f"{top}\n\n{sub_block}"
 
 
 _UNRELEASED_TEMPLATE = """\
