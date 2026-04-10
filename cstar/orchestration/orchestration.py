@@ -591,7 +591,7 @@ class Orchestrator(LoggingMixin):
 
         Returns
         -------
-        set[str] | None
+        dict[str] | None
             - Set of open nodes ready for some processing actions.
             - An empty set indicates no actions are currently possible.
             - Null indicates all nodes are closed (traversal is complete).
@@ -770,14 +770,14 @@ class Orchestrator(LoggingMixin):
         postproc_tasks = [
             asyncio.Task(self.update_planner_state(n, t)) for n, t in kvp.items()
         ]
-        cancellations: set[Task] = set()
+        cancellations: list[Task] = list()
 
         try:
             await asyncio.gather(*postproc_tasks)
         except CstarExpectationFailed:
-            cancellations = {
+            cancellations = [
                 v for v in kvp.values() if v and Status.is_in_progress(v.status)
-            }
+            ]
             self.log.exception("A task has failed unexpectedly")
 
         await self._cancel(cancellations)
