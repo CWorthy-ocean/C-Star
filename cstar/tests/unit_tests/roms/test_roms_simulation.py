@@ -12,6 +12,7 @@ import pytest
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.execution.handler import ExecutionStatus
+from cstar.io.source_data import SourceDataCollection
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms import ROMSRuntimeSettings
 from cstar.roms.discretization import ROMSDiscretization
@@ -1010,9 +1011,19 @@ class TestToAndFromDictAndBlueprint:
          - `open()` is called exactly once with the expected file path in read mode.
 
         """
-        sim = ROMSSimulation.from_blueprint(
-            blueprint=str(blueprint_path),
-        )
+        with (
+            mock.patch(
+                "cstar.io.source_data.SourceDataCollection.from_locations",
+                mock.MagicMock(spec=SourceDataCollection),
+            ),
+            mock.patch(
+                "cstar.roms.simulation.ROMSSimulation._find_dotin_file",
+                mock.Mock(),
+            ),
+        ):
+            sim = ROMSSimulation.from_blueprint(
+                blueprint=str(blueprint_path),
+            )
 
         # Assertions
         assert isinstance(sim, ROMSSimulation)

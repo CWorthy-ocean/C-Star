@@ -25,6 +25,8 @@ from cstar.entrypoint.worker.worker import (
     main,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.io.constants import SourceClassification
+from cstar.io.source_data import SourceDataCollection
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -83,7 +85,6 @@ def fake_job_config() -> Generator[JobConfig, None, None]:
 @pytest.fixture
 def sim_runner(
     blueprint_path: Path,
-    patch_romssimulation_init_sourcedata,
     fake_job_config: JobConfig,
 ) -> SimulationRunner:
     """Fixture to create a SimulationRunner instance.
@@ -107,7 +108,20 @@ def sim_runner(
         name="test_simulation_runner",
     )
 
-    with patch_romssimulation_init_sourcedata(from_worker=True):
+    with (
+        mock.patch(
+            "cstar.io.source_data.SourceDataCollection.from_locations",
+            mock.MagicMock(spec=SourceDataCollection),
+        ),
+        mock.patch(
+            "cstar.roms.simulation.ROMSSimulation._find_dotin_file",
+            mock.Mock(),
+        ),
+        mock.patch(
+            "cstar.io.source_data._SourceInspector.classify",
+            mock.Mock(return_value=SourceClassification.REMOTE_REPOSITORY),
+        ),
+    ):
         runner = SimulationRunner(request, service_config, fake_job_config)
 
     output_path = runner._simulation.fs_manager.output_dir
@@ -325,7 +339,6 @@ def test_configure_environment_prebuilt() -> None:
 
 def test_start_runner(
     blueprint_path: Path,
-    patch_romssimulation_init_sourcedata,
     fake_job_config: JobConfig,
 ) -> None:
     """Test creating a SimulationRunner and starting it.
@@ -348,7 +361,20 @@ def test_start_runner(
         health_check_log_threshold=10,
     )
 
-    with patch_romssimulation_init_sourcedata(from_worker=True):
+    with (
+        mock.patch(
+            "cstar.io.source_data.SourceDataCollection.from_locations",
+            mock.MagicMock(spec=SourceDataCollection),
+        ),
+        mock.patch(
+            "cstar.roms.simulation.ROMSSimulation._find_dotin_file",
+            mock.Mock(),
+        ),
+        mock.patch(
+            "cstar.io.source_data._SourceInspector.classify",
+            mock.Mock(return_value=SourceClassification.REMOTE_REPOSITORY),
+        ),
+    ):
         runner = SimulationRunner(request, service_config, fake_job_config)
 
     assert runner._blueprint_uri == request.blueprint_uri
@@ -1115,8 +1141,19 @@ def test_worker_main_exec(
         "DEBUG",
     ]
 
-    # don't let it perform any real work; mock out runner.execute
     with (
+        mock.patch(
+            "cstar.io.source_data.SourceDataCollection.from_locations",
+            mock.MagicMock(spec=SourceDataCollection),
+        ),
+        mock.patch(
+            "cstar.roms.simulation.ROMSSimulation._find_dotin_file",
+            mock.Mock(),
+        ),
+        mock.patch(
+            "cstar.io.source_data._SourceInspector.classify",
+            mock.Mock(return_value=SourceClassification.REMOTE_REPOSITORY),
+        ),
         mock.patch.object(
             SimulationRunner,
             "execute",

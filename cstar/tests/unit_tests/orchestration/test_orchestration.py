@@ -10,6 +10,7 @@ import pytest
 
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.io.constants import FileEncoding
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.orchestration import (
@@ -266,14 +267,18 @@ async def test_orchestrator_multi_entrypoint_open_closed_lists(
     assert open_set, "Orchestrator didn't identify any open nodes"
     encountered = set(open_set or [])
 
-    while open_set is not None:
-        await orchestrator.run(mode=mode)
+    with mock.patch(
+        "cstar.io.source_data._SourceInspector.file_encoding",
+        mock.PropertyMock(return_value=FileEncoding.TEXT),
+    ):
+        while open_set is not None:
+            await orchestrator.run(mode=mode)
 
-        closed_set = orchestrator.get_closed_nodes(mode=mode)
-        open_set = orchestrator.get_open_nodes(mode=mode)
+            closed_set = orchestrator.get_closed_nodes(mode=mode)
+            open_set = orchestrator.get_open_nodes(mode=mode)
 
-        if open_set:
-            encountered.update(open_set)
+            if open_set:
+                encountered.update(open_set)
 
     assert closed_set, "The orchestrator failed to close tasks."
     assert encountered == set(closed_set), "The orchestrator didn't close all tasks"

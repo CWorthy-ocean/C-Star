@@ -4,6 +4,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.io.constants import SourceClassification
 from cstar.io.source_data import SourceData
 
 if t.TYPE_CHECKING:
@@ -79,6 +80,10 @@ def test_cached_stager_reuse(tmp_path: Path) -> None:
         mock.patch("cstar.io.retriever._pull", new=fake_pull) as mock_pull,
         mock.patch("cstar.io.retriever._clone", new=fake_clone) as mock_clone,
         mock.patch("cstar.io.retriever._checkout", new=fake_checkout) as mock_checkout,
+        mock.patch(
+            "cstar.io.source_data._SourceInspector.classify",
+            mock.Mock(return_value=SourceClassification.REMOTE_REPOSITORY),
+        ),
     ):
         staged_data_2 = source_data_2.stage(stage_path_2)
 
