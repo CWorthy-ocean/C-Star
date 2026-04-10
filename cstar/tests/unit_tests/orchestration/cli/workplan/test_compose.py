@@ -146,8 +146,8 @@ async def test_compose_host_run_parameter(
 @pytest.mark.parametrize(
     ("drop_var", "key"),
     [
-        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT"),
-        (ENV_CSTAR_SLURM_QUEUE, "QUEUE"),
+        pytest.param(ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", id="missing slurm account"),
+        pytest.param(ENV_CSTAR_SLURM_QUEUE, "QUEUE", id="missing slurm queue"),
     ],
 )
 @pytest.mark.asyncio
