@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 import requests
+from packaging.version import Version
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -72,22 +73,20 @@ _LINK_SUFFIX_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 
-def _version_key(stem: str) -> tuple:
+def _parse_version(s: str) -> Version:
     """
-    Sortable key for release file stems like ``v0.5.0`` or ``v0.0.1-alpha``.
+    Parse a version string like ``v0.5.0`` or ``v0.5.0-alpha`` into a
+    ``packaging.version.Version``.
 
-    Pre-release suffixes (``-alpha``, ``-beta``, …) sort *before* the
-    corresponding final release.
+    Dash-separated pre-release labels (``-alpha``, ``-beta``, ``-rc``) are
+    normalised to PEP 440 equivalents (``a0``, ``b0``, ``rc0``) so that
+    ``packaging`` can order them correctly relative to the final release.
     """
-    s = stem.lstrip("v")
-    pre = ""
-    if "-" in s:
-        s, pre = s.split("-", 1)
-    numeric = tuple(int(x) for x in s.split("."))
-    numeric += (0,) * (3 - len(numeric))
-    # (0, tag) < (1, "") ensures pre-release < release
-    pre_key: tuple = (0, pre) if pre else (1, "")
-    return (*numeric, *pre_key)
+    s = s.lstrip("v")
+    s = re.sub(r"-alpha(\d*)$", lambda m: f"a{m.group(1) or '0'}", s)
+    s = re.sub(r"-beta(\d*)$", lambda m: f"b{m.group(1) or '0'}", s)
+    s = re.sub(r"-rc(\d*)$", lambda m: f"rc{m.group(1) or '0'}", s)
+    return Version(s)
 
 
 def get_latest_rst() -> tuple[str, Path]:
@@ -95,7 +94,7 @@ def get_latest_rst() -> tuple[str, Path]:
     candidates: list[tuple] = []
     for f in RELEASES_DIR.glob("*.rst"):
         try:
-            candidates.append((_version_key(f.stem), f.stem, f))
+            candidates.append((_parse_version(f.stem), f.stem, f))
         except (ValueError, TypeError):
             continue
     if not candidates:
@@ -157,7 +156,7 @@ def get_last_tag_date(session: requests.Session) -> tuple[str, str]:
                 # releases mark the boundary for collecting PR notes.
                 if "-" in tag["name"].lstrip("v"):
                     continue
-                versioned.append((_version_key(tag["name"]), tag))
+                versioned.append((_parse_version(tag["name"]), tag))
             except (ValueError, TypeError):
                 pass  # skip non-semver tags
         if len(batch) < 100:
@@ -582,7 +581,7 @@ def main() -> None:
     # strictly newer than the last tag.  If none exists yet, use (or create)
     # unreleased.rst.
     version_stem, candidate_path = get_latest_rst()
-    if _version_key(version_stem) > _version_key(tag_name):
+    if _parse_version(version_stem) > _parse_version(tag_name):
         rst_path = candidate_path
     else:
         rst_path = create_unreleased_rst(dry_run=args.dry_run)
