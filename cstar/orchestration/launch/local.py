@@ -30,7 +30,16 @@ log = get_logger(__name__)
 
 
 def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
-    p = sprun(args=cmd, text=True, check=True)
+    try:
+        print(cmd)
+        p = sprun(args=cmd, text=True, check=True, capture_output=True)
+    except:
+        print("ERROR")
+        print(p.stderr)
+        print(p.stdout)
+        print(p.returncode)
+        print(p)
+        raise
     return {step.name: p.returncode}
 
 
