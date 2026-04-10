@@ -302,7 +302,7 @@ def test_hello_world_workplan_dry_run(
     state_dir = tmp_path / "state"
     runner = CliRunner()
     custom_env = {
-        ENV_CSTAR_ORCH_DELAYS: "3,5",
+        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
         ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
@@ -360,7 +360,7 @@ def test_heterogeneous_workplan(
     state_dir = tmp_path / "state"
     runner = CliRunner()
     custom_env = {
-        ENV_CSTAR_ORCH_DELAYS: "3,5",
+        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
         ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
