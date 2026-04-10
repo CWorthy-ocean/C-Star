@@ -15,16 +15,14 @@ from cstar.io.constants import (
     SourceClassification,
     SourceType,
 )
-from cstar.io.retriever import get_retriever
+from cstar.io.retriever import Retriever, get_retriever
 from cstar.io.staged_data import StagedDataCollection
-from cstar.io.stager import get_stager
+from cstar.io.stager import Stager, get_stager
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
-    from cstar.io.retriever import Retriever
     from cstar.io.staged_data import StagedData
-    from cstar.io.stager import Stager
 
 
 @lru_cache(maxsize=16)
@@ -220,6 +218,12 @@ class SourceData:
         stages the data, making it available to C-Star
     """
 
+    _location: str
+    _identifier: str | None = None
+    _classification: SourceClassification
+    _stager: Stager | None = None
+    _retriever: Retriever | None = None
+
     def __init__(self, location: str | Path, identifier: str | None = None):
         """Initialize a SourceData instance from a location
 
@@ -231,12 +235,10 @@ class SourceData:
             The identifier of the data, e.g. commit hash or checksum
         """
         self._location = str(location)
-        self._identifier: str | None = identifier
+        self._identifier = identifier
         self._classification: SourceClassification = _SourceInspector(
             location
         ).classify()
-        self._stager: Stager | None = None
-        self._retriever: Retriever | None = None
 
     @property
     def location(self) -> str:
