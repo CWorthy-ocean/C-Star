@@ -56,6 +56,12 @@ _SKIP_SECTION_SUBSTRINGS = ("checklist",)
 
 
 def _should_skip_section(name: str) -> bool:
+    """
+    Return True if a PR section with *name* should be excluded from release notes.
+
+    Args:
+        name: The section heading text (case-insensitive matching is applied).
+    """
     lower = name.lower()
     return lower in _SKIP_SECTION_EXACT or any(s in lower for s in _SKIP_SECTION_SUBSTRINGS)
 
@@ -81,6 +87,10 @@ def _parse_version(s: str) -> Version:
     Dash-separated pre-release labels (``-alpha``, ``-beta``, ``-rc``) are
     normalised to PEP 440 equivalents (``a0``, ``b0``, ``rc0``) so that
     ``packaging`` can order them correctly relative to the final release.
+
+    Args:
+        s: Version string to parse, with or without a leading ``v``
+           (e.g. ``"v0.5.0"``, ``"0.5.0-alpha"``).
     """
     s = s.lstrip("v")
     s = re.sub(r"-alpha(\d*)$", lambda m: f"a{m.group(1) or '0'}", s)
@@ -136,8 +146,11 @@ def get_last_tag_date(session: requests.Session) -> tuple[str, str]:
 
     GitHub's tags API returns tags in commit-date order, which can surface
     old pre-release tags ahead of newer stable releases.  We fetch all tags,
-    sort them by semantic version (reusing ``_version_key``), and pick the
+    sort them by semantic version (reusing ``_parse_version``), and pick the
     highest one instead.
+
+    Args:
+        session: Authenticated ``requests.Session`` with GitHub API headers set.
     """
     versioned: list[tuple] = []
     page = 1
@@ -182,6 +195,10 @@ def get_merged_prs_since(session: requests.Session, since: str) -> list[dict]:
     """
     Return all PRs merged into ``main`` after *since* (ISO-8601 string),
     sorted by PR number ascending.
+
+    Args:
+        session: Authenticated ``requests.Session`` with GitHub API headers set.
+        since: ISO-8601 timestamp; only PRs merged strictly after this date are returned.
     """
     results: list[dict] = []
     page = 1
@@ -243,6 +260,9 @@ def parse_pr_body(
     - Drops checklist-style bullets (``- [ ]`` / ``- [x]``) even if they
       appear under a content section, as a belt-and-suspenders guard.
     - Strips inline HTML comments (``<!-- … -->``) before processing.
+
+    Args:
+        body: Raw Markdown text of the PR description, or ``None`` if the PR has no body.
     """
     if not body:
         return {}
@@ -305,13 +325,21 @@ def _normalize(text: str) -> str:
     """
     Lowercase and collapse whitespace; also strips any appended PR link so
     that duplicate detection is link-agnostic.
+
+    Args:
+        text: A bullet's text, possibly including a trailing PR link suffix.
     """
     stripped = _LINK_SUFFIX_RE.sub("", text).strip()
     return re.sub(r"\s+", " ", stripped).lower()
 
 
 def get_known_pr_numbers(rst_text: str) -> set[int]:
-    """PR numbers already linked anywhere in *rst_text*."""
+    """
+    PR numbers already linked anywhere in *rst_text*.
+
+    Args:
+        rst_text: Full text of a release notes ``.rst`` file.
+    """
     return {int(n) for n in re.findall(r"/pull/(\d+)>`_", rst_text)}
 
 
@@ -319,6 +347,9 @@ def _find_section_positions(lines: list[str]) -> dict[str, int]:
     """
     Return ``{section_title: title_line_index}`` for every RST section
     found via the ``title\\nunderline`` pattern.
+
+    Args:
+        lines: Lines of an ``.rst`` file, as returned by ``str.splitlines(keepends=True)``.
     """
     positions: dict[str, int] = {}
     for i in range(len(lines) - 1):
@@ -342,6 +373,13 @@ def _section_bounds(
     """
     Return *(content_start, content_end)* line indices for the section
     whose title is at *title_idx* (content starts after the underline line).
+
+    Args:
+        positions: Mapping of section title to its title line index, as
+            returned by ``_find_section_positions``.
+        title_idx: Line index of the title whose bounds are being queried.
+        total_lines: Total number of lines in the file; used as the default
+            end boundary when no later section exists.
     """
     content_start = title_idx + 2
     content_end = total_lines
@@ -352,7 +390,13 @@ def _section_bounds(
 
 
 def get_section_bullets(lines: list[str], section_title: str) -> set[str]:
-    """Normalised set of bullet texts already present in *section_title*."""
+    """
+    Normalised set of bullet texts already present in *section_title*.
+
+    Args:
+        lines: Lines of an ``.rst`` file.
+        section_title: Exact RST section heading to inspect (e.g. ``"Bug Fixes"``).
+    """
     positions = _find_section_positions(lines)
     if section_title not in positions:
         return set()
@@ -372,6 +416,10 @@ def _bullet_block_to_lines(block: str) -> list[str]:
 
     Simple bullets produce one line; bullets with sub-items produce several
     lines with a required blank line before the sub-list and after it.
+
+    Args:
+        block: RST bullet string as returned by ``format_rst_bullet``,
+            with embedded newlines for sub-items but no trailing newline.
     """
     parts = block.split("\n")
     result = [p + "\n" for p in parts]
@@ -394,6 +442,13 @@ def insert_bullets_into_section(
     ``format_rst_bullet`` — they may be multi-line (when sub-items are present).
 
     If the section contains only a ``- N/A`` placeholder, it is removed first.
+
+    Args:
+        lines: Lines of the ``.rst`` file to update.
+        section_title: Exact RST section heading to append bullets into
+            (e.g. ``"Bug Fixes"``).
+        new_bullets: Pre-formatted RST bullet strings to insert, each as
+            returned by ``format_rst_bullet``.
     """
     positions = _find_section_positions(lines)
     if section_title not in positions:
@@ -472,7 +527,14 @@ def format_rst_bullet(text: str, sub_items: list[str], pr_number: int) -> str:
 
     The PR link is appended to the top-level text.  Sub-items are formatted as
     an RST nested list, indented by two spaces with a required blank line
-    separating them from the parent line::
+    separating them from the parent line.
+
+    Args:
+        text: Top-level bullet text (plain prose, no leading ``-``).
+        sub_items: Indented child bullet texts, if any.
+        pr_number: GitHub PR number used to build the hyperlink reference.
+
+    Example output::
 
         - Parent text (`#NNN <url>`_)
 
@@ -534,6 +596,9 @@ def create_unreleased_rst(dry_run: bool = False) -> Path:
     add a ``.. include::`` directive for it at the top of ``docs/releases.rst``.
 
     Returns the path to the (possibly just-created) file.
+
+    Args:
+        dry_run: If ``True``, print what would be done without writing any files.
     """
     if not UNRELEASED_RST.exists():
         print(f"Creating {UNRELEASED_RST.relative_to(Path.cwd())}")
