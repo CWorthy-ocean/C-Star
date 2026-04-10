@@ -239,15 +239,15 @@ class TestExecutionHandlerUpdates:
         def append_updates_and_change_status():
             with output_file.open("a") as f:
                 for line in running_updates:
-                    time.sleep(0.1)  # Ensure updates() is actively reading
+                    time.sleep(0.05)  # Ensure updates() is actively reading
                     f.write(line)
                     f.flush()
 
                 # Change the status to `COMPLETED` after writing running updates
-                time.sleep(0.2)
+                time.sleep(0.1)
                 handler._status = ExecutionStatus.COMPLETED
                 for line in completed_updates:
-                    time.sleep(0.1)
+                    time.sleep(0.05)
                     f.write(line)
                     f.flush()
 
