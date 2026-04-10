@@ -30,8 +30,8 @@ class HelloWorldBlueprint(Blueprint):
 class HelloWorldRunner(BlueprintRunner):
     """Worker class to execute a simple "Hello, world" application specified via blueprint."""
 
-    @t.override
     @property
+    @t.override
     def blueprint(self) -> HelloWorldBlueprint:
         """Return the deserialized blueprint to be executed by the runner.
 
