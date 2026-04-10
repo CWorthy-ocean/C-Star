@@ -1580,7 +1580,7 @@ class TestProcessingAndExecution:
             sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
             mock_process_instance = mock.MagicMock()
             mock_local_process.return_value = mock_process_instance
-            runtime_code_dir = sim.directory / "ROMS/runtime_code"
+            runtime_code_dir = sim.directory / "input/runtime_code"
             sim.runtime_code._working_copy = stageddatacollection_remote_files(
                 paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
                 sources=sim.runtime_code.source,

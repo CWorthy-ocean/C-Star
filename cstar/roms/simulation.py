@@ -1596,7 +1596,7 @@ class ROMSSimulation(Simulation):
         run_path = self.fs_manager.work_dir
 
         # save modified roms.in and rename original for clarity
-        old_runtime_settings_path = Path(self.runtime_code.working_copy[0].path)
+        old_runtime_settings_path = self.fs_manager.runtime_code_dir / self._in_file
         final_runtime_settings_file = (
             old_runtime_settings_path.parent / f"{self.name}_PATCHED.in"
         )
