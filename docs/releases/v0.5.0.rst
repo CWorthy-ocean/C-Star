@@ -31,6 +31,7 @@ New features
 - Add `nesting_info` block to RomsMarblBlueprint (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - Create work-dir symlinks to predetermined paths for CDR and nesting info files (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - If no `Makefile` is provided in the `compile_time` additional code block, ROMS will copy and use the appropriate `Makefile` from the ROMS repo (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
+- Add automated release-note updater, utilizing PR template categories (`#484 <https://github.com/CWorthy-ocean/C-Star/pull/484>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -71,6 +72,8 @@ Bug Fixes
 - Bump typer version to avoid list-default bug (`#476 <https://github.com/CWorthy-ocean/C-Star/pull/476>`_)
 - Fix uninitialized attributes error in `SlurmBatch`
 - Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`)
+- Fix possibly incorrectly renaming a marbl input file to the `_ORIGINAL` roms.in file (`#491 <https://github.com/CWorthy-ocean/C-Star/pull/491>`_)
+- Mitigate possible ROMS output-name-length errors by using a relative output path in the `roms.in` (`#491 <https://github.com/CWorthy-ocean/C-Star/pull/491>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -110,6 +113,8 @@ Improvements
 - Improve naming of module containing shared CLI callbacks
 - Add callbacks for automatic export of pertinent environment variables from CLI parameters
 - Reduce unit test duration
+- Improve help text for CLI subcommands and parameters (`#487 <https://github.com/CWorthy-ocean/C-Star/pull/487>`_)
+- Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`) (`#489 <https://github.com/CWorthy-ocean/C-Star/pull/489>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -126,3 +131,4 @@ For more details, please refer to the `commit history`_.
 - Remove unnecessary `TypeVar` (`#451 <https://github.com/CWorthy-ocean/C-Star/pull/451>`_)
 - Fix inconsistent test naming convention (`#451 <https://github.com/CWorthy-ocean/C-Star/pull/451>`_)
 - Fix typos in tutorial (`#464 <https://github.com/CWorthy-ocean/C-Star/pull/464>`_)
+- Fix unexpected linting warnings about missing required parameters to `ServiceConfiguration` (`#481 <https://github.com/CWorthy-ocean/C-Star/pull/481>`_)
