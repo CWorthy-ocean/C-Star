@@ -38,6 +38,7 @@ Bug Fixes
 - Fix workplan template with inconsistent blueprint path
 - Fix bug causing failures when invoking blueprints via `cstar blueprint run`
 - Fix uninitialized attributes error in `SlurmBatch`
+- Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`)
 
 Improvements
 ~~~~~~~~~~~~
@@ -48,6 +49,9 @@ Improvements
 - Refactor `cli.workplan.run` to make use of `typer` callbacks for input validation
 - Add `--dry-run` option to test workplan generation in `cstar workplan run`
 - Fix unexpected linting warnings about missing required parameters to `ServiceConfiguration`
+- Improve naming of module containing shared CLI callbacks
+- Add callbacks for automatic export of pertinent environment variables from CLI parameters
+- Reduce unit test duration
 
 Miscellaneous
 ~~~~~~~~~~~~~
