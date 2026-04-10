@@ -74,6 +74,7 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
         echo "{step.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
         sleep {sleep_time} || true;
         echo "{step.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
+        exit 0;
         """)
 
     # write it to a script asset
