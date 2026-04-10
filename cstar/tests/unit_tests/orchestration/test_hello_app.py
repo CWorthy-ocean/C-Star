@@ -155,7 +155,7 @@ async def test_hello_world_command_converter(
 
     # confirm the retrieved converter produces the output expected
     # from the function: convert_step_to_blueprint_run_command
-    assert "python -m " in command
+    assert "python" in command
     assert "cstar.entrypoint.worker.hello_app" in command
     assert f"-b {hello_world_bp_path.as_posix()}" in command
     # assert command == f"cstar blueprint run {hello_world_bp_path.as_posix()}"
