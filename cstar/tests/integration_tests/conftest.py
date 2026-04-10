@@ -78,7 +78,7 @@ def fetch_remote_test_case_data(cstar_test_data_directory: Path) -> Callable[[],
 
 @pytest.fixture
 def modify_template_blueprint(
-    tmpdir: str,
+    tmp_path: Path,
 ) -> Callable[[Path | str, dict[str, str], Path | str], str]:
     """Fixture that provides a factory function for modifying template blueprint files.
 
@@ -87,7 +87,7 @@ def modify_template_blueprint(
 
     Parameters:
     -----
-    tmpdir:
+    tmp_path:
        Pytest fixture used to create a temporary directory in which to hold a modified version
        of the template file during the test.
 
@@ -134,11 +134,10 @@ def modify_template_blueprint(
         modified_template_content = modified_template_content.replace(
             "<output_dir>", str(out_dir)
         )
-        temp_path = tmpdir.join(template_blueprint_path.name)
-        with open(temp_path, "w") as temp_file:
-            temp_file.write(modified_template_content)
+        temp_path = tmp_path / template_blueprint_path.name
+        temp_path.write_text(modified_template_content)
 
-        return temp_path
+        return str(temp_path)
 
     return _modify_template_blueprint
 

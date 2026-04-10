@@ -4,7 +4,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 import yaml
-from _pytest._py.path import LocalPath
 
 from cstar.execution.file_system import RomsFileSystemManager
 
@@ -45,10 +44,10 @@ def test_modify_template_blueprint(
         out_dir=fs.output_dir,
     )
 
-    assert isinstance(test_blueprint, LocalPath), (
+    assert isinstance(test_blueprint, Path), (
         f"Expected type LocalPath, but got {type(test_blueprint)}"
     )
-    bpyaml = yaml.safe_load(test_blueprint.read())
+    bpyaml = yaml.safe_load(test_blueprint.read_text())
 
     assert (
         bpyaml["code"]["compile_time"]["location"]
