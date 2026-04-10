@@ -823,7 +823,7 @@ class ROMSSimulation(Simulation):
         # explicitly set output dir and basename
         simulation_runtime_settings.output_root_name = (
             cstar.roms.runtime_settings.OutputRootName(
-                output_root_name=str(self.fs_manager.output_dir) + "/output"
+                output_root_name="../output/output"
             )
         )
 
