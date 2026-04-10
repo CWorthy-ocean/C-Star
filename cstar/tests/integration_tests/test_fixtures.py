@@ -9,7 +9,7 @@ from cstar.execution.file_system import RomsFileSystemManager
 
 
 def test_modify_template_blueprint(
-    modify_template_blueprint: Callable,
+    modify_template_blueprint: Callable[[Path | str, dict[str, str], Path | str], Path],
     tmp_path: Path,
     tests_path: Path,
 ) -> None:
@@ -35,13 +35,12 @@ def test_modify_template_blueprint(
     fs = RomsFileSystemManager(tmp_path)
     fs.prepare()
 
-    test_blueprint = modify_template_blueprint(
-        template_blueprint_path=tests_path
-        / "integration_tests/blueprints/blueprint_template.yaml",
-        strs_to_replace={
+    test_blueprint: Path = modify_template_blueprint(
+        tests_path / "integration_tests/blueprints/blueprint_template.yaml",
+        {
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
         },
-        out_dir=fs.output_dir,
+        fs.output_dir,
     )
 
     assert isinstance(test_blueprint, Path), (

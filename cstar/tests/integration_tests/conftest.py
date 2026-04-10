@@ -79,7 +79,7 @@ def fetch_remote_test_case_data(cstar_test_data_directory: Path) -> Callable[[],
 @pytest.fixture
 def modify_template_blueprint(
     tmp_path: Path,
-) -> Callable[[Path | str, dict[str, str], Path | str], str]:
+) -> Callable[[Path | str, dict[str, str], Path | str], Path]:
     """Fixture that provides a factory function for modifying template blueprint files.
 
     This fixture returns a function that can returns a path to a modified a blueprint
@@ -101,7 +101,7 @@ def modify_template_blueprint(
         template_blueprint_path: Path | str,
         strs_to_replace: dict,
         out_dir: Path | str,
-    ) -> str:
+    ) -> Path:
         """Creates a temporary, customized blueprint file from a template.
 
         This function reads a blueprint template file, performs string replacements as specified
@@ -137,7 +137,7 @@ def modify_template_blueprint(
         temp_path = tmp_path / template_blueprint_path.name
         temp_path.write_text(modified_template_content)
 
-        return str(temp_path)
+        return temp_path
 
     return _modify_template_blueprint
 
