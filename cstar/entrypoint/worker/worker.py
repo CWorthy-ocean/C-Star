@@ -177,22 +177,22 @@ class SimulationRunner(Service):
 
         try:
             if SimulationStages.SETUP in self._stages:
-                self.log.debug("Setting up simulation")
+                self.log.trace("Setting up simulation")
                 self._simulation.setup()
             else:
-                self.log.debug("Skipping simulation setup")
+                self.log.trace("Skipping simulation setup")
 
             if SimulationStages.BUILD in self._stages:
-                self.log.debug("Building simulation")
+                self.log.trace("Building simulation")
                 self._simulation.build()
             else:
-                self.log.debug("Skipping simulation build")
+                self.log.trace("Skipping simulation build")
 
             if SimulationStages.PRE_RUN in self._stages:
-                self.log.debug("Executing simulation pre-run")
+                self.log.trace("Executing simulation pre-run")
                 self._simulation.pre_run()
             else:
-                self.log.debug("Skipping simulation pre_run")
+                self.log.trace("Skipping simulation pre_run")
 
         except RuntimeError as ex:
             msg = "Failed to build simulation"
@@ -251,10 +251,10 @@ class SimulationRunner(Service):
                 }
 
                 if SimulationStages.RUN in self._stages:
-                    self.log.debug("Running simulation.")
+                    self.log.trace("Running simulation.")
                     self._handler = self._simulation.run(**run_params)
                 else:
-                    self.log.debug("Skipping simulation run")
+                    self.log.trace("Skipping simulation run")
             else:
                 await self._handler.updates(seconds=1.0)
         except Exception:
