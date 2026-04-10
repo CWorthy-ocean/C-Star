@@ -286,6 +286,7 @@ def test_hello_world_workplan_dry_run(
     tmp_path: Path,
     hw_single_step_wp_path: Path,
     dry_run: bool,
+    prefect_server_url: str,
 ) -> None:
     """Test the preparation of a workplan containing a non ROMS-MARBL application (--dry-run).
 
@@ -342,6 +343,7 @@ def test_heterogeneous_workplan(
     tmp_path: Path,
     heterogeneous_workplan_path: Path,
     dry_run: bool,
+    prefect_server_url: str,
 ) -> None:
     """Test the preparation of a workplan containing multiple applications (--dry-run).
 

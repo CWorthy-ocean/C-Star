@@ -1802,7 +1802,7 @@ def prefect_server() -> Generator[str, None, None]:
             process.terminate()
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def prefect_server_url(prefect_server: str) -> Generator[str, None, None]:
     """Configure the Prefect API URL for the duration of the tests."""
     os.environ["PREFECT_API_URL"] = prefect_server
