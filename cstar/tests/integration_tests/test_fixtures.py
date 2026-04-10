@@ -45,7 +45,7 @@ def test_modify_template_blueprint(
     )
 
     assert isinstance(test_blueprint, Path), (
-        f"Expected type LocalPath, but got {type(test_blueprint)}"
+        f"Expected type Path, but got {type(test_blueprint)}"
     )
     bpyaml = yaml.safe_load(test_blueprint.read_text())
 
