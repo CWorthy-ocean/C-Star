@@ -3,8 +3,6 @@
 v0.5.0
 ------
 
-This is a bug-fix release focused on stabilizing the orchestration of blueprints.
-
 .. note:: 
     This release is currently in development
 
@@ -16,11 +14,23 @@ Breaking Changes
 - Modified parameters to `DagStatus.__init__`
 - Removed `workplan-monitor` CLI command
 - Removed `dag_runner.attach_to_run` (duplicates `process_plan` functionality)
+- The flag constant is removed (`#428 <https://github.com/CWorthy-ocean/C-Star/pull/428>`_)
+- Modified the interpretation of `Status.is_running` to exclude `Unsubmitted` (`#461 <https://github.com/CWorthy-ocean/C-Star/pull/461>`_)
+- Rename env var group name constants to omit leading underscore (`#462 <https://github.com/CWorthy-ocean/C-Star/pull/462>`_)
+- The `roms` executable is now executed in the `work` subdirectory instead of `output` (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
+- The output location in the runtime settings (`roms.in`) file is now _always_ modified to place outputs in the output directory (since we no longer run ROMS in the output directory) (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 
 New features
 ~~~~~~~~~~~~
 
 - Enable user supplied variables for templating from `cstar workplan run ...`
+- The orchestrator writes a sentinel file to disk to dynamically alter dependencies (`#459 <https://github.com/CWorthy-ocean/C-Star/pull/459>`_)
+- Add trace log level to reduce log frequency during `Workplan` execution (`#460 <https://github.com/CWorthy-ocean/C-Star/pull/460>`_)
+- Persist `WorkplanRun` record for every invocation of the orchestrator for run history and lookup (`#461 <https://github.com/CWorthy-ocean/C-Star/pull/461>`_)
+- Add `cstar workplan monitor --run-id <run-id>` for reattaching to a running `Workplan` (`#461 <https://github.com/CWorthy-ocean/C-Star/pull/461>`_)
+- Add `nesting_info` block to RomsMarblBlueprint (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
+- Create work-dir symlinks to predetermined paths for CDR and nesting info files (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
+- If no `Makefile` is provided in the `compile_time` additional code block, ROMS will copy and use the appropriate `Makefile` from the ROMS repo (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -37,6 +47,28 @@ Bug Fixes
 - Fix bug causing intermittent `FileNotFound` errors
 - Fix workplan template with inconsistent blueprint path
 - Fix bug causing failures when invoking blueprints via `cstar blueprint run`
+- Fix bug handling user-relative paths in `JobFileSystemManager` (`#430 <https://github.com/CWorthy-ocean/C-Star/pull/430>`_)
+- Fix regression causing blueprint output directory overrides to not be applied (`#434 <https://github.com/CWorthy-ocean/C-Star/pull/434>`_)
+- Fix failure to include run-id in output path directory tree (`#434 <https://github.com/CWorthy-ocean/C-Star/pull/434>`_)
+- Fix defect where steps defined before dependencies were not mapped correctly after time-splitting (`#434 <https://github.com/CWorthy-ocean/C-Star/pull/434>`_)
+- Mitigate failures in the CachedRemoteRepositoryRetriever.refresh by automatically re-cloning if a refresh fails (`#438 <https://github.com/CWorthy-ocean/C-Star/pull/438>`_)
+- Fix posix-path conversion bug when passing blueprint URLs to `cstar blueprint run` (`#440 <https://github.com/CWorthy-ocean/C-Star/pull/440>`_)
+- Catch `FileNotFoundError` in `cstar.cli.blueprint.check` (`#443 <https://github.com/CWorthy-ocean/C-Star/pull/443>`_)
+- Catch `FileNotFoundError` in `cstar.cli.workplan.check` (`#443 <https://github.com/CWorthy-ocean/C-Star/pull/443>`_)
+- Update tests to ignore default factory where appropriate (`#444 <https://github.com/CWorthy-ocean/C-Star/pull/444>`_)
+- Fix a `JSON` serialization bug with pydantic models using field aliases (`#451 <https://github.com/CWorthy-ocean/C-Star/pull/451>`_)
+- Fix case-sensitivity bug when configuring split frequency via `CSTAR_ORCH_TRX_FREQ` env variable (`#452 <https://github.com/CWorthy-ocean/C-Star/pull/452>`_)
+- Fix incorrect initial-conditions file paths created in `RomsMarblTimeSplitter` (`#453 <https://github.com/CWorthy-ocean/C-Star/pull/453>`_)
+- Fix incorrect working directories resulting from `LiveStep.from_step` when a parent is specified (`#453 <https://github.com/CWorthy-ocean/C-Star/pull/453>`_)
+- Use `step.fsm.output_dir` as the source of reset files instead of `step.fsm.joined_output_dir` (`#455 <https://github.com/CWorthy-ocean/C-Star/pull/455>`_)
+- Fix failure to terminate health check thread (`#456 <https://github.com/CWorthy-ocean/C-Star/pull/456>`_)
+- Fix issue when parsing SLURM status of the form `cancelled by Username` (`#459 <https://github.com/CWorthy-ocean/C-Star/pull/459>`_)
+- Fix `cstar workplan status ...` triggering a re-build of the entire workplan (`#461 <https://github.com/CWorthy-ocean/C-Star/pull/461>`_)
+- Fix incorrect env var discovery if `env_` appears repeatedly in variable name (`#462 <https://github.com/CWorthy-ocean/C-Star/pull/462>`_)
+- Fix unhandled exception caused by attempting to execute `typer` app (`#462 <https://github.com/CWorthy-ocean/C-Star/pull/462>`_)
+- post_run() no longer tries to join `_ext` files (`#466 <https://github.com/CWorthy-ocean/C-Star/pull/466>`_)
+- Pin version of tutorial data repo (`#475 <https://github.com/CWorthy-ocean/C-Star/pull/475>`_)
+- Bump typer version to avoid list-default bug (`#476 <https://github.com/CWorthy-ocean/C-Star/pull/476>`_)
 - Fix uninitialized attributes error in `SlurmBatch`
 - Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`)
 
@@ -48,6 +80,32 @@ Improvements
 - Re-use `configure_environment` where applicable
 - Refactor `cli.workplan.run` to make use of `typer` callbacks for input validation
 - Add `--dry-run` option to test workplan generation in `cstar workplan run`
+- Remove `if is_feature_enabled("CSTAR_FF_ORCH_TRX_OVERRIDE")` to always enable overrides. (`#428 <https://github.com/CWorthy-ocean/C-Star/pull/428>`_)
+- Encapsulate creation of `JobFileSystemManager` in new `LiveStep` class (`#434 <https://github.com/CWorthy-ocean/C-Star/pull/434>`_)
+- Perform input validation before executing workplan and blueprint in: (`#443 <https://github.com/CWorthy-ocean/C-Star/pull/443>`_)
+
+  - `cstar.cli.blueprint.run`
+  - `cstar.cli.workplan.run`
+
+- Add additional tests for `EnvItem` functionality not tied to `XDG` home directories (`#444 <https://github.com/CWorthy-ocean/C-Star/pull/444>`_)
+- Reduce module load times (`#446 <https://github.com/CWorthy-ocean/C-Star/pull/446>`_)
+- Reduce package import time by lazy loading expensive modules (`#447 <https://github.com/CWorthy-ocean/C-Star/pull/447>`_)
+- Extract nested/duplicate `YAML` representer functions for re-use (`#451 <https://github.com/CWorthy-ocean/C-Star/pull/451>`_)
+- Add empty sections specified in release notes and _Code Review Checklist_ (`#454 <https://github.com/CWorthy-ocean/C-Star/pull/454>`_)
+- Replace use of incorrect `mp.Queue` where `queue.Queue` is appropriate (`#456 <https://github.com/CWorthy-ocean/C-Star/pull/456>`_)
+- Replace blocking `time.sleep` usage in health check thread (`#456 <https://github.com/CWorthy-ocean/C-Star/pull/456>`_)
+- Remove default values provided in `JobConfig` class (`#457 <https://github.com/CWorthy-ocean/C-Star/pull/457>`_)
+- Removed slow status retrieval loop for previously submitted jobs (`#459 <https://github.com/CWorthy-ocean/C-Star/pull/459>`_)
+- Enable "path-less" CLI commands, such as `cstar workplan status --run-id <id>`. (`#461 <https://github.com/CWorthy-ocean/C-Star/pull/461>`_)
+- Display detailed status information for tasks in a `Workplan` (`#461 <https://github.com/CWorthy-ocean/C-Star/pull/461>`_)
+- Ensure env var display consistency in `cstar env show` output (`#462 <https://github.com/CWorthy-ocean/C-Star/pull/462>`_)
+- The original runtime settings file and the one that is written and used by C-Star are now appended with `_ORIGINAL` and `_PATCHED` to reduce confusion. (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
+- Use computed attributes to in place of duplicating keys found in `DagStatus.details` (`#467 <https://github.com/CWorthy-ocean/C-Star/pull/467>`_)
+- Mitigate un (`#469 <https://github.com/CWorthy-ocean/C-Star/pull/469>`_)
+- Improve error message when failing to load a remote YAML file. (`#473 <https://github.com/CWorthy-ocean/C-Star/pull/473>`_)
+- Loosen Pydantic type validation for override dictionaries to mitigate pydantic warnings (`#474 <https://github.com/CWorthy-ocean/C-Star/pull/474>`_)
+- Update unit tests that fail under specific user conditions on Anvil (`#483 <https://github.com/CWorthy-ocean/C-Star/pull/483>`_)
+
 - Fix unexpected linting warnings about missing required parameters to `ServiceConfiguration`
 - Improve naming of module containing shared CLI callbacks
 - Add callbacks for automatic export of pertinent environment variables from CLI parameters
@@ -63,3 +121,8 @@ Miscellaneous
 For more details, please refer to the `commit history`_.
 
 .. _commit history: https://github.com/CWorthy-ocean/C-Star/compare/v0.4.0...v0.5.0
+- Rename constant and move from `cstar.orchestration.utils` to `cstar.base.env` (`#432 <https://github.com/CWorthy-ocean/C-Star/pull/432>`_)
+- Update all references to the variable (`#432 <https://github.com/CWorthy-ocean/C-Star/pull/432>`_)
+- Remove unnecessary `TypeVar` (`#451 <https://github.com/CWorthy-ocean/C-Star/pull/451>`_)
+- Fix inconsistent test naming convention (`#451 <https://github.com/CWorthy-ocean/C-Star/pull/451>`_)
+- Fix typos in tutorial (`#464 <https://github.com/CWorthy-ocean/C-Star/pull/464>`_)
