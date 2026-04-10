@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import typing as t
 from multiprocessing import Process as MpProcess
+from subprocess import CalledProcessError
 from subprocess import run as sprun
 
 from psutil import NoSuchProcess
@@ -33,12 +34,15 @@ def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
     try:
         print(cmd)
         p = sprun(args=cmd, text=True, check=True, capture_output=True)
-    except:
+    except CalledProcessError as e:
         print("ERROR")
-        print(p.stderr)
-        print(p.stdout)
-        print(p.returncode)
-        print(p)
+        print(e.stderr)
+        print(e.stdout)
+        print(e.returncode)
+        # print(p.stderr)
+        # print(p.stdout)
+        # print(p.returncode)
+        # print(p)
         raise
     return {step.name: p.returncode}
 
@@ -127,7 +131,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             )
             mp_process.start()
             create_time = datetime.datetime.now(tz=datetime.timezone.utc)
-
+            mp_process.join()
             if pid := mp_process.pid:
                 print(f"Local run of `{step.application}` created pid: {pid}")
 
