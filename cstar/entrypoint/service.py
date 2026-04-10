@@ -25,9 +25,9 @@ class ServiceConfiguration(BaseModel):
     shutdown criteria are met. When `False`, the service completes a single
     pass through the service lifecycle and automatically exits.
     """
-    loop_delay: float = Field(0.0, ge=0.0)
+    loop_delay: float = Field(default=0.0, ge=0.0)
     """Duration (in seconds) of a delay between iterations of the main event loop."""
-    health_check_frequency: float | None = Field(None, ge=0.0)
+    health_check_frequency: float | None = Field(default=None, ge=0.0)
     """Time (in seconds) between calls to a health check handler.
 
     NOTE:
@@ -36,7 +36,7 @@ class ServiceConfiguration(BaseModel):
     """
     log_level: int = logging.INFO
     """The logging level used by the service."""
-    health_check_log_threshold: int = Field(10, ge=3)
+    health_check_log_threshold: int = Field(default=10, ge=3)
     """The number of health-checks that may be missed before logging."""
     name: str = "Service"
     """A user-friendly name for logging."""
@@ -214,14 +214,14 @@ class Service(ABC, LoggingMixin):
             return
 
         if self._hc_queue is None:
-            self.log.debug("No healthcheck queue available")
+            self.log.trace("No healthcheck queue available")
             return
 
         try:
             match self._hc_queue.get_nowait():
                 case Service.CMD_HEARTBEAT:
                     # ACK any requests for HC updates
-                    self.log.debug("Health check succeeded")
+                    self.log.trace("Health check succeeded")
                     self._on_health_check()
                 case message:
                     msg = f"Health check sent unknown message: {message}"
@@ -354,7 +354,7 @@ class Service(ABC, LoggingMixin):
         This method is called when the service is ready to shut down, either the service
         has completed its work, or it has received a term signal.
         """
-        self.log.debug("Shutting down service.")
+        self.log.info("Shutting down service.")
 
         try:
             self._terminate_hc()
@@ -399,7 +399,7 @@ class Service(ABC, LoggingMixin):
 
             # shutdown if service reports completion
             if self.can_shutdown:
-                self.log.info("Service is ready for shutdown.")
+                self.log.trace("Service is ready for shutdown.")
                 running = False
                 continue
 

@@ -69,6 +69,8 @@ Bug Fixes
 - post_run() no longer tries to join `_ext` files (`#466 <https://github.com/CWorthy-ocean/C-Star/pull/466>`_)
 - Pin version of tutorial data repo (`#475 <https://github.com/CWorthy-ocean/C-Star/pull/475>`_)
 - Bump typer version to avoid list-default bug (`#476 <https://github.com/CWorthy-ocean/C-Star/pull/476>`_)
+- Fix uninitialized attributes error in `SlurmBatch`
+- Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`)
 
 Improvements
 ~~~~~~~~~~~~
@@ -104,6 +106,10 @@ Improvements
 - Loosen Pydantic type validation for override dictionaries to mitigate pydantic warnings (`#474 <https://github.com/CWorthy-ocean/C-Star/pull/474>`_)
 - Update unit tests that fail under specific user conditions on Anvil (`#483 <https://github.com/CWorthy-ocean/C-Star/pull/483>`_)
 
+- Fix unexpected linting warnings about missing required parameters to `ServiceConfiguration`
+- Improve naming of module containing shared CLI callbacks
+- Add callbacks for automatic export of pertinent environment variables from CLI parameters
+- Reduce unit test duration
 
 Miscellaneous
 ~~~~~~~~~~~~~

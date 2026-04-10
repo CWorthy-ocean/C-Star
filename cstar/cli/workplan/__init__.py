@@ -14,7 +14,10 @@ from cstar.cli.workplan.plan import app as app_plan
 from cstar.cli.workplan.run import app as app_run
 from cstar.cli.workplan.status import app as app_status
 
-app = typer.Typer()
+app = typer.Typer(
+    name="workplan",
+    help="Perform validation and execution of workplans.",
+)
 
 app.add_typer(app_check)
 

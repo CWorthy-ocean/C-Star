@@ -214,7 +214,10 @@ async def render(
     return write_to
 
 
-@app.command()
+@app.command(
+    name="plan",
+    help="Review the execution plan generated for a workplan.",
+)
 def plan(
     path: t.Annotated[
         Path,
@@ -222,12 +225,18 @@ def plan(
     ],
     output_dir: t.Annotated[
         Path,
-        typer.Argument(help="Path to a directory where the plan will be stored."),
+        typer.Option(
+            "-d",
+            "--out-dir",
+            default_factory=lambda: Path.cwd(),
+            help="Path to a directory where the plan will be stored (defaults to current working directory)",
+        ),
     ],
     transform: t.Annotated[
         bool,
         typer.Option(
-            help="Apply runtime transformations to the workplan before rendering."
+            "--transform",
+            help="Apply runtime transformations to the workplan before rendering.",
         ),
     ] = False,
 ) -> None:

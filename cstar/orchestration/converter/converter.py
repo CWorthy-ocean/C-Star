@@ -68,7 +68,7 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     if not step.fsm.work_dir.exists():
         step.fsm.work_dir.mkdir(parents=True)
 
-    sleep_time = random.randint(1, 3)
+    sleep_time = random.random()
     script = textwrap.dedent(f"""\
         # this is a mock application script that produces verifiable output
         echo "{step.name} started at $(date "+%Y-%m-%d %H:%M:%S")";

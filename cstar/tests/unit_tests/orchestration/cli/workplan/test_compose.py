@@ -61,7 +61,7 @@ async def test_compose_host_creation(
             output_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
-            run_plan="0",
+            execute=False,
         )
 
     wp = deserialize(generated_wp_path, Workplan)
@@ -86,10 +86,10 @@ async def test_compose_host_creation(
     assert expected_host_wp.exists()
 
 
-@pytest.mark.parametrize("do_run", ["0", "1"])
+@pytest.mark.parametrize("do_run", [False, True])
 @pytest.mark.asyncio
 async def test_compose_host_run_parameter(
-    do_run: str,
+    do_run: bool,
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
@@ -134,10 +134,10 @@ async def test_compose_host_run_parameter(
             output_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
-            run_plan=do_run,
+            execute=do_run,
         )
 
-    if do_run == "1":
+    if do_run:
         mock_run.assert_called()
     else:
         mock_run.assert_not_called()
@@ -157,6 +157,7 @@ async def test_build_and_run_dag_env(
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
+    prefect_server_url: str,
 ) -> None:
     """Verify that the DAG runner fails when required environment variables are not passed.
 

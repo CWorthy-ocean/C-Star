@@ -1577,10 +1577,10 @@ class TestProcessingAndExecution:
             ),
             mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
-            sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
+            sim.exe_path = sim.fs_manager.compile_time_code_dir / "roms"
             mock_process_instance = mock.MagicMock()
             mock_local_process.return_value = mock_process_instance
-            runtime_code_dir = sim.directory / "ROMS/runtime_code"
+            runtime_code_dir = sim.fs_manager.runtime_code_dir
             sim.runtime_code._working_copy = stageddatacollection_remote_files(
                 paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
                 sources=sim.runtime_code.source,

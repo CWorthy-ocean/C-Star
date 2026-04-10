@@ -8,7 +8,10 @@ from cstar.orchestration.serialization import validate_serialized_entity
 app = typer.Typer()
 
 
-@app.command()
+@app.command(
+    name="check",
+    help="Perform content validation on a user-supplied workplan.",
+)
 def check(
     path: t.Annotated[str, typer.Argument(help="Path to the workplan")],
 ) -> None:

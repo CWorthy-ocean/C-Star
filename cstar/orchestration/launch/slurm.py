@@ -247,7 +247,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the step.
         """
         batch = await get_slurm_batch(job_id)
-        return batch.job.status
+        return batch.status
 
     @staticmethod
     async def _locate_priors() -> t.Mapping[str, SlurmHandle]:
@@ -301,7 +301,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 successes = {
                     k
                     for k, v in batch_map.items()
-                    if v.job.status == ExecutionStatus.COMPLETED
+                    if v.status == ExecutionStatus.COMPLETED
                 }
                 if dependencies and successes:
                     # only keep dependencies that are not old/re-usable
