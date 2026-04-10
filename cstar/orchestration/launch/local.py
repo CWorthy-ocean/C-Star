@@ -2,7 +2,6 @@ import asyncio
 import datetime
 import typing as t
 from multiprocessing import Process as MpProcess
-from subprocess import CalledProcessError
 from subprocess import run as sprun
 
 from psutil import NoSuchProcess
@@ -31,19 +30,7 @@ log = get_logger(__name__)
 
 
 def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
-    try:
-        print(cmd)
-        p = sprun(args=cmd, text=True, check=True, capture_output=True)
-    except CalledProcessError as e:
-        print("ERROR")
-        print(e.stderr)
-        print(e.stdout)
-        print(e.returncode)
-        # print(p.stderr)
-        # print(p.stdout)
-        # print(p.returncode)
-        # print(p)
-        raise
+    p = sprun(args=cmd, text=True, check=True, capture_output=True)
     return {step.name: p.returncode}
 
 
