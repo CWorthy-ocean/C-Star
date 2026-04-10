@@ -2,6 +2,7 @@
 # Build module environment at import time
 # NOTE: need to set ROMS_ROOT,MARBL_ROOT,CSTAR_ROOT,CSTAR_SYSTEM, and maybe modify PATH on conda install
 
+import multiprocessing
 import os
 from importlib.metadata import version as _version
 
@@ -14,6 +15,7 @@ os.environ["KMP_WARNINGS"] = "off"
 os.environ["PREFECT_SERVER_ANALYTICS_ENABLED"] = "false"
 os.environ["DO_NOT_TRACK"] = "1"
 
+multiprocessing.set_start_method("forkserver")
 
 try:
     __version__ = _version("cstar-ocean")

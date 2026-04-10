@@ -28,7 +28,7 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-mp = _mp.get_context("forkserver")
+mp = _mp  # .get_context("forkserver")
 
 
 def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
