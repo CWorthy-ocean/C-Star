@@ -157,6 +157,7 @@ async def test_build_and_run_dag_env(
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
+    prefect_server_url: str,
 ) -> None:
     """Verify that the DAG runner fails when required environment variables are not passed.
 

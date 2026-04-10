@@ -37,13 +37,15 @@ jobs:
       - name: Install C-Star
         shell: micromamba-shell {0}
         run: |
-           python - V
+           python -V
            python -m pip install -e ".[dev]" --force-reinstall
 
       - name: Running Tests
         shell: micromamba-shell {0}        
         run: |
            python -V
+           prefect server start --port 4200 --no-ui --analytics-off --background
+           export PREFECT_API_URL=http://127.0.0.1:4200/api
            coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/unit_tests/*
            
       - name: Get coverage report

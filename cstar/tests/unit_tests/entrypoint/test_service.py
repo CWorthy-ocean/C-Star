@@ -56,12 +56,12 @@ class PrintingService(Service):
 
     def _on_start(self) -> None:
         super()._on_start()
-        self.log.debug("Running PrintingService._on_start")
+        self.log.trace("Running PrintingService._on_start")
         self.start_time = time.time()
 
     def _on_delay(self) -> None:
         super()._on_delay()
-        self.log.debug("Running PrintingService._on_delay")
+        self.log.trace("Running PrintingService._on_delay")
         self.test_queue.put_nowait("_on_delay")
 
     @property
@@ -71,13 +71,13 @@ class PrintingService(Service):
 
     async def _on_iteration(self) -> None:
         await super()._on_iteration()
-        self.log.debug("Running PrintingService._on_iteration")
+        self.log.trace("Running PrintingService._on_iteration")
         self.test_queue.put_nowait("_on_iteration")
         self.summarize()  # update each loop; don't let queues grow too large
 
     def _on_iteration_complete(self) -> None:
         super()._on_iteration_complete()
-        self.log.debug("Running PrintingService._on_iteration_complete")
+        self.log.trace("Running PrintingService._on_iteration_complete")
         self.test_queue.put_nowait("_on_iteration_complete")
         self.summarize()
 
@@ -88,7 +88,7 @@ class PrintingService(Service):
 
     def _on_health_check(self) -> None:
         super()._on_health_check()
-        self.log.debug("Running PrintingService._on_health_check")
+        self.log.trace("Running PrintingService._on_health_check")
         self.test_queue.put_nowait("_on_health_check")
 
     @property
@@ -98,7 +98,7 @@ class PrintingService(Service):
 
     def _can_shutdown(self) -> bool:
         super()._can_shutdown()  # type: ignore[safe-super]
-        self.log.debug("Running PrintingService._can_shutdown")
+        self.log.trace("Running PrintingService._can_shutdown")
         self.test_queue.put_nowait("_can_shutdown")
 
         if self._do_shutdown:
@@ -115,7 +115,7 @@ class PrintingService(Service):
 
     def _on_shutdown(self) -> None:
         super()._on_shutdown()
-        self.log.debug("Running PrintingService._on_shutdown")
+        self.log.trace("Running PrintingService._on_shutdown")
         self.test_queue.put_nowait("_on_shutdown")
         self.summarize()
 

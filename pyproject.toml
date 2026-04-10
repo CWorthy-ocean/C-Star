@@ -28,13 +28,14 @@ dynamic = ["version"]
 dependencies = [
     "networkx>=3.6.1",
     "prefect>=3.6.1",
+    "fakeredis<2.35",
     "pydantic>=2.12",
     "python-dateutil>=2.8.2",
     "pytimeparse>=1.1.8",
     "python-dotenv",
     "PyYAML==6.0.2",
     "roms_tools[dask]>=3.4.0,<4",
-    "typer>=0.24.1",
+    "typer<=0.25",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
