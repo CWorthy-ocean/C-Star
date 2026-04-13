@@ -32,7 +32,7 @@ mp = _mp.get_context("forkserver")
 
 
 def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
-    p = sprun(args=cmd, text=True, check=True, capture_output=True)
+    p = sprun(args=cmd, text=True, check=True)
     return {step.name: p.returncode}
 
 
