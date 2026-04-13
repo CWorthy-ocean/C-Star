@@ -108,7 +108,7 @@ def get_job_config() -> JobConfig:
     walltime: str = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
     priority: str = get_env_item(ENV_CSTAR_SLURM_QUEUE).value
 
-    return JobConfig(account_id, walltime, priority)
+    return JobConfig(account_id=account_id, walltime=walltime, priority=priority)
 
 
 def configure_environment(log: logging.Logger) -> None:
