@@ -1113,6 +1113,11 @@ class ROMSSimulation(Simulation):
         data = source.retriever.read()
         bp_dict = yaml.safe_load(data.decode("utf-8"))
 
+        if bp_dict["application"] != RomsMarblBlueprint.application:
+            raise ValueError("The blueprint contains an unexpected application")
+        else:
+            del bp_dict["application"]  # class var is fixed.
+
         bp = RomsMarblBlueprint.model_validate(bp_dict)
 
         return cls(

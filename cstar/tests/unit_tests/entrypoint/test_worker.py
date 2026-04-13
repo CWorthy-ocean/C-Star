@@ -11,20 +11,23 @@ from unittest import mock
 import pytest
 
 from cstar.base.exceptions import BlueprintError, CstarError
+from cstar.entrypoint.config import (
+    configure_environment,
+    get_job_config,
+    get_service_config,
+)
 from cstar.entrypoint.service import ServiceConfiguration
 from cstar.entrypoint.worker.worker import (
     BlueprintRequest,
     JobConfig,
     SimulationRunner,
     SimulationStages,
-    configure_environment,
     create_parser,
-    get_job_config,
     get_request,
-    get_service_config,
     main,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -95,6 +98,7 @@ def sim_runner(
     """
     request = BlueprintRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
         stages=list(SimulationStages),
     )
 
@@ -247,7 +251,7 @@ def test_get_service_config(
         ],
     )
 
-    config = get_service_config(parsed_args.log_level)
+    config = get_service_config(parsed_args.log_level, name="SimulationRunner")
 
     # some values are currently hardcoded for the worker service
     assert config.as_service
@@ -337,6 +341,7 @@ def test_start_runner(
     """
     request = BlueprintRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
     )
 
     service_config = ServiceConfiguration(
@@ -1031,6 +1036,7 @@ async def test_runner_setup_stage(
 
     request = BlueprintRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
         stages=list(stages),
     )
 

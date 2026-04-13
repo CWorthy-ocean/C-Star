@@ -4,14 +4,13 @@ from pathlib import Path
 import pytest
 from pytest import CaptureFixture
 
-from cstar.entrypoint.worker.app_host import (
-    BaseBlueprintRequest as BlueprintRequestV2,
-)
-from cstar.entrypoint.worker.app_host import create_runner
+from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.service import ServiceConfiguration
 from cstar.entrypoint.worker.hello_app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )
+from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.launch.local import LocalLauncher
@@ -77,13 +76,16 @@ async def test_hello_world_blueprint_execution(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    request = BlueprintRequestV2(blueprint_uri=hello_world_bp_path.as_posix())
-    runner = create_runner(request, HelloWorldRunner)
+    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    svc_cfg = ServiceConfiguration()
+    job_cfg = get_job_config()
 
-    await runner.execute()
+    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    result = await runner.execute_xrunner()
 
+    assert result is not None
     # Confirm the success disposition is set
-    assert runner._result.status == ExecutionStatus.COMPLETED
+    assert result.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()
@@ -106,13 +108,15 @@ async def test_execute_runner_happy_path(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    request = BlueprintRequestV2(blueprint_uri=hello_world_bp_path.as_posix())
-    runner = create_runner(request, HelloWorldRunner)
+    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    job_cfg = get_job_config()
+    svc_cfg = get_service_config(log_level="INFO", name="SimulationRunner")
 
+    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
     await runner.execute()
 
     # Confirm the success disposition is set
-    assert runner._result.status == ExecutionStatus.COMPLETED
+    assert runner.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()

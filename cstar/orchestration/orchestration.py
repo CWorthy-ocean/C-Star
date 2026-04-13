@@ -17,7 +17,7 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
 )
-from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.models import Blueprint, Step, Workplan
 from cstar.orchestration.serialization import (
     intenum_representer,
     register_representer,
@@ -209,6 +209,8 @@ class LiveStep(Step):
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
+    _bp: Blueprint | None = None
+    """The blueprint loaded from the blueprint path"""
 
     @property
     def get_working_dir(self) -> Path:
@@ -237,12 +239,27 @@ class LiveStep(Step):
             self._fsm = JobFileSystemManager(self.get_working_dir)
         return self._fsm
 
+    @property
+    def blueprint(self) -> Blueprint | None:
+        """Load and return the blueprint associated with this step."""
+        if self._bp is None:
+            # may decide to improve reload behavior by tracking file timestep...
+            # - if a step is transformed, the blueprint must be reloaded.
+            # NOTE: must also convert LiveStep to a generic so it knows the type?
+
+            # WARNING: the discriminator includes lots of types ffrom different places
+            # - it's a circular dependency magnet
+            # self._bp = deserialize_discriminated(self.blueprint_path, "application")
+            ...
+        return self._bp
+
     @classmethod
     def from_step(
         cls,
         step: Step,
         parent: "LiveStep | Step | None" = None,
         update: t.Mapping[str, t.Any] | None = None,
+        # blueprint: Blueprint | None = None,
     ) -> "LiveStep":
         """Convert a step from orchestration planning into a LiveStep.
 
@@ -256,6 +273,7 @@ class LiveStep(Step):
             A mapping of updates to apply to the step
         """
         step_attrs = step.model_dump(by_alias=True)
+        # _bp = blueprint
 
         if update:
             step_attrs.update(update)

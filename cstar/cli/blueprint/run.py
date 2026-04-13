@@ -2,7 +2,7 @@ import asyncio
 import typing as t
 
 import typer
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -11,38 +11,22 @@ from cstar.base.env import (
 )
 from cstar.base.log import LogLevelChoices
 from cstar.cli.common import clobber_callback, log_level_callback
-from cstar.entrypoint.worker.hello_app import (
-    HelloWorldBlueprint,
-    HelloWorldRunner,
-    get_base_request,
-)
-from cstar.entrypoint.worker.hello_app import execute_runner as execute_runner_bp
+from cstar.cli.workplan.shared import create_xrunner
 from cstar.entrypoint.worker.worker import (
     SimulationStages,
     get_job_config,
     get_request,
     get_service_config,
 )
-from cstar.entrypoint.worker.worker import (
-    execute_runner as execute_runner_rm,
-)
+from cstar.entrypoint.worker.worker import execute_runner as exec_romsmarbl_runner
+from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.models import RomsMarblBlueprint
-from cstar.orchestration.serialization import (
-    deserialize_discriminated,
-)
+from cstar.orchestration.application import ApplicationRegistry
+from cstar.orchestration.models import Blueprint
+from cstar.orchestration.serialization import deserialize, validate_serialized_entity
+from cstar.system.registration import Registry
 
 app = typer.Typer()
-
-AllBlueprints = RomsMarblBlueprint | HelloWorldBlueprint
-
-
-class BlueprintDiscriminator(BaseModel):
-    """A utility used to enable pydantic to deserialize an unknown
-    blueprint based on the value of the discriminator field (application).
-    """
-
-    blueprint: t.Annotated[AllBlueprints, Field(discriminator="application")]
 
 
 def path_callback(
@@ -71,15 +55,18 @@ def path_callback(
                 msg = f"Blueprint not found at path: {path}"
                 raise typer.BadParameter(msg)
 
-            loader = deserialize_discriminated(
-                local_path, BlueprintDiscriminator, "blueprint"
-            )
+            # use the core blueprint fields to identify the application type
+            bp_core = deserialize(local_path, Blueprint)
+
+            reg_bp = Registry(ApplicationRegistry.BLUEPRINT)
+            bp_type = reg_bp.get(bp_core.application)
+
+            ctx.obj = deserialize(local_path, bp_type)
+
     except FileNotFoundError:
         raise typer.BadParameter(f"Blueprint file not found: {path}")
     except ValidationError as ex:
         raise typer.BadParameter(f"Blueprint file is malformed: {ex}")
-
-    ctx.obj = loader.blueprint
 
     return path
 
@@ -87,10 +74,10 @@ def path_callback(
 @app.command(name="run", help="Execute a blueprint in a local worker service.")
 def run(
     ctx: typer.Context,
-    path: t.Annotated[
+    uri: t.Annotated[
         str,
         typer.Argument(
-            help="The path to the blueprint to execute",
+            help="The URI (or path) to the blueprint to execute",
             callback=path_callback,
         ),
     ],
@@ -122,33 +109,38 @@ def run(
     ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service."""
-    job_cfg = get_job_config()
-    service_cfg = get_service_config(get_env_item(ENV_CSTAR_LOG_LEVEL).value)
-
-    bp: AllBlueprints = ctx.obj
+    bp: Blueprint = ctx.obj
     application = bp.application
+    runner_name = f"{application.capitalize()}Runner"
+    bp_type = type(bp)
+
+    job_cfg = get_job_config()
+    service_cfg = get_service_config(
+        get_env_item(ENV_CSTAR_LOG_LEVEL).value, name=runner_name
+    )
 
     print(f"Executing {application!r} blueprint in a worker service")
 
+    validation_result_rm = validate_serialized_entity(uri, bp_type)
+    if not validation_result_rm.is_valid:
+        print(validation_result_rm.error_msg)
+        return
+
     if application == "roms_marbl":
-        # validation_result_rm = validate_serialized_entity(path, RomsMarblBlueprint)
-        # if not validation_result_rm.is_valid:
-        #     print(validation_result_rm.error_msg)
-        #     return
+        # NOTE: temporary conditional to use old runner until it is converted to XRunner
+        # TODO: stages must be moved to the blueprint instead of a CLI parameter
+        rm_request = get_request(uri, stage)
+        rc = asyncio.run(exec_romsmarbl_runner(job_cfg, service_cfg, rm_request))
+    else:
+        request = XRunnerRequest(uri, type(bp))
 
-        rm_request = get_request(path, stage)
-        rc = asyncio.run(execute_runner_rm(job_cfg, service_cfg, rm_request))
-    elif application == "hello_world":
-        hw_request = get_base_request(path)
-        # validation_result_hw = validate_serialized_entity(path, HelloWorldBlueprint)
-        # if not validation_result_hw.is_valid:
-        #     print(validation_result_hw.error_msg)
-        #     return
+        runner = create_xrunner(request, service_cfg, job_cfg)
+        result = asyncio.run(runner.execute_xrunner())
 
-        bp_result = asyncio.run(
-            execute_runner_bp(HelloWorldRunner, job_cfg, service_cfg, hw_request)
-        )
-        rc = 0 if not bp_result.errors else 1
+        if errors := list(result.errors):
+            print(f"Errors occurred: {', '.join(errors)}")
+
+        rc = len(errors)
 
     if rc:
         print("Blueprint execution failed")

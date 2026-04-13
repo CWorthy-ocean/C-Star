@@ -1,8 +1,6 @@
 import argparse
 import asyncio
-import dataclasses as dc
 import enum
-import logging
 import os
 import pathlib
 import sys
@@ -11,28 +9,19 @@ from datetime import datetime, timezone
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import LogLevelChoices, get_logger, parse_log_level_name
+from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
-from cstar.entrypoint.service import Service, ServiceConfiguration
-from cstar.execution.handler import ExecutionHandler, ExecutionStatus
-from cstar.orchestration.utils import (
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_MAX_WALLTIME,
-    ENV_CSTAR_SLURM_QUEUE,
+from cstar.entrypoint.config import (
+    JobConfig,
+    configure_environment,
+    get_job_config,
+    get_service_config,
 )
+from cstar.entrypoint.service import Service, ServiceConfiguration
+from cstar.entrypoint.xrunner import XRunnerRequest
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms import ROMSSimulation
-
-DATE_FORMAT: t.Final[str] = "%Y-%m-%d %H:%M:%S"
-WORKER_LOG_FILE_TPL: t.Final[str] = "cstar-worker.{0}.log"
-JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
-LOGS_DIRECTORY: t.Final[str] = "logs"
-
-
-def _generate_job_name() -> str:
-    """Generate a unique job name based on the current date and time."""
-    now_utc = datetime.now(timezone.utc)
-    formatted_now_utc = now_utc.strftime(JOBFILE_DATE_FORMAT)
-    return f"cstar_worker_{formatted_now_utc}"
 
 
 class SimulationStages(enum.StrEnum):
@@ -50,31 +39,19 @@ class SimulationStages(enum.StrEnum):
     """Execute hooks after the simulation completes. See `Simulation.post_run`"""
 
 
-@dc.dataclass(frozen=True)
-class BlueprintRequest:
-    """Represents a request to run a c-star simulation."""
+class BlueprintRequest(XRunnerRequest[RomsMarblBlueprint]):
+    stages: list[SimulationStages]
+    """The simulation stages to execute."""
 
-    blueprint_uri: str
-    """The path to the blueprint."""
-    stages: list[SimulationStages] = dc.field(default_factory=list)
-    """The simulation stages to execute.
-
-    Defaults to all stages.
-    """
-
-
-@dc.dataclass(frozen=True)
-class JobConfig:
-    """Configuration required to submit HPC jobs."""
-
-    account_id: str
-    """HPC account used for billing."""
-    walltime: str
-    """Maximum walltime allowed for job."""
-    priority: str
-    """Job priority."""
-    job_name: str = _generate_job_name()
-    """User-friendly job name."""
+    def __init__(
+        self,
+        uri: str,
+        bp_type: type[RomsMarblBlueprint],
+        name: str = "",
+        stages: list[SimulationStages] | None = None,
+    ):
+        super().__init__(uri, bp_type, name)
+        self.stages = stages or []
 
 
 class SimulationRunner(Service):
@@ -344,30 +321,6 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_service_config(log_level: int | str) -> ServiceConfiguration:
-    """Create a ServiceConfiguration instance using CLI arguments.
-
-    Parameters
-    ----------
-    log_level : int or str
-        The log level to be used by the worker
-
-    Returns
-    -------
-    ServiceConfiguration
-    """
-    level = parse_log_level_name(log_level)
-
-    return ServiceConfiguration(
-        as_service=True,
-        loop_delay=5,
-        health_check_frequency=None,
-        log_level=level,
-        health_check_log_threshold=10,
-        name="SimulationRunner",
-    )
-
-
 def get_request(
     blueprint_uri: str, stages: list[SimulationStages] | None = None
 ) -> BlueprintRequest:
@@ -389,40 +342,10 @@ def get_request(
         stages = list(SimulationStages)
 
     return BlueprintRequest(
-        blueprint_uri=blueprint_uri,
+        blueprint_uri,
+        RomsMarblBlueprint,
         stages=stages,
     )
-
-
-def get_job_config() -> JobConfig:
-    """Create and configure a `JobConfig` instance from environment variables.
-
-    Returns
-    -------
-    JobConfig
-    """
-    account_id: str = get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
-    walltime: str = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
-    priority: str = get_env_item(ENV_CSTAR_SLURM_QUEUE).value
-
-    return JobConfig(account_id, walltime, priority)
-
-
-def configure_environment(log: logging.Logger) -> None:
-    """Configure the environment variables required by the worker.
-
-    Parameters
-    ----------
-    log : logging.Logger
-        A logger to log configuration details.
-
-    Returns
-    -------
-    None
-    """
-    # ensure git works on distributed file-system, e.g. lustre
-    os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
-    log.debug("Git discovery across file-system enabled.")
 
 
 async def execute_runner(
@@ -481,7 +404,7 @@ def main() -> int:
         return 1
 
     job_cfg = get_job_config()
-    service_cfg = get_service_config(args.log_level)
+    service_cfg = get_service_config(args.log_level, name="SimulationRunner")
     request = get_request(args.blueprint_uri, args.stages)
 
     return asyncio.run(execute_runner(job_cfg, service_cfg, request))

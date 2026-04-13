@@ -25,6 +25,7 @@ from pytimeparse import parse
 
 from cstar.base.utils import slugify
 from cstar.orchestration.serialization import register_representer, strenum_representer
+from cstar.system.registration import Registry
 
 if t.TYPE_CHECKING:
     from pydantic import ValidationInfo
@@ -61,7 +62,8 @@ class ConfiguredBaseModel(BaseModel):
     for subclasses.
     """
 
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    # model_config = ConfigDict(extra="forbid", from_attributes=True)
+    model_config = ConfigDict(extra="allow", from_attributes=True)
     """Pydantic ConfigDict with options we want changed."""
 
 
@@ -340,7 +342,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     description: RequiredString
     """A user-friendly description of the scenario to be executed by the blueprint."""
 
-    application: str
+    application: t.ClassVar[str]
     """The process type to be executed by the blueprint."""
 
     state: BlueprintState = BlueprintState.NotSet
@@ -358,7 +360,8 @@ class Blueprint(ConfiguredBaseModel, ABC):
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
-    application: t.Literal["roms_marbl"] = "roms_marbl"  #  = Application.ROMS_MARBL
+    application: t.ClassVar[str] = "roms_marbl"
+    """The process type to be executed by the blueprint."""
 
     valid_start_date: datetime
     """Beginning of the time range for the available data."""
@@ -720,3 +723,7 @@ class UserDefinedVariables(BaseModel):
 register_representer(WorkplanState, strenum_representer)
 register_representer(Application, strenum_representer)
 register_representer(BlueprintState, strenum_representer)
+
+registry = Registry.blueprint_registry()
+
+registry.put("roms_marbl", RomsMarblBlueprint)

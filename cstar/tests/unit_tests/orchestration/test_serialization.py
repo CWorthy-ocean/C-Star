@@ -5,13 +5,11 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
-from cstar.entrypoint.worker.hello_app import HelloWorldBlueprint
 from cstar.orchestration.launch.slurm import SlurmHandle
-from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
+from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
-    deserialize_discriminated,
     serialize,
 )
 from cstar.orchestration.state import sentinel_path
@@ -274,13 +272,15 @@ def hello_world_bp_content(hello_world_default_target: str) -> str:
     hello_world_default_target : str
         The default target for the hello world blueprint.
     """
-    return textwrap.dedent(f"""\
+    return textwrap.dedent(
+        f"""\
         name: Say hello to my little friend!
         description: This blueprint says hello to a very nice guy
         application: hello_world
         state: draft
         target: '{hello_world_default_target}'
-        """)
+        """
+    )
 
 
 @pytest.fixture
@@ -318,33 +318,3 @@ def bp_templates_dir(templates_dir: Path) -> Path:
     Path
     """
     return templates_dir / "bp"
-
-
-AllBlueprints = RomsMarblBlueprint | HelloWorldBlueprint
-
-
-class BlueprintDiscriminator(BaseModel):
-    blueprint: t.Annotated[AllBlueprints, Field(discriminator="application")]
-
-
-def test_deserialize_discriminated(tmp_path: Path, hello_world_bp_path: Path) -> None:
-    """Verify that a discriminated union can be properly deserialized."""
-    bpd = deserialize_discriminated(
-        hello_world_bp_path, BlueprintDiscriminator, "blueprint"
-    )
-    assert isinstance(bpd.blueprint, HelloWorldBlueprint)
-    assert bpd.blueprint.target == "@ankona"
-
-
-def test_deserialize_discriminated_roms(tmp_path: Path, bp_templates_dir: Path) -> None:
-    """Verify that a discriminated union can be properly deserialized."""
-    # bpd = deserialize(hello_world_bp_path, BlueprintDiscriminator)
-    roms_bp_path = bp_templates_dir / "blueprint.yaml"
-    content = roms_bp_path.read_text(encoding="utf-8").replace("sleep", "roms_marbl")
-
-    test_bp_path = tmp_path / "roms_marbl.yaml"
-    test_bp_path.write_text(content)
-
-    bpd = deserialize_discriminated(test_bp_path, BlueprintDiscriminator, "blueprint")
-    assert isinstance(bpd.blueprint, RomsMarblBlueprint)
-    assert bpd.blueprint is not None

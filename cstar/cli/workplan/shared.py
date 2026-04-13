@@ -6,9 +6,14 @@ from rich.console import Console
 from rich.table import Column, Table
 
 from cstar.base.log import get_logger
+from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.service import ServiceConfiguration
+from cstar.entrypoint.worker.worker import JobConfig
+from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import TrackingRepository
+from cstar.system.registration import Registry
 
 console = Console()
 log = get_logger(__name__)
@@ -166,3 +171,34 @@ def check_and_capture_kvps(entries: list[str]) -> t.Mapping[str, str] | None:
         raise typer.BadParameter(msg)
 
     return variables
+
+
+def create_xrunner(
+    request: XRunnerRequest,
+    service_cfg: ServiceConfiguration | None = None,
+    job_cfg: JobConfig | None = None,
+    log_level: int | str = "INFO",
+) -> XBlueprintRunner:
+    """Dynamically create a runner using the application to look up the
+    registered handler.
+
+    Parameters
+    ----------
+    job_cfg : JobConfig
+        Configuration applied to the scheduler.
+    service_cfg : ServiceConfiguration
+        Configuration applied to the service.
+    request : BlueprintRequest
+        A request specifying the blueprint to be executed.
+    """
+    if job_cfg is None:
+        job_cfg = get_job_config()
+    if service_cfg is None:
+        service_cfg = get_service_config(
+            log_level, name=f"{request.application.capitalize()}Runner"
+        )
+
+    runner_registry = Registry.runner_registry()
+    klass = runner_registry.get(request.application)
+
+    return klass(request, job_cfg, service_cfg)

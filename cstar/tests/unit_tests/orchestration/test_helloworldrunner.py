@@ -1,6 +1,5 @@
 # ruff: noqa: S101
 import os
-import sys
 import typing as t
 import uuid
 from pathlib import Path
@@ -12,14 +11,12 @@ from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.workplan.run import app
-from cstar.entrypoint.worker.app_host import BaseBlueprintRequest as BlueprintRequestV2
-from cstar.entrypoint.worker.app_host import BlueprintRunner, create_runner
+from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.worker.hello_app import (
+    HelloWorldBlueprint,
     HelloWorldRunner,
 )
-from cstar.entrypoint.worker.hello_app import (
-    main as hw_main,
-)
+from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Workplan, WorkplanState
 from cstar.orchestration.serialization import deserialize, serialize
@@ -119,44 +116,6 @@ def heterogeneous_workplan_path(
     return wp_path
 
 
-@pytest.mark.asyncio
-async def test_hello_world_main(
-    blueprint_path: Path,
-) -> None:
-    """Test the execution of the "hello, {world}!" application entrypoint
-
-    This test verifies that the runner is started successfully and receives
-    the set of expected parameters.
-    """
-    mock_execute = mock.AsyncMock(return_code=0)
-
-    args = [
-        "cstar.entrypoint.worker.hello_app",
-        "--blueprint-uri",
-        str(blueprint_path),
-        "--log-level",
-        "DEBUG",
-    ]
-
-    # don't let it perform any real work; mock out runner.execute
-    with (
-        mock.patch.object(
-            BlueprintRunner,
-            "execute",
-            mock_execute,
-        ),
-        mock.patch.object(sys, "argv", args),
-    ):
-        # This should run the simulation and return a success code
-        return_code = await hw_main()
-
-    # Confirm an error code is returned
-    assert return_code == 0
-
-    # Confirm the runner ran the simulation
-    assert mock_execute.call_count == 1
-
-
 @pytest.mark.parametrize(
     "target",
     [
@@ -191,13 +150,16 @@ async def test_hello_world_runner_happy_path(
     bp_path = tmp_path / "hw.yaml"
     bp_path.write_text(bp_content)
 
-    request = BlueprintRequestV2(blueprint_uri=bp_path.as_posix())
-    runner = create_runner(request, HelloWorldRunner)
+    request = XRunnerRequest(str(bp_path), HelloWorldBlueprint)
+    job_cfg = get_job_config()
+    svc_cfg = get_service_config(log_level="INFO", name="SimulationRunner")
+
+    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
 
     await runner.execute()
 
     # Confirm the success disposition is set
-    assert runner._result.status == ExecutionStatus.COMPLETED
+    assert runner.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {target}".lower() in captured.out.lower()
