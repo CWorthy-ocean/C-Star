@@ -8,11 +8,11 @@ from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import (
     JOBFILE_DATE_FORMAT,
+    JobConfig,
     ServiceConfiguration,
     configure_environment,
 )
 from cstar.entrypoint.service import Service
-from cstar.entrypoint.worker.worker import JobConfig
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.serialization import SerializableModel, deserialize
