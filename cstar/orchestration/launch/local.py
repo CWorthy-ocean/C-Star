@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import multiprocessing as _mp
 import typing as t
+from pathlib import Path
 from subprocess import run as sprun
 
 from psutil import NoSuchProcess
@@ -31,8 +32,9 @@ log = get_logger(__name__)
 mp = _mp.get_context("forkserver")
 
 
-def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
-    p = sprun(args=cmd, text=True, check=True)
+def run_as_process(step: "Step", cmd: list[str], log_file: Path) -> dict[str, int]:
+    with log_file.open("w+") as log:
+        p = sprun(args=cmd, text=True, check=True, stdout=log, stderr=log)
     return {step.name: p.returncode}
 
 
@@ -108,6 +110,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         )
         cmd = step_converter(step)
 
+        step.fsm.prepare()
+        log_file = step.fsm.logs_dir / f"{step.safe_name}.out"
+
         try:
             if not step.fsm.root.exists():
                 step.fsm.prepare()
@@ -115,13 +120,14 @@ class LocalLauncher(Launcher[LocalHandle]):
             mp_process = mp.Process(
                 target=run_as_process,
                 name=step.safe_name,
-                args=(step, cmd.split()),
+                args=(step, cmd.split(), log_file),
                 daemon=True,
             )
             mp_process.start()
             create_time = datetime.datetime.now(tz=datetime.timezone.utc)
             if pid := mp_process.pid:
-                print(f"Local run of `{step.application}` created pid: {pid}")
+                log.debug(f"Local run of `{step.application}` created pid: {pid}")
+                log.info(f"Logs for step {step.safe_name} can be found at {log_file}")
 
                 try:
                     ps_process = PsProcess(pid)
@@ -130,7 +136,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                         create_timestamp, tz=datetime.timezone.utc
                     )
                 except NoSuchProcess:
-                    print(f"Unable to retrieve exact start time for pid: {pid}")
+                    log.debug(f"Unable to retrieve exact start time for pid: {pid}")
 
                 handle = LocalHandle(
                     pid=str(pid),
@@ -293,7 +299,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         if process is not None:
             if process.exitcode is not None:
                 # can't cancel a completed process
-                print(f"Unable to cancel a completed task `{process.pid}")
+                log.debug(f"Unable to cancel a completed task `{process.pid}")
             else:
                 process.kill()
                 item.status = Status.Cancelled
