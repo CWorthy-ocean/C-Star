@@ -1,0 +1,50 @@
+      ! ***************************************************************
+      ! User inputs:
+      !
+      !   Momentum terms:
+      !     Pressure gradient; coriolis; adv.; dissipation from adv.; h. mix.; and v. mix.
+      !
+      !   Tracer terms:
+      !     H. adv.; dissipation from h. adv.; v. adv.; dissipation from v. adv.; h. mix.; and v. mix.
+      !
+      !   Notes:
+      !     1) need DIAGNOSTICS flag in cppdefs.opt
+      !     2) units are du/dt*dz - m^2/s^2 (or v/w/tracer) - i.e. vertically integrated in cell
+      !     3) if tracer diagnostics required set diag_trc==T,
+      !        select which tracers you want in wrt_t_diag array in tracers.opt
+      !     4) for an example try Examples/Diagnostics/
+      !     5) averaging frequency = rec_rate * time_step
+      !        averaging is expensive and will likely slow your simulation by 30-40%
+      !        with u, v, temp and salinity diagnostics.
+      !     6) history (snap-shot) diagnostics is relatively inexpensive.
+
+      logical, parameter         :: diag_avg      = {{ diagnostics.diag_avg|lower }}    ! compute history (=F) or averages (=T)
+      integer, parameter         :: output_period = {{ diagnostics.output_period }}   ! output period
+      integer, parameter         :: nrpf          = {{ diagnostics.nrpf }}        ! total recs per file
+
+      logical, parameter, public :: diag_uv       = {{ diagnostics.diag_uv|lower }}   ! Momentum diagnostics
+      logical, parameter, public :: diag_trc      = {{ diagnostics.diag_trc|lower }}   ! Selected tracers diagnostics
+      logical, parameter, public :: diag_pflx     = {{ diagnostics.diag_pflx|lower }}    ! Baroclinic pressure fluxes
+
+      real,    parameter         :: timescale     = {{ diagnostics.timescale }} ! timescale for filtering (in seconds)
+
+      integer, parameter         :: diag_prec     = {{ diagnostics.diag_prec }} ! Precision of output variables (nf90_float/nf90_double)
+
+
+!      !  If diag_trc=.true., select for which tracers diagnostics are desired:
+!      logical,public,dimension(nt) :: wrt_t_dia = (/
+!     &             .true.     !! Temperature
+!# ifdef SALINITY
+!     &            ,.false.    !! Salinity
+!# endif
+!     &           /)
+
+
+
+
+      ! End of user inputs
+      ! ***************************************************************
+
+
+
+

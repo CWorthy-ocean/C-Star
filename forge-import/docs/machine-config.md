@@ -1,6 +1,6 @@
 # Machine configuration
 
-C-SON Forge uses a configuration system to manage paths and system-specific settings.
+C-STAR Forge uses a configuration system to manage paths and system-specific settings.
 
 ## System Detection
 
@@ -45,7 +45,7 @@ default ``catalog_root`` applied to all domains from YAML.
 ### Accessing Configuration in Code
 
 ```python
-from cson_forge import config
+from cstar_forge import config
 
 # Access paths
 source_data_path = config.paths.source_data
@@ -65,7 +65,7 @@ cluster_type = config.cluster_type  # "LocalCluster" or "SLURMCluster"
 You can inspect the detected system and configured paths using the `config` module CLI:
 
 ```bash
-python -m cson_forge.config show-paths
+python -m cstar_forge.config show-paths
 ```
 
 This will display:
@@ -76,15 +76,15 @@ This will display:
 To output the paths in JSON format:
 
 ```bash
-python -m cson_forge.config show-paths --json
+python -m cstar_forge.config show-paths --json
 ```
 
 ## Machine Configuration
 
-Machine-specific settings (account, processing elements per node, queue names) are loaded from `cson_forge/machines.yml`. The `config.machine` object provides access to these settings:
+Machine-specific settings (account, processing elements per node, queue names) are loaded from `cstar_forge/machines.yml`. The `config.machine` object provides access to these settings:
 
 ```python
-from cson_forge import config
+from cstar_forge import config
 
 # Access machine configuration
 account = config.machine.account  # Account/project name for job submission
@@ -107,7 +107,7 @@ The cluster type is accessible via `config.cluster_type` and is used by the exec
 
 ### Adding a New System
 
-To customize paths or add a new system, edit `cson_forge/config.py` and:
+To customize paths or add a new system, edit `cstar_forge/config.py` and:
 
 1. Create a layout function that returns `(source_data, input_data, scratch)` paths
 2. Register it using the `@register_system(tag)` decorator

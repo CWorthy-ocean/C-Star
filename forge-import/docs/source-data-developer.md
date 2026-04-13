@@ -303,7 +303,7 @@ def _prepare_tpxo(self: SourceData) -> Dict[str, Path]:
 ## Usage Pattern
 
 ```python
-from cson_forge.source_data import SourceData
+from cstar_forge.source_data import SourceData
 from datetime import datetime
 
 # Create SourceData instance

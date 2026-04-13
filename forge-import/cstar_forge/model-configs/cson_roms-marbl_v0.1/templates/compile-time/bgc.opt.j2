@@ -1,0 +1,56 @@
+      ! ****************************************************************
+      ! User inputs
+
+      ! note: choice of bgc tracers to output is still selected in tracers.opt.
+
+      logical,parameter :: wrt_his           = {{ bgc.wrt_his|lower }}             ! t/f to write module history file
+      real,parameter    :: output_period_his = {{ bgc.output_period_his }}        ! output period in seconds
+      integer,parameter :: nrpf_his          = {{ bgc.nrpf_his }}                  ! total recs per file
+      
+      ! still need AVERAGES cppflag set for bgc average file to work:
+      logical,parameter :: wrt_avg           = {{ bgc.wrt_avg|lower }}             ! t/f to write module averages file
+      real,parameter    :: output_period_avg = {{ bgc.output_period_avg }}        ! output averaging period in seconds
+      integer,parameter :: nrpf_avg          = {{ bgc.nrpf_avg }}                  ! total recs per file
+
+      logical,parameter :: wrt_his_dia           = {{ bgc.wrt_his_dia|lower }}        ! t/f to write module history file
+      real,parameter    :: output_period_his_dia = {{ bgc.output_period_his_dia }}   ! output period in seconds
+      integer,parameter :: nrpf_his_dia          = {{ bgc.nrpf_his_dia }}             ! total recs per file
+
+      logical,parameter :: wrt_avg_dia           = {{ bgc.wrt_avg_dia|lower }}         ! t/f to write module history file
+      real,parameter    :: output_period_avg_dia = {{ bgc.output_period_avg_dia }}    ! output period in seconds
+      integer,parameter :: nrpf_avg_dia          = {{ bgc.nrpf_avg_dia }}              ! total recs per file
+
+      integer, parameter :: nbgc_flx = {{ bgc.nbgc_flx }}                   ! number of surface bgc flux forcings
+#ifdef PCO2AIR_FORCING
+     &                                +1
+#endif
+#if defined DAILYPAR_PHOTOINHIBITION || defined DAILYPAR_BEC
+     &                                +1
+#endif  
+      
+      integer :: interp_frc  = {{ bgc.interp_frc }}                           ! interpolate forcing from coarser input grid (=1) or not (=0)
+
+      type (ncforce) :: nc_dust        = ncforce(vname='dust', tname='dust_time' )  ! dust forcing
+      type (ncforce) :: nc_iron        = ncforce(vname='iron', tname='iron_time' )  ! iron forcing      
+#ifdef PCO2AIR_FORCING
+      type (ncforce) :: nc_pco2air     = ncforce(vname='pco2_air',   tname='pco2_time' )
+#ifdef MARBL      
+      type (ncforce) :: nc_pco2air_alt = ncforce(vname='pco2_air_alt',   tname='pco2_time' )
+#endif      
+#endif            
+#if defined DAILYPAR_PHOTOINHIBITION || defined DAILYPAR_BEC
+      type (ncforce) :: nc_swrad_avg   = ncforce(vname='swrad_davg', tname='srf_davg_time' )
+#endif
+#ifdef NOX_FORCING
+      type (ncforce) :: nc_nox        = ncforce(vname='nox', tname='nox_time' )
+#endif
+#ifdef NHY_FORCING
+      type (ncforce) :: nc_nhy        = ncforce(vname='nhy', tname='nhy_time' )
+#endif
+
+!#include "bgc_tracers.h"
+!#include "bgc_bio_diag.h"
+
+      ! End of user inputs
+      ! *************************************************************
+

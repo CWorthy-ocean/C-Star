@@ -1,4 +1,4 @@
 """
-Test suite for cson-forge.
+Test suite for cstar-forge.
 """
 

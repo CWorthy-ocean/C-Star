@@ -1,6 +1,6 @@
 # Overview
 
-C-SON Forge streamlines the creation of ROMS-MARBL domains by automating the generation of all required input files using [ROMS Tools](https://roms-tools.readthedocs.io/en/latest/index.html). 
+C-STAR Forge streamlines the creation of ROMS-MARBL domains by automating the generation of all required input files using [ROMS Tools](https://roms-tools.readthedocs.io/en/latest/index.html). 
 The files include grids, initial conditions, boundary and surface forcing, rivers, and tidal forcing—from a variety of observational and reanalysis datasets. 
 
 
@@ -31,8 +31,8 @@ The tool produces **blueprint** YAML files that capture the complete configurati
 ## Project Structure
 
 ```
-cson-forge/
-├── cson_forge/                 # Main package directory
+cstar-forge/
+├── cstar_forge/                 # Main package directory
 │   ├── _core.py                # Core classes (CstarSpecBuilder, CstarSpecEngine)
 │   ├── models.py               # Model specification classes (ModelSpec, etc.)
 │   ├── source_data.py          # Dataset download and preparation

@@ -1,12 +1,12 @@
 """
-Pytest configuration and shared fixtures for cson-forge tests.
+Pytest configuration and shared fixtures for cstar-forge tests.
 """
 from pathlib import Path
 import sys
 import tempfile
 import yaml
 
-# Add project root to path so we can import cson_forge package
+# Add project root to path so we can import cstar_forge package
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -29,7 +29,7 @@ def sample_models_yaml():
     """Sample models.yml content for testing."""
     return {
         "roms-marbl": {
-            "opt_base_dir": "opt_base/opt_base_roms-marbl-cson-default",
+            "opt_base_dir": "opt_base/opt_base_roms-marbl-csforge-default",
             "conda_env": "roms_env",
             "repos": {
                 "roms": {
@@ -85,8 +85,8 @@ def workflows_dir():
 
 @pytest.fixture
 def real_models_yaml():
-    """Path to the actual models.yml file in the cson_forge package."""
+    """Path to the actual models.yml file in the cstar_forge package."""
     # Use the same pattern as config.py: get path relative to package location
-    import cson_forge
-    return Path(cson_forge.config.paths.models_yaml)
+    import cstar_forge
+    return Path(cstar_forge.config.paths.models_yaml)
 

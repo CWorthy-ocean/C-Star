@@ -11,9 +11,9 @@
 class RomsMarblInputData(InputData):
     """ROMS-MARBL specific input data generation."""
     
-    model_spec: cson_models.ModelSpec
+    model_spec: forge_models.ModelSpec
     grid: rt.Grid
-    boundaries: cson_models.OpenBoundaries
+    boundaries: forge_models.OpenBoundaries
     source_data: source_data.SourceData
     blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet

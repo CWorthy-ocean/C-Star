@@ -2,7 +2,7 @@
 
 ## Workflow
 
-The C-SON Forge workflow progresses through distinct stages, transforming a model specification into an executable simulation:
+The C-STAR Forge workflow progresses through distinct stages, transforming a model specification into an executable simulation:
 
 ```{mermaid}
 flowchart TD

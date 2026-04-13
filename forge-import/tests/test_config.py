@@ -17,9 +17,9 @@ import json
 from dataclasses import FrozenInstanceError
 from unittest.mock import patch, MagicMock
 
-import cson_forge.config as config_module
+import cstar_forge.config as config_module
 
-from cson_forge.config import (
+from cstar_forge.config import (
     DataPaths,
     MachineConfig,
     _detect_system,
@@ -168,8 +168,8 @@ class TestMachineConfig:
 class TestSystemDetection:
     """Tests for system detection functions."""
     
-    @patch('cson_forge.config.platform.system')
-    @patch('cson_forge.config._get_hostname')
+    @patch('cstar_forge.config.platform.system')
+    @patch('cstar_forge.config._get_hostname')
     @patch.dict(os.environ, {}, clear=True)
     def test_detect_system_macos(self, mock_hostname, mock_system):
         """Test system detection for MacOS."""
@@ -177,8 +177,8 @@ class TestSystemDetection:
         result = _detect_system()
         assert result == "MacOS"
     
-    @patch('cson_forge.config.platform.system')
-    @patch('cson_forge.config._get_hostname')
+    @patch('cstar_forge.config.platform.system')
+    @patch('cstar_forge.config._get_hostname')
     @patch.dict(os.environ, {}, clear=True)
     def test_detect_system_anvil(self, mock_hostname, mock_system):
         """Test system detection for RCAC Anvil."""
@@ -187,8 +187,8 @@ class TestSystemDetection:
         result = _detect_system()
         assert result == "RCAC_anvil"
     
-    @patch('cson_forge.config.platform.system')
-    @patch('cson_forge.config._get_hostname')
+    @patch('cstar_forge.config.platform.system')
+    @patch('cstar_forge.config._get_hostname')
     @patch.dict(os.environ, {"NERSC_HOST": "perlmutter"})
     def test_detect_system_perlmutter(self, mock_hostname, mock_system):
         """Test system detection for NERSC Perlmutter."""
@@ -197,8 +197,8 @@ class TestSystemDetection:
         result = _detect_system()
         assert result == "NERSC_perlmutter"
     
-    @patch('cson_forge.config.platform.system')
-    @patch('cson_forge.config._get_hostname')
+    @patch('cstar_forge.config.platform.system')
+    @patch('cstar_forge.config._get_hostname')
     @patch.dict(os.environ, {}, clear=True)
     def test_detect_system_unknown(self, mock_hostname, mock_system):
         """Test system detection for unknown system."""
@@ -208,8 +208,8 @@ class TestSystemDetection:
         assert result == "unknown"
     
     @patch.dict(os.environ, {"HOSTNAME": "test-host"})
-    @patch('cson_forge.config.socket.gethostname', return_value="")
-    @patch('cson_forge.config.platform.node', return_value="")
+    @patch('cstar_forge.config.socket.gethostname', return_value="")
+    @patch('cstar_forge.config.platform.node', return_value="")
     def test_get_hostname_from_env(self, mock_node, mock_gethostname):
         """Test getting hostname from HOSTNAME environment variable."""
         result = _get_hostname()
@@ -218,8 +218,8 @@ class TestSystemDetection:
         mock_node.assert_called_once()
     
     @patch.dict(os.environ, {}, clear=True)
-    @patch('cson_forge.config.socket.gethostname')
-    @patch('cson_forge.config.platform.node')
+    @patch('cstar_forge.config.socket.gethostname')
+    @patch('cstar_forge.config.platform.node')
     def test_get_hostname_from_socket(self, mock_node, mock_gethostname):
         """Test getting hostname from socket.gethostname()."""
         mock_gethostname.return_value = "socket-host"
@@ -229,8 +229,8 @@ class TestSystemDetection:
         mock_node.assert_not_called()
     
     @patch.dict(os.environ, {}, clear=True)
-    @patch('cson_forge.config.socket.gethostname')
-    @patch('cson_forge.config.platform.node')
+    @patch('cstar_forge.config.socket.gethostname')
+    @patch('cstar_forge.config.platform.node')
     def test_get_hostname_from_platform(self, mock_node, mock_gethostname):
         """Test getting hostname from platform.node() as fallback."""
         mock_gethostname.return_value = None
@@ -239,8 +239,8 @@ class TestSystemDetection:
         assert result == "platform-host"
     
     @patch.dict(os.environ, {}, clear=True)
-    @patch('cson_forge.config.socket.gethostname')
-    @patch('cson_forge.config.platform.node')
+    @patch('cstar_forge.config.socket.gethostname')
+    @patch('cstar_forge.config.platform.node')
     def test_get_hostname_unknown(self, mock_node, mock_gethostname):
         """Test getting hostname when all methods fail."""
         mock_gethostname.return_value = None
@@ -296,7 +296,7 @@ class TestSystemLayoutRegistry:
     
     def test_anvil_layout(self, tmp_path):
         """Test RCAC Anvil layout function."""
-        from cson_forge.config import USER
+        from cstar_forge.config import USER
         layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
         env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
         source_data, input_data, scratch = layout_fn(tmp_path, env)
@@ -307,7 +307,7 @@ class TestSystemLayoutRegistry:
     
     def test_perlmutter_layout(self, tmp_path):
         """Test NERSC Perlmutter layout function."""
-        from cson_forge.config import USER
+        from cstar_forge.config import USER
         layout_fn = SYSTEM_LAYOUT_REGISTRY["NERSC_perlmutter"]
         env = {"SCRATCH": str(tmp_path / "scratch")}
         source_data, input_data, scratch = layout_fn(tmp_path, env)
@@ -320,7 +320,7 @@ class TestSystemLayoutRegistry:
 class TestGetDataPaths:
     """Tests for get_data_paths function."""
     
-    @patch('cson_forge.config._detect_system')
+    @patch('cstar_forge.config._detect_system')
     def test_get_data_paths(self, mock_detect, tmp_path):
         """Test get_data_paths returns DataPaths object."""
         mock_detect.return_value = "MacOS"
@@ -345,7 +345,7 @@ class TestGetDataPaths:
         assert paths.catalog == default_catalog_inner_dir(paths.source_data)
         assert paths.blueprints == paths.catalog / "blueprints"
     
-    @patch('cson_forge.config._detect_system')
+    @patch('cstar_forge.config._detect_system')
     def test_get_data_paths_creates_directories(self, mock_detect, tmp_path):
         """Test that get_data_paths creates necessary directories."""
         mock_detect.return_value = "MacOS"
@@ -450,8 +450,8 @@ class TestCLI:
         
         # Patch everything in one context manager
         with patch.object(config_module, 'paths', test_paths), \
-             patch('cson_forge.config._detect_system', return_value="MacOS"), \
-             patch('cson_forge.config._get_hostname', return_value="test-host"):
+             patch('cstar_forge.config._detect_system', return_value="MacOS"), \
+             patch('cstar_forge.config._get_hostname', return_value="test-host"):
             exit_code = main(["show-paths"])
         
         assert exit_code == 0
@@ -479,8 +479,8 @@ class TestCLI:
         
         # Patch everything in one context manager
         with patch.object(config_module, 'paths', test_paths), \
-             patch('cson_forge.config._detect_system', return_value="MacOS"), \
-             patch('cson_forge.config._get_hostname', return_value="test-host"):
+             patch('cstar_forge.config._detect_system', return_value="MacOS"), \
+             patch('cstar_forge.config._get_hostname', return_value="test-host"):
             exit_code = main(["show-paths", "--json"])
         
         assert exit_code == 0
@@ -509,8 +509,8 @@ class TestCLI:
         )
         
         with patch.object(config_module, 'paths', test_paths), \
-             patch('cson_forge.config._detect_system') as mock_detect, \
-             patch('cson_forge.config._get_hostname') as mock_hostname:
+             patch('cstar_forge.config._detect_system') as mock_detect, \
+             patch('cstar_forge.config._get_hostname') as mock_hostname:
             
             mock_detect.return_value = "MacOS"
             mock_hostname.return_value = "test-host"

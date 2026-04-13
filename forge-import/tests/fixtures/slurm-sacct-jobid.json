@@ -3,7 +3,7 @@
      {
        "account": "m4632",
        "comment": {
-         "administrator": "{\"resizing\":0,\"features\":\"cpu\",\"argv\":[\"\\\/pscratch\\\/sd\\\/m\\\/mattlong\\\/cson-forge-data\\\/cson-forge-run\\\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\\\/work\\\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.sh\"],\"arrayTaskId\":4294967294,\"allocCpus\":256,\"arrayJobId\":0,\"gresRequest\":\"cpu=70,mem=487802M,node=1,billing=70\",\"partition\":\"regular_milan_ss11\",\"packJobOffset\":0,\"nodes\":\"nid007082\",\"jobId\":48052914,\"timeLimit\":360,\"endTime\":1769247122,\"stdoutPath\":\"\\\/pscratch\\\/sd\\\/m\\\/mattlong\\\/cson-forge-data\\\/cson-forge-run\\\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\\\/logs\\\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.out\",\"name\":\"cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\",\"startTime\":1769245188,\"workingDirectory\":\"\\\/pscratch\\\/sd\\\/m\\\/mattlong\\\/cson-forge-data\\\/cson-forge-run\\\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\\\/output\",\"allocNodes\":1,\"jobAccount\":\"m4632\",\"uid\":104006,\"packJobId\":0,\"stdinPath\":\"\\\/dev\\\/null\",\"qos\":\"regular_1\",\"cluster\":\"perlmutter\",\"batchHost\":\"nid007082\",\"restartCnt\":0,\"reboot\":0,\"priority\":67734,\"tresRequest\":\"1=256,2=487802,3=18446744073709551614,4=1,5=256\",\"submitTime\":1769231290,\"licenses\":\"scratch:1\",\"jobExitCode\":0,\"jobDerivedExitCode\":0}",
+         "administrator": "{\"resizing\":0,\"features\":\"cpu\",\"argv\":[\"\\\/pscratch\\\/sd\\\/m\\\/mattlong\\\/cstar-forge-data\\\/cstar-forge-run\\\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\\\/work\\\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.sh\"],\"arrayTaskId\":4294967294,\"allocCpus\":256,\"arrayJobId\":0,\"gresRequest\":\"cpu=70,mem=487802M,node=1,billing=70\",\"partition\":\"regular_milan_ss11\",\"packJobOffset\":0,\"nodes\":\"nid007082\",\"jobId\":48052914,\"timeLimit\":360,\"endTime\":1769247122,\"stdoutPath\":\"\\\/pscratch\\\/sd\\\/m\\\/mattlong\\\/cstar-forge-data\\\/cstar-forge-run\\\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\\\/logs\\\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.out\",\"name\":\"cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\",\"startTime\":1769245188,\"workingDirectory\":\"\\\/pscratch\\\/sd\\\/m\\\/mattlong\\\/cstar-forge-data\\\/cstar-forge-run\\\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\\\/output\",\"allocNodes\":1,\"jobAccount\":\"m4632\",\"uid\":104006,\"packJobId\":0,\"stdinPath\":\"\\\/dev\\\/null\",\"qos\":\"regular_1\",\"cluster\":\"perlmutter\",\"batchHost\":\"nid007082\",\"restartCnt\":0,\"reboot\":0,\"priority\":67734,\"tresRequest\":\"1=256,2=487802,3=18446744073709551614,4=1,5=256\",\"submitTime\":1769231290,\"licenses\":\"scratch:1\",\"jobExitCode\":0,\"jobDerivedExitCode\":0}",
          "job": "",
          "system": ""
        },
@@ -153,9 +153,9 @@
        },
        "script": "",
        "stdin_expanded": "\/dev\/null",
-       "stdout_expanded": "\/pscratch\/sd\/m\/mattlong\/cson-forge-data\/cson-forge-run\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\/logs\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.out",
+       "stdout_expanded": "\/pscratch\/sd\/m\/mattlong\/cstar-forge-data\/cstar-forge-run\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\/logs\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.out",
        "stderr_expanded": "",
-       "stdout": "\/pscratch\/sd\/m\/mattlong\/cson-forge-data\/cson-forge-run\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\/logs\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.out",
+       "stdout": "\/pscratch\/sd\/m\/mattlong\/cstar-forge-data\/cstar-forge-run\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\/logs\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.out",
        "stderr": "",
        "stdin": "\/dev\/null",
        "state": {
@@ -1261,7 +1261,7 @@
            }
          }
        ],
-       "submit_line": "sbatch \/pscratch\/sd\/m\/mattlong\/cson-forge-data\/cson-forge-run\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\/work\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.sh",
+       "submit_line": "sbatch \/pscratch\/sd\/m\/mattlong\/cstar-forge-data\/cstar-forge-run\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\/work\/cson_roms-marbl_v0-1_ccs-12km_70procs_20240101-20240102.sh",
        "tres": {
          "allocated": [
            {
@@ -1329,7 +1329,7 @@
          "flags": [
          ]
        },
-       "working_directory": "\/pscratch\/sd\/m\/mattlong\/cson-forge-data\/cson-forge-run\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\/output"
+       "working_directory": "\/pscratch\/sd\/m\/mattlong\/cstar-forge-data\/cstar-forge-run\/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102\/output"
      }
    ],
    "meta": {

@@ -1,0 +1,51 @@
+title:
+   {{ title.casename }}
+
+time_stepping: NTIMES   dt[sec]  NDTFAST  NINFO
+      {{ time_stepping.ntimes }}    {{ time_stepping.dt }}    {{ time_stepping.ndtfast }}    {{ time_stepping.ninfo }}
+
+S-coord: THETA_S,   THETA_B,    TCLINE (m)
+          {{ "%.1fD0"|format(s_coord.theta_s) }}        {{ "%.1fD0"|format(s_coord.theta_b) }}    {{ "%.0fD0"|format(s_coord.tcline) }}
+
+grid:  filename
+      {{ grid.grid_file }}
+
+forcing: filename
+{% for path in [
+    forcing.surface_forcing_path,
+    forcing.boundary_forcing_path,
+    forcing.tidal_forcing_path,
+    forcing.river_path,
+] if path %}
+      {{ path }}
+{% endfor %}
+
+initial: NRREC  filename
+      {{ initial.nrrec }}
+      {{ initial.initial_file }}
+
+output_root_name:
+      {{ output_root_name.output_root_name }}
+
+lateral_visc:   VISC2,    VISC4    [m^2/sec for all]
+                 {{ lateral_visc.visc2 }}       {{ lateral_visc.visc4 }}
+rho0:
+      {{ lateral_visc.rho0 }}
+  
+vertical_mixing:  Akv  Akt(1:NT)     [m^2/sec for all]
+      {% for i in range(nt) %}{{ vertical_mixing.akt_default }} {% endfor %}                  
+tracer_diff2: TNU2(1:NT)           [m^2/sec for all]
+      {% for i in range(nt) %}{{ tracer_diff2.tnu2_default }} {% endfor %}
+
+bottom_drag:     RDRG [m/s],  RDRG2,  Zob [m],  Cdb_min, Cdb_max
+      {{ bottom_drag.rdrg }}       {{ bottom_drag.rdrg2 }}   {{ bottom_drag.zob }}     {{ bottom_drag.cdb_min }}    {{ bottom_drag.cdb_max }}
+
+v_sponge:       V_SPONGE [m^2/sec]
+      {{ v_sponge.v_sponge }}
+                 
+gamma2:
+      {{ "%.1fD0"|format(gamma2) }}
+
+ubind: OBC binding velocity scale [m/s]
+      {{ ubind }}
+       

@@ -1,6 +1,6 @@
 # Tests
 
-This directory contains the test suite for cson-forge.
+This directory contains the test suite for cstar-forge.
 
 ## Running Tests
 

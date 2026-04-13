@@ -2,7 +2,7 @@
 
 The `ModelSpec` abstraction is designed to formalize and preserve a notion of a trusted model configuration by aggregrating the information required to build and configure a particular model as a named entity. 
 
-Model specifications are defined in `cson_forge/models.yml` (see [here](reference-models-yml.md)). 
+Model specifications are defined in `cstar_forge/models.yml` (see [here](reference-models-yml.md)). 
 
 Each model includes:
 

@@ -45,21 +45,21 @@ SLURM Job ID: 48052914
        rdrg = 0.000E+00  linear bottom drag coefficient [m/s]
       rdrg2 = 1.000E-03  quadratic bottom drag coefficient, nondim
         Zob = 1.000E-02  bottom roughness height [m]
- initial condition :: rec =  1  file = '/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_initial_conditions.00.nc'
- forcing data file(s): /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_tidal.00.nc
-                       /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_river.00.nc
-                       /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_surface-physics_202401.00.nc
-                       /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_surface-bgc_clim.00.nc
-                       /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_boundary-physics_202401.00.nc
-                       /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_boundary-bgc_clim.00.nc
+ initial condition :: rec =  1  file = '/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_initial_conditions.00.nc'
+ forcing data file(s): /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_tidal.00.nc
+                       /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_river.00.nc
+                       /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_surface-physics_202401.00.nc
+                       /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_surface-bgc_clim.00.nc
+                       /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_boundary-physics_202401.00.nc
+                       /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_boundary-bgc_clim.00.nc
 
     theta_s = 6.0000000  vertical S-coordinate surface
     theta_b = 6.0000000  and bottom stretching parameters
          hc = 250.00000  critical depth [m]
- grid file: /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_grid.00.nc
- MARBL namelist file               /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in
- MARBL tracer output list                                                   file     /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_tracer_output_list
- MARBL diagnostic output list                                                file /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_diagnostic_output_list
+ grid file: /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_grid.00.nc
+ MARBL namelist file               /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in
+ MARBL tracer output list                                                   file     /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_tracer_output_list
+ MARBL diagnostic output list                                                file /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_diagnostic_output_list
       visc2 = 0.000E+00  horizontal Laplacian kinematic viscosity [m^2/s]
        rho0 = 1000.0000  Boussinesq reference density [kg/m^3].
      gamma2 = 1.000E+00  slipperiness parameter: free-slip = +1, or no-slip = -1.
@@ -137,259 +137,259 @@ SLURM Job ID: 48052914
 
  Mode splitting: ndtfast = 60    nfast =  82        p,q,r =  2.0  4.0   0.2500
 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: abio_dic_on = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: base_bio_on = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: ciso_on = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: PFT_defaults = "CESM2"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_cnt = 3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: max_grazer_prey_cnt = 3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_cnt = 1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: ladjust_bury_coeff = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lcheck_forcing = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lcompute_nhx_surface_emis = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lecovars_full_depth_tavg = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lflux_gas_co2 = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lflux_gas_o2 = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lo2_consumption_scalef = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lp_remin_scalef = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lsource_sink = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lvariable_PtoC = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: init_bury_coeff_opt = "settings_file"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: Jint_Ctot_thres_molpm2pyr = 1e-09
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: QCaCO3_max = 0.4
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: auto_mort2_exp = 1.75
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: bftt_dz_sum_thres = 1e-14
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: bury_coeff_rmean_timescale_years = 10.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: caco3_bury_thres_depth =   3.0000000000000000e+05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: caco3_bury_thres_omega_calc = 1.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: caco3_bury_thres_opt = "omega_calc"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: f_graze_CaCO3_remin = 0.33
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQ_Fe_kFe_thres = 10.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQ_Si_kSi_thres = 5.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQsi_0 = 0.137
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQsi_max = 0.685
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQsi_min = 0.0457
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: o2_sf_o2_range_hi = 45.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: o2_sf_o2_range_lo = 5.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: o2_sf_val_lo_o2 = 3.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_CaCO3_gamma = 0.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Fe_bioavail = 1.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Fe_desorption_rate0 =   9.9999999999999995e-07
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Lig_degrade_rate0 = 9.4e-05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_SiO2_gamma = 0.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_f_prod_sp_CaCO3 = 0.07
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_hPOC_CaCO3_ratio = 0.05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_hPOC_SiO2_ratio = 0.05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_hPOC_dust_ratio = 0.05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_labile_ratio = 0.94
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_o2_min = 5.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_o2_min_delta = 5.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_sed_denitrif_coeff = 1.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: particulate_flux_ref_depth = 10000.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zoo_mort2_exp = 1.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: POM_bury_frac_max = 0.8
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: PON_bury_coeff = 0.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: bSi_bury_frac_max = 1.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_init_POC_bury_coeff = 1.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_init_POP_bury_coeff = 1.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_init_bSi_bury_coeff = 1.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_CaCO3_diss =   5.0000000000000000e+04
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_POC_diss =   1.0000000000000000e+04
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_SiO2_diss =   6.5000000000000000e+04
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_kappa_nitrif_per_day = 0.06
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_nitrif_par_lim = 1.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_FeLig_scavenge_rate0 = 1.3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Fe_scavenge_rate0 = 24.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Lig_scavenge_rate0 = 0.015
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_vals(1) = 1.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_vals(2) = 3.2
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_vals(3) = 4.8
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_vals(4) = 5.3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_z(1) =   1.0000000000000000e+04
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_z(2) =   2.5000000000000000e+04
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_z(3) =   5.0000000000000000e+04
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_z(4) =   1.0000000000000000e+05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%Ea = 0.32
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%Nfixer = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%PCref_per_day = 5.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%Qp_fixed =   8.5470085470085479e-03
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%agg_rate_max = 0.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%agg_rate_min = 0.01
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%alphaPI_per_day = 0.39
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%exp_calcifier = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%gQfe_0 =   3.4999999999999997e-05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%gQfe_min = 2.7e-06
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%imp_calcifier = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%is_carbon_limited = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kCO2 = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kDOP = 0.3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kFe = 3e-05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kNH4 = 0.01
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kNO3 = 0.25
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kPO4 = 0.01
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kSiO3 = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%lname = "Small Phyto"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%loss_poc = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%loss_thres = 0.01
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%loss_thres2 = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%mort2_per_day = 0.01
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%mort_per_day = 0.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%silicifier = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%sname = "sp"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%temp_func_form_opt = "q_10"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%temp_thres = -10.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%thetaN_max = 2.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%Ea = 0.32
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%Nfixer = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%PCref_per_day = 5.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%Qp_fixed =   8.5470085470085479e-03
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%agg_rate_max = 0.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%agg_rate_min = 0.02
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%alphaPI_per_day = 0.39
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%exp_calcifier = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%gQfe_0 =   3.4999999999999997e-05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%gQfe_min = 2.7e-06
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%imp_calcifier = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%is_carbon_limited = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kCO2 = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kDOP = 0.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kFe = 5.5e-05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kNH4 = 0.05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kNO3 = 0.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kPO4 = 0.05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kSiO3 = 0.7
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%lname = "Diatom"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%loss_poc = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%loss_thres = 0.02
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%loss_thres2 = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%mort2_per_day = 0.01
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%mort_per_day = 0.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%silicifier = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%sname = "diat"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%temp_func_form_opt = "q_10"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%temp_thres = -10.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%thetaN_max = 4.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%Ea = 0.32
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%Nfixer = .true.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%PCref_per_day = 2.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%Qp_fixed =   2.7350427350427355e-03
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%agg_rate_max = 0.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%agg_rate_min = 0.01
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%alphaPI_per_day = 0.39
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%exp_calcifier = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%gQfe_0 =   6.9999999999999994e-05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%gQfe_min = 5.4e-06
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%imp_calcifier = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%is_carbon_limited = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kCO2 = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kDOP = 0.075
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kFe = 4.5e-05
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kNH4 = 0.2
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kNO3 = 2.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kPO4 = 0.015
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kSiO3 = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%lname = "Diazotroph"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%loss_poc = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%loss_thres = 0.02
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%loss_thres2 = 0.001
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%mort2_per_day = 0.01
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%mort_per_day = 0.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%silicifier = .false.
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%sname = "diaz"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%temp_func_form_opt = "q_10"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%temp_thres = 15.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%thetaN_max = 2.5
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%Ea = 0.65
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%basal_respiration_rate_per_day = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%lname = "Zooplankton"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%loss_thres = 0.075
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%sname = "zoo"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%temp_func_form_opt = "q_10"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%z_mort2_0_per_day = 0.4
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%z_mort_0_per_day = 0.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%auto_ind(1) = 1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%auto_ind_cnt = 1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%f_zoo_detr = 0.12
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%graze_doc = 0.06
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%graze_poc = 0.0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%graze_zoo = 0.3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%grazing_function = 1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%lname = "Grazing of sp by zoo"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%sname = "grz_sp_zoo"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%z_grz = 1.2
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%z_umax_0_per_day = 3.3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%zoo_ind_cnt = 0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%auto_ind(1) = 2
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%auto_ind_cnt = 1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%f_zoo_detr = 0.24
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%graze_doc = 0.06
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%graze_poc = 0.38
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%graze_zoo = 0.25
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%grazing_function = 1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%lname = "Grazing of diat by zoo"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%sname = "grz_diat_zoo"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%z_grz = 1.2
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%z_umax_0_per_day = 3.125
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%zoo_ind_cnt = 0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%auto_ind(1) = 3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%auto_ind_cnt = 1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%f_zoo_detr = 0.12
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%graze_doc = 0.06
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%graze_poc = 0.1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%graze_zoo = 0.3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%grazing_function = 1
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%lname = "Grazing of diaz by zoo"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%sname = "grz_diaz_zoo"
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%z_grz = 1.2
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%z_umax_0_per_day = 3.3
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%zoo_ind_cnt = 0
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: 
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(1) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(2) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(3) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(4) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(5) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(6) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(7) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(8) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(9) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(10) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(11) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(12) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(13) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(14) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(15) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(16) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(17) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(18) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(19) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(20) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(21) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(22) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(23) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(24) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(25) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(26) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(27) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(28) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(29) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(30) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(31) = ""
-/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(32) = ""
-Successfully read /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in to end of file
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: abio_dic_on = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: base_bio_on = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: ciso_on = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: PFT_defaults = "CESM2"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_cnt = 3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: max_grazer_prey_cnt = 3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_cnt = 1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: ladjust_bury_coeff = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lcheck_forcing = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lcompute_nhx_surface_emis = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lecovars_full_depth_tavg = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lflux_gas_co2 = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lflux_gas_o2 = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lo2_consumption_scalef = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lp_remin_scalef = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lsource_sink = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: lvariable_PtoC = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: init_bury_coeff_opt = "settings_file"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: Jint_Ctot_thres_molpm2pyr = 1e-09
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: QCaCO3_max = 0.4
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: auto_mort2_exp = 1.75
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: bftt_dz_sum_thres = 1e-14
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: bury_coeff_rmean_timescale_years = 10.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: caco3_bury_thres_depth =   3.0000000000000000e+05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: caco3_bury_thres_omega_calc = 1.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: caco3_bury_thres_opt = "omega_calc"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: f_graze_CaCO3_remin = 0.33
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQ_Fe_kFe_thres = 10.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQ_Si_kSi_thres = 5.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQsi_0 = 0.137
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQsi_max = 0.685
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: gQsi_min = 0.0457
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: o2_sf_o2_range_hi = 45.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: o2_sf_o2_range_lo = 5.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: o2_sf_val_lo_o2 = 3.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_CaCO3_gamma = 0.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Fe_bioavail = 1.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Fe_desorption_rate0 =   9.9999999999999995e-07
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Lig_degrade_rate0 = 9.4e-05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_SiO2_gamma = 0.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_f_prod_sp_CaCO3 = 0.07
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_hPOC_CaCO3_ratio = 0.05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_hPOC_SiO2_ratio = 0.05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_hPOC_dust_ratio = 0.05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_labile_ratio = 0.94
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_o2_min = 5.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_o2_min_delta = 5.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_sed_denitrif_coeff = 1.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: particulate_flux_ref_depth = 10000.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zoo_mort2_exp = 1.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: POM_bury_frac_max = 0.8
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: PON_bury_coeff = 0.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: bSi_bury_frac_max = 1.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_init_POC_bury_coeff = 1.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_init_POP_bury_coeff = 1.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_init_bSi_bury_coeff = 1.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_CaCO3_diss =   5.0000000000000000e+04
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_POC_diss =   1.0000000000000000e+04
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_SiO2_diss =   6.5000000000000000e+04
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_kappa_nitrif_per_day = 0.06
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_nitrif_par_lim = 1.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_FeLig_scavenge_rate0 = 1.3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Fe_scavenge_rate0 = 24.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_Lig_scavenge_rate0 = 0.015
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_vals(1) = 1.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_vals(2) = 3.2
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_vals(3) = 4.8
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_vals(4) = 5.3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_z(1) =   1.0000000000000000e+04
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_z(2) =   2.5000000000000000e+04
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_z(3) =   5.0000000000000000e+04
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: parm_scalelen_z(4) =   1.0000000000000000e+05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%Ea = 0.32
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%Nfixer = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%PCref_per_day = 5.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%Qp_fixed =   8.5470085470085479e-03
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%agg_rate_max = 0.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%agg_rate_min = 0.01
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%alphaPI_per_day = 0.39
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%exp_calcifier = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%gQfe_0 =   3.4999999999999997e-05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%gQfe_min = 2.7e-06
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%imp_calcifier = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%is_carbon_limited = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kCO2 = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kDOP = 0.3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kFe = 3e-05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kNH4 = 0.01
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kNO3 = 0.25
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kPO4 = 0.01
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%kSiO3 = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%lname = "Small Phyto"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%loss_poc = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%loss_thres = 0.01
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%loss_thres2 = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%mort2_per_day = 0.01
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%mort_per_day = 0.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%silicifier = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%sname = "sp"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%temp_func_form_opt = "q_10"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%temp_thres = -10.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(1)%thetaN_max = 2.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%Ea = 0.32
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%Nfixer = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%PCref_per_day = 5.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%Qp_fixed =   8.5470085470085479e-03
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%agg_rate_max = 0.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%agg_rate_min = 0.02
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%alphaPI_per_day = 0.39
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%exp_calcifier = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%gQfe_0 =   3.4999999999999997e-05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%gQfe_min = 2.7e-06
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%imp_calcifier = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%is_carbon_limited = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kCO2 = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kDOP = 0.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kFe = 5.5e-05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kNH4 = 0.05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kNO3 = 0.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kPO4 = 0.05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%kSiO3 = 0.7
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%lname = "Diatom"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%loss_poc = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%loss_thres = 0.02
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%loss_thres2 = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%mort2_per_day = 0.01
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%mort_per_day = 0.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%silicifier = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%sname = "diat"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%temp_func_form_opt = "q_10"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%temp_thres = -10.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(2)%thetaN_max = 4.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%Ea = 0.32
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%Nfixer = .true.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%PCref_per_day = 2.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%Qp_fixed =   2.7350427350427355e-03
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%agg_rate_max = 0.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%agg_rate_min = 0.01
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%alphaPI_per_day = 0.39
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%exp_calcifier = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%gQfe_0 =   6.9999999999999994e-05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%gQfe_min = 5.4e-06
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%imp_calcifier = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%is_carbon_limited = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kCO2 = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kDOP = 0.075
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kFe = 4.5e-05
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kNH4 = 0.2
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kNO3 = 2.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kPO4 = 0.015
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%kSiO3 = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%lname = "Diazotroph"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%loss_poc = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%loss_thres = 0.02
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%loss_thres2 = 0.001
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%mort2_per_day = 0.01
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%mort_per_day = 0.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%silicifier = .false.
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%sname = "diaz"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%temp_func_form_opt = "q_10"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%temp_thres = 15.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: autotroph_settings(3)%thetaN_max = 2.5
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%Ea = 0.65
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%basal_respiration_rate_per_day = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%lname = "Zooplankton"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%loss_thres = 0.075
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%sname = "zoo"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%temp_func_form_opt = "q_10"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%z_mort2_0_per_day = 0.4
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: zooplankton_settings(1)%z_mort_0_per_day = 0.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%auto_ind(1) = 1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%auto_ind_cnt = 1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%f_zoo_detr = 0.12
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%graze_doc = 0.06
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%graze_poc = 0.0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%graze_zoo = 0.3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%grazing_function = 1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%lname = "Grazing of sp by zoo"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%sname = "grz_sp_zoo"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%z_grz = 1.2
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%z_umax_0_per_day = 3.3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(1,1)%zoo_ind_cnt = 0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%auto_ind(1) = 2
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%auto_ind_cnt = 1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%f_zoo_detr = 0.24
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%graze_doc = 0.06
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%graze_poc = 0.38
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%graze_zoo = 0.25
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%grazing_function = 1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%lname = "Grazing of diat by zoo"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%sname = "grz_diat_zoo"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%z_grz = 1.2
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%z_umax_0_per_day = 3.125
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(2,1)%zoo_ind_cnt = 0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%auto_ind(1) = 3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%auto_ind_cnt = 1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%f_zoo_detr = 0.12
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%graze_doc = 0.06
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%graze_poc = 0.1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%graze_zoo = 0.3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%grazing_function = 1
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%lname = "Grazing of diaz by zoo"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%sname = "grz_diaz_zoo"
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%z_grz = 1.2
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%z_umax_0_per_day = 3.3
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: grazing_relationship_settings(3,1)%zoo_ind_cnt = 0
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in:
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(1) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(2) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(3) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(4) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(5) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(6) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(7) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(8) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(9) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(10) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(11) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(12) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(13) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(14) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(15) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(16) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(17) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(18) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(19) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(20) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(21) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(22) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(23) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(24) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(25) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(26) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(27) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(28) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(29) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(30) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(31) = ""
+/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in: tracer_restore_vars(32) = ""
+Successfully read /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_in to end of file
  
  --------------------
  MARBL Tracer indices
@@ -756,10 +756,10 @@ Successfully read /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_ro
  grazing_relationship_settings(1,1)%z_umax_0 =   0.38194444444444444E-04 (value computed from grazing_relationship_settings(1,1)%z_umax_0_per_day)
  grazing_relationship_settings(2,1)%z_umax_0 =   0.36168981481481479E-04 (value computed from grazing_relationship_settings(2,1)%z_umax_0_per_day)
  grazing_relationship_settings(3,1)%z_umax_0 =   0.38194444444444444E-04 (value computed from grazing_relationship_settings(3,1)%z_umax_0_per_day)
-NO REQUESTED TRACERS FOUND IN /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_tracer_output_list
+NO REQUESTED TRACERS FOUND IN /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_tracer_output_list
 . Defaulting to  writing all BGC tracers to output file.
 Successfully read marbl_tracer_output_list to end of file
-we successfully read and closed /pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_tracer_output_list
+we successfully read and closed /pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/runtime_code/marbl_tracer_output_list
  Here are the SF forcings MARBL requested
  var: u10_sqr
  units:m^2/s^2
@@ -1489,7 +1489,7 @@ we successfully read and closed /pscratch/sd/m/mattlong/cson-forge-data/cson-for
  Spherical grid detected.
 
  init buffers
-      get_grid :: read grid data from file '/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_grid.00.nc'.
+      get_grid :: read grid data from file '/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_grid.00.nc'.
  hmin =    5.000000   grdmin = 1.1737871E+04     area = 1.2025977491802129E+13
  hmax = 6291.749831   grdmax = 1.1999997E+04   volume = 4.9656853856281600E+16
                                            open_cross = 4.1683907738113266E+10
@@ -1498,11 +1498,11 @@ we successfully read and closed /pscratch/sd/m/mattlong/cson-forge-data/cson-for
  Maximum grid stiffness ratios:   rx0 = 0.199964377  rx1 = 126.623576134
 
  WARNING: Exact restart is requested, but is not possible: initial
-          file '/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_initial_conditions.00.nc' does not contain sufficient records.
+          file '/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_initial_conditions.00.nc' does not contain sufficient records.
  riv_umask not found in initial file. Initializing to zero.
  riv_vmask not found in initial file. Initializing to zero.
- WARNING: netCDF variable 'hbls' not found in '/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_initial_conditions.00.nc' ==> initialized to zero state.
- WARNING: netCDF variable 'hbbl' not found in '/pscratch/sd/m/mattlong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_initial_conditions.00.nc' ==> initialized to zero state.
+ WARNING: netCDF variable 'hbls' not found in '/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_initial_conditions.00.nc' ==> initialized to zero state.
+ WARNING: netCDF variable 'hbbl' not found in '/pscratch/sd/m/mattlong/cstar-forge-data/cstar-forge-run/cson_roms-marbl_v0.1_ccs-12km_70procs_20240101-20240102/input/input_datasets/cson_roms-marbl_v0.1_ccs-12km_70procs_initial_conditions.00.nc' ==> initialized to zero state.
   --- WARNING: MARBL_PH_SURF not in initial file.  Initialized to 0.0
   --- WARNING: MARBL_ABIO_PH_SURF not in initial file.  Initialized to 0.0
   --- WARNING: MARBL_PH_SURF_ALT_CO2 not in initial file.  Initialized to 0.0

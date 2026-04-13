@@ -1,0 +1,45 @@
+      ! ****************************************************************
+      ! user inputs
+      logical,parameter :: wrt_file_rst      = {{ ocean_vars.wrt_file_rst|lower }}     ! t/f to write module history file
+      real,parameter    :: output_period_rst = {{ ocean_vars.output_period_rst }}  ! output period in seconds
+      logical,parameter :: monthly_restarts = {{ ocean_vars.monthly_restarts|lower }}      ! This overrides output_period   
+      integer,parameter :: nrpf_rst          = {{ ocean_vars.nrpf_rst }}           ! total recs per file
+
+      logical,parameter :: wrt_file_his      = {{ ocean_vars.wrt_file_his|lower }}     ! t/f to write module history file
+      real,parameter    :: output_period_his = {{ ocean_vars.output_period_his }}    ! output period in seconds
+      integer,parameter :: nrpf_his          = {{ ocean_vars.nrpf_his }}          ! total recs per file
+      logical,parameter :: wrt_Z  ={{ ocean_vars.wrt_Z|lower }},
+     &                     wrt_Ub ={{ ocean_vars.wrt_Ub|lower }},
+     &                     wrt_Vb ={{ ocean_vars.wrt_Vb|lower }},
+     &                     wrt_U  ={{ ocean_vars.wrt_U|lower }},
+     &                     wrt_V  ={{ ocean_vars.wrt_V|lower }},
+     &                     wrt_R  ={{ ocean_vars.wrt_R|lower }},
+     &                     wrt_O  ={{ ocean_vars.wrt_O|lower }},
+     &                     wrt_W  ={{ ocean_vars.wrt_W|lower }},
+     &                     wrt_Akv={{ ocean_vars.wrt_Akv|lower }},
+     &                     wrt_Akt={{ ocean_vars.wrt_Akt|lower }},
+     &                     wrt_Aks={{ ocean_vars.wrt_Aks|lower }},
+     &                     wrt_Hbls={{ ocean_vars.wrt_Hbls|lower }},
+     &                     wrt_Hbbl={{ ocean_vars.wrt_Hbbl|lower }}
+
+      logical,parameter :: wrt_file_avg      = {{ ocean_vars.wrt_file_avg|lower }}    ! t/f to write module averages file
+      real,parameter    :: output_period_avg = {{ ocean_vars.output_period_avg }}   ! output averaging period in seconds
+      integer,parameter :: nrpf_avg          = {{ ocean_vars.nrpf_avg }}          ! total recs per file
+      logical,parameter :: wrt_avg_Z ={{ ocean_vars.wrt_avg_Z|lower }},
+     &                     wrt_avg_Ub={{ ocean_vars.wrt_avg_Ub|lower }},
+     &                     wrt_avg_Vb={{ ocean_vars.wrt_avg_Vb|lower }},
+     &                     wrt_avg_U={{ ocean_vars.wrt_avg_U|lower }},
+     &                     wrt_avg_V={{ ocean_vars.wrt_avg_V|lower }},
+     &                     wrt_avg_R={{ ocean_vars.wrt_avg_R|lower }},
+     &                     wrt_avg_O={{ ocean_vars.wrt_avg_O|lower }},
+     &                     wrt_avg_W={{ ocean_vars.wrt_avg_W|lower }},
+     &                     wrt_avg_Akv={{ ocean_vars.wrt_avg_Akv|lower }},
+     &                     wrt_avg_Akt={{ ocean_vars.wrt_avg_Akt|lower }},
+     &                     wrt_avg_Aks={{ ocean_vars.wrt_avg_Aks|lower }},
+     &                     wrt_avg_Hbls={{ ocean_vars.wrt_avg_Hbls|lower }},
+     &                     wrt_avg_Hbbl={{ ocean_vars.wrt_avg_Hbbl|lower }}
+
+      logical :: code_check = {{ ocean_vars.code_check|lower }}                       ! keep as false unless for code_check
+      ! end user inputs
+      ! ****************************************************************
+

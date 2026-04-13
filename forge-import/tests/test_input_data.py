@@ -20,10 +20,10 @@ from unittest.mock import MagicMock, Mock, patch, call
 import pytest
 import xarray as xr
 import numpy as np
-
 import cstar.applications.roms_marbl.models as cstar_models
 from cstar.orchestration.models import Resource
-from cson_forge.input_data import (
+from cstar_forge.input_data import (
+
     InputData,
     RomsMarblInputData,
     RomsMarblBlueprintInputData,
@@ -31,11 +31,11 @@ from cson_forge.input_data import (
     INPUT_REGISTRY,
     register_input,
 )
-from cson_forge import models as cson_models
-from cson_forge.models import SettingsSpec
-from cson_forge import source_data
-from cson_forge import config
-from cson_forge.config import DataPaths
+from cstar_forge import models as forge_models
+from cstar_forge.models import SettingsSpec
+from cstar_forge import source_data
+from cstar_forge import config
+from cstar_forge.config import DataPaths
 import roms_tools as rt
 
 
@@ -121,48 +121,48 @@ def sample_model_spec(tmp_path):
         ),
     )
     
-    grid_input = cson_models.GridInput(topography_source="ETOPO5")
-    source = cson_models.SourceSpec(name="GLORYS")
-    bgc_source = cson_models.SourceSpec(name="UNIFIED", climatology=True)
-    ic_input = cson_models.InitialConditionsInput(source=source, bgc_source=bgc_source)
+    grid_input = forge_models.GridInput(topography_source="ETOPO5")
+    source = forge_models.SourceSpec(name="GLORYS")
+    bgc_source = forge_models.SourceSpec(name="UNIFIED", climatology=True)
+    ic_input = forge_models.InitialConditionsInput(source=source, bgc_source=bgc_source)
     
-    surface_item = cson_models.SurfaceForcingItem(
-        source=cson_models.SourceSpec(name="ERA5"),
+    surface_item = forge_models.SurfaceForcingItem(
+        source=forge_models.SourceSpec(name="ERA5"),
         type="physics"
     )
-    surface_bgc_item = cson_models.SurfaceForcingItem(
-        source=cson_models.SourceSpec(name="UNIFIED", climatology=True),
+    surface_bgc_item = forge_models.SurfaceForcingItem(
+        source=forge_models.SourceSpec(name="UNIFIED", climatology=True),
         type="bgc"
     )
-    boundary_item = cson_models.BoundaryForcingItem(
-        source=cson_models.SourceSpec(name="GLORYS"),
+    boundary_item = forge_models.BoundaryForcingItem(
+        source=forge_models.SourceSpec(name="GLORYS"),
         type="physics"
     )
-    boundary_bgc_item = cson_models.BoundaryForcingItem(
-        source=cson_models.SourceSpec(name="UNIFIED", climatology=True),
+    boundary_bgc_item = forge_models.BoundaryForcingItem(
+        source=forge_models.SourceSpec(name="UNIFIED", climatology=True),
         type="bgc"
     )
-    tidal_item = cson_models.TidalForcingItem(
-        source=cson_models.SourceSpec(name="TPXO")
+    tidal_item = forge_models.TidalForcingItem(
+        source=forge_models.SourceSpec(name="TPXO")
     )
-    river_item = cson_models.RiverForcingItem(
-        source=cson_models.SourceSpec(name="DAI")
+    river_item = forge_models.RiverForcingItem(
+        source=forge_models.SourceSpec(name="DAI")
     )
     
-    forcing_input = cson_models.ForcingInput(
+    forcing_input = forge_models.ForcingInput(
         surface=[surface_item, surface_bgc_item],
         boundary=[boundary_item, boundary_bgc_item],
         tidal=[tidal_item],
         river=[river_item]
     )
     
-    model_inputs = cson_models.ModelInputs(
+    model_inputs = forge_models.ModelInputs(
         grid=grid_input,
         initial_conditions=ic_input,
         forcing=forcing_input
     )
     
-    return cson_models.ModelSpec(
+    return forge_models.ModelSpec(
         name="test_model",
         code=code_repo,
         inputs=model_inputs,
@@ -174,7 +174,7 @@ def sample_model_spec(tmp_path):
 @pytest.fixture
 def sample_open_boundaries():
     """Sample open boundaries configuration."""
-    return cson_models.OpenBoundaries(north=True, south=True, east=True, west=False)
+    return forge_models.OpenBoundaries(north=True, south=True, east=True, west=False)
 
 
 @pytest.fixture
@@ -199,7 +199,7 @@ def sample_source_data(tmp_path):
     mock_source_data.dataset_key_for_source = MagicMock(side_effect=_dks)
     
     # Mock STREAMABLE_SOURCES
-    with patch('cson_forge.input_data.source_data.STREAMABLE_SOURCES', {"ERA5"}):
+    with patch('cstar_forge.input_data.source_data.STREAMABLE_SOURCES', {"ERA5"}):
         yield mock_source_data
 
 
@@ -245,7 +245,7 @@ class TestInputData:
     
     def test_inputdata_initialization(self, tmp_path):
         """Test InputData initialization."""
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -269,7 +269,7 @@ class TestInputData:
 
     def test_inputdata_forcing_filename(self, tmp_path):
         """Test _forcing_filename method."""
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -295,7 +295,7 @@ class TestInputData:
     
     def test_inputdata_ensure_empty_or_clobber_no_files(self, tmp_path):
         """Test _ensure_empty_or_clobber when directory is empty."""
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -307,7 +307,7 @@ class TestInputData:
     
     def test_inputdata_ensure_empty_or_clobber_with_files_no_clobber(self, tmp_path):
         """When .nc files exist and clobber=False, allow continuing (reuse mode)."""
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -324,7 +324,7 @@ class TestInputData:
     
     def test_inputdata_ensure_empty_or_clobber_with_files_clobber(self, tmp_path):
         """Test _ensure_empty_or_clobber when files exist and clobber=True."""
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -341,7 +341,7 @@ class TestInputData:
     
     def test_inputdata_generate_all_not_implemented(self, tmp_path):
         """Test that InputData.generate_all raises NotImplementedError."""
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -473,7 +473,7 @@ class TestRomsMarblInputDataInitialization:
         blueprint_dir = tmp_path / "blueprints"
         blueprint_dir.mkdir(parents=True, exist_ok=True)
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = RomsMarblInputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -513,25 +513,25 @@ class TestRomsMarblInputDataInitialization:
             ),
         )
         
-        grid_input = cson_models.GridInput(topography_source="ETOPO5")
-        source = cson_models.SourceSpec(name="GLORYS")
-        ic_input = cson_models.InitialConditionsInput(source=source)
+        grid_input = forge_models.GridInput(topography_source="ETOPO5")
+        source = forge_models.SourceSpec(name="GLORYS")
+        ic_input = forge_models.InitialConditionsInput(source=source)
         
         # Create forcing with a non-existent input type
-        surface_item = cson_models.SurfaceForcingItem(
-            source=cson_models.SourceSpec(name="ERA5"),
+        surface_item = forge_models.SurfaceForcingItem(
+            source=forge_models.SourceSpec(name="ERA5"),
             type="physics"
         )
-        boundary_item = cson_models.BoundaryForcingItem(
-            source=cson_models.SourceSpec(name="GLORYS"),
+        boundary_item = forge_models.BoundaryForcingItem(
+            source=forge_models.SourceSpec(name="GLORYS"),
             type="physics"
         )
-        forcing_input = cson_models.ForcingInput(
+        forcing_input = forge_models.ForcingInput(
             surface=[surface_item],
             boundary=[boundary_item]
         )
         
-        model_inputs = cson_models.ModelInputs(
+        model_inputs = forge_models.ModelInputs(
             grid=grid_input,
             initial_conditions=ic_input,
             forcing=forcing_input
@@ -545,7 +545,7 @@ class TestRomsMarblInputDataInitialization:
         # easily test this without modifying the registry. Let's test the validation
         # that happens when a handler is missing.
         
-        model_spec = cson_models.ModelSpec(
+        model_spec = forge_models.ModelSpec(
             name="test_model",
             code=code_repo,
             inputs=model_inputs,
@@ -556,12 +556,12 @@ class TestRomsMarblInputDataInitialization:
         blueprint_dir = tmp_path / "blueprints"
         blueprint_dir.mkdir(parents=True, exist_ok=True)
         
-        open_boundaries = cson_models.OpenBoundaries()
+        open_boundaries = forge_models.OpenBoundaries()
         mock_source_data = MagicMock()
         partitioning = cstar_models.PartitioningParameterSet(n_procs_x=2, n_procs_y=2)
         
         # This should work since all inputs are registered
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = RomsMarblInputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -616,7 +616,7 @@ class TestRomsMarblInputDataHelperMethods:
     
     def test_resolve_source_block_streamable(self, sample_roms_marbl_input_data):
         """Test _resolve_source_block with streamable source."""
-        with patch('cson_forge.input_data.source_data.STREAMABLE_SOURCES', {"ERA5"}):
+        with patch('cstar_forge.input_data.source_data.STREAMABLE_SOURCES', {"ERA5"}):
             sample_roms_marbl_input_data.source_data.dataset_key_for_source.return_value = "ERA5"
             result = sample_roms_marbl_input_data._resolve_source_block("ERA5")
             # Should not add path for streamable sources if not explicitly provided
@@ -678,14 +678,14 @@ class TestRomsMarblInputDataHelperMethods:
 class TestRomsMarblInputDataGeneration:
     """Tests for input generation methods."""
     
-    @patch('cson_forge.input_data.rt.Grid')
+    @patch('cstar_forge.input_data.rt.Grid')
     def test_generate_grid(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_grid method."""
         mock_grid = MagicMock()
         mock_grid_class.return_value = sample_roms_marbl_input_data.grid
         sample_roms_marbl_input_data.grid = mock_grid
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             # Update input_data_dir to use the mocked path since it was set in __post_init__
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
@@ -711,7 +711,7 @@ class TestRomsMarblInputDataGeneration:
             # Check that resource was added to blueprint_elements
             assert len(sample_roms_marbl_input_data.blueprint_elements.grid.data) > 0
     
-    @patch('cson_forge.input_data.rt.InitialConditions')
+    @patch('cstar_forge.input_data.rt.InitialConditions')
     def test_generate_initial_conditions(self, mock_ic_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_initial_conditions method."""
         mock_ic = MagicMock()
@@ -721,7 +721,7 @@ class TestRomsMarblInputDataGeneration:
         mock_ic.save.return_value = [ic_path]
         mock_ic_class.return_value = mock_ic
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._generate_initial_conditions()
             
             # Check that InitialConditions was created
@@ -732,7 +732,7 @@ class TestRomsMarblInputDataGeneration:
             # Check that resource was added
             assert len(sample_roms_marbl_input_data.blueprint_elements.initial_conditions.data) > 0
     
-    @patch('cson_forge.input_data.rt.InitialConditions')
+    @patch('cstar_forge.input_data.rt.InitialConditions')
     def test_generate_initial_conditions_multiple_paths(self, mock_ic_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_initial_conditions with multiple paths."""
         mock_ic = MagicMock()
@@ -743,13 +743,13 @@ class TestRomsMarblInputDataGeneration:
         mock_ic.save.return_value = [ic1_path, ic2_path]
         mock_ic_class.return_value = mock_ic
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._generate_initial_conditions()
             
             # Should have 2 resources
             assert len(sample_roms_marbl_input_data.blueprint_elements.initial_conditions.data) == 2
     
-    @patch('cson_forge.input_data.rt.SurfaceForcing')
+    @patch('cstar_forge.input_data.rt.SurfaceForcing')
     def test_generate_surface_forcing(self, mock_sf_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_surface_forcing method."""
         mock_sf = MagicMock()
@@ -758,7 +758,7 @@ class TestRomsMarblInputDataGeneration:
         mock_sf.save.return_value = surface_path
         mock_sf_class.return_value = mock_sf
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._generate_surface_forcing(
                 key="forcing.surface",
                 source={"name": "ERA5"},
@@ -772,7 +772,7 @@ class TestRomsMarblInputDataGeneration:
             # Check that resource was added to forcing.surface
             assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data) > 0
     
-    @patch('cson_forge.input_data.rt.SurfaceForcing')
+    @patch('cstar_forge.input_data.rt.SurfaceForcing')
     def test_generate_surface_forcing_missing_type(self, mock_sf_class, sample_roms_marbl_input_data):
         """Test _generate_surface_forcing raises error when type is missing."""
         with pytest.raises(ValueError) as exc_info:
@@ -808,7 +808,7 @@ class TestRomsMarblInputDataGeneration:
         mock_sf_class.assert_not_called()
         assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data) > 0
     
-    @patch('cson_forge.input_data.rt.BoundaryForcing')
+    @patch('cstar_forge.input_data.rt.BoundaryForcing')
     def test_generate_boundary_forcing(self, mock_bf_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_boundary_forcing method."""
         mock_bf = MagicMock()
@@ -817,7 +817,7 @@ class TestRomsMarblInputDataGeneration:
         mock_bf.save.return_value = boundary_path
         mock_bf_class.return_value = mock_bf
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._generate_boundary_forcing(
                 key="forcing.boundary",
                 source={"name": "GLORYS"},
@@ -831,7 +831,7 @@ class TestRomsMarblInputDataGeneration:
             # Check that resource was added to forcing.boundary
             assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.boundary.data) > 0
     
-    @patch('cson_forge.input_data.rt.BoundaryForcing')
+    @patch('cstar_forge.input_data.rt.BoundaryForcing')
     def test_generate_boundary_forcing_missing_type(self, mock_bf_class, sample_roms_marbl_input_data):
         """Test _generate_boundary_forcing raises error when type is missing."""
         with pytest.raises(ValueError) as exc_info:
@@ -842,7 +842,7 @@ class TestRomsMarblInputDataGeneration:
             )
         assert "type" in str(exc_info.value).lower()
     
-    @patch('cson_forge.input_data.rt.TidalForcing')
+    @patch('cstar_forge.input_data.rt.TidalForcing')
     def test_generate_tidal_forcing(self, mock_tf_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_tidal_forcing method."""
         mock_tf = MagicMock()
@@ -851,7 +851,7 @@ class TestRomsMarblInputDataGeneration:
         mock_tf.save.return_value = tidal_path
         mock_tf_class.return_value = mock_tf
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._generate_tidal_forcing(
                 key="forcing.tidal",
                 source={"name": "TPXO"}
@@ -888,7 +888,7 @@ class TestRomsMarblInputDataGeneration:
         mock_tf_class.assert_not_called()
         assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
     
-    @patch('cson_forge.input_data.rt.RiverForcing')
+    @patch('cstar_forge.input_data.rt.RiverForcing')
     def test_generate_river_forcing(self, mock_rf_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_river_forcing method."""
         mock_rf = MagicMock()
@@ -903,7 +903,7 @@ class TestRomsMarblInputDataGeneration:
         mock_rf.ds = mock_ds
         mock_rf_class.return_value = mock_rf
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._generate_river_forcing(
                 key="forcing.river",
                 source={"name": "DAI"}
@@ -950,7 +950,7 @@ class TestRomsMarblInputDataGeneration:
         assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
         assert sample_roms_marbl_input_data._settings_compile_time["river_frc"]["nriv"] == nriver
     
-    @patch('cson_forge.input_data.rt.CDRForcing')
+    @patch('cstar_forge.input_data.rt.CDRForcing')
     def test_generate_cdr_forcing(self, mock_cdr_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_cdr_forcing method."""
         # Initialize cdr_forcing as a Dataset if it's None
@@ -963,7 +963,7 @@ class TestRomsMarblInputDataGeneration:
         mock_cdr.save.return_value = cdr_path
         mock_cdr_class.return_value = mock_cdr
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._generate_cdr_forcing(
                 key="cdr_forcing",
                 cdr_kwargs={"foo": "bar"}
@@ -978,7 +978,7 @@ class TestRomsMarblInputDataGeneration:
     
     def test_generate_cdr_forcing_empty_list(self, sample_roms_marbl_input_data):
         """Test _generate_cdr_forcing with empty cdr_list returns early."""
-        with patch('cson_forge.input_data.rt.CDRForcing') as mock_cdr_class:
+        with patch('cstar_forge.input_data.rt.CDRForcing') as mock_cdr_class:
             sample_roms_marbl_input_data._generate_cdr_forcing(
                 key="cdr_forcing",
                 cdr_list=[]
@@ -993,8 +993,8 @@ class TestRomsMarblInputDataGeneration:
             sample_roms_marbl_input_data._generate_corrections()
 
     @patch('cson_forge.input_data.roms_tools_nesting_writer')
-    @patch('cson_forge.input_data.rt.Grid')
-    def test_generate_grid_with_child(self, mock_grid_class, mock_nesting_writer, sample_roms_marbl_input_data, tmp_path):
+    @patch('cstar_forge.input_data.rt.Grid')
+    def test_generate_grid_with_child(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_grid sets nesting_info and extract_data settings when grid_child is present."""
         mock_grid = MagicMock()
         mock_grid.nx = 20
@@ -1012,7 +1012,7 @@ class TestRomsMarblInputDataGeneration:
         mock_child.hc = 300.0
         sample_roms_marbl_input_data.grid_child = mock_child
 
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1044,8 +1044,8 @@ class TestRomsMarblInputDataGeneration:
             assert extract_data["hc_chd"] == mock_child.hc
 
     @patch('cson_forge.input_data.roms_tools_nesting_writer')
-    @patch('cson_forge.input_data.rt.Grid')
-    def test_generate_grid_extract_file_is_basename(self, mock_grid_class, mock_nesting_writer, sample_roms_marbl_input_data, tmp_path):
+    @patch('cstar_forge.input_data.rt.Grid')
+    def test_generate_grid_extract_file_is_basename(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
         """Test that extract_file in compile-time settings is the bare filename, not a full path."""
         mock_grid = MagicMock()
         mock_grid.nx = 20
@@ -1063,7 +1063,7 @@ class TestRomsMarblInputDataGeneration:
         mock_child.hc = 300.0
         sample_roms_marbl_input_data.grid_child = mock_child
 
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1081,14 +1081,14 @@ class TestRomsMarblInputDataGeneration:
             assert extract_file == "nesting.nc"
             assert "/" not in str(extract_file)
 
-    @patch('cson_forge.input_data.rt.Grid')
+    @patch('cstar_forge.input_data.rt.Grid')
     def test_generate_grid_without_child_nesting_info_is_none(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_grid leaves nesting_info as None when no grid_child is set."""
         mock_grid = MagicMock()
         sample_roms_marbl_input_data.grid = mock_grid
         sample_roms_marbl_input_data.grid_child = None
 
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1107,12 +1107,12 @@ class TestRomsMarblInputDataGeneration:
 class TestRomsMarblInputDataGenerateAll:
     """Tests for generate_all method."""
     
-    @patch('cson_forge.input_data.rt.Grid')
-    @patch('cson_forge.input_data.rt.InitialConditions')
-    @patch('cson_forge.input_data.rt.SurfaceForcing')
-    @patch('cson_forge.input_data.rt.BoundaryForcing')
-    @patch('cson_forge.input_data.rt.TidalForcing')
-    @patch('cson_forge.input_data.rt.RiverForcing')
+    @patch('cstar_forge.input_data.rt.Grid')
+    @patch('cstar_forge.input_data.rt.InitialConditions')
+    @patch('cstar_forge.input_data.rt.SurfaceForcing')
+    @patch('cstar_forge.input_data.rt.BoundaryForcing')
+    @patch('cstar_forge.input_data.rt.TidalForcing')
+    @patch('cstar_forge.input_data.rt.RiverForcing')
     def test_generate_all_basic(
         self,
         mock_river,
@@ -1188,8 +1188,8 @@ class TestRomsMarblInputDataGenerateAll:
         mock_river_instance.ds = mock_river_ds
         mock_river.return_value = mock_river_instance
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
-            mock_ds = xr.Dataset()
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+            # Mock xr.open_dataset to prevent file operations when opening source files
             with patch('xarray.combine_by_coords') as mock_combine:
                 mock_combine.return_value = mock_ds
                 with _patch_xarray_open_dataset_for_input_data(mock_ds):
@@ -1202,7 +1202,7 @@ class TestRomsMarblInputDataGenerateAll:
             assert settings_compile_time is not None
             assert settings_run_time is not None
     
-    @patch('cson_forge.input_data.rt.BoundaryForcing')
+    @patch('cstar_forge.input_data.rt.BoundaryForcing')
     @patch('xarray.combine_by_coords')
     @patch('xarray.open_dataset')
     def test_generate_all_test_mode(self, mock_open_dataset, mock_combine, mock_boundary_class, sample_roms_marbl_input_data, tmp_path):
@@ -1224,7 +1224,7 @@ class TestRomsMarblInputDataGenerateAll:
         mock_open_dataset.return_value = mock_ds
         mock_combine.return_value = mock_ds
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             result = sample_roms_marbl_input_data.generate_all(clobber=True, test=True)
             
             # In test mode, should only process forcing.boundary
@@ -1232,12 +1232,12 @@ class TestRomsMarblInputDataGenerateAll:
             # The exact behavior depends on the order of steps
             assert result is not None
     
-    @patch('cson_forge.input_data.rt.Grid')
-    @patch('cson_forge.input_data.rt.InitialConditions')
-    @patch('cson_forge.input_data.rt.SurfaceForcing')
-    @patch('cson_forge.input_data.rt.BoundaryForcing')
-    @patch('cson_forge.input_data.rt.TidalForcing')
-    @patch('cson_forge.input_data.rt.RiverForcing')
+    @patch('cstar_forge.input_data.rt.Grid')
+    @patch('cstar_forge.input_data.rt.InitialConditions')
+    @patch('cstar_forge.input_data.rt.SurfaceForcing')
+    @patch('cstar_forge.input_data.rt.BoundaryForcing')
+    @patch('cstar_forge.input_data.rt.TidalForcing')
+    @patch('cstar_forge.input_data.rt.RiverForcing')
     def test_generate_all_no_clobber_with_files(
         self,
         mock_river,
@@ -1336,14 +1336,14 @@ class TestRomsMarblInputDataGenerateAll:
         assert settings_run_time is not None
         assert (sample_roms_marbl_input_data.input_data_dir / "existing.nc").exists()
     
-    @patch('cson_forge.input_data.rt.RiverForcing')
-    @patch('cson_forge.input_data.rt.TidalForcing')
-    @patch('cson_forge.input_data.rt.BoundaryForcing')
-    @patch('cson_forge.input_data.rt.SurfaceForcing')
-    @patch('cson_forge.input_data.rt.InitialConditions')
+    @patch('cstar_forge.input_data.rt.RiverForcing')
+    @patch('cstar_forge.input_data.rt.TidalForcing')
+    @patch('cstar_forge.input_data.rt.BoundaryForcing')
+    @patch('cstar_forge.input_data.rt.SurfaceForcing')
+    @patch('cstar_forge.input_data.rt.InitialConditions')
     @patch('xarray.combine_by_coords')
     @patch('xarray.open_dataset')
-    @patch('cson_forge.input_data.rt.partition_netcdf')
+    @patch('cstar_forge.input_data.rt.partition_netcdf')
     def test_generate_all_with_partition_files(
         self,
         mock_partition,
@@ -1412,14 +1412,14 @@ class TestRomsMarblInputDataGenerateAll:
             Resource(location=str(surface_file), partitioned=False)
         )
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             # Patch at class level so the registry uses the patched methods
-            with patch('cson_forge.input_data.RomsMarblInputData._generate_grid'):
-                with patch('cson_forge.input_data.RomsMarblInputData._generate_initial_conditions'):
-                    with patch('cson_forge.input_data.RomsMarblInputData._generate_surface_forcing'):
-                        with patch('cson_forge.input_data.RomsMarblInputData._generate_boundary_forcing'):
-                            with patch('cson_forge.input_data.RomsMarblInputData._generate_tidal_forcing'):
-                                with patch('cson_forge.input_data.RomsMarblInputData._generate_river_forcing'):
+            with patch('cstar_forge.input_data.RomsMarblInputData._generate_grid'):
+                with patch('cstar_forge.input_data.RomsMarblInputData._generate_initial_conditions'):
+                    with patch('cstar_forge.input_data.RomsMarblInputData._generate_surface_forcing'):
+                        with patch('cstar_forge.input_data.RomsMarblInputData._generate_boundary_forcing'):
+                            with patch('cstar_forge.input_data.RomsMarblInputData._generate_tidal_forcing'):
+                                with patch('cstar_forge.input_data.RomsMarblInputData._generate_river_forcing'):
                                     # This should raise NotImplementedError since partition_files=True
                                     # But actually _partition_files doesn't raise NotImplementedError, 
                                     # so this test might need to be updated
@@ -1440,7 +1440,7 @@ class TestRomsMarblInputDataGenerateAll:
 class TestRomsMarblInputDataPartitionFiles:
     """Tests for _partition_files method."""
     
-    @patch('cson_forge.input_data.rt.partition_netcdf')
+    @patch('cstar_forge.input_data.rt.partition_netcdf')
     def test_partition_files_basic(self, mock_partition, sample_roms_marbl_input_data, tmp_path):
         """Test _partition_files with basic workflow."""
         # Create a resource with a file
@@ -1462,7 +1462,7 @@ class TestRomsMarblInputDataPartitionFiles:
             p.touch()
         mock_partition.return_value = partitioned_paths
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._partition_files()
             
             # Should have called partition_netcdf
@@ -1475,7 +1475,7 @@ class TestRomsMarblInputDataPartitionFiles:
             # But since we're skipping grid and initial_conditions, and the input_list
             # determines what gets partitioned, we need to check the actual behavior
     
-    @patch('cson_forge.input_data.rt.partition_netcdf')
+    @patch('cstar_forge.input_data.rt.partition_netcdf')
     def test_partition_files_skips_empty(self, mock_partition, sample_roms_marbl_input_data):
         """Test _partition_files skips empty datasets."""
         # Don't add any resources - dataset is empty
@@ -1487,7 +1487,7 @@ class TestRomsMarblInputDataPartitionFiles:
             # Should not call partition_netcdf for empty datasets
             # (exact behavior depends on input_list)
     
-    @patch('cson_forge.input_data.rt.partition_netcdf')
+    @patch('cstar_forge.input_data.rt.partition_netcdf')
     def test_partition_files_skips_none_location(self, mock_partition, sample_roms_marbl_input_data, tmp_path):
         """Test _partition_files skips resources with None location."""
         # Create resource with a valid location first, then test skipping None in the logic
@@ -1510,7 +1510,7 @@ class TestRomsMarblInputDataPartitionFiles:
         # Should not call partition_netcdf for None location
         # The resource should be kept as-is
     
-    @patch('cson_forge.input_data.rt.partition_netcdf')
+    @patch('cstar_forge.input_data.rt.partition_netcdf')
     def test_partition_files_creates_multiple_resources(self, mock_partition, sample_roms_marbl_input_data, tmp_path):
         """Test _partition_files creates multiple resources from one."""
         # Create a resource
@@ -1533,7 +1533,7 @@ class TestRomsMarblInputDataPartitionFiles:
             p.touch()
         mock_partition.return_value = partitioned_paths
         
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             # Need to set up input_list to include forcing.surface
             # The actual partitioning happens in a loop over input_list
             # For this test, we'll directly test the partitioning logic

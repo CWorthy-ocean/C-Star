@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cson_forge.parsers import (
+from cstar_forge.parsers import (
     AppConfig,
     DaskClusterKwargs,
     NotebookConfig,

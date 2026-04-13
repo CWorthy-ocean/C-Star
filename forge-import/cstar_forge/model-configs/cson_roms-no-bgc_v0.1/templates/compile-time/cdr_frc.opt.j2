@@ -1,0 +1,52 @@
+      ! ****************************************************************
+      ! user inputs
+
+      logical,parameter,public :: cdr_source  = {{ cdr_frc.cdr_source|lower }}  ! Should be false if not using CDR forcing
+
+{{ cdr_frc.cdr_file | fort_cdr_file_decl }}
+
+      integer,parameter,public :: ncdr_parm={{ cdr_frc.ncdr_parm }}   !! number of discrete CDR releases; only used with PARAMETERIZED or 3D FORCING
+
+      ! SET ONLY ONE OF THE FOLLOWING FORCING TYPES TO BE TRUE ***********************************
+      logical,public                     :: forcing_depth_profiles = {{ cdr_frc.forcing_depth_profiles|lower }}     ! T if this file contains depth profiles
+      logical,public                     :: forcing_3d             = {{ cdr_frc.forcing_3d|lower }}     ! T if this file contains 3d forcing
+      logical,public                     :: forcing_parameterized  = {{ cdr_frc.forcing_parameterized|lower }}      ! T if forcing with idealized Gaussian profiles
+
+      ! INTERPOLATE FORCING IN TIME, OR NO?
+      logical                            :: time_interpolation = {{ cdr_frc.time_interpolation|lower }}   ! T if using time interpolation. If T, forcing is linearly
+                                                                           ! interpolated in time between consecutive records; otherwise,
+                                                                           ! forcing is held constant until the next record is reached
+
+
+      ! PARAMETERIZED VERTICAL PROFILES ********************************
+      logical,parameter,public :: cdr_volume  = {{ cdr_frc.cdr_volume|lower }}  ! Set to .false. if you want a tracer flux but no added water.
+                                                         ! If .true., read in volume flux and tracer concentration, and
+                                                         ! multiply together to get tracer flux.
+                                                         ! Set to false if you want to read in a vertical profile(s).
+
+      ! Use either volume flux [m3/s] and tracer concentrations [mmol/m3], or use tracer flux [mmol/s]
+      type (ncforce) :: nc_cdrvol = ncforce( vname='{{ cdr_frc.cdrvol_vname }}', tname='{{ cdr_frc.cdrvol_tname }}')
+      type (ncforce) :: nc_cdrtrc = ncforce( vname='{{ cdr_frc.cdrtrc_vname }}', tname='{{ cdr_frc.cdrtrc_tname }}')
+      type (ncforce) :: nc_cdrflx = ncforce( vname='{{ cdr_frc.cdrflx_vname }}', tname='{{ cdr_frc.cdrflx_tname }}')
+
+      character(len=9)  :: cdr_loc_lon = '{{ cdr_frc.cdr_loc_lon }}'  !!  longitude of CDR release [degrees East]
+      character(len=9)  :: cdr_loc_lat = '{{ cdr_frc.cdr_loc_lat }}'  !!  latitude of CDR release  [degrees North]
+      character(len=9)  :: cdr_loc_dep = '{{ cdr_frc.cdr_loc_dep }}'  !!  depth of CDR release [m]
+      character(len=9)  :: cdr_scl_hor = '{{ cdr_frc.cdr_scl_hor }}'  !!  horizontal scale of CDR release [m]
+      character(len=9)  :: cdr_scl_vrt = '{{ cdr_frc.cdr_scl_vrt }}'  !!  vertical scale of CDR release [m]
+
+      ! VERTICAL PROFILES FROM FILE ****************************
+      ! Layer thicknesses for a vertical profile [m]
+      type (ncforce)   :: nc_cdrhz  = ncforce( vname='cdr_layer_thickness', tname='cdr_time')
+      ! Layerwise additionality
+      type (ncforce3d) :: nc_cdrflx_dp = ncforce3d( vname='cdr_trcflx_profile', tname='cdr_time')
+
+
+      ! 3D FORCING FROM FILE *************************************
+      type (ncforce3d) :: nc_cdrflx_3d_ALK = ncforce3d( vname='cdr_trcflx_3d_ALK', tname='cdr_time')
+      type (ncforce3d) :: nc_cdrflx_3d_DIC = ncforce3d( vname='cdr_trcflx_3d_DIC', tname='cdr_time')
+
+      integer, parameter :: nz_chd = {{ cdr_frc.nz_chd|default(50, true) }}  ! Number of vertical layers in the forcing file, or, if upscaling,
+                                         ! the number of vertical layers in the child grid.
+
+      ! end user inputs
