@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import CstarError
-from cstar.base.log import get_logger
+from cstar.base.log import LogLevelChoices, get_logger
 from cstar.entrypoint.config import (
     JOBFILE_DATE_FORMAT,
     JobConfig,
@@ -377,7 +377,7 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
             return self.set_result(ExecutionStatus.FAILED, [msg, str(ex)])
 
 
-def create_parser() -> argparse.ArgumentParser:
+def create_parser(desc: str) -> argparse.ArgumentParser:
     """Create a parser for shared CLI arguments for any worker running a blueprint.
 
     Returns
@@ -387,7 +387,7 @@ def create_parser() -> argparse.ArgumentParser:
         BlueprintRunner service.
     """
     parser = argparse.ArgumentParser(
-        description="Execute a blueprint.",
+        description=desc,
         exit_on_error=True,
     )
     parser.add_argument(
@@ -404,5 +404,6 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         required=False,
         help="Set the logging level for the worker.",
+        choices=[x.value for x in LogLevelChoices],
     )
     return parser

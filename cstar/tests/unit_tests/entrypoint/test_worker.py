@@ -22,7 +22,7 @@ from cstar.entrypoint.worker.worker import (
     JobConfig,
     SimulationRunner,
     SimulationStages,
-    create_parser,
+    create_simrunner_parser,
     get_request,
     main,
 )
@@ -123,9 +123,9 @@ def sim_runner(
     return runner
 
 
-def test_create_parser_happy_path() -> None:
+def test_create_worker_parser_happy_path() -> None:
     """Verify that a help argument is present in the parser."""
-    parser = create_parser()
+    parser = create_simrunner_parser()
 
     # ruff: noqa: SLF001
     assert "--blueprint-uri" in parser._option_string_actions
@@ -162,7 +162,7 @@ def test_parser_good_log_level(
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
 
-    parser = create_parser()
+    parser = create_simrunner_parser()
     parsed_args = parser.parse_args(args)
 
     assert getattr(parsed_args, "log_level", None) == logging.getLevelName(
@@ -191,7 +191,7 @@ def test_parser_lowercase_log_level(
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
 
-    parser = create_parser()
+    parser = create_simrunner_parser()
 
     # unable to parse the lower-case log levels
     with pytest.raises(SystemExit):
@@ -206,7 +206,7 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
     valid_args_tuples = ((k, v) for k, v in valid_args.items())
     args = list(itertools.chain.from_iterable(valid_args_tuples))
 
-    parser = create_parser()
+    parser = create_simrunner_parser()
 
     with pytest.raises(SystemExit):
         _ = parser.parse_args(args)
@@ -241,7 +241,7 @@ def test_get_service_config(
     arg_b, val_b = blueprint_uri.split(" ", maxsplit=1)
     arg_l, val_l = log_level.split(" ", maxsplit=1)
 
-    parser = create_parser()
+    parser = create_simrunner_parser()
     parsed_args = parser.parse_args(
         [
             arg_b,
@@ -274,7 +274,7 @@ def test_get_request(
     blueprint_uri: str,
 ) -> None:
     """Verify that the expected values are set on the blueprint request."""
-    parser = create_parser()
+    parser = create_simrunner_parser()
     parsed_args = parser.parse_args(
         [
             "--blueprint-uri",

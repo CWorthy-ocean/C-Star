@@ -7,9 +7,8 @@ import sys
 import typing as t
 from datetime import datetime, timezone
 
-from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
     JobConfig,
@@ -18,7 +17,7 @@ from cstar.entrypoint.config import (
     get_service_config,
 )
 from cstar.entrypoint.service import Service, ServiceConfiguration
-from cstar.entrypoint.xrunner import XRunnerRequest
+from cstar.entrypoint.xrunner import XRunnerRequest, create_parser
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms import ROMSSimulation
@@ -279,7 +278,7 @@ class SimulationRunner(Service):
         return False
 
 
-def create_parser() -> argparse.ArgumentParser:
+def create_simrunner_parser() -> argparse.ArgumentParser:
     """Create a parser for CLI arguments expected by a SimulationRunner.
 
     Returns
@@ -288,26 +287,7 @@ def create_parser() -> argparse.ArgumentParser:
         An argument parser configured with the expected arguments for the
         SimulationRunner service.
     """
-    parser = argparse.ArgumentParser(
-        description="Run a c-star simulation.",
-        exit_on_error=True,
-    )
-    parser.add_argument(
-        "-b",
-        "--blueprint-uri",
-        type=str,
-        required=True,
-        help="The URI of a blueprint.",
-    )
-    parser.add_argument(
-        "-l",
-        "--log-level",
-        default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
-        type=str,
-        required=False,
-        help="Set the logging level for the worker.",
-        choices=[x.value for x in LogLevelChoices],
-    )
+    parser = create_parser("Run a simulation with C-Star.")
     parser.add_argument(
         "-g",
         "--stage",
@@ -398,7 +378,7 @@ def main() -> int:
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
     try:
-        parser = create_parser()
+        parser = create_simrunner_parser()
         args = parser.parse_args()
     except SystemExit:
         return 1
