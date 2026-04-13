@@ -6,14 +6,21 @@ from rich.console import Console
 from rich.table import Table
 
 from cstar.base.utils import slugify
-from cstar.orchestration.models import RomsMarblBlueprint, Step, Workplan, WorkplanState
+from cstar.orchestration.application import ApplicationRegistry
+from cstar.orchestration.models import (
+    Blueprint,
+    Step,
+    Workplan,
+    WorkplanState,
+)
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.system.registration import Registry
 
 app = typer.Typer()
 console = Console()
 
 if t.TYPE_CHECKING:
-    BPResult: t.TypeAlias = tuple[Path, RomsMarblBlueprint]
+    BPResult: t.TypeAlias = tuple[Path, Blueprint]
 
 
 def _locate_blueprints(search_dir: Path) -> t.Iterable["BPResult"]:
@@ -29,7 +36,10 @@ def _locate_blueprints(search_dir: Path) -> t.Iterable["BPResult"]:
 
     for file in files:
         try:
-            bp = deserialize(file, RomsMarblBlueprint)
+            bp_core = deserialize(file, Blueprint)
+            reg_bp = Registry(ApplicationRegistry.BLUEPRINT)
+
+            bp: Blueprint = deserialize(file, reg_bp.get(bp_core.application))
             valid_blueprints.append((file, bp))
         except Exception:
             print(f"File {file} is not a valid RomsMarblBlueprint")
