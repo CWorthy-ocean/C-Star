@@ -63,7 +63,7 @@ def test_blueprint_run_remote_blueprint() -> None:
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
     with mock.patch(
-        "cstar.cli.blueprint.run.execute_runner_rm",
+        "cstar.cli.blueprint.run.exec_romsmarbl_runner",
         return_value=0,
     ) as mock_exec:
         runner = CliRunner()
