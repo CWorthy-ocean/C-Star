@@ -12,7 +12,6 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Application
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -101,11 +100,9 @@ class LocalLauncher(Launcher[LocalHandle]):
             A ProcessHandle identifying the newly submitted job.
         """
         step_converter = get_command_mapping(
-            Application(step.application),
-            LocalLauncher,
+            step.application,
         )
         cmd = step_converter(step)
-
         try:
             if not step.fsm.root.exists():
                 step.fsm.prepare()

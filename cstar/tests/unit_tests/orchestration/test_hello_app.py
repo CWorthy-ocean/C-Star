@@ -13,7 +13,6 @@ from cstar.entrypoint.worker.hello_app import (
 from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
@@ -149,7 +148,7 @@ async def test_hello_world_command_converter(
     )
 
     # find the registered command converter for this application and launcher type
-    cmd_converter = get_command_mapping(Application.HELLO_WORLD, LocalLauncher)
+    cmd_converter = get_command_mapping(Application.HELLO_WORLD.value)
     assert cmd_converter is not None, "Command converter not found"
 
     # use the converter function to generate the command
