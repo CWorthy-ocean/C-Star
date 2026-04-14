@@ -12,19 +12,19 @@ APP_HELLOWORLD: t.Literal["hello_world"] = "hello_world"
 """The unique identifier for the hello-world application type."""
 
 
-@register_app_handler(ApplicationRegistry.BLUEPRINT.value)
+@register_app_handler(ApplicationRegistry.BLUEPRINT.value, APP_HELLOWORLD)
 class HelloWorldBlueprint(Blueprint):
     """A simple blueprint demonstrating the integration of a Blueprint and it's
     runner application.
     """
 
-    application: t.ClassVar[str] = APP_HELLOWORLD
+    application: str = APP_HELLOWORLD
     """The application identifier."""
     target: str
     """The person to say hello to."""
 
 
-@register_app_handler(ApplicationRegistry.RUNNER.value)
+@register_app_handler(ApplicationRegistry.RUNNER.value, APP_HELLOWORLD)
 class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
     """Worker class to execute a simple "Hello, world" application specified via blueprint."""
 

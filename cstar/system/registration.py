@@ -103,6 +103,10 @@ class Registry:
         CStarError
             If the lookup fails to find a mapping.
         """
+        key = key.strip() if key else ""
+        if not key:
+            raise ValueError("A registry key must be specified")
+
         found_type = self._lookup.get(key, None)
         if not found_type:
             raise CstarError(f"No {self._role!r} is registered for the key: {key!r}")

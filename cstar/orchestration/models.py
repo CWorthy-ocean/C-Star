@@ -342,7 +342,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     description: RequiredString
     """A user-friendly description of the scenario to be executed by the blueprint."""
 
-    application: t.ClassVar[str]
+    application: str
     """The process type to be executed by the blueprint."""
 
     state: BlueprintState = BlueprintState.NotSet
@@ -360,7 +360,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
-    application: t.ClassVar[str] = "roms_marbl"
+    application: str = "roms_marbl"
     """The process type to be executed by the blueprint."""
 
     valid_start_date: datetime

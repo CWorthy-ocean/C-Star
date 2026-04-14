@@ -15,21 +15,14 @@ class ApplicationRegistry(StrEnum):
     """Used to register types that contain runners for an application."""
 
 
-class ApplicationHandler(t.Protocol):
-    """Minimum API necessary to identify a type that handles some segment of
-    the application processing lifecycle.
-    """
-
-    # application: str
-    application: t.ClassVar[str]
-    """The name of the application the handler is associated with."""
-
-
-THandler = t.TypeVar("THandler", bound=ApplicationHandler)
+THandler = t.TypeVar("THandler")
 """Type variable representing handlers for application life cycle segments"""
 
 
-def register_app_handler(category: str) -> t.Callable[[type[THandler]], type[THandler]]:
+def register_app_handler(
+    category: str,
+    application: str,
+) -> t.Callable[[type[THandler]], type[THandler]]:
     """Decorator used to register a type as the handler of some portion of an
     application's lifecycle.
 
@@ -37,6 +30,8 @@ def register_app_handler(category: str) -> t.Callable[[type[THandler]], type[THa
     ----------
     category : str
         A string identifying the lifecycle segment, e.g. "blueprint" or "runner".
+    application : str
+        The name of the application the handler will be registered for, e.g. "roms_marbl"
 
     Returns
     -------
@@ -52,7 +47,7 @@ def register_app_handler(category: str) -> t.Callable[[type[THandler]], type[THa
             The type to be registered
         """
         registry = Registry(category)
-        registry.put(klass.application, klass)
+        registry.put(application, klass)
 
         return klass
 

@@ -2,8 +2,10 @@ import typing as t
 
 import typer
 
-from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.orchestration.application import ApplicationRegistry
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import validate_serialized_entity
+from cstar.system.registration import Registry
 
 app = typer.Typer()
 
@@ -22,7 +24,15 @@ def check(
     bool
         `True` if valid
     """
-    result = validate_serialized_entity(path, RomsMarblBlueprint)
+    result = validate_serialized_entity(path, Blueprint)
+    if result.item is None:
+        print(result.error_msg)
+        return
+
+    reg_bp = Registry(ApplicationRegistry.BLUEPRINT)
+    app_bp = reg_bp.get(result.item.application)
+
+    result = validate_serialized_entity(path, app_bp)
     if result.item is None:
         print(result.error_msg)
         return
