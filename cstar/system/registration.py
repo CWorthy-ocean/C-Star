@@ -1,9 +1,10 @@
 import typing as t
 
 from cstar.base.exceptions import CstarError
+from cstar.base.log import LoggingMixin
 
 
-class Registry:
+class Registry(LoggingMixin):
     """An in-memory cache of key-value pairs used to identify a type used for
     a specific role.
     """
@@ -41,8 +42,6 @@ class Registry:
         Registry
             The runner instance used to handle registration of blueprint runners.
         """
-        # TODO: this shouldn't be here, sincc "runner" and "blueprint" are now keys
-        # on cstar.orchetration.application.ApplicationRegistry
         return Registry("runner")
 
     @classmethod
@@ -74,13 +73,12 @@ class Registry:
         current = self._lookup.get(key, None)
 
         if current and current == klass:
-            # type was already registered
-            print(f"Managed to re-register the same {self._role!r} for: {key}")
+            self.log.debug(f"Attempted to re-register the {self._role!r} for: {key}")
             return False
 
         self._lookup[key] = klass
 
-        print(f"Registry for handling {key!r} updated to {klass.__name__!r}")
+        self.log.debug(f"Registry `{self._role}::{key}` updated {klass.__name__!r}")
         return True
 
     def get(self, key: str) -> type:

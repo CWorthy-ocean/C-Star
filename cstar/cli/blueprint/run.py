@@ -9,7 +9,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     get_env_item,
 )
-from cstar.base.log import LogLevelChoices
+from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
 from cstar.cli.workplan.shared import create_xrunner
 from cstar.entrypoint.worker.worker import (
@@ -27,6 +27,7 @@ from cstar.orchestration.serialization import deserialize, validate_serialized_e
 from cstar.system.registration import Registry
 
 app = typer.Typer()
+log = get_logger(__name__)
 
 
 def path_callback(
@@ -119,7 +120,7 @@ def run(
         get_env_item(ENV_CSTAR_LOG_LEVEL).value, name=runner_name
     )
 
-    print(f"Executing {application!r} blueprint in a worker service")
+    log.debug(f"Executing {application!r} blueprint in a {bp_type} service")
 
     validation_result_rm = validate_serialized_entity(uri, bp_type)
     if not validation_result_rm.is_valid:

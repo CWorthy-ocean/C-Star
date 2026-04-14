@@ -377,10 +377,13 @@ def main() -> int:
     int
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
+    log = get_logger(__name__)
+
     try:
         parser = create_simrunner_parser()
         args = parser.parse_args()
     except SystemExit:
+        log.exception("An error occurred while parsing script arguments")
         return 1
 
     job_cfg = get_job_config()
