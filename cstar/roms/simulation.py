@@ -91,8 +91,10 @@ def _ncjoin_wildcard(
     """
     logger.info(f"Joining netCDF files {wildcard_pattern}...")
 
+    command = "extract_data_join" if "ext" in wildcard_pattern else "ncjoin"
+
     _run_cmd(
-        f"ncjoin {wildcard_pattern}",
+        f"{command} {wildcard_pattern}",
         cwd=input_dir,
         raise_on_error=True,
     )
