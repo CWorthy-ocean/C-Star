@@ -73,7 +73,9 @@ class ServiceConfiguration(BaseModel):
         return self.health_check_frequency is not None
 
 
-def get_service_config(log_level: int | str, name: str) -> ServiceConfiguration:
+def get_service_config(
+    log_level: int | str, name: str = "Runner"
+) -> ServiceConfiguration:
     """Create a ServiceConfiguration instance using CLI arguments.
 
     Parameters
@@ -93,7 +95,7 @@ def get_service_config(log_level: int | str, name: str) -> ServiceConfiguration:
         health_check_frequency=None,
         log_level=level,
         health_check_log_threshold=10,
-        name=name or "Runner",
+        name=name,
     )
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from pytest import CaptureFixture
 
+from cstar.base.log import LogLevelChoices
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.service import ServiceConfiguration
 from cstar.entrypoint.worker.hello_app import (
@@ -109,7 +110,9 @@ async def test_execute_runner_happy_path(
     """
     request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     job_cfg = get_job_config()
-    svc_cfg = get_service_config(log_level="INFO", name="SimulationRunner")
+    svc_cfg = get_service_config(
+        log_level=LogLevelChoices.INFO,
+    )
 
     runner = HelloWorldRunner(request, job_cfg, svc_cfg)
     await runner.execute()
