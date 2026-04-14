@@ -138,7 +138,7 @@ def run(
         runner = create_xrunner(request, service_cfg, job_cfg)
         result = asyncio.run(runner.execute_xrunner())
 
-        if errors := list(result.errors):
+        if errors := result.errors:
             print(f"Errors occurred: {', '.join(errors)}")
 
         rc = len(errors)

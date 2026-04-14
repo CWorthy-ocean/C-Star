@@ -133,8 +133,8 @@ class XRunnerResult(t.Generic[TBlueprint]):
         self.status = status
 
     @property
-    def errors(self) -> t.Iterable[str]:
-        return self._errors
+    def errors(self) -> tuple[str, ...]:
+        return tuple(self._errors)
 
 
 class XRunner(t.Generic[TBlueprint], t.Protocol):
