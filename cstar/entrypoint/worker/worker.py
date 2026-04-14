@@ -287,7 +287,7 @@ def create_simrunner_parser() -> argparse.ArgumentParser:
         An argument parser configured with the expected arguments for the
         SimulationRunner service.
     """
-    parser = create_parser("Run a simulation with C-Star.")
+    parser = create_parser()
     parser.add_argument(
         "-g",
         "--stage",

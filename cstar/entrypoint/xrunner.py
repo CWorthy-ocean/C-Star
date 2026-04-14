@@ -17,6 +17,8 @@ from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.serialization import SerializableModel, deserialize
 
+BLUEPRINT_RUNNER: t.Literal["BlueprintRunner"] = "BlueprintRunner"
+
 
 class XBlueprint(SerializableModel, t.Protocol):
     """Minimal API required for blueprint registration.
@@ -377,7 +379,7 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
             return self.set_result(ExecutionStatus.FAILED, [msg, str(ex)])
 
 
-def create_parser(desc: str) -> argparse.ArgumentParser:
+def create_parser() -> argparse.ArgumentParser:
     """Create a parser for shared CLI arguments for any worker running a blueprint.
 
     Returns
@@ -387,7 +389,7 @@ def create_parser(desc: str) -> argparse.ArgumentParser:
         BlueprintRunner service.
     """
     parser = argparse.ArgumentParser(
-        description=desc,
+        prog=BLUEPRINT_RUNNER,
         exit_on_error=True,
     )
     parser.add_argument(
