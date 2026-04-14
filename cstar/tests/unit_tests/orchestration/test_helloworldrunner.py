@@ -92,6 +92,17 @@ def heterogeneous_workplan_path(
 ) -> Path:
     """Return the path to a workplan containing steps triggering different applications.
 
+    Uses pre-existing fixtures and combines their steps into a new workplan.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Path where temporary workplans and blueprints will be written during the test.
+    hw_single_step_wp : Path
+        Path to a workplan that contains a single hello_world step.
+    single_step_workplan : Path
+        Path to a workplan that contains a single roms_marbl/sleep step.
+
     Returns
     -------
     Path
@@ -260,6 +271,8 @@ def test_hello_world_workplan_dry_run(
         The path to the workplan containing a single step that runs the hello_world application.
     dry_run : bool
         Whether to run the workplan in dry-run mode.
+    prefect_server_url: str
+        Implicitly declare dependence on the prefect server
     """
     state_dir = tmp_path / "state"
     runner = CliRunner()
@@ -318,6 +331,8 @@ def test_heterogeneous_workplan(
         and a step relying on the ROMS-MARBL application.
     dry_run : bool
         Whether to run the workplan in dry-run mode.
+    prefect_server_url: str
+        Implicitly declare dependence on the prefect server
     """
     state_dir = tmp_path / "state"
     runner = CliRunner()

@@ -60,14 +60,15 @@ async def test_hello_world_blueprint_serialization(
 
 
 @pytest.mark.asyncio
-async def test_hello_world_blueprint_execution(
+async def test_hello_world_runner_execute_xrunner(
     capsys: CaptureFixture,
     hello_world_bp_path: Path,
     hello_world_default_target: str,
 ) -> None:
     """Verify that a well-formed HW blueprint executes correctly.
 
-    This tests the `BlueprintRunner` and `HelloWorldRunner` classes.
+    This tests the integration of `BlueprintRunner` and `HelloWorldRunner` classes
+    without the service lifecycle being invoked.
 
     Parameters
     ----------
