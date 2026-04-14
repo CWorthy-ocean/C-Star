@@ -1710,11 +1710,7 @@ class ROMSSimulation(Simulation):
 
         output_dir = self.fs_manager.output_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
-        unique_wildcards = {
-            Path(fname.stem).stem + ".*.nc"
-            for fname in files
-            if "_ext." not in fname.name
-        }
+        unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
         else:
