@@ -71,7 +71,7 @@ class XRunnerRequest(t.Generic[TBlueprint]):
         -------
         str
         """
-        return self.bp_type.application
+        return self.blueprint.application
 
     @property
     def blueprint(self) -> TBlueprint:
