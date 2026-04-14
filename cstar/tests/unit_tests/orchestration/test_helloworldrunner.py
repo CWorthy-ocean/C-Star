@@ -66,7 +66,7 @@ def hw_single_step_wp_path(
         }
     )
     wp_path = tmp_path / "hw-workplan.yaml"
-    wp_path.write_text(wp_yaml)
+    assert wp_path.write_text(wp_yaml)
 
     return wp_path
 
@@ -111,7 +111,7 @@ def heterogeneous_workplan_path(
         ],
     )
     wp_path = tmp_path / f"{wp.name}.yaml"
-    serialize(wp_path, wp)
+    assert serialize(wp_path, wp)
 
     return wp_path
 
