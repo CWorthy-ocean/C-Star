@@ -20,7 +20,6 @@ from cstar.execution.scheduler_job import (
     get_slurm_batch,
     get_slurm_batches,
 )
-from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Application, Blueprint, RomsMarblBlueprint
 from cstar.orchestration.orchestration import (
     Launcher,
@@ -197,10 +196,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         bp = deserialize(step.blueprint_path, bp_type)
         job_dep_ids = [d.pid for d in dependencies]
 
-        step_converter = get_command_mapping(
-            Application(step.application),
-        )
-
         script_path = step.fsm.work_dir / "script.sh"
         output_file = step.fsm.logs_dir / f"{job_name}.out"
 
@@ -211,7 +206,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             output_file.parent.mkdir(parents=True)
             output_file.write_text("ready\n")
 
-        command = step_converter(step)
+        command = step.command
+
         job = create_scheduler_job(
             commands=command,
             account_key=SlurmLauncher.configured_account(),

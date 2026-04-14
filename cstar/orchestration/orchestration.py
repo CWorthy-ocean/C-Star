@@ -17,6 +17,7 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
 )
+from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Blueprint, Step, Workplan
 from cstar.orchestration.serialization import (
     intenum_representer,
@@ -252,6 +253,17 @@ class LiveStep(Step):
             # self._bp = deserialize_discriminated(self.blueprint_path, "application")
             ...
         return self._bp
+
+    @property
+    def command(self) -> str:
+        """Generate the shell command that will execute the underlying application.
+
+        Returns
+        -------
+        str
+        """
+        step_converter = get_command_mapping(self.application)
+        return step_converter(self)
 
     @classmethod
     def from_step(
