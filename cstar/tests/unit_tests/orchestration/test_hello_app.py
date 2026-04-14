@@ -125,9 +125,7 @@ async def test_execute_runner_happy_path(
 @pytest.mark.asyncio
 async def test_hello_world_command_converter(
     tmp_path: Path,
-    capsys: CaptureFixture,
     hello_world_bp_path: Path,
-    hello_world_default_target: str,
 ) -> None:
     """Verify that the command converter produces a working CLI
     command.
