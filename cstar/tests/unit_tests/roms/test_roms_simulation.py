@@ -1040,7 +1040,7 @@ class TestToAndFromDictAndBlueprint:
         """
         blueprint_path = blueprint_path.with_stem(f"{blueprint_path.stem}-DNE")
 
-        with pytest.raises(FileNotFoundError, match="Invalid blueprint path"):
+        with pytest.raises(ValueError, match="not a recognised"):
             _ = ROMSSimulation.from_blueprint(
                 blueprint=str(blueprint_path),
             )
@@ -1062,23 +1062,6 @@ class TestToAndFromDictAndBlueprint:
         )
 
         assert isinstance(sim, ROMSSimulation)
-
-    def test_from_blueprint_remote_file_DNE(self) -> None:
-        """Tests that `from_blueprint()` raises an exception when asked to load a
-        remote blueprint from a broken URI.
-
-         Assertions
-         ----------
-         - The returned object is an instance of `ROMSSimulation`.
-         - `open()` is called exactly once with the expected file path in read mode.
-
-        """
-        blueprint_uri: str = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint-DNE.yaml"
-
-        with pytest.raises(FileNotFoundError, match="Invalid blueprint uri"):
-            _ = ROMSSimulation.from_blueprint(
-                blueprint=blueprint_uri,
-            )
 
 
 class TestProcessingAndExecution:

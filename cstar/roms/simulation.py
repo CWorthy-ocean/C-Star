@@ -8,6 +8,8 @@ from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 
+import yaml
+
 import cstar.roms.runtime_settings
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
@@ -29,6 +31,7 @@ from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.constants import FileEncoding
+from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration.adapter import (
     AddtlCodeAdapter,
@@ -46,7 +49,6 @@ from cstar.orchestration.adapter import (
     TidalForcingAdapter,
 )
 from cstar.orchestration.models import RomsMarblBlueprint
-from cstar.orchestration.serialization import deserialize
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -1107,7 +1109,11 @@ class ROMSSimulation(Simulation):
         to_blueprint : Saves the simulation as a YAML blueprint.
         from_dict : Creates an instance from a dictionary representation.
         """
-        bp = deserialize(blueprint, RomsMarblBlueprint)
+        source = SourceData(location=blueprint)
+        data = source.retriever.read()
+        bp_dict = yaml.safe_load(data.decode("utf-8"))
+
+        bp = RomsMarblBlueprint.model_validate(bp_dict)
 
         return cls(
             name=bp.name,
