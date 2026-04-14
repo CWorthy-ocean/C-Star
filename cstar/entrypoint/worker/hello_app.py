@@ -28,8 +28,7 @@ class HelloWorldBlueprint(Blueprint):
 class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
     """Worker class to execute a simple "Hello, world" application specified via blueprint."""
 
-    # application: t.ClassVar[str] = Field(default=APP_HELLOWORLD, frozen=True)
-    application: t.ClassVar[str] = APP_HELLOWORLD
+    application: str = APP_HELLOWORLD
     """The application identifier."""
 
     @t.override

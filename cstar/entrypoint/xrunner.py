@@ -26,7 +26,7 @@ class XBlueprint(SerializableModel, t.Protocol):
 
     name: str
     """A user-friendly name."""
-    application: t.ClassVar[str]
+    application: str
     """The process type to be executed by the blueprint."""
 
 
