@@ -1028,6 +1028,58 @@ class TestToAndFromDictAndBlueprint:
         # Assertions
         assert isinstance(sim, ROMSSimulation)
 
+    def test_from_blueprint_invalid_file(self, blueprint_path: Path) -> None:
+        """Tests that `from_blueprint()` raises an exception when supplied with
+        an invalid local path.
+
+         Assertions
+         ----------
+         - The returned object is an instance of `ROMSSimulation`.
+         - `open()` is called exactly once with the expected file path in read mode.
+
+        """
+        blueprint_path = blueprint_path.with_stem(f"{blueprint_path.stem}-DNE")
+
+        with pytest.raises(FileNotFoundError, match="Invalid blueprint path"):
+            _ = ROMSSimulation.from_blueprint(
+                blueprint=str(blueprint_path),
+            )
+
+    def test_from_blueprint_valid_remote_file(self) -> None:
+        """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
+        YAML file that is remotely located.
+
+         Assertions
+         ----------
+         - The returned object is an instance of `ROMSSimulation`.
+         - `open()` is called exactly once with the expected file path in read mode.
+
+        """
+        blueprint_uri: str = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
+
+        sim = ROMSSimulation.from_blueprint(
+            blueprint=blueprint_uri,
+        )
+
+        assert isinstance(sim, ROMSSimulation)
+
+    def test_from_blueprint_remote_file_DNE(self) -> None:
+        """Tests that `from_blueprint()` raises an exception when asked to load a
+        remote blueprint from a broken URI.
+
+         Assertions
+         ----------
+         - The returned object is an instance of `ROMSSimulation`.
+         - `open()` is called exactly once with the expected file path in read mode.
+
+        """
+        blueprint_uri: str = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint-DNE.yaml"
+
+        with pytest.raises(FileNotFoundError, match="Invalid blueprint uri"):
+            _ = ROMSSimulation.from_blueprint(
+                blueprint=blueprint_uri,
+            )
+
 
 class TestProcessingAndExecution:
     """Tests processing steps and execution methods of `ROMSSimulation`.
