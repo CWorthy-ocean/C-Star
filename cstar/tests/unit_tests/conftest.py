@@ -148,7 +148,8 @@ class MockSourceData(SourceData):
 
 @pytest.fixture
 def mocksourcedata_factory() -> Callable[
-    [SourceClassification, str | Path, str | None], MockSourceData
+    [SourceClassification, str | Path, str | None],
+    MockSourceData,
 ]:
     """
     Fixture that returns a MockSourceData instance with chosen attributes
