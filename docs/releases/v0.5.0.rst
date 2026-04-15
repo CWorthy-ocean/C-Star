@@ -74,6 +74,7 @@ Bug Fixes
 - Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`)
 - Fix possibly incorrectly renaming a marbl input file to the `_ORIGINAL` roms.in file (`#491 <https://github.com/CWorthy-ocean/C-Star/pull/491>`_)
 - Mitigate possible ROMS output-name-length errors by using a relative output path in the `roms.in` (`#491 <https://github.com/CWorthy-ocean/C-Star/pull/491>`_)
+- Fix incorrect status mapping of local runs, which caused dependencies to not be cancelled if upstream tasks failed. (`#478 <https://github.com/CWorthy-ocean/C-Star/pull/478>`_)
 
 Improvements
 ~~~~~~~~~~~~
