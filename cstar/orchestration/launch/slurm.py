@@ -14,21 +14,18 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd, slugify
-from cstar.entrypoint.worker.hello_app import HelloWorldBlueprint
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
     get_slurm_batch,
     get_slurm_batches,
 )
-from cstar.orchestration.models import Application, Blueprint, RomsMarblBlueprint
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
     Status,
     Task,
 )
-from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import (
     get_sentinel,
     load_sentinels,
@@ -183,16 +180,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             A ProcessHandle identifying the newly submitted job.
         """
         job_name = step.safe_name
-        bp_type: type[Blueprint]
-
-        if step.application == Application.ROMS_MARBL:
-            bp_type = RomsMarblBlueprint
-        elif step.application == Application.HELLO_WORLD:
-            bp_type = HelloWorldBlueprint
-        elif step.application == Application.SLEEP:
-            bp_type = RomsMarblBlueprint  # TODO: this is not good
-        else:
-            raise ValueError(f"Unknown application: {step.application}")
 
         if not step.blueprint:
             raise CstarError("Step cannot resolve blueprint")
