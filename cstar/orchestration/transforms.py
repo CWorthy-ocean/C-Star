@@ -429,14 +429,14 @@ class RomsMarblTimeSplitter(Transform):
 class OverrideTransform(Transform):
     """Transform that overrides a step by returning a blueprint with all overridden attributes applied."""
 
-    _system_overrides: dict[str, t.Any] = {}
+    _system_overrides: dict[str, t.Any]
 
-    def __init__(self, sys_overrides: dict[str, t.Any] = None) -> None:  # type: ignore[assignment]
+    def __init__(self, sys_overrides: dict[str, t.Any] | None = None) -> None:  # type: ignore[assignment]
         """Initialize the instance.
 
         Parameters
         ----------
-        sys_overrides : dict[str, t.Any]
+        sys_overrides : dict[str, t.Any] | None
             System-level blueprint overrides that will be applied after
             the user-supplied values.
         """
@@ -445,7 +445,7 @@ class OverrideTransform(Transform):
     def apply(
         self,
         bp: RomsMarblBlueprint,
-        overrides: dict[str, t.Any] = None,  # type: ignore[assignment]
+        overrides: dict[str, t.Any] | None = None,  # type: ignore[assignment]
     ) -> RomsMarblBlueprint:
         """Apply all overrides from a blueprint.
 
@@ -456,7 +456,7 @@ class OverrideTransform(Transform):
         ----------
         bp : RomsMarblBlueprint
             The blueprint to apply overrides to
-        overrides : dict[str, t.Any]
+        overrides : dict[str, t.Any] | None
             A dictionary containing overrides for attributes of a blueprint.
 
         Returns
