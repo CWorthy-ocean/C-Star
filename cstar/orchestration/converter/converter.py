@@ -4,11 +4,7 @@ import sys
 import textwrap
 import typing as t
 
-from cstar.base.env import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_LOG_LEVEL,
-    get_env_item,
-)
+from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.orchestration.models import Application
@@ -68,7 +64,6 @@ def convert_step_to_blueprint_run_command(step: "LiveStep") -> str:
         The complete CLI command.
     """
     cmd_array = [
-        f"CSTAR_LOG_LEVEL={get_env_item(ENV_CSTAR_LOG_LEVEL).value}",
         "cstar",
         "blueprint",
         "run",
