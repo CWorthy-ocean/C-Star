@@ -87,6 +87,21 @@ ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
 """Enable automatic time-splitting of simulations."""
 
 
+def is_flag_enabled(flag: str) -> bool:
+    """Determine if a boolean environment varible is enabled.
+
+    Parameters
+    ----------
+    flag : str
+        The name of an environment variable to check.
+
+    Returns
+    -------
+    bool
+    """
+    return os.getenv(flag, FLAG_OFF) == FLAG_ON
+
+
 def is_feature_enabled(flag: str) -> bool:
     """Determine if an environment variable for a feature is set.
 
@@ -101,7 +116,7 @@ def is_feature_enabled(flag: str) -> bool:
         pass only the <FLAG_NAME> and exclude the `CSTAR_FF_` prefix.
     """
     # developer mode enables all feature flags
-    if os.getenv(ENV_FF_DEVELOPER_MODE, FLAG_OFF) == FLAG_ON:
+    if is_flag_enabled(ENV_FF_DEVELOPER_MODE):
         return True
 
     # enable omitting the CSTAR_FF_ prefix at the call-site
@@ -119,7 +134,7 @@ def is_feature_enabled(flag: str) -> bool:
         for i in range(2, len(flag_parts)):
             segment_id = "_".join(flag_parts[:i])
 
-            if os.getenv(segment_id, FLAG_OFF) == FLAG_ON:
+            if is_flag_enabled(segment_id):
                 return True
 
-    return os.getenv(flag, FLAG_OFF) == FLAG_ON
+    return is_flag_enabled(flag)
