@@ -91,7 +91,8 @@ def _ncjoin_wildcard(
     """
     logger.info(f"Joining netCDF files {wildcard_pattern}...")
 
-    command = "extract_data_join" if "ext" in wildcard_pattern else "ncjoin"
+    extract_data = "ext" in wildcard_pattern
+    command = "extract_data_join" if extract_data else "ncjoin"
 
     _run_cmd(
         f"{command} {wildcard_pattern}",
@@ -100,7 +101,20 @@ def _ncjoin_wildcard(
     )
 
     out_file = input_dir / wildcard_pattern.replace("*.", "")
-    out_file.rename(output_dir / out_file.name)
+    if extract_data:
+        out_file_name = out_file.name
+        out_file_timestamp_dot_nc = out_file_name.split(".")[1:]
+        out_file_name = ".".join(["child_bry", *out_file_timestamp_dot_nc])
+        out_file = input_dir / out_file_name
+        ocean_file_name = ".".join(["ocean", *out_file_timestamp_dot_nc])
+    else:
+        out_file_name = out_file.name
+
+    out_file.rename(output_dir / out_file_name)
+
+    if extract_data:
+        ocean_file = input_dir / ocean_file_name
+        ocean_file.unlink(missing_ok=True)
 
     logger.info(f"done spatially joining {out_file}")
 
