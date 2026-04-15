@@ -10,7 +10,8 @@ from pytest import CaptureFixture
 from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
-from cstar.cli.workplan.run import app
+from cstar.cli.blueprint.run import app as app_run_blueprint
+from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.worker.hello_app import (
     HelloWorldBlueprint,
@@ -163,7 +164,7 @@ async def test_hello_world_runner_happy_path(
 
     request = XRunnerRequest(str(bp_path), HelloWorldBlueprint)
     job_cfg = get_job_config()
-    svc_cfg = get_service_config(log_level="INFO", name="SimulationRunner")
+    svc_cfg = get_service_config(log_level="INFO")
 
     runner = HelloWorldRunner(request, job_cfg, svc_cfg)
 
@@ -297,7 +298,7 @@ def test_hello_world_workplan_dry_run(
             args.append("--dry-run")
 
         result = runner.invoke(
-            app,
+            app_run_workplan,
             args,
             color=False,
         )
@@ -341,7 +342,7 @@ def test_heterogeneous_workplan(
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
         ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
-        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
+        # ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
     run_id = str(uuid.uuid4())
     with (
@@ -356,7 +357,7 @@ def test_heterogeneous_workplan(
             args.append("--dry-run")
 
         result = runner.invoke(
-            app,
+            app_run_workplan,
             args,
             color=False,
         )
@@ -364,3 +365,49 @@ def test_heterogeneous_workplan(
     assert result.exit_code == 0
     assert run_id in result.stdout
     assert "completed" in result.stdout
+
+
+def test_hw_runner_bp_only(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    prefect_server_url: str,
+) -> None:
+    """Verify that a blueprint containing the sample application is executed
+    correctly by the `cstar blueprint run` command.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary output location for writing the test workplan and outputs from the run.
+    hello_world_bp_path : Path
+        A fixture that stores an HW blueprint and returns the path.
+    prefect_server_url: str
+        Implicitly declare dependence on the prefect server
+    """
+    state_dir = tmp_path / "state"
+    runner = CliRunner()
+    custom_env = {
+        ENV_CSTAR_ORCH_DELAYS: "0.01",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
+        ENV_CSTAR_SLURM_QUEUE: "debug",
+        ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
+        # ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
+    }
+    with (
+        mock.patch.dict(os.environ, custom_env),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=None),
+        ),
+    ):
+        args = [str(hello_world_bp_path)]
+
+        print(f"Executing CliRunner with: {args}")
+        result = runner.invoke(
+            app_run_blueprint,
+            args,
+            color=False,
+        )
+
+        assert result.exit_code == 0
+        assert "Hello," in result.stdout

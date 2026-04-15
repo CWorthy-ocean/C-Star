@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from pytest import CaptureFixture
 
+from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.service import ServiceConfiguration
@@ -87,6 +88,46 @@ async def test_hello_world_runner_execute_xrunner(
     assert result is not None
     # Confirm the success disposition is set
     assert result.status == ExecutionStatus.COMPLETED
+
+    captured = capsys.readouterr()
+    assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()
+
+
+@pytest.mark.asyncio
+async def test_hello_world_runner_execute_runner(
+    capsys: CaptureFixture,
+    hello_world_bp_path: Path,
+    hello_world_default_target: str,
+) -> None:
+    """Verify that a well-formed HW blueprint executes correctly.
+
+    This tests the integration of `BlueprintRunner` and `HelloWorldRunner` classes
+    by triggering the service lifecycle.
+
+    Parameters
+    ----------
+    capsys : CaptureFixture
+        Fixture for capturing stdout and stderr.
+    hello_world_bp_path : Path
+        Path to the hello world blueprint.
+    """
+    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    svc_cfg = ServiceConfiguration()
+    job_cfg = get_job_config()
+
+    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    await runner.execute()
+
+    if not runner.result:
+        raise CstarError("Failed to set result on runner")
+
+    result = runner.result
+
+    assert result is not None
+
+    # Confirm the success disposition is set and no errors are returned
+    assert result.status == ExecutionStatus.COMPLETED
+    assert not result.errors
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()
