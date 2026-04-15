@@ -850,8 +850,9 @@ class TestRomsMarblInputDataGeneration:
         with pytest.raises(NotImplementedError):
             sample_roms_marbl_input_data._generate_corrections()
 
+    @patch('cson_forge.input_data.rt.make_edata')
     @patch('cson_forge.input_data.rt.Grid')
-    def test_generate_grid_with_child(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
+    def test_generate_grid_with_child(self, mock_grid_class, mock_make_edata, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_grid sets nesting_info and extract_data settings when grid_child is present."""
         mock_grid = MagicMock()
         mock_grid.nx = 20
@@ -900,8 +901,9 @@ class TestRomsMarblInputDataGeneration:
             assert extract_data["theta_b_chd"] == mock_child.theta_b
             assert extract_data["hc_chd"] == mock_child.hc
 
+    @patch('cson_forge.input_data.rt.make_edata')
     @patch('cson_forge.input_data.rt.Grid')
-    def test_generate_grid_extract_file_is_basename(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
+    def test_generate_grid_extract_file_is_basename(self, mock_grid_class, mock_make_edata, sample_roms_marbl_input_data, tmp_path):
         """Test that extract_file in compile-time settings is the bare filename, not a full path."""
         mock_grid = MagicMock()
         mock_grid.nx = 20
