@@ -62,7 +62,7 @@ def path_callback(
             reg_bp = Registry(ApplicationRegistry.BLUEPRINT)
             bp_type = reg_bp.get(bp_core.application)
 
-            ctx.obj = deserialize(local_path, bp_type)
+            ctx.obj = bp_type(**bp_core.model_dump())
 
     except FileNotFoundError:
         raise typer.BadParameter(f"Blueprint file not found: {path}")

@@ -11,6 +11,7 @@ from cstar.base.env import (
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd, slugify
 from cstar.entrypoint.worker.hello_app import HelloWorldBlueprint
@@ -193,7 +194,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         else:
             raise ValueError(f"Unknown application: {step.application}")
 
-        bp = deserialize(step.blueprint_path, bp_type)
+        if not step.blueprint:
+            raise CstarError("Step cannot resolve blueprint")
+
+        bp = step.blueprint
         job_dep_ids = [d.pid for d in dependencies]
 
         script_path = step.fsm.work_dir / "script.sh"

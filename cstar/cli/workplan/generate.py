@@ -37,9 +37,11 @@ def _locate_blueprints(search_dir: Path) -> t.Iterable["BPResult"]:
     for file in files:
         try:
             bp_core = deserialize(file, Blueprint)
-            reg_bp = Registry(ApplicationRegistry.BLUEPRINT)
 
-            bp: Blueprint = deserialize(file, reg_bp.get(bp_core.application))
+            reg_bp = Registry(ApplicationRegistry.BLUEPRINT)
+            bp_type = reg_bp.get(bp_core.application)
+            bp = bp_type(**bp_core.model_dump())
+
             valid_blueprints.append((file, bp))
         except Exception:
             print(f"File {file} is not a valid RomsMarblBlueprint")
