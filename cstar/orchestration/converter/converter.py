@@ -4,6 +4,12 @@ import sys
 import textwrap
 import typing as t
 
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_LOG_LEVEL,
+    get_env_item,
+)
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
@@ -61,10 +67,18 @@ def convert_step_to_blueprint_run_command(step: "LiveStep") -> str:
     str
         The complete CLI command.
     """
-    # return f"cstar blueprint run {step.blueprint_path}"
+    cmd_array = [
+        f"CSTAR_LOG_LEVEL={get_env_item(ENV_CSTAR_LOG_LEVEL).value}",
+        "cstar",
+        "blueprint",
+        "run",
+        str(step.blueprint_path),
+    ]
 
-    worker_module = "cstar.entrypoint.worker.hello_app"  # TODO: this isn't generic...
-    return f"{sys.executable} -m {worker_module} -b {step.blueprint_path}"
+    if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
+        cmd_array.append("--clobber")
+
+    return " ".join(cmd_array)
 
 
 def convert_step_to_placeholder(step: "LiveStep") -> str:
