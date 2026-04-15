@@ -342,7 +342,7 @@ def test_heterogeneous_workplan(
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
         ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
-        # ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
+        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
     run_id = str(uuid.uuid4())
     with (
@@ -391,7 +391,7 @@ def test_hw_runner_bp_only(
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
         ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
-        # ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
+        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
     with (
         mock.patch.dict(os.environ, custom_env),
