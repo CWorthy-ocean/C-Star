@@ -184,7 +184,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         if not step.blueprint:
             raise CstarError("Step cannot resolve blueprint")
 
-        bp = step.blueprint
         job_dep_ids = [d.pid for d in dependencies]
 
         script_path = step.fsm.work_dir / "script.sh"
@@ -202,7 +201,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job = create_scheduler_job(
             commands=command,
             account_key=SlurmLauncher.configured_account(),
-            cpus=bp.cpus_needed,
+            cpus=step.blueprint.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
             script_path=script_path,

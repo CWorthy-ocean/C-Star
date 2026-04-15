@@ -17,12 +17,15 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
 )
+from cstar.orchestration.application import ApplicationRegistry
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Blueprint, Step, Workplan
 from cstar.orchestration.serialization import (
+    deserialize,
     intenum_representer,
     register_representer,
 )
+from cstar.system.registration import Registry
 
 nx = lazy_import("networkx")
 
@@ -210,8 +213,6 @@ class LiveStep(Step):
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
-    _bp: Blueprint | None = None
-    """The blueprint loaded from the blueprint path"""
 
     @property
     def get_working_dir(self) -> Path:
@@ -241,18 +242,12 @@ class LiveStep(Step):
         return self._fsm
 
     @property
-    def blueprint(self) -> Blueprint | None:
+    def blueprint(self) -> Blueprint:
         """Load and return the blueprint associated with this step."""
-        if self._bp is None:
-            # may decide to improve reload behavior by tracking file timestep...
-            # - if a step is transformed, the blueprint must be reloaded.
-            # NOTE: must also convert LiveStep to a generic so it knows the type?
-
-            # WARNING: the discriminator includes lots of types ffrom different places
-            # - it's a circular dependency magnet
-            # self._bp = deserialize_discriminated(self.blueprint_path, "application")
-            ...
-        return self._bp
+        bp_core = deserialize(self.blueprint_path, Blueprint)
+        reg_bp = Registry(ApplicationRegistry.BLUEPRINT)
+        bp_type = reg_bp.get(bp_core.application)
+        return t.cast("Blueprint", bp_type(**bp_core.model_dump()))
 
     @property
     def command(self) -> str:
