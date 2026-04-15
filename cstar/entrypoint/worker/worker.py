@@ -62,6 +62,9 @@ class BlueprintRequest:
     Defaults to all stages.
     """
 
+    preprocessors: list[str] = dc.field(default_factory=list)
+    # """The list of preprocessing directives to apply before execution of the blueprint"""
+
 
 @dc.dataclass(frozen=True)
 class JobConfig:
@@ -92,6 +95,7 @@ class SimulationRunner(Service):
     """The execution handler for the simulation."""
     _job_config: Final[JobConfig]
     """Configuration for submitting jobs to an HPC."""
+    _preprocessors: tuple[str, ...]
 
     def __init__(
         self,
@@ -121,6 +125,7 @@ class SimulationRunner(Service):
         self._simulation.name = slugify(self._simulation.name)
         self._output_root = self._simulation.directory.expanduser()
         self._stages = tuple(request.stages)
+        self._preprocessors = tuple(request.preprocessors) or tuple()
 
         roms_root = os.environ.get("ROMS_ROOT", None)
         self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
@@ -160,6 +165,10 @@ class SimulationRunner(Service):
         else:
             self.log.warning(f"Simulation ended with status: {disposition}.")
 
+    # @property
+    # def blueprint(self) -> RomsMarblBlueprint:
+    #     return deserialize(self._blueprint_uri, RomsMarblBlueprint)
+
     @override
     def _on_start(self) -> None:
         """Prepare the simulation for execution.
@@ -170,6 +179,9 @@ class SimulationRunner(Service):
         if self._blueprint_uri is None:
             msg = "No blueprint URI provided"
             raise BlueprintError(msg)
+
+        if self._preprocessors:
+            ...
 
         if self._simulation is None:
             msg = f"Unable to load the blueprint: {self._blueprint_uri}"

@@ -29,6 +29,37 @@ str
 """
 
 
+def convert_step_to_preprocessed_roms_sim(step: "LiveStep") -> str:
+    """Convert a `Step` into a command to be executed.
+
+    This function converts ROMS/ROMS-MARBL applications into a command triggering
+    a C-Star worker to run a simulation.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step to be converted.
+
+    Returns
+    -------
+    str
+        The complete CLI command.
+    """
+    worker_module = "cstar.entrypoint.worker.worker"
+    args = [
+        sys.executable,
+        "-m",
+        worker_module,
+        "-b",
+        step.blueprint_path,
+    ]
+
+    for preprocessor in step.preprocessing:
+        args.extend(preprocessor.as_args())
+
+    return " ".join(str(x).strip() for x in args)
+
+
 def convert_roms_step_to_command(step: "LiveStep") -> str:
     """Convert a `Step` into a command to be executed.
 

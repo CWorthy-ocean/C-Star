@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     is_feature_enabled,
@@ -18,6 +19,7 @@ from cstar.base.utils import (
 )
 from cstar.orchestration.models import (
     Application,
+    ContinueFromRequest,
     RomsMarblBlueprint,
     Workplan,
 )
@@ -502,7 +504,7 @@ class OverrideTransform(Transform):
             step,
             update={
                 "blueprint_overrides": {},
-                "work_dir": updated_bp.runtime_params.output_dir,
+                # "work_dir": updated_bp.runtime_params.output_dir,
             },
         )
 
@@ -537,6 +539,49 @@ def override_output_directory(step: LiveStep) -> LiveStep:
     overridden_step_result = iter(override_transform(step))
 
     return next(overridden_step_result)
+
+
+class ContinuanceTransform(OverrideTransform):
+    """A transform that locates a reset file with an unknown path at the
+    time the task was scheduled.
+    """
+
+    _request: ContinueFromRequest
+    """The request containing details of where to search for the reset file."""
+
+    def __init__(self, request: ContinueFromRequest) -> None:  # type: ignore[assignment]
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        sys_overrides : dict[str, t.Any] | None
+            System-level blueprint overrides that will be applied after
+            the user-supplied values.
+        """
+        self._request = request
+        self._system_overrides = self._create_reset_override(request)
+
+    def _create_reset_override(
+        self,
+        request: ContinueFromRequest,
+    ) -> dict[str, t.Any]:
+        # roms_fs = RomsFileSystemManager(request.source)
+        matches = sorted(request.source.rglob("*_rst*.nc"), reverse=True)
+
+        if not matches:
+            msg = f"No reset files located. Unable to continue from {request.source!r}"
+            raise CstarExpectationFailed(msg)
+
+        match = matches.pop(0).as_posix()
+        return {"initial_conditions": {"data": [{"location": match}]}}
+
+    @t.override
+    @staticmethod
+    def suffix() -> str:
+        """Return the standard prefix to be used when persisting
+        a resource modified by this transform.
+        """
+        return "continuedfrom"
 
 
 register_transform(Application.ROMS_MARBL.value, RomsMarblTimeSplitter())

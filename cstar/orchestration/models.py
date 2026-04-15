@@ -437,6 +437,33 @@ class ComputePlatform(StrEnum):
     """Indicate that execution should take place on Perlmutter."""
 
 
+class ContinueFromRequest(BaseModel):
+    request_key: t.ClassVar[t.Literal["continue_from"]] = "continue_from"
+    """Unique key identifying this request type.
+
+    Used to enable differentiation during deserialization
+    with discriminated unions.
+    """
+
+    # LATEST: t.Literal["latest"] = "latest"
+    SOURCE_ARG: t.ClassVar[t.Literal["--continue-from"]] = "--continue-from"
+
+    source: Path
+    """The name of the step to retrieve restart details from
+    or a path to a directory containing data to search.
+    """
+
+    # filter: str = "latest"
+    # """Filter to identify which restart file to use.
+
+    # Default of _latest_ results in selecting the last restart file.
+    # """
+
+    def as_args(self) -> list[str]:
+        # hardcode to latest for now...
+        return [ContinueFromRequest.SOURCE_ARG, self.source.as_posix()]
+
+
 class Step(BaseModel):
     """An individual unit of execution within a workplan."""
 
@@ -478,6 +505,9 @@ class Step(BaseModel):
         frozen=True,
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
+
+    preprocessing: list[ContinueFromRequest] = Field(default_factory=list)
+    """A collection of pre-processing steps to apply to the blueprint prior to execution."""
 
     @property
     def safe_name(self) -> str:
