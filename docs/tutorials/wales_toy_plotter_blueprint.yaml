@@ -1,0 +1,17 @@
+name: wales_plotter
+description: plot outputs from wales domain
+application: plotter
+state: draft
+
+input_dir: "~/cstar/wales_toy_blueprint/joined_output"
+output_dir: "~/cstar/wales_plotter/plots"
+variables:
+  - "ALK"
+  - "pH_3D"
+time_indices:
+  - "-1"
+s_indices:
+  - 0
+  - "-1"
+grid_file_path: "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc"
+file_glob: "*bgc*.nc"
