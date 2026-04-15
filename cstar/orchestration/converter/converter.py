@@ -111,7 +111,7 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     )
 
     # write it to a script asset
-    script_path = step.fsm.work_dir / "script.sh"
+    script_path = step.fsm.work_dir / "placeholder_script.sh"
     script_path.write_text(script)
 
     return f"sh {script_path}"
