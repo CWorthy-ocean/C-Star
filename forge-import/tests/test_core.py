@@ -310,6 +310,37 @@ class TestCstarSpecBuilderInitialization:
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
                 assert builder.description == "Custom description"
 
+    def test_initialization_prints_planned_netcdf_outputs(
+        self,
+        minimal_cstar_spec_builder_args,
+        mock_model_spec,
+        capsys,
+    ):
+        """Test initialization prints planned NetCDF output list."""
+        mock_model_spec.inputs.model_dump.return_value = {
+            "grid": {"topography_source": "ETOPO5"},
+            "initial_conditions": {"source": {"name": "GLORYS"}},
+            "forcing": {
+                "surface": [{"type": "physics"}, {"type": "bgc"}],
+                "boundary": [{"type": "physics"}],
+                "tidal": [{"source": {"name": "TPXO"}}],
+            },
+        }
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+        stdout = capsys.readouterr().out
+        assert "CstarSpecBuilder: planned NetCDF outputs" in stdout
+        assert "_grid.nc" in stdout
+        assert "_initial_conditions.nc" in stdout
+        assert "_surface-physics.nc" in stdout
+        assert "_surface-bgc.nc" in stdout
+        assert "_boundary-physics.nc" in stdout
+        assert "_tidal.nc" in stdout
+
     def test_validation_end_date_before_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test that validation raises error when end_date is before start_date."""
         minimal_cstar_spec_builder_args["end_date"] = datetime(2012, 1, 1)

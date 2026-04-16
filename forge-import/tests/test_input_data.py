@@ -12,6 +12,7 @@ Tests cover:
 - Edge cases and error handling
 """
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, call
@@ -36,6 +37,27 @@ from cson_forge import source_data
 from cson_forge import config
 from cson_forge.config import DataPaths
 import roms_tools as rt
+
+
+@contextmanager
+def _patch_xarray_open_dataset_for_input_data(mock_ds):
+    """
+    Patch xarray.open_dataset where input_data (and roms_tools) resolve it.
+
+    Tests use empty ``.touch()`` NetCDF paths; real ``open_dataset`` needs a backend
+    (e.g. netCDF4). Patching only ``xarray.open_dataset`` misses ``cson_forge.input_data.xr``
+    after import; patching both avoids IO backend errors.
+    """
+
+    @contextmanager
+    def _fake_open(*args, **kwargs):
+        yield mock_ds
+
+    with (
+        patch("cson_forge.input_data.xr.open_dataset", side_effect=_fake_open),
+        patch("xarray.open_dataset", side_effect=_fake_open),
+    ):
+        yield
 
 
 def _create_mock_paths(tmp_path):
@@ -249,7 +271,7 @@ class TestInputData:
             assert result is True
     
     def test_inputdata_ensure_empty_or_clobber_with_files_no_clobber(self, tmp_path):
-        """Test _ensure_empty_or_clobber when files exist and clobber=False."""
+        """When .nc files exist and clobber=False, allow continuing (reuse mode)."""
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="test_grid",
@@ -258,10 +280,12 @@ class TestInputData:
             )
             
             # Create a dummy .nc file
-            (data.input_data_dir / "test.nc").touch()
+            nc_path = data.input_data_dir / "test.nc"
+            nc_path.touch()
             
             result = data._ensure_empty_or_clobber(clobber=False)
-            assert result is False
+            assert result is True
+            assert nc_path.exists()
     
     def test_inputdata_ensure_empty_or_clobber_with_files_clobber(self, tmp_path):
         """Test _ensure_empty_or_clobber when files exist and clobber=True."""
@@ -723,6 +747,36 @@ class TestRomsMarblInputDataGeneration:
                 # Missing type
             )
         assert "type" in str(exc_info.value).lower()
+
+    @patch('cson_forge.input_data.rt.SurfaceForcing')
+    def test_generate_surface_forcing_reuse_skips_init_uses_from_yaml(
+        self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
+    ):
+        """When NetCDF exists, do not call SurfaceForcing(grid=...); YAML via from_yaml -> to_yaml."""
+        mock_from_yaml = MagicMock()
+        mock_from_yaml.use_coarse_grid = False
+        mock_sf_class.from_yaml.return_value = mock_from_yaml
+
+        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+            sample_roms_marbl_input_data.input_data_dir = (
+                tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+            )
+            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+            nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="surface-physics")
+            nc_path.touch()
+            yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.surface-physics")
+            yaml_path.write_text("---\nSurfaceForcing:\n  type: physics\n")
+
+            sample_roms_marbl_input_data._generate_surface_forcing(
+                key="forcing.surface",
+                source={"name": "ERA5"},
+                type="physics",
+            )
+
+        mock_sf_class.assert_not_called()
+        mock_sf_class.from_yaml.assert_called_once()
+        mock_from_yaml.to_yaml.assert_called_once()
+        assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data) > 0
     
     @patch('cson_forge.input_data.rt.BoundaryForcing')
     def test_generate_boundary_forcing(self, mock_bf_class, sample_roms_marbl_input_data, tmp_path):
@@ -1047,12 +1101,10 @@ class TestRomsMarblInputDataGenerateAll:
         mock_river.return_value = mock_river_instance
         
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
-            # Mock xr.open_dataset to prevent file operations when opening source files
+            mock_ds = xr.Dataset()
             with patch('xarray.combine_by_coords') as mock_combine:
-                with patch('xarray.open_dataset') as mock_open_dataset:
-                    mock_ds = xr.Dataset()  # Create a real empty Dataset
-                    mock_open_dataset.return_value = mock_ds
-                    mock_combine.return_value = mock_ds
+                mock_combine.return_value = mock_ds
+                with _patch_xarray_open_dataset_for_input_data(mock_ds):
                     result = sample_roms_marbl_input_data.generate_all(clobber=True, test=False)
             
             assert result is not None
@@ -1092,15 +1144,109 @@ class TestRomsMarblInputDataGenerateAll:
             # The exact behavior depends on the order of steps
             assert result is not None
     
-    def test_generate_all_no_clobber_with_files(self, sample_roms_marbl_input_data, tmp_path):
-        """Test generate_all returns (None, {}, {}) when files exist and clobber=False."""
+    @patch('cson_forge.input_data.rt.Grid')
+    @patch('cson_forge.input_data.rt.InitialConditions')
+    @patch('cson_forge.input_data.rt.SurfaceForcing')
+    @patch('cson_forge.input_data.rt.BoundaryForcing')
+    @patch('cson_forge.input_data.rt.TidalForcing')
+    @patch('cson_forge.input_data.rt.RiverForcing')
+    def test_generate_all_no_clobber_with_files(
+        self,
+        mock_river,
+        mock_tidal,
+        mock_boundary,
+        mock_surface,
+        mock_ic,
+        mock_grid,
+        sample_roms_marbl_input_data,
+        tmp_path,
+    ):
+        """With pre-existing .nc files and clobber=False, generate_all still runs (reuse path)."""
+        mock_grid_instance = MagicMock()
+
+        def grid_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+            return path
+
+        mock_grid_instance.save.side_effect = grid_save
+        mock_grid_instance.to_yaml = MagicMock()
+        sample_roms_marbl_input_data.grid = mock_grid_instance
+
+        mock_ic_instance = MagicMock()
+
+        def ic_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+            return [path]
+
+        mock_ic_instance.save.side_effect = ic_save
+        mock_ic_instance.to_yaml = MagicMock()
+        mock_ic.return_value = mock_ic_instance
+
+        mock_surface_instance = MagicMock()
+
+        def surface_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+            return path
+
+        mock_surface_instance.save.side_effect = surface_save
+        mock_surface_instance.to_yaml = MagicMock()
+        mock_surface.return_value = mock_surface_instance
+
+        mock_boundary_instance = MagicMock()
+
+        def boundary_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+            return path
+
+        mock_boundary_instance.save.side_effect = boundary_save
+        mock_boundary_instance.to_yaml = MagicMock()
+        mock_boundary.return_value = mock_boundary_instance
+
+        mock_tidal_instance = MagicMock()
+
+        def tidal_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+            return path
+
+        mock_tidal_instance.save.side_effect = tidal_save
+        mock_tidal_instance.to_yaml = MagicMock()
+        mock_tidal.return_value = mock_tidal_instance
+
+        mock_river_instance = MagicMock()
+
+        def river_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+            return path
+
+        mock_river_instance.save.side_effect = river_save
+        mock_river_instance.to_yaml = MagicMock()
+        mock_river_instance.ds = xr.Dataset({
+            "river_volume": (["nriver", "time"], np.random.rand(5, 10)),
+            "river_tracer": (["nriver", "time", "tracer"], np.random.rand(5, 10, 3)),
+        })
+        mock_river.return_value = mock_river_instance
+
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
-            # Create existing files
             (sample_roms_marbl_input_data.input_data_dir / "existing.nc").touch()
-            
-            result = sample_roms_marbl_input_data.generate_all(clobber=False)
-            # When clobber fails, generate_all returns (None, {}, {})
-            assert result == (None, {}, {})
+            mock_ds = xr.Dataset()
+            with patch('xarray.combine_by_coords') as mock_combine:
+                mock_combine.return_value = mock_ds
+                with _patch_xarray_open_dataset_for_input_data(mock_ds):
+                    result = sample_roms_marbl_input_data.generate_all(clobber=False, test=False)
+
+        assert result is not None
+        assert result != (None, {}, {})
+        blueprint_elements, settings_compile_time, settings_run_time = result
+        assert blueprint_elements is not None
+        assert settings_compile_time is not None
+        assert settings_run_time is not None
+        assert (sample_roms_marbl_input_data.input_data_dir / "existing.nc").exists()
     
     @patch('cson_forge.input_data.rt.RiverForcing')
     @patch('cson_forge.input_data.rt.TidalForcing')
