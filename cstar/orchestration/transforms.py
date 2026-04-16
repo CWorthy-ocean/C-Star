@@ -433,7 +433,7 @@ class OverrideTransform(Transform):
 
     _system_overrides: dict[str, t.Any]
 
-    def __init__(self, sys_overrides: dict[str, t.Any] | None = None) -> None:  # type: ignore[assignment]
+    def __init__(self, sys_overrides: dict[str, t.Any] | None = None) -> None:
         """Initialize the instance.
 
         Parameters
@@ -447,7 +447,7 @@ class OverrideTransform(Transform):
     def apply(
         self,
         bp: RomsMarblBlueprint,
-        overrides: dict[str, t.Any] | None = None,  # type: ignore[assignment]
+        overrides: dict[str, t.Any] | None = None,
     ) -> RomsMarblBlueprint:
         """Apply all overrides from a blueprint.
 
@@ -568,7 +568,6 @@ class ContinuanceTransform(OverrideTransform):
         self,
         request: ContinueFromRequest,
     ) -> dict[str, t.Any]:
-        # roms_fs = RomsFileSystemManager(request.source)
         matches = sorted(request.source.rglob("*_rst*.nc"), reverse=True)
 
         if not matches:

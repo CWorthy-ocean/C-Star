@@ -42,8 +42,6 @@ def preprocessable_roms_step(
     ----------
     mock_sim_output_dir: tuple[Path, Path, Path]
         Paths to directories created to mock output of a ROMS simulation.
-    tmp_path : Path
-        Temporary path fixture for writing per-test outputs.
     """
     *_, step_dir, bp_path = mock_sim_output_dir
     joined_dir = step_dir / "joined_output"
@@ -212,8 +210,8 @@ def test_converter_override_capability(
         Temporary path fixture for writing per-test outputs
     target_application: Application
         The application type to locate a mapping for
-    target_application: Application
-        The application type to locate a mapping for
+    overridden_target: Application
+        The application type to use in place of the original target application
     launcher_type: type[Launcher]
         The type of launcher that will consume the command
     """
