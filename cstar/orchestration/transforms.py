@@ -516,8 +516,11 @@ class OverrideTransform(Transform):
 
     @staticmethod
     def suffix() -> str:
-        """Return the standard prefix to be used when persisting
-        a resource modified by this transform.
+        """Return a suffix used when persisting a resource modified by this transform.
+
+        Returns
+        -------
+        str
         """
         return "ovrd"
 
@@ -578,10 +581,13 @@ class ContinuanceTransform(OverrideTransform):
     @t.override
     @staticmethod
     def suffix() -> str:
-        """Return the standard prefix to be used when persisting
-        a resource modified by this transform.
+        """Return a suffix used when persisting a resource modified by this transform.
+
+        Returns
+        -------
+        str
         """
-        return "continuedfrom"
+        return "cfrom"
 
 
 register_transform(Application.ROMS_MARBL.value, RomsMarblTimeSplitter())
