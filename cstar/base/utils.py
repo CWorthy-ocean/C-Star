@@ -344,14 +344,13 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
         The merged dictionaries.
     """
     for k, target in d2.items():
-        source = d1.get(k, None)
+        source = d1.get(k)
 
         if isinstance(source, dict) and isinstance(target, dict):
             d1[k] = deep_merge(source, target)
         elif isinstance(target, dict):
             d1[k] = {**target}
         elif isinstance(source, list) and isinstance(target, list):
-            # d1[k] = copy.deepcopy(target)
             items = []
             for x0, x1 in zip_longest(source, target, fillvalue=None):
                 if x0 is None:
