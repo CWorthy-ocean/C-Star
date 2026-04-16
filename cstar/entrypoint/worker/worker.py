@@ -6,6 +6,7 @@ import logging
 import os
 import pathlib
 import sys
+from collections.abc import Generator
 from datetime import datetime, timezone
 from typing import Final, override
 
@@ -15,6 +16,9 @@ from cstar.base.log import get_logger, parse_log_level_name
 from cstar.base.utils import slugify
 from cstar.entrypoint.service import Service, ServiceConfiguration
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.models import ContinueFromRequest
+from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.transforms import ContinuanceTransform, Transform
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -61,9 +65,14 @@ class BlueprintRequest:
 
     Defaults to all stages.
     """
+    continue_from: str | None = None
 
-    preprocessors: list[str] = dc.field(default_factory=list)
-    # """The list of preprocessing directives to apply before execution of the blueprint"""
+
+def create_preprocessors(request: BlueprintRequest) -> Generator[Transform, None, None]:
+    """Create all preprocessors specified in the request starting the worker."""
+    if request.continue_from:
+        path = pathlib.Path(request.continue_from)
+        yield ContinuanceTransform(ContinueFromRequest(source=path))
 
 
 @dc.dataclass(frozen=True)
@@ -95,7 +104,7 @@ class SimulationRunner(Service):
     """The execution handler for the simulation."""
     _job_config: Final[JobConfig]
     """Configuration for submitting jobs to an HPC."""
-    _preprocessors: tuple[str, ...]
+    _preprocessors: tuple[Transform, ...]
 
     def __init__(
         self,
@@ -119,18 +128,37 @@ class SimulationRunner(Service):
         """
         super().__init__(service_cfg)
 
-        self._blueprint_uri = request.blueprint_uri
+        self._preprocessors = tuple(list(create_preprocessors(request)))
+        self._blueprint_uri = self._apply_preprocessors()
 
         self._simulation = ROMSSimulation.from_blueprint(self._blueprint_uri)
         self._simulation.name = slugify(self._simulation.name)
         self._output_root = self._simulation.directory.expanduser()
         self._stages = tuple(request.stages)
-        self._preprocessors = tuple(request.preprocessors) or tuple()
 
         roms_root = os.environ.get("ROMS_ROOT", None)
         self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
         self._handler = None
         self._job_config = job_cfg
+
+    def _apply_preprocessors(self) -> str:
+        """Apply all preprocessing transforms to the blueprint and
+        return the path to the final, transformed blueprint.
+
+        Returns
+        -------
+        str
+        """
+        if self._preprocessors:
+            step = LiveStep(
+                name="step", application="roms_marbl", blueprint=self._blueprint_uri
+            )
+            for transform in self._preprocessors:
+                step, _ = transform(step)
+
+            return str(step.blueprint_path)
+
+        return self._blueprint_uri
 
     @staticmethod
     def _get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
@@ -165,10 +193,6 @@ class SimulationRunner(Service):
         else:
             self.log.warning(f"Simulation ended with status: {disposition}.")
 
-    # @property
-    # def blueprint(self) -> RomsMarblBlueprint:
-    #     return deserialize(self._blueprint_uri, RomsMarblBlueprint)
-
     @override
     def _on_start(self) -> None:
         """Prepare the simulation for execution.
@@ -179,9 +203,6 @@ class SimulationRunner(Service):
         if self._blueprint_uri is None:
             msg = "No blueprint URI provided"
             raise BlueprintError(msg)
-
-        if self._preprocessors:
-            ...
 
         if self._simulation is None:
             msg = f"Unable to load the blueprint: {self._blueprint_uri}"
@@ -496,6 +517,10 @@ def main() -> int:
     """
     try:
         parser = create_parser()
+
+        # TODO: add a function to add all pre-processor args to the parser
+        parser.add_argument("--continue-from", type=str, default="")
+
         args = parser.parse_args()
     except SystemExit:
         return 1
