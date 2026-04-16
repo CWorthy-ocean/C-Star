@@ -7,7 +7,7 @@ import os
 import pathlib
 import sys
 from datetime import datetime, timezone
-from typing import Final, override
+from typing import Final, Literal, override
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
@@ -26,6 +26,15 @@ DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
 JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
 LOGS_DIRECTORY: Final[str] = "logs"
+
+ARG_URI_LONG: Literal["--blueprint-uri"] = "--blueprint-uri"
+ARG_URI_SHORT: Literal["-b"] = "-b"
+
+ARG_LOGLEVEL_LONG: Literal["--log-level"] = "--log-level"
+ARG_LOGLEVEL_SHORT: Literal["-l"] = "-l"
+
+ARG_STAGE_LONG: Literal["--stage"] = "--stage"
+ARG_STAGE_SHORT: Literal["-g"] = "-g"
 
 
 def _generate_job_name() -> str:
@@ -316,15 +325,15 @@ def create_parser() -> argparse.ArgumentParser:
         exit_on_error=True,
     )
     parser.add_argument(
-        "-b",
-        "--blueprint-uri",
+        ARG_URI_SHORT,
+        ARG_URI_LONG,
         type=str,
         required=True,
         help="The URI of a blueprint.",
     )
     parser.add_argument(
-        "-l",
-        "--log-level",
+        ARG_LOGLEVEL_SHORT,
+        ARG_LOGLEVEL_LONG,
         default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
         type=str,
         required=False,
@@ -340,8 +349,8 @@ def create_parser() -> argparse.ArgumentParser:
         ],
     )
     parser.add_argument(
-        "-g",
-        "--stage",
+        ARG_STAGE_SHORT,
+        ARG_STAGE_LONG,
         choices=[x.value for x in SimulationStages],
         type=str,
         required=False,
