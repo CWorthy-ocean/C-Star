@@ -51,7 +51,7 @@ def convert_step_to_preprocessed_roms_sim(step: "LiveStep") -> str:
         "-m",
         worker_module,
         "-b",
-        step.blueprint_path,
+        str(step.blueprint_path),
     ]
 
     for preprocessor in step.preprocessing:
