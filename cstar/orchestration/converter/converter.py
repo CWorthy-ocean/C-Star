@@ -6,6 +6,7 @@ import typing as t
 from collections import defaultdict
 
 from cstar.base.log import get_logger
+from cstar.entrypoint.worker.worker import URI_ARG_LONG
 from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
@@ -50,7 +51,7 @@ def convert_step_to_preprocessed_roms_sim(step: "LiveStep") -> str:
         sys.executable,
         "-m",
         worker_module,
-        "-b",
+        URI_ARG_LONG,
         str(step.blueprint_path),
     ]
 
@@ -77,7 +78,7 @@ def convert_roms_step_to_command(step: "LiveStep") -> str:
         The complete CLI command.
     """
     worker_module = "cstar.entrypoint.worker.worker"
-    return f"{sys.executable} -m {worker_module}  -b {step.blueprint_path}"
+    return f"{sys.executable} -m {worker_module} {URI_ARG_LONG} {step.blueprint_path}"
 
 
 def convert_step_to_placeholder(step: "LiveStep") -> str:
