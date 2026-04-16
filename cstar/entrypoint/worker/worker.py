@@ -128,8 +128,8 @@ class SimulationRunner(Service):
         """
         super().__init__(service_cfg)
 
-        self._preprocessors = tuple(list(create_preprocessors(request)))
-        self._blueprint_uri = self._apply_preprocessors()
+        self._preprocessors = tuple(create_preprocessors(request))
+        self._blueprint_uri = self._apply_preprocessors(request.blueprint_uri)
 
         self._simulation = ROMSSimulation.from_blueprint(self._blueprint_uri)
         self._simulation.name = slugify(self._simulation.name)
@@ -141,9 +141,14 @@ class SimulationRunner(Service):
         self._handler = None
         self._job_config = job_cfg
 
-    def _apply_preprocessors(self) -> str:
+    def _apply_preprocessors(self, blueprint_uri: str) -> str:
         """Apply all preprocessing transforms to the blueprint and
         return the path to the final, transformed blueprint.
+
+        Parameters
+        ----------
+        blueprint_uri : str
+            The user-supplied blueprint URI specifying the blueprint to preprocess.
 
         Returns
         -------
@@ -151,14 +156,16 @@ class SimulationRunner(Service):
         """
         if self._preprocessors:
             step = LiveStep(
-                name="step", application="roms_marbl", blueprint=self._blueprint_uri
+                name="step",
+                application="roms_marbl",
+                blueprint=blueprint_uri,
             )
             for transform in self._preprocessors:
                 step, _ = transform(step)
 
             return str(step.blueprint_path)
 
-        return self._blueprint_uri
+        return blueprint_uri
 
     @staticmethod
     def _get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
