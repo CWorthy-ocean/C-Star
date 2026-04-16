@@ -174,8 +174,8 @@ def test_converter_override_capability(
         Temporary path fixture for writing per-test outputs
     target_application: Application
         The application type to locate a mapping for
-    target_application: Application
-        The application type to locate a mapping for
+    overridden_target: Application
+        The application type to use in place of the original target application
     launcher_type: type[Launcher]
         The type of launcher that will consume the command
     """

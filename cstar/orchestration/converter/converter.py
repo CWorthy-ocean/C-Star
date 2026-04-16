@@ -69,12 +69,14 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
         step.fsm.work_dir.mkdir(parents=True)
 
     sleep_time = random.random()
-    script = textwrap.dedent(f"""\
+    script = textwrap.dedent(
+        f"""\
         # this is a mock application script that produces verifiable output
         echo "{step.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
         sleep {sleep_time};
         echo "{step.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
-        """)
+        """
+    )
 
     # write it to a script asset
     script_path = step.fsm.work_dir / "script.sh"
