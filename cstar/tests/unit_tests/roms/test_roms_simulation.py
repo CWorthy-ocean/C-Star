@@ -1859,7 +1859,11 @@ class TestProcessingAndExecution:
         assert (new_out_dir / "ocean_rst.20240101000000.nc").exists()
         assert (new_out_dir / "child_bry.20240101000000.nc").exists()
 
-        mock_persist.assert_called_once()
+        # assert all non-rst partitioned files got cleaned up
+        assert not (output_dir / "ocean_his.20240101000000.001.nc").exists()
+        assert not (output_dir / "ocean_his.20240101000000.002.nc").exists()
+        assert not (output_dir / "ocean_ext.20240101000000.001.nc").exists()
+        assert (output_dir / "ocean_rst.20240101000000.001.nc").exists()
 
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
