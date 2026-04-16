@@ -1,5 +1,3 @@
-# ruff: noqa: S101
-
 import json
 import textwrap
 import typing as t
@@ -7,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from cstar.base.utils import additional_files_dir
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
 
 
@@ -23,52 +20,6 @@ def fake_blueprint_path(tmp_path: Path) -> Path:
     path = tmp_path / "blueprint.yml"
     path.touch()
     return path
-
-
-@pytest.fixture
-def templates_dir() -> Path:
-    """Return the path to the templates directory contained in the package
-    "additional files."
-
-    Returns
-    -------
-    Path
-    """
-    return additional_files_dir() / "templates"
-
-
-@pytest.fixture
-def wp_templates_dir(templates_dir: Path) -> Path:
-    """Return the path to the `Workplan` templates directory contained in the package
-    "additional files."
-
-    Parameters
-    ----------
-    templates_dir : Path
-        Fixture returning the path to the templates root directory.
-
-    Returns
-    -------
-    Path
-    """
-    return templates_dir / "wp"
-
-
-@pytest.fixture
-def bp_templates_dir(templates_dir: Path) -> Path:
-    """Return the path to the `Blueprint` templates directory contained in the package
-    "additional files."
-
-    Parameters
-    ----------
-    templates_dir : Path
-        Fixture returning the path to the templates root directory.
-
-    Returns
-    -------
-    Path
-    """
-    return templates_dir / "bp"
 
 
 @pytest.fixture

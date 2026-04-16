@@ -19,6 +19,7 @@ from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import get_logger
+from cstar.base.utils import additional_files_dir
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
 from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector
@@ -1807,3 +1808,49 @@ def prefect_server_url(prefect_server: str) -> Generator[str, None, None]:
     """Configure the Prefect API URL for the duration of the tests."""
     os.environ["PREFECT_API_URL"] = prefect_server
     yield prefect_server
+
+
+@pytest.fixture
+def templates_dir() -> Path:
+    """Return the path to the templates directory contained in the package
+    "additional files."
+
+    Returns
+    -------
+    Path
+    """
+    return additional_files_dir() / "templates"
+
+
+@pytest.fixture
+def wp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Workplan` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "wp"
+
+
+@pytest.fixture
+def bp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Blueprint` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "bp"
