@@ -531,15 +531,9 @@ def main() -> int:
     int
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
-    try:
-        parser = create_parser()
+    parser = create_parser()
 
-        # TODO: add a function to add all pre-processor args to the parser
-        parser.add_argument("--continue-from", type=str, default="")
-
-        args = parser.parse_args()
-    except SystemExit:
-        return 1
+    args = parser.parse_args()
 
     job_cfg = get_job_config()
     service_cfg = get_service_config(args.log_level)
