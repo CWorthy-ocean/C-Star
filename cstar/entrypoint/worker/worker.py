@@ -31,16 +31,14 @@ WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
 JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
 LOGS_DIRECTORY: Final[str] = "logs"
 
+ARG_URI_LONG: Literal["--blueprint-uri"] = "--blueprint-uri"
+ARG_URI_SHORT: Literal["-b"] = "-b"
 
-URI_ARG_LONG: Literal["--blueprint-uri"] = "--blueprint-uri"
-URI_ARG_SHORT: Literal["-b"] = "-b"
+ARG_LOGLEVEL_LONG: Literal["--log-level"] = "--log-level"
+ARG_LOGLEVEL_SHORT: Literal["-l"] = "-l"
 
-LOGLEVEL_ARG_LONG: Literal["--log-level"] = "--log-level"
-LOGLEVEL_ARG_SHORT: Literal["-l"] = "-l"
-
-
-STAGE_ARG_LONG: Literal["--stage"] = "--stage"
-STAGE_ARG_SHORT: Literal["-g"] = "-g"
+ARG_STAGE_LONG: Literal["--stage"] = "--stage"
+ARG_STAGE_SHORT: Literal["-g"] = "-g"
 
 
 def _generate_job_name() -> str:
@@ -369,15 +367,15 @@ def create_parser() -> argparse.ArgumentParser:
         exit_on_error=True,
     )
     parser.add_argument(
-        URI_ARG_SHORT,
-        URI_ARG_LONG,
+        ARG_URI_SHORT,
+        ARG_URI_LONG,
         type=str,
         required=True,
         help="The URI of a blueprint.",
     )
     parser.add_argument(
-        LOGLEVEL_ARG_SHORT,
-        LOGLEVEL_ARG_LONG,
+        ARG_LOGLEVEL_SHORT,
+        ARG_LOGLEVEL_LONG,
         default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
         type=str,
         required=False,
@@ -393,8 +391,8 @@ def create_parser() -> argparse.ArgumentParser:
         ],
     )
     parser.add_argument(
-        STAGE_ARG_SHORT,
-        STAGE_ARG_LONG,
+        ARG_STAGE_SHORT,
+        ARG_STAGE_LONG,
         choices=[x.value for x in SimulationStages],
         type=str,
         required=False,
