@@ -6,7 +6,7 @@ import logging
 import os
 import pathlib
 import sys
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from datetime import datetime, timezone
 from typing import Final, override
 
@@ -65,14 +65,44 @@ class BlueprintRequest:
 
     Defaults to all stages.
     """
-    continue_from: str | None = None
 
 
-def create_preprocessors(request: BlueprintRequest) -> Generator[Transform, None, None]:
+def create_preprocessors(
+    continue_from: str | pathlib.Path | None,
+) -> Generator[Transform, None, None]:
     """Create all preprocessors specified in the request starting the worker."""
-    if request.continue_from:
-        path = pathlib.Path(request.continue_from)
+    if continue_from:
+        path = pathlib.Path(continue_from)
         yield ContinuanceTransform(ContinueFromRequest(source=path))
+
+
+def apply_preprocessors(
+    preprocessors: Iterable[Transform],
+    blueprint_uri: str,
+) -> str:
+    """Apply all preprocessing transforms to the blueprint and
+    return the path to the final, transformed blueprint.
+
+    Parameters
+    ----------
+    blueprint_uri : str
+        The user-supplied blueprint URI specifying the blueprint to preprocess.
+
+    Returns
+    -------
+    str
+    """
+    if preprocessors:
+        step = LiveStep(name="step", application="roms_marbl", blueprint=blueprint_uri)
+        for transform in preprocessors:
+            transformed_steps = list(transform(step))
+            step = transformed_steps[
+                0
+            ]  # preprocessors should only return a single item...
+
+        return str(step.blueprint_path)
+
+    return blueprint_uri
 
 
 @dc.dataclass(frozen=True)
@@ -104,7 +134,6 @@ class SimulationRunner(Service):
     """The execution handler for the simulation."""
     _job_config: Final[JobConfig]
     """Configuration for submitting jobs to an HPC."""
-    _preprocessors: tuple[Transform, ...]
 
     def __init__(
         self,
@@ -128,8 +157,7 @@ class SimulationRunner(Service):
         """
         super().__init__(service_cfg)
 
-        self._preprocessors = tuple(create_preprocessors(request))
-        self._blueprint_uri = self._apply_preprocessors(request.blueprint_uri)
+        self._blueprint_uri = request.blueprint_uri
 
         self._simulation = ROMSSimulation.from_blueprint(self._blueprint_uri)
         self._simulation.name = slugify(self._simulation.name)
@@ -140,32 +168,6 @@ class SimulationRunner(Service):
         self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
         self._handler = None
         self._job_config = job_cfg
-
-    def _apply_preprocessors(self, blueprint_uri: str) -> str:
-        """Apply all preprocessing transforms to the blueprint and
-        return the path to the final, transformed blueprint.
-
-        Parameters
-        ----------
-        blueprint_uri : str
-            The user-supplied blueprint URI specifying the blueprint to preprocess.
-
-        Returns
-        -------
-        str
-        """
-        if self._preprocessors:
-            step = LiveStep(
-                name="step",
-                application="roms_marbl",
-                blueprint=blueprint_uri,
-            )
-            for transform in self._preprocessors:
-                step, _ = transform(step)
-
-            return str(step.blueprint_path)
-
-        return blueprint_uri
 
     @staticmethod
     def _get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
@@ -389,6 +391,13 @@ def create_parser() -> argparse.ArgumentParser:
         dest="stages",
         help=("Simulation stages to execute."),
     )
+    parser.add_argument(
+        "--continue-from",
+        default="",
+        type=str,
+        required=False,
+        help="Path to a directory containing restart files",
+    )
     return parser
 
 
@@ -534,7 +543,12 @@ def main() -> int:
 
     job_cfg = get_job_config()
     service_cfg = get_service_config(args.log_level)
-    request = get_request(args.blueprint_uri, args.stages)
+
+    blueprint_uri = args.blueprint_uri
+    if preprocessors := tuple(create_preprocessors(args.continue_from)):
+        blueprint_uri = apply_preprocessors(preprocessors, blueprint_uri)
+
+    request = get_request(blueprint_uri, args.stages)
 
     return asyncio.run(execute_runner(job_cfg, service_cfg, request))
 
