@@ -1,3 +1,4 @@
+import copy
 import datetime as dt
 import functools
 import hashlib
@@ -6,6 +7,7 @@ import re
 import subprocess
 import sys
 import typing as t
+from itertools import zip_longest
 from pathlib import Path
 from types import ModuleType
 
@@ -341,19 +343,29 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
     dict[str, t.Any]
         The merged dictionaries.
     """
-    for k, v in d2.items():
-        if isinstance(v, dict):
-            d1[k] = deep_merge(d1.get(k, {}), v)
-        elif isinstance(v, list):
-            list_items = []
-            for i, item in enumerate(v):
-                if isinstance(item, dict):
-                    list_items.append(deep_merge(d1.get(k, {})[i], item))
+    for k, target in d2.items():
+        source = d1.get(k)
+
+        if isinstance(source, dict) and isinstance(target, dict):
+            d1[k] = deep_merge(source, target)
+        elif isinstance(target, dict):
+            d1[k] = {**target}
+        elif isinstance(source, list) and isinstance(target, list):
+            items = []
+            for x0, x1 in zip_longest(source, target, fillvalue=None):
+                if x0 is None:
+                    items.append(copy.deepcopy(x1))
+                elif x1 is None:
+                    items.append(copy.deepcopy(x0))
+                elif isinstance(x0, dict) and isinstance(x1, dict):
+                    items.append(deep_merge(x0, x1))
                 else:
-                    list_items.append(item)
-            d1[k] = list_items
+                    items.append(copy.deepcopy(x1))
+            d1[k] = items
+        elif isinstance(target, list):
+            d1[k] = copy.deepcopy(target)
         else:
-            d1[k] = v
+            d1[k] = target
     return d1
 
 

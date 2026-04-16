@@ -7,6 +7,7 @@ from cstar.base.utils import (
     _get_sha256_hash,
     _list_to_concise_str,
     _replace_text_in_file,
+    deep_merge,
 )
 
 
@@ -266,3 +267,101 @@ class TestDictToTree:
             "        └── leaf6\n"
         )
         assert result == expected_output
+
+
+@pytest.mark.parametrize(
+    ("original", "to_merge", "expected"),
+    [
+        pytest.param(
+            {},
+            {"a": 10},
+            {"a": 10},
+            id="no overlap, scalar",
+        ),
+        pytest.param(
+            {"a": 0},
+            {"a": 10},
+            {"a": 10},
+            id="overlap, scalar",
+        ),
+        pytest.param(
+            {"a": [1]},
+            {"a": [1, 2, 3]},
+            {"a": [1, 2, 3]},
+            id="overlap, scalar list to same",
+        ),
+        pytest.param(
+            {"a": 0},
+            {"a": [1, 2, 3]},
+            {"a": [1, 2, 3]},
+            id="overlap, scalar list over scalar",
+        ),
+        pytest.param(
+            {"a": 0, "b": {"x": 9}},
+            {"c": 4},
+            {"a": 0, "b": {"x": 9}, "c": 4},
+            id="value from update and source",
+        ),
+        pytest.param(
+            {"a": [9, 8, 7]},
+            {"a": [1, 2, 3]},
+            {"a": [1, 2, 3]},
+            id="list replacement",
+        ),
+        pytest.param(
+            {"a": 0},
+            {"b": {"c": 1}},
+            {"a": 0, "b": {"c": 1}},
+            id="copy dict from update",
+        ),
+        pytest.param(
+            {"a": {"d": 2}},
+            {"b": {"c": 1}},
+            {"a": {"d": 2}, "b": {"c": 1}},
+            id="copy dict from source and update",
+        ),
+        pytest.param(
+            {"a": {"b": 0}},
+            {"a": {"b": {"c": 1}}},
+            {"a": {"b": {"c": 1}}},
+            id="copy nested dict over scalar",
+        ),
+        pytest.param(
+            {"a": {"b": {"a": 0}}},
+            {"a": {"b": {"c": 1}}},
+            {"a": {"b": {"a": 0, "c": 1}}},
+            id="merge nested dict",
+        ),
+        pytest.param(
+            {"a": {"b": [9, 8, 7]}},
+            {"a": {"b": 1}},
+            {"a": {"b": 1}},
+            id="overwrite list with dict",
+        ),
+        pytest.param(
+            {"a": {"b": {"c": 9}}},
+            {"a": {"b": [1, 2, 3]}},
+            {"a": {"b": [1, 2, 3]}},
+            id="overwrite dict with list",
+        ),
+        pytest.param(
+            {"a": {"b": {"c": 9}}},
+            {"a": {"b": 1}},
+            {"a": {"b": 1}},
+            id="overwrite nested dict with scalar",
+        ),
+        pytest.param(
+            {"a": {"b": {"c": 1, "d": 2}}},
+            {"a": {"b": {"d": 3}}},
+            {"a": {"b": {"c": 1, "d": 3}}},
+            id="nested key interleave",
+        ),
+    ],
+)
+def test_deep_merge(
+    original: dict[str, str],
+    to_merge: dict[str, str],
+    expected: dict[str, str],
+) -> None:
+    actual = deep_merge(original, to_merge)
+    assert actual == expected
