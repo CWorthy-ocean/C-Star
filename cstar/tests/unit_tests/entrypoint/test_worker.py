@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import sys
+import typing as t
 from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
@@ -24,7 +25,11 @@ from cstar.entrypoint.worker.worker import (
     get_service_config,
     main,
 )
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.transforms import ContinuanceTransform
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -1168,3 +1173,50 @@ def test_worker_main_cstar_error(
         return_code = main()
 
     assert return_code > 0
+
+
+def test_worker_main_preprocessor_args_parsed(
+    mock_sim_output_dir: tuple[Path, Path, Path],
+) -> None:
+    """Verify that the worker parses preprocessor arguments and they are supplied
+    to the runner.
+
+    Parameters
+    ----------
+    mock_sim_output_dir : tuple[Path, Path, Path]
+        Creates files/directories mimicking output of a prior simulation run.
+    """
+    *_, step_dir, bp_path = mock_sim_output_dir
+
+    reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
+
+    args = [
+        "cstar.entrypoint.worker.worker",
+        "--blueprint-uri",
+        str(bp_path),
+        "--continue-from",
+        str(reset_dir),
+    ]
+
+    with (
+        mock.patch(
+            "cstar.entrypoint.worker.worker.execute_runner",
+            mock.AsyncMock(),
+        ) as mock_exec_runner,
+        mock.patch.object(sys, "argv", args),
+    ):
+        _ = main()
+
+    mock_exec_runner.assert_called_once()
+
+    *_, req = mock_exec_runner.mock_calls[0].args
+
+    request = t.cast("BlueprintRequest", req)
+
+    # verify the blueprint uri was modified by preprocessing prior to invocation
+    assert request.blueprint_uri != str(bp_path)
+    assert ContinuanceTransform.suffix() in request.blueprint_uri
+
+    # verify initial conditions now point to the --continue-from location
+    blueprint = deserialize(request.blueprint_uri, RomsMarblBlueprint)
+    assert str(reset_dir) in str(blueprint.initial_conditions.data[0].location)

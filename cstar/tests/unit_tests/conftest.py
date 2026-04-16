@@ -20,6 +20,7 @@ from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import get_logger
 from cstar.base.utils import additional_files_dir
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
 from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector
@@ -1854,3 +1855,64 @@ def bp_templates_dir(templates_dir: Path) -> Path:
     Path
     """
     return templates_dir / "bp"
+
+
+@pytest.fixture
+def mock_sim_output_dir(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> tuple[Path, Path, Path]:
+    """This fixture creates a directory structure mocking a completed simulation.
+
+    It includes directoriess matching the expected convention for:
+    - work
+    - logs
+    - output
+    - joined output
+    - etc.
+
+    > See RomsFileSystemManager for the more information.
+
+    It includes mocked files for:
+    - a blueprint (yaml) file
+    - reset files matching glob pattern `*_rst*.nc`
+
+    Returns
+    -------
+    tuple[Path, Path, Path]
+        The tuple contains:
+        - mock user data directory (e.g. a fake "source" where user information can originate)
+        - step working directory
+        - blueprint path (path to a blueprint in user data directory)
+    """
+    info_msg = f"This file was created by the {__name__} fixture\n"
+
+    container_dir = tmp_path / "mock_sim_output_dir"
+    user_data_dir = container_dir / "userdata"
+    user_data_dir.mkdir(parents=True, exist_ok=True)
+
+    tpl_path = bp_templates_dir / "blueprint.yaml"
+    tpl_content = tpl_path.read_text()
+
+    bp_path = user_data_dir / "blueprint.yaml"
+    bp_path.write_text(tpl_content)
+
+    step_dir = container_dir / "step"
+    fsm = RomsFileSystemManager(step_dir)
+    fsm.prepare()
+
+    log_path = fsm.logs_dir / "cstar.out"
+    log_path.write_text(info_msg)
+    log_path.write_text("Simulation completed successfully\n")
+
+    joined_dir = fsm.joined_output_dir
+
+    reset_files = [
+        joined_dir / "output_rst.0.nc",
+        joined_dir / "output_rst.1.nc",
+        joined_dir / "output_rst.2.nc",
+    ]
+    for file in reset_files:
+        file.write_text(info_msg)
+
+    return user_data_dir, step_dir, bp_path

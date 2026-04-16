@@ -34,39 +34,19 @@ def custom_map_function(step: Step) -> str:
 
 @pytest.fixture
 def preprocessable_roms_step(
-    bp_templates_dir: Path,
-    tmp_path: Path,
+    mock_sim_output_dir: tuple[Path, Path, Path],
 ) -> LiveStep:
     """Create a valid step with an underlying RomsMarblBlueprint.
 
     Parameters
     ----------
-    bp_templates_dir: Path,
-        Directory containing blueprint templates. Used to create a valid blueprint
-        the preprocessor will read in.
+    mock_sim_output_dir: tuple[Path, Path, Path]
+        Paths to directories created to mock output of a ROMS simulation.
     tmp_path : Path
         Temporary path fixture for writing per-test outputs.
     """
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_path.touch()
-
-    tpl_path = bp_templates_dir / "blueprint.yaml"
-    tpl_content = tpl_path.read_text()
-    bp_path.write_text(tpl_content)
-
-    step_dir = tmp_path / "unit-test-work-dir"
-    fs_mgr = RomsFileSystemManager(step_dir)
-
-    # create some fake reset files
-    joined_dir = fs_mgr.joined_output_dir
-    joined_dir.mkdir(parents=True)
-    reset_files = [
-        joined_dir / "preprocessable_roms_step_rst.0.nc",
-        joined_dir / "preprocessable_roms_step_rst.1.nc",
-        joined_dir / "preprocessable_roms_step_rst.2.nc",
-    ]
-    for file in reset_files:
-        file.touch()
+    *_, step_dir, bp_path = mock_sim_output_dir
+    joined_dir = step_dir / "joined_output"
 
     return LiveStep(
         name="test step",
@@ -301,12 +281,25 @@ def test_convert_step_to_preprocessed_roms_sim_no_reset_files(
 def test_continuance_transform(
     preprocessable_roms_step: LiveStep,
 ) -> None:
+    """Verify that the `ContinuanceTransform` materially modifies blueprint content
+    to include a path to an initial conditions file located in the directory
+    configured on the `ContinueFromRequest`.
+
+    Parameters
+    ----------
+    preprocessable_roms_step: LiveStep
+        A `LiveStep` preconfigured with a continue-from preprocessing directive.
+    """
     step = preprocessable_roms_step
     assert not step.blueprint_overrides, "Empty overrides expected"
     assert step.work_dir, "Ensure fixture sets workdir"
 
     bp_path_before = step.blueprint_path
     fsm = RomsFileSystemManager(step.work_dir)
+
+    original_bp = deserialize(bp_path_before, RomsMarblBlueprint)
+    assert original_bp.initial_conditions.data, "data list is unexpectedly empty"
+    original_ic = original_bp.initial_conditions.data[0].location
 
     request = ContinueFromRequest(source=fsm.joined_output_dir)
     trx = ContinuanceTransform(request)
@@ -317,13 +310,19 @@ def test_continuance_transform(
     # confirm overrides aren empty after the transformation is applied
     assert not transformed_step.blueprint_overrides
 
-    # confirm the step is transformed
+    # confirm the blueprint path is changed
     bp_path_after = transformed_step.blueprint_path
     assert bp_path_after != bp_path_before, "New step must reference a new blueprint"
+
+    # confirm the path includes a suffix specified by the transform
+    assert ContinuanceTransform.suffix() in str(bp_path_after)
 
     bp = deserialize(bp_path_after, RomsMarblBlueprint)
     assert bp.initial_conditions.data, "data list is unexpectedly empty"
 
     # confirm the location has been swapped to match the fixture
-    d0 = bp.initial_conditions.data[0]
-    assert "preprocessable_roms_step" in str(d0.location)
+    transformed_ic = Path(str(bp.initial_conditions.data[0].location))
+    assert str(original_ic) != str(transformed_ic)
+
+    # confirm the path has been expanded and resolved
+    assert transformed_ic.expanduser().resolve() == transformed_ic
