@@ -1768,29 +1768,33 @@ class ROMSSimulation(Simulation):
 
         output_dir = self.fs_manager.output_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
-        unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
-        else:
-            self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
+            self.persist()
+            return
 
-            def _spatial_join(wildcard_pattern: str) -> None:
-                fn = (
-                    _extract_data_join_wildcard
-                    if "ext" in wildcard_pattern
-                    else _ncjoin_wildcard
-                )
-                fn(
-                    wildcard_pattern,
-                    input_dir=self.fs_manager.output_dir,
-                    output_dir=self.fs_manager.joined_output_dir,
-                    logger=self.log,
-                )
+        self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
 
-            nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
-            with ThreadPoolExecutor(max_workers=nprocs) as executor:
-                results = executor.map(_spatial_join, unique_wildcards)
-                _ = [r for r in results]  # exhaust iterator
+        def _spatial_join(wildcard_pattern: str) -> None:
+            """Choose and execute correct joining function for the file type."""
+            joiner = (
+                _extract_data_join_wildcard
+                if "ext" in wildcard_pattern
+                else _ncjoin_wildcard
+            )
+            joiner(
+                wildcard_pattern,
+                input_dir=self.fs_manager.output_dir,
+                output_dir=self.fs_manager.joined_output_dir,
+                logger=self.log,
+            )
+
+        nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
+        unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
+
+        with ThreadPoolExecutor(max_workers=nprocs) as executor:
+            results = executor.map(_spatial_join, unique_wildcards)
+            _ = [r for r in results]  # exhaust iterator
 
         self.persist()
 
