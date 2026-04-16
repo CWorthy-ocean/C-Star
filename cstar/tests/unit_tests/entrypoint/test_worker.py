@@ -1074,16 +1074,10 @@ def test_worker_main(tmp_path: Path, sim_runner: SimulationRunner) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     args = [
-        "--blueprint-uri",
+        "cstar.entrypoint.worker.worker",
         str(bp_path),
-        "--output-dir",
-        str(output_dir),
         "--log-level",
         "DEBUG",
-        "--start-date",
-        "2024-01-01 00:00:00",
-        "--end-date",
-        "2024-02-01 00:00:00",
     ]
 
     with mock.patch.dict(os.environ, {}), mock.patch.object(sys, "argv", args):
