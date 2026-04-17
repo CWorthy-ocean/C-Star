@@ -279,7 +279,6 @@ class LiveStep(Step):
             A mapping of updates to apply to the step
         """
         step_attrs = step.model_dump(by_alias=True)
-        # _bp = blueprint
 
         if update:
             step_attrs.update(update)
