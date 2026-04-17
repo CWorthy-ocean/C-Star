@@ -10,13 +10,17 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_NPROCS_POST,
     ENV_CSTAR_STATE_HOME,
+    FLAG_OFF,
+    FLAG_ON,
     get_env_item,
     hpc_data_directory,
 )
+from cstar.base.feature import is_flag_enabled
 from cstar.system.environment import CStarEnvironment
 
 
@@ -161,9 +165,7 @@ class TestSetupEnvironmentFromFiles:
         )
 
         # Patch the root path and expanduser to point to our temporary files
-        with (
-            patch.object(CStarEnvironment, "package_root", new=tmp_path),
-        ):
+        with patch.object(CStarEnvironment, "package_root", new=tmp_path):
             # Instantiate the environment to trigger loading the environment variables
             env = MockEnvironment()
             # Define expected final environment variables after merging and expansion
@@ -912,3 +914,19 @@ def test_env_show_default(
         from cstar.cli.environment.show import show
 
         show("file")
+
+
+def test_is_flag_enabled() -> None:
+    """Verify the utility `is_flag_enabled` determines the correct value for
+    a flag when it is set to on, set to off, and not set at all.
+    """
+    key = ENV_CSTAR_CLOBBER_WORKING_DIR
+
+    with mock.patch.dict(os.environ, {key: FLAG_ON}, clear=True):
+        assert is_flag_enabled(key)
+
+    with mock.patch.dict(os.environ, {key: FLAG_OFF}, clear=True):
+        assert not is_flag_enabled(key)
+
+    with mock.patch.dict(os.environ, {}, clear=True):
+        assert not is_flag_enabled(key)
