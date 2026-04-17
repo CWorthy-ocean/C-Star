@@ -5,7 +5,7 @@ from cstar.system.registration import Registry
 
 
 class ApplicationRegistry(StrEnum):
-    """Constants identifying the registry keys used for types that have
+    """Constants identifying the registry keys used for types that
     are registered to handle a portion of the application life-cycle.
     """
 
