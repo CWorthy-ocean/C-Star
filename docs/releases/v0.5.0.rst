@@ -120,6 +120,7 @@ Improvements
 - Improve help text for CLI subcommands and parameters (`#487 <https://github.com/CWorthy-ocean/C-Star/pull/487>`_)
 - Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`) (`#489 <https://github.com/CWorthy-ocean/C-Star/pull/489>`_)
 - Reduce usage of hardcoded strings in CLI and tests (`#497 <https://github.com/CWorthy-ocean/C-Star/pull/497>`_)
+- Simplified env-var flag evaluation (`#501 <https://github.com/CWorthy-ocean/C-Star/pull/501>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
