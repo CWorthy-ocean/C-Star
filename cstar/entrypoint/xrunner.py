@@ -367,7 +367,6 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
             configure_environment(log)
 
             return self()
-            # return bp_runner.set_result(ExecutionStatus.COMPLETED)
 
         except CstarError as ex:
             msg = "An error occurred while processing the blueprint"
