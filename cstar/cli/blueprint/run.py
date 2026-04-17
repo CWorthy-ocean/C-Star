@@ -3,8 +3,17 @@ import typing as t
 
 import typer
 
-from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_LOG_LEVEL,
+    get_env_item,
+)
+from cstar.base.log import LogLevelChoices
+from cstar.cli.common import clobber_callback, log_level_callback
 from cstar.entrypoint.worker.worker import (
+    ARG_CLOBBER,
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
     SimulationStages,
     execute_runner,
     get_job_config,
@@ -30,6 +39,25 @@ def run(
             case_sensitive=False,
         ),
     ] = None,
+    log_level: t.Annotated[
+        LogLevelChoices,
+        typer.Option(
+            ARG_LOGLEVEL_LONG,
+            ARG_LOGLEVEL_SHORT,
+            callback=log_level_callback,
+            help="Set the log level for C-Star.",
+            envvar=ENV_CSTAR_LOG_LEVEL,
+        ),
+    ] = LogLevelChoices.INFO,
+    clobber: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_CLOBBER,
+            callback=clobber_callback,
+            help="Clobber the working directory if it exists.",
+            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ),
+    ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service."""
     result = validate_serialized_entity(path, RomsMarblBlueprint)

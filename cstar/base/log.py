@@ -1,3 +1,4 @@
+import enum
 import logging
 import sys
 import typing as t
@@ -11,6 +12,18 @@ DEFAULT_LOG_FORMAT = (
 )
 TRACE_LOG_LEVEL: t.Final[int] = 5
 TRACE_LOG_NAME: t.Final[str] = "TRACE"
+
+
+class LogLevelChoices(enum.StrEnum):
+    """Log levels for C-Star. Used by CLI and entrypoints to display and validate
+    a set of fixed choices.
+    """
+
+    TRACE = "TRACE"
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
 
 
 class TraceLogger(logging.Logger):
