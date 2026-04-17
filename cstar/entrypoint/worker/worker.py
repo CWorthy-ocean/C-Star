@@ -36,6 +36,8 @@ ARG_LOGLEVEL_SHORT: Literal["-l"] = "-l"
 ARG_STAGE_LONG: Literal["--stage"] = "--stage"
 ARG_STAGE_SHORT: Literal["-g"] = "-g"
 
+ARG_CLOBBER: Literal["--clobber"] = "--clobber"
+
 
 def _generate_job_name() -> str:
     """Generate a unique job name based on the current date and time."""

@@ -13,6 +13,11 @@ from cstar.cli.workplan.shared import (
     check_and_capture_kvps,
     list_runs,
 )
+from cstar.entrypoint.worker.worker import (
+    ARG_CLOBBER,
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
+)
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import build_and_run_dag
 from cstar.orchestration.models import Workplan
@@ -253,8 +258,8 @@ def run(
     log_level: t.Annotated[
         LogLevelChoices,
         typer.Option(
-            "--log-level",
-            "-l",
+            ARG_LOGLEVEL_LONG,
+            ARG_LOGLEVEL_SHORT,
             callback=log_level_callback,
             help="Set the log level for C-Star.",
             envvar=ENV_CSTAR_LOG_LEVEL,
@@ -263,7 +268,7 @@ def run(
     clobber: t.Annotated[
         bool,
         typer.Option(
-            "--clobber",
+            ARG_CLOBBER,
             callback=clobber_callback,
             help="Clobber the working directory if it exists.",
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
