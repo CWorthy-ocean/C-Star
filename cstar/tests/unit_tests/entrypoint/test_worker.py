@@ -13,6 +13,10 @@ import pytest
 from cstar.base.exceptions import BlueprintError, CstarError
 from cstar.entrypoint.service import ServiceConfiguration
 from cstar.entrypoint.worker.worker import (
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
+    ARG_URI_LONG,
+    ARG_URI_SHORT,
     BlueprintRequest,
     JobConfig,
     SimulationRunner,
@@ -50,8 +54,8 @@ def clean_up_logs() -> Generator[None, None, None]:
 def valid_args() -> dict[str, str]:
     """Fixture to provide valid arguments for the SimulationRunner."""
     return {
-        "--blueprint-uri": "blueprint.yaml",
-        "--log-level": "INFO",
+        ARG_URI_LONG: "blueprint.yaml",
+        ARG_LOGLEVEL_LONG: "INFO",
     }
 
 
@@ -59,8 +63,8 @@ def valid_args() -> dict[str, str]:
 def valid_args_short() -> dict[str, str]:
     """Fixture to provide valid arguments for the SimulationRunner."""
     return {
-        "-b": "blueprint.yaml",
-        "-l": "INFO",
+        ARG_URI_SHORT: "blueprint.yaml",
+        ARG_LOGLEVEL_SHORT: "INFO",
     }
 
 
@@ -124,8 +128,8 @@ def test_create_parser_happy_path() -> None:
     parser = create_parser()
 
     # ruff: noqa: SLF001
-    assert "--blueprint-uri" in parser._option_string_actions
-    assert "--log-level" in parser._option_string_actions
+    assert ARG_URI_LONG in parser._option_string_actions
+    assert ARG_LOGLEVEL_LONG in parser._option_string_actions
 
 
 @pytest.mark.parametrize(
@@ -150,10 +154,10 @@ def test_parser_good_log_level(
     """Verify that a log level is parsed correctly."""
     valid_args: dict[str, str] = request.getfixturevalue(args_fixture_name)
     valid_args = valid_args.copy()
-    if "--log-level" in valid_args:
-        valid_args["--log-level"] = log_level
+    if ARG_LOGLEVEL_LONG in valid_args:
+        valid_args[ARG_LOGLEVEL_LONG] = log_level
     else:
-        valid_args["-l"] = log_level
+        valid_args[ARG_LOGLEVEL_SHORT] = log_level
 
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
@@ -182,7 +186,7 @@ def test_parser_lowercase_log_level(
 ) -> None:
     """Verify that lower-case log levels are parsed correctly."""
     valid_args = valid_args.copy()
-    valid_args["--log-level"] = log_level
+    valid_args[ARG_LOGLEVEL_LONG] = log_level
 
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
@@ -197,7 +201,7 @@ def test_parser_lowercase_log_level(
 def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
     """Verify that a bad log level fails to parse."""
     valid_args = valid_args.copy()
-    valid_args["--log-level"] = "INVALID"
+    valid_args[ARG_LOGLEVEL_LONG] = "INVALID"
 
     valid_args_tuples = ((k, v) for k, v in valid_args.items())
     args = list(itertools.chain.from_iterable(valid_args_tuples))
@@ -212,20 +216,20 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
     ("blueprint_uri", "log_level"),
     [
         (
-            "-b blueprint1.yaml",
-            "-l DEBUG",
+            f"{ARG_URI_SHORT} blueprint1.yaml",
+            f"{ARG_LOGLEVEL_SHORT} DEBUG",
         ),
         (
-            "--blueprint-uri blueprint2.yaml",
-            "--log-level INFO",
+            f"{ARG_URI_LONG} blueprint2.yaml",
+            f"{ARG_LOGLEVEL_LONG} INFO",
         ),
         (
-            "--blueprint-uri blueprint3.yaml",
-            "--log-level WARNING",
+            f"{ARG_URI_SHORT} blueprint3.yaml",
+            f"{ARG_LOGLEVEL_SHORT} WARNING",
         ),
         (
-            "-b blueprint1.yaml",
-            "-l ERROR",
+            f"{ARG_URI_LONG} blueprint1.yaml",
+            f"{ARG_LOGLEVEL_LONG} ERROR",
         ),
     ],
 )
@@ -273,9 +277,9 @@ def test_get_request(
     parser = create_parser()
     parsed_args = parser.parse_args(
         [
-            "--blueprint-uri",
+            ARG_URI_LONG,
             blueprint_uri,
-            "--log-level",
+            ARG_LOGLEVEL_LONG,
             "INFO",
         ]
     )
@@ -1074,16 +1078,11 @@ def test_worker_main(tmp_path: Path, sim_runner: SimulationRunner) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     args = [
-        "--blueprint-uri",
+        "cstar.entrypoint.worker.worker",
+        ARG_URI_LONG,
         str(bp_path),
-        "--output-dir",
-        str(output_dir),
-        "--log-level",
+        ARG_LOGLEVEL_LONG,
         "DEBUG",
-        "--start-date",
-        "2024-01-01 00:00:00",
-        "--end-date",
-        "2024-02-01 00:00:00",
     ]
 
     with mock.patch.dict(os.environ, {}), mock.patch.object(sys, "argv", args):
@@ -1109,9 +1108,9 @@ def test_worker_main_exec(
 
     args = [
         "cstar.entrypoint.worker.worker",
-        "--blueprint-uri",
+        ARG_URI_LONG,
         str(blueprint_path),
-        "--log-level",
+        ARG_LOGLEVEL_LONG,
         "DEBUG",
     ]
 
@@ -1145,9 +1144,10 @@ def test_worker_main_cstar_error(
     gracefully.
     """
     args = [
-        "--blueprint-uri",
+        "cstar.entrypoint.worker.worker",
+        ARG_URI_LONG,
         str(blueprint_path),
-        "--log-level",
+        ARG_LOGLEVEL_LONG,
         "DEBUG",
     ]
 

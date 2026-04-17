@@ -72,6 +72,7 @@ Bug Fixes
 - Fix uninitialized attributes error in `SlurmBatch`
 - Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`)
 - Fix bug when merging dictionaries during application of blueprint overrides
+- Fix bug where `SimulationRunner` fails to display errors when parsing bad CLI arguments
 
 Improvements
 ~~~~~~~~~~~~
@@ -111,6 +112,7 @@ Improvements
 - Improve naming of module containing shared CLI callbacks
 - Add callbacks for automatic export of pertinent environment variables from CLI parameters
 - Reduce unit test duration
+- Reduce usage of hardcoded strings in CLI and tests
 
 Miscellaneous
 ~~~~~~~~~~~~~
