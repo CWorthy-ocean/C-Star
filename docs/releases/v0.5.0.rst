@@ -71,6 +71,7 @@ Bug Fixes
 - Bump typer version to avoid list-default bug (`#476 <https://github.com/CWorthy-ocean/C-Star/pull/476>`_)
 - Fix uninitialized attributes error in `SlurmBatch`
 - Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`)
+- Fix bug when merging dictionaries during application of blueprint overrides
 
 Improvements
 ~~~~~~~~~~~~
