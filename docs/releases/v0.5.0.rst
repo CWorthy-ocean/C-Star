@@ -76,6 +76,7 @@ Bug Fixes
 - Mitigate possible ROMS output-name-length errors by using a relative output path in the `roms.in` (`#491 <https://github.com/CWorthy-ocean/C-Star/pull/491>`_)
 - Fix incorrect status mapping of local runs, which caused dependencies to not be cancelled if upstream tasks failed. (`#478 <https://github.com/CWorthy-ocean/C-Star/pull/478>`_)
 - Fix bug when merging dictionaries during application of blueprint overrides (`#496 <https://github.com/CWorthy-ocean/C-Star/pull/496>`_)
+- Fix bug where `SimulationRunner` fails to display errors when parsing bad CLI arguments (`#497 <https://github.com/CWorthy-ocean/C-Star/pull/497>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -117,6 +118,7 @@ Improvements
 - Reduce unit test duration
 - Improve help text for CLI subcommands and parameters (`#487 <https://github.com/CWorthy-ocean/C-Star/pull/487>`_)
 - Mitigate a dependency issue with prefect and fakeredis (pin `fakeredis<2.35`) (`#489 <https://github.com/CWorthy-ocean/C-Star/pull/489>`_)
+- Reduce usage of hardcoded strings in CLI and tests (`#497 <https://github.com/CWorthy-ocean/C-Star/pull/497>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
