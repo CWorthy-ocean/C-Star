@@ -32,6 +32,7 @@ New features
 - Create work-dir symlinks to predetermined paths for CDR and nesting info files (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - If no `Makefile` is provided in the `compile_time` additional code block, ROMS will copy and use the appropriate `Makefile` from the ROMS repo (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - Add automated release-note updater, utilizing PR template categories (`#484 <https://github.com/CWorthy-ocean/C-Star/pull/484>`_)
+- Locally-launched steps now generate a `.out` log file consistent with slurm-launched steps (`#493 <https://github.com/CWorthy-ocean/C-Star/pull/493>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
