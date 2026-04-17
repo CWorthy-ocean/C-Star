@@ -266,7 +266,6 @@ class LiveStep(Step):
         step: Step,
         parent: "LiveStep | Step | None" = None,
         update: t.Mapping[str, t.Any] | None = None,
-        # blueprint: Blueprint | None = None,
     ) -> "LiveStep":
         """Convert a step from orchestration planning into a LiveStep.
 
