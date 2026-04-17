@@ -11,21 +11,23 @@ from unittest import mock
 import pytest
 
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.entrypoint.service import ServiceConfiguration
+from cstar.entrypoint.config import (
+    JobConfig,
+    ServiceConfiguration,
+    configure_environment,
+    get_job_config,
+    get_service_config,
+)
 from cstar.entrypoint.worker.worker import (
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
     ARG_URI_LONG,
     ARG_URI_SHORT,
     BlueprintRequest,
-    JobConfig,
     SimulationRunner,
     SimulationStages,
-    configure_environment,
     create_parser,
-    get_job_config,
     get_request,
-    get_service_config,
     main,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
@@ -251,7 +253,7 @@ def test_get_service_config(
         ],
     )
 
-    config = get_service_config(parsed_args.log_level)
+    config = get_service_config(parsed_args.log_level, name="SimulationRunner")
 
     # some values are currently hardcoded for the worker service
     assert config.as_service
