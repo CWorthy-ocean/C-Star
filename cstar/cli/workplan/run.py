@@ -303,8 +303,7 @@ def run(
     except ValueError as ex:
         raise typer.BadParameter(ex.args[0]) from ex
     except Exception as ex:
-        msg = f"Workplan run `{run_id}` has completed unsuccessfully: {ex}"
-        print(msg)
+        print(f"Workplan run {run_id!r} has failed: {ex}")
         raise typer.Exit(3) from ex
     else:
         print(f"Workplan run `{run_id}` has completed")
