@@ -19,6 +19,7 @@ Breaking Changes
 - Rename env var group name constants to omit leading underscore (`#462 <https://github.com/CWorthy-ocean/C-Star/pull/462>`_)
 - The `roms` executable is now executed in the `work` subdirectory instead of `output` (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - The output location in the runtime settings (`roms.in`) file is now _always_ modified to place outputs in the output directory (since we no longer run ROMS in the output directory) (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
+- `ServiceConfiguration`, `JobConfig` have been relocated to `cstar.entrypoint.config` from `cstar.entrypoint.worker.worker` (`#503 <https://github.com/CWorthy-ocean/C-Star/pull/503>`_)
 
 New features
 ~~~~~~~~~~~~
