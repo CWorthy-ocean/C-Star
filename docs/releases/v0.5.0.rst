@@ -123,6 +123,7 @@ Improvements
 - Reduce usage of hardcoded strings in CLI and tests (`#497 <https://github.com/CWorthy-ocean/C-Star/pull/497>`_)
 - Simplified env-var flag evaluation (`#501 <https://github.com/CWorthy-ocean/C-Star/pull/501>`_)
 - Add `--log-level` and `--clobber` parameters to CLI methods for running blueprints and workplans. (`#502 <https://github.com/CWorthy-ocean/C-Star/pull/502>`_)
+- Reduced amount of repetitive logs captured at the `DEBUG` level (`#504 <https://github.com/CWorthy-ocean/C-Star/pull/504>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
