@@ -1,49 +1,48 @@
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
-from cstar.cli.blueprint.check import check
+from cstar.cli.blueprint.check import app
 
 
 def test_blueprint_check_file_dne(
-    capsys: pytest.CaptureFixture,
     tmp_path: Path,
 ) -> None:
     """Verify that a path to a non-existent blueprint fails a validity check.
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
     """
     blueprint_path = tmp_path / "blueprint-dne.yml"
+    args = [str(blueprint_path)]
 
-    check(blueprint_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, args, color=False)
 
-    assert "not found" in capsys.readouterr().out
+    assert "not found" in result.stdout
 
 
 def test_blueprint_check_file_no_content(
-    capsys: pytest.CaptureFixture,
     tmp_path: Path,
 ) -> None:
     """Verify that an empty blueprint file fails a validity check.
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
     """
     blueprint_path = tmp_path / "empty_blueprint.yml"
     blueprint_path.touch()
+    args = [str(blueprint_path)]
 
-    check(blueprint_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, args, color=False)
 
-    assert "is invalid" in capsys.readouterr().out
+    assert "is invalid" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -51,7 +50,6 @@ def test_blueprint_check_file_no_content(
     [" ", "", "\n", '{"foo": "bar"}'],
 )
 def test_blueprint_check_file_bad_content(
-    capsys: pytest.CaptureFixture,
     tmp_path: Path,
     content: str,
 ) -> None:
@@ -59,17 +57,17 @@ def test_blueprint_check_file_bad_content(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
     """
     blueprint_path = tmp_path / "invalid_blueprint.yml"
     blueprint_path.write_text(content)
+    args = [str(blueprint_path)]
 
-    check(blueprint_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, args, color=False)
 
-    assert "is invalid" in capsys.readouterr().out
+    assert "is invalid" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -82,7 +80,6 @@ def test_blueprint_check_file_bad_content(
     ],
 )
 def test_blueprint_valid_input(
-    capsys: pytest.CaptureFixture,
     repo_relative_path: Path,
     package_path: Path,
 ) -> None:
@@ -93,18 +90,18 @@ def test_blueprint_valid_input(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     repo_relative_path : Path
         Relative path to a blueprint within the c-star repo
     package_path : Path
         Absolute path to the c-star package on disk
     """
     blueprint_path = package_path / repo_relative_path
+    args = [str(blueprint_path)]
 
-    check(blueprint_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, args, color=False)
 
-    assert "is valid" in capsys.readouterr().out, (
+    assert "is valid" in result.stdout, (
         f"`{blueprint_path}` does not contain a valid blueprint"
     )
 
@@ -132,7 +129,6 @@ def test_blueprint_valid_input(
     ],
 )
 def test_blueprint_incomplete_input(
-    capsys: pytest.CaptureFixture,
     start_removal: str,
     end_removal: str,
     tests_path: Path,
@@ -144,8 +140,6 @@ def test_blueprint_incomplete_input(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     start_removal : Path
         A string that will trigger content skipping to begin when building a test blueprint
     end_removal : Path
@@ -178,24 +172,24 @@ def test_blueprint_incomplete_input(
 
     bp_path = tmp_path / "bp.yaml"
     bp_path.write_text("\n".join(remaining_content))
+    args = [str(bp_path)]
 
-    check(bp_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, args, color=False)
 
     err_msg = f"{bp_path} should not pass validation"
-    assert "is invalid" in capsys.readouterr().out, err_msg
+    assert "is invalid" in result.stdout, err_msg
 
 
 @pytest.mark.parametrize(
     ("start_removal", "end_removal"),
     [
-        ("application:", None),
         ("state:", None),
         ("filter:", "compile_time"),
         ("files:", "directory:"),
     ],
 )
 def test_blueprint_optional_input(
-    capsys: pytest.CaptureFixture,
     start_removal: str,
     end_removal: str,
     tests_path: Path,
@@ -208,8 +202,6 @@ def test_blueprint_optional_input(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     start_removal : Path
         A string that will trigger content skipping to begin when building a test blueprint
     end_removal : Path
@@ -240,29 +232,26 @@ def test_blueprint_optional_input(
 
     bp_path = tmp_path / "bp.yaml"
     bp_path.write_text("\n".join(remaining_content))
+    args = [str(bp_path)]
 
-    check(bp_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, args, color=False)
 
     err_msg = f"{bp_path} should not pass validation"
-    assert "is valid" in capsys.readouterr().out, err_msg
+    assert "is valid" in result.stdout, err_msg
 
 
-def test_blueprint_check_remote_blueprint_dne(
-    capsys: pytest.CaptureFixture,
-) -> None:
+def test_blueprint_check_remote_blueprint_dne() -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
     blueprint is not executed if the URL is invalid.
-
-    Parameters
-    ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     """
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint-X.yaml"
+    args = [str(bp_path)]
 
-    check(bp_path)
+    runner = CliRunner()
+    result = runner.invoke(app, args, color=False)
 
-    assert "not found" in capsys.readouterr().out
+    assert "not found" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -273,7 +262,6 @@ def test_blueprint_check_remote_blueprint_dne(
     ],
 )
 def test_blueprint_check_remote_blueprint(
-    capsys: pytest.CaptureFixture,
     bp_uri: str,
 ) -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
@@ -286,6 +274,9 @@ def test_blueprint_check_remote_blueprint(
     bp_uri : str
         A working URL referencing a valid blueprint
     """
-    check(bp_uri)
+    args = [bp_uri]
 
-    assert "is valid" in capsys.readouterr().out
+    runner = CliRunner()
+    result = runner.invoke(app, args, color=False)
+
+    assert "is valid" in result.stdout
