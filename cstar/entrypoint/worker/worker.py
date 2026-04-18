@@ -7,25 +7,23 @@ import os
 import pathlib
 import sys
 from datetime import datetime, timezone
-from typing import Final, Literal, override
+from typing import TYPE_CHECKING, Final, Literal, override
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import get_logger, parse_log_level_name
+from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.entrypoint.service import Service, ServiceConfiguration
-from cstar.execution.handler import ExecutionHandler, ExecutionStatus
-from cstar.orchestration.utils import (
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_MAX_WALLTIME,
-    ENV_CSTAR_SLURM_QUEUE,
+from cstar.entrypoint.config import (
+    configure_environment,
+    get_job_config,
+    get_service_config,
 )
+from cstar.entrypoint.service import Service
+from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
 
-DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
-WORKER_LOG_FILE_TPL: Final[str] = "cstar-worker.{0}.log"
-JOBFILE_DATE_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
-LOGS_DIRECTORY: Final[str] = "logs"
+if TYPE_CHECKING:
+    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
 ARG_URI_LONG: Literal["--blueprint-uri"] = "--blueprint-uri"
 ARG_URI_SHORT: Literal["-b"] = "-b"
@@ -37,13 +35,6 @@ ARG_STAGE_LONG: Literal["--stage"] = "--stage"
 ARG_STAGE_SHORT: Literal["-g"] = "-g"
 
 ARG_CLOBBER: Literal["--clobber"] = "--clobber"
-
-
-def _generate_job_name() -> str:
-    """Generate a unique job name based on the current date and time."""
-    now_utc = datetime.now(timezone.utc)
-    formatted_now_utc = now_utc.strftime(JOBFILE_DATE_FORMAT)
-    return f"cstar_worker_{formatted_now_utc}"
 
 
 class SimulationStages(enum.StrEnum):
@@ -74,20 +65,6 @@ class BlueprintRequest:
     """
 
 
-@dc.dataclass(frozen=True)
-class JobConfig:
-    """Configuration required to submit HPC jobs."""
-
-    account_id: str
-    """HPC account used for billing."""
-    walltime: str
-    """Maximum walltime allowed for job."""
-    priority: str
-    """Job priority."""
-    job_name: str = _generate_job_name()
-    """User-friendly job name."""
-
-
 class SimulationRunner(Service):
     """Worker class to run c-star simulations."""
 
@@ -101,14 +78,14 @@ class SimulationRunner(Service):
     """The simulation stages that should be executed."""
     _handler: ExecutionHandler | None
     """The execution handler for the simulation."""
-    _job_config: Final[JobConfig]
+    _job_config: Final["JobConfig"]
     """Configuration for submitting jobs to an HPC."""
 
     def __init__(
         self,
         request: BlueprintRequest,
-        service_cfg: ServiceConfiguration,
-        job_cfg: JobConfig,
+        service_cfg: "ServiceConfiguration",
+        job_cfg: "JobConfig",
     ) -> None:
         """Initialize the SimulationRunner with the supplied configuration.
 
@@ -363,30 +340,6 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_service_config(log_level: int | str) -> ServiceConfiguration:
-    """Create a ServiceConfiguration instance using CLI arguments.
-
-    Parameters
-    ----------
-    log_level : int or str
-        The log level to be used by the worker
-
-    Returns
-    -------
-    ServiceConfiguration
-    """
-    level = parse_log_level_name(log_level)
-
-    return ServiceConfiguration(
-        as_service=True,
-        loop_delay=5,
-        health_check_frequency=None,
-        log_level=level,
-        health_check_log_threshold=10,
-        name="SimulationRunner",
-    )
-
-
 def get_request(
     blueprint_uri: str, stages: list[SimulationStages] | None = None
 ) -> BlueprintRequest:
@@ -413,39 +366,10 @@ def get_request(
     )
 
 
-def get_job_config() -> JobConfig:
-    """Create and configure a `JobConfig` instance from environment variables.
-
-    Returns
-    -------
-    JobConfig
-    """
-    account_id: str = get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
-    walltime: str = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
-    priority: str = get_env_item(ENV_CSTAR_SLURM_QUEUE).value
-
-    return JobConfig(account_id, walltime, priority)
-
-
-def configure_environment(log: logging.Logger) -> None:
-    """Configure the environment variables required by the worker.
-
-    Parameters
-    ----------
-    log : logging.Logger
-        A logger to log configuration details.
-
-    Returns
-    -------
-    None
-    """
-    # ensure git works on distributed file-system, e.g. lustre
-    os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
-    log.debug("Git discovery configured.")
-
-
 async def execute_runner(
-    job_cfg: JobConfig, service_cfg: ServiceConfiguration, request: BlueprintRequest
+    job_cfg: "JobConfig",
+    service_cfg: "ServiceConfiguration",
+    request: BlueprintRequest,
 ) -> int:
     """Execute a blueprint with a SimulationRunner.
 
@@ -460,10 +384,10 @@ async def execute_runner(
     """
     log = get_logger(__name__, level=service_cfg.log_level)
 
-    log.debug(f"Job config: {job_cfg}")
-    log.debug(f"Simulation runner service config: {service_cfg}")
-    log.debug(f"Simulation request: {request}")
-    log.debug(f"os.environ: {os.environ}")
+    log.debug(f"Job config: {job_cfg!r}")
+    log.debug(f"Service config: {service_cfg!r}")
+    log.debug(f"Request: {request!r}")
+    log.trace(f"Environment: {os.environ}")
 
     try:
         configure_environment(log)

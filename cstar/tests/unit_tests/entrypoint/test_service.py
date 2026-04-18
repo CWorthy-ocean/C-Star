@@ -12,7 +12,8 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError
 
-from cstar.entrypoint.service import Service, ServiceConfiguration
+from cstar.entrypoint.config import ServiceConfiguration
+from cstar.entrypoint.service import Service
 
 
 class PrintingService(Service):

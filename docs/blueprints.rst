@@ -219,8 +219,8 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
     .. code-block:: python
       :caption: Executing a blueprint YAML file in python.
 
-        from cstar.entrypoint.service import ServiceConfiguration
-        from cstar.entrypoint.worker.worker import BlueprintRequest, JobConfig, SimulationRunner
+        from cstar.entrypoint.config import JobConfig, ServiceConfiguration, SimulationRunner
+        from cstar.entrypoint.worker.worker import BlueprintRequest
 
         account_id = "your-account-id"
         queue_id = "wholenode"
