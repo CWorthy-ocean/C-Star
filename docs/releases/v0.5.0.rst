@@ -79,6 +79,7 @@ Bug Fixes
 - Fix incorrect status mapping of local runs, which caused dependencies to not be cancelled if upstream tasks failed. (`#478 <https://github.com/CWorthy-ocean/C-Star/pull/478>`_)
 - Fix bug when merging dictionaries during application of blueprint overrides (`#496 <https://github.com/CWorthy-ocean/C-Star/pull/496>`_)
 - Fix bug where `SimulationRunner` fails to display errors when parsing bad CLI arguments (`#497 <https://github.com/CWorthy-ocean/C-Star/pull/497>`_)
+- Ensure typer `CliRunner` is used for tests of `blueprint check` command (`#505 <https://github.com/CWorthy-ocean/C-Star/pull/505>`_)
 
 Improvements
 ~~~~~~~~~~~~
