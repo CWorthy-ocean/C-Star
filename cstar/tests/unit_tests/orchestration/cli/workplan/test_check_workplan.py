@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
-from cstar.cli.workplan.check import check
+from cstar.cli.workplan.check import app
 
 
 @pytest.mark.parametrize(
@@ -12,7 +13,6 @@ from cstar.cli.workplan.check import check
 def test_cli_workplan_check_action_tpl(
     tmp_path: Path,
     workplan_name: str,
-    capsys: pytest.CaptureFixture,
     wp_templates_dir: Path,
 ) -> None:
     """Verify that CLI check action validates the stored templates.
@@ -32,14 +32,14 @@ def test_cli_workplan_check_action_tpl(
     wp_path = tmp_path / template_file
     wp_path.write_text(template_path.read_text())
 
-    check(wp_path.as_posix())
-    captured = capsys.readouterr().out
-    assert " valid" in captured
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    assert " valid" in result.stdout
 
 
 def test_cli_workplan_check_dne(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
 ) -> None:
     """Verify that an invalid path fails a validity check.
 
@@ -54,30 +54,29 @@ def test_cli_workplan_check_dne(
     """
     wp_path = tmp_path / "workplan-dne.yaml"
 
-    check(wp_path.as_posix())
-    captured = capsys.readouterr().out
-    assert " not found" in captured
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    assert " not found" in result.stderr
 
 
 def test_cli_workplan_check_file_no_content(
-    capsys: pytest.CaptureFixture,
     tmp_path: Path,
 ) -> None:
     """Verify that an empty workplan file fails a validity check.
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
     """
     wp_path = tmp_path / "empty_workplan.yml"
     wp_path.touch()
 
-    check(wp_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
 
-    assert "is invalid" in capsys.readouterr().out
+    assert "is invalid" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -85,7 +84,6 @@ def test_cli_workplan_check_file_no_content(
     [" ", "", "\n", '{"foo": "bar"}', "name: Sample Workplan\n"],
 )
 def test_cli_workplan_check_file_bad_content(
-    capsys: pytest.CaptureFixture,
     tmp_path: Path,
     content: str,
 ) -> None:
@@ -93,17 +91,16 @@ def test_cli_workplan_check_file_bad_content(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
     """
     wp_path = tmp_path / "invalid_workplan.yml"
     wp_path.write_text(content)
 
-    check(wp_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
 
-    assert "is invalid" in capsys.readouterr().out
+    assert "is invalid" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -114,7 +111,6 @@ def test_cli_workplan_check_file_bad_content(
     ],
 )
 def test_cli_workplan_check_valid_input(
-    capsys: pytest.CaptureFixture,
     repo_relative_path: Path,
     package_path: Path,
 ) -> None:
@@ -125,8 +121,6 @@ def test_cli_workplan_check_valid_input(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     repo_relative_path : Path
         Relative path to a workplan within the c-star repo
     package_path : Path
@@ -134,10 +128,11 @@ def test_cli_workplan_check_valid_input(
     """
     wp_path = package_path / repo_relative_path
 
-    check(wp_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
 
     msg = f"`{wp_path}` does not contain a valid workplan"
-    assert "is valid" in capsys.readouterr().out, msg
+    assert "is valid" in result.stdout, msg
 
 
 @pytest.mark.parametrize(
@@ -154,9 +149,8 @@ def test_cli_workplan_check_valid_input(
     ],
 )
 def test_workplan_incomplete_input(
-    capsys: pytest.CaptureFixture,
     start_removal: str,
-    end_removal: str,
+    end_removal: str | None,
     tmp_path: Path,
     package_path: Path,
 ) -> None:
@@ -166,8 +160,6 @@ def test_workplan_incomplete_input(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     start_removal : Path
         A string that will trigger content skipping to begin when building a test workplan
     end_removal : Path
@@ -180,7 +172,7 @@ def test_workplan_incomplete_input(
     wp_path = package_path / "cstar/additional_files/templates/wp/workplan.yaml"
 
     content = wp_path.read_text().splitlines()
-    remaining_content = []
+    remaining_content: list[str] = []
     cutting = False
     cut_once = False
 
@@ -200,10 +192,11 @@ def test_workplan_incomplete_input(
     wp_path = tmp_path / "wp.yaml"
     wp_path.write_text("\n".join(remaining_content))
 
-    check(wp_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
 
     err_msg = f"{wp_path} should not pass validation"
-    assert "is invalid" in capsys.readouterr().out, err_msg
+    assert "is invalid" in result.stderr, err_msg
 
 
 @pytest.mark.parametrize(
@@ -224,7 +217,6 @@ def test_workplan_incomplete_input(
     ],
 )
 def test_workplan_optional_input(
-    capsys: pytest.CaptureFixture,
     start_removal: str,
     end_removal: str | None,
     tmp_path: Path,
@@ -236,8 +228,6 @@ def test_workplan_optional_input(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     start_removal : Path
         A string that will trigger content skipping to begin when building a test workplan
     end_removal : Path
@@ -250,7 +240,7 @@ def test_workplan_optional_input(
     wp_path = package_path / "cstar/additional_files/templates/wp/workplan.yaml"
 
     content = wp_path.read_text().splitlines()
-    remaining_content = []
+    remaining_content: list[str] = []
     cutting = False
     cut_once = False
 
@@ -270,28 +260,23 @@ def test_workplan_optional_input(
     wp_path = tmp_path / "bp.yaml"
     wp_path.write_text("\n".join(remaining_content))
 
-    check(wp_path.as_posix())
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
 
     err_msg = f"{wp_path} should not pass validation"
-    assert "is valid" in capsys.readouterr().out, err_msg
+    assert "is valid" in result.stdout, err_msg
 
 
-def test_workplan_check_remote_workplan_dne(
-    capsys: pytest.CaptureFixture,
-) -> None:
+def test_workplan_check_remote_workplan_dne() -> None:
     """Verify that a URL to a remote workplan is handled properly and the
     workplan is not executed if the URL is invalid.
-
-    Parameters
-    ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     """
-    wp_path = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml_XXX"
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml_XXX"
 
-    check(wp_path)
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_uri], color=False)
 
-    assert "not found" in capsys.readouterr().out
+    assert "not found" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -302,7 +287,6 @@ def test_workplan_check_remote_workplan_dne(
     ],
 )
 def test_workplan_check_remote_workplan(
-    capsys: pytest.CaptureFixture,
     wp_uri: str,
 ) -> None:
     """Verify that a URL to a remote workplan is handled properly and the
@@ -310,11 +294,10 @@ def test_workplan_check_remote_workplan(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     wp_uri : str
         A working URL referencing a valid workplan
     """
-    check(wp_uri)
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_uri], color=False)
 
-    assert "is valid" in capsys.readouterr().out
+    assert "is valid" in result.stdout

@@ -24,7 +24,6 @@ def check(
     """
     result = validate_serialized_entity(path, Workplan)
     if result.item is None:
-        print(result.error_msg)
-        return
+        raise typer.BadParameter(result.error_msg)
 
     print(f"The workplan `{result.item.name}` is valid")
