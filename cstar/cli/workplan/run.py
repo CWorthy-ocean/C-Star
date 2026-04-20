@@ -13,7 +13,7 @@ from cstar.cli.workplan.shared import (
     check_and_capture_kvps,
     list_runs,
 )
-from cstar.entrypoint.worker.worker import (
+from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,

@@ -10,10 +10,12 @@ from cstar.base.env import (
 )
 from cstar.base.log import LogLevelChoices
 from cstar.cli.common import clobber_callback, log_level_callback
-from cstar.entrypoint.worker.worker import (
+from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+)
+from cstar.entrypoint.worker.worker import (
     SimulationStages,
     execute_runner,
     get_job_config,

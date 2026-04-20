@@ -18,11 +18,13 @@ from cstar.entrypoint.config import (
     get_job_config,
     get_service_config,
 )
-from cstar.entrypoint.worker.worker import (
+from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
     ARG_URI_LONG,
     ARG_URI_SHORT,
+)
+from cstar.entrypoint.worker.worker import (
     BlueprintRequest,
     SimulationRunner,
     SimulationStages,

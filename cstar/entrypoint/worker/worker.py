@@ -19,22 +19,21 @@ from cstar.entrypoint.config import (
     get_service_config,
 )
 from cstar.entrypoint.service import Service
+from cstar.entrypoint.utils import (
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
+    ARG_URI_LONG,
+    ARG_URI_SHORT,
+)
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.roms import ROMSSimulation
 
 if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
-ARG_URI_LONG: Literal["--blueprint-uri"] = "--blueprint-uri"
-ARG_URI_SHORT: Literal["-b"] = "-b"
-
-ARG_LOGLEVEL_LONG: Literal["--log-level"] = "--log-level"
-ARG_LOGLEVEL_SHORT: Literal["-l"] = "-l"
 
 ARG_STAGE_LONG: Literal["--stage"] = "--stage"
 ARG_STAGE_SHORT: Literal["-g"] = "-g"
-
-ARG_CLOBBER: Literal["--clobber"] = "--clobber"
 
 
 class SimulationStages(enum.StrEnum):
