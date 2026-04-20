@@ -289,7 +289,7 @@ class SimulationRunner(Service):
         return False
 
 
-def create_parser() -> argparse.ArgumentParser:
+def create_simrunner_parser() -> argparse.ArgumentParser:
     """Create a parser for CLI arguments expected by a SimulationRunner.
 
     Returns
@@ -416,11 +416,11 @@ def main() -> int:
     int
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
-    parser = create_parser()
+    parser = create_simrunner_parser()
     args = parser.parse_args()
 
     job_cfg = get_job_config()
-    service_cfg = get_service_config(args.log_level)
+    service_cfg = get_service_config(args.log_level, name="SimulationRunner")
     request = get_request(args.blueprint_uri, args.stages)
 
     return asyncio.run(execute_runner(job_cfg, service_cfg, request))
