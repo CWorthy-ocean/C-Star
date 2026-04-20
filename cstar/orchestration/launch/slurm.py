@@ -1,6 +1,7 @@
 import asyncio
 import os
 import typing as t
+from collections.abc import Mapping
 
 from prefect import State, task
 from prefect import Task as PrefectTask
@@ -250,7 +251,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return batch.status
 
     @staticmethod
-    async def _locate_priors() -> t.Mapping[str, SlurmHandle]:
+    async def _locate_priors() -> Mapping[str, SlurmHandle]:
         """Retrieve all task sentinels discovered in the output path.
 
 

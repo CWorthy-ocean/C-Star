@@ -11,11 +11,13 @@ from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 if t.TYPE_CHECKING:
+    from collections.abc import Callable
+
     from cstar.orchestration.orchestration import Launcher, LiveStep
 
 log = get_logger(__name__)
 
-StepToCommandConversionFn: t.TypeAlias = "t.Callable[[LiveStep], str]"
+StepToCommandConversionFn: t.TypeAlias = "Callable[[LiveStep], str]"
 """Convert a `Step` into a command to be executed.
 
 Parameters

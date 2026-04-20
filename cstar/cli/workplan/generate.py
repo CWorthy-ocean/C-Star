@@ -1,5 +1,8 @@
 import typing as t
+from collections.abc import Iterable
+from itertools import permutations
 from pathlib import Path
+from random import choice
 
 import typer
 from rich.console import Console
@@ -16,7 +19,7 @@ if t.TYPE_CHECKING:
     BPResult: t.TypeAlias = tuple[Path, RomsMarblBlueprint]
 
 
-def _locate_blueprints(search_dir: Path) -> t.Iterable["BPResult"]:
+def _locate_blueprints(search_dir: Path) -> Iterable["BPResult"]:
     """Iterate through the contents of a directory to locate `Blueprints`.
 
     Parameters
@@ -104,9 +107,6 @@ def generate(
         _display_order(results)
 
         while "y" in input("Do you want to change the order? (yes/no): ").lower():
-            from itertools import permutations
-            from random import choice
-
             possible = list(permutations(list(range(len(results)))))
             example = list(choice(possible))
             example = [x + 1 for x in example]
@@ -115,8 +115,8 @@ def generate(
                 f"Specify the new order by providing the current order numbers in a new arrangement, (e.g. {', '.join(str(ex) for ex in example)}): "
             )
             order = order_input.replace(" ", "").split(",")
-            provided = set(int(x) for x in order)
-            required = set(x + 1 for x in range(len(results)))
+            provided = {int(x) for x in order}
+            required = {x + 1 for x in range(len(results))}
 
             diff = required.difference(provided)
 

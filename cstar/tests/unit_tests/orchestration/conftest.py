@@ -1,6 +1,7 @@
 import json
 import textwrap
 import typing as t
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -23,7 +24,7 @@ def fake_blueprint_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step, None, None]]:
+def gen_fake_steps(tmp_path: Path) -> Callable[[int], Generator[Step, None, None]]:
     """Create fake steps for testing purposes.
 
     Parameters
@@ -32,7 +33,7 @@ def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step, None, 
         Unique path for test-specific files
     """
 
-    def _gen_fake_steps(num_steps: int) -> t.Generator[Step, None, None]:
+    def _gen_fake_steps(num_steps: int) -> Generator[Step, None, None]:
         """Create `num_steps` fake steps."""
         for i in range(num_steps):
             step_name = f"step-{i:03d}"
@@ -139,7 +140,7 @@ def blueprint_schema_path(tmp_path: Path) -> Path:
 def fill_workplan_template(
     empty_workplan_template_input: dict[str, t.Any],
     workplan_schema_path: Path,
-) -> t.Callable[[dict[str, t.Any]], str]:
+) -> Callable[[dict[str, t.Any]], str]:
     """Create a function to populate a raw workplan yaml document template."""
 
     def _get_workplan_template(
@@ -228,7 +229,7 @@ def fill_workplan_template(
 def fill_blueprint_template(
     empty_workplan_template_input: dict[str, t.Any],
     blueprint_schema_path: Path,
-) -> t.Callable[[dict[str, t.Any]], str]:
+) -> Callable[[dict[str, t.Any]], str]:
     """Create a function to populate a raw workplan yaml document template."""
 
     def _get_blueprint_template(

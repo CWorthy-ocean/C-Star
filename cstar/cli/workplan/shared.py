@@ -1,5 +1,7 @@
 import asyncio
 import typing as t
+from collections import Counter
+from collections.abc import Mapping
 
 import typer
 from rich.console import Console
@@ -131,7 +133,7 @@ def check_and_capture_kvp(entry: str) -> tuple[str, str]:
     return k, v
 
 
-def check_and_capture_kvps(entries: list[str]) -> t.Mapping[str, str] | None:
+def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str] | None:
     """Capture all unique keyj-value pairs from user-supplied configuration
     supplied as a list of key-value pairs in the format ["key1=value", "key2=value"]
 
@@ -160,7 +162,7 @@ def check_and_capture_kvps(entries: list[str]) -> t.Mapping[str, str] | None:
     variables = dict(captured_kvps)
 
     if len(variables) < len(captured_kvps):
-        counter = t.Counter(k for k, _ in captured_kvps)
+        counter = Counter(k for k, _ in captured_kvps)
         k, _ = counter.most_common(1)[0]
         msg = f"Found variable with multiple values: {k}"
         raise typer.BadParameter(msg)
