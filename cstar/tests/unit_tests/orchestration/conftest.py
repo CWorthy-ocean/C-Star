@@ -148,7 +148,7 @@ def fill_workplan_template(
         list_form: int = 0,
     ) -> str:
         """Populate the template with the supplied data."""
-        dedent = "            "  # depth of populated dedent below...
+        dedent = "                "  # depth of populated dedent below...
         l1_indent = " " * 4
         # l2_indent = l1_indent * 2
 
@@ -183,17 +183,8 @@ def fill_workplan_template(
             )
 
         # NOTE: using __file__ for blueprint path to give an existing path to pass validator
-        populated = textwrap.dedent(
+        steps_str = textwrap.dedent(
             f"""\
-            # yaml-language-server: $schema={workplan_schema_path.as_posix()}
-            name: {fill_vals["name"]}
-            description: {fill_vals["description"]}
-            state: {fill_vals["state"]}
-            compute_environment: {fill_vals["compute_environment"]}
-                # num_nodes: 4
-                # num_cpus_per_process: 16
-
-            runtime_vars: {fill_vals.get("runtime_vars", "")}
             steps:
                 - name: Test Step
                   application: sleep
@@ -213,9 +204,38 @@ def fill_workplan_template(
                   workflow_overrides:
                       segment_length: 16
                   compute_overrides:
-                      walltime: 00:10:00
-                      num_nodes: 4
+                      walltime: 00:05:00
+                      num_nodes: 2
             """,
+        )
+
+        if input_data.get("steps", ""):
+            steps: list[dict[str, t.Any]] = input_data["steps"]
+            steps_str = "steps:\n" if steps else "steps: []\n"
+
+            for step in steps:
+                steps_str += textwrap.dedent(f"""\
+                    - name: {step["name"]}
+                      application: {step["application"]}
+                      depends_on: []
+                      blueprint: {step["blueprint"]}
+                      blueprint_overrides: {{}}
+                """)
+
+        populated = (
+            textwrap.dedent(
+                f"""\
+                # yaml-language-server: $schema={workplan_schema_path.as_posix()}
+                name: {fill_vals["name"]}
+                description: {fill_vals["description"]}
+                state: {fill_vals["state"]}
+                compute_environment: {fill_vals["compute_environment"]}
+                    # num_nodes: 4
+                    # num_cpus_per_process: 16
+                runtime_vars: {fill_vals.get("runtime_vars", "")}
+                """,
+            )
+            + steps_str
         )
 
         print(f"populated workplan template:\n{populated}\n")
@@ -422,3 +442,35 @@ def single_step_workplan(
 def remote_workplan_uri() -> str:
     """Fixture for returning a URL to a valid remote workplan for testing."""
     return "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+
+@pytest.fixture
+def hello_world_default_target() -> str:
+    """Return the default target for the hello world blueprint."""
+    return "@ankona"
+
+
+@pytest.fixture
+def hello_world_bp_content(hello_world_default_target: str) -> str:
+    """Return the minimal content for a HW blueprint.
+
+    Parameters
+    ----------
+    hello_world_default_target : str
+        The default target for the hello world blueprint.
+    """
+    return textwrap.dedent(f"""\
+        name: Say hello to my little friend!
+        description: This blueprint says hello to a very nice guy
+        application: hello_world
+        state: draft
+        target: '{hello_world_default_target}'
+        """)
+
+
+@pytest.fixture
+def hello_world_bp_path(tmp_path: Path, hello_world_bp_content: str) -> Path:
+    """Return a fresh copy of the HW blueprint in the current test's temp dir."""
+    path = tmp_path / "helloworld.yaml"
+    path.write_text(hello_world_bp_content)
+    return path

@@ -5,6 +5,7 @@ from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
 from cstar.cli.template import app as app_template
 from cstar.cli.workplan import app as app_workplan
+from cstar.entrypoint.worker import hello_app, worker  # noqa: F401
 
 
 def attach_subcommands(app: typer.Typer) -> None:

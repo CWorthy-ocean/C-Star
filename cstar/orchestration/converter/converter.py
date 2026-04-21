@@ -4,8 +4,10 @@ import sys
 import textwrap
 import typing as t
 
+from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
-from cstar.entrypoint.utils import ARG_URI_LONG
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_URI_LONG
 from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
@@ -48,7 +50,33 @@ def convert_roms_step_to_command(step: "LiveStep") -> str:
         The complete CLI command.
     """
     worker_module = "cstar.entrypoint.worker.worker"
-    return f"{sys.executable} -m {worker_module} {ARG_URI_LONG} {step.blueprint_path}"
+    return f"{sys.executable} -m {worker_module}  {ARG_URI_LONG} {step.blueprint_path}"
+
+
+def convert_step_to_blueprint_run_command(step: "LiveStep") -> str:
+    """Convert a generic blueprint execution step to a CLI command.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step to be converted.
+
+    Returns
+    -------
+    str
+        The complete CLI command.
+    """
+    cmd_array = [
+        "cstar",
+        "blueprint",
+        "run",
+        str(step.blueprint_path),
+    ]
+
+    if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
+        cmd_array.append(ARG_CLOBBER)
+
+    return " ".join(cmd_array)
 
 
 def convert_step_to_placeholder(step: "LiveStep") -> str:

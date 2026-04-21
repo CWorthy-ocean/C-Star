@@ -1,8 +1,6 @@
 import argparse
 import asyncio
-import dataclasses as dc
 import enum
-import logging
 import os
 import pathlib
 import sys
@@ -11,7 +9,7 @@ from typing import TYPE_CHECKING, Final, Literal, override
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import get_logger
+from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
     configure_environment,
@@ -25,7 +23,9 @@ from cstar.entrypoint.utils import (
     ARG_URI_LONG,
     ARG_URI_SHORT,
 )
+from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms import ROMSSimulation
 
 if TYPE_CHECKING:
@@ -51,17 +51,19 @@ class SimulationStages(enum.StrEnum):
     """Execute hooks after the simulation completes. See `Simulation.post_run`"""
 
 
-@dc.dataclass(frozen=True)
-class BlueprintRequest:
-    """Represents a request to run a c-star simulation."""
+class BlueprintRequest(XRunnerRequest[RomsMarblBlueprint]):
+    stages: list[SimulationStages]
+    """The simulation stages to execute."""
 
-    blueprint_uri: str
-    """The path to the blueprint."""
-    stages: list[SimulationStages] = dc.field(default_factory=list)
-    """The simulation stages to execute.
-
-    Defaults to all stages.
-    """
+    def __init__(
+        self,
+        uri: str,
+        bp_type: type[RomsMarblBlueprint],
+        name: str = "",
+        stages: list[SimulationStages] | None = None,
+    ) -> None:
+        super().__init__(uri, bp_type, name)
+        self.stages = stages or []
 
 
 class SimulationRunner(Service):
@@ -316,15 +318,7 @@ def create_simrunner_parser() -> argparse.ArgumentParser:
         type=str,
         required=False,
         help="Logging level for the simulation.",
-        choices=[
-            logging.getLevelName(i)
-            for i in [
-                logging.DEBUG,
-                logging.INFO,
-                logging.WARNING,
-                logging.ERROR,
-            ]
-        ],
+        choices=list(LogLevelChoices),
     )
     parser.add_argument(
         ARG_STAGE_SHORT,
@@ -360,7 +354,8 @@ def get_request(
         stages = list(SimulationStages)
 
     return BlueprintRequest(
-        blueprint_uri=blueprint_uri,
+        blueprint_uri,
+        RomsMarblBlueprint,
         stages=stages,
     )
 

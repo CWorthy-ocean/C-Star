@@ -8,7 +8,9 @@ from rich.console import Console
 from rich.table import Column, Table
 
 from cstar.base.log import get_logger
-from cstar.orchestration.application import APP_CAT_BLUEPRINTS
+from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest
+from cstar.orchestration.application import APP_CAT_BLUEPRINTS, APP_CAT_RUNNERS
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import Status
@@ -17,6 +19,9 @@ from cstar.system.registration import Registrar
 
 console = Console()
 log = get_logger(__name__)
+
+if t.TYPE_CHECKING:
+    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
 
 def list_runs(incomplete: str) -> list[tuple[str, str]]:
@@ -171,6 +176,38 @@ def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str] | None:
         raise typer.BadParameter(msg)
 
     return variables
+
+
+def create_xrunner(
+    request: XRunnerRequest[Blueprint],
+    service_cfg: "ServiceConfiguration | None" = None,
+    job_cfg: "JobConfig | None" = None,
+    log_level: int | str = "INFO",
+) -> XBlueprintRunner[Blueprint]:
+    """Dynamically create a runner using the application to look up the
+    registered handler.
+
+    Parameters
+    ----------
+    job_cfg : JobConfig
+        Configuration applied to the scheduler.
+    service_cfg : ServiceConfiguration
+        Configuration applied to the service.
+    request : XRunnerRequest
+        A request specifying the blueprint to be executed.
+    """
+    if job_cfg is None:
+        job_cfg = get_job_config()
+    if service_cfg is None:
+        service_cfg = get_service_config(
+            log_level,
+            name=f"{request.application}_runner",
+        )
+
+    runner_registry = Registrar[XBlueprintRunner[Blueprint]](APP_CAT_RUNNERS)
+    klass = runner_registry.get(request.application)
+
+    return klass(request, job_cfg, service_cfg)
 
 
 def get_registered_bp(application: str) -> type[Blueprint]:

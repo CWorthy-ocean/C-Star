@@ -33,6 +33,7 @@ from cstar.entrypoint.worker.worker import (
     main,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -103,6 +104,7 @@ def sim_runner(
     """
     request = BlueprintRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
         stages=list(SimulationStages),
     )
 
@@ -345,6 +347,7 @@ def test_start_runner(
     """
     request = BlueprintRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
     )
 
     service_config = ServiceConfiguration(
@@ -1039,6 +1042,7 @@ async def test_runner_setup_stage(
 
     request = BlueprintRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
         stages=list(stages),
     )
 

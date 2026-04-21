@@ -1,23 +1,17 @@
 from pathlib import Path
 from unittest import mock
 
-import pytest
 from typer.testing import CliRunner
 
 from cstar.cli.blueprint.run import app
 
 
-def test_blueprint_run_file_dne(
-    capsys: pytest.CaptureFixture,
-    tmp_path: Path,
-) -> None:
+def test_blueprint_run_file_dne(tmp_path: Path) -> None:
     """Verify that a path to a non-existent blueprint fails to be started due
     to validation.
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
     """
@@ -30,19 +24,12 @@ def test_blueprint_run_file_dne(
         color=False,
     )
 
-    assert "not found" in result.stdout
+    assert "not found" in result.stderr
 
 
-def test_blueprint_run_remote_blueprint_dne(
-    capsys: pytest.CaptureFixture,
-) -> None:
+def test_blueprint_run_remote_blueprint_dne() -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
     blueprint is not executed if the URL is invalid.
-
-    Parameters
-    ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     """
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint-X.yaml"
 
@@ -53,7 +40,7 @@ def test_blueprint_run_remote_blueprint_dne(
         color=False,
     )
 
-    assert "not found" in result.stdout
+    assert "not found" in result.stderr
 
 
 def test_blueprint_run_remote_blueprint() -> None:
@@ -63,7 +50,7 @@ def test_blueprint_run_remote_blueprint() -> None:
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
     with mock.patch(
-        "cstar.cli.blueprint.run.execute_runner",
+        "cstar.cli.blueprint.run.exec_romsmarbl_runner",
         return_value=0,
     ) as mock_exec:
         runner = CliRunner()

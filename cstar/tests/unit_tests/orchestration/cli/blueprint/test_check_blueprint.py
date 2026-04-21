@@ -22,7 +22,7 @@ def test_blueprint_check_file_dne(
     runner = CliRunner()
     result = runner.invoke(app, args, color=False)
 
-    assert "not found" in result.stdout
+    assert "not found" in result.stderr
 
 
 def test_blueprint_check_file_no_content(
@@ -42,7 +42,7 @@ def test_blueprint_check_file_no_content(
     runner = CliRunner()
     result = runner.invoke(app, args, color=False)
 
-    assert "is invalid" in result.stdout
+    assert "is invalid" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -67,7 +67,7 @@ def test_blueprint_check_file_bad_content(
     runner = CliRunner()
     result = runner.invoke(app, args, color=False)
 
-    assert "is invalid" in result.stdout
+    assert "is invalid" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -130,7 +130,7 @@ def test_blueprint_valid_input(
 )
 def test_blueprint_incomplete_input(
     start_removal: str,
-    end_removal: str,
+    end_removal: str | None,
     tests_path: Path,
     tmp_path: Path,
 ) -> None:
@@ -152,7 +152,7 @@ def test_blueprint_incomplete_input(
     blueprint_path = tests_path / "integration_tests/blueprints/blueprint_complete.yaml"
 
     content = blueprint_path.read_text().splitlines()
-    remaining_content = []
+    remaining_content: list[str] = []
     cutting = False
     cut_once = False
 
@@ -178,7 +178,7 @@ def test_blueprint_incomplete_input(
     result = runner.invoke(app, args, color=False)
 
     err_msg = f"{bp_path} should not pass validation"
-    assert "is invalid" in result.stdout, err_msg
+    assert "is invalid" in result.stderr, err_msg
 
 
 @pytest.mark.parametrize(
@@ -191,7 +191,7 @@ def test_blueprint_incomplete_input(
 )
 def test_blueprint_optional_input(
     start_removal: str,
-    end_removal: str,
+    end_removal: str | None,
     tests_path: Path,
     tmp_path: Path,
 ) -> None:
@@ -214,7 +214,7 @@ def test_blueprint_optional_input(
     blueprint_path = tests_path / "integration_tests/blueprints/blueprint_complete.yaml"
 
     content = blueprint_path.read_text().splitlines()
-    remaining_content = []
+    remaining_content: list[str] = []
     cutting, cut_once = False, False
 
     for line in content:
@@ -251,7 +251,7 @@ def test_blueprint_check_remote_blueprint_dne() -> None:
     runner = CliRunner()
     result = runner.invoke(app, args, color=False)
 
-    assert "not found" in result.stdout
+    assert "not found" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -269,8 +269,6 @@ def test_blueprint_check_remote_blueprint(
 
     Parameters
     ----------
-    capsys : pytest.CaptureFixture
-        Used to verify outputs from the CLI
     bp_uri : str
         A working URL referencing a valid blueprint
     """
