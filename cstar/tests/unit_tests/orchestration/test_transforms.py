@@ -9,10 +9,12 @@ import pytest
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
     OverrideTransform,
     RomsMarblTimeSplitter,
+    TemplateFillTransform,
     WorkplanTransformer,
     get_transforms,
 )
@@ -295,3 +297,195 @@ def test_workplan_transformer_applies_output_dir_overrides(
     assert blueprint.runtime_params.output_dir == exp_dir
     assert blueprint.runtime_params.output_dir != dir_orig
     assert blueprint.runtime_params.output_dir != original_override
+
+
+@pytest.fixture
+def live_step_with_templates(tmp_path: Path) -> LiveStep:
+    """A minimal LiveStep whose blueprint_overrides contain template placeholders."""
+    bp = tmp_path / "bp.yaml"
+    bp.touch()
+    step = Step(
+        name="fill-step",
+        application="sleep",
+        blueprint=bp.as_posix(),
+        blueprint_overrides={
+            "input_dir": "{{base_dir}}/input",
+            "output_dir": "{{path: upstream}}/output",
+            "variables": ["{{var1}}", "{{var2}}"],
+            "nested": {"key": "{{base_dir}}"},
+            "count": 42,
+        },
+    )
+    return LiveStep.from_step(step)
+
+
+def test_template_fill_suffix() -> None:
+    """Verify the transform reports the expected suffix."""
+    assert TemplateFillTransform.suffix() == "tmpl"
+
+
+def test_template_fill_variable_substitution(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """Plain {{name}} tokens are replaced using the variable resolver."""
+    variables = {"base_dir": "/data/base", "var1": "ALK", "var2": "pH_3D"}
+    transform = TemplateFillTransform(variable_resolver=variables.__getitem__)
+
+    # only fill overrides that don't contain path: tokens
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"input_dir": "{{base_dir}}/input"}},
+    )
+    (result,) = transform(step)
+
+    assert result.blueprint_overrides["input_dir"] == "/data/base/input"
+
+
+def test_template_fill_path_substitution(
+    live_step_with_templates: LiveStep, tmp_path: Path
+) -> None:
+    """{{path: step_name}} tokens are replaced using the path resolver."""
+    upstream_dir = tmp_path / "upstream"
+    path_resolver = lambda name: upstream_dir  # noqa: E731
+
+    transform = TemplateFillTransform(path_resolver=path_resolver)
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"output_dir": "{{path: upstream}}/output"}},
+    )
+    (result,) = transform(step)
+
+    assert result.blueprint_overrides["output_dir"] == f"{upstream_dir}/output"
+
+
+def test_template_fill_nested_dict(live_step_with_templates: LiveStep) -> None:
+    """Placeholders nested inside a dict value are replaced."""
+    variables = {"base_dir": "/data/base"}
+    transform = TemplateFillTransform(variable_resolver=variables.__getitem__)
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"nested": {"key": "{{base_dir}}"}}},
+    )
+    (result,) = transform(step)
+
+    assert result.blueprint_overrides["nested"] == {"key": "/data/base"}
+
+
+def test_template_fill_nested_list(live_step_with_templates: LiveStep) -> None:
+    """Placeholders nested inside a list value are replaced."""
+    variables = {"var1": "ALK", "var2": "pH_3D"}
+    transform = TemplateFillTransform(variable_resolver=variables.__getitem__)
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"variables": ["{{var1}}", "{{var2}}"]}},
+    )
+    (result,) = transform(step)
+
+    assert result.blueprint_overrides["variables"] == ["ALK", "pH_3D"]
+
+
+def test_template_fill_scalar_passthrough(live_step_with_templates: LiveStep) -> None:
+    """Non-string scalars (int, float) pass through unchanged."""
+    transform = TemplateFillTransform()
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"count": 42, "ratio": 3.14}},
+    )
+    (result,) = transform(step)
+
+    assert result.blueprint_overrides["count"] == 42
+    assert result.blueprint_overrides["ratio"] == 3.14
+
+
+def test_template_fill_missing_variable_resolver_raises(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """ValueError is raised when a plain placeholder is encountered with no variable resolver."""
+    transform = TemplateFillTransform()
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"key": "{{missing_var}}"}},
+    )
+    with pytest.raises(ValueError, match="No variable resolver"):
+        list(transform(step))
+
+
+def test_template_fill_missing_path_resolver_raises(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """ValueError is raised when a path placeholder is encountered with no path resolver."""
+    transform = TemplateFillTransform()
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"key": "{{path: some_step}}"}},
+    )
+    with pytest.raises(ValueError, match="No path resolver"):
+        list(transform(step))
+
+
+def test_template_fill_with_path_resolver_returns_new_instance(
+    tmp_path: Path,
+) -> None:
+    """with_path_resolver returns a new instance; the original is unchanged."""
+    original = TemplateFillTransform(variable_resolver=str)
+    bound = original.with_path_resolver(lambda _: tmp_path)
+
+    assert bound is not original
+    assert bound._path_resolver is not None
+    assert original._path_resolver is None
+    assert bound._variable_resolver is original._variable_resolver
+
+
+def test_template_fill_does_not_mutate_original_step(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """__call__ must not mutate the original step's blueprint_overrides."""
+    variables = {"base_dir": "/data/base"}
+    transform = TemplateFillTransform(variable_resolver=variables.__getitem__)
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"dir": "{{base_dir}}"}},
+    )
+    original_overrides = dict(step.blueprint_overrides)
+
+    list(transform(step))
+
+    assert step.blueprint_overrides == original_overrides
+
+
+def test_template_fill_yields_single_step(live_step_with_templates: LiveStep) -> None:
+    """__call__ always yields exactly one step."""
+    variables = {"base_dir": "/data/base"}
+    transform = TemplateFillTransform(variable_resolver=variables.__getitem__)
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"dir": "{{base_dir}}"}},
+    )
+    results = list(transform(step))
+
+    assert len(results) == 1
+
+
+def test_template_fill_combined_resolvers(
+    tmp_path: Path, live_step_with_templates: LiveStep
+) -> None:
+    """Variable and path resolvers can both operate in the same transform pass."""
+    upstream_dir = tmp_path / "tasks" / "upstream"
+    variables = {"var1": "ALK"}
+    transform = TemplateFillTransform(
+        variable_resolver=variables.__getitem__,
+        path_resolver=lambda _: upstream_dir,
+    )
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={
+            "blueprint_overrides": {
+                "variable": "{{var1}}",
+                "input_dir": "{{path: upstream}}/joined_output",
+            }
+        },
+    )
+    (result,) = transform(step)
+
+    assert result.blueprint_overrides["variable"] == "ALK"
+    assert result.blueprint_overrides["input_dir"] == f"{upstream_dir}/joined_output"
