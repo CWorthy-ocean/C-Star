@@ -18,6 +18,7 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
 )
+from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.serialization import (
     intenum_representer,
@@ -237,6 +238,17 @@ class LiveStep(Step):
         if self._fsm is None:
             self._fsm = JobFileSystemManager(self.get_working_dir)
         return self._fsm
+
+    @property
+    def command(self) -> str:
+        """Generate the shell command that will execute the underlying application.
+
+        Returns
+        -------
+        str
+        """
+        step_converter = get_command_mapping(self.application)
+        return step_converter(self)
 
     @classmethod
     def from_step(

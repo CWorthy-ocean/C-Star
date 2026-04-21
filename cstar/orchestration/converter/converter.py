@@ -3,17 +3,16 @@ import random
 import sys
 import textwrap
 import typing as t
-from collections import defaultdict
 
 from cstar.base.log import get_logger
-from cstar.entrypoint.worker.worker import ARG_URI_LONG
+from cstar.entrypoint.utils import ARG_URI_LONG
 from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable
 
-    from cstar.orchestration.orchestration import Launcher, LiveStep
+    from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
 
@@ -88,40 +87,31 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     return f"sh {script_path}"
 
 
-launcher_aware_app_to_cmd_map: dict[
-    type["Launcher"],
-    dict[str, StepToCommandConversionFn],
-] = defaultdict(
-    lambda: {
-        Application.SLEEP.value: convert_step_to_placeholder,
-        Application.ROMS_MARBL.value: convert_roms_step_to_command,
-    },
-)
+app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
+    Application.SLEEP: convert_step_to_placeholder,
+    Application.ROMS_MARBL: convert_roms_step_to_command,
+}
 """Map application types to a function that converts a step to a CLI command."""
 
 
 def register_command_mapping(
-    application: Application,
-    launcher: type["Launcher"],
+    application: str,
     mapping_func: StepToCommandConversionFn,
 ) -> None:
-    launcher_map = launcher_aware_app_to_cmd_map[launcher]
-    launcher_map[application] = mapping_func
+    app_to_cmd_map[application] = mapping_func
 
 
 def get_command_mapping(
-    application: Application,
-    launcher: type["Launcher"],
+    application: str,
 ) -> StepToCommandConversionFn:
-    launcher_map = launcher_aware_app_to_cmd_map[launcher]
-    step_converter = launcher_map[application.value]
+    step_converter = app_to_cmd_map[application]
 
     if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
-        if converter_override not in launcher_map:
+        if converter_override not in app_to_cmd_map:
             msg = f"Override in env var `{ENV_CSTAR_CMD_CONVERTER_OVERRIDE}` has invalid value: {converter_override}"
             raise ValueError(msg)
 
-        converter = launcher_map[converter_override]
+        converter = app_to_cmd_map[converter_override]
         msg = f"Overriding step converter `{step_converter}` with `{converter}` for `{application}` commands."
         step_converter = converter
     else:

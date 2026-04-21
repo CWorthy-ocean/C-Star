@@ -402,7 +402,7 @@ def single_step_workplan(
     bp_content = bp_content.replace(
         default_output_dir, f"output_dir: {tmp_path.as_posix()}"
     )
-    bp_content.replace(Application.SLEEP.value, Application.ROMS_MARBL.value)
+    bp_content.replace(Application.SLEEP, Application.ROMS_MARBL)
     bp_path.write_text(bp_content)
 
     return Workplan(
