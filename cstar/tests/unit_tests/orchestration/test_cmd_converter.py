@@ -29,7 +29,7 @@ def custom_map_function(step: Step) -> str:
 )
 def test_converter_defaults(
     tmp_path: Path,
-    target_application: str,
+    target_application: Application,
 ) -> None:
     """Verify that the registration of a converter is not required for the default apps.
 
@@ -62,7 +62,7 @@ def test_converter_defaults(
 )
 def test_converter_registration(
     tmp_path: Path,
-    target_application: str,
+    target_application: Application,
 ) -> None:
     """Verify that the registration of a converter is not required for the default apps.
 

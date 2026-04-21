@@ -116,22 +116,28 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
 
 
 app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
-    Application.SLEEP: convert_step_to_placeholder,
-    Application.ROMS_MARBL: convert_roms_step_to_command,
+    Application.SLEEP.value: convert_step_to_placeholder,
+    Application.ROMS_MARBL.value: convert_roms_step_to_command,
+    Application.HELLO_WORLD.value: convert_step_to_blueprint_run_command,
 }
 """Map application types to a function that converts a step to a CLI command."""
 
 
 def register_command_mapping(
-    application: str,
+    application: Application | str,
     mapping_func: StepToCommandConversionFn,
 ) -> None:
+    if isinstance(application, Application):
+        application = application.value
     app_to_cmd_map[application] = mapping_func
 
 
 def get_command_mapping(
     application: str,
 ) -> StepToCommandConversionFn:
+    if isinstance(application, Application):
+        application = application.value
+
     step_converter = app_to_cmd_map[application]
 
     if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
