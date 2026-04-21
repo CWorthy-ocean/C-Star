@@ -12,8 +12,6 @@ from pydantic import PrivateAttr
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Application
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -104,11 +102,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        step_converter = get_command_mapping(
-            Application(step.application),
-            LocalLauncher,
-        )
-        cmd = step_converter(step)
+        cmd = step.command
 
         step.fsm.prepare()
         log_file = step.fsm.logs_dir / f"{step.safe_name}.out"

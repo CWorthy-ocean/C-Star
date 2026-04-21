@@ -1,7 +1,7 @@
-import itertools
 import os
 import typing as t
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -31,7 +31,7 @@ class Transform(t.Protocol):
     new steps.
     """
 
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -89,7 +89,7 @@ def get_transforms(application: str) -> list[Transform]:
 
 def _dailies(
     start_date: datetime, end_date: datetime
-) -> t.Iterable[tuple[datetime, datetime]]:
+) -> Iterable[tuple[datetime, datetime]]:
     """Get daily time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, start_date.day)
     while current_date < end_date:
@@ -101,7 +101,7 @@ def _dailies(
 
 def _weeklies(
     start_date: datetime, end_date: datetime
-) -> t.Iterable[tuple[datetime, datetime]]:
+) -> Iterable[tuple[datetime, datetime]]:
     """Get weekly time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, start_date.day)
     while current_date < end_date:
@@ -113,7 +113,7 @@ def _weeklies(
 
 def _monthlies(
     start_date: datetime, end_date: datetime
-) -> t.Iterable[tuple[datetime, datetime]]:
+) -> Iterable[tuple[datetime, datetime]]:
     """Get monthly time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, 1)
     while current_date < end_date:
@@ -148,7 +148,7 @@ def get_time_slices(
     start_date: datetime,
     end_date: datetime,
     frequency: str = SplitFrequency.Monthly.value,
-) -> t.Iterable[tuple[datetime, datetime]]:
+) -> Iterable[tuple[datetime, datetime]]:
     """Get the time slices for the given start and end dates.
 
     Parameters
@@ -273,22 +273,38 @@ class WorkplanTransformer(LoggingMixin):
         if self._transformed:
             return self._transformed
 
+        apply_to = {Application.ROMS_MARBL, Application.SLEEP}
+
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]
-        steps: t.Iterable[LiveStep] = list(
-            map(override_output_directory, live_steps),
-        )
+        steps: list[LiveStep] = []
+        for step in live_steps:
+            if step.application in apply_to:
+                override_output_directory(step)
+            steps.append(step)
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             split_steps: list[LiveStep] = []
             named_dep_map: dict[str, str] = {}
 
             for step in steps:
-                transformed_steps = list(self.transform_fn(step))
-                named_dep_map[step.name] = transformed_steps[-1].name
-                split_steps.extend(transformed_steps)
+                if step.application in apply_to:
+                    transformed_steps = list(self.transform_fn(step))
+                    named_dep_map[step.name] = transformed_steps[-1].name
+                    split_steps.extend(transformed_steps)
+                else:
+                    split_steps.append(step)
+
+            # apply any overrides produced in the transform function
+            override_transform = OverrideTransform()
+
+            steps = []
 
             for step in split_steps:
+                if step.application not in apply_to:
+                    steps.append(step)
+                    continue
+
                 depends_on = {str(d) for d in step.depends_on}
 
                 if to_update := depends_on.intersection(named_dep_map):
@@ -298,11 +314,7 @@ class WorkplanTransformer(LoggingMixin):
                     step.depends_on.clear()
                     step.depends_on.extend(depends_on)
 
-            steps = split_steps
-
-        # apply any overrides produced in the transform function
-        override_transform = OverrideTransform()
-        steps = list(itertools.chain.from_iterable(map(override_transform, steps)))
+                steps.extend(override_transform(step))
 
         self._transformed = self.original.model_copy(
             update={
@@ -327,7 +339,7 @@ class RomsMarblTimeSplitter(Transform):
         freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
         self.frequency = freq_config.lower()
 
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
         """Split a step into multiple sub-steps.
 
         Parameters
@@ -376,7 +388,7 @@ class RomsMarblTimeSplitter(Transform):
             child_fs = step.fsm.get_subtask_manager(child_step_name)
 
             description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
-            overrides = {
+            overrides: dict[str, t.Any] = {
                 "name": dynamic_name,
                 "description": description,
                 "runtime_params": {
@@ -393,7 +405,7 @@ class RomsMarblTimeSplitter(Transform):
             child_bp_path = child_fs.work_dir / f"{child_step_name}_bp.yaml"
             serialize(child_bp_path, bp_copy)
 
-            updates = {
+            updates: dict[str, t.Any] = {
                 "blueprint": child_bp_path.as_posix(),
                 "blueprint_overrides": overrides,
                 "depends_on": depends_on,
@@ -480,7 +492,7 @@ class OverrideTransform(Transform):
 
         return RomsMarblBlueprint(**merged)
 
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -540,6 +552,3 @@ def override_output_directory(step: LiveStep) -> LiveStep:
     overridden_step_result = iter(override_transform(step))
 
     return next(overridden_step_result)
-
-
-register_transform(Application.ROMS_MARBL.value, RomsMarblTimeSplitter())

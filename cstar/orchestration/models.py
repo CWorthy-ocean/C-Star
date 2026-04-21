@@ -24,6 +24,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
+from cstar.orchestration.application import register_blueprint
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 if t.TYPE_CHECKING:
@@ -61,7 +62,7 @@ class ConfiguredBaseModel(BaseModel):
     for subclasses.
     """
 
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    model_config = ConfigDict(extra="allow", from_attributes=True)
     """Pydantic ConfigDict with options we want changed."""
 
 
@@ -212,10 +213,12 @@ class BlueprintState(StrEnum):
 class Application(StrEnum):
     """The supported application types."""
 
-    ROMS_MARBL = auto()
+    ROMS_MARBL = "roms_marbl"
     """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
-    SLEEP = auto()
+    SLEEP = "sleep"
     """A call to the hostname executable to simplify testing."""
+    HELLO_WORLD = "hello_world"
+    """Sample custom application."""
 
 
 class ParameterSet(DocLocMixin, ConfiguredBaseModel):
@@ -338,7 +341,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     description: RequiredString
     """A user-friendly description of the scenario to be executed by the blueprint."""
 
-    application: Application = Application.ROMS_MARBL
+    application: str
     """The process type to be executed by the blueprint."""
 
     state: BlueprintState = BlueprintState.NotSet
@@ -353,8 +356,12 @@ class Blueprint(ConfiguredBaseModel, ABC):
         return 1
 
 
+@register_blueprint(Application.ROMS_MARBL)
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     """Blueprint schema for running a ROMS-MARBL simulation."""
+
+    application: str = Application.ROMS_MARBL
+    """The process type to be executed by the blueprint."""
 
     valid_start_date: datetime
     """Beginning of the time range for the available data."""

@@ -54,7 +54,7 @@ _T = t.TypeVar("_T", bound=SerializableModel)
 class ValidationResult(t.Generic[_T]):
     """Disposition and reason for a validation failure."""
 
-    error_msg: str | None = None
+    error_msg: str = ""
     """An error message that is populated if validation fails."""
     item: _T | None = None
     """The deserialized workplan if validation succeeds."""

@@ -18,19 +18,22 @@ from cstar.entrypoint.config import (
     get_job_config,
     get_service_config,
 )
-from cstar.entrypoint.worker.worker import (
+from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
     ARG_URI_LONG,
     ARG_URI_SHORT,
-    BlueprintRequest,
+)
+from cstar.entrypoint.worker.worker import (
+    RomsMarblRunnerRequest,
     SimulationRunner,
     SimulationStages,
-    create_parser,
+    create_simrunner_parser,
     get_request,
     main,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -99,8 +102,9 @@ def sim_runner(
     SimulationRunner
         An initialized instance of SimulationRunner, configured via blueprint.
     """
-    request = BlueprintRequest(
+    request = RomsMarblRunnerRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
         stages=list(SimulationStages),
     )
 
@@ -127,7 +131,7 @@ def sim_runner(
 
 def test_create_parser_happy_path() -> None:
     """Verify that a help argument is present in the parser."""
-    parser = create_parser()
+    parser = create_simrunner_parser()
 
     # ruff: noqa: SLF001
     assert ARG_URI_LONG in parser._option_string_actions
@@ -164,7 +168,7 @@ def test_parser_good_log_level(
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
 
-    parser = create_parser()
+    parser = create_simrunner_parser()
     parsed_args = parser.parse_args(args)
 
     assert getattr(parsed_args, "log_level", None) == logging.getLevelName(
@@ -193,7 +197,7 @@ def test_parser_lowercase_log_level(
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
 
-    parser = create_parser()
+    parser = create_simrunner_parser()
 
     # unable to parse the lower-case log levels
     with pytest.raises(SystemExit):
@@ -208,7 +212,7 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
     valid_args_tuples = ((k, v) for k, v in valid_args.items())
     args = list(itertools.chain.from_iterable(valid_args_tuples))
 
-    parser = create_parser()
+    parser = create_simrunner_parser()
 
     with pytest.raises(SystemExit):
         _ = parser.parse_args(args)
@@ -243,7 +247,7 @@ def test_get_service_config(
     arg_b, val_b = blueprint_uri.split(" ", maxsplit=1)
     arg_l, val_l = log_level.split(" ", maxsplit=1)
 
-    parser = create_parser()
+    parser = create_simrunner_parser()
     parsed_args = parser.parse_args(
         [
             arg_b,
@@ -276,7 +280,7 @@ def test_get_request(
     blueprint_uri: str,
 ) -> None:
     """Verify that the expected values are set on the blueprint request."""
-    parser = create_parser()
+    parser = create_simrunner_parser()
     parsed_args = parser.parse_args(
         [
             ARG_URI_LONG,
@@ -341,8 +345,9 @@ def test_start_runner(
     blueprint_path: Path
         The path to the blueprint yaml file created by the fixture.
     """
-    request = BlueprintRequest(
+    request = RomsMarblRunnerRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
     )
 
     service_config = ServiceConfiguration(
@@ -1023,7 +1028,7 @@ async def test_runner_setup_stage(
     """
     mock_prep_fs = mock.Mock()
 
-    stages = []
+    stages: list[SimulationStages] = []
     if setup:
         stages.append(SimulationStages.SETUP)
     if build:
@@ -1035,8 +1040,9 @@ async def test_runner_setup_stage(
     if post_run:
         stages.append(SimulationStages.POST_RUN)
 
-    request = BlueprintRequest(
+    request = RomsMarblRunnerRequest(
         str(blueprint_path),
+        RomsMarblBlueprint,
         stages=list(stages),
     )
 

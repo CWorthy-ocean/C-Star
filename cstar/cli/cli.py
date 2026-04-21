@@ -5,6 +5,7 @@ from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
 from cstar.cli.template import app as app_template
 from cstar.cli.workplan import app as app_workplan
+from cstar.entrypoint.worker import hello_app, worker  # noqa: F401
 
 
 def attach_subcommands(app: typer.Typer) -> None:
@@ -32,14 +33,13 @@ def attach_subcommands(app: typer.Typer) -> None:
 
 app = typer.Typer(
     callback=common_callback,
-    help="The C-Star CLI (installed as `cstar`) enables command-line management and execution of C-Star workplans and blueprints.",
+    help="The C-Star CLI enables command-line management and execution of C-Star workplans and blueprints.",
 )
 attach_subcommands(app)
 
 
 def main() -> None:
     """Main entrypoint for the complete C-Star CLI."""
-    global app
     app()
 
 

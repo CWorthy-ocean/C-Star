@@ -5,17 +5,22 @@ import textwrap
 import typing as t
 from collections import defaultdict
 
+from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
-from cstar.entrypoint.worker.worker import ARG_URI_LONG
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_URI_LONG
 from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 if t.TYPE_CHECKING:
-    from cstar.orchestration.orchestration import Launcher, LiveStep
+    from collections.abc import Callable
+
+    from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
 
-StepToCommandConversionFn: t.TypeAlias = "t.Callable[[LiveStep], str]"
+StepToCommandConversionFn: t.TypeAlias = "Callable[[LiveStep], str]"
 """Convert a `Step` into a command to be executed.
 
 Parameters
@@ -47,7 +52,33 @@ def convert_roms_step_to_command(step: "LiveStep") -> str:
         The complete CLI command.
     """
     worker_module = "cstar.entrypoint.worker.worker"
-    return f"{sys.executable} -m {worker_module} {ARG_URI_LONG} {step.blueprint_path}"
+    return f"{sys.executable} -m {worker_module}  {ARG_URI_LONG} {step.blueprint_path}"
+
+
+def convert_step_to_blueprint_run_command(step: "LiveStep") -> str:
+    """Convert a generic blueprint execution step to a CLI command.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step to be converted.
+
+    Returns
+    -------
+    str
+        The complete CLI command.
+    """
+    cmd_array = [
+        "cstar",
+        "blueprint",
+        "run",
+        str(step.blueprint_path),
+    ]
+
+    if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
+        cmd_array.append(ARG_CLOBBER)
+
+    return " ".join(cmd_array)
 
 
 def convert_step_to_placeholder(step: "LiveStep") -> str:
@@ -80,17 +111,15 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     )
 
     # write it to a script asset
-    script_path = step.fsm.work_dir / "script.sh"
+    script_path = step.fsm.work_dir / "placeholder_script.sh"
     script_path.write_text(script)
 
     return f"sh {script_path}"
 
 
-launcher_aware_app_to_cmd_map: dict[
-    type["Launcher"],
-    dict[str, StepToCommandConversionFn],
-] = defaultdict(
-    lambda: {
+app_to_cmd_map: dict[str, StepToCommandConversionFn] = defaultdict(
+    lambda: convert_step_to_blueprint_run_command,
+    {
         Application.SLEEP.value: convert_step_to_placeholder,
         Application.ROMS_MARBL.value: convert_roms_step_to_command,
     },
@@ -99,27 +128,31 @@ launcher_aware_app_to_cmd_map: dict[
 
 
 def register_command_mapping(
-    application: Application,
-    launcher: type["Launcher"],
+    application: Application | str,
     mapping_func: StepToCommandConversionFn,
 ) -> None:
-    launcher_map = launcher_aware_app_to_cmd_map[launcher]
-    launcher_map[application] = mapping_func
+    if isinstance(application, Application):
+        application = application.value
+    app_to_cmd_map[application] = mapping_func
 
 
 def get_command_mapping(
-    application: Application,
-    launcher: type["Launcher"],
+    application: str,
 ) -> StepToCommandConversionFn:
-    launcher_map = launcher_aware_app_to_cmd_map[launcher]
-    step_converter = launcher_map[application.value]
+    if isinstance(application, Application):
+        application = application.value
+
+    step_converter = app_to_cmd_map[application]
+    if step_converter is None:
+        msg = f"No command converter found for application: {application!r}"
+        raise CstarExpectationFailed(msg)
 
     if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
-        if converter_override not in launcher_map:
+        if converter_override not in app_to_cmd_map:
             msg = f"Override in env var `{ENV_CSTAR_CMD_CONVERTER_OVERRIDE}` has invalid value: {converter_override}"
             raise ValueError(msg)
 
-        converter = launcher_map[converter_override]
+        converter = app_to_cmd_map[converter_override]
         msg = f"Overriding step converter `{step_converter}` with `{converter}` for `{application}` commands."
         step_converter = converter
     else:

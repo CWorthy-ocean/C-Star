@@ -1,6 +1,7 @@
 import asyncio
 import os
 import typing as t
+from collections.abc import Callable, Iterable, Mapping
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
@@ -17,11 +18,15 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
 )
-from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.application import APP_CAT_BLUEPRINTS
+from cstar.orchestration.converter.converter import get_command_mapping
+from cstar.orchestration.models import Blueprint, Step, Workplan
 from cstar.orchestration.serialization import (
+    deserialize,
     intenum_representer,
     register_representer,
 )
+from cstar.system.registration import Registrar
 
 nx = lazy_import("networkx")
 
@@ -237,12 +242,31 @@ class LiveStep(Step):
             self._fsm = JobFileSystemManager(self.get_working_dir)
         return self._fsm
 
+    @property
+    def blueprint(self) -> Blueprint:
+        """Load and return the blueprint associated with this step."""
+        base_bp = deserialize(self.blueprint_path, Blueprint)
+        reg_bp = Registrar[Blueprint](APP_CAT_BLUEPRINTS)
+        bp_type = reg_bp.get(base_bp.application)
+        return bp_type(**base_bp.model_dump())
+
+    @property
+    def command(self) -> str:
+        """Generate the shell command that will execute the underlying application.
+
+        Returns
+        -------
+        str
+        """
+        step_converter = get_command_mapping(self.application)
+        return step_converter(self)
+
     @classmethod
     def from_step(
         cls,
         step: Step,
         parent: "LiveStep | Step | None" = None,
-        update: t.Mapping[str, t.Any] | None = None,
+        update: Mapping[str, t.Any] | None = None,
     ) -> "LiveStep":
         """Convert a step from orchestration planning into a LiveStep.
 
@@ -317,7 +341,7 @@ class Planner(LoggingMixin):
         DiGraph
             A graph of the execution plan.
         """
-        data: t.Mapping[str, list[str]] = {s.name: [] for s in workplan.steps}
+        data: Mapping[str, list[str]] = {s.name: [] for s in workplan.steps}
         for step in workplan.steps:
             for prereq in step.depends_on:
                 data[prereq].append(step.name)
@@ -334,7 +358,7 @@ class Planner(LoggingMixin):
         nx.set_node_attributes(g, values=defaults)
         return g
 
-    def flatten(self) -> t.Iterable[Step]:
+    def flatten(self) -> Iterable[Step]:
         """Return the planned steps in execution order.
 
         Returns
@@ -433,31 +457,31 @@ class Planner(LoggingMixin):
         self,
         key: t.Literal["status"],
         default: Status | None = None,
-        filter_fn: t.Callable[[Status], bool] | None = None,
-    ) -> t.Mapping[str, Status]: ...
+        filter_fn: Callable[[Status], bool] | None = None,
+    ) -> Mapping[str, Status]: ...
 
     @t.overload
     def retrieve_all(
         self,
         key: t.Literal["step"],
         default: Step | None = None,
-        filter_fn: t.Callable[[Step], bool] | None = None,
-    ) -> t.Mapping[str, Step]: ...
+        filter_fn: Callable[[Step], bool] | None = None,
+    ) -> Mapping[str, Step]: ...
 
     @t.overload
     def retrieve_all(
         self,
         key: t.Literal["task"],
-        default: Task | None = None,
-        filter_fn: t.Callable[[Task], bool] | None = None,
-    ) -> t.Mapping[str, Task]: ...
+        default: Task[t.Any] | None = None,
+        filter_fn: Callable[[Task[t.Any]], bool] | None = None,
+    ) -> Mapping[str, Task[t.Any]]: ...
 
     def retrieve_all(
         self,
         key: str,
         default: t.Any | None = None,
-        filter_fn: t.Callable[[t.Any], bool] | None = None,
-    ) -> t.Mapping[str, t.Any]:
+        filter_fn: Callable[[t.Any], bool] | None = None,
+    ) -> Mapping[str, t.Any]:
         """Retrieve a user-defined value for every node in the plan.
 
         Parameters
@@ -585,7 +609,7 @@ class Orchestrator(LoggingMixin):
         self.planner = planner
         self.launcher = launcher
 
-    def get_open_nodes(self, *, mode: RunMode) -> t.Mapping[str, Status] | None:
+    def get_open_nodes(self, *, mode: RunMode) -> Mapping[str, Status] | None:
         """Retrieve the set of task nodes with a non-terminal state that are
         executing or ready to execute.
 
@@ -636,7 +660,7 @@ class Orchestrator(LoggingMixin):
 
         return None
 
-    def get_closed_nodes(self, *, mode: RunMode) -> t.Mapping[str, Status]:
+    def get_closed_nodes(self, *, mode: RunMode) -> Mapping[str, Status]:
         """Retrieve the set of task nodes with a terminal state.
 
         Returns
@@ -738,7 +762,7 @@ class Orchestrator(LoggingMixin):
             self.planner.store(n, KEY_STATUS, Status.Failed)
             raise CstarExpectationFailed(f"Node {n} task failed.")
 
-    async def run(self, mode: RunMode) -> t.Mapping[str, Status]:
+    async def run(self, mode: RunMode) -> Mapping[str, Status]:
         """Execute tasks that are ready and query status on running tasks.
 
         Parameters
@@ -784,7 +808,7 @@ class Orchestrator(LoggingMixin):
 
         return {k: v.status if v else Status.Unsubmitted for k, v in kvp.items()}
 
-    async def _cancel(self, cancellations: t.Iterable[Task]) -> None:
+    async def _cancel(self, cancellations: Iterable[Task]) -> None:
         """Request the cancellation of running tasks.
 
         Parameters
@@ -827,7 +851,7 @@ def check_environment() -> None:
 def configure_environment(
     output_dir: Path | None = None,
     run_id: str | None = None,
-    updates: t.Mapping[str, str] | None = None,
+    updates: Mapping[str, str] | None = None,
 ) -> None:
     """Configure environment variables required by the runner.
 
@@ -837,7 +861,7 @@ def configure_environment(
         The directory where outputs will be written.
     run_id : str | None
         The unique identifier for an execution of the workplan.
-    updates : t.Mapping[str, str] | None
+    updates : Mapping[str, str] | None
         Additional environment variable updates.
     """
     if output_dir:

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import typing as t
+from collections.abc import Mapping
 
 from prefect import State, task
 from prefect import Task as PrefectTask
@@ -11,6 +12,7 @@ from cstar.base.env import (
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.handler import ExecutionStatus
@@ -19,15 +21,12 @@ from cstar.execution.scheduler_job import (
     get_slurm_batch,
     get_slurm_batches,
 )
-from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Application, RomsMarblBlueprint
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
     Status,
     Task,
 )
-from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import (
     get_sentinel,
     load_sentinels,
@@ -181,14 +180,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        job_name = step.safe_name
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        job_dep_ids = [d.pid for d in dependencies]
+        if not step.blueprint:
+            msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
+            raise CstarError(msg)
 
-        step_converter = get_command_mapping(
-            Application(step.application),
-            SlurmLauncher,
-        )
+        job_name = step.safe_name
+        job_dep_ids = [d.pid for d in dependencies]
 
         script_path = step.fsm.work_dir / "script.sh"
         output_file = step.fsm.logs_dir / f"{job_name}.out"
@@ -200,11 +197,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             output_file.parent.mkdir(parents=True)
             output_file.write_text("ready\n")
 
-        command = step_converter(step)
+        command = step.command
         job = create_scheduler_job(
             commands=command,
             account_key=SlurmLauncher.configured_account(),
-            cpus=bp.cpus_needed,
+            cpus=step.blueprint.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
             script_path=script_path,
@@ -250,7 +247,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return batch.status
 
     @staticmethod
-    async def _locate_priors() -> t.Mapping[str, SlurmHandle]:
+    async def _locate_priors() -> Mapping[str, SlurmHandle]:
         """Retrieve all task sentinels discovered in the output path.
 
 

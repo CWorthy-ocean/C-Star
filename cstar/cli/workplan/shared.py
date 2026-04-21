@@ -1,17 +1,27 @@
 import asyncio
 import typing as t
+from collections import Counter
+from collections.abc import Mapping
 
 import typer
 from rich.console import Console
 from rich.table import Column, Table
 
 from cstar.base.log import get_logger
+from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest
+from cstar.orchestration.application import APP_CAT_BLUEPRINTS, APP_CAT_RUNNERS
 from cstar.orchestration.dag_runner import DagStatus
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import TrackingRepository
+from cstar.system.registration import Registrar
 
 console = Console()
 log = get_logger(__name__)
+
+if t.TYPE_CHECKING:
+    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
 
 def list_runs(incomplete: str) -> list[tuple[str, str]]:
@@ -131,7 +141,7 @@ def check_and_capture_kvp(entry: str) -> tuple[str, str]:
     return k, v
 
 
-def check_and_capture_kvps(entries: list[str]) -> t.Mapping[str, str] | None:
+def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str] | None:
     """Capture all unique keyj-value pairs from user-supplied configuration
     supplied as a list of key-value pairs in the format ["key1=value", "key2=value"]
 
@@ -160,9 +170,71 @@ def check_and_capture_kvps(entries: list[str]) -> t.Mapping[str, str] | None:
     variables = dict(captured_kvps)
 
     if len(variables) < len(captured_kvps):
-        counter = t.Counter(k for k, _ in captured_kvps)
+        counter = Counter(k for k, _ in captured_kvps)
         k, _ = counter.most_common(1)[0]
         msg = f"Found variable with multiple values: {k}"
         raise typer.BadParameter(msg)
 
     return variables
+
+
+def create_xrunner(
+    request: XRunnerRequest[Blueprint],
+    service_cfg: "ServiceConfiguration | None" = None,
+    job_cfg: "JobConfig | None" = None,
+    log_level: int | str = "INFO",
+) -> XBlueprintRunner[Blueprint]:
+    """Dynamically create a runner using the application to look up the
+    registered handler.
+
+    Parameters
+    ----------
+    job_cfg : JobConfig
+        Configuration applied to the scheduler.
+    service_cfg : ServiceConfiguration
+        Configuration applied to the service.
+    request : XRunnerRequest
+        A request specifying the blueprint to be executed.
+    """
+    if job_cfg is None:
+        job_cfg = get_job_config()
+    if service_cfg is None:
+        service_cfg = get_service_config(
+            log_level,
+            name=f"{request.application}_runner",
+        )
+
+    klass = get_registered_runner(request.application)
+    return klass(request, job_cfg, service_cfg)
+
+
+def get_registered_bp(application: str) -> type[Blueprint]:
+    """Retrieve the Blueprint type registered for the given application.
+
+    Parameters
+    ----------
+    application
+        The application name
+
+    Returns
+    -------
+    type[Blueprint]
+    """
+    registrar = Registrar[Blueprint](APP_CAT_BLUEPRINTS)
+    return registrar.get(application)
+
+
+def get_registered_runner(application: str) -> type[XBlueprintRunner[Blueprint]]:
+    """Retrieve the Runner type registered for the given application.
+
+    Parameters
+    ----------
+    application
+        The application name
+
+    Returns
+    -------
+    type[XBlueprintRunner[Blueprint]]
+    """
+    registrar = Registrar[XBlueprintRunner[Blueprint]](APP_CAT_RUNNERS)
+    return registrar.get(application)

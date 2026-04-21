@@ -1,8 +1,6 @@
 import argparse
 import asyncio
-import dataclasses as dc
 import enum
-import logging
 import os
 import pathlib
 import sys
@@ -11,7 +9,7 @@ from typing import TYPE_CHECKING, Final, Literal, override
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import get_logger
+from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
     configure_environment,
@@ -19,22 +17,23 @@ from cstar.entrypoint.config import (
     get_service_config,
 )
 from cstar.entrypoint.service import Service
+from cstar.entrypoint.utils import (
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
+    ARG_URI_LONG,
+    ARG_URI_SHORT,
+)
+from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms import ROMSSimulation
 
 if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
-ARG_URI_LONG: Literal["--blueprint-uri"] = "--blueprint-uri"
-ARG_URI_SHORT: Literal["-b"] = "-b"
-
-ARG_LOGLEVEL_LONG: Literal["--log-level"] = "--log-level"
-ARG_LOGLEVEL_SHORT: Literal["-l"] = "-l"
 
 ARG_STAGE_LONG: Literal["--stage"] = "--stage"
 ARG_STAGE_SHORT: Literal["-g"] = "-g"
-
-ARG_CLOBBER: Literal["--clobber"] = "--clobber"
 
 
 class SimulationStages(enum.StrEnum):
@@ -52,17 +51,19 @@ class SimulationStages(enum.StrEnum):
     """Execute hooks after the simulation completes. See `Simulation.post_run`"""
 
 
-@dc.dataclass(frozen=True)
-class BlueprintRequest:
-    """Represents a request to run a c-star simulation."""
+class RomsMarblRunnerRequest(XRunnerRequest[RomsMarblBlueprint]):
+    stages: list[SimulationStages]
+    """The simulation stages to execute."""
 
-    blueprint_uri: str
-    """The path to the blueprint."""
-    stages: list[SimulationStages] = dc.field(default_factory=list)
-    """The simulation stages to execute.
-
-    Defaults to all stages.
-    """
+    def __init__(
+        self,
+        uri: str,
+        bp_type: type[RomsMarblBlueprint],
+        name: str = "",
+        stages: list[SimulationStages] | None = None,
+    ) -> None:
+        super().__init__(uri, bp_type, name)
+        self.stages = stages or []
 
 
 class SimulationRunner(Service):
@@ -83,7 +84,7 @@ class SimulationRunner(Service):
 
     def __init__(
         self,
-        request: BlueprintRequest,
+        request: RomsMarblRunnerRequest,
         service_cfg: "ServiceConfiguration",
         job_cfg: "JobConfig",
     ) -> None:
@@ -290,7 +291,7 @@ class SimulationRunner(Service):
         return False
 
 
-def create_parser() -> argparse.ArgumentParser:
+def create_simrunner_parser() -> argparse.ArgumentParser:
     """Create a parser for CLI arguments expected by a SimulationRunner.
 
     Returns
@@ -317,15 +318,7 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         required=False,
         help="Logging level for the simulation.",
-        choices=[
-            logging.getLevelName(i)
-            for i in [
-                logging.DEBUG,
-                logging.INFO,
-                logging.WARNING,
-                logging.ERROR,
-            ]
-        ],
+        choices=list(LogLevelChoices),
     )
     parser.add_argument(
         ARG_STAGE_SHORT,
@@ -342,7 +335,7 @@ def create_parser() -> argparse.ArgumentParser:
 
 def get_request(
     blueprint_uri: str, stages: list[SimulationStages] | None = None
-) -> BlueprintRequest:
+) -> RomsMarblRunnerRequest:
     """Create a BlueprintRequest instance from CLI arguments.
 
     Parameters
@@ -360,8 +353,9 @@ def get_request(
     if not stages:
         stages = list(SimulationStages)
 
-    return BlueprintRequest(
-        blueprint_uri=blueprint_uri,
+    return RomsMarblRunnerRequest(
+        blueprint_uri,
+        RomsMarblBlueprint,
         stages=stages,
     )
 
@@ -369,7 +363,7 @@ def get_request(
 async def execute_runner(
     job_cfg: "JobConfig",
     service_cfg: "ServiceConfiguration",
-    request: BlueprintRequest,
+    request: RomsMarblRunnerRequest,
 ) -> int:
     """Execute a blueprint with a SimulationRunner.
 
@@ -417,11 +411,11 @@ def main() -> int:
     int
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
-    parser = create_parser()
+    parser = create_simrunner_parser()
     args = parser.parse_args()
 
     job_cfg = get_job_config()
-    service_cfg = get_service_config(args.log_level)
+    service_cfg = get_service_config(args.log_level, name="SimulationRunner")
     request = get_request(args.blueprint_uri, args.stages)
 
     return asyncio.run(execute_runner(job_cfg, service_cfg, request))

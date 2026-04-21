@@ -1,6 +1,7 @@
 import asyncio
 import os
 import typing as t
+from collections.abc import Generator, Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
@@ -46,12 +47,12 @@ class DagStatus:
     ]
 
     @property
-    def open_items(self) -> t.Iterable[str]:
+    def open_items(self) -> Iterable[str]:
         """Return the name of all items that have not completed."""
         return (k for k, v in self.details.items() if not Status.is_terminal(v))
 
     @property
-    def closed_items(self) -> t.Iterable[str]:
+    def closed_items(self) -> Iterable[str]:
         """Return the name of all items that have completed."""
         return (k for k, v in self.details.items() if Status.is_terminal(v))
 
@@ -63,14 +64,14 @@ def get_launcher() -> "Launcher":
     return launcher
 
 
-def incremental_delays() -> t.Generator[float, None, None]:
+def incremental_delays() -> Generator[float, None, None]:
     """Return a value from an infinite cycle of incremental delays.
 
     Returns
     -------
     Generator[float]
     """
-    delays = [0.1, 1, 2, 5, 15, 30, 60]
+    delays: list[float] = [0.1, 1, 2, 5, 15, 30, 60]
 
     if custom_delays := os.getenv(ENV_CSTAR_ORCH_DELAYS, ""):
         try:
@@ -184,7 +185,7 @@ async def prepare_workplan(
     wp_path: Path,
     output_dir: Path,
     run_id: str,
-    user_variables: t.Mapping | None = None,
+    user_variables: Mapping[str, str] | None = None,
 ) -> tuple[Workplan, Path]:
     """Load the workplan and apply any applicable transforms.
 
@@ -246,7 +247,7 @@ async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
     output_dir: Path | None = None,
-    user_variables: t.Mapping[str, str] | None = None,
+    user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
 ) -> Path:
     """Execute the steps in the workplan.

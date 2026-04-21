@@ -1,22 +1,31 @@
 import typing as t
+from collections.abc import Iterable
+from itertools import permutations
 from pathlib import Path
+from random import choice
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from cstar.base.utils import slugify
-from cstar.orchestration.models import RomsMarblBlueprint, Step, Workplan, WorkplanState
+from cstar.cli.workplan.shared import get_registered_bp
+from cstar.orchestration.models import (
+    Blueprint,
+    Step,
+    Workplan,
+    WorkplanState,
+)
 from cstar.orchestration.serialization import deserialize, serialize
 
 app = typer.Typer()
 console = Console()
 
 if t.TYPE_CHECKING:
-    BPResult: t.TypeAlias = tuple[Path, RomsMarblBlueprint]
+    BPResult: t.TypeAlias = tuple[Path, Blueprint]
 
 
-def _locate_blueprints(search_dir: Path) -> t.Iterable["BPResult"]:
+def _locate_blueprints(search_dir: Path) -> Iterable["BPResult"]:
     """Iterate through the contents of a directory to locate `Blueprints`.
 
     Parameters
@@ -27,12 +36,17 @@ def _locate_blueprints(search_dir: Path) -> t.Iterable["BPResult"]:
     files = search_dir.glob("*.yaml")
     valid_blueprints: list[BPResult] = []
 
-    for file in files:
-        try:
-            bp = deserialize(file, RomsMarblBlueprint)
+    try:
+        for file in files:
+            base_bp = deserialize(file, Blueprint)
+
+            bp_type = get_registered_bp(base_bp.application)
+            bp = bp_type(**base_bp.model_dump())
+
             valid_blueprints.append((file, bp))
-        except Exception:
-            print(f"File {file} is not a valid RomsMarblBlueprint")
+    except ValueError as ex:
+        msg = "File contains an invalid blueprint"
+        raise typer.BadParameter(msg) from ex
 
     return valid_blueprints
 
@@ -104,9 +118,6 @@ def generate(
         _display_order(results)
 
         while "y" in input("Do you want to change the order? (yes/no): ").lower():
-            from itertools import permutations
-            from random import choice
-
             possible = list(permutations(list(range(len(results)))))
             example = list(choice(possible))
             example = [x + 1 for x in example]
@@ -115,8 +126,8 @@ def generate(
                 f"Specify the new order by providing the current order numbers in a new arrangement, (e.g. {', '.join(str(ex) for ex in example)}): "
             )
             order = order_input.replace(" ", "").split(",")
-            provided = set(int(x) for x in order)
-            required = set(x + 1 for x in range(len(results)))
+            provided = {int(x) for x in order}
+            required = {x + 1 for x in range(len(results))}
 
             diff = required.difference(provided)
 
