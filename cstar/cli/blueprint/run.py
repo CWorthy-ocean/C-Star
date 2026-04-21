@@ -60,10 +60,10 @@ def path_callback(
                 raise typer.BadParameter(msg)
 
             # use the core blueprint fields to identify the application type
-            bp_core = deserialize(local_path, Blueprint)
-            bp_type = get_registered_bp(bp_core.application)
+            base_bp = deserialize(local_path, Blueprint)
+            bp_type = get_registered_bp(base_bp.application)
 
-            ctx.obj = bp_type(**bp_core.model_dump())
+            ctx.obj = bp_type(**base_bp.model_dump())
 
     except FileNotFoundError as ex:
         msg = f"Blueprint file not found: {path}"
