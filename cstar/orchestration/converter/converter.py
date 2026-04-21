@@ -3,8 +3,10 @@ import random
 import sys
 import textwrap
 import typing as t
+from collections import defaultdict
 
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_URI_LONG
@@ -115,11 +117,13 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     return f"sh {script_path}"
 
 
-app_to_cmd_map: dict[str, StepToCommandConversionFn] = {
-    Application.SLEEP.value: convert_step_to_placeholder,
-    Application.ROMS_MARBL.value: convert_roms_step_to_command,
-    Application.HELLO_WORLD.value: convert_step_to_blueprint_run_command,
-}
+app_to_cmd_map: dict[str, StepToCommandConversionFn] = defaultdict(
+    lambda: convert_step_to_blueprint_run_command,
+    {
+        Application.SLEEP.value: convert_step_to_placeholder,
+        Application.ROMS_MARBL.value: convert_roms_step_to_command,
+    },
+)
 """Map application types to a function that converts a step to a CLI command."""
 
 
@@ -139,6 +143,9 @@ def get_command_mapping(
         application = application.value
 
     step_converter = app_to_cmd_map[application]
+    if step_converter is None:
+        msg = f"No command converter found for application: {application!r}"
+        raise CstarExpectationFailed(msg)
 
     if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
         if converter_override not in app_to_cmd_map:
