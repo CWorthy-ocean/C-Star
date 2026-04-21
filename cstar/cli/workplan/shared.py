@@ -8,9 +8,12 @@ from rich.console import Console
 from rich.table import Column, Table
 
 from cstar.base.log import get_logger
+from cstar.orchestration.application import APP_CAT_BLUEPRINTS
 from cstar.orchestration.dag_runner import DagStatus
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import TrackingRepository
+from cstar.system.registration import Registrar
 
 console = Console()
 log = get_logger(__name__)
@@ -168,3 +171,19 @@ def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str] | None:
         raise typer.BadParameter(msg)
 
     return variables
+
+
+def get_registered_bp(application: str) -> type[Blueprint]:
+    """Retrieve the Blueprint type registered for the given application.
+
+    Parameters
+    ----------
+    application
+        The application name
+
+    Returns
+    -------
+    type[Blueprint]
+    """
+    reg_bp = Registrar[Blueprint](APP_CAT_BLUEPRINTS)
+    return reg_bp.get(application)

@@ -12,6 +12,7 @@ from cstar.base.env import (
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd, slugify
 from cstar.execution.handler import ExecutionStatus
@@ -20,14 +21,12 @@ from cstar.execution.scheduler_job import (
     get_slurm_batch,
     get_slurm_batches,
 )
-from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
     Status,
     Task,
 )
-from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import (
     get_sentinel,
     load_sentinels,
@@ -181,8 +180,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
+        if not step.blueprint:
+            msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
+            raise CstarError(msg)
+
         job_name = step.safe_name
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
         script_path = step.fsm.work_dir / "script.sh"
@@ -199,7 +201,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job = create_scheduler_job(
             commands=command,
             account_key=SlurmLauncher.configured_account(),
-            cpus=bp.cpus_needed,
+            cpus=step.blueprint.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
             script_path=script_path,

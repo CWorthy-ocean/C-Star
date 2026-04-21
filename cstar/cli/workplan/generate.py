@@ -9,14 +9,20 @@ from rich.console import Console
 from rich.table import Table
 
 from cstar.base.utils import slugify
-from cstar.orchestration.models import RomsMarblBlueprint, Step, Workplan, WorkplanState
+from cstar.cli.workplan.shared import get_registered_bp
+from cstar.orchestration.models import (
+    Blueprint,
+    Step,
+    Workplan,
+    WorkplanState,
+)
 from cstar.orchestration.serialization import deserialize, serialize
 
 app = typer.Typer()
 console = Console()
 
 if t.TYPE_CHECKING:
-    BPResult: t.TypeAlias = tuple[Path, RomsMarblBlueprint]
+    BPResult: t.TypeAlias = tuple[Path, Blueprint]
 
 
 def _locate_blueprints(search_dir: Path) -> Iterable["BPResult"]:
@@ -30,12 +36,17 @@ def _locate_blueprints(search_dir: Path) -> Iterable["BPResult"]:
     files = search_dir.glob("*.yaml")
     valid_blueprints: list[BPResult] = []
 
-    for file in files:
-        try:
-            bp = deserialize(file, RomsMarblBlueprint)
+    try:
+        for file in files:
+            base_bp = deserialize(file, Blueprint)
+
+            bp_type = get_registered_bp(base_bp.application)
+            bp = bp_type(**base_bp.model_dump())
+
             valid_blueprints.append((file, bp))
-        except Exception:
-            print(f"File {file} is not a valid RomsMarblBlueprint")
+    except ValueError as ex:
+        msg = "File contains an invalid blueprint"
+        raise typer.BadParameter(msg) from ex
 
     return valid_blueprints
 

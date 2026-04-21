@@ -24,6 +24,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
+from cstar.orchestration.application import register_blueprint
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 if t.TYPE_CHECKING:
@@ -61,7 +62,7 @@ class ConfiguredBaseModel(BaseModel):
     for subclasses.
     """
 
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    model_config = ConfigDict(extra="allow", from_attributes=True)
     """Pydantic ConfigDict with options we want changed."""
 
 
@@ -355,6 +356,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
         return 1
 
 
+@register_blueprint(Application.ROMS_MARBL)
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
