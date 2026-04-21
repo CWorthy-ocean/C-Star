@@ -1,0 +1,22 @@
+name: example_workplan
+description: Runs a Wales model, then make some plots!
+state: draft
+runtime_vars:
+  - time_slice
+
+steps:
+  - name: wales
+    application: roms_marbl
+    blueprint: ./wales_toy_blueprint.yaml
+    
+  - name: wales_plotter
+    application: plotter
+    blueprint: ./wales_toy_plotter_blueprint.yaml
+    depends_on:
+      - wales
+    blueprint_overrides:
+      input_dir: "{{path: wales}}/joined_output"
+      grid_file_path: "{{path: wales}}/input/input_datasets/roms_grd.nc"
+      output_dir: "{{path: wales_plotter}}/output"
+      time_indices:
+        - "{{time_slice}}"

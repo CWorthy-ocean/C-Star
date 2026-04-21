@@ -28,6 +28,7 @@ from cstar.orchestration.state import load_sentinels
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     RomsMarblTimeSplitter,
+    TemplateFillTransform,
     WorkplanTransformer,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
@@ -208,11 +209,29 @@ async def prepare_workplan(
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
     run_root_dir = output_dir / run_id
 
-    transformer = WorkplanTransformer(wp_orig, RomsMarblTimeSplitter())
-    wp = transformer.apply()
+    fill_transform: TemplateFillTransform | None = None
+    file_io_extras: list = []
 
-    if transformer.is_modified:
-        log.info("A time-split workplan will be executed.")
+    if user_variables is not None:
+        named_config = UserDefinedVariables(
+            keys=set(wp_orig.runtime_vars), mapping=user_variables
+        )
+        if named_config.error:
+            raise ValueError(named_config.error)
+
+        fill_transform = TemplateFillTransform(
+            variable_resolver=lambda name: named_config.mapping[name]
+        )
+
+        persist_vars = WorkplanTransformer.derived_path(
+            wp_path, run_root_dir, suffix="", extension=".vars"
+        )
+        file_io_extras.append(asyncio.to_thread(serialize, persist_vars, named_config))
+
+    transformer = WorkplanTransformer(
+        wp_orig, RomsMarblTimeSplitter(), fill_transform=fill_transform
+    )
+    wp = transformer.apply()
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = WorkplanTransformer.derived_path(
@@ -223,19 +242,8 @@ async def prepare_workplan(
     file_io = [
         asyncio.to_thread(serialize, persist_orig, wp_orig),
         asyncio.to_thread(serialize, persist_as, wp),
+        *file_io_extras,
     ]
-
-    if user_variables is not None:
-        named_config = UserDefinedVariables(
-            keys=set(wp.runtime_vars), mapping=user_variables
-        )
-        if named_config.error:
-            raise ValueError(named_config.error)
-
-        persist_vars = WorkplanTransformer.derived_path(
-            wp_path, run_root_dir, suffix="", extension=".vars"
-        )
-        file_io.append(asyncio.to_thread(serialize, persist_vars, named_config))
 
     _ = await asyncio.gather(*file_io)
 

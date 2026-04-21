@@ -1,0 +1,16 @@
+name: wales_plotter
+description: plot outputs from wales domain; overridden keys [input_dir, grid_file_path,
+  output_dir, time_indices]
+state: draft
+input_dir: /Users/eilerman/cstar/plot_test6/tasks/wales/joined_output
+output_dir: /Users/eilerman/cstar/plot_test6/tasks/wales_plotter/output
+variables:
+- ALK
+- pH_3D
+time_indices:
+- 2
+s_indices:
+- 0
+- -1
+grid_file_path: /Users/eilerman/cstar/plot_test6/tasks/wales/input/input_datasets/roms_grd.nc
+file_glob: '*bgc*.nc'

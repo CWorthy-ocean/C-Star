@@ -275,7 +275,7 @@ async def execute_runner(
 
     try:
         configure_environment(log)
-
+        log.info(f"Beginning simulation run for {request.blueprint_uri}")
         worker = SimulationRunner(request, service_cfg, job_cfg)
         await worker.execute()
     except CstarError as ex:

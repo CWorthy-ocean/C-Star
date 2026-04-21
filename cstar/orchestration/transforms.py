@@ -1,4 +1,5 @@
 import os
+import re
 import typing as t
 from collections import defaultdict
 from collections.abc import Iterable
@@ -16,14 +17,17 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
+from cstar.orchestration.application import APP_CAT_BLUEPRINTS
 from cstar.orchestration.models import (
     Application,
+    Blueprint,
     RomsMarblBlueprint,
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
+from cstar.system.registration import Registrar
 
 
 class Transform(t.Protocol):
@@ -85,6 +89,145 @@ def get_transforms(application: str) -> list[Transform]:
         A list containing transforms
     """
     return TRANSFORMS.get(application, [])
+
+
+PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
+"""Pattern matching double-brace template placeholders.
+
+Captures the full content between braces so dispatch logic can distinguish
+plain variable references (``{{my_var}}``) from path references
+(``{{path: step_name}}``).
+"""
+
+
+class TemplateFillTransform:
+    """Fill ``{{placeholder}}`` template strings in a step's blueprint_overrides.
+
+    Recursively traverses the nested blueprint_overrides structure and
+    dispatches each placeholder to one of two resolvers:
+
+    - **variable resolver** — handles plain ``{{name}}`` tokens by looking up
+      *name* in the caller-supplied mapping (e.g. user-defined runtime variables).
+    - **path resolver** — handles ``{{path: step_name}}`` tokens by returning
+      the working-directory path of the named step.  Must be bound via
+      :meth:`with_path_resolver` before any step that uses this syntax is
+      processed.
+
+    The transform yields a single updated step; the original step's
+    ``blueprint_overrides`` is not mutated.
+    """
+
+    def __init__(
+        self,
+        variable_resolver: t.Callable[[str], str] | None = None,
+        path_resolver: t.Callable[[str], Path] | None = None,
+    ) -> None:
+        """Initialize the transform.
+
+        Parameters
+        ----------
+        variable_resolver : Callable[[str], str] | None
+            Maps a plain placeholder name to its replacement string.
+        path_resolver : Callable[[str], Path] | None
+            Maps a step name to its working-directory path.  Required only
+            when ``blueprint_overrides`` contains ``{{path: …}}`` tokens.
+        """
+        self._variable_resolver = variable_resolver
+        self._path_resolver = path_resolver
+
+    def with_path_resolver(
+        self, path_resolver: t.Callable[[str], Path]
+    ) -> "TemplateFillTransform":
+        """Return a new instance with the given path resolver bound.
+
+        Parameters
+        ----------
+        path_resolver : Callable[[str], Path]
+            Maps a step name to its working-directory path.
+
+        Returns
+        -------
+        TemplateFillTransform
+        """
+        return TemplateFillTransform(self._variable_resolver, path_resolver)
+
+    @staticmethod
+    def suffix() -> str:
+        """Return the suffix used when persisting a resource modified by this transform."""
+        return "tmpl"
+
+    def _resolve(self, content: str) -> str:
+        """Dispatch a single placeholder's inner content to the correct resolver.
+
+        Parameters
+        ----------
+        content : str
+            The text captured between ``{{`` and ``}}``, stripped of
+            surrounding whitespace.
+
+        Returns
+        -------
+        str
+            The resolved replacement string.
+
+        Raises
+        ------
+        ValueError
+            If the appropriate resolver has not been provided.
+        """
+        if content.startswith("path:"):
+            step_name = content[len("path:") :].strip()
+            if self._path_resolver is None:
+                raise ValueError(
+                    f"No path resolver provided for placeholder '{{{{path: {step_name}}}}}'"
+                )
+            return str(self._path_resolver(step_name))
+
+        if self._variable_resolver is None:
+            raise ValueError(
+                f"No variable resolver provided for placeholder '{{{{{content}}}}}'"
+            )
+        return self._variable_resolver(content)
+
+    def _fill(self, value: t.Any) -> t.Any:
+        """Recursively replace ``{{placeholder}}`` tokens in *value*.
+
+        Parameters
+        ----------
+        value : Any
+            A value drawn from the blueprint_overrides tree — may be a str,
+            dict, list, or a scalar that requires no substitution.
+
+        Returns
+        -------
+        Any
+            The same structure with all placeholder tokens replaced.
+        """
+        if isinstance(value, str):
+            return PLACEHOLDER_RE.sub(
+                lambda m: self._resolve(m.group(1).strip()), value
+            )
+        if isinstance(value, dict):
+            return {k: self._fill(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._fill(item) for item in value]
+        return value
+
+    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+        """Apply template filling to a step's blueprint_overrides.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step whose blueprint_overrides will be traversed.
+
+        Returns
+        -------
+        Iterable[LiveStep]
+            A single-element iterable containing the updated step.
+        """
+        filled_overrides = self._fill(dict(step.blueprint_overrides))
+        yield LiveStep.from_step(step, update={"blueprint_overrides": filled_overrides})
 
 
 def _dailies(
@@ -191,10 +334,16 @@ class WorkplanTransformer(LoggingMixin):
     DERIVED_PATH_SUFFIX: t.Literal["_trx"] = "_trx"
     """Suffix appended to the original workplan path when generating a derived path."""
 
-    def __init__(self, wp: Workplan, transform: Transform) -> None:
+    def __init__(
+        self,
+        wp: Workplan,
+        transform: Transform,
+        fill_transform: TemplateFillTransform | None = None,
+    ) -> None:
         """Initialize the instance."""
         self.original = Workplan(**wp.model_dump(by_alias=True))
         self.transform_fn = transform
+        self.fill_transform = fill_transform
         self._transformed: Workplan | None = None
 
     @property
@@ -277,9 +426,19 @@ class WorkplanTransformer(LoggingMixin):
 
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]
-        steps: list[LiveStep] = []
-        for i in range(len(live_steps)):
-            step = live_steps[i]
+
+        # fill template placeholders before any other transform operates on overrides
+        if self.fill_transform is not None:
+            step_index = {s.name: s for s in live_steps}
+            fill = self.fill_transform.with_path_resolver(
+                lambda name: step_index[name].get_working_dir
+            )
+            live_steps = [filled for step in live_steps for filled in fill(step)]
+
+        # apply user blueprint_overrides and ensure consistent output targets;
+        # must happen before time-splitting so the splitter reads correct blueprint values
+        steps = []
+        for step in live_steps:
             if step.application in apply_to:
                 step = override_output_directory(step)
             steps.append(step)
@@ -296,26 +455,28 @@ class WorkplanTransformer(LoggingMixin):
                 else:
                     split_steps.append(step)
 
-            # apply any overrides produced in the transform function
-            override_transform = OverrideTransform()
-
+            # remap dependency references to point to the last child of each split parent
             steps = []
-
             for step in split_steps:
-                if step.application not in apply_to:
-                    steps.append(step)
-                    continue
+                if step.application in apply_to:
+                    depends_on = {str(d) for d in step.depends_on}
+                    if to_update := depends_on.intersection(named_dep_map):
+                        depends_on.update(named_dep_map[x] for x in to_update)
+                        depends_on.difference_update(to_update)
+                        step.depends_on.clear()
+                        step.depends_on.extend(depends_on)
+                steps.append(step)
 
-                depends_on = {str(d) for d in step.depends_on}
-
-                if to_update := depends_on.intersection(named_dep_map):
-                    depends_on.update(named_dep_map[x] for x in to_update)
-                    depends_on.difference_update(to_update)
-
-                    step.depends_on.clear()
-                    step.depends_on.extend(depends_on)
-
-                steps.extend(override_transform(step))
+        # apply any blueprint_overrides accumulated by prior transforms (e.g. per-child
+        # date/IC overrides set by the time-splitter); skipped when overrides are empty
+        override_transform = OverrideTransform()
+        final_steps: list[LiveStep] = []
+        for step in steps:
+            if step.blueprint_overrides:
+                final_steps.extend(override_transform(step))
+            else:
+                final_steps.append(step)
+        steps = final_steps
 
         self._transformed = self.original.model_copy(
             update={
@@ -457,9 +618,9 @@ class OverrideTransform(Transform):
 
     def apply(
         self,
-        bp: RomsMarblBlueprint,
-        overrides: dict[str, t.Any] | None = None,
-    ) -> RomsMarblBlueprint:
+        bp: Blueprint,
+        overrides: dict[str, t.Any] = None,  # type: ignore[assignment]
+    ) -> Blueprint:
         """Apply all overrides from a blueprint.
 
         Generate a new blueprint with overrides applied and an empty set of overrides.
@@ -467,14 +628,14 @@ class OverrideTransform(Transform):
 
         Parameters
         ----------
-        bp : RomsMarblBlueprint
+        bp : Blueprint
             The blueprint to apply overrides to
         overrides : dict[str, t.Any] | None
             A dictionary containing overrides for attributes of a blueprint.
 
         Returns
         -------
-        RomsMarblBlueprint
+        Blueprint
             The blueprint with all overrides applied.
         """
         overrides = overrides or {}
@@ -490,10 +651,10 @@ class OverrideTransform(Transform):
             f"{bp.description}; overridden keys [{', '.join(changeset.keys())}]"
         )
         merged.update(description=description)
+        bp_type = type(bp)
+        return bp_type(**merged)
 
-        return RomsMarblBlueprint(**merged)
-
-    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -507,17 +668,20 @@ class OverrideTransform(Transform):
             Zero-to-many steps resulting from applying the transform.
         """
         bp_path = Path(step.blueprint_path)
-        blueprint = deserialize(bp_path, RomsMarblBlueprint)
+
+        bp_type = Registrar[Blueprint](APP_CAT_BLUEPRINTS).get(step.application)
+
+        blueprint: Blueprint = deserialize(bp_path, bp_type)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
 
-        live_step = LiveStep.from_step(
-            step,
-            update={
-                "blueprint_overrides": {},
-                "work_dir": updated_bp.runtime_params.output_dir,
-            },
-        )
+        update: dict[str, t.Any] = {"blueprint_overrides": {}}
+        if bp_type == RomsMarblBlueprint:
+            update["work_dir"] = t.cast(
+                "RomsMarblBlueprint", updated_bp
+            ).runtime_params.output_dir
+
+        live_step = LiveStep.from_step(step, update=update)
 
         bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
         live_step.blueprint_path = live_step.fsm.work_dir / bp_renamed

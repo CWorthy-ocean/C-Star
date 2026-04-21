@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable, Mapping
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
@@ -208,9 +208,9 @@ class Status(IntEnum):
 class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
-    parent: t.Self | None = None
+    parent: t.Self | None = Field(None, exclude=True)
     """The step for which this step is a sub-task."""
-    work_dir: Path | None = None
+    work_dir: Path | None = Field(None, exclude=True)
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
@@ -284,9 +284,18 @@ class LiveStep(Step):
         if update:
             step_attrs.update(update)
 
-        if parent:
+        effective_parent: LiveStep | None = (
+            parent
+            if isinstance(parent, LiveStep)
+            else (LiveStep.from_step(parent) if parent else None)
+        )
+        # when no parent is given, inherit the parent from the source step (if it has one)
+        if effective_parent is None and isinstance(step, LiveStep):
+            effective_parent = step.parent
+
+        if effective_parent is not None:
             step_attrs.pop("work_dir", None)
-            step_attrs["parent"] = LiveStep.from_step(parent).model_dump(by_alias=True)
+            step_attrs["parent"] = effective_parent
 
         return LiveStep(**step_attrs)
 
