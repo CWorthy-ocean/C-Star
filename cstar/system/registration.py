@@ -21,6 +21,10 @@ class Registrar(LoggingMixin, t.Generic[TValue]):
     for many different reasons. The role (or category) specifies which sub-mapping to
     place a given registration into.
     """
+    _role: str
+    """The registry role the instance will retrieve records for."""
+    _lookup: dict[str, t.Any]
+    """The branch of the registry used for the target role."""
 
     def __init__(self, role: str) -> None:
         """Initialize a registry instance.
