@@ -204,9 +204,7 @@ def create_xrunner(
             name=f"{request.application}_runner",
         )
 
-    runner_registry = Registrar[XBlueprintRunner[Blueprint]](APP_CAT_RUNNERS)
-    klass = runner_registry.get(request.application)
-
+    klass = get_registered_runner(request.application)
     return klass(request, job_cfg, service_cfg)
 
 
@@ -222,5 +220,21 @@ def get_registered_bp(application: str) -> type[Blueprint]:
     -------
     type[Blueprint]
     """
-    reg_bp = Registrar[Blueprint](APP_CAT_BLUEPRINTS)
-    return reg_bp.get(application)
+    registrar = Registrar[Blueprint](APP_CAT_BLUEPRINTS)
+    return registrar.get(application)
+
+
+def get_registered_runner(application: str) -> type[XBlueprintRunner[Blueprint]]:
+    """Retrieve the Runner type registered for the given application.
+
+    Parameters
+    ----------
+    application
+        The application name
+
+    Returns
+    -------
+    type[XBlueprintRunner[Blueprint]]
+    """
+    registrar = Registrar[XBlueprintRunner[Blueprint]](APP_CAT_RUNNERS)
+    return registrar.get(application)
