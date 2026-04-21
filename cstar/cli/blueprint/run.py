@@ -26,7 +26,7 @@ from cstar.entrypoint.worker.worker import (
 from cstar.entrypoint.worker.worker import execute_runner as exec_romsmarbl_runner
 from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.models import Blueprint
+from cstar.orchestration.models import Application, Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 
 app = typer.Typer()
@@ -127,7 +127,7 @@ def run(
         print(result.error_msg)
         return
 
-    if bp.application == "roms_marbl":
+    if bp.application == Application.ROMS_MARBL.value:
         # NOTE: temporary conditional to use old runner until it is converted to XRunner
         rm_request = get_request(uri, stage)
         rc = asyncio.run(exec_romsmarbl_runner(job_cfg, service_cfg, rm_request))
