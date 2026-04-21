@@ -25,7 +25,7 @@ from cstar.entrypoint.utils import (
     ARG_URI_SHORT,
 )
 from cstar.entrypoint.worker.worker import (
-    BlueprintRequest,
+    RomsMarblRunnerRequest,
     SimulationRunner,
     SimulationStages,
     create_simrunner_parser,
@@ -102,7 +102,7 @@ def sim_runner(
     SimulationRunner
         An initialized instance of SimulationRunner, configured via blueprint.
     """
-    request = BlueprintRequest(
+    request = RomsMarblRunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
         stages=list(SimulationStages),
@@ -345,7 +345,7 @@ def test_start_runner(
     blueprint_path: Path
         The path to the blueprint yaml file created by the fixture.
     """
-    request = BlueprintRequest(
+    request = RomsMarblRunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
     )
@@ -1040,7 +1040,7 @@ async def test_runner_setup_stage(
     if post_run:
         stages.append(SimulationStages.POST_RUN)
 
-    request = BlueprintRequest(
+    request = RomsMarblRunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
         stages=list(stages),

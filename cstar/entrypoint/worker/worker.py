@@ -51,7 +51,7 @@ class SimulationStages(enum.StrEnum):
     """Execute hooks after the simulation completes. See `Simulation.post_run`"""
 
 
-class BlueprintRequest(XRunnerRequest[RomsMarblBlueprint]):
+class RomsMarblRunnerRequest(XRunnerRequest[RomsMarblBlueprint]):
     stages: list[SimulationStages]
     """The simulation stages to execute."""
 
@@ -84,7 +84,7 @@ class SimulationRunner(Service):
 
     def __init__(
         self,
-        request: BlueprintRequest,
+        request: RomsMarblRunnerRequest,
         service_cfg: "ServiceConfiguration",
         job_cfg: "JobConfig",
     ) -> None:
@@ -335,7 +335,7 @@ def create_simrunner_parser() -> argparse.ArgumentParser:
 
 def get_request(
     blueprint_uri: str, stages: list[SimulationStages] | None = None
-) -> BlueprintRequest:
+) -> RomsMarblRunnerRequest:
     """Create a BlueprintRequest instance from CLI arguments.
 
     Parameters
@@ -353,7 +353,7 @@ def get_request(
     if not stages:
         stages = list(SimulationStages)
 
-    return BlueprintRequest(
+    return RomsMarblRunnerRequest(
         blueprint_uri,
         RomsMarblBlueprint,
         stages=stages,
@@ -363,7 +363,7 @@ def get_request(
 async def execute_runner(
     job_cfg: "JobConfig",
     service_cfg: "ServiceConfiguration",
-    request: BlueprintRequest,
+    request: RomsMarblRunnerRequest,
 ) -> int:
     """Execute a blueprint with a SimulationRunner.
 
