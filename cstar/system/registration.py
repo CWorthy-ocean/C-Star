@@ -106,8 +106,8 @@ class Registrar(LoggingMixin, t.Generic[TValue]):
             for cat in categories
             if cls._storage[cat].get(key)
         ]
-        missing = set(categories).difference(x[0] for x in results)
-        if missing:
+
+        if missing := set(categories).difference(x[0] for x in results):
             msg = f"Unable to locate categorical registrations: {key}, {','.join(missing)}"
             raise ValueError(msg)
         return tuple(x[1] for x in results if x[1])
