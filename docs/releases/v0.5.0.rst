@@ -20,6 +20,7 @@ Breaking Changes
 - The `roms` executable is now executed in the `work` subdirectory instead of `output` (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - The output location in the runtime settings (`roms.in`) file is now _always_ modified to place outputs in the output directory (since we no longer run ROMS in the output directory) (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - `ServiceConfiguration`, `JobConfig` have been relocated to `cstar.entrypoint.config` from `cstar.entrypoint.worker.worker` (`#503 <https://github.com/CWorthy-ocean/C-Star/pull/503>`_)
+- `BlueprintRequest` deprecated in favor of `XRunnerRequest` (`#506 <https://github.com/CWorthy-ocean/C-Star/pull/506>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -34,6 +35,7 @@ New features
 - If no `Makefile` is provided in the `compile_time` additional code block, ROMS will copy and use the appropriate `Makefile` from the ROMS repo (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - Add automated release-note updater, utilizing PR template categories (`#484 <https://github.com/CWorthy-ocean/C-Star/pull/484>`_)
 - Locally-launched steps now generate a `.out` log file consistent with slurm-launched steps (`#493 <https://github.com/CWorthy-ocean/C-Star/pull/493>`_)
+- Added capability to add custom blueprints and orchestrate within a `Workplan` (`#506 <https://github.com/CWorthy-ocean/C-Star/pull/506>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -125,6 +127,7 @@ Improvements
 - Simplified env-var flag evaluation (`#501 <https://github.com/CWorthy-ocean/C-Star/pull/501>`_)
 - Add `--log-level` and `--clobber` parameters to CLI methods for running blueprints and workplans. (`#502 <https://github.com/CWorthy-ocean/C-Star/pull/502>`_)
 - Reduced amount of repetitive logs captured at the `DEBUG` level (`#504 <https://github.com/CWorthy-ocean/C-Star/pull/504>`_)
+- Improved consistency in CLI outputs and error handling (`#506 <https://github.com/CWorthy-ocean/C-Star/pull/506>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
