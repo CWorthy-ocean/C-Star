@@ -132,12 +132,17 @@ def register_handler(
     """
 
     def register_handler_direct(klass: type[TValue]) -> type[TValue]:
-        """Register the specified type as a blueprint.
+        """Register the handler in the registry for the specified role.
 
         Parameters
         ----------
         klass : type[THandler]
             The type to be registered
+
+        Returns
+        -------
+        type[TValue]
+            The unmodified, original type.
         """
         registry = Registrar[TValue](role)
         registry.put(application, klass)
