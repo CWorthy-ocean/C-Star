@@ -24,6 +24,9 @@ from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import validate_serialized_entity
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
+if t.TYPE_CHECKING:
+    from collections.abc import Mapping
+
 app = typer.Typer()
 log = get_logger(__name__)
 
@@ -292,7 +295,7 @@ def run(
                 build_and_run_dag(
                     wp_path,
                     run_id,
-                    user_variables=t.cast("t.Mapping[str, str]", ctx.obj),
+                    user_variables=t.cast("Mapping[str, str]", ctx.obj),
                     dry_run=dry_run,
                 ),
             )

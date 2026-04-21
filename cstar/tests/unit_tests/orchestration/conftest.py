@@ -411,7 +411,7 @@ def single_step_workplan(
         steps=[
             Step(
                 name="s-00",
-                application=Application.SLEEP.value,
+                application=Application.SLEEP,
                 blueprint=bp_path.as_posix(),
             ),
         ],

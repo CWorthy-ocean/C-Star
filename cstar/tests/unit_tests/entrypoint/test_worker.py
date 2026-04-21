@@ -1025,7 +1025,7 @@ async def test_runner_setup_stage(
     """
     mock_prep_fs = mock.Mock()
 
-    stages = []
+    stages: list[SimulationStages] = []
     if setup:
         stages.append(SimulationStages.SETUP)
     if build:
