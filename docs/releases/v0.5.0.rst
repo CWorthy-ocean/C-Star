@@ -36,6 +36,7 @@ New features
 - Add automated release-note updater, utilizing PR template categories (`#484 <https://github.com/CWorthy-ocean/C-Star/pull/484>`_)
 - Locally-launched steps now generate a `.out` log file consistent with slurm-launched steps (`#493 <https://github.com/CWorthy-ocean/C-Star/pull/493>`_)
 - Added capability to add custom blueprints and orchestrate within a `Workplan` (`#506 <https://github.com/CWorthy-ocean/C-Star/pull/506>`_)
+- Add a basic Plotter application as a demonstration of building a functional application (`#499 <https://github.com/CWorthy-ocean/C-Star/pull/499>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
