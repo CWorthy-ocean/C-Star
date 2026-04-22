@@ -221,7 +221,7 @@ class Application(StrEnum):
     """A call to the hostname executable to simplify testing."""
     HELLO_WORLD = "hello_world"
     """Sample custom application."""
-    PLOTTER = auto()
+    PLOTTER = "plotter"
     """Demo plotting application."""
 
 
