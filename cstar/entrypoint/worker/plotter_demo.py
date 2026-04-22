@@ -20,9 +20,7 @@ log = get_logger(__name__)
 
 @register_blueprint(APP_PLOTTER)
 class PlotterBlueprint(Blueprint):
-    """A simple blueprint demonstrating the integration of a Blueprint and it's
-    runner application.
-    """
+    """A blueprint for an example plotting application."""
 
     application: str = APP_PLOTTER
     """The application identifier."""
@@ -44,7 +42,12 @@ class PlotterBlueprint(Blueprint):
 
 @register_runner(APP_PLOTTER)
 class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
-    """Worker class to execute a simple "Hello, world" application specified via blueprint."""
+    """Worker class to execute a simple plotting application.
+
+    This application is intended primarily as an example of how to build a functioning
+    application to perform a custom task, rather than a fully-featured plotting utility
+    intended for scientific use.
+    """
 
     application: str = APP_PLOTTER
     """The application identifier."""
@@ -78,7 +81,24 @@ def make_plots(
     file_glob: str,
     **kwargs,
 ) -> None:
+    """
+    Make 2D plots of all combinations of the provided variables, time indices, and depth indices.
 
+    Parameters
+    ----------
+    input_dir: location of ROMS output files
+    output_dir: location to save the plots
+    variables: variables to plot
+    time_indices: time indices to plot
+    s_indices: depth indices to plot
+    grid_file_path: location of the grid file corresponding to the ROMS outputs
+    file_glob: glob pattern to match the file names to open for plotting
+    kwargs: unused; intended to capture any unused blueprint params that are unpacked
+
+    Returns
+    -------
+    None
+    """
     input_dir = input_dir.expanduser().resolve()
     grid = Grid(filename=grid_file_path)
     roms = ROMSOutput(path=input_dir / file_glob, grid=grid, use_dask=True)
