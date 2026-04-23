@@ -61,3 +61,23 @@ def test_blueprint_run_remote_blueprint() -> None:
         )
 
     mock_exec.assert_called_once()
+
+
+def test_blueprint_run_apply_directives() -> None:
+    """Verify that a URL to a remote blueprint is handled properly and the
+    blueprint is executed.
+    """
+    bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
+
+    with mock.patch(
+        "cstar.cli.blueprint.run.exec_romsmarbl_runner",
+        return_value=0,
+    ) as mock_exec:
+        runner = CliRunner()
+        _ = runner.invoke(
+            app,
+            [bp_path],
+            color=False,
+        )
+
+    mock_exec.assert_called_once()

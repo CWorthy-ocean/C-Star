@@ -213,6 +213,40 @@ def test_serialization_workplan_runtime_vars(
     assert actual == expected
 
 
+def test_serialization_workplan_steps_with_directives(
+    tmp_path: Path,
+    preprocessable_workplan_path: Path,
+) -> None:
+    """Verify that steps containing directives are serialized correctly.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Used to write some temporary workplans to disk
+    preprocessable_workplan_path : Path
+        Path to a workplan that contains directives.
+    """
+    write_to = preprocessable_workplan_path
+
+    # load the new workplan
+    wp = deserialize(write_to, Workplan)
+
+    step = wp.steps[-1]
+
+    # confirm the directive has been loaded
+    assert step.directives
+    assert "continue-from" in step.directives
+    assert "path" in step.directives["continue-from"]
+
+    # confirm the directives can be written
+    serialize_to = tmp_path / "reserialized.yaml"
+    assert serialize(serialize_to, wp)
+
+    # confirm the serialization step wrote the directives
+    wp2 = deserialize(serialize_to, Workplan)
+    assert wp2.steps[-1].directives == wp.steps[-1].directives
+
+
 @pytest.mark.parametrize(
     "mode",
     [
