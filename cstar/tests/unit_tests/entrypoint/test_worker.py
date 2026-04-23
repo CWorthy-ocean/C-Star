@@ -25,13 +25,11 @@ from cstar.entrypoint.utils import (
     ARG_URI_SHORT,
 )
 from cstar.entrypoint.worker.worker import (
-    RomsMarblRunnerRequest,
     SimulationRunner,
-    SimulationStages,
-    create_simrunner_parser,
     get_request,
     main,
 )
+from cstar.entrypoint.xrunner import XRunnerRequest, create_parser
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.utils import (
@@ -39,7 +37,6 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
-from cstar.simulation import Simulation
 
 DEFAULT_LOOP_DELAY = 5
 DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
@@ -102,10 +99,9 @@ def sim_runner(
     SimulationRunner
         An initialized instance of SimulationRunner, configured via blueprint.
     """
-    request = RomsMarblRunnerRequest(
+    request = XRunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
-        stages=list(SimulationStages),
     )
 
     service_config = ServiceConfiguration(
@@ -131,7 +127,7 @@ def sim_runner(
 
 def test_create_parser_happy_path() -> None:
     """Verify that a help argument is present in the parser."""
-    parser = create_simrunner_parser()
+    parser = create_parser()
 
     # ruff: noqa: SLF001
     assert ARG_URI_LONG in parser._option_string_actions
@@ -168,7 +164,7 @@ def test_parser_good_log_level(
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
 
-    parser = create_simrunner_parser()
+    parser = create_parser()
     parsed_args = parser.parse_args(args)
 
     assert getattr(parsed_args, "log_level", None) == logging.getLevelName(
@@ -197,7 +193,7 @@ def test_parser_lowercase_log_level(
     arg_tuples = [(k, v) for k, v in valid_args.items()]
     args = list(itertools.chain.from_iterable(arg_tuples))
 
-    parser = create_simrunner_parser()
+    parser = create_parser()
 
     # unable to parse the lower-case log levels
     with pytest.raises(SystemExit):
@@ -212,7 +208,7 @@ def test_parser_bad_log_level(valid_args: dict[str, str]) -> None:
     valid_args_tuples = ((k, v) for k, v in valid_args.items())
     args = list(itertools.chain.from_iterable(valid_args_tuples))
 
-    parser = create_simrunner_parser()
+    parser = create_parser()
 
     with pytest.raises(SystemExit):
         _ = parser.parse_args(args)
@@ -247,7 +243,7 @@ def test_get_service_config(
     arg_b, val_b = blueprint_uri.split(" ", maxsplit=1)
     arg_l, val_l = log_level.split(" ", maxsplit=1)
 
-    parser = create_simrunner_parser()
+    parser = create_parser()
     parsed_args = parser.parse_args(
         [
             arg_b,
@@ -280,7 +276,7 @@ def test_get_request(
     blueprint_uri: str,
 ) -> None:
     """Verify that the expected values are set on the blueprint request."""
-    parser = create_simrunner_parser()
+    parser = create_parser()
     parsed_args = parser.parse_args(
         [
             ARG_URI_LONG,
@@ -290,7 +286,7 @@ def test_get_request(
         ]
     )
 
-    config = get_request(parsed_args.blueprint_uri, parsed_args.stages)
+    config = get_request(parsed_args.blueprint_uri)
 
     assert config.blueprint_uri == blueprint_uri
 
@@ -345,7 +341,7 @@ def test_start_runner(
     blueprint_path: Path
         The path to the blueprint yaml file created by the fixture.
     """
-    request = RomsMarblRunnerRequest(
+    request = XRunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
     )
@@ -975,100 +971,6 @@ async def test_runner_on_iteration(
         assert mock_simulation.pre_run.call_count == 1
         assert mock_simulation.run.call_count == 1
         assert mock_shutdown.call_count == 1
-
-
-@pytest.mark.xfail(
-    reason="some of these fail now that we raise an error on unknown return status"
-)
-@pytest.mark.parametrize(
-    ("setup", "build", "pre_run", "run", "post_run"),
-    [
-        (0, 0, 0, 0, 0),
-        (1, 0, 0, 0, 0),
-        (0, 1, 0, 0, 0),
-        (0, 0, 1, 0, 0),
-        (0, 0, 0, 1, 0),
-        (0, 0, 0, 1, 1),
-        (1, 1, 0, 0, 0),
-        (0, 0, 1, 1, 0),
-        (1, 0, 1, 0, 0),
-        (1, 0, 0, 1, 0),
-        (0, 1, 1, 0, 0),
-        (0, 1, 0, 1, 0),
-        (0, 1, 0, 1, 1),
-        (0, 1, 1, 1, 0),
-        (0, 1, 1, 1, 1),
-        (1, 0, 0, 1, 1),
-        (1, 1, 0, 1, 1),
-        (1, 0, 1, 1, 1),
-        (1, 1, 1, 1, 1),
-    ],
-)
-@pytest.mark.asyncio
-async def test_runner_setup_stage(
-    sim_runner: SimulationRunner,
-    blueprint_path: Path,
-    setup: bool,
-    build: bool,
-    pre_run: bool,
-    run: bool,
-    post_run: bool,
-) -> None:
-    """Test conditional stage execution.
-
-    Verifies that each conditionally stage is executed when configured to do so.
-
-    WARNING: executing post-run without run is currently not tested/supported due to
-    the way the simulation creates and relies on a stateful execution handler.
-
-    Parameters
-    ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
-    """
-    mock_prep_fs = mock.Mock()
-
-    stages: list[SimulationStages] = []
-    if setup:
-        stages.append(SimulationStages.SETUP)
-    if build:
-        stages.append(SimulationStages.BUILD)
-    if pre_run:
-        stages.append(SimulationStages.PRE_RUN)
-    if run:
-        stages.append(SimulationStages.RUN)
-    if post_run:
-        stages.append(SimulationStages.POST_RUN)
-
-    request = RomsMarblRunnerRequest(
-        str(blueprint_path),
-        RomsMarblBlueprint,
-        stages=list(stages),
-    )
-
-    setattr(sim_runner, "_stages", tuple(request.stages))
-    mock_simulation = mock.Mock(spec=Simulation)
-
-    def _mock_run(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001
-        return mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
-
-    mock_simulation.run.configure_mock(side_effect=_mock_run)
-
-    # don't let it perform any real work
-    with (
-        mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
-    ):
-        # Trigger a run through the lifecycle as a task.
-        await sim_runner.execute()
-
-        # Now confirm that my target lifecycle behaviors were conditionally executed
-        assert mock_prep_fs.call_count == 1
-        assert mock_simulation.setup.call_count == (1 if setup else 0)
-        assert mock_simulation.build.call_count == (1 if build else 0)
-        assert mock_simulation.pre_run.call_count == (1 if pre_run else 0)
-        assert mock_simulation.run.call_count == (1 if run else 0)
-        assert mock_simulation.post_run.call_count == (1 if post_run else 0)
 
 
 def test_worker_main(tmp_path: Path, sim_runner: SimulationRunner) -> None:

@@ -228,7 +228,7 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
 
         Parameters
         ----------
-        request: BlueprintRequest
+        request: XRunnerRequest[TBlueprint]
             A request containing information about the blueprint to run.
         job_cfg: JobConfig
             Configuration for submitting jobs to an HPC, such as account ID,

@@ -1,15 +1,12 @@
-import argparse
 import asyncio
-import enum
 import os
 import pathlib
 import sys
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Final, Literal, override
+from typing import TYPE_CHECKING, Final, override
 
-from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError
-from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
     configure_environment,
@@ -17,53 +14,13 @@ from cstar.entrypoint.config import (
     get_service_config,
 )
 from cstar.entrypoint.service import Service
-from cstar.entrypoint.utils import (
-    ARG_LOGLEVEL_LONG,
-    ARG_LOGLEVEL_SHORT,
-    ARG_URI_LONG,
-    ARG_URI_SHORT,
-)
-from cstar.entrypoint.xrunner import XRunnerRequest
+from cstar.entrypoint.xrunner import XRunnerRequest, create_parser
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms import ROMSSimulation
 
 if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-
-
-ARG_STAGE_LONG: Literal["--stage"] = "--stage"
-ARG_STAGE_SHORT: Literal["-g"] = "-g"
-
-
-class SimulationStages(enum.StrEnum):
-    """The stages in the simulation pipeline."""
-
-    SETUP = enum.auto()
-    """Execute simulation setup. See `Simulation.setup`"""
-    BUILD = enum.auto()
-    """Execute builds of simulation dependencies. See `Simulation.build`"""
-    PRE_RUN = enum.auto()
-    """Execute hooks before the simulation starts. See `Simulation.pre_run`"""
-    RUN = enum.auto()
-    """Execute the simulation. See `Simulation.run`"""
-    POST_RUN = enum.auto()
-    """Execute hooks after the simulation completes. See `Simulation.post_run`"""
-
-
-class RomsMarblRunnerRequest(XRunnerRequest[RomsMarblBlueprint]):
-    stages: list[SimulationStages]
-    """The simulation stages to execute."""
-
-    def __init__(
-        self,
-        uri: str,
-        bp_type: type[RomsMarblBlueprint],
-        name: str = "",
-        stages: list[SimulationStages] | None = None,
-    ) -> None:
-        super().__init__(uri, bp_type, name)
-        self.stages = stages or []
 
 
 class SimulationRunner(Service):
@@ -75,8 +32,6 @@ class SimulationRunner(Service):
     """The root directory where simulation outputs will be written."""
     _simulation: Final[ROMSSimulation]
     """The simulation instance created from the blueprint."""
-    _stages: Final[tuple[SimulationStages, ...]]
-    """The simulation stages that should be executed."""
     _handler: ExecutionHandler | None
     """The execution handler for the simulation."""
     _job_config: Final["JobConfig"]
@@ -84,7 +39,7 @@ class SimulationRunner(Service):
 
     def __init__(
         self,
-        request: RomsMarblRunnerRequest,
+        request: XRunnerRequest[RomsMarblBlueprint],
         service_cfg: "ServiceConfiguration",
         job_cfg: "JobConfig",
     ) -> None:
@@ -92,7 +47,7 @@ class SimulationRunner(Service):
 
         Parameters
         ----------
-        request: BlueprintRequest
+        request: XRunnerRequest[RomsMarblBlueprint]
             A request containing information about the simulation to run
 
         service_cfg: ServiceConfiguration
@@ -109,7 +64,6 @@ class SimulationRunner(Service):
         self._simulation = ROMSSimulation.from_blueprint(self._blueprint_uri)
         self._simulation.name = slugify(self._simulation.name)
         self._output_root = self._simulation.directory.expanduser()
-        self._stages = tuple(request.stages)
 
         roms_root = os.environ.get("ROMS_ROOT", None)
         self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
@@ -165,23 +119,14 @@ class SimulationRunner(Service):
             raise BlueprintError(msg)
 
         try:
-            if SimulationStages.SETUP in self._stages:
-                self.log.trace("Setting up simulation")
-                self._simulation.setup()
-            else:
-                self.log.trace("Skipping simulation setup")
+            self.log.trace("Setting up simulation")
+            self._simulation.setup()
 
-            if SimulationStages.BUILD in self._stages:
-                self.log.trace("Building simulation")
-                self._simulation.build()
-            else:
-                self.log.trace("Skipping simulation build")
+            self.log.trace("Building simulation")
+            self._simulation.build()
 
-            if SimulationStages.PRE_RUN in self._stages:
-                self.log.trace("Executing simulation pre-run")
-                self._simulation.pre_run()
-            else:
-                self.log.trace("Skipping simulation pre_run")
+            self.log.trace("Executing simulation pre-run")
+            self._simulation.pre_run()
 
         except RuntimeError as ex:
             msg = "Failed to build simulation"
@@ -198,7 +143,6 @@ class SimulationRunner(Service):
         simulation.
         """
         # perform simulation cleanup activities only when required
-        stage_enabled = SimulationStages.POST_RUN in self._stages
         treat_as_failure = False
         try:
             if not self._simulation:
@@ -216,11 +160,8 @@ class SimulationRunner(Service):
                 )
                 return
 
-            if stage_enabled:
-                self._simulation.post_run()
-                self.log.debug("Executing simulation post-run")
-            else:
-                self.log.debug("Skipping simulation post-run")
+            self._simulation.post_run()
+            self.log.debug("Executing simulation post-run")
         except RuntimeError:
             treat_as_failure = True
             self.log.exception("Simulation post_run failed.")
@@ -239,11 +180,8 @@ class SimulationRunner(Service):
                     "job_name": self._job_config.job_name,
                 }
 
-                if SimulationStages.RUN in self._stages:
-                    self.log.trace("Running simulation.")
-                    self._handler = self._simulation.run(**run_params)
-                else:
-                    self.log.trace("Skipping simulation run")
+                self.log.trace("Running simulation.")
+                self._handler = self._simulation.run(**run_params)
             else:
                 await self._handler.updates(seconds=1.0)
         except Exception:
@@ -291,79 +229,31 @@ class SimulationRunner(Service):
         return False
 
 
-def create_simrunner_parser() -> argparse.ArgumentParser:
-    """Create a parser for CLI arguments expected by a SimulationRunner.
-
-    Returns
-    -------
-    argparse.ArgumentParser
-        An argument parser configured with the expected arguments for the
-        SimulationRunner service.
-    """
-    parser = argparse.ArgumentParser(
-        description="Run a c-star simulation.",
-        exit_on_error=True,
-    )
-    parser.add_argument(
-        ARG_URI_SHORT,
-        ARG_URI_LONG,
-        type=str,
-        required=True,
-        help="The URI of a blueprint.",
-    )
-    parser.add_argument(
-        ARG_LOGLEVEL_SHORT,
-        ARG_LOGLEVEL_LONG,
-        default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
-        type=str,
-        required=False,
-        help="Logging level for the simulation.",
-        choices=list(LogLevelChoices),
-    )
-    parser.add_argument(
-        ARG_STAGE_SHORT,
-        ARG_STAGE_LONG,
-        choices=[x.value for x in SimulationStages],
-        type=str,
-        required=False,
-        action="append",
-        dest="stages",
-        help=("Simulation stages to execute."),
-    )
-    return parser
-
-
 def get_request(
-    blueprint_uri: str, stages: list[SimulationStages] | None = None
-) -> RomsMarblRunnerRequest:
-    """Create a BlueprintRequest instance from CLI arguments.
+    blueprint_uri: str,
+) -> XRunnerRequest[RomsMarblBlueprint]:
+    """Create a XRunnerRequest[RomsMarblBlueprint] instance from CLI arguments.
 
     Parameters
     ----------
     blueprint_uri : str
         The path to a blueprint file
-    stages : list[SimulationStages] | None
-        The set of stages to be executed. Defaults to all stages, if empty or None.
 
     Returns
     -------
-    BlueprintRequest
+    XRunnerRequest[RomsMarblBlueprint]
         A request configured to run a c-star simulation via a blueprint.
     """
-    if not stages:
-        stages = list(SimulationStages)
-
-    return RomsMarblRunnerRequest(
+    return XRunnerRequest(
         blueprint_uri,
         RomsMarblBlueprint,
-        stages=stages,
     )
 
 
 async def execute_runner(
     job_cfg: "JobConfig",
     service_cfg: "ServiceConfiguration",
-    request: RomsMarblRunnerRequest,
+    request: XRunnerRequest[RomsMarblBlueprint],
 ) -> int:
     """Execute a blueprint with a SimulationRunner.
 
@@ -373,7 +263,7 @@ async def execute_runner(
         Configuration applied to the scheduler
     service_cfg : ServiceConfiguration
         Configuration applied to the service
-    request : BlueprintRequest
+    request : XRunnerRequest[RomsMarblBlueprint]
         A request specifying the blueprint to be executed
     """
     log = get_logger(__name__, level=service_cfg.log_level)
@@ -411,12 +301,12 @@ def main() -> int:
     int
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
-    parser = create_simrunner_parser()
+    parser = create_parser()
     args = parser.parse_args()
 
     job_cfg = get_job_config()
     service_cfg = get_service_config(args.log_level, name="SimulationRunner")
-    request = get_request(args.blueprint_uri, args.stages)
+    request = get_request(args.blueprint_uri)
 
     return asyncio.run(execute_runner(job_cfg, service_cfg, request))
 

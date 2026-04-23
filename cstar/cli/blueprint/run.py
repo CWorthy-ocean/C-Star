@@ -17,13 +17,12 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
+from cstar.entrypoint.worker.worker import execute_runner as exec_romsmarbl_runner
 from cstar.entrypoint.worker.worker import (
-    SimulationStages,
     get_job_config,
     get_request,
     get_service_config,
 )
-from cstar.entrypoint.worker.worker import execute_runner as exec_romsmarbl_runner
 from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Application, Blueprint
@@ -85,13 +84,6 @@ def run(
             callback=path_callback,
         ),
     ],
-    stage: t.Annotated[
-        list[SimulationStages] | None,
-        typer.Option(
-            help="The stages to execute. If not specified, all stages will be executed.",
-            case_sensitive=False,
-        ),
-    ] = None,
     log_level: t.Annotated[
         LogLevelChoices,
         typer.Option(
@@ -129,7 +121,7 @@ def run(
 
     if bp.application == Application.ROMS_MARBL.value:
         # NOTE: temporary conditional to use old runner until it is converted to XRunner
-        rm_request = get_request(uri, stage)
+        rm_request = get_request(uri)
         rc = asyncio.run(exec_romsmarbl_runner(job_cfg, service_cfg, rm_request))
     else:
         request = XRunnerRequest(uri, type(bp))
