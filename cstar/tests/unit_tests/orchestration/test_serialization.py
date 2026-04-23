@@ -1,5 +1,6 @@
 import typing as t
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -57,7 +58,7 @@ def test_serialization_workplan_no_data(
 )
 def test_serialization_workplan_required_fields(
     tmp_path: Path,
-    fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
+    fill_workplan_template: Callable[[dict[str, t.Any]], str],
     attr_to_exclude: str,
     complete_workplan_template_input: dict[str, t.Any],
     empty_workplan_template_input: dict[str, t.Any],
@@ -92,7 +93,7 @@ def test_serialization_workplan_required_fields(
 )
 def test_serialization_workplan_optional_fields(
     tmp_path: Path,
-    fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
+    fill_workplan_template: Callable[[dict[str, t.Any]], str],
     attr_to_empty: str,
     complete_workplan_template_input: dict[str, t.Any],
     empty_workplan_template_input: dict[str, t.Any],
@@ -119,7 +120,7 @@ def test_serialization_workplan_optional_fields(
 
 def test_serialization_workplan_happy_path(
     tmp_path: Path,
-    fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
+    fill_workplan_template: Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
 ) -> None:
     """Verify that a fully-populated workplan can be deserialized."""
@@ -148,7 +149,7 @@ def test_serialization_workplan_happy_path(
 
 def test_serialization_workplan_compute_env(
     tmp_path: Path,
-    fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
+    fill_workplan_template: Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
 ) -> None:
     """Verify that dynamically added compute environment attributes are parsed."""
@@ -184,7 +185,7 @@ def test_serialization_workplan_compute_env(
 
 def test_serialization_workplan_runtime_vars(
     tmp_path: Path,
-    fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
+    fill_workplan_template: Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
 ) -> None:
     """Verify that dynamically added runtime vars are parsed."""
@@ -219,7 +220,7 @@ def test_serialization_workplan_runtime_vars(
         PersistenceMode.yaml,
     ],
 )
-def test_serialization_handle(tmp_path: Path, mode: PersistenceMode) -> None:
+def test_serialization_handle(mode: PersistenceMode) -> None:
     """Verify that a task can be properly serialized to disk and reloaded."""
     pid, job_name = "test-pid", "abc123"
     handle = SlurmHandle(pid=pid, name=job_name)
