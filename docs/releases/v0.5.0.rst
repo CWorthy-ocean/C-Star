@@ -129,6 +129,7 @@ Improvements
 - Add `--log-level` and `--clobber` parameters to CLI methods for running blueprints and workplans. (`#502 <https://github.com/CWorthy-ocean/C-Star/pull/502>`_)
 - Reduced amount of repetitive logs captured at the `DEBUG` level (`#504 <https://github.com/CWorthy-ocean/C-Star/pull/504>`_)
 - Improved consistency in CLI outputs and error handling (`#506 <https://github.com/CWorthy-ocean/C-Star/pull/506>`_)
+- Mitigated linter warnings from using deprecated collections (e.g. t.Mapping, t.Iterable) (`#507 <https://github.com/CWorthy-ocean/C-Star/pull/507>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
