@@ -490,6 +490,13 @@ class Step(BaseModel):
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
 
+    directives: KeyValueStore = Field(
+        default_factory=dict,
+        validate_default=False,
+        frozen=True,
+    )
+    """A collection of key-value pairs specifying configuration for runtime directives."""
+
     @property
     def safe_name(self) -> str:
         """Return a URL-safe version of the step name.

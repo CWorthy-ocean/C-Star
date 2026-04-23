@@ -4,6 +4,8 @@ import logging
 import os
 import shutil
 import sys
+import textwrap
+import typing as t
 from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
@@ -19,6 +21,7 @@ from cstar.entrypoint.config import (
     get_service_config,
 )
 from cstar.entrypoint.utils import (
+    ARG_DIRECTIVES_URI_LONG,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
     ARG_URI_LONG,
@@ -30,8 +33,11 @@ from cstar.entrypoint.worker.worker import (
     main,
 )
 from cstar.entrypoint.xrunner import XRunnerRequest, create_parser
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.transforms import ContinuanceTransform
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -123,6 +129,38 @@ def sim_runner(
     runner._simulation.directory = output_path
 
     return runner
+
+
+@pytest.fixture
+def continuance_directive_path(
+    mock_sim_output_dir: tuple[Path, Path, Path],
+) -> Path:
+    """Fixture to return a Path pointing to a file containing directive
+    configuration that causes the `ContinuanceTransform` to execute.
+
+    Parameters
+    ----------
+    mock_sim_output_dir : tuple[Path, Path, Path]
+        Used to create the mock run outputs that the directive config file will
+        refer to (to locate reset files).
+
+    Returns
+    -------
+    Path
+        The path to the directive configuration file.
+    """
+    _, step_dir, _ = mock_sim_output_dir
+
+    directives = textwrap.dedent(
+        f"""\
+        directives:
+            continue-from:
+                path: {step_dir}
+        """,
+    )
+    directive_path = step_dir / "test-directives.yaml"
+    directive_path.write_text(directives)
+    return directive_path
 
 
 def test_create_parser_happy_path() -> None:
@@ -1043,6 +1081,53 @@ def test_worker_main_exec(
     assert mock_execute.call_count == 1
 
 
+def test_worker_main_exec_continue_from(
+    blueprint_path: Path,
+    continuance_directive_path: Path,
+) -> None:
+    """Verify that the continuance transform is executed when included in
+    the directives file.
+    """
+    args = [
+        "cstar.entrypoint.worker.worker",
+        ARG_URI_LONG,
+        str(blueprint_path),
+        ARG_LOGLEVEL_LONG,
+        "DEBUG",
+        ARG_DIRECTIVES_URI_LONG,
+        str(continuance_directive_path),
+    ]
+
+    # don't let it perform any real work; mock out SimulationRunner
+    with (
+        mock.patch.object(
+            SimulationRunner,
+            "execute",
+            mock.AsyncMock(),
+        ) as mock_execute,
+        mock.patch.object(
+            SimulationRunner,
+            "__init__",
+            mock.Mock(return_value=None),
+        ) as mock_init,
+        mock.patch.object(sys, "argv", args),
+    ):
+        # This should run the simulation and return a success code
+        return_code = main()
+
+    # Confirm an error code is returned
+    assert return_code == 0
+
+    # Confirm the runner ran the simulation
+    mock_init.assert_called_once()
+    mock_execute.assert_called_once()
+
+    request: XRunnerRequest[RomsMarblBlueprint] = mock_init.call_args[0][0]
+
+    # confirm directive was applied by verifying a transformed blueprint was created
+    assert ContinuanceTransform.suffix() in str(request.blueprint_uri)
+
+
 @pytest.mark.parametrize("exception_type", [CstarError, BlueprintError, Exception])
 def test_worker_main_cstar_error(
     blueprint_path: Path,
@@ -1078,3 +1163,51 @@ def test_worker_main_cstar_error(
         return_code = main()
 
     assert return_code > 0
+
+
+def test_worker_main_preprocessor_args_parsed(
+    mock_sim_output_dir: tuple[Path, Path, Path],
+    continuance_directive_path: Path,
+) -> None:
+    """Verify that the worker receives directives and they are supplied
+    to the runner.
+
+    Parameters
+    ----------
+    mock_sim_output_dir : tuple[Path, Path, Path]
+        Creates files/directories mimicking output of a prior simulation run.
+    """
+    *_, step_dir, bp_path = mock_sim_output_dir
+
+    reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
+
+    args = [
+        "cstar.entrypoint.worker.worker",
+        ARG_URI_LONG,
+        str(bp_path),
+        ARG_DIRECTIVES_URI_LONG,
+        str(continuance_directive_path),
+    ]
+
+    with (
+        mock.patch(
+            "cstar.entrypoint.worker.worker.execute_runner",
+            mock.AsyncMock(),
+        ) as mock_exec_runner,
+        mock.patch.object(sys, "argv", args),
+    ):
+        _ = main()
+
+    mock_exec_runner.assert_called_once()
+
+    *_, req = mock_exec_runner.mock_calls[0].args
+
+    request = t.cast("XRunnerRequest[RomsMarblBlueprint]", req)
+
+    # verify the blueprint uri was modified by preprocessing prior to invocation
+    assert request.blueprint_uri != str(bp_path)
+    assert ContinuanceTransform.suffix() in request.blueprint_uri
+
+    # verify initial conditions now point to the --continue-from location
+    blueprint = deserialize(request.blueprint_uri, RomsMarblBlueprint)
+    assert str(reset_dir) in str(blueprint.initial_conditions.data[0].location)

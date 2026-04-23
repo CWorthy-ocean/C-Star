@@ -1,15 +1,17 @@
 import os
 import random
-import sys
 import textwrap
 import typing as t
 from collections import defaultdict
+from pathlib import Path
+
+import yaml
 
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_URI_LONG
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
 from cstar.orchestration.models import Application
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
@@ -35,24 +37,25 @@ str
 """
 
 
-def convert_roms_step_to_command(step: "LiveStep") -> str:
-    """Convert a `Step` into a command to be executed.
-
-    This function converts ROMS/ROMS-MARBL applications into a command triggering
-    a C-Star worker to run a simulation.
+def prepare_directive_file(step: "LiveStep") -> Path:
+    """Create a directives file in the step work directory.
 
     Parameters
     ----------
     step : LiveStep
-        The step to be converted.
+        The step to prepare a directive file for.
 
     Returns
     -------
     str
-        The complete CLI command.
+        The path to the directive file.
     """
-    worker_module = "cstar.entrypoint.worker.worker"
-    return f"{sys.executable} -m {worker_module}  {ARG_URI_LONG} {step.blueprint_path}"
+    directives_path = step.fsm.work_dir / "directives.yaml"
+    with directives_path.open("w") as fp:
+        model = step.model_dump_json(include={"directives"})
+        content = yaml.dump(model, sort_keys=False)
+        fp.write(content)
+    return directives_path
 
 
 def convert_step_to_blueprint_run_command(step: "LiveStep") -> str:
@@ -77,6 +80,10 @@ def convert_step_to_blueprint_run_command(step: "LiveStep") -> str:
 
     if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
         cmd_array.append(ARG_CLOBBER)
+
+    if step.directives:
+        directives_path = prepare_directive_file(step)
+        cmd_array.extend([ARG_DIRECTIVES_URI_LONG, str(directives_path)])
 
     return " ".join(cmd_array)
 
@@ -121,7 +128,7 @@ app_to_cmd_map: dict[str, StepToCommandConversionFn] = defaultdict(
     lambda: convert_step_to_blueprint_run_command,
     {
         Application.SLEEP.value: convert_step_to_placeholder,
-        Application.ROMS_MARBL.value: convert_roms_step_to_command,
+        Application.ROMS_MARBL.value: convert_step_to_blueprint_run_command,
     },
 )
 """Map application types to a function that converts a step to a CLI command."""

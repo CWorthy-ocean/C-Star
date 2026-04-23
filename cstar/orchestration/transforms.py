@@ -2,10 +2,12 @@ import os
 import re
 import typing as t
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import (
@@ -18,10 +20,12 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
+from cstar.execution.file_system import local_copy
 from cstar.orchestration.application import APP_CAT_BLUEPRINTS
 from cstar.orchestration.models import (
     Application,
     Blueprint,
+    KeyValueStore,
     RomsMarblBlueprint,
     Workplan,
 )
@@ -120,8 +124,8 @@ class TemplateFillTransform:
 
     def __init__(
         self,
-        variable_resolver: t.Callable[[str], str] | None = None,
-        path_resolver: t.Callable[[str], Path] | None = None,
+        variable_resolver: Callable[[str], str] | None = None,
+        path_resolver: Callable[[str], Path] | None = None,
     ) -> None:
         """Initialize the transform.
 
@@ -137,7 +141,7 @@ class TemplateFillTransform:
         self._path_resolver = path_resolver
 
     def with_path_resolver(
-        self, path_resolver: t.Callable[[str], Path]
+        self, path_resolver: Callable[[str], Path]
     ) -> "TemplateFillTransform":
         """Return a new instance with the given path resolver bound.
 
@@ -207,7 +211,7 @@ class TemplateFillTransform:
 
         return step.model_validate_json(content)
 
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
         """Apply template filling to a step's blueprint_overrides.
 
         Parameters
@@ -430,13 +434,14 @@ class WorkplanTransformer(LoggingMixin):
 
         # apply user blueprint_overrides and ensure consistent output targets;
         # must happen before time-splitting so the splitter reads correct blueprint values
-        steps = []
-        for step in live_steps:
+        steps: list[LiveStep] = []
+
+        for i in range(len(live_steps)):
+            step = live_steps[i]
+
             if step.application in apply_to:
-                new_step = override_output_directory(step)
-            else:
-                new_step = step
-            steps.append(new_step)
+                step = override_output_directory(step)
+            steps.append(step)
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             split_steps: list[LiveStep] = []
@@ -649,7 +654,7 @@ class OverrideTransform(Transform):
         bp_type = type(bp)
         return bp_type(**merged)
 
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -704,11 +709,121 @@ def override_output_directory(step: LiveStep) -> LiveStep:
 
     Returns
     -------
-    list[Step]
-        The transformed steps.
+    LiveStep
+        The updated step.
     """
     sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
     override_transform = OverrideTransform(sys_overrides)
     overridden_step_result = iter(override_transform(step))
 
     return next(overridden_step_result)
+
+
+class Directive(Transform, t.Protocol):
+    _config: Mapping[str, t.Any]
+    """Contract of a transform that can be used as a directive."""
+
+    def __init__(self, config: dict[str, t.Any]) -> None:
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        config : dict[str, t.Any] | None
+            A dictionary containing configuration for the directive.
+        """
+        if not config:
+            msg = "Configuration must be provided"
+            raise ValueError(msg)
+
+        self._config = config
+
+
+class ContinuanceTransform(Directive, OverrideTransform):
+    """A transform that locates a reset file with an unknown path at the
+    time the task was scheduled.
+    """
+
+    def __init__(self, config: dict[str, t.Any]) -> None:
+        """Initialize the instance.
+
+
+        Parameters
+        ----------
+        config : dict[str, t.Any] | None
+            A dictionary containing configuration for the directive.
+        """
+        Directive.__init__(self, config)
+        OverrideTransform.__init__(self, self._create_reset_override())
+
+    def _create_reset_override(
+        self,
+    ) -> dict[str, t.Any]:
+        source = Path(self._config["path"])
+        matches = sorted(source.rglob("*_rst*.nc"), reverse=True)
+
+        if not matches:
+            msg = f"No reset files located. Unable to continue from {source!r}"
+            raise CstarExpectationFailed(msg)
+
+        match = matches.pop(0).as_posix()
+        return {"initial_conditions": {"data": [{"location": match}]}}
+
+    @t.override
+    @staticmethod
+    def suffix() -> str:
+        """Return a suffix used when persisting a resource modified by this transform.
+
+        Returns
+        -------
+        str
+        """
+        return "cfrom"
+
+
+class DirectiveConfig(BaseModel):
+    directive_map: t.ClassVar[Mapping[str, type[Directive]]] = {
+        "continue-from": ContinuanceTransform,
+    }
+    directives: KeyValueStore
+
+    @classmethod
+    def apply_directives(
+        cls,
+        directive_uri: str,
+        blueprint_uri: str,
+    ) -> str:
+        """Apply the specified directives to the blueprint and
+        return the path to the final, transformed blueprint.
+
+        Parameters
+        ----------
+        directive_uri : str
+            The URI to configuration for directives the runner must execute.
+        blueprint_uri : str
+            The user-supplied blueprint URI specifying the blueprint to preprocess.
+
+        Returns
+        -------
+        str
+        """
+        with local_copy(directive_uri) as local_path:
+            model = deserialize(local_path, DirectiveConfig)
+
+        directives = model.directives
+        if not directives:
+            return blueprint_uri
+
+        step = LiveStep(
+            name="directive-step",
+            application="directive",
+            blueprint=blueprint_uri,
+        )
+        directive_map = DirectiveConfig.directive_map
+        transforms = {
+            directive_map[key](config=t.cast("dict[str, dict[str, t.Any]]", config))
+            for key, config in directives.items()
+        }
+        for transform in transforms:
+            step = next(iter(transform(step)))
+
+        return str(step.blueprint_path)

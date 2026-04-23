@@ -20,6 +20,7 @@ from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import get_logger
 from cstar.base.utils import additional_files_dir
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
 from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector
@@ -31,6 +32,8 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.models import Step
+from cstar.orchestration.orchestration import LiveStep
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -1772,7 +1775,7 @@ def mock_placeholder_delay() -> Generator[None, None, None]:
         yield
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def prefect_server() -> Generator[str, None, None]:
     """Starts a Prefect server and stops it when the tests are done."""
     if "PREFECT_API_URL" in os.environ:
@@ -1854,3 +1857,149 @@ def bp_templates_dir(templates_dir: Path) -> Path:
     Path
     """
     return templates_dir / "bp"
+
+
+@pytest.fixture
+def mock_sim_output_dir(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> tuple[Path, Path, Path]:
+    """This fixture creates a directory structure mocking a completed simulation.
+
+    It includes directoriess matching the expected convention for:
+    - work
+    - logs
+    - output
+    - joined output
+    - etc.
+
+    > See RomsFileSystemManager for the more information.
+
+    It includes mocked files for:
+    - a blueprint (yaml) file
+    - reset files matching glob pattern `*_rst*.nc`
+
+    Returns
+    -------
+    tuple[Path, Path, Path]
+        The tuple contains:
+        - mock user data directory (e.g. a fake "source" where user information can originate)
+        - step working directory
+        - blueprint path (path to a blueprint in user data directory)
+    """
+    info_msg = f"This file was created by the {__name__} fixture\n"
+
+    container_dir = tmp_path / "mock_sim_output_dir"
+    user_data_dir = container_dir / "userdata"
+    user_data_dir.mkdir(parents=True, exist_ok=True)
+
+    tpl_path = bp_templates_dir / "blueprint.yaml"
+    tpl_content = tpl_path.read_text()
+
+    bp_path = user_data_dir / "blueprint.yaml"
+    bp_path.write_text(tpl_content)
+
+    step_dir = container_dir / "step"
+    fsm = RomsFileSystemManager(step_dir)
+    fsm.prepare()
+
+    log_path = fsm.logs_dir / "cstar.out"
+    log_path.write_text(info_msg)
+    log_path.write_text("Simulation completed successfully\n")
+
+    joined_dir = fsm.joined_output_dir
+
+    reset_files = [
+        joined_dir / "output_rst.0.nc",
+        joined_dir / "output_rst.1.nc",
+        joined_dir / "output_rst.2.nc",
+    ]
+    for file in reset_files:
+        file.write_text(info_msg)
+
+    return user_data_dir, step_dir, bp_path
+
+
+@pytest.fixture
+def preprocessable_roms_step(
+    mock_sim_output_dir: tuple[Path, Path, Path],
+) -> Step:
+    """Create a valid step with an underlying RomsMarblBlueprint.
+
+    Parameters
+    ----------
+    mock_sim_output_dir: tuple[Path, Path, Path]
+        Paths to directories created to mock output of a ROMS simulation.
+    """
+    *_, step_dir, bp_path = mock_sim_output_dir
+    joined_dir = step_dir / "joined_output"
+
+    return Step(
+        name="test step",
+        application="roms_marbl",
+        blueprint=bp_path,
+        directives={
+            "continue-from": {
+                "path": joined_dir.as_posix(),
+            },
+        },
+    )
+
+
+@pytest.fixture
+def preprocessable_roms_livestep(
+    preprocessable_roms_step: Step,
+    mock_sim_output_dir: tuple[Path, Path, Path],
+) -> LiveStep:
+    """Create a valid step with an underlying RomsMarblBlueprint.
+
+    Parameters
+    ----------
+    mock_sim_output_dir: tuple[Path, Path, Path]
+        Paths to directories created to mock output of a ROMS simulation.
+
+    Returns
+    -------
+    LiveStep
+    """
+    *_, step_dir, _ = mock_sim_output_dir
+    return LiveStep.from_step(
+        preprocessable_roms_step,
+        update={"work_dir": step_dir},
+    )
+
+
+@pytest.fixture
+def preprocessable_workplan_path(
+    tmp_path: Path,
+    mock_sim_output_dir: tuple[Path, Path, Path],
+    wp_templates_dir: Path,
+) -> Path:
+    """Modify a basic workplan template to include directives in the last step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Used to write some temporary workplans to disk
+    mock_sim_output_dir : Path
+        Used to identify a directory containing mocked restart files
+    wp_templates_dir : Path
+        Used to load a workplan template that can be modified to include directives
+    """
+    wp_template = wp_templates_dir / "workplan.yaml"
+
+    # add directives to the last step in the workplan file
+    _, continue_from_dir, _ = mock_sim_output_dir
+    content = wp_template.read_text()
+    base_indent = 6  # indentation of the "directives" element
+    directives = ["directives:", "continue-from:", f"path: {continue_from_dir}"]
+    for i in range(len(directives)):
+        line_indent_sz = base_indent + (i * 4)
+        indent = " " * line_indent_sz
+        directives[i] = f"{indent}{directives[i]}"
+    content += "\n".join(directives)
+    write_to = tmp_path / "wp_with_directives.yaml"
+    nbytes = write_to.write_text(content)
+    assert nbytes
+
+    return write_to

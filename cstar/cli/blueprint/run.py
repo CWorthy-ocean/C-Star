@@ -12,21 +12,21 @@ from cstar.base.env import (
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
 from cstar.cli.workplan.shared import create_xrunner, get_registered_bp
+from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
+    ARG_DIRECTIVES_URI_LONG,
+    ARG_DIRECTIVES_URI_SHORT,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
 from cstar.entrypoint.worker.worker import execute_runner as exec_romsmarbl_runner
-from cstar.entrypoint.worker.worker import (
-    get_job_config,
-    get_request,
-    get_service_config,
-)
+from cstar.entrypoint.worker.worker import get_request
 from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Application, Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
+from cstar.orchestration.transforms import DirectiveConfig
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -74,6 +74,40 @@ def path_callback(
     return path
 
 
+def directives_callback(path: str | None) -> str | None:
+    """Validate the directive content after typer has parsed the path.
+
+    Parameters
+    ----------
+    path : str
+        The path to the directive file to validate.
+
+    Returns
+    -------
+    str.
+    """
+    if path is None:
+        return path
+
+    try:
+        with local_copy(path) as local_path:
+            if not local_path.exists():
+                msg = f"Directive file not found at path: {path}"
+                raise typer.BadParameter(msg)
+
+            # deserialize content to validate
+            _ = deserialize(path, DirectiveConfig)
+
+    except FileNotFoundError as ex:
+        msg = f"Directive file not found: {path}"
+        raise typer.BadParameter(msg) from ex
+    except ValidationError as ex:
+        msg = f"Directive file {path!r} is malformed: {ex}"
+        raise typer.BadParameter(msg) from ex
+
+    return path
+
+
 @app.command(name="run", help="Execute a blueprint in a local worker service.")
 def run(
     ctx: typer.Context,
@@ -103,6 +137,15 @@ def run(
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
         ),
     ] = False,
+    directive_uri: t.Annotated[
+        str | None,
+        typer.Option(
+            ARG_DIRECTIVES_URI_LONG,
+            ARG_DIRECTIVES_URI_SHORT,
+            help="The URI (or path) to a file containing directive configuration to be applied.",
+            callback=directives_callback,
+        ),
+    ] = None,
 ) -> None:
     """Execute a blueprint in a local worker service."""
     bp = t.cast("Blueprint", ctx.obj)
@@ -118,6 +161,9 @@ def run(
     if not result.is_valid:
         print(result.error_msg)
         return
+
+    if directive_uri:
+        uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
     if bp.application == Application.ROMS_MARBL.value:
         # NOTE: temporary conditional to use old runner until it is converted to XRunner
