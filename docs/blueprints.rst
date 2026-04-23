@@ -220,12 +220,13 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
       :caption: Executing a blueprint YAML file in python.
 
         from cstar.entrypoint.config import JobConfig, ServiceConfiguration, SimulationRunner
-        from cstar.entrypoint.worker.worker import BlueprintRequest
+        from cstar.entrypoint.xrunner import XRunnerRequest
+        from cstar.orchestration.models import RomsMarblBlueprint
 
         account_id = "your-account-id"
         queue_id = "wholenode"
         
-        request = BlueprintRequest("my_blueprint.yaml")
+        request = XRunnerRequest("my_blueprint.yaml", RomsMarblBlueprint)
         service_cfg = ServiceConfiguration()
         job_cfg = JobConfig(account_id, priority=queue_id)
 
