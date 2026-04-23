@@ -339,7 +339,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 return Status.Running
             case ExecutionStatus.COMPLETED:
                 return Status.Done
-            case ExecutionStatus.CANCELLED:
+            case ExecutionStatus.CANCELLED | ExecutionStatus.TIMEOUT:
                 return Status.Cancelled
             case ExecutionStatus.FAILED:
                 return Status.Failed
