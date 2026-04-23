@@ -1,6 +1,8 @@
 import itertools
 import typing as t
 from abc import ABC
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime
 from enum import StrEnum, auto
@@ -506,7 +508,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: t.Sequence[SerializeAsAny[Step]] = Field(
+    steps: Sequence[SerializeAsAny[Step]] = Field(
         min_length=1,
         frozen=True,
     )
@@ -556,7 +558,7 @@ class Workplan(BaseModel):
         value : list[str]
             Variable names used at runtime
         """
-        var_counter = t.Counter(value)
+        var_counter = Counter(value)
         most_common = var_counter.most_common(1)
         var_name, var_count = most_common[0] if most_common else ("", 0)
 
@@ -576,7 +578,7 @@ class Workplan(BaseModel):
         value : list[Step]
             The steps in the workplan.
         """
-        name_counter = t.Counter(step.name for step in value)
+        name_counter = Counter(step.name for step in value)
         most_common = name_counter.most_common(1)
         step_name, step_count = most_common[0] if most_common else ("", 0)
 
@@ -621,7 +623,7 @@ class UserDefinedVariables(BaseModel):
 
     keys: set[str] = Field(default_factory=set)
     """The set of valid keys available for runtime replacement."""
-    mapping: t.Mapping[str, str] = Field(default_factory=dict)
+    mapping: Mapping[str, str] = Field(default_factory=dict)
     """Key-value pairs specifying the value to be used for a key replacement."""
 
     require_coverage: bool = Field(default=False, frozen=True)

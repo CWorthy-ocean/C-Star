@@ -27,6 +27,9 @@ from cstar.orchestration.transforms import (
     get_time_slices,
 )
 
+if t.TYPE_CHECKING:
+    from collections.abc import Iterable
+
 
 @pytest.fixture
 def diamond_graph(tmp_path: Path) -> nx.DiGraph:
@@ -60,14 +63,14 @@ def tree_graph(tmp_path: Path) -> nx.DiGraph:
     -------
     nx.DiGraph
     """
-    data: dict[str, t.Iterable[str]] = {
+    data: dict[str, Iterable[str]] = {
         "0": ["1", "2"],
         "1": ["3", "4"],
         "2": ["5", "6"],
     }
     bp_path = tmp_path / "blueprint.yaml"
-    g: nx.DiGraph = nx.DiGraph(data)
-    initial_stats = {
+    g = nx.DiGraph(data)
+    initial_stats: dict[str, dict[str, Step | Status]] = {
         key: {
             KEY_STEP: Step(name=key, application="sleep", blueprint=bp_path.as_posix()),
             KEY_STATUS: Status.Unsubmitted,
