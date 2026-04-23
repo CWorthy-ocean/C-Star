@@ -1,18 +1,24 @@
 import os
+import typing as t
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_RUNID
-from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
+from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
     OverrideTransform,
     RomsMarblTimeSplitter,
+    WorkplanTransformer,
     get_transforms,
 )
+
+if t.TYPE_CHECKING:
+    from cstar.orchestration.orchestration import LiveStep
 
 
 @pytest.fixture
@@ -230,3 +236,62 @@ def test_override_transform_system_precedence(
     # system level override was applied last.
     assert Path(bp_old.runtime_params.output_dir) == dir_orig
     assert Path(bp_new.runtime_params.output_dir) == sys_od
+
+
+def test_workplan_transformer_applies_output_dir_overrides(
+    step_overiding_wp: Workplan,
+    test_output_dir: Path,
+    test_output_dir_override: Path,
+) -> None:
+    """Verify that the workplan transformer applies a transform to override
+    the output directory for all steps.
+
+    Parameters
+    ----------
+    step_overiding_wp : Workplan
+        A workplan copied from a template with paths referencing tmp_path.
+    test_output_dir : Path
+        The value that replaced the static content of the blueprint template
+        and was written to the test directory, tmp_path.
+    test_output_dir_override : Path
+        An override that was already on the step before the WP transformer is invoked
+    """
+    wp_transformer = WorkplanTransformer(step_overiding_wp, OverrideTransform())
+    original_bp_path = step_overiding_wp.steps[0].blueprint_path
+    step_orig: Step = step_overiding_wp.steps[0]
+    bp_orig = deserialize(step_orig.blueprint_path, RomsMarblBlueprint)
+
+    with mock.patch.dict(
+        os.environ,
+        {ENV_CSTAR_RUNID: "12345", ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_OFF},
+        clear=True,
+    ):
+        wp_trx = wp_transformer.apply()
+
+    step_trx = t.cast("LiveStep", wp_trx.steps[0])
+
+    # sanity-check expectations for the original blueprint output location and override
+    dir_orig = bp_orig.runtime_params.output_dir
+    original_override = t.cast(
+        "str",
+        step_orig.blueprint_overrides["runtime_params"]["output_dir"],  # type: ignore[reportArgumentType,index,call-overload]
+    )
+    assert dir_orig == test_output_dir
+    assert original_override == str(test_output_dir_override)
+
+    # confirm no override remains on the step
+    assert "runtime_params" not in step_trx.blueprint_overrides
+
+    # confirm the transformed step includes an updated blueprint path.
+    trx_bp_path = step_trx.blueprint_path
+    assert str(trx_bp_path) != str(original_bp_path)
+
+    # confirm the original and updated blueprint have different output directories
+    blueprint = deserialize(trx_bp_path, RomsMarblBlueprint)
+    assert blueprint.runtime_params.output_dir != dir_orig
+
+    # confirm the workplan override took precedence over any original override or output_dir
+    exp_dir = step_trx.fsm.root
+    assert blueprint.runtime_params.output_dir == exp_dir
+    assert blueprint.runtime_params.output_dir != dir_orig
+    assert blueprint.runtime_params.output_dir != original_override
