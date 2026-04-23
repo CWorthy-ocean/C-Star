@@ -21,6 +21,8 @@ Breaking Changes
 - The output location in the runtime settings (`roms.in`) file is now _always_ modified to place outputs in the output directory (since we no longer run ROMS in the output directory) (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - `ServiceConfiguration`, `JobConfig` have been relocated to `cstar.entrypoint.config` from `cstar.entrypoint.worker.worker` (`#503 <https://github.com/CWorthy-ocean/C-Star/pull/503>`_)
 - `BlueprintRequest` deprecated in favor of `XRunnerRequest` (`#506 <https://github.com/CWorthy-ocean/C-Star/pull/506>`_)
+- `BlueprintRequest` has been deprecated and removed. (`#510 <https://github.com/CWorthy-ocean/C-Star/pull/510>`_)
+- `--stage` CLI parameter for `cstar blueprint run` is no longer supported (`#510 <https://github.com/CWorthy-ocean/C-Star/pull/510>`_)
 
 New features
 ~~~~~~~~~~~~
