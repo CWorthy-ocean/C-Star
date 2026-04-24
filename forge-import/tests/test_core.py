@@ -340,6 +340,32 @@ class TestCstarSpecBuilderInitialization:
         assert "_surface-bgc.nc" in stdout
         assert "_boundary-physics.nc" in stdout
         assert "_tidal.nc" in stdout
+        planned_section = stdout.split("CstarSpecBuilder: planned NetCDF outputs", 1)[1].split(
+            "CstarSpecBuilder: output locations", 1
+        )[0]
+        assert "v0.1" not in planned_section, (
+            "Planned paths must match on-disk NetCDF naming (dots in model name → underscores)"
+        )
+
+    def test_canonicalize_stored_input_netcdf_path_matches_generated_names(
+        self,
+        minimal_cstar_spec_builder_args,
+        mock_model_spec,
+    ):
+        """POSTCONFIG missing-file messages use the same paths as generated NetCDF files."""
+        from cson_forge.input_data import netcdf_filename_component
+
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+        raw = builder.name
+        safe = netcdf_filename_component(raw)
+        expected = builder.input_data_dir / f"{safe}_grid.nc"
+        old_path = builder.input_data_dir.parent / raw / f"{raw}_grid.nc"
+        assert builder._canonicalize_stored_input_netcdf_path(old_path) == expected
+        assert builder._canonicalize_stored_input_netcdf_path(Path(f"{raw}_grid.nc")) == expected
 
     def test_validation_end_date_before_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test that validation raises error when end_date is before start_date."""

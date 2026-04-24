@@ -8,11 +8,53 @@ Tests cover:
 - Validation and error handling
 """
 from pathlib import Path
+import re
 import pytest
 import yaml
 from unittest.mock import MagicMock
 
-from cson_forge.settings import render_roms_settings, ROMSTemplateRenderer
+from cson_forge.settings import (
+    render_roms_settings,
+    ROMSTemplateRenderer,
+    _fortran_cdr_file_decl,
+)
+
+
+class TestFortranCdrFileDecl:
+    """Tests for long-path Fortran cdr_file emission (fixed-form line length)."""
+
+    def test_short_path_single_line(self):
+        out = _fortran_cdr_file_decl("/a/b.nc")
+        assert "\n" not in out
+        assert len(out) <= 72
+        assert "character(len=8)" in out
+
+    def test_long_path_no_line_exceeds_72(self):
+        p = "/home/x-sbachman/" + "x" * 120 + "/c.nc"
+        out = _fortran_cdr_file_decl(p)
+        for line in out.splitlines():
+            assert len(line) <= 72, repr(line)
+
+    def test_long_path_first_line_opens_string_not_bare_ampersand(self):
+        """Avoid ``character(...) :: cdr_file = &`` with the literal starting next line."""
+        p = "/home/x-sbachman/" + "x" * 120 + "/c.nc"
+        out = _fortran_cdr_file_decl(p)
+        first = out.splitlines()[0]
+        assert "cdr_file = '" in first
+        assert not re.search(r"cdr_file\s*=\s*&\s*$", first)
+
+    def test_f77_concat_continuation_no_free_form_trailing_ampersand(self):
+        """F77 fixed form: ``//`` ends the line; next line uses column 6, not ``// &``."""
+        p = "/home/x-sbachman/" + "x" * 120 + "/c.nc"
+        out = _fortran_cdr_file_decl(p)
+        for line in out.splitlines():
+            assert not line.rstrip().endswith("// &"), line
+
+    def test_embedded_quote_doubled(self):
+        out = _fortran_cdr_file_decl("/tmp/O'Brien_cdr.nc")
+        assert "''" in out
+        for line in out.splitlines():
+            assert len(line) <= 72, repr(line)
 
 
 class TestRenderRomsSettings:

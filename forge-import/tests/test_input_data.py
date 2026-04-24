@@ -244,7 +244,17 @@ class TestInputData:
             assert data.start_date == datetime(2012, 1, 1)
             assert data.end_date == datetime(2012, 1, 2)
             assert data.input_data_dir.exists()
-    
+
+    def test_inputdata_input_data_dir_sanitizes_domain_dots(self, tmp_path):
+        """Directory name matches NetCDF basename rule (no ``.`` except in ``.nc`` files)."""
+        with patch("cson_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
+            data = InputData(
+                domain_name="run_v0.1_case",
+                start_date=datetime(2012, 1, 1),
+                end_date=datetime(2012, 1, 2),
+            )
+            assert data.input_data_dir.name == "run_v0_1_case"
+
     def test_inputdata_forcing_filename(self, tmp_path):
         """Test _forcing_filename method."""
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
@@ -257,6 +267,19 @@ class TestInputData:
             filename = data._forcing_filename("grid")
             assert filename.name == "test_grid_grid.nc"
             assert filename.parent == data.input_data_dir
+
+    def test_inputdata_forcing_filename_dots_replaced_except_nc_suffix(self, tmp_path):
+        """Basenames must have no ``.`` except ``.nc`` (e.g. ``v0.1`` in domain name)."""
+        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+            data = InputData(
+                domain_name="case_v0.1_x",
+                start_date=datetime(2012, 1, 1),
+                end_date=datetime(2012, 1, 2),
+            )
+            filename = data._forcing_filename("surface-physics")
+            assert filename.name == "case_v0_1_x_surface-physics.nc"
+            assert filename.name.count(".") == 1
+            assert filename.name.endswith(".nc")
     
     def test_inputdata_ensure_empty_or_clobber_no_files(self, tmp_path):
         """Test _ensure_empty_or_clobber when directory is empty."""
