@@ -1,20 +1,23 @@
 from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from unittest.mock import Mock, patch
 
 import pytest
 
-from cstar.orchestration.application import register_blueprint
-from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl import RomsMarblApplication
+from cstar.applications.utils import register_application
 
 
-@register_blueprint("sleep")
-class SleepBlueprint(RomsMarblBlueprint):
+@register_application
+@dataclass
+class SleepBlueprint(RomsMarblApplication):
     """For the sake of test suites, the 'sleep' app sometimes replaces roms-marbl and
     can use the RomsMarblBlueprint
     """
 
-    pass
+    name: Literal["sleep"] = "sleep"
 
 
 @pytest.fixture(scope="session")

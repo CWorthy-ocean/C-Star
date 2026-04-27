@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from cstar.applications.utils import get_application
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
@@ -26,48 +27,17 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
-from cstar.execution.file_system import local_copy
-from cstar.orchestration.application import APP_CAT_BLUEPRINTS
 from cstar.orchestration.models import (
     Application,
     Blueprint,
     KeyValueStore,
     RomsMarblBlueprint,
+    Transform,
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
-from cstar.system.registration import Registrar
-
-
-class Transform(t.Protocol):
-    """Protocol for a class that transforms a step into one or more
-    new steps.
-    """
-
-    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
-        """Apply the transform to a step.
-
-        Parameters
-        ----------
-        step : Step
-            The step to be transformed
-
-        Returns
-        -------
-        Iterable[Step]
-            Zero-to-many steps resulting from applying the transform.
-        """
-        ...
-
-    @staticmethod
-    def suffix() -> str:
-        """Return the standard prefix to be used when persisting
-        a resource modified by this transform.
-        """
-        ...
-
 
 TRANSFORMS: dict[str, list[Transform]] = defaultdict(list)
 """Storage for transform registrations."""
@@ -686,7 +656,7 @@ class OverrideTransform(Transform):
         """
         bp_path = Path(step.blueprint_path)
 
-        bp_type = Registrar[Blueprint](APP_CAT_BLUEPRINTS).get(step.application)
+        bp_type = get_application(step.application).blueprint
 
         blueprint: Blueprint = deserialize(bp_path, bp_type)
 

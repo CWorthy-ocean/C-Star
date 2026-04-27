@@ -34,6 +34,7 @@ class JobConfig(BaseModel):
     """Job priority."""
     job_name: t.Annotated[str, Field(frozen=True)] = _generate_job_name()
     """User-friendly job name."""
+    log_level: str = "INFO"
 
 
 class ServiceConfiguration(BaseModel):

@@ -1,28 +1,29 @@
 import typing as t
+from dataclasses import dataclass
 from pathlib import Path
 
 from roms_tools import Grid, ROMSOutput
 
+from cstar.applications.utils import register_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.xrunner import (
     XBlueprintRunner,
     XRunnerResult,
 )
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.application import register_blueprint, register_runner
-from cstar.orchestration.models import Blueprint
+from cstar.orchestration.models import ApplicationDefinition, Blueprint, Transform
+from cstar.orchestration.transforms import OverrideTransform
 
-APP_PLOTTER: t.Literal["plotter"] = "plotter"
+_APP_NAME: t.Literal["plotter"] = "plotter"
 """The unique identifier for the plotter application type."""
 
 log = get_logger(__name__)
 
 
-@register_blueprint(APP_PLOTTER)
 class PlotterBlueprint(Blueprint):
     """A blueprint for an example plotting application."""
 
-    application: str = APP_PLOTTER
+    application: str = _APP_NAME
     """The application identifier."""
     input_dir: Path
     """The location of the inputs for this step (the outputs from ROMS)."""
@@ -40,7 +41,6 @@ class PlotterBlueprint(Blueprint):
     """The glob pattern to match the file names to open for plotting."""
 
 
-@register_runner(APP_PLOTTER)
 class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
     """Worker class to execute a simple plotting application.
 
@@ -49,7 +49,7 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
     intended for scientific use.
     """
 
-    application: str = APP_PLOTTER
+    application: str = _APP_NAME
     """The application identifier."""
 
     @t.override
@@ -116,3 +116,17 @@ def make_plots(
                     log.exception(
                         f"Exception while plotting var {var}, s {s}, time {time}"
                     )
+
+
+@register_application
+@dataclass
+class PlotterApplicationDefinition(
+    ApplicationDefinition[PlotterBlueprint, PlotterRunner]
+):
+    name: str = _APP_NAME
+    blueprint: type[PlotterBlueprint] = PlotterBlueprint
+    runner: type[PlotterRunner] = PlotterRunner
+    applicable_transforms: tuple[type[Transform]] = (OverrideTransform,)
+    resources_needed: t.Any = ()
+    output_override_method: t.Callable = None
+    long_name: str = "Plotting Demo Application"
