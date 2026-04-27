@@ -19,9 +19,6 @@ from cstar.orchestration.transforms import (
     get_transforms,
 )
 
-if t.TYPE_CHECKING:
-    from cstar.orchestration.orchestration import LiveStep
-
 
 @pytest.fixture
 def test_wp_path(tmp_path: Path) -> Path:
