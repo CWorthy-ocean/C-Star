@@ -440,8 +440,10 @@ class WorkplanTransformer(LoggingMixin):
         steps = []
         for step in live_steps:
             if step.application in apply_to:
-                step = override_output_directory(step)
-            steps.append(step)
+                new_step = override_output_directory(step)
+            else:
+                new_step = step
+            steps.append(new_step)
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             split_steps: list[LiveStep] = []
