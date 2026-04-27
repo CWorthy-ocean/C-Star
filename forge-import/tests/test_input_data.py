@@ -772,13 +772,10 @@ class TestRomsMarblInputDataGeneration:
         assert "type" in str(exc_info.value).lower()
 
     @patch('cson_forge.input_data.rt.SurfaceForcing')
-    def test_generate_surface_forcing_reuse_skips_init_uses_from_yaml(
+    def test_generate_surface_forcing_reuse_skips_roms_tools_calls(
         self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
     ):
-        """When NetCDF exists, do not call SurfaceForcing(grid=...); YAML via from_yaml -> to_yaml."""
-        mock_from_yaml = MagicMock()
-        mock_from_yaml.use_coarse_grid = False
-        mock_sf_class.from_yaml.return_value = mock_from_yaml
+        """When NetCDF exists, reuse paths without constructing SurfaceForcing."""
 
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data.input_data_dir = (
@@ -797,8 +794,6 @@ class TestRomsMarblInputDataGeneration:
             )
 
         mock_sf_class.assert_not_called()
-        mock_sf_class.from_yaml.assert_called_once()
-        mock_from_yaml.to_yaml.assert_called_once()
         assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data) > 0
     
     @patch('cson_forge.input_data.rt.BoundaryForcing')
@@ -856,6 +851,29 @@ class TestRomsMarblInputDataGeneration:
             
             # Check that resource was added to forcing.tidal
             assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
+
+    @patch("cson_forge.input_data.rt.TidalForcing")
+    def test_generate_tidal_forcing_reuse_skips_roms_tools_calls(
+        self, mock_tf_class, sample_roms_marbl_input_data, tmp_path
+    ):
+        """When NetCDF and YAML exist, do not construct TidalForcing."""
+        with patch("cson_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
+            sample_roms_marbl_input_data.input_data_dir = (
+                tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+            )
+            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+            nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="tidal")
+            nc_path.touch()
+            yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.tidal")
+            yaml_path.write_text("roms_tools_version: test\ntest: 1\n")
+
+            sample_roms_marbl_input_data._generate_tidal_forcing(
+                key="forcing.tidal",
+                source={"name": "TPXO", "path": str(nc_path)},
+            )
+
+        mock_tf_class.assert_not_called()
+        assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
     
     @patch('cson_forge.input_data.rt.RiverForcing')
     def test_generate_river_forcing(self, mock_rf_class, sample_roms_marbl_input_data, tmp_path):
@@ -884,6 +902,40 @@ class TestRomsMarblInputDataGeneration:
             
             # Check that resource was added to forcing.river
             assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
+
+    @patch("cson_forge.input_data.rt.RiverForcing")
+    def test_generate_river_forcing_reuse_skips_roms_tools_calls(
+        self, mock_rf_class, sample_roms_marbl_input_data, tmp_path
+    ):
+        """When NetCDF and YAML exist, do not construct RiverForcing."""
+        with patch("cson_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
+            sample_roms_marbl_input_data.input_data_dir = (
+                tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+            )
+            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+            nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="river")
+            nriver, ntime, ntrc = 2, 2, 1
+            ds = xr.Dataset(
+                {
+                    "river_volume": (["nriver", "time"], np.ones((nriver, ntime))),
+                    "river_tracer": (
+                        ["nriver", "time", "tracer"],
+                        np.ones((nriver, ntime, ntrc)),
+                    ),
+                }
+            )
+            ds.to_netcdf(nc_path)
+            yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.river")
+            yaml_path.write_text("roms_tools_version: test\n")
+
+            sample_roms_marbl_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "DAI"},
+            )
+
+        mock_rf_class.assert_not_called()
+        assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
+        assert sample_roms_marbl_input_data._settings_compile_time["river_frc"]["nriv"] == nriver
     
     @patch('cson_forge.input_data.rt.CDRForcing')
     def test_generate_cdr_forcing(self, mock_cdr_class, sample_roms_marbl_input_data, tmp_path):
