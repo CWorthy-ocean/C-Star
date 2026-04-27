@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from cstar.applications.utils import get_application
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,
@@ -18,7 +19,6 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
 )
-from cstar.orchestration.application import APP_CAT_BLUEPRINTS
 from cstar.orchestration.converter.converter import get_command_mapping
 from cstar.orchestration.models import Blueprint, Step, Workplan
 from cstar.orchestration.serialization import (
@@ -26,7 +26,6 @@ from cstar.orchestration.serialization import (
     intenum_representer,
     register_representer,
 )
-from cstar.system.registration import Registrar
 
 nx = lazy_import("networkx")
 
@@ -246,8 +245,8 @@ class LiveStep(Step):
     def blueprint(self) -> Blueprint:
         """Load and return the blueprint associated with this step."""
         base_bp = deserialize(self.blueprint_path, Blueprint)
-        reg_bp = Registrar[Blueprint](APP_CAT_BLUEPRINTS)
-        bp_type = reg_bp.get(base_bp.application)
+        app = get_application(base_bp.application)
+        bp_type = app.blueprint
         return bp_type(**base_bp.model_dump())
 
     @property

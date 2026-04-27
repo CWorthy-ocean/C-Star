@@ -3,16 +3,16 @@ from pathlib import Path
 
 import pytest
 
+from cstar.applications.hello_world import (
+    HelloWorldBlueprint,
+    HelloWorldRunner,
+)
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices
 from cstar.entrypoint.config import (
     ServiceConfiguration,
     get_job_config,
     get_service_config,
-)
-from cstar.entrypoint.worker.hello_app import (
-    HelloWorldBlueprint,
-    HelloWorldRunner,
 )
 from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus

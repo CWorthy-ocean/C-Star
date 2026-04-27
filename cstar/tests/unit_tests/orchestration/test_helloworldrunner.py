@@ -9,14 +9,14 @@ from unittest import mock
 import pytest
 from typer.testing import CliRunner
 
+from cstar.applications.hello_world import (
+    HelloWorldBlueprint,
+    HelloWorldRunner,
+)
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
-from cstar.entrypoint.worker.hello_app import (
-    HelloWorldBlueprint,
-    HelloWorldRunner,
-)
 from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Workplan, WorkplanState

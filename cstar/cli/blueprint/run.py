@@ -4,6 +4,7 @@ import typing as t
 import typer
 from pydantic import ValidationError
 
+from cstar.applications.utils import get_application
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
@@ -11,7 +12,6 @@ from cstar.base.env import (
 )
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
-from cstar.cli.workplan.shared import create_xrunner, get_registered_bp
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_LOGLEVEL_LONG,
@@ -60,7 +60,7 @@ def path_callback(
 
             # use the core blueprint fields to identify the application type
             base_bp = deserialize(local_path, Blueprint)
-            bp_type = get_registered_bp(base_bp.application)
+            bp_type = get_application(base_bp.application).blueprint
 
             ctx.obj = bp_type(**base_bp.model_dump())
 
@@ -126,7 +126,8 @@ def run(
     else:
         request = XRunnerRequest(uri, type(bp))
 
-        runner = create_xrunner(request, service_cfg, job_cfg)
+        _app = get_application(bp.application)
+        runner = _app.runner(request, service_cfg, job_cfg)
         xresult = asyncio.run(runner.execute_xrunner())
 
         if errors := xresult.errors:

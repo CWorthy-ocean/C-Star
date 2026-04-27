@@ -7,15 +7,14 @@ import typer
 from rich.console import Console
 from rich.table import Column, Table
 
+from cstar.applications.utils import get_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest
-from cstar.orchestration.application import APP_CAT_BLUEPRINTS, APP_CAT_RUNNERS
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import TrackingRepository
-from cstar.system.registration import Registrar
 
 console = Console()
 log = get_logger(__name__)
@@ -220,8 +219,7 @@ def get_registered_bp(application: str) -> type[Blueprint]:
     -------
     type[Blueprint]
     """
-    registrar = Registrar[Blueprint](APP_CAT_BLUEPRINTS)
-    return registrar.get(application)
+    return get_application(application).blueprint
 
 
 def get_registered_runner(application: str) -> type[XBlueprintRunner[Blueprint]]:
@@ -236,5 +234,4 @@ def get_registered_runner(application: str) -> type[XBlueprintRunner[Blueprint]]
     -------
     type[XBlueprintRunner[Blueprint]]
     """
-    registrar = Registrar[XBlueprintRunner[Blueprint]](APP_CAT_RUNNERS)
-    return registrar.get(application)
+    return get_application(application).runner

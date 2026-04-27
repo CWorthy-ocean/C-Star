@@ -2,8 +2,9 @@ import itertools
 import typing as t
 from abc import ABC
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, auto
 from pathlib import Path
@@ -26,11 +27,13 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
-from cstar.orchestration.application import register_blueprint
+from cstar.entrypoint.xrunner import XRunner
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 if t.TYPE_CHECKING:
     from pydantic import ValidationInfo
+
+    from cstar.orchestration.orchestration import LiveStep
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -360,7 +363,6 @@ class Blueprint(ConfiguredBaseModel, ABC):
         return 1
 
 
-@register_blueprint(Application.ROMS_MARBL)
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
@@ -722,6 +724,49 @@ class UserDefinedVariables(BaseModel):
         self._missing_keys = self.keys.difference(configured_keys)
 
         return self
+
+
+class Transform(t.Protocol):
+    """Protocol for a class that transforms a step into one or more
+    new steps.
+    """
+
+    def __call__(self, step: "LiveStep") -> Iterable["LiveStep"]:
+        """Apply the transform to a step.
+
+        Parameters
+        ----------
+        step : Step
+            The step to be transformed
+
+        Returns
+        -------
+        Iterable[Step]
+            Zero-to-many steps resulting from applying the transform.
+        """
+        ...
+
+    @staticmethod
+    def suffix() -> str:
+        """Return the standard prefix to be used when persisting
+        a resource modified by this transform.
+        """
+        ...
+
+
+TBlueprint = t.TypeVar("TBlueprint", bound=Blueprint)  # add bound/constrain etc.
+TRunner = t.TypeVar("TRunner", bound=XRunner)  # add bound/constrain etc.
+
+
+@dataclass(kw_only=True)
+class ApplicationDefinition(t.Generic[TBlueprint, TRunner], ABC):
+    name: str
+    blueprint: type[TBlueprint]
+    runner: type[TRunner]
+    applicable_transforms: tuple[type[Transform]]
+    resources_needed: t.Any
+    output_override_method: t.Callable
+    long_name: str  # default to name
 
 
 register_representer(WorkplanState, strenum_representer)
