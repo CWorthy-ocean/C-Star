@@ -278,9 +278,10 @@ class WorkplanTransformer(LoggingMixin):
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]
         steps: list[LiveStep] = []
-        for step in live_steps:
+        for i in range(len(live_steps)):
+            step = live_steps[i]
             if step.application in apply_to:
-                override_output_directory(step)
+                step = override_output_directory(step)
             steps.append(step)
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
