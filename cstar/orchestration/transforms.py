@@ -190,7 +190,7 @@ class TemplateFillTransform:
         return self._variable_resolver(content)
 
     def _fill(self, value: t.Any) -> t.Any:
-        """Recursively replace ``{{placeholder}}`` tokens in *value*.
+        """Replace ``{{placeholder}}`` tokens in *value*, traversing into lists and dicts.
 
         Parameters
         ----------
