@@ -22,6 +22,8 @@ class ExecutionStatus(Enum):
         The task is currently executing.
     COMPLETED : ExecutionStatus
         The task finished successfully.
+    TIMEOUT : ExecutionStatus
+        The task was cancelled by the system for exceeding it's walltime allotment.
     CANCELLED : ExecutionStatus
         The task was cancelled before completion.
     FAILED : ExecutionStatus
@@ -38,6 +40,7 @@ class ExecutionStatus(Enum):
     PENDING = auto()
     RUNNING = auto()
     COMPLETED = auto()
+    TIMEOUT = auto()
     CANCELLED = auto()
     FAILED = auto()
     HELD = auto()
