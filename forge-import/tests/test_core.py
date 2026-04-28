@@ -367,6 +367,95 @@ class TestCstarSpecBuilderInitialization:
         assert builder._canonicalize_stored_input_netcdf_path(old_path) == expected
         assert builder._canonicalize_stored_input_netcdf_path(Path(f"{raw}_grid.nc")) == expected
 
+    def test_rewrite_roms_input_paths_to_staged_runtime_paths(
+        self,
+        minimal_cstar_spec_builder_args,
+        mock_model_spec,
+    ):
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+        source_root = builder.input_data_dir.resolve()
+        builder._settings_run_time = {
+            "roms.in": {
+                "grid": {"grid_file": str(source_root / "case_grid.nc")},
+                "initial": {"initial_file": str(source_root / "case_initial.nc")},
+                "forcing": {
+                    "surface_forcing_path": str(source_root / "case_surface.nc"),
+                    "boundary_forcing_path": str(source_root / "case_boundary.nc"),
+                    "tidal_forcing_path": str(source_root / "case_tidal.nc"),
+                    "river_path": "/tmp/custom_river.nc",
+                },
+            }
+        }
+
+        builder._rewrite_roms_input_paths_to_staged_runtime_paths()
+
+        staged_root = builder.run_output_dir / "input" / "input_datasets"
+        roms_settings = builder._settings_run_time["roms.in"]
+        assert roms_settings["grid"]["grid_file"] == str(staged_root / "case_grid.nc")
+        assert roms_settings["initial"]["initial_file"] == str(staged_root / "case_initial.nc")
+        assert roms_settings["forcing"]["surface_forcing_path"] == str(staged_root / "case_surface.nc")
+        assert roms_settings["forcing"]["boundary_forcing_path"] == str(staged_root / "case_boundary.nc")
+        assert roms_settings["forcing"]["tidal_forcing_path"] == str(staged_root / "case_tidal.nc")
+        assert roms_settings["forcing"]["river_path"] == "/tmp/custom_river.nc"
+
+    def test_ensure_runtime_code_cdr_pointer(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
+        mock_paths = _create_mock_paths_core(
+            tmp_path,
+            blueprints_dir=tmp_path / "blueprints",
+            scratch=tmp_path / "scratch",
+            here=tmp_path / "workspace",
+        )
+        mock_paths.blueprints.mkdir(parents=True, exist_ok=True)
+        mock_paths.scratch.mkdir(parents=True, exist_ok=True)
+        mock_paths.here.mkdir(parents=True, exist_ok=True)
+
+        with patch("cson_forge._core.config.paths", mock_paths):
+            with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+                mock_load.return_value = mock_model_spec
+                with patch("cson_forge._core.rt.Grid") as mock_grid:
+                    mock_grid.return_value = _create_grid_mock()
+                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+            builder.cdr_forcing = [MagicMock()]
+            builder._ensure_runtime_code_cdr_pointer()
+
+            pointer = builder.run_output_dir / "input" / "runtime_code" / "cdr.nc"
+            assert pointer.is_symlink()
+            assert (
+                pointer.resolve(strict=False)
+                == (
+                    builder.run_output_dir
+                    / "input"
+                    / "input_datasets"
+                    / f"{builder.name.replace('.', '_')}_cdr.nc"
+                ).resolve(strict=False)
+            )
+
+    def test_ensure_runtime_code_cdr_pointer_from_compile_time_flags(
+        self,
+        minimal_cstar_spec_builder_args,
+        mock_model_spec,
+        tmp_path,
+    ):
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+        builder.cdr_forcing = None
+        builder._settings_compile_time["cppdefs"]["cdr_forcing"] = True
+        builder._settings_compile_time["cdr_frc"]["cdr_source"] = True
+        builder._ensure_runtime_code_cdr_pointer()
+
+        pointer = builder.run_output_dir / "input" / "runtime_code" / "cdr.nc"
+        assert pointer.is_symlink()
+
     def test_validation_end_date_before_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test that validation raises error when end_date is before start_date."""
         minimal_cstar_spec_builder_args["end_date"] = datetime(2012, 1, 1)
@@ -400,6 +489,78 @@ class TestCstarSpecBuilderInitialization:
         with pytest.raises(ValidationError) as exc_info:
             CstarSpecBuilder(**minimal_cstar_spec_builder_args)
         assert "extra" in str(exc_info.value).lower() or "forbidden" in str(exc_info.value).lower()
+
+
+class TestCwdOverrideSettings:
+    """Tests for OVERRIDE/ compile-time-overrides.yml and run-time-overrides.yml."""
+
+    def test_cwd_override_compile_time_deep_merge(
+        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        override_dir = tmp_path / "OVERRIDE"
+        override_dir.mkdir()
+        (override_dir / "compile-time-overrides.yml").write_text(
+            yaml.dump({"cppdefs": {"test": False}}),
+            encoding="utf-8",
+        )
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+        assert builder._settings_compile_time["cppdefs"]["test"] is False
+
+    def test_cwd_override_compile_unknown_top_level_warns(
+        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        override_dir = tmp_path / "OVERRIDE"
+        override_dir.mkdir()
+        (override_dir / "compile-time-overrides.yml").write_text(
+            yaml.dump({"unknown_top": {"x": 1}}),
+            encoding="utf-8",
+        )
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                with pytest.warns(UserWarning, match="unknown_top"):
+                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+        assert builder._settings_compile_time["cppdefs"]["test"] is True
+
+    def test_cwd_override_run_time_merge_after_timestep(
+        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path, monkeypatch
+    ):
+        mock_model_spec.settings.run_time.settings_dict = {
+            "roms.in": {
+                "title": {"casename": "test"},
+                "time_stepping": {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1},
+                "foo_section": {"bar": 0},
+            }
+        }
+        monkeypatch.chdir(tmp_path)
+        override_dir = tmp_path / "OVERRIDE"
+        override_dir.mkdir()
+        (override_dir / "run-time-overrides.yml").write_text(
+            yaml.dump(
+                {
+                    "roms.in": {
+                        "foo_section": {"bar": 99},
+                        "time_stepping": {"ndtfast": 12},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cson_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+        assert builder._settings_run_time["roms.in"]["foo_section"]["bar"] == 99
+        assert builder._settings_run_time["roms.in"]["time_stepping"]["ndtfast"] == 12
+        assert "ntimes" in builder._settings_run_time["roms.in"]["time_stepping"]
 
 
 class TestCstarSpecBuilderProperties:
