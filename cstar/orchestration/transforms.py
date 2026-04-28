@@ -677,12 +677,7 @@ class OverrideTransform(Transform):
         blueprint: Blueprint = deserialize(bp_path, bp_type)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
-
         update: dict[str, t.Any] = {"blueprint_overrides": {}}
-        if bp_type == RomsMarblBlueprint:
-            update["work_dir"] = t.cast(
-                "RomsMarblBlueprint", updated_bp
-            ).runtime_params.output_dir
 
         live_step = LiveStep.from_step(step, update=update)
 
