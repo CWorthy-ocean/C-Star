@@ -365,3 +365,14 @@ def test_deep_merge(
 ) -> None:
     actual = deep_merge(original, to_merge)
     assert actual == expected
+
+
+def test_deep_merge_purity() -> None:
+    """Confirm the deep_merge function does not modify the input dictionaries."""
+    d0 = {"a": 1}
+    d1 = {"b": 2}
+
+    d3 = deep_merge(d0, d1)
+
+    assert "b" in d3
+    assert "b" not in d0
