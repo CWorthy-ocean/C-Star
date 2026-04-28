@@ -491,19 +491,18 @@ class TestCstarSpecBuilderInitialization:
         assert "extra" in str(exc_info.value).lower() or "forbidden" in str(exc_info.value).lower()
 
 
-class TestCwdOverrideSettings:
-    """Tests for OVERRIDE/ compile-time-overrides.yml and run-time-overrides.yml."""
+class TestOverrideSettings:
+    """Tests for passing override YAML files via CstarSpecBuilder.override."""
 
-    def test_cwd_override_compile_time_deep_merge(
-        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path, monkeypatch
+    def test_override_compile_time_deep_merge(
+        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path
     ):
-        monkeypatch.chdir(tmp_path)
-        override_dir = tmp_path / "OVERRIDE"
-        override_dir.mkdir()
-        (override_dir / "compile-time-overrides.yml").write_text(
+        override_file = tmp_path / "compile-time-overrides.yml"
+        override_file.write_text(
             yaml.dump({"cppdefs": {"test": False}}),
             encoding="utf-8",
         )
+        minimal_cstar_spec_builder_args["override"] = [str(override_file)]
         with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
             with patch("cson_forge._core.rt.Grid") as mock_grid:
@@ -511,16 +510,15 @@ class TestCwdOverrideSettings:
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
         assert builder._settings_compile_time["cppdefs"]["test"] is False
 
-    def test_cwd_override_compile_unknown_top_level_warns(
-        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path, monkeypatch
+    def test_override_compile_unknown_top_level_warns(
+        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path
     ):
-        monkeypatch.chdir(tmp_path)
-        override_dir = tmp_path / "OVERRIDE"
-        override_dir.mkdir()
-        (override_dir / "compile-time-overrides.yml").write_text(
+        override_file = tmp_path / "compile-time-overrides.yml"
+        override_file.write_text(
             yaml.dump({"unknown_top": {"x": 1}}),
             encoding="utf-8",
         )
+        minimal_cstar_spec_builder_args["override"] = [str(override_file)]
         with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
             with patch("cson_forge._core.rt.Grid") as mock_grid:
@@ -529,8 +527,8 @@ class TestCwdOverrideSettings:
                     builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
         assert builder._settings_compile_time["cppdefs"]["test"] is True
 
-    def test_cwd_override_run_time_merge_after_timestep(
-        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path, monkeypatch
+    def test_override_run_time_merge_after_timestep(
+        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path
     ):
         mock_model_spec.settings.run_time.settings_dict = {
             "roms.in": {
@@ -539,10 +537,8 @@ class TestCwdOverrideSettings:
                 "foo_section": {"bar": 0},
             }
         }
-        monkeypatch.chdir(tmp_path)
-        override_dir = tmp_path / "OVERRIDE"
-        override_dir.mkdir()
-        (override_dir / "run-time-overrides.yml").write_text(
+        override_file = tmp_path / "run-time-overrides.yml"
+        override_file.write_text(
             yaml.dump(
                 {
                     "roms.in": {
@@ -553,6 +549,7 @@ class TestCwdOverrideSettings:
             ),
             encoding="utf-8",
         )
+        minimal_cstar_spec_builder_args["override"] = [str(override_file)]
         with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
             with patch("cson_forge._core.rt.Grid") as mock_grid:
