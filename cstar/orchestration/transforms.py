@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     is_feature_enabled,
@@ -189,29 +190,22 @@ class TemplateFillTransform:
             )
         return self._variable_resolver(content)
 
-    def _fill(self, value: t.Any) -> t.Any:
-        """Replace ``{{placeholder}}`` tokens in *value*, traversing into lists and dicts.
+    def _fill(self, step: LiveStep) -> LiveStep:
+        content = step.model_dump_json(by_alias=True)
+        matches = PLACEHOLDER_RE.findall(content)
+        if not matches:
+            return step
 
-        Parameters
-        ----------
-        value : Any
-            A value drawn from the blueprint_overrides tree — may be a str,
-            dict, list, or a scalar that requires no substitution.
+        # use set to replace all occurrences at once
+        for match in set(matches):
+            content = content.replace(f"{{{{{match}}}}}", self._resolve(match))
 
-        Returns
-        -------
-        Any
-            The same structure with all placeholder tokens replaced.
-        """
-        if isinstance(value, str):
-            return PLACEHOLDER_RE.sub(
-                lambda m: self._resolve(m.group(1).strip()), value
+        if PLACEHOLDER_RE.findall(content):
+            raise CstarExpectationFailed(
+                "Some templated values were not filled or placeholders were malformed."
             )
-        if isinstance(value, dict):
-            return {k: self._fill(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [self._fill(item) for item in value]
-        return value
+
+        return step.model_validate_json(content)
 
     def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
         """Apply template filling to a step's blueprint_overrides.
@@ -226,8 +220,7 @@ class TemplateFillTransform:
         Iterable[LiveStep]
             A single-element iterable containing the updated step.
         """
-        filled_overrides = self._fill(dict(step.blueprint_overrides))
-        yield LiveStep.from_step(step, update={"blueprint_overrides": filled_overrides})
+        yield LiveStep.from_step(self._fill(step))
 
 
 def _dailies(
