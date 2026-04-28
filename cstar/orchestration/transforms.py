@@ -2,7 +2,7 @@ import os
 import re
 import typing as t
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -40,7 +40,7 @@ class Transform(t.Protocol):
     new steps.
     """
 
-    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -449,7 +449,7 @@ class WorkplanTransformer(LoggingMixin):
 
             for step in steps:
                 if step.application in apply_to:
-                    transformed_steps = list(self.transform_fn(step))
+                    transformed_steps = self.transform_fn(step)
                     named_dep_map[step.name] = transformed_steps[-1].name
                     split_steps.extend(transformed_steps)
                 else:
@@ -501,7 +501,7 @@ class RomsMarblTimeSplitter(Transform):
         freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
         self.frequency = freq_config.lower()
 
-    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Split a step into multiple sub-steps.
 
         Parameters
@@ -511,7 +511,7 @@ class RomsMarblTimeSplitter(Transform):
 
         Returns
         -------
-        Iterable[Step]
+        Sequence[Step]
             Steps for each subtask resulting from the split.
         """
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
@@ -532,6 +532,7 @@ class RomsMarblTimeSplitter(Transform):
         last_restart_file: Path | None = None
         output_root_name = DEFAULT_OUTPUT_ROOT_NAME
 
+        results: list[LiveStep] = []
         for i, (sd, ed) in enumerate(time_slices):
             bp_copy = RomsMarblBlueprint(
                 **blueprint.model_dump(
@@ -574,8 +575,8 @@ class RomsMarblTimeSplitter(Transform):
                 "name": child_step_name,
             }
             child_step = LiveStep.from_step(step, parent=step, update=updates)
+            results.append(child_step)
 
-            yield child_step
             if i == len(time_slices) - 1:
                 break
 
@@ -591,6 +592,8 @@ class RomsMarblTimeSplitter(Transform):
 
             # use output dir of the last step as the input for the next step
             last_restart_file = restart_file_path
+
+        return tuple(results)
 
     @staticmethod
     def suffix() -> str:
@@ -654,7 +657,7 @@ class OverrideTransform(Transform):
         bp_type = type(bp)
         return bp_type(**merged)
 
-    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -664,7 +667,7 @@ class OverrideTransform(Transform):
 
         Returns
         -------
-        Iterable[Step]
+        Sequence[Step]
             Zero-to-many steps resulting from applying the transform.
         """
         bp_path = Path(step.blueprint_path)
@@ -687,7 +690,7 @@ class OverrideTransform(Transform):
         live_step.blueprint_path = live_step.fsm.work_dir / bp_renamed
 
         serialize(live_step.blueprint_path, updated_bp)
-        return [live_step]
+        return (live_step,)
 
     @staticmethod
     def suffix() -> str:
@@ -714,9 +717,9 @@ def override_output_directory(step: LiveStep) -> LiveStep:
     """
     sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
     override_transform = OverrideTransform(sys_overrides)
-    overridden_step_result = iter(override_transform(step))
+    overridden_step_result = override_transform(step)
 
-    return next(overridden_step_result)
+    return overridden_step_result[0]
 
 
 class Directive(Transform, t.Protocol):
@@ -824,6 +827,6 @@ class DirectiveConfig(BaseModel):
             for key, config in directives.items()
         }
         for transform in transforms:
-            step = next(iter(transform(step)))
+            step = transform(step)[0]
 
         return str(step.blueprint_path)
