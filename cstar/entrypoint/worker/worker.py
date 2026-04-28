@@ -272,10 +272,10 @@ async def execute_runner(
     log.debug(f"Service config: {service_cfg!r}")
     log.debug(f"Request: {request!r}")
     log.trace(f"Environment: {os.environ}")
+    log.info(f"Creating simulation runner for {request.blueprint_uri}")
 
     try:
         configure_environment(log)
-
         worker = SimulationRunner(request, service_cfg, job_cfg)
         await worker.execute()
     except CstarError as ex:

@@ -89,50 +89,56 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
     ):
         transformed_steps = list(transform(original_step))
 
-    # one step transforms into 12 monthly steps
-    assert len(transformed_steps) == 12
+        # one step transforms into 12 monthly steps
+        assert len(transformed_steps) == 12
 
-    output_directories: list[str] = []
+        output_directories: list[str] = []
 
-    for i, step in enumerate(transformed_steps[:-1]):
-        successor = transformed_steps[i + 1]
-        runtime_params = t.cast("dict", step.blueprint_overrides)["runtime_params"]
-        succ_runtime_params = t.cast("dict", successor.blueprint_overrides)[
-            "runtime_params"
-        ]
+        for i, step in enumerate(transformed_steps[:-1]):
+            successor = transformed_steps[i + 1]
+            runtime_params = t.cast("dict", step.blueprint_overrides)["runtime_params"]
+            succ_runtime_params = t.cast("dict", successor.blueprint_overrides)[
+                "runtime_params"
+            ]
 
-        # verify start and end dates are valid
-        sd = runtime_params["start_date"]
-        if not isinstance(sd, datetime):
-            sd = datetime.strptime(sd, "%Y%m%d %H%M%S")
-        ed = runtime_params["end_date"]
-        if not isinstance(ed, datetime):
-            ed = datetime.strptime(ed, "%Y%m%d %H%M%S")
-        assert sd < ed
+            # verify start and end dates are valid
+            sd = runtime_params["start_date"]
+            if not isinstance(sd, datetime):
+                sd = datetime.strptime(sd, "%Y%m%d %H%M%S")
+            ed = runtime_params["end_date"]
+            if not isinstance(ed, datetime):
+                ed = datetime.strptime(ed, "%Y%m%d %H%M%S")
+            assert sd < ed
 
-        output_dir = runtime_params["output_dir"]
-        output_directories.append(output_dir)
+            output_dir = runtime_params["output_dir"]
+            output_directories.append(output_dir)
 
-        # verify each step uses output from the prior step as initial conditions
-        if i > 0:
-            succ_init_cond = successor.blueprint_overrides.get("initial_conditions", {})
-            ic_loc_successor = succ_init_cond.get("data", [{}])[0].get("location", "")  # type: ignore[union-attr,index,operator]
+            # verify each step uses output from the prior step as initial conditions
+            if i > 0:
+                succ_init_cond = successor.blueprint_overrides.get(
+                    "initial_conditions", {}
+                )
+                ic_loc_successor = succ_init_cond.get("data", [{}])[0].get(  # type: ignore[union-attr,index,operator]
+                    "location", ""
+                )
 
-            assert str(output_dir) in ic_loc_successor  # type: ignore[union-attr,index,operator]
+                assert str(output_dir) in ic_loc_successor  # type: ignore[union-attr,index,operator]
 
-            # verify the initial conditions reference the prior step's time slice
-            compact_sd = ed.strftime("%Y%m%d%H%M%S")
+                # verify the initial conditions reference the prior step's time slice
+                compact_sd = ed.strftime("%Y%m%d%H%M%S")
 
-            # verify the joined reset files are used
-            out_dir = step.fsm.output_dir
-            expected = f"{out_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
+                # verify the joined reset files are used
+                out_dir = step.fsm.output_dir
+                expected = (
+                    f"{out_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
+                )
 
-            assert expected in str(ic_loc_successor)
+                assert expected in str(ic_loc_successor)
 
-        # verify successor starts right where current step ends
-        sd_successor = succ_runtime_params["start_date"]
-        # sd_successor = datetime.strptime(sd_successor_str, "%Y-%m-%d %H:%M:%S")
-        assert sd_successor == ed
+            # verify successor starts right where current step ends
+            sd_successor = succ_runtime_params["start_date"]
+            # sd_successor = datetime.strptime(sd_successor_str, "%Y-%m-%d %H:%M:%S")
+            assert sd_successor == ed
 
-    # verify all output directories are unique
-    assert len(output_directories) == len(set(output_directories))
+        # verify all output directories are unique
+        assert len(output_directories) == len(set(output_directories))

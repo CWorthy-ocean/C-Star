@@ -66,7 +66,7 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
             raise ValueError(
                 f"PlotterBlueprint expected. Received: {type(self.blueprint)}"
             )
-
+        self.log.info(f"Running plotter application for {self.blueprint}")
         make_plots(**self.blueprint.dict())
         return self.set_result(ExecutionStatus.COMPLETED)
 

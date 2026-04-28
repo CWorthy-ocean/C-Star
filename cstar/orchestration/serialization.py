@@ -173,6 +173,11 @@ def model_to_yaml(model: _T) -> str:
     """
     dumped = model.model_dump(exclude_defaults=True, by_alias=True)
 
+    # 'application' is required by the base Blueprint type for deserialization
+    # routing; always include it even when it equals the subclass default.
+    if hasattr(model, "application"):
+        dumped["application"] = model.application
+
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
     dumper.add_representer(set, set_representer)
