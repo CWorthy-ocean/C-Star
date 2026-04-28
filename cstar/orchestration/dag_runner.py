@@ -205,6 +205,11 @@ async def prepare_workplan(
     -------
     tuple[Workplan, Path]
         Tuple containing the resulting workplan and workplan file path
+
+    Raises
+    ------
+    ValueError
+        If the expected and provided user variables are not in agreement.
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
     run_root_dir = output_dir / run_id
