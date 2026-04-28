@@ -28,5 +28,4 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
         OverrideTransform,
     )
     resources_needed: t.Any = ()
-    output_override_method: t.Callable = None
     long_name: str = "ROMS-MARBL simulation runner"

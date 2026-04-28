@@ -758,15 +758,17 @@ TBlueprint = t.TypeVar("TBlueprint", bound=Blueprint)  # add bound/constrain etc
 TRunner = t.TypeVar("TRunner", bound=XRunner)  # add bound/constrain etc.
 
 
+# todo: mypy is borked in a lot of places
+# todo: feel free to rename any of this stuff
 @dataclass(kw_only=True)
 class ApplicationDefinition(t.Generic[TBlueprint, TRunner], ABC):
     name: str
     blueprint: type[TBlueprint]
     runner: type[TRunner]
+    # todo: some things like overrides and templates should be defaults and not need to be listed
     applicable_transforms: tuple[type[Transform]]
     resources_needed: t.Any
-    output_override_method: t.Callable
-    long_name: str  # default to name
+    long_name: str  # default to name?
 
 
 register_representer(WorkplanState, strenum_representer)
