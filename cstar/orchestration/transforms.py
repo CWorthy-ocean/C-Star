@@ -818,7 +818,7 @@ class DirectiveConfig(BaseModel):
 
         step = LiveStep(
             name="directive-step",
-            application="directive",
+            application=Application.SLEEP,
             blueprint=blueprint_uri,
         )
         directive_map = DirectiveConfig.directive_map
