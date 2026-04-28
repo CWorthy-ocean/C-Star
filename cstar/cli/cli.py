@@ -1,6 +1,6 @@
 import typer
 
-from cstar.applications import *  # noqa: F401
+from cstar.applications import *  # noqa: F401, F403
 from cstar.cli.blueprint import app as app_blueprint
 from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
