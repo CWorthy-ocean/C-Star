@@ -1,7 +1,7 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Generator, Iterable, Mapping
+from collections.abc import Awaitable, Generator, Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
@@ -215,7 +215,7 @@ async def prepare_workplan(
     run_root_dir = output_dir / run_id
 
     fill_transform: TemplateFillTransform | None = None
-    file_io_extras: list = []
+    file_io_extras: list[Awaitable[int]] = []
 
     if user_variables is not None:
         named_config = UserDefinedVariables(
@@ -244,7 +244,7 @@ async def prepare_workplan(
     )
     persist_as = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_transformed")
 
-    file_io = [
+    file_io: list[Awaitable[int]] = [
         asyncio.to_thread(serialize, persist_orig, wp_orig),
         asyncio.to_thread(serialize, persist_as, wp),
         *file_io_extras,
