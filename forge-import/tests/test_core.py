@@ -449,8 +449,8 @@ class TestCstarSpecBuilderInitialization:
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
 
         builder.cdr_forcing = None
-        builder._settings_compile_time["cppdefs"]["cdr_forcing"] = True
-        builder._settings_compile_time["cdr_frc"]["cdr_source"] = True
+        builder._settings_compile_time.setdefault("cppdefs", {})["cdr_forcing"] = True
+        builder._settings_compile_time.setdefault("cdr_frc", {})["cdr_source"] = True
         builder._ensure_runtime_code_cdr_pointer()
 
         pointer = builder.run_output_dir / "input" / "runtime_code" / "cdr.nc"
