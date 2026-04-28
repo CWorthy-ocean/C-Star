@@ -51,5 +51,4 @@ class HelloWorldApplication(
     runner: type[HelloWorldRunner] = HelloWorldRunner
     applicable_transforms: tuple[type[Transform]] = ()
     resources_needed: t.Any = ()
-    output_override_method: t.Callable = None
     long_name: str = "Hello World"

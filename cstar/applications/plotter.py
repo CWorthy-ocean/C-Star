@@ -128,5 +128,4 @@ class PlotterApplicationDefinition(
     runner: type[PlotterRunner] = PlotterRunner
     applicable_transforms: tuple[type[Transform]] = (OverrideTransform,)
     resources_needed: t.Any = ()
-    output_override_method: t.Callable = None
     long_name: str = "Plotting Demo Application"

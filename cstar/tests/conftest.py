@@ -12,7 +12,7 @@ from cstar.applications.utils import register_application
 
 @register_application
 @dataclass
-class SleepBlueprint(RomsMarblApplication):
+class SleepApplication(RomsMarblApplication):
     """For the sake of test suites, the 'sleep' app sometimes replaces roms-marbl and
     can use the RomsMarblBlueprint
     """
