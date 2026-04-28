@@ -89,6 +89,7 @@ Bug Fixes
 - Fix bug where automatic output directory overrides appeared dependent on time-splitting (`#512 <https://github.com/CWorthy-ocean/C-Star/pull/512>`_)
 - Fix failure to handle SLURM timeout status (`#508 <https://github.com/CWorthy-ocean/C-Star/pull/508>`_)
 - Generalize OverrideTransform for non-ROMS application types (`#500 <https://github.com/CWorthy-ocean/C-Star/pull/500>`_)
+- Create work-dir earlier to avoid failure when making sym-links for CDR/nesting files. (`#513 <https://github.com/CWorthy-ocean/C-Star/pull/513>`_)
 
 Improvements
 ~~~~~~~~~~~~
