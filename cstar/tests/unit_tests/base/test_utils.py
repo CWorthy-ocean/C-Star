@@ -369,10 +369,25 @@ def test_deep_merge(
 
 def test_deep_merge_purity() -> None:
     """Confirm the deep_merge function does not modify the input dictionaries."""
-    d0 = {"a": 1}
-    d1 = {"b": 2}
+    d0: dict[str, int | list[str]] = {"a": 0, "b": 1, "l": ["x"]}
+    d1: dict[str, int | list[str]] = {"a": 100, "c": 101, "l": ["y"]}
 
     d3 = deep_merge(d0, d1)
 
+    # confirm key moved from d1 to d3 without side-effects
+    assert "c" in d3
+    assert "c" not in d0
+
+    # confirm key moved from d0 to d3 without side-effects
     assert "b" in d3
-    assert "b" not in d0
+    assert "b" not in d1
+
+    # confirm original lists weren't changed
+    assert isinstance(d0["l"], list)
+    assert isinstance(d1["l"], list)
+    assert "x" in d0["l"]
+    assert "y" in d1["l"]
+
+    # confirm the list was merged by index
+    assert "y" in d3["l"]
+    assert "x" not in d3["l"]
