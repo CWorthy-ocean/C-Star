@@ -263,7 +263,7 @@ def test_convert_step_to_preprocessed_roms_sim_no_reset_files(
 
     config = {"path": fsm.joined_output_dir}
 
-    with pytest.raises(CstarExpectationFailed, match="No reset files"):
+    with pytest.raises(CstarExpectationFailed, match="No restart files"):
         _ = ContinuanceTransform(config)
 
 
