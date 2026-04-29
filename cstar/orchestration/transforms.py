@@ -593,9 +593,8 @@ class RomsMarblTimeSplitter(Transform):
             depends_on = [child_step.name]
 
             # Use the last restart file as initial conditions for the follow-up step
-            step_output_dir = child_fs.output_dir
             restart_file = RestartFile.from_parts(
-                output_root_name, ed, 0, step_output_dir
+                output_root_name, ed, 0, child_fs.output_dir
             )
 
             # use output dir of the last step as the input for the next step
