@@ -885,7 +885,6 @@ class RestartFile(BaseModel):
             raise ValueError(msg)
 
         self._base = matches.group(1)
-
         self._ts = datetime.strptime(matches.group(2), RestartFile.FMT_TS)
         # look for segment for partition number, e.g. <base>.<ts>.000.nc vs. <base>.<ts>.nc
         self._segment = matches.group(3)
@@ -921,8 +920,6 @@ class RestartFile(BaseModel):
 
 class ResetFileTrxAdapter:
     """Convert a restart file into a dictionary useful for use in an OverrideTransform."""
-
-    FMT_DATE: t.ClassVar[t.Literal["%Y-%m-%d %H:%M:%S"]] = "%Y-%m-%d %H:%M:%S"
 
     @classmethod
     def adapt(cls, rst_file: RestartFile) -> dict[str, t.Any]:
