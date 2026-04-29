@@ -763,16 +763,28 @@ class ContinuanceTransform(Directive, OverrideTransform):
         -------
         dict[str, t.Any]
 
+        Raises
+        ------
+        ValueError
+            If unknown or invalid configuration is supplied.
         """
+        if "path" not in self._config:
+            msg = "Invalid continuance transform configuration. Only reset paths are supported."
+            raise NotImplementedError(msg)
+
         source = Path(self._config["path"])
+        if not source.exists():
+            msg = f"No directory found at path: {source!r}"
+            raise ValueError(msg)
+
         matches = sorted(source.rglob("*_rst*.nc"), reverse=True)
 
         if not matches:
             msg = f"No reset files located. Unable to continue from {source!r}"
             raise CstarExpectationFailed(msg)
 
-        match = matches.pop(0).as_posix()
-        return {"initial_conditions": {"data": [{"location": match}]}}
+        value = matches.pop(0).as_posix()
+        return {"initial_conditions": {"data": [{"location": value}]}}
 
     @t.override
     @staticmethod
