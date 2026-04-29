@@ -1,12 +1,13 @@
 import os
 import typing as t
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
@@ -14,6 +15,8 @@ from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
     ContinuanceTransform,
     OverrideTransform,
+    ResetFileTrxAdapter,
+    RestartFile,
     RomsMarblTimeSplitter,
     TemplateFillTransform,
     WorkplanTransformer,
@@ -551,3 +554,235 @@ def test_template_fill_combined_resolvers(
 
     assert result.blueprint_overrides["variable"] == "ALK"
     assert result.blueprint_overrides["input_dir"] == f"{upstream_dir}/joined_output"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("foo", id="no redeeming qualities"),
+        pytest.param("foo.txt", id="name-like, bad extension"),
+        pytest.param("foo.nc", id="name-like, good extension"),
+        pytest.param("foo_rst.nc", id="missing timestamp segment"),
+        pytest.param("foo_rst.0000000000000.nc", id="non-parseable timestamp (zeros)"),
+        pytest.param("foo_rst.2026040100000.nc", id="unparted::ts too short"),
+        pytest.param("foo_rst.2026040100000a..nc", id="unparted::non-numeric ts"),
+        pytest.param("foo_rst.202604010000000..nc", id="unparted::ts too long"),
+        pytest.param("foo.20260401000000_rst.nc", id="unparted::suffix on ts segment"),
+        pytest.param("foo.20260401000000_rst.000.nc", id="suffix on ts segment"),
+        pytest.param("foo.20260401000000.000_rst.nc", id="suffix on partition segment"),
+        pytest.param("foo.rst.20260401000000.000.nc", id="dot leader in suffix"),
+        pytest.param("foo.rst.20260401000000.nc", id="unparted::dot leader in suffix"),
+        pytest.param("foo_rst.20260401000000.000.nc/file.nc", id="match to dir name"),
+        pytest.param("foo_rst.20260401000000.nc/xxx.nc", id="unparted::match dir name"),
+        pytest.param("foo_rst.0000000000000.000.nc", id="ts too short"),
+        pytest.param("foo_rst.0000000000000a.000.nc", id="non-numeric ts"),
+        pytest.param("foo_rst.000000000000000.000.nc", id="ts too long"),
+        pytest.param("foo_rst.20260401000000..nc", id="partition empty"),
+        pytest.param("foo_rst.20260401000000.00.nc", id="partition too short"),
+        pytest.param("foo_rst.20260401000000.00a.nc", id="non-numeric partition"),
+        pytest.param("foo_rst.20260401000000.0000.nc", id="partition too long"),
+    ],
+)
+def test_reset_file_bad_path(tmp_path: Path, name: str) -> None:
+    """Verify that `ResetFile` reports paths that do not meet reset file naming convention."""
+    mismatched_name_path = tmp_path / name
+
+    with pytest.raises(ValueError, match="convention"):
+        _ = RestartFile(path=mismatched_name_path)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_is_parted"),
+    [
+        pytest.param("foo_rst.20260401000000.000.nc", True, id="parted"),
+        pytest.param("foo_rst.20260401000000.001.nc", True, id="non-start segment"),
+        pytest.param("foo_rst.20260401000000.nc", False, id="unparted"),
+    ],
+)
+def test_reset_file_happy_path(
+    tmp_path: Path,
+    name: str,
+    expected_is_parted: bool,
+) -> None:
+    """Verify that `ResetFile` handles good inputs correctly."""
+    path = tmp_path / name
+
+    rf = RestartFile(path=path)
+    assert rf.is_partitioned == expected_is_parted
+
+
+def test_reset_file_find(tmp_path: Path) -> None:
+    """Verify that ResetFile.find locates a reset file when expected."""
+    now = datetime.now(tz=timezone.utc)
+    search_path = tmp_path / "test-reset-file-find"
+    search_path.mkdir(parents=True)
+    reset_path = search_path / f"foo_rst.{now.strftime('%Y%m%d%H%M%S')}.000.nc"
+    reset_path.touch()
+
+    # confirm root of search path is searched
+    reset_file = RestartFile.find(search_path)
+    assert reset_file
+    assert reset_file.path == Path(reset_path).expanduser().resolve()
+
+    # confirm search is recursive
+    reset_file = RestartFile.find(tmp_path)
+    assert reset_file
+    assert reset_file.path == Path(reset_path).expanduser().resolve()
+
+
+def test_reset_file_find_dne(tmp_path: Path) -> None:
+    """Verify that ResetFile.find returns None when no files are found."""
+    search_path = tmp_path / "test-reset-file-find"
+    search_path.mkdir(parents=True)
+
+    reset_file = RestartFile.find(search_path)
+    assert reset_file is None
+
+
+def test_reset_file_find_dne_notok(tmp_path: Path) -> None:
+    """Verify that ResetFile.find raises an exception when no files are found
+    and find is passed `notfound_ok=False`.
+    """
+    search_path = tmp_path / "test-reset-file-find"
+    search_path.mkdir(parents=True)
+
+    with pytest.raises(CstarExpectationFailed, match="No restart files"):
+        _ = RestartFile.find(search_path, notfound_ok=False)
+
+
+def test_reset_file_from_parts_unparted(tmp_path: Path) -> None:
+    """Verify that a ResetFile instance is created without a segment ID in the
+    path if it is not supplied.
+    """
+    now = datetime.now(tz=timezone.utc)
+    ts = now.strftime("%Y%m%d%H%M%S")
+    search_path = tmp_path / "test-reset-file-find"
+    search_path.mkdir(parents=True)
+
+    reset_file = RestartFile.from_parts("test_reset_file_from_parts", now)
+
+    # confirm no empty segment is added
+    assert ".000." not in reset_file.path.as_posix()
+
+    # confirm full file name
+    assert reset_file.path.as_posix().endswith(f"_rst.{ts}.{RestartFile.EXT}")
+
+
+@pytest.mark.parametrize(
+    ("segment", "exp_segment"),
+    [
+        pytest.param(0, ".000.", id="edge-case, 0-th segment"),
+        pytest.param(1, ".001.", id="valid non-boundary index 1"),
+        pytest.param(123, ".123.", id="valid non-boundary index 123"),
+        pytest.param(42, ".042.", id="two-digit padding"),
+        pytest.param(999, ".999.", id="edge-case, final 3-digit segment"),
+    ],
+)
+def test_reset_file_from_parts_parted(
+    tmp_path: Path, segment: int, exp_segment: str
+) -> None:
+    """Verify that a ResetFile instance is created with a segment ID in the
+    path if it is supplied.
+    """
+    now = datetime.now(tz=timezone.utc)
+    search_path = tmp_path / "test-reset-file-find"
+    search_path.mkdir(parents=True)
+    reset_path = search_path / f"foo_rst.{now.strftime('%Y%m%d%H%M%S')}.000.nc"
+    reset_path.touch()
+
+    reset_file = RestartFile.from_parts("test_reset_file_from_parts", now, segment)
+
+    assert exp_segment in reset_file.path.as_posix()
+
+
+def test_reset_file_from_parts_with_base(tmp_path: Path) -> None:
+    """Verify that a ResetFile instance is created with a segment ID in the
+    path if it is supplied.
+    """
+    now = datetime.now(tz=timezone.utc)
+    search_path = tmp_path / "test-reset-file-find"
+    search_path.mkdir(parents=True)
+
+    reset_file = RestartFile.from_parts(
+        "test-base",
+        now,
+        directory=search_path,
+    )
+    assert reset_file is not None
+
+    assert reset_file.path.as_posix().startswith(
+        (search_path / "test-base_rst").as_posix(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "exp_partition", "exp_is_partitioned"),
+    [
+        pytest.param(
+            f"foo_rst.{datetime.now(tz=timezone.utc).strftime(RestartFile.FMT_TS)}.010.nc",
+            10,
+            True,
+            id="parted path",
+        ),
+        pytest.param(
+            f"foo_rst.{datetime.now(tz=timezone.utc).strftime(RestartFile.FMT_TS)}.nc",
+            None,
+            False,
+            id="unparted path",
+        ),
+    ],
+)
+def test_reset_file_from_path(
+    path: str,
+    exp_partition: int | None,
+    exp_is_partitioned: bool,
+) -> None:
+    """Verify that ResetFile.__init__ results in the correct settings on the instance."""
+    reset_path = Path(path)
+    reset_file = RestartFile(path=reset_path)
+
+    assert reset_file.is_partitioned == exp_is_partitioned
+    assert reset_file.partition == exp_partition
+
+
+def test_reset_file_adapter(tmp_path: Path) -> None:
+    """Verify that a partitioned reset file contains the correct partition information
+    when converted into an override.
+    """
+    now = datetime.now(tz=timezone.utc)
+    ts = now.strftime("%Y%m%d%H%M%S")
+    search_path = tmp_path / "test-reset-file-find"
+    search_path.mkdir(parents=True)
+    reset_path = search_path / f"foo_rst.{ts}.000.nc"
+    reset_path.touch()
+
+    reset_file = RestartFile(path=reset_path)
+    result = ResetFileTrxAdapter.adapt(reset_file)
+
+    # confirm all fields exist and the partioned flag is True
+    rp = result.get("runtime_params", None)
+    assert rp
+    assert "start_date" in rp
+    ic = result.get("initial_conditions", None)
+    assert ic
+    data = ic.get("data", None)
+    assert data
+    data0 = data[0]
+    assert data0["location"] == reset_file.path.as_posix()
+    assert data0["partitioned"]
+
+    reset_path = search_path / f"foo_rst.{ts}.nc"
+    reset_file = RestartFile(path=reset_path)
+    result = ResetFileTrxAdapter.adapt(reset_file)
+
+    # confirm all fields exist and the partioned flag is False
+    rp = result.get("runtime_params", None)
+    assert rp
+    assert "start_date" in rp
+    ic = result.get("initial_conditions", None)
+    assert ic
+    data = ic.get("data", None)
+    assert data
+    data0 = data[0]
+    assert data0["location"] == reset_file.path.as_posix()
+    assert not data0["partitioned"]
