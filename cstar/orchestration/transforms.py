@@ -708,7 +708,7 @@ def override_output_directory(step: LiveStep) -> LiveStep:
     Returns
     -------
     LiveStep
-        The updated step.
+        The transformed step.
     """
     sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
     override_transform = OverrideTransform(sys_overrides)
