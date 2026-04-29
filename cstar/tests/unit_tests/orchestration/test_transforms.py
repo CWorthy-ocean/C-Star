@@ -269,7 +269,8 @@ def test_continuance_transform_happy_path(
     single_step_workplan: Workplan,
     mock_sim_output_dir: tuple[Path, Path, Path],
 ) -> None:
-    """Verify that unknown configuration results in an exception.
+    """Verify that applying a well-formed continuance transform causes the
+    blueprint initial conditions to be updated.
 
     Parameters
     ----------
