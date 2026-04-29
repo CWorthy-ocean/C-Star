@@ -20,11 +20,13 @@ from cstar.base.env import (
     ENV_CSTAR_STATE_HOME,
     get_env_item,
 )
-from cstar.base.log import LoggingMixin
+from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import slugify
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem
+
+log = get_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -497,3 +499,24 @@ async def local_copy_async(uri: str) -> t.AsyncGenerator[Path, None]:
     finally:
         exc_type, exc_val, exc_tb = sys.exc_info()
         await asyncio.to_thread(sync_local_copy.__exit__, exc_type, exc_val, exc_tb)
+
+
+def remove_files(file_dir: Path, wildcard_pattern: str) -> bool:
+    """Removes files in the input dir matching the wildcard pattern.
+
+    Parameters
+    ----------
+    file_dir: directory in which to search for and remove matching files
+    wildcard_pattern: the glob pattern to match files against
+
+    Returns
+    -------
+    True if any files were removed, False otherwise
+    """
+    log.debug(f"Removing files matching wildcard pattern {wildcard_pattern}...")
+    removed = False
+    for p in file_dir.glob(wildcard_pattern):
+        p.unlink()
+        removed = True
+
+    return removed
