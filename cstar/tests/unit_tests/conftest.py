@@ -1910,9 +1910,9 @@ def mock_sim_output_dir(
     joined_dir = fsm.joined_output_dir
 
     reset_files = [
-        joined_dir / "output_rst.0.nc",
-        joined_dir / "output_rst.1.nc",
-        joined_dir / "output_rst.2.nc",
+        joined_dir / "output_rst.20120101000000.000.nc",
+        joined_dir / "output_rst.20120110000000.001.nc",
+        joined_dir / "output_rst.20120120000000.002.nc",
     ]
     for file in reset_files:
         file.write_text(info_msg)
