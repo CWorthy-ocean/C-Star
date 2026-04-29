@@ -386,7 +386,9 @@ def test_deep_merge_purity() -> None:
     assert isinstance(d0["l"], list)
     assert isinstance(d1["l"], list)
     assert "x" in d0["l"]
+    assert "x" not in d1["l"]
     assert "y" in d1["l"]
+    assert "y" not in d0["l"]
 
     # confirm the list was merged by index
     assert "y" in d3["l"]
