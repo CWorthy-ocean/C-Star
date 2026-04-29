@@ -51,8 +51,10 @@ def prepare_directive_file(step: "LiveStep") -> Path:
         The path to the directive file.
     """
     directives_path = step.fsm.work_dir / "directives.yaml"
+    if not step.fsm.work_dir.exists():
+        step.fsm.work_dir.mkdir(parents=True)
     with directives_path.open("w") as fp:
-        model = step.model_dump_json(include={"directives"})
+        model = step.model_dump(include={"directives"})
         content = yaml.dump(model, sort_keys=False)
         fp.write(content)
     return directives_path
