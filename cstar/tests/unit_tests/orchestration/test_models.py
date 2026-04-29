@@ -525,6 +525,46 @@ def test_step_blueprint_overrides_set(
     assert "blueprint_overrides" in str(error)
 
 
+def test_step_directives(
+    tmp_path: Path,
+    fake_blueprint_path: pathlib.Path,
+) -> None:
+    """Verify that a `LiveBlueprint` can be instantiated from the Blueprint
+    model and dynamic directives specified on a workplan `Step`.
+
+    Parameters
+    ----------
+    tmp_path: Path
+        A temporary directory for storing testing outputs.
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+
+    """
+    directive_name = "continue-from"
+    directive_kwargs = {"path", "extra"}
+    directives: KeyValueStore = {
+        directive_name: {
+            "path": tmp_path.as_posix(),
+            "extra": 12345,
+        },
+    }
+
+    step_name = f"test-step-{uuid.uuid4()}"
+    app_name = f"test-app-{uuid.uuid4()}"
+    step = Step(
+        name=step_name,
+        application=app_name,
+        blueprint=fake_blueprint_path,
+        directives=directives,
+    )
+
+    # confirm directives are available
+    assert directive_name in step.directives
+    # confirm attributes exist
+    directive_params = t.cast("dict[str, t.Any]", step.directives[directive_name])
+    assert directive_kwargs.issubset(directive_params.keys())
+
+
 def test_workplan_defaults(
     gen_fake_steps: Callable[[int], Generator[Step, None, None]],
 ) -> None:

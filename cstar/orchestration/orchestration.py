@@ -208,9 +208,9 @@ class Status(IntEnum):
 class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
-    parent: t.Self | None = Field(None, exclude=True)
+    parent: t.Self | None = Field(default=None, exclude=True)
     """The step for which this step is a sub-task."""
-    work_dir: Path | None = Field(None, exclude=True)
+    work_dir: Path | None = Field(default=None, exclude=True)
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""

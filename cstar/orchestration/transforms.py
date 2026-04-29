@@ -2,10 +2,18 @@ import os
 import re
 import typing as t
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
+
+from pydantic import (
+    BaseModel,
+    PrivateAttr,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import (
@@ -18,10 +26,12 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
+from cstar.execution.file_system import local_copy
 from cstar.orchestration.application import APP_CAT_BLUEPRINTS
 from cstar.orchestration.models import (
     Application,
     Blueprint,
+    KeyValueStore,
     RomsMarblBlueprint,
     Workplan,
 )
@@ -36,7 +46,7 @@ class Transform(t.Protocol):
     new steps.
     """
 
-    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -120,8 +130,8 @@ class TemplateFillTransform:
 
     def __init__(
         self,
-        variable_resolver: t.Callable[[str], str] | None = None,
-        path_resolver: t.Callable[[str], Path] | None = None,
+        variable_resolver: Callable[[str], str] | None = None,
+        path_resolver: Callable[[str], Path] | None = None,
     ) -> None:
         """Initialize the transform.
 
@@ -137,7 +147,7 @@ class TemplateFillTransform:
         self._path_resolver = path_resolver
 
     def with_path_resolver(
-        self, path_resolver: t.Callable[[str], Path]
+        self, path_resolver: Callable[[str], Path]
     ) -> "TemplateFillTransform":
         """Return a new instance with the given path resolver bound.
 
@@ -207,7 +217,7 @@ class TemplateFillTransform:
 
         return step.model_validate_json(content)
 
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
         """Apply template filling to a step's blueprint_overrides.
 
         Parameters
@@ -430,13 +440,14 @@ class WorkplanTransformer(LoggingMixin):
 
         # apply user blueprint_overrides and ensure consistent output targets;
         # must happen before time-splitting so the splitter reads correct blueprint values
-        steps = []
-        for step in live_steps:
+        steps: list[LiveStep] = []
+
+        for i in range(len(live_steps)):
+            step = live_steps[i]
+
             if step.application in apply_to:
-                new_step = override_output_directory(step)
-            else:
-                new_step = step
-            steps.append(new_step)
+                step = override_output_directory(step)
+            steps.append(step)
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             split_steps: list[LiveStep] = []
@@ -444,7 +455,7 @@ class WorkplanTransformer(LoggingMixin):
 
             for step in steps:
                 if step.application in apply_to:
-                    transformed_steps = list(self.transform_fn(step))
+                    transformed_steps = self.transform_fn(step)
                     named_dep_map[step.name] = transformed_steps[-1].name
                     split_steps.extend(transformed_steps)
                 else:
@@ -496,7 +507,7 @@ class RomsMarblTimeSplitter(Transform):
         freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
         self.frequency = freq_config.lower()
 
-    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Split a step into multiple sub-steps.
 
         Parameters
@@ -506,7 +517,7 @@ class RomsMarblTimeSplitter(Transform):
 
         Returns
         -------
-        Iterable[Step]
+        Sequence[Step]
             Steps for each subtask resulting from the split.
         """
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
@@ -524,9 +535,10 @@ class RomsMarblTimeSplitter(Transform):
             raise ValueError(msg)
 
         depends_on = step.depends_on
-        last_restart_file: Path | None = None
+        last_restart_file: RestartFile | None = None
         output_root_name = DEFAULT_OUTPUT_ROOT_NAME
 
+        results: list[LiveStep] = []
         for i, (sd, ed) in enumerate(time_slices):
             bp_copy = RomsMarblBlueprint(
                 **blueprint.model_dump(
@@ -536,8 +548,9 @@ class RomsMarblTimeSplitter(Transform):
                 ),
             )
 
-            compact_sd = sd.strftime("%Y%m%d%H%M%S")
-            compact_ed = ed.strftime("%Y%m%d%H%M%S")
+            compact_fmt = "%Y%m%d%H%M%S"
+            compact_sd = sd.strftime(compact_fmt)
+            compact_ed = ed.strftime(compact_fmt)
 
             dynamic_name = f"{i + 1:03d}_{step.safe_name}_{compact_sd}_{compact_ed}"
             child_step_name = slugify(dynamic_name)
@@ -556,8 +569,10 @@ class RomsMarblTimeSplitter(Transform):
             }
 
             if last_restart_file:
-                rst_path = last_restart_file.as_posix()
-                overrides["initial_conditions"] = {"data": [{"location": rst_path}]}
+                overrides = deep_merge(
+                    overrides,
+                    RestartFileTrxAdapter.adapt(last_restart_file),
+                )
 
             child_bp_path = child_fs.work_dir / f"{child_step_name}_bp.yaml"
             serialize(child_bp_path, bp_copy)
@@ -569,8 +584,8 @@ class RomsMarblTimeSplitter(Transform):
                 "name": child_step_name,
             }
             child_step = LiveStep.from_step(step, parent=step, update=updates)
+            results.append(child_step)
 
-            yield child_step
             if i == len(time_slices) - 1:
                 break
 
@@ -578,14 +593,14 @@ class RomsMarblTimeSplitter(Transform):
             depends_on = [child_step.name]
 
             # Use the last restart file as initial conditions for the follow-up step
-            # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
-            reset_file_name = f"{output_root_name}_rst.{compact_ed}.000.nc"
-
-            step_output_dir = child_fs.output_dir
-            restart_file_path = step_output_dir / reset_file_name
+            restart_file = RestartFile.from_parts(
+                output_root_name, ed, 0, child_fs.output_dir
+            )
 
             # use output dir of the last step as the input for the next step
-            last_restart_file = restart_file_path
+            last_restart_file = restart_file
+
+        return tuple(results)
 
     @staticmethod
     def suffix() -> str:
@@ -649,7 +664,7 @@ class OverrideTransform(Transform):
         bp_type = type(bp)
         return bp_type(**merged)
 
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -659,7 +674,7 @@ class OverrideTransform(Transform):
 
         Returns
         -------
-        Iterable[Step]
+        Sequence[Step]
             Zero-to-many steps resulting from applying the transform.
         """
         bp_path = Path(step.blueprint_path)
@@ -669,12 +684,7 @@ class OverrideTransform(Transform):
         blueprint: Blueprint = deserialize(bp_path, bp_type)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
-
         update: dict[str, t.Any] = {"blueprint_overrides": {}}
-        if bp_type == RomsMarblBlueprint:
-            update["work_dir"] = t.cast(
-                "RomsMarblBlueprint", updated_bp
-            ).runtime_params.output_dir
 
         live_step = LiveStep.from_step(step, update=update)
 
@@ -682,7 +692,7 @@ class OverrideTransform(Transform):
         live_step.blueprint_path = live_step.fsm.work_dir / bp_renamed
 
         serialize(live_step.blueprint_path, updated_bp)
-        return [live_step]
+        return (live_step,)
 
     @staticmethod
     def suffix() -> str:
@@ -704,11 +714,340 @@ def override_output_directory(step: LiveStep) -> LiveStep:
 
     Returns
     -------
-    list[Step]
-        The transformed steps.
+    LiveStep
+        The transformed step.
     """
     sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
     override_transform = OverrideTransform(sys_overrides)
-    overridden_step_result = iter(override_transform(step))
+    overridden_step_result = override_transform(step)
 
-    return next(overridden_step_result)
+    return overridden_step_result[0]
+
+
+class Directive(Transform, t.Protocol):
+    _config: Mapping[str, t.Any]
+    """Contract of a transform that can be used as a directive."""
+
+    def __init__(self, config: dict[str, t.Any]) -> None:
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        config : dict[str, t.Any] | None
+            A dictionary containing configuration for the directive.
+        """
+        if not config:
+            msg = "Configuration must be provided"
+            raise ValueError(msg)
+
+        self._config = config
+
+
+class RestartFile(BaseModel):
+    """Reference to a path that contains restart checkpoints."""
+
+    path: Path
+    """The path to a restart file."""
+    _base: str = PrivateAttr()
+    """The base name of the file."""
+    _segment: str | None = PrivateAttr(default=None)
+    """The segment identifier of the file."""
+    _ts: datetime = PrivateAttr()
+    """The timestamp parsed from the file name."""
+
+    EXT: t.ClassVar[t.Literal["nc"]] = "nc"
+    """The expected file extension for a restart file."""
+    FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
+    """The expected timestamp format in the restart file name"""
+    PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_rst\.(\d{14})(?:\.(\d{3}))?\.nc$"]] = (
+        r"^(.*?)_rst\.(\d{14})(?:\.(\d{3}))?\.nc$"
+    )
+    """A regex identifying full restart or partitioned files."""
+    SUFFIX: t.ClassVar[t.Literal["_rst"]] = "_rst"
+    """A unique suffix found in the name of restart files"""
+
+    @classmethod
+    def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
+        """Search for a restart file in the specified location.
+
+        Parameters
+        ----------
+        search_path : Path
+            The path to search
+        notfound_ok : bool
+            If False, raise an exception if no restart files are found.
+
+        Returns
+        -------
+        ResetFile
+
+        Raises
+        ------
+        ValueError
+            If the search path does not exist or contains no recognizable restart files.
+        """
+        search_path = search_path.expanduser().resolve()
+
+        if not search_path.exists():
+            msg = f"No directory found at path: {search_path!r}"
+            raise ValueError(msg)
+
+        if matches := sorted(search_path.rglob(f"*{cls.SUFFIX}.*.000.{cls.EXT}")):
+            # prefer use of pre-partitioned data when available
+            return RestartFile(path=matches[0])
+
+        matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"), reverse=True)
+        if matches:
+            return RestartFile(path=matches.pop(0))
+
+        if not notfound_ok:
+            msg = f"No restart files located. Unable to continue from {search_path!r}"
+            raise CstarExpectationFailed(msg)
+        return None
+
+    @classmethod
+    def from_parts(
+        cls,
+        base: str,
+        timestamp: datetime,
+        segment: int | None = None,
+        directory: Path | None = None,
+    ) -> "RestartFile":
+        """Create a ResetFile from components.
+
+        Parameters
+        ----------
+        base : str
+            The base name for the restart file.
+        timestamp : datetime
+            The timestamp for the restart file.
+        segment : int | None
+            The segment number if partitioned, otherwise `None`.
+        directory : Path | None
+            The directory to contain the file. If not specified, defaults to cwd.
+
+        Returns
+        -------
+        ResetFile
+
+        Raises
+        ------
+        ValueError
+            If the search path does not exist or contains no recognizable restart files.
+        """
+        ts = timestamp.strftime(cls.FMT_TS)
+        parted_clause = f".{segment:03d}" if segment is not None else ""
+        filename = f"{base}{cls.SUFFIX}.{ts}{parted_clause}.{cls.EXT}"
+
+        if directory:
+            return RestartFile(path=directory / filename)
+
+        return RestartFile(path=Path(filename))
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, value: Path, _info: "ValidationInfo") -> Path:
+        """Verify the supplied path meets the restart file naming convention.
+
+        Parameters
+        ----------
+        value : str
+            The value of the checkpoint frequency property
+        _info : ValidationInfo
+            Metadata for the current validation context
+        """
+        if value.suffix != f".{RestartFile.EXT}":
+            msg = f"File extension does not match expected naming convention: {value.suffix}"
+            raise ValueError(msg)
+
+        if re.fullmatch(RestartFile.PATTERN_RST, value.name, flags=re.ASCII):
+            return value
+
+        msg = f"File name does not match expected naming convention: {value}"
+        raise ValueError(msg)
+
+    @model_validator(mode="after")
+    def _model_validate(self) -> "RestartFile":
+        """Perform post-processing on the restart file path.
+
+        Returns
+        -------
+        ResetFile
+        """
+        matches = re.fullmatch(
+            RestartFile.PATTERN_RST, self.path.as_posix(), flags=re.ASCII
+        )
+        if not matches:
+            msg = f"File name does not match expected naming convention: {self.path}"
+            raise ValueError(msg)
+
+        self._base = matches.group(1)
+        self._ts = datetime.strptime(matches.group(2), RestartFile.FMT_TS)
+        # look for segment for partition number, e.g. <base>.<ts>.000.nc vs. <base>.<ts>.nc
+        self._segment = matches.group(3)
+        return self
+
+    @property
+    def timestamp(self) -> datetime:
+        """Return a datetime derived from the timestamp in the restart file name.
+
+        Returns
+        -------
+        datetime
+        """
+        return self._ts
+
+    @property
+    def is_partitioned(self) -> bool:
+        """Return `True` if the restart file belongs to a partioned dataset.
+
+        Returns
+        -------
+        datetime
+        """
+        return self._segment is not None
+
+    @property
+    def partition(self) -> int | None:
+        if self._segment:
+            return int(self._segment)
+        return None
+
+
+class RestartFileTrxAdapter:
+    """Convert a restart file into a dictionary useful for use in an OverrideTransform."""
+
+    @classmethod
+    def adapt(cls, rst_file: RestartFile) -> dict[str, t.Any]:
+        """Given a restart file, create a dictionary containing the overrides necessary to
+        execute a simulation with the restart file specified in the initial conditions.
+
+        Parameters
+        ----------
+        restart_file : ResetFile
+            The restart file metadata used to convert into an override mapping.
+
+        Returns
+        -------
+        Mapping[str, t.Any]
+        """
+        return {
+            "runtime_params": {
+                "start_date": rst_file.timestamp,
+            },
+            "initial_conditions": {
+                "data": [
+                    {
+                        "location": rst_file.path.as_posix(),
+                        "partitioned": rst_file.is_partitioned,
+                    },
+                ],
+            },
+        }
+
+
+class ContinuanceTransform(Directive, OverrideTransform):
+    """A transform that locates a restart file with an unknown path at the
+    time the task was scheduled.
+    """
+
+    def __init__(self, config: dict[str, t.Any]) -> None:
+        """Initialize the instance.
+
+
+        Parameters
+        ----------
+        config : dict[str, t.Any] | None
+            A dictionary containing configuration for the directive.
+        """
+        Directive.__init__(self, config)
+        OverrideTransform.__init__(self, self._create_initial_condition_overrides())
+
+    def _create_initial_condition_overrides(
+        self,
+    ) -> dict[str, t.Any]:
+        """Create an overrides dictionary that will result in the modified blueprint
+        using a
+
+        Returns
+        -------
+        dict[str, t.Any]
+
+        Raises
+        ------
+        ValueError
+            If unknown or invalid configuration is supplied.
+        """
+        if "path" not in self._config:
+            msg = "Invalid continuance transform configuration. Only restart paths are supported."
+            raise NotImplementedError(msg)
+
+        search_path = Path(self._config["path"])
+        if restart_file := RestartFile.find(search_path, notfound_ok=False):
+            return RestartFileTrxAdapter.adapt(restart_file)
+
+        msg = f"No restart file located in search path: {search_path!r}"
+        raise ValueError(msg)
+
+    @t.override
+    @staticmethod
+    def suffix() -> str:
+        """Return a suffix used when persisting a resource modified by this transform.
+
+        Returns
+        -------
+        str
+        """
+        return "cfrom"
+
+
+class DirectiveConfig(BaseModel):
+    directive_map: t.ClassVar[Mapping[str, type[Directive]]] = {
+        "continue-from": ContinuanceTransform,
+    }
+    directives: KeyValueStore
+
+    @classmethod
+    def apply_directives(
+        cls,
+        directive_uri: str,
+        blueprint_uri: str,
+    ) -> str:
+        """Apply the specified directives to the blueprint and
+        return the path to the final, transformed blueprint.
+
+        Parameters
+        ----------
+        directive_uri : str
+            The URI to configuration for directives the runner must execute.
+        blueprint_uri : str
+            The user-supplied blueprint URI specifying the blueprint to preprocess.
+
+        Returns
+        -------
+        str
+        """
+        with (
+            local_copy(directive_uri) as local_path,
+            local_copy(blueprint_uri) as local_bp,
+        ):
+            model = deserialize(local_path, DirectiveConfig)
+
+            directives = model.directives
+            if not directives:
+                return blueprint_uri
+
+            step = LiveStep(
+                name="directive-step",
+                application=Application.ROMS_MARBL,
+                blueprint=local_bp,
+            )
+            directive_map = DirectiveConfig.directive_map
+            transforms = {
+                directive_map[key](config=t.cast("dict[str, dict[str, t.Any]]", config))
+                for key, config in directives.items()
+            }
+            for transform in transforms:
+                step = transform(step)[0]
+
+        return str(step.blueprint_path)
