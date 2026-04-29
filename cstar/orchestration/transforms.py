@@ -571,7 +571,7 @@ class RomsMarblTimeSplitter(Transform):
             if last_restart_file:
                 overrides = deep_merge(
                     overrides,
-                    ResetFileTrxAdapter.adapt(last_restart_file),
+                    RestartFileTrxAdapter.adapt(last_restart_file),
                 )
 
             child_bp_path = child_fs.work_dir / f"{child_step_name}_bp.yaml"
@@ -918,7 +918,7 @@ class RestartFile(BaseModel):
         return None
 
 
-class ResetFileTrxAdapter:
+class RestartFileTrxAdapter:
     """Convert a restart file into a dictionary useful for use in an OverrideTransform."""
 
     @classmethod
@@ -988,7 +988,7 @@ class ContinuanceTransform(Directive, OverrideTransform):
 
         search_path = Path(self._config["path"])
         if restart_file := RestartFile.find(search_path, notfound_ok=False):
-            return ResetFileTrxAdapter.adapt(restart_file)
+            return RestartFileTrxAdapter.adapt(restart_file)
 
         msg = f"No restart file located in search path: {search_path!r}"
         raise ValueError(msg)

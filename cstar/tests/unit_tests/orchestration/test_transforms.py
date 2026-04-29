@@ -15,8 +15,8 @@ from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
     ContinuanceTransform,
     OverrideTransform,
-    ResetFileTrxAdapter,
     RestartFile,
+    RestartFileTrxAdapter,
     RomsMarblTimeSplitter,
     TemplateFillTransform,
     WorkplanTransformer,
@@ -757,7 +757,7 @@ def test_reset_file_adapter(tmp_path: Path) -> None:
     reset_path.touch()
 
     reset_file = RestartFile(path=reset_path)
-    result = ResetFileTrxAdapter.adapt(reset_file)
+    result = RestartFileTrxAdapter.adapt(reset_file)
 
     # confirm all fields exist and the partioned flag is True
     rp = result.get("runtime_params", None)
@@ -773,7 +773,7 @@ def test_reset_file_adapter(tmp_path: Path) -> None:
 
     reset_path = search_path / f"foo_rst.{ts}.nc"
     reset_file = RestartFile(path=reset_path)
-    result = ResetFileTrxAdapter.adapt(reset_file)
+    result = RestartFileTrxAdapter.adapt(reset_file)
 
     # confirm all fields exist and the partioned flag is False
     rp = result.get("runtime_params", None)
