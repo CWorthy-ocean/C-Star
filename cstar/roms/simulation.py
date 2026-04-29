@@ -25,7 +25,7 @@ from cstar.base.utils import (
     _run_cmd,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager
+from cstar.execution.file_system import RomsFileSystemManager, remove_files
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -72,30 +72,11 @@ if TYPE_CHECKING:
     from cstar.execution.handler import ExecutionHandler
 
 
-def _remove_wildcard_pattern(
-    input_dir: Path, wildcard_pattern: str, logger: logging.Logger
-) -> None:
-    """Removes files in the input dir matching the wildcard pattern.
-
-    Parameters
-    ----------
-    input_dir: directory in which to search for and remove matching files
-    wildcard_pattern: the glob pattern to match files against
-    logger: logger object to post log messages to
-
-    Returns
-    -------
-    None
-    """
-    logger.debug(f"Removing files matching wildcard pattern {wildcard_pattern}...")
-    for p in input_dir.glob(wildcard_pattern):
-        p.unlink()
-
-
 def _ncjoin_wildcard(
     wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
 ) -> None:
-    """Spatially join netcdfs matching the wildcard pattern using ncjoin, and move the joined output to output_dir.
+    """Spatially join netcdfs matching the wildcard pattern using ncjoin, move the joined output to output_dir, and
+    remove the unjoined outputs (except for rst files, which would need to be repartitioned later).
 
     Parameters
     ----------
@@ -117,17 +98,17 @@ def _ncjoin_wildcard(
     out_file = input_dir / wildcard_pattern.replace("*.", "")
     out_file_name = out_file.name
     out_file.rename(output_dir / out_file_name)
-    logger.info(f"done spatially joining {out_file}")
+    logger.info(f"Done spatially joining {out_file}")
 
     if "rst" not in wildcard_pattern:
-        _remove_wildcard_pattern(input_dir, wildcard_pattern, logger)
+        remove_files(input_dir, wildcard_pattern)
 
 
 def _extract_data_join_wildcard(
     wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
 ) -> None:
     """Spatially join netcdfs matching the wildcard pattern using extract_data_join,
-    and move the joined output to output_dir.
+     move the joined output to output_dir, and remove the unjoined outputs.
 
     Parameters
     ----------
@@ -158,9 +139,9 @@ def _extract_data_join_wildcard(
     ocean_file = input_dir / ocean_file_name
     ocean_file.unlink(missing_ok=True)
 
-    _remove_wildcard_pattern(input_dir, wildcard_pattern, logger)
+    remove_files(input_dir, wildcard_pattern)
 
-    logger.info(f"done spatially joining {out_file}")
+    logger.info(f"Done spatially joining {out_file}")
 
 
 class ROMSSimulation(Simulation):
@@ -1790,11 +1771,14 @@ class ROMSSimulation(Simulation):
             )
 
         nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
-        unique_wildcards = {Path(fname.stem).stem + ".*.nc" for fname in files}
+        unique_wildcards = {
+            str(Path(fname.stem).with_suffix(".*.nc")) for fname in files
+        }
 
         with ThreadPoolExecutor(max_workers=nprocs) as executor:
-            results = executor.map(_spatial_join, unique_wildcards)
-            _ = [r for r in results]  # exhaust iterator
+            # list() exhausts the returned iterator, which is needed to surface any errors
+            # that were raised in the threaded join operations
+            list(executor.map(_spatial_join, unique_wildcards))
 
         self.persist()
 
