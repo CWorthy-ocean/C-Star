@@ -836,11 +836,9 @@ class RestartFile(BaseModel):
         ValueError
             If the search path does not exist or contains no recognizable restart files.
         """
-        filename = f"{base}{cls.SUFFIX}.{timestamp.strftime(cls.FMT_TS)}"
-        if segment is not None:
-            filename = f"{filename}.{segment:03d}.{cls.EXT}"
-        else:
-            filename = f"{filename}.{cls.EXT}"
+        ts = timestamp.strftime(cls.FMT_TS)
+        parted_clause = f".{segment:03d}" if segment is not None else ""
+        filename = f"{base}{cls.SUFFIX}.{ts}{parted_clause}.{cls.EXT}"
 
         if directory:
             return RestartFile(path=directory / filename)
