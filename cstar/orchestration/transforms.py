@@ -885,7 +885,6 @@ class RestartFile(BaseModel):
         self._ts = datetime.strptime(matches.group(2), RestartFile.FMT_TS)
         # look for segment for partition number, e.g. <base>.<ts>.000.nc vs. <base>.<ts>.nc
         self._segment = matches.group(3)
-        self._is_partitioned = self._segment is not None
         return self
 
     @property
