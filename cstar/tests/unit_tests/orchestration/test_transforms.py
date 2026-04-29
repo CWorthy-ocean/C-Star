@@ -12,6 +12,7 @@ from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Wo
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
+    ContinuanceTransform,
     OverrideTransform,
     RomsMarblTimeSplitter,
     TemplateFillTransform,
@@ -235,6 +236,69 @@ def test_override_transform_system_precedence(
     # system level override was applied last.
     assert Path(bp_old.runtime_params.output_dir) == dir_orig
     assert Path(bp_new.runtime_params.output_dir) == sys_od
+
+
+def test_continuance_transform_not_supported(test_output_dir: Path) -> None:
+    """Verify that unknown configuration results in an exception.
+
+    Parameters
+    ----------
+    test_output_dir : Path
+        The value that replaced the static content of the blueprint template
+        and was written to the test directory, tmp_path.
+    """
+    with pytest.raises(NotImplementedError, match="supported"):
+        _ = ContinuanceTransform({"not-path": str(test_output_dir)})
+
+
+def test_continuance_transform_path_dne() -> None:
+    """Verify that sending a path to a directory that does not exist results in
+    an exception being raised.
+
+    Parameters
+    ----------
+    test_output_dir : Path
+        The value that replaced the static content of the blueprint template
+        and was written to the test directory, tmp_path.
+    """
+    with pytest.raises(ValueError, match="No directory found"):
+        _ = ContinuanceTransform({"path": "./dir-that-dne"})
+
+
+def test_continuance_transform_happy_path(
+    single_step_workplan: Workplan,
+    mock_sim_output_dir: tuple[Path, Path, Path],
+) -> None:
+    """Verify that unknown configuration results in an exception.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    mock_sim_output_dir : Path
+        Paths to mocked simulation outputs; used here to pass a valid path
+        to the continuance transform (containing files meeting glob pattern *_rst.nc)
+    """
+    _, continue_from_dir, _ = mock_sim_output_dir
+
+    transform = ContinuanceTransform({"path": str(continue_from_dir)})
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()  # ensure nothing existing
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
+        steps = transform(step)
+
+    transformed = steps[0]
+
+    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+
+    # confirm the old blueprint has a different initial conditions location
+    assert str(continue_from_dir) not in str(bp_old.initial_conditions.data[0].location)
+    assert str(continue_from_dir) in str(bp_new.initial_conditions.data[0].location)
+
+    # confirm the overrides were removed after being applied
+    assert not transformed.blueprint_overrides
 
 
 def test_workplan_transformer_applies_output_dir_overrides(
