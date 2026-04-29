@@ -1027,24 +1027,27 @@ class DirectiveConfig(BaseModel):
         -------
         str
         """
-        with local_copy(directive_uri) as local_path:
+        with (
+            local_copy(directive_uri) as local_path,
+            local_copy(blueprint_uri) as local_bp,
+        ):
             model = deserialize(local_path, DirectiveConfig)
 
-        directives = model.directives
-        if not directives:
-            return blueprint_uri
+            directives = model.directives
+            if not directives:
+                return blueprint_uri
 
-        step = LiveStep(
-            name="directive-step",
-            application=Application.SLEEP,
-            blueprint=blueprint_uri,
-        )
-        directive_map = DirectiveConfig.directive_map
-        transforms = {
-            directive_map[key](config=t.cast("dict[str, dict[str, t.Any]]", config))
-            for key, config in directives.items()
-        }
-        for transform in transforms:
-            step = transform(step)[0]
+            step = LiveStep(
+                name="directive-step",
+                application=Application.ROMS_MARBL,
+                blueprint=local_bp,
+            )
+            directive_map = DirectiveConfig.directive_map
+            transforms = {
+                directive_map[key](config=t.cast("dict[str, dict[str, t.Any]]", config))
+                for key, config in directives.items()
+            }
+            for transform in transforms:
+                step = transform(step)[0]
 
         return str(step.blueprint_path)
