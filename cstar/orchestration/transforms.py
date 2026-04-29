@@ -751,11 +751,19 @@ class ContinuanceTransform(Directive, OverrideTransform):
             A dictionary containing configuration for the directive.
         """
         Directive.__init__(self, config)
-        OverrideTransform.__init__(self, self._create_reset_override())
+        OverrideTransform.__init__(self, self._create_initial_condition_overrides())
 
-    def _create_reset_override(
+    def _create_initial_condition_overrides(
         self,
     ) -> dict[str, t.Any]:
+        """Create an overrides dictionary that will result in the modified blueprint
+        using a
+
+        Returns
+        -------
+        dict[str, t.Any]
+
+        """
         source = Path(self._config["path"])
         matches = sorted(source.rglob("*_rst*.nc"), reverse=True)
 
