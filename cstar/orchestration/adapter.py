@@ -1,7 +1,5 @@
 import typing as t
 
-from pydantic import BaseModel
-
 from cstar.base.additional_code import AdditionalCode
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -21,11 +19,11 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
 )
 
-_Tin = t.TypeVar("_Tin", bound=BaseModel)
+_Tin = t.TypeVar("_Tin")
 _Tout_co = t.TypeVar("_Tout_co", covariant=True)
 
 
-class ModelAdapter(t.Generic[_Tin, _Tout_co], t.Protocol):
+class ModelAdapter(t.Protocol, t.Generic[_Tin, _Tout_co]):
     """Contract exposing a mechanism to adapt a source model to a target type."""
 
     model: _Tin
