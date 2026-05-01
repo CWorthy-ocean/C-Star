@@ -57,7 +57,9 @@ def test_blueprint_migrate_default_output(
     versioned_file_name = "blueprint.2025.1.yaml"
     bp_2025_1 = bp_templates_dir / versioned_file_name
     bp_path = work_dir / f"{bp_stem}.yaml"
-    bp_path.write_text(bp_2025_1.read_text())
+    content = bp_2025_1.read_text()
+    content = content.replace("application: sleep", "application: roms_marbl")
+    bp_path.write_text(content)
 
     expected_output_path = Path(f"./{bp_stem}_{latest}.yaml")
 
@@ -74,6 +76,7 @@ def test_blueprint_migrate_default_output(
 
     bp = deserialize(expected_output_path, RomsMarblBlueprint)
     assert bp
+    expected_output_path.unlink()
 
 
 def test_blueprint_migrate_custom_output(
