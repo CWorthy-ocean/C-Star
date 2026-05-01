@@ -135,25 +135,21 @@ class RomsBlueprintMigration(Migration):
         start_at_version = t.cast(
             "str", dumped.get("version", RomsBlueprintMigration.INITIAL)
         )
-        limit = 20
         current_version = start_at_version
 
-        while limit > 0 and current_version != self.LATEST:
-            limit -= 1
+        while current_version != self.LATEST:
             options = [(x, y) for (x, y) in self.map if x == current_version]
             if not options:
                 msg = f"No migration adapter from {start_at_version!r} to {self.LATEST}"
                 raise CstarUnsupportedMigrationError(msg)
 
-            # TODO: either use recursion to pop back to a path or use networkx
             opt_source, opt_target = options.pop(0)
             current_version = opt_target
 
             adapter_type = self.map[(opt_source, opt_target)]
             plan.append(adapter_type)
 
-        is_planned = current_version != RomsBlueprintMigration.LATEST
-        if is_planned:
+        if current_version != RomsBlueprintMigration.LATEST:
             msg = f"Incomplete migration from {start_at_version!r} to {self.LATEST}"
             raise CstarUnsupportedMigrationError(msg)
 
