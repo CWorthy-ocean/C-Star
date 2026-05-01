@@ -1610,7 +1610,7 @@ class ROMSSimulation(Simulation):
         # symlink roms exe into work dir for ability to easily rerun from the correct
         # location if debugging
 
-        roms_symlink_path = self.fs_manager.work_dir / "roms"
+        roms_symlink_path = self.fs_manager.work_dir / self.exe_path.name
         roms_symlink_path.symlink_to(self.exe_path)
 
         ## 2: RUN ROMS
