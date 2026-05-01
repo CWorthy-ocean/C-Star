@@ -4,8 +4,14 @@ from pathlib import Path
 import typer
 
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.cli.common import verbose_callback
 from cstar.cli.workplan.shared import get_registered_bp
-from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
+from cstar.entrypoint.utils import (
+    ARG_DRY_RUN,
+    ARG_OUTPUT_LONG,
+    ARG_OUTPUT_SHORT,
+    ARG_VERBOSE,
+)
 from cstar.execution.file_system import is_remote_resource, local_copy
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import (
@@ -62,6 +68,14 @@ def migrate(
         typer.Option(
             ARG_DRY_RUN,
             help="Generate the migration plan without executing it.",
+        ),
+    ] = False,
+    verbose: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_VERBOSE,
+            help="Enable printing verbose migration outputs.",
+            callback=verbose_callback,
         ),
     ] = False,
 ) -> None:

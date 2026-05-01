@@ -14,3 +14,5 @@ ARG_OUTPUT_SHORT: t.Literal["-o"] = "-o"
 
 ARG_URI_LONG: t.Literal["--blueprint-uri"] = "--blueprint-uri"
 ARG_URI_SHORT: t.Literal["-b"] = "-b"
+
+ARG_VERBOSE: t.Literal["--verbose"] = "--verbose"

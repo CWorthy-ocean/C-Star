@@ -169,6 +169,16 @@ ENV_CSTAR_LOG_LEVEL: t.Annotated[
 """Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
 
 
+ENV_CSTAR_CLI_VERBOSE: t.Annotated[
+    t.Literal["CSTAR_CLI_VERBOSE"],
+    EnvVar(
+        "Set to `1` to produce verbose CLI outputs.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_CLI_VERBOSE"
+"""Set to `1` to produce verbose CLI outputs."""
+
 ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
     t.Literal["CSTAR_CLOBBER_WORKING_DIR"],
     EnvVar(
@@ -177,7 +187,7 @@ ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
         default=FLAG_OFF,
     ),
 ] = "CSTAR_CLOBBER_WORKING_DIR"
-""""Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
+"""Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
 
 ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
     t.Literal["CSTAR_FRESH_CODEBASES"],
@@ -197,7 +207,7 @@ ENV_CSTAR_IN_ACTIVE_ALLOCATION: t.Annotated[
         default="",
     ),
 ] = "CSTAR_IN_ACTIVE_ALLOCATION"
-"""""Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation."""
+"""Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation."""
 
 ENV_CSTAR_NPROCS_POST: t.Annotated[
     t.Literal["CSTAR_NPROCS_POST"],
