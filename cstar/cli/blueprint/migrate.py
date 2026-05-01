@@ -5,6 +5,7 @@ import typer
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.workplan.shared import get_registered_bp
+from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
 from cstar.execution.file_system import is_remote_resource, local_copy
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import (
@@ -24,9 +25,6 @@ The schema will be updated to the latest available version. If an output
 path is not provided, it will be written next to the existing
 file with the version number appended to the file name.
 """
-
-ARG_OUTPUT_PATH_SHORT: t.Literal["-o"] = "-o"
-"""An argument specifying the output desired path for an output."""
 
 
 def path_callback(value: str | None) -> str | None:
@@ -53,11 +51,19 @@ def migrate(
     output: t.Annotated[
         str | None,
         typer.Option(
-            ARG_OUTPUT_PATH_SHORT,
+            ARG_OUTPUT_LONG,
+            ARG_OUTPUT_SHORT,
             help="Path to the output file",
             callback=path_callback,
         ),
     ] = None,
+    dry_run: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_DRY_RUN,
+            help="Generate the migration plan without executing it.",
+        ),
+    ] = False,
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
     result = validate_serialized_entity(path, Blueprint)

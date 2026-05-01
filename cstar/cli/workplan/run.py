@@ -15,6 +15,7 @@ from cstar.cli.workplan.shared import (
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
+    ARG_DRY_RUN,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
@@ -253,8 +254,7 @@ def run(
     dry_run: t.Annotated[
         bool,
         typer.Option(
-            "--dry-run",
-            "-d",
+            ARG_DRY_RUN,
             help="Generate the execution plan without executing the workplan.",
         ),
     ] = False,

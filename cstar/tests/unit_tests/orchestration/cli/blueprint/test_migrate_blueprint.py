@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
-from cstar.cli.blueprint.migrate import ARG_OUTPUT_PATH_SHORT, app
+from cstar.cli.blueprint.migrate import app
+from cstar.entrypoint.utils import ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import RomsBlueprintMigration
@@ -79,9 +81,11 @@ def test_blueprint_migrate_default_output(
     expected_output_path.unlink()
 
 
+@pytest.mark.parametrize("output_param", [ARG_OUTPUT_SHORT, ARG_OUTPUT_LONG])
 def test_blueprint_migrate_custom_output(
     tmp_path: Path,
     bp_templates_dir: Path,
+    output_param: str,
 ) -> None:
     """Verify that an output path specified by the user is honored."""
     latest = RomsBlueprintMigration.LATEST
@@ -104,7 +108,7 @@ def test_blueprint_migrate_custom_output(
         app,
         [
             bp_path.as_posix(),
-            ARG_OUTPUT_PATH_SHORT,
+            output_param,
             expected_output_path.as_posix(),
         ],
         color=False,
