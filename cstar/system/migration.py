@@ -2,8 +2,8 @@ import abc
 import typing as t
 from collections.abc import Mapping
 
+from cstar.base.adapter import ModelAdapter
 from cstar.base.exceptions import CstarError
-from cstar.orchestration.adapter import ModelAdapter
 
 
 class SchemaMigration(ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
