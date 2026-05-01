@@ -40,6 +40,7 @@ New features
 - Added capability to add custom blueprints and orchestrate within a `Workplan` (`#506 <https://github.com/CWorthy-ocean/C-Star/pull/506>`_)
 - Add a basic Plotter application as a demonstration of building a functional application (`#499 <https://github.com/CWorthy-ocean/C-Star/pull/499>`_)
 - Add template-filling transform for user variables and paths (`#500 <https://github.com/CWorthy-ocean/C-Star/pull/500>`_)
+- .ext files are now passed through extract_data_join at the same time as other files are passed through ncjoin (`#495 <https://github.com/CWorthy-ocean/C-Star/pull/495>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
