@@ -3,7 +3,6 @@ import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from functools import partial
 from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
@@ -26,7 +25,7 @@ from cstar.base.utils import (
     _run_cmd,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager
+from cstar.execution.file_system import RomsFileSystemManager, remove_files
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -76,7 +75,8 @@ if TYPE_CHECKING:
 def _ncjoin_wildcard(
     wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
 ) -> None:
-    """Spatially join netcdfs matching the wildcard pattern using ncjoin, and move the joined output to output_dir.
+    """Spatially join netcdfs matching the wildcard pattern using ncjoin, move the joined output to output_dir, and
+    remove the unjoined outputs (except for rst files, which would need to be repartitioned later).
 
     Parameters
     ----------
@@ -90,17 +90,58 @@ def _ncjoin_wildcard(
     None
     """
     logger.info(f"Joining netCDF files {wildcard_pattern}...")
-
     _run_cmd(
         f"ncjoin {wildcard_pattern}",
         cwd=input_dir,
         raise_on_error=True,
     )
-
     out_file = input_dir / wildcard_pattern.replace("*.", "")
-    out_file.rename(output_dir / out_file.name)
+    out_file_name = out_file.name
+    out_file.rename(output_dir / out_file_name)
+    logger.info(f"Done spatially joining {out_file}")
 
-    logger.info(f"done spatially joining {out_file}")
+    if "rst" not in wildcard_pattern:
+        remove_files(input_dir, wildcard_pattern)
+
+
+def _extract_data_join_wildcard(
+    wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
+) -> None:
+    """Spatially join netcdfs matching the wildcard pattern using extract_data_join,
+     move the joined output to output_dir, and remove the unjoined outputs.
+
+    Parameters
+    ----------
+    wildcard_pattern: the wildcard pattern to match for files within input_dir
+    input_dir: location of the partitioned netcdfs to be joined
+    output_dir: location to move the joined output to
+    logger: logger object to post log messages to
+
+    Returns
+    -------
+    None
+    """
+    logger.info(f"Joining netCDF files {wildcard_pattern}...")
+    _run_cmd(
+        f"extract_data_join {wildcard_pattern}",
+        cwd=input_dir,
+        raise_on_error=True,
+    )
+
+    out_file_name = wildcard_pattern.replace("*.", "")
+    _, out_file_timestamp_dot_nc = out_file_name.split(".", maxsplit=1)
+
+    out_file_name = f"child_bry.{out_file_timestamp_dot_nc}"
+    out_file = input_dir / out_file_name
+    out_file.rename(output_dir / out_file_name)
+
+    ocean_file_name = f"ocean.{out_file_timestamp_dot_nc}"
+    ocean_file = input_dir / ocean_file_name
+    ocean_file.unlink(missing_ok=True)
+
+    remove_files(input_dir, wildcard_pattern)
+
+    logger.info(f"Done spatially joining {out_file}")
 
 
 class ROMSSimulation(Simulation):
@@ -1710,27 +1751,36 @@ class ROMSSimulation(Simulation):
 
         output_dir = self.fs_manager.output_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
-        unique_wildcards = {
-            Path(fname.stem).stem + ".*.nc"
-            for fname in files
-            if "_ext." not in fname.name
-        }
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
-        else:
-            self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
+            self.persist()
+            return
 
-            spatial_joiner = partial(
-                _ncjoin_wildcard,
-                logger=self.log,
+        self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
+
+        def _spatial_join(wildcard_pattern: str) -> None:
+            """Choose and execute correct joining function for the file type."""
+            joiner = (
+                _extract_data_join_wildcard
+                if "ext" in wildcard_pattern
+                else _ncjoin_wildcard
+            )
+            joiner(
+                wildcard_pattern,
                 input_dir=self.fs_manager.output_dir,
                 output_dir=self.fs_manager.joined_output_dir,
+                logger=self.log,
             )
 
-            nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
-            with ThreadPoolExecutor(max_workers=nprocs) as executor:
-                results = executor.map(spatial_joiner, unique_wildcards)
-                _ = [r for r in results]  # exhaust iterator
+        nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
+        unique_wildcards = {
+            str(Path(fname.stem).with_suffix(".*.nc")) for fname in files
+        }
+
+        with ThreadPoolExecutor(max_workers=nprocs) as executor:
+            # list() exhausts the returned iterator, which is needed to surface any errors
+            # that were raised in the threaded join operations
+            list(executor.map(_spatial_join, unique_wildcards))
 
         self.persist()
 
