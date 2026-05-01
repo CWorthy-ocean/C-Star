@@ -90,6 +90,7 @@ Bug Fixes
 - Fix failure to handle SLURM timeout status (`#508 <https://github.com/CWorthy-ocean/C-Star/pull/508>`_)
 - Generalize OverrideTransform for non-ROMS application types (`#500 <https://github.com/CWorthy-ocean/C-Star/pull/500>`_)
 - Create work-dir earlier to avoid failure when making sym-links for CDR/nesting files. (`#513 <https://github.com/CWorthy-ocean/C-Star/pull/513>`_)
+- File system's `.clear()` method now correctly clears the `work` directory (`#516 <https://github.com/CWorthy-ocean/C-Star/pull/516>`_)
 
 Improvements
 ~~~~~~~~~~~~
