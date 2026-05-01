@@ -6,10 +6,10 @@ import pytest
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.system.migration import (
-    BlueprintMigrationManager,
     # BlueprintVersionAdapter2025v1,
     # ConversionPlan,
     RawModelVersionAdapterType,
+    RomsBlueprintMigration,
     SchemaMigration,
 )
 
@@ -21,12 +21,12 @@ def test_migration_simple_plan() -> None:
 
     bp0 = {"version": src_version_exp}
 
-    migrator = BlueprintMigrationManager()
+    migrator = RomsBlueprintMigration()
 
     # static target avoids the test planning multiple steps as migration count grows.
     with mock.patch.object(
-        BlueprintMigrationManager,
-        "latest",
+        RomsBlueprintMigration,
+        "LATEST",
         mock.PropertyMock(return_value=tgt_version_exp),
     ):
         src_version, tgt_version, plan = migrator.plan(bp0)
@@ -43,13 +43,13 @@ def test_migration_to_unknown_target() -> None:
 
     bp0 = {"version": src_version_exp}
 
-    migrator = BlueprintMigrationManager()
+    migrator = RomsBlueprintMigration()
 
     with (
         # simulate failure to add the latest target to `BlueprintMigrationManager`.
         mock.patch.object(
-            BlueprintMigrationManager,
-            "latest",
+            RomsBlueprintMigration,
+            "LATEST",
             mock.PropertyMock(return_value=tgt_version_exp),
         ),
         pytest.raises(
@@ -67,7 +67,7 @@ def test_migration_from_unknown_source() -> None:
 
     bp0 = {"version": src_version_exp}
 
-    migrator = BlueprintMigrationManager()
+    migrator = RomsBlueprintMigration()
 
     # simulate failure to add the correct source & target to a migration.
     with pytest.raises(
@@ -184,13 +184,13 @@ def test_migration_intermediate_multistep(
     # shuffle to ensure order in the converters list doesn't matter
     random.shuffle(converters)
 
-    migrator = BlueprintMigrationManager(converters)
+    migrator = RomsBlueprintMigration(converters)
 
     with (
         # simulate failure to add the latest target to `BlueprintMigrationManager`.
         mock.patch.object(
-            BlueprintMigrationManager,
-            "latest",
+            RomsBlueprintMigration,
+            "LATEST",
             mock.PropertyMock(return_value=tgt_version_exp),
         ),
     ):

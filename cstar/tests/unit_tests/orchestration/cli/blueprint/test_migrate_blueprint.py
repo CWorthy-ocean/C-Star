@@ -5,7 +5,7 @@ from typer.testing import CliRunner
 from cstar.cli.blueprint.migrate import ARG_OUTPUT_PATH_SHORT, app
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.serialization import deserialize
-from cstar.system.migration import BlueprintMigrationManager
+from cstar.system.migration import RomsBlueprintMigration
 
 
 def test_blueprint_migrate_file_dne(tmp_path: Path) -> None:
@@ -47,9 +47,9 @@ def test_blueprint_migrate_default_output(
     bp_templates_dir: Path,
 ) -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
-    blueprint is executed.
+    blueprint is migrated.
     """
-    latest = BlueprintMigrationManager.latest
+    latest = RomsBlueprintMigration.LATEST
     work_dir = tmp_path / "subdir"
     work_dir.mkdir(parents=True)
 
@@ -80,8 +80,8 @@ def test_blueprint_migrate_custom_output(
     tmp_path: Path,
     bp_templates_dir: Path,
 ) -> None:
-    """Verify that a URL the output path specified by the user is honored."""
-    latest = BlueprintMigrationManager.latest
+    """Verify that an output path specified by the user is honored."""
+    latest = RomsBlueprintMigration.LATEST
     work_dir = tmp_path / "subdir"
     work_dir.mkdir(parents=True)
 
@@ -89,11 +89,14 @@ def test_blueprint_migrate_custom_output(
     versioned_file_name = "blueprint.2025.1.yaml"
     bp_2025_1 = bp_templates_dir / versioned_file_name
     bp_path = work_dir / f"{bp_stem}.yaml"
-    bp_path.write_text(bp_2025_1.read_text())
+    content = bp_2025_1.read_text()
+    content = content.replace("application: sleep", "application: roms_marbl")
+    bp_path.write_text(content)
 
     expected_output_path = work_dir / f"{bp_stem}_{latest}.yaml"
 
     runner = CliRunner()
+
     result = runner.invoke(
         app,
         [

@@ -60,10 +60,37 @@ ConversionPlan: t.TypeAlias = tuple[str, str, list[RawModelVersionAdapterType]]
 """A mutable list of version adapters."""
 
 
-class BlueprintMigrationManager:
+class AppAwareMetaclass(abc.ABCMeta):
+    """Metaclass used to add a class-level `application` attribute."""
+
+    _application: t.ClassVar[str] = ""
+
+    @property
+    def application(cls) -> str:
+        return cls._application
+
+
+class Migration(metaclass=AppAwareMetaclass):
+    @abc.abstractmethod
+    def plan(self, dumped: dict[str, t.Any]) -> ConversionPlan:
+        """Identify the upgrade path."""
+        ...
+
+    @abc.abstractmethod
+    def adapt(self, dumped: dict[str, t.Any]) -> dict[str, t.Any]:
+        """Execute the upgrade path."""
+        ...
+
+
+class RomsBlueprintMigration(Migration):
+    _application: t.Literal["roms_marbl"] = "roms_marbl"
+    """The registered application name for the blueprint."""
     converters: list[RawModelVersionAdapterType]
-    oldest: t.Final[str] = "2025.1"
-    latest: t.Final[str] = "2026.1"
+    """The registered migrations for the blueprint."""
+    INITIAL: t.ClassVar[t.Literal["2025.1"]] = "2025.1"
+    """The default version number to use if the blueprint omits it."""
+    LATEST: t.ClassVar[t.Literal["2026.1"]] = "2026.1"
+    """The schema version the migrator currently targets."""
 
     map: t.Final[ConverterMap]
 
@@ -83,17 +110,19 @@ class BlueprintMigrationManager:
         return results
 
     def plan(self, dumped: dict[str, t.Any]) -> ConversionPlan:
-        """Identify the upgrade path."""
+        """Execute the upgrade path."""
         plan: list[RawModelVersionAdapterType] = []
-        start_at_version = t.cast("str", dumped.get("version", self.oldest))
+        start_at_version = t.cast(
+            "str", dumped.get("version", RomsBlueprintMigration.INITIAL)
+        )
         limit = 20
         current_version = start_at_version
 
-        while limit > 0 and current_version != self.latest:
+        while limit > 0 and current_version != self.LATEST:
             limit -= 1
             options = [(x, y) for (x, y) in self.map if x == current_version]
             if not options:
-                msg = f"No migration adapter from {start_at_version!r} to {self.latest}"
+                msg = f"No migration adapter from {start_at_version!r} to {self.LATEST}"
                 raise CstarExpectationFailed(msg)
 
             # TODO: either use recursion to pop back to a path or use networkx
@@ -103,12 +132,12 @@ class BlueprintMigrationManager:
             adapter_type = self.map[(opt_source, opt_target)]
             plan.append(adapter_type)
 
-        is_planned = current_version != BlueprintMigrationManager.latest
+        is_planned = current_version != RomsBlueprintMigration.LATEST
         if is_planned:
-            msg = f"Incomplete migration from {start_at_version!r} to {self.latest}"
+            msg = f"Incomplete migration from {start_at_version!r} to {self.LATEST}"
             raise CstarExpectationFailed(msg)
 
-        return start_at_version, self.latest, plan
+        return start_at_version, self.LATEST, plan
 
     def adapt(self, dumped: dict[str, t.Any]) -> dict[str, t.Any]:
         v_source, v_target, plan = self.plan(dumped)

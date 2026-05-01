@@ -11,7 +11,7 @@ from cstar.orchestration.serialization import (
     serialize,
     validate_serialized_entity,
 )
-from cstar.system.migration import BlueprintMigrationManager
+from cstar.system.migration import Migration, RomsBlueprintMigration
 
 app = typer.Typer()
 
@@ -60,12 +60,17 @@ def migrate(
     ] = None,
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
-    migrator = BlueprintMigrationManager()
-
     result = validate_serialized_entity(path, Blueprint)
+    application: str = "unknown"
     if result.item is None:
         raise typer.BadParameter(result.error_msg)
+    else:
+        application = result.item.application
 
+    migrators: list[type[Migration]] = [RomsBlueprintMigration]
+    klass = next(filter(lambda x: x.application == application, migrators))
+
+    migrator = klass()
     with local_copy(path) as local_path:
         dumped = result.item.model_dump()
 
