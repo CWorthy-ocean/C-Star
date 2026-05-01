@@ -56,8 +56,17 @@ RawModelVersionAdapterType: t.TypeAlias = type[SchemaMigration]
 """An adapter that converts the content of a dumped model into another version."""
 ConverterMap: t.TypeAlias = Mapping[tuple[str, str], RawModelVersionAdapterType]
 """A mapping of (source version, target version) keys to adapters."""
-ConversionPlan: t.TypeAlias = tuple[str, str, list[RawModelVersionAdapterType]]
-"""A mutable list of version adapters."""
+
+
+class ConversionPlan(t.NamedTuple):
+    """Results describing the plan that will be used to complete a migration."""
+
+    source: str
+    """The version of the schema that the document will be upgraded from."""
+    target: str
+    """The version of the schema that the document will be upgraded to."""
+    plan: list[RawModelVersionAdapterType]
+    """The ordered list of adapaters to apply to complete the migration."""
 
 
 class AppAwareMetaclass(abc.ABCMeta):
@@ -149,7 +158,7 @@ class RomsBlueprintMigration(Migration):
             msg = f"Incomplete migration from {start_at_version!r} to {self.LATEST}"
             raise CstarUnsupportedMigrationError(msg)
 
-        return start_at_version, self.LATEST, plan
+        return ConversionPlan(start_at_version, self.LATEST, plan)
 
     def adapt(self, dumped: dict[str, t.Any]) -> dict[str, t.Any]:
         """Execute the plan to upgrade the blueprint to the latest version.
