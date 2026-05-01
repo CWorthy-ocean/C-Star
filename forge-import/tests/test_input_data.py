@@ -213,7 +213,10 @@ def sample_roms_marbl_input_data(
     """Create a RomsMarblInputData instance for testing."""
     blueprint_dir = tmp_path / "blueprints"
     blueprint_dir.mkdir(parents=True, exist_ok=True)
-    
+
+    data_dir = tmp_path / "input_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
     return RomsMarblInputData(
         domain_name="test_grid",
         start_date=datetime(2012, 1, 1),
@@ -224,7 +227,8 @@ def sample_roms_marbl_input_data(
         source_data=sample_source_data,
         blueprint_dir=blueprint_dir,
         partitioning=sample_partitioning,
-        use_dask=False
+        use_dask=False,
+        input_data_dir_override=data_dir
     )
 
 
@@ -856,6 +860,7 @@ class TestRomsMarblInputDataGeneration:
     def test_generate_tidal_forcing_reuse_skips_roms_tools_calls(
         self, mock_tf_class, sample_roms_marbl_input_data, tmp_path
     ):
+
         """When NetCDF and YAML exist, do not construct TidalForcing."""
         with patch("cson_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data.input_data_dir = (
@@ -865,7 +870,7 @@ class TestRomsMarblInputDataGeneration:
             nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="tidal")
             nc_path.touch()
             yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.tidal")
-            yaml_path.write_text("roms_tools_version: test\ntest: 1\n")
+            yaml_path.write_text("TidalForcing: \n  ntides: 10\n")
 
             sample_roms_marbl_input_data._generate_tidal_forcing(
                 key="forcing.tidal",
