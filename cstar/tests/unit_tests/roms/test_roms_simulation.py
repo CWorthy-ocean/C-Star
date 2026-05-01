@@ -1590,7 +1590,7 @@ class TestProcessingAndExecution:
 
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
-                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} {sim.exe_path} {runtime_code_dir}/ROMSTest_PATCHED.in",
+                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} ./roms cstar_generated_roms.in",
                 run_path=sim.fs_manager.work_dir,
                 output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
@@ -1679,7 +1679,7 @@ class TestProcessingAndExecution:
             # Call `run()` without explicitly passing `queue_name` and `walltime`
             execution_handler = sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
-                commands=f"{exp_mpi_prefix} -n 6 {build_dir / 'roms'} {runtime_code_dir}/ROMSTest_PATCHED.in",
+                commands=f"{exp_mpi_prefix} -n 6 ./roms cstar_generated_roms.in",
                 job_name=None,
                 cpus=6,
                 account_key="some_key",

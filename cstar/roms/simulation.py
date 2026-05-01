@@ -1637,23 +1637,22 @@ class ROMSSimulation(Simulation):
 
         # we run ROMS in the work dir
         run_path = self.fs_manager.work_dir
+        runtime_settings_fname = "cstar_generated_roms.in"
 
-        # save modified roms.in and rename original for clarity
-        old_runtime_settings_path = self.fs_manager.runtime_code_dir / self._in_file
-        final_runtime_settings_file = (
-            old_runtime_settings_path.parent / f"{self.name}_PATCHED.in"
-        )
+        # save modified roms.in in the work directory
+        final_runtime_settings_file = self.fs_manager.work_dir / runtime_settings_fname
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
-
-        old_runtime_settings_path.rename(
-            old_runtime_settings_path.parent
-            / f"{old_runtime_settings_path.stem}_ORIGINAL.in"
-        )
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
         script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
+
+        # symlink roms exe into work dir for ability to easily rerun from the correct
+        # location if debugging
+
+        roms_symlink_path = self.fs_manager.work_dir / self.exe_path.name
+        roms_symlink_path.symlink_to(self.exe_path)
 
         ## 2: RUN ROMS
 
@@ -1662,8 +1661,8 @@ class ROMSSimulation(Simulation):
                 f"{cstar_sysmgr.environment.mpi_exec_prefix}",
                 "-n",
                 f"{self.discretization.n_procs_tot}",
-                f"{self.exe_path}",
-                f"{final_runtime_settings_file}",
+                "./roms",
+                f"{runtime_settings_fname}",
             ]
         )
 
