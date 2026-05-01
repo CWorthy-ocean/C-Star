@@ -47,7 +47,7 @@ def migrate(
         str,
         typer.Argument(
             help="Path to a blueprint file.",
-            # callback=path_callback,
+            callback=path_callback,
         ),
     ],
     output: t.Annotated[
