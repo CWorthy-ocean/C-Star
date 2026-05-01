@@ -2,7 +2,7 @@ import abc
 import typing as t
 from collections.abc import Mapping
 
-from cstar.base.exceptions import CstarError, CstarExpectationFailed
+from cstar.base.exceptions import CstarError
 from cstar.orchestration.adapter import ModelAdapter
 
 
@@ -82,6 +82,12 @@ class Migration(metaclass=AppAwareMetaclass):
         ...
 
 
+class CstarMigrationError(Exception): ...
+
+
+class CstarUnsupportedMigrationError(CstarMigrationError): ...
+
+
 class RomsBlueprintMigration(Migration):
     _application: t.Literal["roms_marbl"] = "roms_marbl"
     """The registered application name for the blueprint."""
@@ -110,7 +116,13 @@ class RomsBlueprintMigration(Migration):
         return results
 
     def plan(self, dumped: dict[str, t.Any]) -> ConversionPlan:
-        """Execute the upgrade path."""
+        """Execute the upgrade path.
+
+        Raises
+        ------
+        CstarUnsupportedMigrationError
+            If unable to identify a complete migration upgrade path.
+        """
         plan: list[RawModelVersionAdapterType] = []
         start_at_version = t.cast(
             "str", dumped.get("version", RomsBlueprintMigration.INITIAL)
@@ -123,7 +135,7 @@ class RomsBlueprintMigration(Migration):
             options = [(x, y) for (x, y) in self.map if x == current_version]
             if not options:
                 msg = f"No migration adapter from {start_at_version!r} to {self.LATEST}"
-                raise CstarExpectationFailed(msg)
+                raise CstarUnsupportedMigrationError(msg)
 
             # TODO: either use recursion to pop back to a path or use networkx
             opt_source, opt_target = options.pop(0)
@@ -135,11 +147,18 @@ class RomsBlueprintMigration(Migration):
         is_planned = current_version != RomsBlueprintMigration.LATEST
         if is_planned:
             msg = f"Incomplete migration from {start_at_version!r} to {self.LATEST}"
-            raise CstarExpectationFailed(msg)
+            raise CstarUnsupportedMigrationError(msg)
 
         return start_at_version, self.LATEST, plan
 
     def adapt(self, dumped: dict[str, t.Any]) -> dict[str, t.Any]:
+        """Execute the plan to upgrade the blueprint to the latest version.
+
+        Raises
+        ------
+        CstarUnsupportedMigrationError
+            If unable to identify a complete migration upgrade path.
+        """
         v_source, v_target, plan = self.plan(dumped)
         model = dumped
         for klass in plan:

@@ -4,10 +4,8 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.system.migration import (
-    # BlueprintVersionAdapter2025v1,
-    # ConversionPlan,
+    CstarUnsupportedMigrationError,
     RawModelVersionAdapterType,
     RomsBlueprintMigration,
     SchemaMigration,
@@ -46,14 +44,15 @@ def test_migration_to_unknown_target() -> None:
     migrator = RomsBlueprintMigration()
 
     with (
-        # simulate failure to add the latest target to `BlueprintMigrationManager`.
+        # simulate failure to add a migration for latest version (or
+        # an incorrect update to XxxBlueprintMigration.application).
         mock.patch.object(
             RomsBlueprintMigration,
             "LATEST",
             mock.PropertyMock(return_value=tgt_version_exp),
         ),
         pytest.raises(
-            CstarExpectationFailed,
+            CstarUnsupportedMigrationError,
             match="migration adapter",
         ),
     ):
@@ -69,9 +68,9 @@ def test_migration_from_unknown_source() -> None:
 
     migrator = RomsBlueprintMigration()
 
-    # simulate failure to add the correct source & target to a migration.
+    # simulate failure to add a migration adapter for any version
     with pytest.raises(
-        CstarExpectationFailed,
+        CstarUnsupportedMigrationError,
         match="migration adapter",
     ):
         _ = migrator.plan(bp0)
@@ -175,19 +174,20 @@ def test_migration_intermediate_multistep(
 
     bp0 = {"version": src_version_exp}
 
+    # pass in the converters instead of relying on the default
     converters: list[RawModelVersionAdapterType] = [
         BPTestAdapterV0,
         BPTestAdapterV1,
         BPTestAdapterV2,
         BPTestAdapterV3,
     ]
-    # shuffle to ensure order in the converters list doesn't matter
+    # shuffle to confirm that order in the converters list doesn't matter
     random.shuffle(converters)
 
     migrator = RomsBlueprintMigration(converters)
 
     with (
-        # simulate failure to add the latest target to `BlueprintMigrationManager`.
+        # Make the RomsBlueprintMigration work with the adapters defined in the tests.
         mock.patch.object(
             RomsBlueprintMigration,
             "LATEST",
