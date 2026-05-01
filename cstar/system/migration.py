@@ -3,7 +3,6 @@ import typing as t
 from collections.abc import Mapping
 
 from cstar.base.adapter import ModelAdapter
-from cstar.base.exceptions import CstarError
 
 
 class SchemaMigration(ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
@@ -165,8 +164,8 @@ class RomsBlueprintMigration(Migration):
 
         Raises
         ------
-        CstarUnsupportedMigrationError
-            If unable to identify a complete migration upgrade path.
+        CstarMigrationError
+            If unable to complete the migration.
         """
         v_source, v_target, plan = self.plan(dumped)
         model = dumped
@@ -175,7 +174,7 @@ class RomsBlueprintMigration(Migration):
             result = converter.adapt()
             if not result:
                 msg = f"Schema migration from {v_source!r} to {v_target!r} failed."
-                raise CstarError(msg)
+                raise CstarMigrationError(msg)
             model = result
 
         return model
