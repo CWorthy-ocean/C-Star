@@ -203,9 +203,8 @@ class BlueprintMigration(Migration):
             msg = f"No schema bounds registered for application {application!r}"
             raise CstarUnsupportedMigrationError(msg)
 
-        initial_version = str(
-            dumped.get("version", self.schema_bounds[application]["min"]),
-        )
+        found_version = str(dumped.get("version", "")).strip()
+        initial_version = found_version or self.schema_bounds[application]["min"]
         version = initial_version
         goal = self.schema_bounds[application]["max"]
 

@@ -465,6 +465,7 @@ def hello_world_bp_content(hello_world_default_target: str) -> str:
         application: hello_world
         state: draft
         target: '{hello_world_default_target}'
+        version: '2026.1'
         """)
 
 
