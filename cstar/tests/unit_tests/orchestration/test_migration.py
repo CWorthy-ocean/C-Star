@@ -50,7 +50,6 @@ def test_migration_no_migration_needed(hello_world_bp_path: Path) -> None:
     src_version_exp = APP_HW_SCHEMA_2026_1
     tgt_version_exp = src_version_exp
 
-    # bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_ROMS}
     bp = deserialize(hello_world_bp_path, HelloWorldBlueprint)
     migrator = BlueprintMigration()
 
