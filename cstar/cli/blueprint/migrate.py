@@ -55,7 +55,7 @@ def display_summary(bp_path: Path, migration_plan: MigrationPlan) -> None:
     padding = (0, 1)
 
     table = Table(
-        Column(header="Step", justify="right"),
+        Column(header="Step", justify="center"),
         Column(header="From", justify="center"),
         Column(header="To", justify="center"),
         title=f"Migration Plan for [yellow]{bp_path.name}[/yellow]",
@@ -63,8 +63,8 @@ def display_summary(bp_path: Path, migration_plan: MigrationPlan) -> None:
         padding=padding,
         pad_edge=False,
         row_styles=["", "dim"],
-        min_width=60,
-        caption=f"Initial Schema: [green]{source}[/green], Final Schema: [red]{target}[/red]",
+        min_width=40,
+        caption=f"Initial Schema: [green]{source}[/green]\nFinal Schema: [red]{target}[/red]",
     )
 
     for i, adapter in enumerate(plan):
