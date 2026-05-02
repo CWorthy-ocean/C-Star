@@ -2,9 +2,12 @@ import typing as t
 from pathlib import Path
 
 import typer
+from rich.console import Console
+from rich.table import Column, Table
 
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLI_VERBOSE
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import is_flag_enabled
 from cstar.cli.common import dryrun_callback, verbose_callback
 from cstar.cli.workplan.shared import get_registered_bp
 from cstar.entrypoint.utils import (
@@ -15,12 +18,10 @@ from cstar.entrypoint.utils import (
 )
 from cstar.execution.file_system import is_remote_resource, local_copy
 from cstar.orchestration.models import Blueprint
-from cstar.orchestration.serialization import (
-    serialize,
-    validate_serialized_entity,
-)
-from cstar.system.migration import Migration, RomsBlueprintMigration
+from cstar.orchestration.serialization import serialize, validate_serialized_entity
+from cstar.system.migration import BlueprintMigration, MigrationPlan
 
+console = Console()
 app = typer.Typer()
 
 
@@ -32,6 +33,48 @@ The schema will be updated to the latest available version. If an output
 path is not provided, it will be written next to the existing
 file with the version number appended to the file name.
 """
+
+
+def display_summary(bp_path: Path, migration_plan: MigrationPlan) -> None:
+    """Display a summary of the migration plan.
+
+    Parameters
+    ----------
+    bp_path : Path
+        The path to the blueprint being migrated.
+    migration_plan : MigrationPlan
+        Details of the planned migration.
+    """
+    source, target, plan = migration_plan
+
+    if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
+        print(f"Migration from {source!r} to {target!r} will take {len(plan)} steps.")
+        return
+
+    source, target, plan = migration_plan
+    padding = (0, 1)
+
+    table = Table(
+        Column(header="Step", justify="right"),
+        Column(header="From", justify="center"),
+        Column(header="To", justify="center"),
+        title=f"Migration Plan for [yellow]{bp_path.name}[/yellow]",
+        show_lines=True,
+        padding=padding,
+        pad_edge=False,
+        row_styles=["", "dim"],
+        min_width=60,
+        caption=f"Initial Schema: [green]{source}[/green], Final Schema: [red]{target}[/red]",
+    )
+
+    for i, adapter in enumerate(plan):
+        table.add_row(
+            str(i + 1),
+            adapter.source(),
+            adapter.target(),
+        )
+
+    console.print(table)
 
 
 def path_callback(value: str | None) -> str | None:
@@ -97,29 +140,25 @@ def migrate(
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
     result = validate_serialized_entity(path, Blueprint)
-    application: str = "unknown"
     if result.item is None:
         raise typer.BadParameter(result.error_msg)
-    else:
-        application = result.item.application
 
-    migrators: list[type[Migration]] = [RomsBlueprintMigration]
-    klass = next(filter(lambda x: x.application == application, migrators))
-
-    migrator = klass()
+    migrator = BlueprintMigration()
     with local_copy(path) as local_path:
         dumped = result.item.model_dump()
 
         try:
-            source, target, plan = migrator.plan(dumped)
+            plan = migrator.plan(dumped)
         except CstarExpectationFailed as ex:
             msg = f"Unable to complete migration plan: {ex}"
             raise typer.BadParameter(msg) from ex
 
-        print(f"Migration from {source!r} to {target!r} will take {len(plan)} steps.")
+        display_summary(local_path, plan)
+        if dry_run:
+            raise typer.Exit(0)
 
         try:
-            updated = migrator.adapt(dumped)
+            updated = migrator.migrate(dumped)
         except CstarExpectationFailed as ex:
             msg = f"Unable to complete migration: {ex}"
             raise typer.BadParameter(msg) from ex
@@ -127,7 +166,7 @@ def migrate(
             print("Migration complete")
 
         persist_to = (
-            Path(f"./{local_path.stem}_{target}{local_path.suffix}")
+            Path(f"./{local_path.stem}_{plan.target}{local_path.suffix}")
             if output is None
             else Path(output)
         )
