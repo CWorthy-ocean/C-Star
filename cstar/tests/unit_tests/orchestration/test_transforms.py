@@ -268,9 +268,11 @@ def test_continuance_transform_path_dne() -> None:
         _ = ContinuanceTransform({"path": "./dir-that-dne"})
 
 
+@pytest.mark.parametrize("pad_size", range(1, 10))
 def test_continuance_transform_happy_path(
     single_step_workplan: Workplan,
     mock_sim_output_dir: tuple[Path, Path, Path],
+    pad_size: int,
 ) -> None:
     """Verify that applying a well-formed continuance transform causes the
     blueprint initial conditions to be updated.
@@ -282,8 +284,21 @@ def test_continuance_transform_happy_path(
     mock_sim_output_dir : Path
         Paths to mocked simulation outputs; used here to pass a valid path
         to the continuance transform (containing files meeting glob pattern *_rst.nc)
+    pad_size : int
+        Used to vary the amount of zero padding in the partition segment of the file
+        name. This ensures that the restart file search can locate files regardless
+        of the number of partitions.
     """
     _, continue_from_dir, _ = mock_sim_output_dir
+
+    for seg_id in ["000", "001", "002"]:
+        rf_glob = f"*_rst.*.{seg_id}.nc"
+        reset_file_path = next(continue_from_dir.rglob(rf_glob))
+        name = reset_file_path.name.replace(
+            f"{seg_id}.nc",
+            f"{str(int(seg_id)).zfill(pad_size)}.nc",
+        )
+        reset_file_path = reset_file_path.rename(reset_file_path.with_name(name))
 
     transform = ContinuanceTransform({"path": str(continue_from_dir)})
     step = single_step_workplan.steps[0]
@@ -578,9 +593,8 @@ def test_template_fill_combined_resolvers(
         pytest.param("foo_rst.0000000000000a.000.nc", id="non-numeric ts"),
         pytest.param("foo_rst.000000000000000.000.nc", id="ts too long"),
         pytest.param("foo_rst.20260401000000..nc", id="partition empty"),
-        pytest.param("foo_rst.20260401000000.00.nc", id="partition too short"),
+        pytest.param("foo_rst.20260401000000.0000000000.nc", id="10 partition chars"),
         pytest.param("foo_rst.20260401000000.00a.nc", id="non-numeric partition"),
-        pytest.param("foo_rst.20260401000000.0000.nc", id="partition too long"),
     ],
 )
 def test_reset_file_bad_path(tmp_path: Path, name: str) -> None:
@@ -596,6 +610,8 @@ def test_reset_file_bad_path(tmp_path: Path, name: str) -> None:
     [
         pytest.param("foo_rst.20260401000000.000.nc", True, id="parted"),
         pytest.param("foo_rst.20260401000000.001.nc", True, id="non-start segment"),
+        pytest.param("foo_rst.20260401000000.1.nc", True, id="no partition padding"),
+        pytest.param("foo_rst.20260401000000.999999999.nc", True, id="max 0-padding"),
         pytest.param("foo_rst.20260401000000.nc", False, id="unparted"),
     ],
 )
@@ -671,15 +687,15 @@ def test_reset_file_from_parts_unparted(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("segment", "exp_segment"),
     [
-        pytest.param(0, ".000.", id="edge-case, 0-th segment"),
-        pytest.param(1, ".001.", id="valid non-boundary index 1"),
-        pytest.param(123, ".123.", id="valid non-boundary index 123"),
-        pytest.param(42, ".042.", id="two-digit padding"),
-        pytest.param(999, ".999.", id="edge-case, final 3-digit segment"),
+        pytest.param("0", ".0.", id="edge-case, 0-th segment"),
+        pytest.param("1", ".1.", id="valid non-boundary index 1"),
+        pytest.param("123", ".123.", id="valid non-boundary index 123"),
+        pytest.param("042", ".042.", id="two-digit padding"),
+        pytest.param("999", ".999.", id="edge-case, final 3-digit segment"),
     ],
 )
 def test_reset_file_from_parts_parted(
-    tmp_path: Path, segment: int, exp_segment: str
+    tmp_path: Path, segment: str, exp_segment: str
 ) -> None:
     """Verify that a ResetFile instance is created with a segment ID in the
     path if it is supplied.

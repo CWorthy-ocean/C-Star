@@ -592,9 +592,16 @@ class RomsMarblTimeSplitter(Transform):
             # use dependency on the prior substep to chain all the dynamic steps
             depends_on = [child_step.name]
 
+            # determine padding on partition segment of name from number of partitions
+            partition_segment: str | None = None
+            if partitioning := bp_copy.partitioning:
+                num_partitions = partitioning.n_procs_x * partitioning.n_procs_y
+                pad_size = len(str(num_partitions - 1))
+                partition_segment = "0".zfill(pad_size)
+
             # Use the last restart file as initial conditions for the follow-up step
             restart_file = RestartFile.from_parts(
-                output_root_name, ed, 0, child_fs.output_dir
+                output_root_name, ed, partition_segment, child_fs.output_dir
             )
 
             # use output dir of the last step as the input for the next step
@@ -759,8 +766,8 @@ class RestartFile(BaseModel):
     """The expected file extension for a restart file."""
     FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
     """The expected timestamp format in the restart file name"""
-    PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_rst\.(\d{14})(?:\.(\d{3}))?\.nc$"]] = (
-        r"^(.*?)_rst\.(\d{14})(?:\.(\d{3}))?\.nc$"
+    PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
+        r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
     )
     """A regex identifying full restart or partitioned files."""
     SUFFIX: t.ClassVar[t.Literal["_rst"]] = "_rst"
@@ -792,7 +799,7 @@ class RestartFile(BaseModel):
             msg = f"No directory found at path: {search_path!r}"
             raise ValueError(msg)
 
-        if matches := sorted(search_path.rglob(f"*{cls.SUFFIX}.*.000.{cls.EXT}")):
+        if matches := sorted(search_path.rglob(f"*{cls.SUFFIX}.*.*.{cls.EXT}")):
             # prefer use of pre-partitioned data when available
             return RestartFile(path=matches[0])
 
@@ -810,7 +817,7 @@ class RestartFile(BaseModel):
         cls,
         base: str,
         timestamp: datetime,
-        segment: int | None = None,
+        segment: str | None = None,
         directory: Path | None = None,
     ) -> "RestartFile":
         """Create a ResetFile from components.
@@ -821,8 +828,8 @@ class RestartFile(BaseModel):
             The base name for the restart file.
         timestamp : datetime
             The timestamp for the restart file.
-        segment : int | None
-            The segment number if partitioned, otherwise `None`.
+        segment : str | None
+            The 0-padded segment number if partitioned, otherwise `None`.
         directory : Path | None
             The directory to contain the file. If not specified, defaults to cwd.
 
@@ -836,7 +843,7 @@ class RestartFile(BaseModel):
             If the search path does not exist or contains no recognizable restart files.
         """
         ts = timestamp.strftime(cls.FMT_TS)
-        parted_clause = f".{segment:03d}" if segment is not None else ""
+        parted_clause = f".{segment}" if segment is not None else ""
         filename = f"{base}{cls.SUFFIX}.{ts}{parted_clause}.{cls.EXT}"
 
         if directory:
