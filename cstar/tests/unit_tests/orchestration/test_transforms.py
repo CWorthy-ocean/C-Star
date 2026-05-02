@@ -627,12 +627,17 @@ def test_reset_file_happy_path(
     assert rf.is_partitioned == expected_is_parted
 
 
-def test_reset_file_find(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "pad_size",
+    range(1, 10),
+)
+def test_reset_file_find(tmp_path: Path, pad_size: int) -> None:
     """Verify that ResetFile.find locates a reset file when expected."""
     now = datetime.now(tz=timezone.utc)
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
-    reset_path = search_path / f"foo_rst.{now.strftime('%Y%m%d%H%M%S')}.000.nc"
+    segment = "0".zfill(pad_size)
+    reset_path = search_path / f"foo_rst.{now.strftime('%Y%m%d%H%M%S')}.{segment}.nc"
     reset_path.touch()
 
     # confirm root of search path is searched
