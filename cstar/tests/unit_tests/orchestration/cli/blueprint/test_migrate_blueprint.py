@@ -8,7 +8,7 @@ from cstar.cli.blueprint.migrate import app
 from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.serialization import deserialize
-from cstar.system.migration import rm_bounds
+from cstar.system.migration import hw_bounds, rm_bounds
 
 
 @pytest.fixture
@@ -95,6 +95,23 @@ def test_blueprint_migrate_default_output(blueprint_2025_1_sleep: Path) -> None:
     assert bp
     # the test writes to current working directory. clean up.
     expected_output_path.unlink()
+
+
+def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
+    """Verify that the user is informed that no migration is necessary
+    when a blueprint has the latest schema version.
+    """
+    latest = hw_bounds["max"]
+    bp_path = hello_world_bp_path
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [bp_path.as_posix()],
+        color=False,
+    )
+    assert "uses the latest" in result.stdout
+    assert latest in result.stdout
 
 
 @pytest.mark.parametrize("output_param", [ARG_OUTPUT_SHORT, ARG_OUTPUT_LONG])

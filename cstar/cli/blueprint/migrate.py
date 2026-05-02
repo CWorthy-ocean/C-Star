@@ -154,6 +154,11 @@ def migrate(
             raise typer.BadParameter(msg) from ex
 
         display_summary(local_path, plan)
+
+        if len(plan.plan) == 0:
+            print(f"The blueprint uses the latest schema ({plan.source})")
+            raise typer.Exit(0)
+
         if dry_run:
             raise typer.Exit(0)
 

@@ -1,10 +1,14 @@
 import random
 import typing as t
+from pathlib import Path
 from unittest import mock
 
 import pytest
 
+from cstar.entrypoint.worker.hello_app import HelloWorldBlueprint
+from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import (
+    APP_HW_SCHEMA_2026_1,
     APP_ROMS_MARBL_SCHEMA_2025_1,
     APP_ROMS_MARBL_SCHEMA_2026_1,
     BlueprintMigration,
@@ -39,6 +43,23 @@ def test_migration_simple_plan() -> None:
     assert src_version == src_version_exp
     assert tgt_version == tgt_version_exp
     assert plan
+
+
+def test_migration_no_migration_needed(hello_world_bp_path: Path) -> None:
+    """Verify a blueprint that is already at the latest schema version is not modified."""
+    src_version_exp = APP_HW_SCHEMA_2026_1
+    tgt_version_exp = src_version_exp
+
+    # bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_ROMS}
+    bp = deserialize(hello_world_bp_path, HelloWorldBlueprint)
+    migrator = BlueprintMigration()
+
+    # static target avoids the test planning multiple steps as migration count grows.
+    src_version, tgt_version, plan = migrator.plan(bp.model_dump())
+
+    assert src_version == src_version_exp
+    assert tgt_version == tgt_version_exp
+    assert not plan
 
 
 def test_migration_with_unregistered_application() -> None:
