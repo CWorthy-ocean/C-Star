@@ -3,8 +3,9 @@ from pathlib import Path
 
 import typer
 
+from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLI_VERBOSE
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.cli.common import verbose_callback
+from cstar.cli.common import dryrun_callback, verbose_callback
 from cstar.cli.workplan.shared import get_registered_bp
 from cstar.entrypoint.utils import (
     ARG_DRY_RUN,
@@ -45,6 +46,18 @@ def path_callback(value: str | None) -> str | None:
     return value
 
 
+def migrate_dryrun_callback(ctx: typer.Context, value: bool | None) -> bool | None:
+    """Display informational message to user if a parameter conflict is found."""
+    value = dryrun_callback(ctx, value)
+
+    output: str | None = ctx.params.get("output", None)
+
+    if value is not None and value and output is not None:
+        print(f"Ignoring output path {output!r} during dry-run")
+
+    return value
+
+
 @app.command(name="migrate", help=HELP_LONG, short_help=HELP_SHORT)
 def migrate(
     path: t.Annotated[
@@ -68,6 +81,8 @@ def migrate(
         typer.Option(
             ARG_DRY_RUN,
             help="Generate the migration plan without executing it.",
+            callback=migrate_dryrun_callback,
+            envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
     ] = False,
     verbose: t.Annotated[
@@ -76,6 +91,7 @@ def migrate(
             ARG_VERBOSE,
             help="Enable printing verbose migration outputs.",
             callback=verbose_callback,
+            envvar=ENV_CSTAR_CLI_VERBOSE,
         ),
     ] = False,
 ) -> None:

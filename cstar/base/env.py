@@ -169,6 +169,17 @@ ENV_CSTAR_LOG_LEVEL: t.Annotated[
 """Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
 
 
+ENV_CSTAR_CLI_DRY_RUN: t.Annotated[
+    t.Literal["CSTAR_CLI_DRY_RUN"],
+    EnvVar(
+        "Set to `1` to short-circuit CLI operations after planning steps are completed",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_CLI_DRY_RUN"
+"""Set to `1` to short-circuit CLI operations after planning steps are completed."""
+
+
 ENV_CSTAR_CLI_VERBOSE: t.Annotated[
     t.Literal["CSTAR_CLI_VERBOSE"],
     EnvVar(
