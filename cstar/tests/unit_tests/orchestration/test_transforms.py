@@ -597,8 +597,8 @@ def test_template_fill_combined_resolvers(
         pytest.param("foo_rst.20260401000000.00a.nc", id="non-numeric partition"),
     ],
 )
-def test_reset_file_bad_path(tmp_path: Path, name: str) -> None:
-    """Verify that `ResetFile` reports paths that do not meet reset file naming convention."""
+def test_restart_file_bad_path(tmp_path: Path, name: str) -> None:
+    """Verify that `RestartFile` reports paths that do not meet reset file naming convention."""
     mismatched_name_path = tmp_path / name
 
     with pytest.raises(ValueError, match="convention"):
@@ -615,12 +615,12 @@ def test_reset_file_bad_path(tmp_path: Path, name: str) -> None:
         pytest.param("foo_rst.20260401000000.nc", False, id="unparted"),
     ],
 )
-def test_reset_file_happy_path(
+def test_restart_file_happy_path(
     tmp_path: Path,
     name: str,
     expected_is_parted: bool,
 ) -> None:
-    """Verify that `ResetFile` handles good inputs correctly."""
+    """Verify that `RestartFile` handles good inputs correctly."""
     path = tmp_path / name
 
     rf = RestartFile(path=path)
@@ -631,8 +631,8 @@ def test_reset_file_happy_path(
     "pad_size",
     range(1, 10),
 )
-def test_reset_file_find(tmp_path: Path, pad_size: int) -> None:
-    """Verify that ResetFile.find locates a reset file when expected."""
+def test_restart_file_find(tmp_path: Path, pad_size: int) -> None:
+    """Verify that `RestartFile.find` locates a reset file when expected."""
     now = datetime.now(tz=timezone.utc)
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
@@ -651,8 +651,8 @@ def test_reset_file_find(tmp_path: Path, pad_size: int) -> None:
     assert reset_file.path == Path(reset_path).expanduser().resolve()
 
 
-def test_reset_file_find_dne(tmp_path: Path) -> None:
-    """Verify that ResetFile.find returns None when no files are found."""
+def test_restart_file_find_dne(tmp_path: Path) -> None:
+    """Verify that `RestartFile.find` returns None when no files are found."""
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
 
@@ -660,8 +660,8 @@ def test_reset_file_find_dne(tmp_path: Path) -> None:
     assert reset_file is None
 
 
-def test_reset_file_find_dne_notok(tmp_path: Path) -> None:
-    """Verify that ResetFile.find raises an exception when no files are found
+def test_restart_file_find_dne_notok(tmp_path: Path) -> None:
+    """Verify that `RestartFile.find` raises an exception when no files are found
     and find is passed `notfound_ok=False`.
     """
     search_path = tmp_path / "test-reset-file-find"
@@ -671,8 +671,8 @@ def test_reset_file_find_dne_notok(tmp_path: Path) -> None:
         _ = RestartFile.find(search_path, notfound_ok=False)
 
 
-def test_reset_file_from_parts_unparted(tmp_path: Path) -> None:
-    """Verify that a ResetFile instance is created without a segment ID in the
+def test_restart_file_from_parts_unparted(tmp_path: Path) -> None:
+    """Verify that a `RestartFile` instance is created without a segment ID in the
     path if it is not supplied.
     """
     now = datetime.now(tz=timezone.utc)
@@ -680,7 +680,7 @@ def test_reset_file_from_parts_unparted(tmp_path: Path) -> None:
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
 
-    reset_file = RestartFile.from_parts("test_reset_file_from_parts", now)
+    reset_file = RestartFile.from_parts("test_restart_file_from_parts", now)
 
     # confirm no empty segment is added
     assert ".000." not in reset_file.path.as_posix()
@@ -699,10 +699,10 @@ def test_reset_file_from_parts_unparted(tmp_path: Path) -> None:
         pytest.param("999", ".999.", id="edge-case, final 3-digit segment"),
     ],
 )
-def test_reset_file_from_parts_parted(
+def test_restart_file_from_parts_parted(
     tmp_path: Path, segment: str, exp_segment: str
 ) -> None:
-    """Verify that a ResetFile instance is created with a segment ID in the
+    """Verify that a `RestartFile` instance is created with a segment ID in the
     path if it is supplied.
     """
     now = datetime.now(tz=timezone.utc)
@@ -711,13 +711,13 @@ def test_reset_file_from_parts_parted(
     reset_path = search_path / f"foo_rst.{now.strftime('%Y%m%d%H%M%S')}.000.nc"
     reset_path.touch()
 
-    reset_file = RestartFile.from_parts("test_reset_file_from_parts", now, segment)
+    reset_file = RestartFile.from_parts("test_restart_file_from_parts", now, segment)
 
     assert exp_segment in reset_file.path.as_posix()
 
 
-def test_reset_file_from_parts_with_base(tmp_path: Path) -> None:
-    """Verify that a ResetFile instance is created with a segment ID in the
+def test_restart_file_from_parts_with_base(tmp_path: Path) -> None:
+    """Verify that a `RestartFile` instance is created with a segment ID in the
     path if it is supplied.
     """
     now = datetime.now(tz=timezone.utc)
@@ -753,12 +753,12 @@ def test_reset_file_from_parts_with_base(tmp_path: Path) -> None:
         ),
     ],
 )
-def test_reset_file_from_path(
+def test_restart_file_from_path(
     path: str,
     exp_partition: int | None,
     exp_is_partitioned: bool,
 ) -> None:
-    """Verify that ResetFile.__init__ results in the correct settings on the instance."""
+    """Verify that `RestartFile.__init__` results in the correct settings on the instance."""
     reset_path = Path(path)
     reset_file = RestartFile(path=reset_path)
 
@@ -766,7 +766,7 @@ def test_reset_file_from_path(
     assert reset_file.partition == exp_partition
 
 
-def test_reset_file_adapter(tmp_path: Path) -> None:
+def test_restart_file_adapter(tmp_path: Path) -> None:
     """Verify that a partitioned reset file contains the correct partition information
     when converted into an override.
     """
