@@ -1275,7 +1275,9 @@ class ROMSSimulation(Simulation):
             compile_time_code_dir.mkdir(parents=True)
             runtime_code_dir.mkdir(parents=True)
             input_datasets_dir.mkdir(parents=True)
-            work_dir.mkdir(parents=True)
+            work_dir.mkdir(
+                parents=True, exist_ok=True
+            )  # this one gets made by C-Star FSM
         except OSError as e:
             msg = (
                 f"The input directory is not empty. Re-run with {ENV_CSTAR_CLOBBER_WORKING_DIR}={FLAG_ON} "
