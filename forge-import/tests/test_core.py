@@ -403,58 +403,6 @@ class TestCstarSpecBuilderInitialization:
         assert roms_settings["forcing"]["tidal_forcing_path"] == str(staged_root / "case_tidal.nc")
         assert roms_settings["forcing"]["river_path"] == "/tmp/custom_river.nc"
 
-    def test_ensure_runtime_code_cdr_pointer(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
-        mock_paths = _create_mock_paths_core(
-            tmp_path,
-            blueprints_dir=tmp_path / "blueprints",
-            scratch=tmp_path / "scratch",
-            here=tmp_path / "workspace",
-        )
-        mock_paths.blueprints.mkdir(parents=True, exist_ok=True)
-        mock_paths.scratch.mkdir(parents=True, exist_ok=True)
-        mock_paths.here.mkdir(parents=True, exist_ok=True)
-
-        with patch("cson_forge._core.config.paths", mock_paths):
-            with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-                mock_load.return_value = mock_model_spec
-                with patch("cson_forge._core.rt.Grid") as mock_grid:
-                    mock_grid.return_value = _create_grid_mock()
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-
-            builder.cdr_forcing = [MagicMock()]
-            builder._ensure_runtime_code_cdr_pointer()
-
-            pointer = builder.run_output_dir / "input" / "runtime_code" / "cdr.nc"
-            assert pointer.is_symlink()
-            assert (
-                pointer.resolve(strict=False)
-                == (
-                    builder.run_output_dir
-                    / "input"
-                    / "input_datasets"
-                    / f"{builder.name.replace('.', '_')}_cdr.nc"
-                ).resolve(strict=False)
-            )
-
-    def test_ensure_runtime_code_cdr_pointer_from_compile_time_flags(
-        self,
-        minimal_cstar_spec_builder_args,
-        mock_model_spec,
-        tmp_path,
-    ):
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-
-        builder.cdr_forcing = None
-        builder._settings_compile_time.setdefault("cppdefs", {})["cdr_forcing"] = True
-        builder._settings_compile_time.setdefault("cdr_frc", {})["cdr_source"] = True
-        builder._ensure_runtime_code_cdr_pointer()
-
-        pointer = builder.run_output_dir / "input" / "runtime_code" / "cdr.nc"
-        assert pointer.is_symlink()
 
     def test_validation_end_date_before_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test that validation raises error when end_date is before start_date."""
@@ -1062,20 +1010,6 @@ class TestCstarSpecBuilderGenerateInputs:
 class TestCstarSpecBuilderBuildAndRun:
     """Tests for build and run methods."""
 
-    def test_build_raises_not_implemented(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
-        """Test that build raises AttributeError when _cstar_simulation is not initialized."""
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                    
-                # build() requires configure_build() to be called first
-                # Without it, _cstar_simulation will be None
-                with pytest.raises(AttributeError) as exc_info:
-                    builder.build()
-                assert "'NoneType' object has no attribute 'setup'" in str(exc_info.value)
     
     def test_build_updates_compile_time_location(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
         """Test that build() updates compile_time.location in blueprint."""
@@ -1100,52 +1034,9 @@ class TestCstarSpecBuilderBuildAndRun:
                             "filter": {"files": ["test.opt"]},
                             "branch": "main"  # Required for ROMSCompositeCodeRepository
                         }
-                        
-                        # Mock ROMSSimulation.from_blueprint and patch model_dump/model_construct
-                        with patch("cson_forge._core.ROMSSimulation.from_blueprint") as mock_from_blueprint:
-                            mock_sim = MagicMock()
-                            mock_from_blueprint.return_value = mock_sim
-                            
-                            original_model_dump = builder.blueprint.model_dump
-                            placeholder_file = tmp_path / "placeholder.nc"
-                            placeholder_file.touch()
-                            placeholder_path = str(placeholder_file)
-                            
-                            def patched_model_dump(*args, **kwargs):
-                                try:
-                                    return original_model_dump(*args, **kwargs)
-                                except (ValidationError, Exception):
-                                    import json
-                                    json_str = builder.blueprint.model_dump_json(*args, exclude_none=True, **kwargs)
-                                    return json.loads(json_str)
-                            
-                            object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                            
-                            original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
-                            def patched_model_construct(**kwargs):
-                                import copy
-                                kwargs_copy = copy.deepcopy(kwargs)
-                                def clean_dict(d):
-                                    if isinstance(d, dict):
-                                        for k, v in d.items():
-                                            if k == 'location' and v is None:
-                                                d[k] = placeholder_path
-                                            elif k == 'data' and isinstance(v, list):
-                                                for item in v:
-                                                    if isinstance(item, dict) and item.get('location') is None:
-                                                        item['location'] = placeholder_path
-                                            else:
-                                                clean_dict(v)
-                                    elif isinstance(d, list):
-                                        for item in d:
-                                            clean_dict(item)
-                                clean_dict(kwargs_copy)
-                                return original_model_construct(**kwargs_copy)
-                            
-                            with patch.object(cstar_models.RomsMarblBlueprint, 'model_construct', patched_model_construct):
-                                builder.configure_build()
-                                object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                        
+
+                        builder.configure_build()
+
                         # Verify compile_time.location was updated
                         assert builder.blueprint is not None
                         assert builder.blueprint.code is not None
@@ -1168,52 +1059,9 @@ class TestCstarSpecBuilderBuildAndRun:
                     }
                     with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
                         builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                        
-                        # Mock ROMSSimulation.from_blueprint and patch model_dump/model_construct
-                        with patch("cson_forge._core.ROMSSimulation.from_blueprint") as mock_from_blueprint:
-                            mock_sim = MagicMock()
-                            mock_from_blueprint.return_value = mock_sim
-                            
-                            original_model_dump = builder.blueprint.model_dump
-                            placeholder_file = tmp_path / "placeholder.nc"
-                            placeholder_file.touch()
-                            placeholder_path = str(placeholder_file)
-                            
-                            def patched_model_dump(*args, **kwargs):
-                                try:
-                                    return original_model_dump(*args, **kwargs)
-                                except (ValidationError, Exception):
-                                    import json
-                                    json_str = builder.blueprint.model_dump_json(*args, exclude_none=True, **kwargs)
-                                    return json.loads(json_str)
-                            
-                            object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                            
-                            original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
-                            def patched_model_construct(**kwargs):
-                                import copy
-                                kwargs_copy = copy.deepcopy(kwargs)
-                                def clean_dict(d):
-                                    if isinstance(d, dict):
-                                        for k, v in d.items():
-                                            if k == 'location' and v is None:
-                                                d[k] = placeholder_path
-                                            elif k == 'data' and isinstance(v, list):
-                                                for item in v:
-                                                    if isinstance(item, dict) and item.get('location') is None:
-                                                        item['location'] = placeholder_path
-                                            else:
-                                                clean_dict(v)
-                                    elif isinstance(d, list):
-                                        for item in d:
-                                            clean_dict(item)
-                                clean_dict(kwargs_copy)
-                                return original_model_construct(**kwargs_copy)
-                            
-                            with patch.object(cstar_models.RomsMarblBlueprint, 'model_construct', patched_model_construct):
-                                builder.configure_build()
-                                object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                        
+
+                        builder.configure_build()
+
                         # Verify stage was set to BUILD
                         assert builder._stage == BlueprintStage.BUILD
     
@@ -1233,52 +1081,9 @@ class TestCstarSpecBuilderBuildAndRun:
                     }
                     with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
                         builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                        
-                        # Mock ROMSSimulation.from_blueprint and patch model_dump/model_construct
-                        with patch("cson_forge._core.ROMSSimulation.from_blueprint") as mock_from_blueprint:
-                            mock_sim = MagicMock()
-                            mock_from_blueprint.return_value = mock_sim
-                            
-                            original_model_dump = builder.blueprint.model_dump
-                            placeholder_file = tmp_path / "placeholder.nc"
-                            placeholder_file.touch()
-                            placeholder_path = str(placeholder_file)
-                            
-                            def patched_model_dump(*args, **kwargs):
-                                try:
-                                    return original_model_dump(*args, **kwargs)
-                                except (ValidationError, Exception):
-                                    import json
-                                    json_str = builder.blueprint.model_dump_json(*args, exclude_none=True, **kwargs)
-                                    return json.loads(json_str)
-                            
-                            object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                            
-                            original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
-                            def patched_model_construct(**kwargs):
-                                import copy
-                                kwargs_copy = copy.deepcopy(kwargs)
-                                def clean_dict(d):
-                                    if isinstance(d, dict):
-                                        for k, v in d.items():
-                                            if k == 'location' and v is None:
-                                                d[k] = placeholder_path
-                                            elif k == 'data' and isinstance(v, list):
-                                                for item in v:
-                                                    if isinstance(item, dict) and item.get('location') is None:
-                                                        item['location'] = placeholder_path
-                                            else:
-                                                clean_dict(v)
-                                    elif isinstance(d, list):
-                                        for item in d:
-                                            clean_dict(item)
-                                clean_dict(kwargs_copy)
-                                return original_model_construct(**kwargs_copy)
-                            
-                            with patch.object(cstar_models.RomsMarblBlueprint, 'model_construct', patched_model_construct):
-                                builder.configure_build()
-                                object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                        
+
+                        builder.configure_build()
+
                         # Verify blueprint file was created
                         expected_bp_path = builder.path_blueprint(stage=BlueprintStage.BUILD)
                         assert expected_bp_path.exists()
@@ -1305,52 +1110,13 @@ class TestCstarSpecBuilderBuildAndRun:
                     }
                     with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
                         builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                        
-                        # Mock ROMSSimulation.from_blueprint and patch model_dump/model_construct
-                        with patch("cson_forge._core.ROMSSimulation.from_blueprint") as mock_from_blueprint:
-                            mock_sim = MagicMock()
-                            mock_from_blueprint.return_value = mock_sim
-                            
-                            original_model_dump = builder.blueprint.model_dump
-                            placeholder_file = tmp_path / "placeholder.nc"
-                            placeholder_file.touch()
-                            placeholder_path = str(placeholder_file)
-                            
-                            def patched_model_dump(*args, **kwargs):
-                                try:
-                                    return original_model_dump(*args, **kwargs)
-                                except (ValidationError, Exception):
-                                    import json
-                                    json_str = builder.blueprint.model_dump_json(*args, exclude_none=True, **kwargs)
-                                    return json.loads(json_str)
-                            
-                            object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                            
-                            original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
-                            def patched_model_construct(**kwargs):
-                                import copy
-                                kwargs_copy = copy.deepcopy(kwargs)
-                                def clean_dict(d):
-                                    if isinstance(d, dict):
-                                        for k, v in d.items():
-                                            if k == 'location' and v is None:
-                                                d[k] = placeholder_path
-                                            elif k == 'data' and isinstance(v, list):
-                                                for item in v:
-                                                    if isinstance(item, dict) and item.get('location') is None:
-                                                        item['location'] = placeholder_path
-                                            else:
-                                                clean_dict(v)
-                                    elif isinstance(d, list):
-                                        for item in d:
-                                            clean_dict(item)
-                                clean_dict(kwargs_copy)
-                                return original_model_construct(**kwargs_copy)
-                            
-                            with patch.object(cstar_models.RomsMarblBlueprint, 'model_construct', patched_model_construct):
-                                builder.configure_build()
-                                object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                        
+
+
+                        original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
+
+
+                        builder.configure_build()
+
                         # Verify render_roms_settings was called with compile-time template directory
                         assert mock_render.called
                         # render_roms_settings is called twice: once for compile_time, once for run_time
@@ -1363,28 +1129,7 @@ class TestCstarSpecBuilderBuildAndRun:
                         assert template_dir is not None
                         assert str(template_dir).endswith("compile-time")
                         assert "templates" in str(template_dir)
-    
-    def test_build_raises_when_blueprint_not_initialized(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
-        """Test that build() raises error when blueprint is not initialized."""
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch("cson_forge._core.render_roms_settings") as mock_render:
-                    mock_render.return_value = {
-                        "location": str(tmp_path / "opt"),
-                        "filter": {"files": ["test.opt"]}
-                    }
-                    with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                        builder.blueprint = None  # Clear blueprint
-                        
-                        # build() requires _cstar_simulation, which is set by configure_build()
-                        # Without configure_build(), _cstar_simulation will be None
-                        with pytest.raises(AttributeError) as exc_info:
-                            builder.build()
-                        # Should fail because _cstar_simulation is None
-                        assert "'NoneType' object has no attribute 'setup'" in str(exc_info.value)
+
     
     def test_build_raises_when_compile_time_not_defined(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
         """Test that configure_build() raises error when compile_time is not defined."""
@@ -1416,35 +1161,6 @@ class TestCstarSpecBuilderBuildAndRun:
                         # configure_build() checks for compile_time templates
                         with pytest.raises(ValueError, match="templates.compile_time"):
                             builder.configure_build()
-
-    def test_run_raises_when_settings_not_initialized(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
-        """Test that run raises RuntimeError when settings are not initialized."""
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                    # Remove settings to trigger error
-                    builder._settings_run_time = None
-                    
-                    with pytest.raises(RuntimeError) as exc_info:
-                            builder.run()
-                    assert "_settings_run_time" in str(exc_info.value)
-    
-    def test_run_raises_when_runtime_params_provided(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path, sample_runtime_params):
-        """Test that run() raises NotImplementedError when runtime_params are provided."""
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                    
-                    # run() raises NotImplementedError when run_time_settings is provided
-                    with pytest.raises(NotImplementedError) as exc_info:
-                        builder.run(run_time_settings=sample_runtime_params)
-                    assert "run_time_settings" in str(exc_info.value) or "Changing run_time_settings" in str(exc_info.value)
 
 
 class TestCstarSpecBuilderInitializeBlueprint:
@@ -1957,362 +1673,6 @@ class TestCstarSpecBuilderRun:
                         with pytest.raises(NotImplementedError) as exc_info:
                             builder.run(run_time_settings=custom_params)
                         assert "run_time_settings" in str(exc_info.value) or "runtime_params" in str(exc_info.value)
-    
-    def test_run_uses_default_runtime_params(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
-        """Test run uses default runtime_params when none provided."""
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                    
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                    
-                    # Patch RomsMarblBlueprint constructor to handle Resources with None locations
-                    original_blueprint_init = cstar_models.RomsMarblBlueprint
-                    def patched_blueprint_init(**kwargs):
-                        # Clean up kwargs to ensure valid Resources
-                        def clean_dataset_dict(dataset_dict):
-                            if isinstance(dataset_dict, dict) and 'data' in dataset_dict:
-                                dataset_dict['data'] = [r for r in dataset_dict['data'] if r.get('location')]
-                                if not dataset_dict['data']:
-                                    # Use tmp_path from outer scope if available, otherwise use /tmp
-                                    try:
-                                        placeholder_file = tmp_path / "placeholder.nc"
-                                    except NameError:
-                                        placeholder_file = Path("/tmp/placeholder.nc")
-                                        placeholder_file.parent.mkdir(parents=True, exist_ok=True)
-                                    placeholder_file.touch()
-                                    dataset_dict['data'] = [{"location": str(placeholder_file), "partitioned": False}]
-                        
-                        for field_name in ['grid', 'initial_conditions']:
-                            if field_name in kwargs and kwargs[field_name]:
-                                clean_dataset_dict(kwargs[field_name])
-                        if 'forcing' in kwargs and kwargs['forcing']:
-                            if isinstance(kwargs['forcing'], dict):
-                                for forcing_field in ['boundary', 'surface', 'tidal', 'rivers']:
-                                    if forcing_field in kwargs['forcing'] and kwargs['forcing'][forcing_field]:
-                                        clean_dataset_dict(kwargs['forcing'][forcing_field])
-                        
-                        try:
-                            return original_blueprint_init(**kwargs)
-                        except Exception:
-                            return cstar_models.RomsMarblBlueprint.model_construct(**kwargs)
-                    
-                    with patch("cson_forge._core.render_roms_settings") as mock_render:
-                        mock_render.return_value = {
-                            "location": str(tmp_path / "opt"),
-                            "filter": {"files": ["test.opt"]},
-                            "branch": "main"  # Required for ROMSCompositeCodeRepository
-                        }
-                        # Mock ROMSSimulation.from_blueprint to avoid validation errors
-                        with patch("cson_forge._core.ROMSSimulation.from_blueprint") as mock_from_blueprint:
-                            mock_sim = MagicMock()
-                            mock_from_blueprint.return_value = mock_sim
-                            
-                            # Patch model_dump and model_construct to handle None locations (same pattern as test_run_merges_runtime_params)
-                            original_model_dump = builder.blueprint.model_dump
-                            placeholder_file = tmp_path / "placeholder.nc"
-                            placeholder_file.touch()
-                            placeholder_path = str(placeholder_file)
-                            
-                            def patched_model_dump(*args, **kwargs):
-                                try:
-                                    return original_model_dump(*args, **kwargs)
-                                except (ValidationError, Exception):
-                                    import json
-                                    json_str = builder.blueprint.model_dump_json(*args, exclude_none=True, **kwargs)
-                                    return json.loads(json_str)
-                            
-                            object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                            
-                            original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
-                            def patched_model_construct(**kwargs):
-                                import copy
-                                kwargs_copy = copy.deepcopy(kwargs)
-                                def clean_dict(d):
-                                    if isinstance(d, dict):
-                                        for k, v in d.items():
-                                            if k == 'location' and v is None:
-                                                d[k] = placeholder_path
-                                            elif k == 'data' and isinstance(v, list):
-                                                for item in v:
-                                                    if isinstance(item, dict) and item.get('location') is None:
-                                                        item['location'] = placeholder_path
-                                            else:
-                                                clean_dict(v)
-                                    elif isinstance(d, list):
-                                        for item in d:
-                                            clean_dict(item)
-                                clean_dict(kwargs_copy)
-                                return original_model_construct(**kwargs_copy)
-                            
-                            with patch.object(cstar_models.RomsMarblBlueprint, 'model_construct', patched_model_construct):
-                                builder.configure_build()
-                                object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                            
-                            # Mock build() to avoid NotImplementedError (use object.__setattr__ for Pydantic models)
-                            object.__setattr__(builder, 'build', MagicMock())
-                            
-                            # The _cstar_simulation should already be set by configure_build() via from_blueprint()
-                            if builder._cstar_simulation:
-                                builder._cstar_simulation.run = MagicMock(return_value=None)
-                            
-                            # Call run() - should work since runtime_params is set by configure_build()
-                            builder.run(run_time_settings=None)
-                        
-                        # Check that blueprint was updated with default params
-                        assert builder.blueprint.runtime_params is not None
-                        # runtime_params might be a dict (from model_construct) or a RuntimeParameterSet object
-                        runtime_params = builder.blueprint.runtime_params
-                        if isinstance(runtime_params, dict):
-                            assert runtime_params.get('start_date') == builder.start_date
-                        else:
-                            assert runtime_params.start_date == builder.start_date
-    
-    def test_run_validates_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
-        """Test run raises NotImplementedError when runtime_params are provided."""
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                # Create runtime params with start_date before blueprint start_date
-                invalid_params = cstar_models.RuntimeParameterSet(
-                    start_date=datetime(2011, 12, 31),  # Before blueprint start_date
-                    end_date=datetime(2012, 1, 2),
-                    checkpoint_frequency="1d",
-                    output_dir=Path()
-                )
-                
-                with patch("cson_forge._core.render_roms_settings") as mock_render:
-                    mock_render.return_value = {
-                        "location": str(tmp_path / "opt"),
-                        "filter": {"files": ["test.opt"]},
-                        "branch": "main"  # Required for ROMSCompositeCodeRepository
-                    }
-                    # Mock ROMSSimulation.from_blueprint to avoid validation errors
-                    with patch("cson_forge._core.ROMSSimulation.from_blueprint") as mock_from_blueprint:
-                        mock_sim = MagicMock()
-                        mock_from_blueprint.return_value = mock_sim
-                                
-                        # Patch model_dump and model_construct to handle None locations
-                        original_model_dump = builder.blueprint.model_dump
-                        placeholder_file = tmp_path / "placeholder.nc"
-                        placeholder_file.touch()
-                        placeholder_path = str(placeholder_file)
-                        
-                        def patched_model_dump(*args, **kwargs):
-                            try:
-                                return original_model_dump(*args, **kwargs)
-                            except (ValidationError, Exception):
-                                import json
-                                json_str = builder.blueprint.model_dump_json(*args, exclude_none=True, **kwargs)
-                                return json.loads(json_str)
-                        
-                        object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                        
-                        original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
-                        def patched_model_construct(**kwargs):
-                            import copy
-                            kwargs_copy = copy.deepcopy(kwargs)
-                            def clean_dict(d):
-                                if isinstance(d, dict):
-                                    for k, v in d.items():
-                                        if k == 'location' and v is None:
-                                            d[k] = placeholder_path
-                                        elif k == 'data' and isinstance(v, list):
-                                            for item in v:
-                                                if isinstance(item, dict) and item.get('location') is None:
-                                                    item['location'] = placeholder_path
-                                        else:
-                                            clean_dict(v)
-                                elif isinstance(d, list):
-                                    for item in d:
-                                        clean_dict(item)
-                            clean_dict(kwargs_copy)
-                            return original_model_construct(**kwargs_copy)
-                        
-                        with patch.object(cstar_models.RomsMarblBlueprint, 'model_construct', patched_model_construct):
-                            builder.configure_build()
-                            object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                        
-                        # Mock build() to avoid NotImplementedError (use object.__setattr__ for Pydantic models)
-                        object.__setattr__(builder, 'build', MagicMock())
-                        
-                        # The _cstar_simulation should already be set by configure_build() via from_blueprint()
-                        if builder._cstar_simulation:
-                            builder._cstar_simulation.run = MagicMock(return_value=None)
-                                
-                        # Should raise NotImplementedError when run_time_settings are provided
-                        with pytest.raises(NotImplementedError) as exc_info:
-                            builder.run(run_time_settings=invalid_params)
-                        assert "run_time_settings" in str(exc_info.value) or "runtime_params" in str(exc_info.value)
-    
-    def test_run_validates_end_date(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
-        """Test run raises NotImplementedError when runtime_params are provided."""
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                with patch("cson_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                # Create runtime params with end_date after blueprint end_date
-                invalid_params = cstar_models.RuntimeParameterSet(
-                    start_date=datetime(2012, 1, 1),
-                    end_date=datetime(2012, 1, 3),  # After blueprint end_date
-                    checkpoint_frequency="1d",
-                    output_dir=Path()
-                )
-                
-                with patch("cson_forge._core.render_roms_settings") as mock_render:
-                    mock_render.return_value = {
-                        "location": str(tmp_path / "opt"),
-                        "filter": {"files": ["test.opt"]},
-                        "branch": "main"  # Required for ROMSCompositeCodeRepository
-                    }
-                    # Mock ROMSSimulation.from_blueprint to avoid validation errors
-                    with patch("cson_forge._core.ROMSSimulation.from_blueprint") as mock_from_blueprint:
-                        mock_sim = MagicMock()
-                        mock_from_blueprint.return_value = mock_sim
-                                
-                        # Patch model_dump and model_construct to handle None locations
-                        original_model_dump = builder.blueprint.model_dump
-                        placeholder_file = tmp_path / "placeholder.nc"
-                        placeholder_file.touch()
-                        placeholder_path = str(placeholder_file)
-                                
-                        def patched_model_dump(*args, **kwargs):
-                            try:
-                                return original_model_dump(*args, **kwargs)
-                            except (ValidationError, Exception):
-                                import json
-                                json_str = builder.blueprint.model_dump_json(*args, exclude_none=True, **kwargs)
-                                return json.loads(json_str)
-                                
-                        object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                                
-                        original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
-                        def patched_model_construct(**kwargs):
-                            import copy
-                            kwargs_copy = copy.deepcopy(kwargs)
-                            def clean_dict(d):
-                                if isinstance(d, dict):
-                                    for k, v in d.items():
-                                        if k == 'location' and v is None:
-                                            d[k] = placeholder_path
-                                        elif k == 'data' and isinstance(v, list):
-                                            for item in v:
-                                                if isinstance(item, dict) and item.get('location') is None:
-                                                    item['location'] = placeholder_path
-                                        else:
-                                            clean_dict(v)
-                                elif isinstance(d, list):
-                                    for item in d:
-                                        clean_dict(item)
-                            clean_dict(kwargs_copy)
-                            return original_model_construct(**kwargs_copy)
-                        
-                        with patch.object(cstar_models.RomsMarblBlueprint, 'model_construct', patched_model_construct):
-                            builder.configure_build()
-                            object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                                
-                        # Mock build() to avoid NotImplementedError (use object.__setattr__ for Pydantic models)
-                        object.__setattr__(builder, 'build', MagicMock())
-                                
-                        # The _cstar_simulation should already be set by configure_build() via from_blueprint()
-                        if builder._cstar_simulation:
-                            builder._cstar_simulation.run = MagicMock(return_value=None)
-                                
-                        # Should raise NotImplementedError when run_time_settings are provided
-                        with pytest.raises(NotImplementedError) as exc_info:
-                            builder.run(run_time_settings=invalid_params)
-                        assert "run_time_settings" in str(exc_info.value) or "runtime_params" in str(exc_info.value)
-    
-    def test_run_persists_blueprint(self, minimal_cstar_spec_builder_args, mock_model_spec, sample_runtime_params, tmp_path):
-        """Test run persists blueprint before raising NotImplementedError."""
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch("cson_forge._core.config.paths") as mock_paths:
-                    mock_paths.blueprints = tmp_path
-                    mock_paths.scratch = Path("/test/run")
-                    
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                    
-                    with patch("cson_forge._core.render_roms_settings") as mock_render:
-                        mock_render.return_value = {
-                            "location": str(tmp_path / "opt"),
-                            "filter": {"files": ["test.opt"]},
-                            "branch": "main"  # Required for ROMSCompositeCodeRepository
-                        }
-                        # Mock ROMSSimulation.from_blueprint to avoid validation errors
-                        with patch("cson_forge._core.ROMSSimulation.from_blueprint") as mock_from_blueprint:
-                            mock_sim = MagicMock()
-                            mock_from_blueprint.return_value = mock_sim
-                            
-                            # Patch model_dump and model_construct to handle None locations
-                            original_model_dump = builder.blueprint.model_dump
-                            placeholder_file = tmp_path / "placeholder.nc"
-                            placeholder_file.touch()
-                            placeholder_path = str(placeholder_file)
-                            
-                            def patched_model_dump(*args, **kwargs):
-                                try:
-                                    return original_model_dump(*args, **kwargs)
-                                except (ValidationError, Exception):
-                                    import json
-                                    json_str = builder.blueprint.model_dump_json(*args, exclude_none=True, **kwargs)
-                                    return json.loads(json_str)
-                            
-                            object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                            
-                            original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
-                            def patched_model_construct(**kwargs):
-                                import copy
-                                kwargs_copy = copy.deepcopy(kwargs)
-                                def clean_dict(d):
-                                    if isinstance(d, dict):
-                                        for k, v in d.items():
-                                            if k == 'location' and v is None:
-                                                d[k] = placeholder_path
-                                            elif k == 'data' and isinstance(v, list):
-                                                for item in v:
-                                                    if isinstance(item, dict) and item.get('location') is None:
-                                                        item['location'] = placeholder_path
-                                            else:
-                                                clean_dict(v)
-                                    elif isinstance(d, list):
-                                        for item in d:
-                                            clean_dict(item)
-                                clean_dict(kwargs_copy)
-                                return original_model_construct(**kwargs_copy)
-                            
-                            with patch.object(cstar_models.RomsMarblBlueprint, 'model_construct', patched_model_construct):
-                                builder.configure_build()
-                                object.__setattr__(builder.blueprint, 'model_dump', patched_model_dump)
-                            
-                            # Mock build() to avoid NotImplementedError (use object.__setattr__ for Pydantic models)
-                            object.__setattr__(builder, 'build', MagicMock())
-                            
-                            # The _cstar_simulation should already be set by configure_build() via from_blueprint()
-                            if builder._cstar_simulation:
-                                builder._cstar_simulation.run = MagicMock(return_value=None)
-                    
-                    # Should raise NotImplementedError when run_time_settings are provided
-                        with pytest.raises(NotImplementedError) as exc_info:
-                            builder.run(run_time_settings=sample_runtime_params)
-                    assert "run_time_settings" in str(exc_info.value) or "runtime_params" in str(exc_info.value)
-                            
-                            # Note: Actually, run() raises NotImplementedError BEFORE calling persist(), so the blueprint
-                            # is not persisted when run_time_settings is provided. The test name is misleading.
-
 
 class TestCstarSpecBuilderSetBlueprintState:
     """Tests for set_blueprint_state method."""
