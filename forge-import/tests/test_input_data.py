@@ -228,7 +228,7 @@ def sample_roms_marbl_input_data(
         blueprint_dir=blueprint_dir,
         partitioning=sample_partitioning,
         use_dask=False,
-        input_data_dir_override=data_dir
+        input_data_dir_override=data_dir,
     )
 
 
@@ -958,7 +958,7 @@ class TestRomsMarblInputDataGeneration:
         with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data._generate_cdr_forcing(
                 key="cdr_forcing",
-                cdr_list=["release1", "release2"]
+                cdr_kwargs={"foo": "bar"}
             )
             
             mock_cdr_class.assert_called_once()
