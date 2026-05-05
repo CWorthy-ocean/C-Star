@@ -17,6 +17,7 @@ from cstar.entrypoint.service import Service
 from cstar.entrypoint.xrunner import XRunnerRequest, create_parser
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.orchestration.transforms import DirectiveConfig
 from cstar.roms import ROMSSimulation
 
 if TYPE_CHECKING:
@@ -306,7 +307,12 @@ def main() -> int:
 
     job_cfg = get_job_config()
     service_cfg = get_service_config(args.log_level, name="SimulationRunner")
-    request = get_request(args.blueprint_uri)
+
+    blueprint_uri = args.blueprint_uri
+    if args.directives:
+        blueprint_uri = DirectiveConfig.apply_directives(args.directives, blueprint_uri)
+
+    request = get_request(blueprint_uri)
 
     return asyncio.run(execute_runner(job_cfg, service_cfg, request))
 

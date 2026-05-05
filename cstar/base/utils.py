@@ -343,13 +343,15 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
     dict[str, t.Any]
         The merged dictionaries.
     """
+    result: dict[str, t.Any] = copy.deepcopy(d1)
+
     for k, target in d2.items():
-        source = d1.get(k)
+        source = result.get(k)
 
         if isinstance(source, dict) and isinstance(target, dict):
-            d1[k] = deep_merge(source, target)
+            result[k] = deep_merge(source, target)
         elif isinstance(target, dict):
-            d1[k] = {**target}
+            result[k] = {**target}
         elif isinstance(source, list) and isinstance(target, list):
             items = []
             for x0, x1 in zip_longest(source, target, fillvalue=None):
@@ -361,12 +363,12 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
                     items.append(deep_merge(x0, x1))
                 else:
                     items.append(copy.deepcopy(x1))
-            d1[k] = items
+            result[k] = items
         elif isinstance(target, list):
-            d1[k] = copy.deepcopy(target)
+            result[k] = copy.deepcopy(target)
         else:
-            d1[k] = target
-    return d1
+            result[k] = target
+    return result
 
 
 def additional_files_dir() -> Path:

@@ -12,6 +12,8 @@ from cstar.entrypoint.config import (
 )
 from cstar.entrypoint.service import Service
 from cstar.entrypoint.utils import (
+    ARG_DIRECTIVES_URI_LONG,
+    ARG_DIRECTIVES_URI_SHORT,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
     ARG_URI_LONG,
@@ -41,26 +43,37 @@ class XRunnerRequest(t.Generic[TBlueprint]):
     """User-friendly name for the process (or job) handling the request."""
     blueprint_uri: str
     """The URI of a blueprint to be used to parameterize the application."""
+    directive_uri: str
+    """The URI of a file containing directive configuration."""
     bp_type: type[TBlueprint]
     """The type of blueprint that the URI will be deserialized into."""
     _bp: TBlueprint | None = None
     """The deserialized blueprint."""
 
-    def __init__(self, uri: str, bp_type: type[TBlueprint], name: str = "") -> None:
+    def __init__(
+        self,
+        uri: str,
+        bp_type: type[TBlueprint],
+        name: str = "",
+        directive_uri: str = "",
+    ) -> None:
         """Initialize the request instance.
 
         Parameters
         ----------
         name : str
             User-friendly name for the process (or job) handling the request.
-        path : Path
+        uri : str
             The URI of a blueprint to be used to parameterize the application.
         bp_type : type[TBlueprint]
             The type of blueprint that the path will be deserialized into.
+        directive_uri : str
+            The URI of a file containing directive configuration for a runner.
         """
-        self.blueprint_uri = uri
+        self.blueprint_uri = uri.strip()
         self.bp_type = bp_type
         self.name = name.strip() or XRunnerRequest._generate_job_name()
+        self.directive_uri = directive_uri.strip()
 
     @property
     def application(self) -> str:
@@ -403,5 +416,12 @@ def create_parser() -> argparse.ArgumentParser:
         required=False,
         help="Logging level for the simulation.",
         choices=list(LogLevelChoices),
+    )
+    parser.add_argument(
+        ARG_DIRECTIVES_URI_LONG,
+        ARG_DIRECTIVES_URI_SHORT,
+        type=str,
+        required=False,
+        help="The URI of a file containing directive configuration.",
     )
     return parser
