@@ -23,6 +23,7 @@ Breaking Changes
 - `BlueprintRequest` deprecated in favor of `XRunnerRequest` (`#506 <https://github.com/CWorthy-ocean/C-Star/pull/506>`_)
 - `BlueprintRequest` has been deprecated and removed. (`#510 <https://github.com/CWorthy-ocean/C-Star/pull/510>`_)
 - `--stage` CLI parameter for `cstar blueprint run` is no longer supported (`#510 <https://github.com/CWorthy-ocean/C-Star/pull/510>`_)
+- `deep_merge` is a pure method and no longer changes the inputs (`#498 <https://github.com/CWorthy-ocean/C-Star/pull/498>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -41,6 +42,7 @@ New features
 - Add a basic Plotter application as a demonstration of building a functional application (`#499 <https://github.com/CWorthy-ocean/C-Star/pull/499>`_)
 - Add template-filling transform for user variables and paths (`#500 <https://github.com/CWorthy-ocean/C-Star/pull/500>`_)
 - .ext files are now passed through extract_data_join at the same time as other files are passed through ncjoin (`#495 <https://github.com/CWorthy-ocean/C-Star/pull/495>`_)
+- Add `Directives` to enable just-in-time blueprint manipulation by the runner. (`#498 <https://github.com/CWorthy-ocean/C-Star/pull/498>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
