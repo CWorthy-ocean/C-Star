@@ -771,7 +771,7 @@ TRunner = t.TypeVar("TRunner", bound=XRunner)  # add bound/constrain etc.
 # todo: mypy is borked in a lot of places
 # todo: feel free to rename any of this stuff
 @dataclass(kw_only=True)
-class ApplicationDefinition(t.Generic[TBlueprint, TRunner], ABC):
+class ApplicationDefinition(ABC, t.Generic[TBlueprint, TRunner]):
     name: str
     blueprint: type[TBlueprint]
     runner: type[TRunner]
