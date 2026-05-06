@@ -49,6 +49,6 @@ class HelloWorldApplication(
     name: str = _APP_NAME
     blueprint: type[HelloWorldBlueprint] = HelloWorldBlueprint
     runner: type[HelloWorldRunner] = HelloWorldRunner
-    applicable_transforms: tuple[type[Transform]] = ()
+    applicable_transforms: tuple[type[Transform], ...] = ()
     resources_needed: t.Any = ()
     long_name: str = "Hello World"

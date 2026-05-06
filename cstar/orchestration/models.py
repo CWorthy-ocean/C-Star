@@ -776,7 +776,7 @@ class ApplicationDefinition(t.Generic[TBlueprint, TRunner], ABC):
     blueprint: type[TBlueprint]
     runner: type[TRunner]
     # todo: some things like overrides and templates should be defaults and not need to be listed
-    applicable_transforms: tuple[type[Transform]]
+    applicable_transforms: tuple[type[Transform], ...]
     resources_needed: t.Any
     long_name: str  # default to name?
 

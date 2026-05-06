@@ -23,7 +23,7 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     name: str = _APP_NAME
     blueprint: type[RomsMarblBlueprint] = RomsMarblBlueprint
     runner: type[RomsMarblRunner] = RomsMarblRunner
-    applicable_transforms: tuple[type[Transform]] = (
+    applicable_transforms: tuple[type[Transform], ...] = (
         RomsMarblTimeSplitter,
         OverrideTransform,
     )

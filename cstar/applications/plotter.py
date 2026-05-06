@@ -126,6 +126,6 @@ class PlotterApplicationDefinition(
     name: str = _APP_NAME
     blueprint: type[PlotterBlueprint] = PlotterBlueprint
     runner: type[PlotterRunner] = PlotterRunner
-    applicable_transforms: tuple[type[Transform]] = (OverrideTransform,)
+    applicable_transforms: tuple[type[Transform], ...] = (OverrideTransform,)
     resources_needed: t.Any = ()
     long_name: str = "Plotting Demo Application"
