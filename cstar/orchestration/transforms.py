@@ -425,7 +425,7 @@ class WorkplanTransformer(LoggingMixin):
         if self._transformed:
             return self._transformed
 
-        apply_to = {Application.ROMS_MARBL, Application.SLEEP}
+        apply_to = {Application.ROMS_MARBL, Application.SLEEP, Application.NEST_IC}
 
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]
@@ -478,7 +478,7 @@ class WorkplanTransformer(LoggingMixin):
         override_transform = OverrideTransform()
         final_steps: list[LiveStep] = []
         for step in steps:
-            if step.blueprint_overrides:
+            if step.blueprint_overrides or step.directives:
                 final_steps.extend(override_transform(step))
             else:
                 final_steps.append(step)
@@ -724,7 +724,11 @@ def override_output_directory(step: LiveStep) -> LiveStep:
     LiveStep
         The transformed step.
     """
-    sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
+    sys_overrides = (
+        {"runtime_params": {"output_dir": step.fsm.root}}
+        if step.application == Application.ROMS_MARBL
+        else {"output_dir": step.fsm.root}  # type: ignore[dict-item]
+    )
     override_transform = OverrideTransform(sys_overrides)
     overridden_step_result = override_transform(step)
 
@@ -906,7 +910,7 @@ class RestartFile(BaseModel):
 
     @property
     def is_partitioned(self) -> bool:
-        """Return `True` if the restart file belongs to a partioned dataset.
+        """Return `True` if the restart file belongs to a partitioned dataset.
 
         Returns
         -------
@@ -919,6 +923,10 @@ class RestartFile(BaseModel):
         if self._segment:
             return int(self._segment)
         return None
+
+    @property
+    def formatted_timestamp(self) -> str:
+        return self._ts.strftime(self.FMT_TS)
 
 
 class RestartFileTrxAdapter:
@@ -949,6 +957,206 @@ class RestartFileTrxAdapter:
                         "partitioned": rst_file.is_partitioned,
                     },
                 ],
+            },
+        }
+
+
+class BoundaryFile(BaseModel):
+    path: Path
+    """The path to a boundary file."""
+    _base: str = PrivateAttr()
+    """The base name of the file."""
+    _segment: str | None = PrivateAttr(default=None)
+    """The segment identifier of the file."""
+    _ts: datetime = PrivateAttr()
+    """The timestamp parsed from the file name."""
+
+    EXT: t.ClassVar[t.Literal["nc"]] = "nc"
+    """The expected file extension for a boundary file."""
+    FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
+    """The expected timestamp format in the boundary file name"""
+    PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
+        r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
+    )
+    """A regex identifying full boundary or partitioned files."""
+    SUFFIX: t.ClassVar[t.Literal["_bry"]] = "_bry"
+    """A unique suffix found in the name of boundary files"""
+
+    @classmethod
+    def find(
+        cls, search_path: Path, notfound_ok: bool = True
+    ) -> Sequence["BoundaryFile"] | None:
+        """Search for boundary files in the specified location.
+
+        Parameters
+        ----------
+        search_path : Path
+            The path to search
+        notfound_ok : bool
+            If False, raise an exception if no boundary files are found.
+
+        Returns
+        -------
+        ResetFile
+
+        Raises
+        ------
+        ValueError
+            If the search path does not exist or contains no recognizable boundary files.
+        """
+        search_path = search_path.expanduser().resolve()
+
+        if not search_path.exists():
+            msg = f"No directory found at path: {search_path!r}"
+            raise ValueError(msg)
+
+        matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"))
+        if matches:
+            return tuple(BoundaryFile(path=m) for m in matches)
+
+        if not notfound_ok:
+            msg = f"No boundary files located. Unable to continue from {search_path!r}"
+            raise CstarExpectationFailed(msg)
+
+        return None
+
+    @classmethod
+    def from_parts(
+        cls,
+        base: str,
+        timestamp: datetime,
+        segment: str | None = None,
+        directory: Path | None = None,
+    ) -> "BoundaryFile":
+        """Create a BoundaryFile from components.
+
+        Parameters
+        ----------
+        base : str
+            The base name for the boundary file.
+        timestamp : datetime
+            The timestamp for the boundary file.
+        segment : str | None
+            The 0-padded segment number if partitioned, otherwise `None`.
+        directory : Path | None
+            The directory to contain the file. If not specified, defaults to cwd.
+
+        Returns
+        -------
+        ResetFile
+
+        Raises
+        ------
+        ValueError
+            If the search path does not exist or contains no recognizable boundary files.
+        """
+        ts = timestamp.strftime(cls.FMT_TS)
+        parted_clause = f".{segment}" if segment is not None else ""
+        filename = f"{base}{cls.SUFFIX}.{ts}{parted_clause}.{cls.EXT}"
+
+        if directory:
+            return BoundaryFile(path=directory / filename)
+
+        return BoundaryFile(path=Path(filename))
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, value: Path, _info: "ValidationInfo") -> Path:
+        """Verify the supplied path meets the boundary file naming convention.
+
+        Parameters
+        ----------
+        value : str
+            The value of the checkpoint frequency property
+        _info : ValidationInfo
+            Metadata for the current validation context
+        """
+        if value.suffix != f".{BoundaryFile.EXT}":
+            msg = f"File extension does not match expected naming convention: {value.suffix}"
+            raise ValueError(msg)
+
+        if re.fullmatch(BoundaryFile.PATTERN_RST, value.name, flags=re.ASCII):
+            return value
+
+        msg = f"File name does not match expected naming convention: {value}"
+        raise ValueError(msg)
+
+    @model_validator(mode="after")
+    def _model_validate(self) -> "BoundaryFile":
+        """Perform post-processing on the boundary file path.
+
+        Returns
+        -------
+        ResetFile
+        """
+        matches = re.fullmatch(
+            BoundaryFile.PATTERN_RST, self.path.as_posix(), flags=re.ASCII
+        )
+        if not matches:
+            msg = f"File name does not match expected naming convention: {self.path}"
+            raise ValueError(msg)
+
+        self._base = matches.group(1)
+        self._ts = datetime.strptime(matches.group(2), BoundaryFile.FMT_TS)
+        # look for segment for partition number, e.g. <base>.<ts>.000.nc vs. <base>.<ts>.nc
+        self._segment = matches.group(3)
+        return self
+
+    @property
+    def timestamp(self) -> datetime:
+        """Return a datetime derived from the timestamp in the boundary file name.
+
+        Returns
+        -------
+        datetime
+        """
+        return self._ts
+
+    @property
+    def is_partitioned(self) -> bool:
+        """Return `True` if the boundary file belongs to a partitioned dataset.
+
+        Returns
+        -------
+        datetime
+        """
+        return self._segment is not None
+
+    @property
+    def partition(self) -> int | None:
+        if self._segment:
+            return int(self._segment)
+        return None
+
+
+class BoundaryFileTrxAdapter:
+    """Convert a boundary file into a dictionary useful for use in an OverrideTransform."""
+
+    @classmethod
+    def adapt(cls, bry_files: Sequence[BoundaryFile]) -> dict[str, t.Any]:
+        """Given a tuple of boundary files, create a dictionary containing the overrides necessary to
+        execute a simulation with the restart file specified in the initial conditions.
+
+        Parameters
+        ----------
+        restart_file : ResetFile
+            The restart file metadata used to convert into an override mapping.
+
+        Returns
+        -------
+        Mapping[str, t.Any]
+        """
+        return {
+            "forcing": {
+                "boundary": {
+                    "data": [
+                        {
+                            "location": bry.path.as_posix(),
+                            "partitioned": bry.is_partitioned,
+                        }
+                        for bry in bry_files
+                    ],
+                },
             },
         }
 
@@ -1008,9 +1216,66 @@ class ContinuanceTransform(Directive, OverrideTransform):
         return "cfrom"
 
 
+class NestingTransform(Directive, OverrideTransform):
+    """A transform that uses a restart file and boundary conditions from a previous parent simulation."""
+
+    def __init__(self, config: dict[str, t.Any]) -> None:
+        """Initialize the instance.
+
+
+        Parameters
+        ----------
+        config : dict[str, t.Any] | None
+            A dictionary containing configuration for the directive.
+        """
+        Directive.__init__(self, config)
+        OverrideTransform.__init__(
+            self, self._create_initial_condition_and_bc_overrides()
+        )
+
+    def _create_initial_condition_and_bc_overrides(self) -> dict[str, t.Any]:
+        """Create an overrides dictionary that will result in the modified blueprint"""
+        if "rst_path" not in self._config:
+            msg = "Invalid nesting transform configuration. Must include rst_path."
+            raise NotImplementedError(msg)
+
+        if "bry_path" not in self._config:
+            msg = "Invalid nesting transform configuration. Must include bry_path."
+            raise NotImplementedError(msg)
+
+        search_path = Path(self._config["rst_path"])
+        if restart_file := RestartFile.find(search_path, notfound_ok=False):
+            rst_override_dict = RestartFileTrxAdapter.adapt(restart_file)
+
+        else:
+            msg = f"No restart file located in search path: {search_path!r}"
+            raise ValueError(msg)
+
+        search_path = Path(self._config["bry_path"])
+        if boundary_files := BoundaryFile.find(search_path, notfound_ok=False):
+            bry_override_dict = BoundaryFileTrxAdapter.adapt(boundary_files)
+        else:
+            msg = f"No boundary files located in search path: {search_path!r}"
+            raise ValueError(msg)
+
+        return {**rst_override_dict, **bry_override_dict}
+
+    @t.override
+    @staticmethod
+    def suffix() -> str:
+        """Return a suffix used when persisting a resource modified by this transform.
+
+        Returns
+        -------
+        str
+        """
+        return "nfrom"
+
+
 class DirectiveConfig(BaseModel):
     directive_map: t.ClassVar[Mapping[str, type[Directive]]] = {
         "continue-from": ContinuanceTransform,
+        "nest-from": NestingTransform,
     }
     directives: KeyValueStore
 

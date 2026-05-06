@@ -5,7 +5,12 @@ from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
 from cstar.cli.template import app as app_template
 from cstar.cli.workplan import app as app_workplan
-from cstar.entrypoint.worker import hello_app, plotter_demo, worker  # noqa: F401
+from cstar.entrypoint.worker import (  # noqa: F401
+    hello_app,
+    nest_ic,
+    plotter_demo,
+    worker,
+)
 
 
 def attach_subcommands(app: typer.Typer) -> None:

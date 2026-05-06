@@ -223,6 +223,7 @@ class Application(StrEnum):
     """Sample custom application."""
     PLOTTER = "plotter"
     """Demo plotting application."""
+    NEST_IC = "nest_ic"
 
 
 class ParameterSet(DocLocMixin, ConfiguredBaseModel):
