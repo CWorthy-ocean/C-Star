@@ -1,0 +1,47 @@
+name: example_workplan
+description: POC of nesting applications/directives
+state: draft
+
+steps:
+  - name: outer
+    application: roms_marbl
+    blueprint: /Users/eilerman/git/cson-forge/cson_forge/blueprints/MacOS/cson_roms-marbl_v0.1_PAC-0p5_deg_8procs/B_cson_roms-marbl_v0.1_PAC-0p5_deg_8procs_build.yml
+
+  - name: nest_conversion
+    application: nest_ic
+    blueprint: /Users/eilerman/git/C-Star/docs/tutorials/nest_ic_bp.yaml
+    depends_on:
+        - outer
+    blueprint_overrides:
+      parent_grid: "{{path: outer}}/input/input_datasets/cson_roms-marbl_v0_1_PAC-0p5_deg_8procs_grid.nc"
+      parent_rst: "{{path: outer}}/joined_output/output_rst.20100103000000.nc"
+
+  - name: middle
+    application: roms_marbl
+    blueprint: /Users/eilerman/git/cson-forge/cson_forge/blueprints/MacOS/cson_roms-marbl_v0.1_NEP-p25_deg_8procs/B_cson_roms-marbl_v0.1_NEP-p25_deg_8procs_build.yml
+    depends_on:
+      - nest_conversion
+    directives:
+      nest-from:
+        rst_path: "{{path: nest_conversion}}"
+        bry_path: "{{path: outer}}/joined_output"
+
+  - name: nest_conversion2
+    application: nest_ic
+    blueprint: /Users/eilerman/git/C-Star/docs/tutorials/nest_ic_bp.yaml
+    depends_on:
+        - middle
+    blueprint_overrides:
+      parent_grid: "{{path: middle}}/input/input_datasets/cson_roms-marbl_v0_1_NEP-p25_deg_8procs_grid.nc"
+      parent_rst: "{{path: middle}}/joined_output/output_rst.20100104000000.nc"
+      child_grid: "/Users/eilerman/cson-forge-data/input-data/cson_roms-marbl_v0_1_GoA-p10_deg_8procs/cson_roms-marbl_v0_1_GoA-p10_deg_8procs_grid.nc"
+
+  - name: inner
+    application: roms_marbl
+    blueprint: /Users/eilerman/git/cson-forge/cson_forge/blueprints/MacOS/cson_roms-marbl_v0.1_GoA-p10_deg_8procs/B_cson_roms-marbl_v0.1_GoA-p10_deg_8procs_build.yml
+    depends_on:
+      - nest_conversion2
+    directives:
+      nest-from:
+        rst_path: "{{path: nest_conversion2}}"
+        bry_path: "{{path: middle}}/joined_output"
