@@ -267,7 +267,7 @@ async def execute_runner(
     request : XRunnerRequest[RomsMarblBlueprint]
         A request specifying the blueprint to be executed
     """
-    log = get_logger(__name__, level=service_cfg.log_level)
+    log = get_logger(f"{__name__}.runner", level=service_cfg.log_level)
 
     log.debug(f"Job config: {job_cfg!r}")
     log.debug(f"Service config: {service_cfg!r}")
