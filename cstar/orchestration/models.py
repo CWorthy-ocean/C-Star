@@ -764,8 +764,8 @@ class Transform(t.Protocol):
         ...
 
 
-TBlueprint = t.TypeVar("TBlueprint", bound=Blueprint)  # add bound/constrain etc.
-TRunner = t.TypeVar("TRunner", bound=XRunner)  # add bound/constrain etc.
+TBlueprint = t.TypeVar("TBlueprint", bound=Blueprint)
+TRunner = t.TypeVar("TRunner", bound=XRunner)
 
 
 class ResourceSpec: ...

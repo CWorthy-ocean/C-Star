@@ -28,7 +28,7 @@ class Service(ABC, LoggingMixin):
     """Runtime configuration of the `Service`"""
     _hc_thread: Thread | None = None
     """A thread for executing an unblocked healthcheck callback."""
-    _hc_queue: Queue | None = None
+    _hc_queue: Queue[str] | None = None
     """A queue for sending shutdown messages to the healthcheck thread."""
     _hc_stop_event: Final[Event]
     """An event triggering health-check thread termination."""
@@ -195,7 +195,7 @@ class Service(ABC, LoggingMixin):
     def _healthcheck(
         self,
         config: "ServiceConfiguration",
-        msg_queue: Queue,
+        msg_queue: Queue[str],
     ) -> None:
         """Run the health-check event loop.
 
