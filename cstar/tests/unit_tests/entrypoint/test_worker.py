@@ -1053,17 +1053,12 @@ def test_worker_main_cstar_error(
         "DEBUG",
     ]
 
-    def return_mocked_sim_runner(*_args: str, **_kwargs: str) -> None:
-        """Mock construction of a RomsMarblRunner failing."""
-        msg = "Mock error"
-        raise exception_type(msg)
-
     # don't let it perform any real work; mock out runner.execute
     with (
         mock.patch.object(
             RomsMarblRunner,
-            "__new__",
-            return_mocked_sim_runner,
+            "execute_xrunner",
+            mock.AsyncMock(side_effect=exception_type),
         ),
         mock.patch.object(sys, "argv", args),
     ):
