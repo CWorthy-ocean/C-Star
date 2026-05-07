@@ -1,2 +1,2 @@
 #!/bin/bash
-python -m cstar.entrypoint.worker.worker "$@"
+python -m cstar.applications.roms_marbl "$@"

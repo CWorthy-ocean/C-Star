@@ -1025,7 +1025,7 @@ def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(bp_path),
         ARG_LOGLEVEL_LONG,
@@ -1054,7 +1054,7 @@ def test_worker_main_exec(
     mock_execute = mock.AsyncMock(return_code=0)
 
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
@@ -1138,7 +1138,7 @@ def test_worker_main_cstar_error(
     gracefully.
     """
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
