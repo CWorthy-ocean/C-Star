@@ -44,11 +44,10 @@ class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
 @register_application
 @dataclass
 class HelloWorldApplication(
-    ApplicationDefinition[HelloWorldBlueprint, HelloWorldRunner]
+    ApplicationDefinition[HelloWorldBlueprint, HelloWorldRunner],
 ):
-    name: str = _APP_NAME
-    blueprint: type[HelloWorldBlueprint] = HelloWorldBlueprint
-    runner: type[HelloWorldRunner] = HelloWorldRunner
+    name = _APP_NAME
+    long_name = _APP_NAME
+    runner = HelloWorldRunner
+    blueprint = HelloWorldBlueprint
     applicable_transforms: tuple[type[Transform], ...] = ()
-    resources_needed: t.Any = ()
-    long_name: str = "Hello World"

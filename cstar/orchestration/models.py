@@ -4,7 +4,7 @@ from abc import ABC
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import field
 from datetime import datetime
 from enum import StrEnum, auto
 from pathlib import Path
@@ -768,17 +768,26 @@ TBlueprint = t.TypeVar("TBlueprint", bound=Blueprint)  # add bound/constrain etc
 TRunner = t.TypeVar("TRunner", bound=XRunner)  # add bound/constrain etc.
 
 
-# todo: mypy is borked in a lot of places
-# todo: feel free to rename any of this stuff
-@dataclass(kw_only=True)
-class ApplicationDefinition(ABC, t.Generic[TBlueprint, TRunner]):
+class ResourceSpec: ...
+
+
+class ApplicationDefinition(t.Generic[TBlueprint, TRunner]):
+    """Specification of the dependencies necessary to execute an application."""
+
     name: str
-    blueprint: type[TBlueprint]
+    """The application name."""
+    long_name: str
+    """A long application name (if desired)."""
     runner: type[TRunner]
-    # todo: some things like overrides and templates should be defaults and not need to be listed
-    applicable_transforms: tuple[type[Transform], ...]
-    resources_needed: t.Any
-    long_name: str  # default to name?
+    """The runner that executes the application blueprints."""
+    blueprint: type[TBlueprint]
+    """The blueprint containing the application configuration."""
+    applicable_transforms: tuple[type[Transform], ...] = field(default_factory=tuple)
+    """Transforms that must be executed prior to execution."""
+    resources_needed: ResourceSpec | None = None
+    """Hardware requirements of the application."""
+
+    def __init__(self) -> None: ...
 
 
 register_representer(WorkplanState, strenum_representer)

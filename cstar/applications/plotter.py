@@ -11,11 +11,13 @@ from cstar.entrypoint.xrunner import (
     XRunnerResult,
 )
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import ApplicationDefinition, Blueprint, Transform
+from cstar.orchestration.models import ApplicationDefinition, Blueprint
 from cstar.orchestration.transforms import OverrideTransform
 
 _APP_NAME: t.Literal["plotter"] = "plotter"
 """The unique identifier for the plotter application type."""
+_APP_NAME_LONG: t.Literal["Plotting Demo Application"] = "Plotting Demo Application"
+"""The long-form application name."""
 
 log = get_logger(__name__)
 
@@ -121,11 +123,10 @@ def make_plots(
 @register_application
 @dataclass
 class PlotterApplicationDefinition(
-    ApplicationDefinition[PlotterBlueprint, PlotterRunner]
+    ApplicationDefinition[PlotterBlueprint, PlotterRunner],
 ):
-    name: str = _APP_NAME
-    blueprint: type[PlotterBlueprint] = PlotterBlueprint
-    runner: type[PlotterRunner] = PlotterRunner
-    applicable_transforms: tuple[type[Transform], ...] = (OverrideTransform,)
-    resources_needed: t.Any = ()
-    long_name: str = "Plotting Demo Application"
+    name = _APP_NAME
+    long_name = _APP_NAME_LONG
+    runner = PlotterRunner
+    blueprint = PlotterBlueprint
+    applicable_transforms = (OverrideTransform,)
