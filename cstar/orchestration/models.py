@@ -4,7 +4,6 @@ from abc import ABC
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import field
 from datetime import datetime
 from enum import StrEnum, auto
 from pathlib import Path
@@ -771,9 +770,7 @@ TRunner = t.TypeVar("TRunner", bound=XRunner)
 class ResourceSpec: ...
 
 
-class ApplicationDefinition(t.Generic[TBlueprint, TRunner]):
-    """Specification of the dependencies necessary to execute an application."""
-
+class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     name: str
     """The application name."""
     long_name: str
@@ -782,12 +779,10 @@ class ApplicationDefinition(t.Generic[TBlueprint, TRunner]):
     """The runner that executes the application blueprints."""
     blueprint: type[TBlueprint]
     """The blueprint containing the application configuration."""
-    applicable_transforms: tuple[type[Transform], ...] = field(default_factory=tuple)
+    applicable_transforms: tuple[type[Transform], ...]
     """Transforms that must be executed prior to execution."""
     resources_needed: ResourceSpec | None = None
     """Hardware requirements of the application."""
-
-    def __init__(self) -> None: ...
 
 
 register_representer(WorkplanState, strenum_representer)
