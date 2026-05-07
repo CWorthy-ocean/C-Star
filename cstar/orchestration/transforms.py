@@ -188,7 +188,7 @@ class TemplateFillTransform:
 
         return step.model_validate_json(content)
 
-    def __call__(self, step: LiveStep) -> Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Apply template filling to a step's blueprint_overrides.
 
         Parameters
@@ -201,7 +201,7 @@ class TemplateFillTransform:
         Iterable[LiveStep]
             A single-element iterable containing the updated step.
         """
-        yield LiveStep.from_step(self._fill(step))
+        return (LiveStep.from_step(self._fill(step)),)
 
 
 def _dailies(

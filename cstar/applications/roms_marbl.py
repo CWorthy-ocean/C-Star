@@ -24,7 +24,11 @@ from cstar.orchestration.models import (
     ApplicationDefinition,
     RomsMarblBlueprint,
 )
-from cstar.orchestration.transforms import OverrideTransform, RomsMarblTimeSplitter
+from cstar.orchestration.transforms import (
+    DirectiveConfig,
+    OverrideTransform,
+    RomsMarblTimeSplitter,
+)
 from cstar.roms import ROMSSimulation
 
 if TYPE_CHECKING:
@@ -209,7 +213,12 @@ def main() -> int:
 
     job_cfg = get_job_config()
     service_cfg = get_service_config(args.log_level, name="RomsMarblRunner")
-    request = get_request(args.blueprint_uri)
+
+    blueprint_uri = args.blueprint_uri
+    if args.directives:
+        blueprint_uri = DirectiveConfig.apply_directives(args.directives, blueprint_uri)
+
+    request = get_request(blueprint_uri)
 
     return asyncio.run(execute_runner(job_cfg, service_cfg, request))
 

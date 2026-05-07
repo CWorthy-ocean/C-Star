@@ -2,7 +2,7 @@ import itertools
 import typing as t
 from abc import ABC
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime
 from enum import StrEnum, auto
@@ -740,7 +740,7 @@ class Transform(t.Protocol):
     new steps.
     """
 
-    def __call__(self, step: "LiveStep") -> Iterable["LiveStep"]:
+    def __call__(self, step: "LiveStep") -> Sequence["LiveStep"]:
         """Apply the transform to a step.
 
         Parameters

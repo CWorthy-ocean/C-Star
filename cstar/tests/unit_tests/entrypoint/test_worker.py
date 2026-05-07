@@ -994,7 +994,7 @@ def test_worker_main_exec_continue_from(
     the directives file.
     """
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
@@ -1087,7 +1087,7 @@ def test_worker_main_preprocessor_args_parsed(
     reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
 
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(bp_path),
         ARG_DIRECTIVES_URI_LONG,
@@ -1096,7 +1096,7 @@ def test_worker_main_preprocessor_args_parsed(
 
     with (
         mock.patch(
-            "cstar.entrypoint.worker.worker.execute_runner",
+            "cstar.applications.roms_marbl.execute_runner",
             mock.AsyncMock(),
         ) as mock_exec_runner,
         mock.patch.object(sys, "argv", args),
