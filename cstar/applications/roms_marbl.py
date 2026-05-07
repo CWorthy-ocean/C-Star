@@ -74,9 +74,6 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
         self._simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
         self._simulation.name = slugify(self._simulation.name)
 
-        # roms_root = os.environ.get("ROMS_ROOT", None)
-        # self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
-
     @override
     def _on_start(self) -> None:
         super()._on_start()
@@ -104,7 +101,7 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
                 self.log.trace("Executing simulation pre-run")
                 self._simulation.pre_run()
 
-                self.log.trace("Running simulation.")
+                self.log.trace("Starting simulation.")
                 self._handler = self._simulation.run(**run_params)
             else:
                 await self._handler.updates(seconds=1.0)

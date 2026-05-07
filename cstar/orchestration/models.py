@@ -771,6 +771,8 @@ class ResourceSpec: ...
 
 
 class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
+    """The required contract for defining metadata needed to orchestrate blueprints."""
+
     name: str
     """The application name."""
     long_name: str
