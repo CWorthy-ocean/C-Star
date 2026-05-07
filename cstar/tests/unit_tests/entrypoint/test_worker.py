@@ -14,7 +14,6 @@ import pytest
 
 from cstar.applications.roms_marbl import (
     RomsMarblRunner,
-    get_request,
     main,
 )
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
@@ -326,10 +325,13 @@ def test_get_request(
             blueprint_uri,
             ARG_LOGLEVEL_LONG,
             "INFO",
-        ]
+        ],
     )
 
-    config = get_request(parsed_args.blueprint_uri)
+    config = XRunnerRequest(
+        parsed_args.blueprint_uri,
+        RomsMarblBlueprint,
+    )
 
     assert config.blueprint_uri == blueprint_uri
 
@@ -1096,7 +1098,8 @@ def test_worker_main_preprocessor_args_parsed(
 
     with (
         mock.patch(
-            "cstar.applications.roms_marbl.execute_runner",
+            # "cstar.applications.roms_marbl.execute_runner",
+            "cstar.entrypoint.xrunner.XBlueprintRunner.execute_xrunner",
             mock.AsyncMock(),
         ) as mock_exec_runner,
         mock.patch.object(sys, "argv", args),

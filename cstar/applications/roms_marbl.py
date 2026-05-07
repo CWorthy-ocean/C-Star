@@ -1,15 +1,12 @@
 import asyncio
-import os
 import sys
 import typing as t
 from typing import TYPE_CHECKING, Final, override
 
 from cstar.applications.utils import register_application
 from cstar.base.exceptions import CstarError
-from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
-    configure_environment,
     get_job_config,
     get_service_config,
 )
@@ -133,67 +130,6 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     applicable_transforms = (RomsMarblTimeSplitter, OverrideTransform)
 
 
-def get_request(
-    blueprint_uri: str,
-) -> XRunnerRequest[RomsMarblBlueprint]:
-    """Create a XRunnerRequest[RomsMarblBlueprint] instance from CLI arguments.
-
-    Parameters
-    ----------
-    blueprint_uri : str
-        The path to a blueprint file
-
-    Returns
-    -------
-    XRunnerRequest[RomsMarblBlueprint]
-        A request configured to run a c-star simulation via a blueprint.
-    """
-    return XRunnerRequest(
-        blueprint_uri,
-        RomsMarblBlueprint,
-    )
-
-
-async def execute_runner(
-    job_cfg: "JobConfig",
-    service_cfg: "ServiceConfiguration",
-    request: XRunnerRequest[RomsMarblBlueprint],
-) -> int:
-    """Execute a blueprint with a RomsMarblRunner.
-
-    Parameters
-    ----------
-    job_cfg : JobConfig
-        Configuration applied to the scheduler
-    service_cfg : ServiceConfiguration
-        Configuration applied to the service
-    request : XRunnerRequest[RomsMarblBlueprint]
-        A request specifying the blueprint to be executed
-    """
-    log = get_logger(__name__, level=service_cfg.log_level)
-
-    log.debug(f"Job config: {job_cfg!r}")
-    log.debug(f"Service config: {service_cfg!r}")
-    log.debug(f"Request: {request!r}")
-    log.trace(f"Environment: {os.environ}")
-    log.info(f"Creating simulation runner for {request.blueprint_uri!r}")
-
-    try:
-        configure_environment(log)
-        worker = RomsMarblRunner(request, service_cfg, job_cfg)
-        await worker.execute()
-    except CstarError as ex:
-        log.exception("An error occurred during the simulation", exc_info=ex)
-        return 1
-    except Exception as ex:
-        log.exception(
-            "An unexpected exception occurred during the simulation", exc_info=ex
-        )
-        return 1
-
-    return 0
-
-
 def main() -> int:
     """Parse CLI arguments and run a c-star worker.
 
@@ -215,9 +151,21 @@ def main() -> int:
     if args.directives:
         blueprint_uri = DirectiveConfig.apply_directives(args.directives, blueprint_uri)
 
-    request = get_request(blueprint_uri)
+    request = XRunnerRequest(blueprint_uri, RomsMarblBlueprint)
+    runner = RomsMarblRunner(request, service_cfg, job_cfg)
 
-    return asyncio.run(execute_runner(job_cfg, service_cfg, request))
+    try:
+        asyncio.run(runner.execute_xrunner())
+        if runner.result and runner.result.errors:
+            return 1
+    except CstarError as ex:
+        print(f"An error occurred during the simulation: {ex}")
+        return 1
+    except Exception as ex:
+        print(f"An unexpected exception occurred during the simulation: {ex}")
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
