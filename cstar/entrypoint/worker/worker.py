@@ -14,7 +14,12 @@ from cstar.entrypoint.config import (
     get_service_config,
 )
 from cstar.entrypoint.service import Service
-from cstar.entrypoint.xrunner import XRunnerRequest, create_parser
+from cstar.entrypoint.xrunner import (
+    XBlueprintRunner,
+    XRunnerRequest,
+    XRunnerResult,
+    create_parser,
+)
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.transforms import DirectiveConfig
@@ -24,7 +29,7 @@ if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
 
-class SimulationRunner(Service):
+class SimulationRunner(XBlueprintRunner[RomsMarblBlueprint]):
     """Worker class to run c-star simulations."""
 
     _blueprint_uri: Final[str]
@@ -58,7 +63,7 @@ class SimulationRunner(Service):
             Configuration for submitting jobs to an HPC, such as account ID,
             walltime, job name, and priority.
         """
-        super().__init__(service_cfg)
+        super().__init__(request, job_cfg, service_cfg)
 
         self._blueprint_uri = request.blueprint_uri
 
@@ -171,7 +176,7 @@ class SimulationRunner(Service):
             self._log_disposition(treat_as_failure=treat_as_failure)
 
     @override
-    async def _on_iteration(self) -> None:
+    async def run(self) -> XRunnerResult[RomsMarblBlueprint]:
         """Execute the c-star simulation."""
         try:
             if not self._handler:
@@ -185,6 +190,8 @@ class SimulationRunner(Service):
                 self._handler = self._simulation.run(**run_params)
             else:
                 await self._handler.updates(seconds=1.0)
+
+            return self.set_result(self._handler.status)
         except Exception:
             self.log.exception("An error occurred while running the simulation")
 

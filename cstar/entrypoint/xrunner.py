@@ -200,7 +200,7 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
         """
         ...
 
-    def __call__(self) -> XRunnerResult[TBlueprint]:
+    async def run(self) -> XRunnerResult[TBlueprint]:
         """Execute the application.
 
         Returns
@@ -278,7 +278,7 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
 
         return ExecutionStatus.UNKNOWN
 
-    def __call__(self) -> XRunnerResult[TBlueprint]:
+    async def run(self) -> XRunnerResult[TBlueprint]:
         return XRunnerResult(self.request, ExecutionStatus.COMPLETED)
 
     def is_done(self) -> bool:
@@ -327,9 +327,9 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
     async def _on_iteration(self) -> None:
         """Execute an application as specified in the blueprint."""
         try:
-            self._result = self()
+            self._result = await self.run()
         except Exception:
-            msg = f"An error occurred while running blueprint: {self.blueprint_uri}"
+            msg = f"An error occurred while running blueprint: {self.blueprint_uri!r}"
             self.log.exception(msg)
             self.set_result(ExecutionStatus.FAILED, [msg])
 
@@ -376,7 +376,7 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
         try:
             configure_environment(log)
 
-            return self()
+            return await self.run()
 
         except CstarError as ex:
             msg = "An error occurred while processing the blueprint"

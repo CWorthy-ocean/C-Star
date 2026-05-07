@@ -27,7 +27,7 @@ class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
     """The application identifier."""
 
     @t.override
-    def __call__(self) -> XRunnerResult[HelloWorldBlueprint]:
+    async def run(self) -> XRunnerResult[HelloWorldBlueprint]:
         """Process the blueprint.
 
         Returns

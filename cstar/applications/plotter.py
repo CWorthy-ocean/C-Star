@@ -55,7 +55,7 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
     """The application identifier."""
 
     @t.override
-    def __call__(self) -> XRunnerResult[PlotterBlueprint]:
+    async def run(self) -> XRunnerResult[PlotterBlueprint]:
         """Process the blueprint.
 
         Returns
@@ -64,12 +64,14 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
             The result of the blueprint processing.
         """
         self.log.debug("Executing handler function on blueprint runner")
-        if not isinstance(self.blueprint, PlotterBlueprint):
-            raise ValueError(
-                f"PlotterBlueprint expected. Received: {type(self.blueprint)}"
-            )
-        self.log.info(f"Running plotter application for {self.blueprint}")
-        make_plots(**self.blueprint.dict())
+        if self.blueprint.application != self.application:
+            msg = f"PlotterBlueprint expected. Received: {type(self.blueprint)}"
+            raise ValueError(msg)
+
+        msg = f"Running plotter application for {self.blueprint}"
+        self.log.info(msg)
+
+        make_plots(**self.blueprint.model_dump())
         return self.set_result(ExecutionStatus.COMPLETED)
 
 
