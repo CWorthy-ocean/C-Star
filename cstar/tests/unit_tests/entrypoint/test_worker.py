@@ -922,7 +922,7 @@ def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     """Test the main entrypoint of the worker service.
 
     This test verifies that the the main function will fail to run when called without
-    explicit arguments.
+    supplying a path to a blueprint.
     """
     mock_execute = mock.Mock()
 
@@ -1054,6 +1054,7 @@ def test_worker_main_cstar_error(
     ]
 
     def return_mocked_sim_runner(*_args: str, **_kwargs: str) -> None:
+        """Mock construction of a RomsMarblRunner failing."""
         msg = "Mock error"
         raise exception_type(msg)
 

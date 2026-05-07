@@ -369,7 +369,6 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
 
         try:
             configure_environment(log)
-
             return await self.run()
 
         except CstarError as ex:
