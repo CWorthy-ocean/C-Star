@@ -1505,6 +1505,43 @@ class TestLoadModelsYaml:
         # run_time and compile_time are placeholders with default branch
         assert spec.code.run_time.branch == "main"
         assert spec.code.compile_time.branch == "main"
+
+    def test_load_models_yaml_with_numeric_commit(self, tmp_path):
+        """Test numeric commit values are coerced to strings."""
+        yaml_content = {
+            "test_model": {
+                "code": {
+                    "roms": {
+                        "location": "https://github.com/test/roms.git",
+                        "commit": 6588486,
+                    }
+                },
+                "inputs": {
+                    "grid": {
+                        "topography_source": "ETOPO5"
+                    },
+                    "initial_conditions": {
+                        "source": {"name": "GLORYS"}
+                    },
+                    "forcing": {
+                        "surface": [
+                            {"source": {"name": "ERA5"}, "type": "physics"}
+                        ],
+                        "boundary": [
+                            {"source": {"name": "GLORYS"}, "type": "physics"}
+                        ]
+                    }
+                }
+            }
+        }
+
+        yaml_path = tmp_path / "models.yml"
+        with yaml_path.open("w") as f:
+            yaml.safe_dump(yaml_content, f)
+
+        spec = load_models_yaml(yaml_path, "test_model")
+
+        assert spec.code.roms.commit == "6588486"
     
     def test_load_models_yaml_default_branch(self, tmp_path):
         """Test loading models.yml with default branch when not specified."""
