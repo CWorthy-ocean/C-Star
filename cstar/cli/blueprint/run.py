@@ -4,8 +4,6 @@ import typing as t
 import typer
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl import execute_runner as exec_romsmarbl_runner
-from cstar.applications.roms_marbl import get_request
 from cstar.applications.utils import get_application
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -25,7 +23,7 @@ from cstar.entrypoint.utils import (
 )
 from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.models import Application, Blueprint
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig
 
@@ -166,21 +164,16 @@ def run(
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
-    if bp.application == Application.ROMS_MARBL.value:
-        # NOTE: temporary conditional to use old runner until it is converted to XRunner
-        rm_request = get_request(uri)
-        rc = asyncio.run(exec_romsmarbl_runner(job_cfg, service_cfg, rm_request))
-    else:
-        request = XRunnerRequest(uri, type(bp))
+    request = XRunnerRequest(uri, type(bp))
 
-        _app = get_application(bp.application)
-        runner = _app.runner(request, job_cfg, service_cfg)
-        xresult = asyncio.run(runner.execute_xrunner())
+    app = get_application(bp.application)
+    runner = app.runner(request, job_cfg, service_cfg)
+    xresult = asyncio.run(runner.execute_xrunner())
 
-        if errors := xresult.errors:
-            print(f"Errors occurred: {', '.join(errors)}")
+    if errors := xresult.errors:
+        print(f"Errors occurred: {', '.join(errors)}")
 
-        rc = len(errors)
+    rc = len(errors)
 
     if rc:
         print("Blueprint execution failed")
