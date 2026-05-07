@@ -1,11 +1,9 @@
 import asyncio
 import os
-import pathlib
 import sys
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Final, override
 
-from cstar.base.exceptions import BlueprintError, CstarError
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
@@ -13,7 +11,6 @@ from cstar.entrypoint.config import (
     get_job_config,
     get_service_config,
 )
-from cstar.entrypoint.service import Service
 from cstar.entrypoint.xrunner import (
     XBlueprintRunner,
     XRunnerRequest,
@@ -32,16 +29,10 @@ if TYPE_CHECKING:
 class SimulationRunner(XBlueprintRunner[RomsMarblBlueprint]):
     """Worker class to run c-star simulations."""
 
-    _blueprint_uri: Final[str]
-    """The URI of the blueprint to run."""
-    _output_root: Final[pathlib.Path]
-    """The root directory where simulation outputs will be written."""
     _simulation: Final[ROMSSimulation]
     """The simulation instance created from the blueprint."""
-    _handler: ExecutionHandler | None
+    _handler: ExecutionHandler | None = None
     """The execution handler for the simulation."""
-    _job_config: Final["JobConfig"]
-    """Configuration for submitting jobs to an HPC."""
 
     def __init__(
         self,
@@ -65,126 +56,38 @@ class SimulationRunner(XBlueprintRunner[RomsMarblBlueprint]):
         """
         super().__init__(request, job_cfg, service_cfg)
 
-        self._blueprint_uri = request.blueprint_uri
-
-        self._simulation = ROMSSimulation.from_blueprint(self._blueprint_uri)
+        self._simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
         self._simulation.name = slugify(self._simulation.name)
-        self._output_root = self._simulation.directory.expanduser()
 
-        roms_root = os.environ.get("ROMS_ROOT", None)
-        self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
-        self._handler = None
-        self._job_config = job_cfg
-
-    @staticmethod
-    def _get_unique_path(root_path: pathlib.Path) -> pathlib.Path:
-        """Create a unique path name to avoid collisions.
-
-        Parameters
-        ----------
-        root_path: pathlib.Path
-            The parent directory where the unique directory will be created.
-
-        Returns
-        -------
-        pathlib.Path
-            A unique path based on the current date and time.
-        """
-        current_time = datetime.now(timezone.utc)
-        return root_path / f"{current_time.strftime('%Y%m%d_%H%M%S')}"
-
-    def _log_disposition(self, treat_as_failure: bool = False) -> None:
-        """Log the status of the simulation at shutdown time."""
-        disposition: ExecutionStatus = (
-            self._handler.status if self._handler else ExecutionStatus.UNKNOWN
-        )
-
-        if self._handler:
-            self.log.info(f"Completed simulation logs at: {self._handler.output_file}")
-
-        if disposition == ExecutionStatus.COMPLETED and not treat_as_failure:
-            self.log.info("Simulation completed successfully.")
-        elif disposition == ExecutionStatus.FAILED or treat_as_failure:
-            self.log.error("Simulation failed.")
-        else:
-            self.log.warning(f"Simulation ended with status: {disposition}.")
+        # roms_root = os.environ.get("ROMS_ROOT", None)
+        # self._simulation.exe_path = pathlib.Path(roms_root) if roms_root else None
 
     @override
     def _on_start(self) -> None:
-        """Prepare the simulation for execution.
+        super()._on_start()
 
-        Verifies the simulation loaded properly, configuring the file system, retrieving
-        remote resources, and building third-party codebases.
-        """
-        if self._blueprint_uri is None:
-            msg = "No blueprint URI provided"
-            raise BlueprintError(msg)
-
-        if self._simulation is None:
-            msg = f"Unable to load the blueprint: {self._blueprint_uri}"
-            raise BlueprintError(msg)
-
-        try:
-            self.log.trace("Setting up simulation")
-            self._simulation.setup()
-
-            self.log.trace("Building simulation")
-            self._simulation.build()
-
-            self.log.trace("Executing simulation pre-run")
-            self._simulation.pre_run()
-
-        except RuntimeError as ex:
-            msg = "Failed to build simulation"
-            raise CstarError(msg) from ex
-        except ValueError as ex:
-            msg = "Failed to prepare simulation"
-            raise CstarError(msg) from ex
-
-    @override
-    def _on_shutdown(self) -> None:
-        """Perform activities required for clean shutdown.
-
-        Execute simulation post-run behavior and log the final disposition of the
-        simulation.
-        """
-        # perform simulation cleanup activities only when required
-        treat_as_failure = False
-        try:
-            if not self._simulation:
-                self.log.warning("No simulation available at shutdown")
-                return
-
-            # note: calling post_run on any status but completed fails.
-            if not self._handler:
-                self.log.debug("Skipping simulation post-run; handler not found.")
-                return
-
-            if self._handler.status != ExecutionStatus.COMPLETED:
-                self.log.debug(
-                    "Skipping simulation post-run; simulation is not complete."
-                )
-                return
-
-            self._simulation.post_run()
-            self.log.debug("Executing simulation post-run")
-        except RuntimeError:
-            treat_as_failure = True
-            self.log.exception("Simulation post_run failed.")
-        finally:
-            # ensure status is logged even if _handler updates are suppressed.
-            self._log_disposition(treat_as_failure=treat_as_failure)
+        if not self._simulation:
+            msg = "Simulation creation failed. Unable to execute simulation runner"
+            raise RuntimeError(msg)
 
     @override
     async def run(self) -> XRunnerResult[RomsMarblBlueprint]:
         """Execute the c-star simulation."""
+        treat_as_failure = False
+
         try:
             if not self._handler:
                 run_params = {
-                    "account_key": self._job_config.account_id,
-                    "walltime": self._job_config.walltime,
-                    "job_name": self._job_config.job_name,
+                    "account_key": self._job_cfg.account_id,
+                    "walltime": self._job_cfg.walltime,
+                    "job_name": self._job_cfg.job_name,
                 }
+                self.log.trace("Setting up simulation")
+                self._simulation.setup()
+                self.log.trace("Building simulation")
+                self._simulation.build()
+                self.log.trace("Executing simulation pre-run")
+                self._simulation.pre_run()
 
                 self.log.trace("Running simulation.")
                 self._handler = self._simulation.run(**run_params)
@@ -192,49 +95,21 @@ class SimulationRunner(XBlueprintRunner[RomsMarblBlueprint]):
                 await self._handler.updates(seconds=1.0)
 
             return self.set_result(self._handler.status)
+
         except Exception:
-            self.log.exception("An error occurred while running the simulation")
+            msg = "An error occurred while running the simulation"
+            self.log.exception(msg)
+            treat_as_failure = True
+            self.set_result(ExecutionStatus.FAILED, [msg])
 
-    def _is_status_complete(self) -> bool:
-        """Determine if the simulation has completed.
+        if self.status == ExecutionStatus.COMPLETED:
+            self._simulation.post_run()
+        else:
+            msg = "Skipping simulation post-run; simulation is not complete."
+            self.log.debug(msg)
 
-        Returns
-        -------
-        bool
-            `True` if the simulation is in a completed state, `False` otherwise.
-        """
-        if self._handler is None:
-            return True
-
-        return self._handler.status in [
-            ExecutionStatus.COMPLETED,
-            ExecutionStatus.CANCELLED,
-            ExecutionStatus.FAILED,
-        ]
-
-    @override
-    def _can_shutdown(self) -> bool:
-        """Determine if the service can shutdown.
-
-        Returns
-        -------
-        bool
-            `True` if the service can shutdown, `False` otherwise.
-        """
-        if self._simulation is None:
-            self.log.error("Simulation is not set. Allowing shutdown.")
-            return True
-
-        if not self._handler:
-            self.log.error("Execution handler is not set. Allowing shutdown.")
-            return True
-
-        status = self._handler.status
-        if self._is_status_complete():
-            self.log.info(f"Simulation is not running ({status}). Allowing shutdown.")
-            return True
-
-        return False
+        self._log_disposition(treat_as_failure=treat_as_failure)
+        return self.set_result(self.status)
 
 
 def get_request(

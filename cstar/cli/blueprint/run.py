@@ -4,6 +4,8 @@ import typing as t
 import typer
 from pydantic import ValidationError
 
+from cstar.applications.roms_marbl import execute_runner as exec_romsmarbl_runner
+from cstar.applications.roms_marbl import get_request
 from cstar.applications.utils import get_application
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -12,7 +14,6 @@ from cstar.base.env import (
 )
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
-from cstar.cli.workplan.shared import create_xrunner, get_registered_bp
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
@@ -21,8 +22,6 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
-from cstar.entrypoint.worker.worker import execute_runner as exec_romsmarbl_runner
-from cstar.entrypoint.worker.worker import get_request
 from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Application, Blueprint

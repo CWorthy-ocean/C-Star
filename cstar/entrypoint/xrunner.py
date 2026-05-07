@@ -281,22 +281,16 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
     async def run(self) -> XRunnerResult[TBlueprint]:
         return XRunnerResult(self.request, ExecutionStatus.COMPLETED)
 
-    def is_done(self) -> bool:
-        """Return `True` if the blueprint has completed execution.
+    def _log_disposition(self, treat_as_failure: bool = False) -> None:
+        """Log the status of the simulation at shutdown time."""
+        disposition = self.status
 
-        Returns
-        -------
-        bool
-        """
-        return ExecutionStatus.is_terminal(self.status)
-
-    def _log_disposition(self) -> None:
-        """Log the status of the runner's work at the current time."""
-        msg = (
-            "Final disposition of task executed by service "
-            f"{self._config.name!r} is {self.status.name!r}"
-        )
-        self.log.debug(msg)
+        if disposition == ExecutionStatus.COMPLETED and not treat_as_failure:
+            self.log.info("Simulation completed successfully.")
+        elif disposition == ExecutionStatus.FAILED or treat_as_failure:
+            self.log.error("Simulation failed.")
+        else:
+            self.log.warning(f"Simulation ended with status: {disposition}.")
 
     @t.override
     def _can_shutdown(self) -> bool:
@@ -307,7 +301,7 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
         bool
             `True` if the service can shutdown, `False` otherwise.
         """
-        if self.is_done():
+        if ExecutionStatus.is_terminal(self.status):
             self.log.info(f"Shutdown is allowed ({self.status}).")
             return True
 
@@ -389,13 +383,13 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
 
 
 def create_parser() -> argparse.ArgumentParser:
-    """Create a parser for CLI arguments expected by a SimulationRunner.
+    """Create a parser for CLI arguments expected by a blueprint runner.
 
     Returns
     -------
     argparse.ArgumentParser
         An argument parser configured with the expected arguments for the
-        SimulationRunner service.
+        blueprint runner service.
     """
     parser = argparse.ArgumentParser(
         description="Run a c-star simulation.",

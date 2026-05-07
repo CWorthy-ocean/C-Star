@@ -27,6 +27,7 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
+from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import (
     Application,
     Blueprint,

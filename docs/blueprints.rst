@@ -214,12 +214,13 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
 
    .. tab-item:: Programmatic Execution
 
-    Use a ``SimulationRunner`` to execute the blueprint.
+    Use a ``RomsMarblRunner`` to execute the blueprint.
 
     .. code-block:: python
       :caption: Executing a blueprint YAML file in python.
 
-        from cstar.entrypoint.config import JobConfig, ServiceConfiguration, SimulationRunner
+        from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+        from cstar.applications.roms_marbl import RomsMarblRunner
         from cstar.entrypoint.xrunner import XRunnerRequest
         from cstar.orchestration.models import RomsMarblBlueprint
 
@@ -230,4 +231,4 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
         service_cfg = ServiceConfiguration()
         job_cfg = JobConfig(account_id, priority=queue_id)
 
-        SimulationRunner(request, service_cfg, job_cfg)
+        RomsMarblRunner(request, service_cfg, job_cfg)
