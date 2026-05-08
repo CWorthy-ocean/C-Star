@@ -67,55 +67,40 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
         msg = f"Running plotter application for {self.blueprint}"
         self.log.info(msg)
 
-        make_plots(**self.blueprint.model_dump())
+        self.make_plots()
         return self.set_result(ExecutionStatus.COMPLETED)
 
+    def make_plots(self) -> None:
+        """
+        Make 2D plots of all combinations of the provided variables, time indices, and depth indices.
 
-def make_plots(
-    input_dir: Path,
-    output_dir: Path,
-    variables: list[str],
-    time_indices: list[int],
-    s_indices: list[int],
-    grid_file_path: Path,
-    file_glob: str,
-    **kwargs,
-) -> None:
-    """
-    Make 2D plots of all combinations of the provided variables, time indices, and depth indices.
+        Plots will be written to the output directory specified in the blueprint.
 
-    Parameters
-    ----------
-    input_dir: location of ROMS output files
-    output_dir: location to save the plots
-    variables: variables to plot
-    time_indices: time indices to plot
-    s_indices: depth indices to plot
-    grid_file_path: location of the grid file corresponding to the ROMS outputs
-    file_glob: glob pattern to match the file names to open for plotting
-    kwargs: unused; intended to capture any unused blueprint params that are unpacked
+        Returns
+        -------
+        None
+        """
+        blueprint = self.request.blueprint
 
-    Returns
-    -------
-    None
-    """
-    input_dir = input_dir.expanduser().resolve()
-    grid = Grid(filename=grid_file_path)
-    roms = ROMSOutput(path=input_dir / file_glob, grid=grid, use_dask=True)
-    output_dir = output_dir.expanduser().resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = blueprint.input_dir.expanduser().resolve()
+        grid = Grid(filename=blueprint.grid_file_path)
+        roms = ROMSOutput(
+            path=input_dir / blueprint.file_glob, grid=grid, use_dask=True
+        )
+        output_dir = blueprint.output_dir.expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    for var in variables:
-        for s in s_indices:
-            for time in time_indices:
-                out_path = output_dir / f"{var}_s{s}_t{time}.png"
-                try:
-                    roms.ds.variables[var][s][time].compute()
-                    roms.plot(var, time=time, s=s, save_path=str(out_path))
-                except Exception:
-                    log.exception(
-                        f"Exception while plotting var {var}, s {s}, time {time}"
-                    )
+        for var in blueprint.variables:
+            for s in blueprint.s_indices:
+                for time in blueprint.time_indices:
+                    out_path = output_dir / f"{var}_s{s}_t{time}.png"
+                    try:
+                        roms.ds.variables[var][s][time].compute()
+                        roms.plot(var, time=time, s=s, save_path=str(out_path))
+                    except Exception:
+                        log.exception(
+                            f"Exception while plotting var {var}, s {s}, time {time}"
+                        )
 
 
 @register_application
