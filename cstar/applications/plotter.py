@@ -64,11 +64,6 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
         RunnerResult
             The result of the blueprint processing.
         """
-        self.log.debug("Executing handler function on blueprint runner")
-        if self.blueprint.application != self.application:
-            msg = f"PlotterBlueprint expected. Received: {self.blueprint.application!r}"
-            raise ValueError(msg)
-
         msg = f"Running plotter application for {self.blueprint}"
         self.log.info(msg)
 
