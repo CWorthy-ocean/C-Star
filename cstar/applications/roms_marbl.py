@@ -91,11 +91,6 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
 
         try:
             if not self._handler:
-                run_params = {
-                    "account_key": self._job_cfg.account_id,
-                    "walltime": self._job_cfg.walltime,
-                    "job_name": self._job_cfg.job_name,
-                }
                 self.log.trace("Setting up simulation")
                 self._simulation.setup()
                 self.log.trace("Building simulation")
@@ -104,7 +99,11 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
                 self._simulation.pre_run()
 
                 self.log.trace("Starting simulation.")
-                self._handler = self._simulation.run(**run_params)
+                self._handler = self._simulation.run(
+                    account_key=self._job_cfg.account_id,
+                    walltime=self._job_cfg.walltime,
+                    job_name=self._job_cfg.job_name,
+                )
             else:
                 await self._handler.updates(seconds=1.0)
 
