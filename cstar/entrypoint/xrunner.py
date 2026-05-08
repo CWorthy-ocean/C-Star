@@ -155,8 +155,8 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
     def __init__(
         self,
         request: XRunnerRequest[TBlueprint],
-        job_cfg: "JobConfig",
         service_config: "ServiceConfiguration",
+        job_cfg: "JobConfig",
     ) -> None:
         """Initialize a runner instance.
 
@@ -164,11 +164,12 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
         ----------
         request : XRunnerRequest[TBlueprint]
             The request containing configuration for executing an application.
-        job_cfg : JobConfig
-            Configuration required to submit jobs on an HPC.
         service_config : ServiceConfiguration
             Configuration options for the execution of an application in a service.
+        job_cfg : JobConfig
+            Configuration required to submit jobs on an HPC.
         """
+        ...
 
     @property
     def blueprint(self) -> TBlueprint:
@@ -221,7 +222,7 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
         ...
 
 
-class XBlueprintRunner(XRunner[TBlueprint], Service):
+class XBlueprintRunner(Service, XRunner[TBlueprint]):
     """A service that executes a blueprint."""
 
     _request: XRunnerRequest[TBlueprint]
@@ -234,8 +235,8 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
     def __init__(
         self,
         request: XRunnerRequest[TBlueprint],
-        job_cfg: "JobConfig",
         service_cfg: "ServiceConfiguration",
+        job_cfg: "JobConfig",
     ) -> None:
         """Initialize the `XBlueprintRunner` with the supplied configuration.
 
@@ -243,11 +244,11 @@ class XBlueprintRunner(XRunner[TBlueprint], Service):
         ----------
         request: XRunnerRequest[TBlueprint]
             A request containing information about the blueprint to run.
+        service_cfg: ServiceConfiguration
+            Configuration for modifying behavior of the service process.
         job_cfg: JobConfig
             Configuration for submitting jobs to an HPC, such as account ID,
             walltime, job name, and priority.
-        service_cfg: ServiceConfiguration
-            Configuration for modifying behavior of the service process.
         """
         Service.__init__(self, service_cfg)
         self._request = request

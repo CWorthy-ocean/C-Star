@@ -66,7 +66,7 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
             Configuration for submitting jobs to an HPC, such as account ID,
             walltime, job name, and priority.
         """
-        super().__init__(request, job_cfg, service_cfg)
+        super().__init__(request, service_cfg, job_cfg)
 
         self._simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
         self._simulation.name = slugify(self._simulation.name)
@@ -141,8 +141,12 @@ def main() -> int:
     int
         The exit code of the worker script. Returns 0 on success, 1 on failure.
     """
-    parser = create_parser()
-    args = parser.parse_args()
+    try:
+        parser = create_parser()
+        args = parser.parse_args()
+    except SystemExit as ex:
+        print(str(ex))
+        return 1
 
     job_cfg = get_job_config()
     service_cfg = get_service_config(args.log_level, name="RomsMarblRunner")
@@ -155,8 +159,9 @@ def main() -> int:
     runner = RomsMarblRunner(request, service_cfg, job_cfg)
 
     try:
-        asyncio.run(runner.execute_xrunner())
-        if runner.result and runner.result.errors:
+        result = asyncio.run(runner.execute_xrunner())
+        if result.errors:
+            print(f"Errors occurred: {', '.join(result.errors)}")
             return 1
     except CstarError as ex:
         print(f"An error occurred during the simulation: {ex}")

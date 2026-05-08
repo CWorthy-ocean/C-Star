@@ -166,7 +166,7 @@ async def test_hello_world_runner_happy_path(
     job_cfg = get_job_config()
     svc_cfg = get_service_config(log_level="INFO")
 
-    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
 
     await runner.execute()
 

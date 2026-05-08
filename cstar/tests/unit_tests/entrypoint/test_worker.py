@@ -5,7 +5,6 @@ import os
 import shutil
 import sys
 import textwrap
-import typing as t
 from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
@@ -32,6 +31,7 @@ from cstar.entrypoint.utils import (
     ARG_URI_SHORT,
 )
 from cstar.entrypoint.xrunner import (
+    XBlueprintRunner,
     XRunnerRequest,
     XRunnerResult,
     create_parser,
@@ -932,16 +932,12 @@ def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     output_dir = sim_runner._simulation.fs_manager.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    args = [
-        "cstar.applications.roms_marbl",
-        ARG_URI_LONG,
-        str(bp_path),
-        ARG_LOGLEVEL_LONG,
-        "DEBUG",
-    ]
+    args = ["cstar.applications.roms_marbl.py"]
 
-    with mock.patch.dict(os.environ, {}), mock.patch.object(sys, "argv", args):
-        # don't let it perform any real work
+    with (
+        mock.patch.dict(os.environ, {}),
+        mock.patch.object(sys, "argv", args),
+    ):
         return_code = main()
 
     # Confirm an error code is returned
@@ -959,8 +955,12 @@ def test_worker_main_exec(
     This test verifies that the main function will run the simulation when called
     with properly formatted arguments.
     """
-    mock_execute = mock.AsyncMock(return_code=0)
-
+    mock_execute = mock.AsyncMock(
+        return_value=XRunnerResult(
+            XRunnerRequest(blueprint_path.as_posix(), RomsMarblBlueprint),
+            ExecutionStatus.COMPLETED,
+        ),
+    )
     args = [
         "cstar.applications.roms_marbl",
         ARG_URI_LONG,
@@ -973,7 +973,7 @@ def test_worker_main_exec(
     with (
         mock.patch.object(
             RomsMarblRunner,
-            "execute",
+            "execute_xrunner",
             mock_execute,
         ),
         mock.patch.object(sys, "argv", args),
@@ -995,6 +995,11 @@ def test_worker_main_exec_continue_from(
     """Verify that the continuance transform is executed when included in
     the directives file.
     """
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+    mock_roms_sim_class = mock.Mock()
+    mock_roms_sim_class.from_blueprint.return_value = mock_sim_instance
+
     args = [
         "cstar.applications.roms_marbl",
         ARG_URI_LONG,
@@ -1005,19 +1010,32 @@ def test_worker_main_exec_continue_from(
         str(continuance_directive_path),
     ]
 
+    async def modify_runner(
+        self: XBlueprintRunner[RomsMarblBlueprint],
+    ) -> XRunnerResult[RomsMarblBlueprint]:
+        """Mock the main execution method to avoid `real work` and ensure the result
+        attribute is updated.
+        """
+        self._result = XRunnerResult(
+            XRunnerRequest(str(blueprint_path), RomsMarblBlueprint),
+            ExecutionStatus.COMPLETED,
+        )
+        assert ContinuanceTransform.suffix() in str(self.request.blueprint_uri)
+        return self._result
+
     # don't let it perform any real work; mock out RomsMarblRunner
     with (
-        mock.patch.object(
-            RomsMarblRunner,
-            "execute",
-            mock.AsyncMock(),
-        ) as mock_execute,
-        mock.patch.object(
-            RomsMarblRunner,
-            "__init__",
-            mock.Mock(return_value=None),
-        ) as mock_init,
         mock.patch.object(sys, "argv", args),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute_xrunner",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+        mock.patch(
+            "cstar.applications.roms_marbl.ROMSSimulation",
+            mock_roms_sim_class,
+        ),
     ):
         # This should run the simulation and return a success code
         return_code = main()
@@ -1026,13 +1044,7 @@ def test_worker_main_exec_continue_from(
     assert return_code == 0
 
     # Confirm the runner ran the simulation
-    mock_init.assert_called_once()
-    mock_execute.assert_called_once()
-
-    request: XRunnerRequest[RomsMarblBlueprint] = mock_init.call_args[0][0]
-
-    # confirm directive was applied by verifying a transformed blueprint was created
-    assert ContinuanceTransform.suffix() in str(request.blueprint_uri)
+    mock_exec_runner.assert_called_once()
 
 
 @pytest.mark.parametrize("exception_type", [CstarError, BlueprintError, Exception])
@@ -1055,12 +1067,12 @@ def test_worker_main_cstar_error(
 
     # don't let it perform any real work; mock out runner.execute
     with (
+        mock.patch.object(sys, "argv", args),
         mock.patch.object(
             RomsMarblRunner,
             "execute_xrunner",
             mock.AsyncMock(side_effect=exception_type),
         ),
-        mock.patch.object(sys, "argv", args),
     ):
         # This should run the simulation and return a failure code.
         return_code = main()
@@ -1084,6 +1096,11 @@ def test_worker_main_preprocessor_args_parsed(
 
     reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
 
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+    mock_roms_sim_class = mock.Mock()
+    mock_roms_sim_class.from_blueprint.return_value = mock_sim_instance
+
     args = [
         "cstar.applications.roms_marbl",
         ARG_URI_LONG,
@@ -1092,26 +1109,36 @@ def test_worker_main_preprocessor_args_parsed(
         str(continuance_directive_path),
     ]
 
+    async def modify_runner(self) -> XRunnerResult[RomsMarblBlueprint]:
+        """Mock the main execution method to avoid `real work` and ensure the result
+        attribute is updated.
+        """
+        self._result = XRunnerResult(
+            XRunnerRequest(str(bp_path), RomsMarblBlueprint),
+            ExecutionStatus.COMPLETED,
+        )
+        return self._result
+
     with (
-        mock.patch(
-            # "cstar.applications.roms_marbl.execute_runner",
-            "cstar.entrypoint.xrunner.XBlueprintRunner.execute_xrunner",
-            mock.AsyncMock(),
-        ) as mock_exec_runner,
         mock.patch.object(sys, "argv", args),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute_xrunner",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+        mock.patch("cstar.applications.roms_marbl.ROMSSimulation", mock_roms_sim_class),
     ):
         _ = main()
 
     mock_exec_runner.assert_called_once()
 
-    *_, req = mock_exec_runner.mock_calls[0].args
-
-    request = t.cast("XRunnerRequest[RomsMarblBlueprint]", req)
+    modified_uri = mock_roms_sim_class.from_blueprint.mock_calls[0].args[0]
 
     # verify the blueprint uri was modified by preprocessing prior to invocation
-    assert request.blueprint_uri != str(bp_path)
-    assert ContinuanceTransform.suffix() in request.blueprint_uri
+    assert modified_uri != str(bp_path)
+    assert ContinuanceTransform.suffix() in modified_uri
 
     # verify initial conditions now point to the --continue-from location
-    blueprint = deserialize(request.blueprint_uri, RomsMarblBlueprint)
+    blueprint = deserialize(modified_uri, RomsMarblBlueprint)
     assert str(reset_dir) in str(blueprint.initial_conditions.data[0].location)

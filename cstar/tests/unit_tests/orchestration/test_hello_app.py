@@ -82,7 +82,7 @@ async def test_hello_world_runner_execute_xrunner(
     svc_cfg = ServiceConfiguration()
     job_cfg = get_job_config()
 
-    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
     result = await runner.execute_xrunner()
 
     assert result is not None
@@ -115,7 +115,7 @@ async def test_hello_world_runner_execute_runner(
     svc_cfg = ServiceConfiguration()
     job_cfg = get_job_config()
 
-    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
     await runner.execute()
 
     if not runner.result:
@@ -157,7 +157,7 @@ async def test_execute_runner_happy_path(
         log_level=LogLevelChoices.INFO,
     )
 
-    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
     await runner.execute()
 
     # Confirm the success disposition is set

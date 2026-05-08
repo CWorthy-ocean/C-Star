@@ -166,8 +166,8 @@ def run(
 
     request = XRunnerRequest(uri, type(bp))
 
-    app = get_application(bp.application)
-    runner = app.runner(request, job_cfg, service_cfg)
+    app_config = get_application(bp.application)
+    runner = app_config.runner(request, service_cfg, job_cfg)
     xresult = asyncio.run(runner.execute_xrunner())
 
     if errors := xresult.errors:

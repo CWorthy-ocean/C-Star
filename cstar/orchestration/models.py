@@ -26,7 +26,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.utils import slugify
-from cstar.entrypoint.xrunner import XRunner
+from cstar.entrypoint.xrunner import XBlueprintRunner
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 if t.TYPE_CHECKING:
@@ -764,7 +764,7 @@ class Transform(t.Protocol):
 
 
 TBlueprint = t.TypeVar("TBlueprint", bound=Blueprint)
-TRunner = t.TypeVar("TRunner", bound=XRunner)
+TRunner = t.TypeVar("TRunner", bound=XBlueprintRunner[t.Any])
 
 
 class ResourceSpec: ...
