@@ -125,12 +125,10 @@ def sim_runner(
     with patch_romssimulation_init_sourcedata(from_worker=True):
         runner = RomsMarblRunner(request, service_config, fake_job_config)
 
-    output_path = runner._simulation.fs_manager.output_dir
+    output_path = runner.simulation.fs_manager.output_dir
 
     runner.blueprint.runtime_params.output_dir = output_path
-    # runner._output_root = output_path  # type: ignore[misc]
-    # sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
-    runner._simulation.directory = output_path
+    runner.simulation.directory = output_path
 
     return runner
 
@@ -419,7 +417,7 @@ def test_runner_directory_check_ignore_logs(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logs_dir = output_dir / "logs"
@@ -441,7 +439,7 @@ def test_runner_directory_prep(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -470,7 +468,7 @@ async def test_runner_can_shutdown_as_task(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -517,7 +515,7 @@ async def test_runner_shutdown_handler_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -535,8 +533,8 @@ async def test_runner_shutdown_handler_complete(
         mock.patch.object(sim_runner, "_on_start", mock.Mock()),
         mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
         mock.patch.object(sim_runner, "_handler", mock_handler),
-        mock.patch.object(sim_runner._simulation, "post_run", mock.Mock()),
-        mock.patch.object(sim_runner._simulation, "_execution_handler", mock_handler),
+        mock.patch.object(sim_runner.simulation, "post_run", mock.Mock()),
+        mock.patch.object(sim_runner.simulation, "_execution_handler", mock_handler),
     ):
         # make the simulation go through the main loop...
         await sim_runner._on_iteration()
@@ -574,7 +572,7 @@ async def test_runner_shutdown_handler_not_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -621,7 +619,7 @@ async def test_runner_shutdown_side_effects(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -660,7 +658,7 @@ async def test_runner_on_start_without_uri(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -706,7 +704,7 @@ async def test_runner_on_start_without_simulation(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -747,7 +745,7 @@ async def test_runner_on_start_user_unhandled_setup(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -797,7 +795,7 @@ async def test_runner_on_start_user_unhandled_build(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -845,7 +843,7 @@ async def test_runner_on_start_user_unhandled_pre_run(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -893,7 +891,7 @@ async def test_runner_on_iteration(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -929,7 +927,7 @@ def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     args = ["cstar.applications.roms_marbl.py"]

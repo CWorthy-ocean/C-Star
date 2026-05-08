@@ -41,7 +41,7 @@ _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
 class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
     """Worker class to run c-star simulations."""
 
-    _simulation: Final[ROMSSimulation]
+    simulation: Final[ROMSSimulation]
     """The simulation instance created from the blueprint."""
     _handler: ExecutionHandler | None = None
     """The execution handler for the simulation."""
@@ -68,8 +68,8 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
         """
         super().__init__(request, service_cfg, job_cfg)
 
-        self._simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
-        self._simulation.name = slugify(self._simulation.name)
+        self.simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
+        self.simulation.name = slugify(self.simulation.name)
 
     @property
     def application(self) -> str:
@@ -80,7 +80,7 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
     def _on_start(self) -> None:
         super()._on_start()
 
-        if not self._simulation:
+        if not self.simulation:
             msg = "Simulation creation failed. Unable to execute simulation runner"
             raise RuntimeError(msg)
 
@@ -92,14 +92,14 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
         try:
             if not self._handler:
                 self.log.trace("Setting up simulation")
-                self._simulation.setup()
+                self.simulation.setup()
                 self.log.trace("Building simulation")
-                self._simulation.build()
+                self.simulation.build()
                 self.log.trace("Executing simulation pre-run")
-                self._simulation.pre_run()
+                self.simulation.pre_run()
 
                 self.log.trace("Starting simulation.")
-                self._handler = self._simulation.run(
+                self._handler = self.simulation.run(
                     account_key=self._job_cfg.account_id,
                     walltime=self._job_cfg.walltime,
                     job_name=self._job_cfg.job_name,
@@ -116,7 +116,7 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
             self.set_result(ExecutionStatus.FAILED, [msg])
 
         if self.status == ExecutionStatus.COMPLETED:
-            self._simulation.post_run()
+            self.simulation.post_run()
         else:
             msg = "Skipping simulation post-run; simulation is not complete."
             self.log.debug(msg)
