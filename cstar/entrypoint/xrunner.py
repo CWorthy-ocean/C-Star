@@ -1,14 +1,11 @@
 import argparse
-import os
 import typing as t
 from datetime import datetime, timezone
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
-from cstar.base.exceptions import CstarError
-from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.log import LogLevelChoices
 from cstar.entrypoint.config import (
     JOBFILE_DATE_FORMAT,
-    configure_environment,
 )
 from cstar.entrypoint.service import Service
 from cstar.entrypoint.utils import (
@@ -362,34 +359,6 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         if self._result is None:
             self._result = XRunnerResult(self._request, status, errors)
         return self._result
-
-    async def execute_xrunner(self) -> XRunnerResult[TBlueprint]:
-        """Execute a blueprint with a BlueprintRunner.
-
-        Parameters
-        ----------
-        klass : type[BlueprintRunner]
-            The BlueprintRunner to use for execution.
-        """
-        log = get_logger(__name__, level=self._config.log_level)
-
-        log.debug(f"Job config: {self._job_cfg!r}")
-        log.debug(f"Service config: {self._config!r}")
-        log.debug(f"Request: {self.request!r}")
-        log.trace(f"Environment: {os.environ}")
-
-        try:
-            configure_environment(log)
-            return await self.run()
-
-        except CstarError as ex:
-            msg = "An error occurred while processing the blueprint"
-            log.exception(msg, exc_info=ex)
-            return self.set_result(ExecutionStatus.FAILED, [msg, str(ex)])
-        except Exception as ex:
-            msg = "An unexpected exception occurred while processing the blueprint"
-            log.exception(msg, exc_info=ex)
-            return self.set_result(ExecutionStatus.FAILED, [msg, str(ex)])
 
 
 def create_parser() -> argparse.ArgumentParser:

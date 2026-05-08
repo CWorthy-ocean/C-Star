@@ -155,7 +155,7 @@ def main() -> int:
     job_cfg = get_job_config()
     service_cfg = get_service_config(args.log_level, name="RomsMarblRunner")
 
-    blueprint_uri = args.blueprint_uri
+    blueprint_uri = str(args.blueprint_uri)
     if args.directives:
         blueprint_uri = DirectiveConfig.apply_directives(args.directives, blueprint_uri)
 
@@ -163,8 +163,9 @@ def main() -> int:
     runner = RomsMarblRunner(request, service_cfg, job_cfg)
 
     try:
-        result = asyncio.run(runner.execute_xrunner())
-        if result.errors:
+        asyncio.run(runner.execute())
+        result = runner.result
+        if result and result.errors:
             print(f"Errors occurred: {', '.join(result.errors)}")
             return 1
     except CstarError as ex:

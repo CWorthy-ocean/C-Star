@@ -167,12 +167,12 @@ def run(
 
     app_config = get_application(bp.application)
     runner = app_config.runner(request, service_cfg, job_cfg)
-    xresult = asyncio.run(runner.execute_xrunner())
+    asyncio.run(runner.execute())
 
-    if errors := xresult.errors:
-        print(f"Errors occurred: {', '.join(errors)}")
+    if runner.result and runner.result.errors:
+        print(f"Errors occurred: {', '.join(runner.result.errors)}")
 
-    rc = len(errors)
+    rc = len(runner.result.errors) if runner.result else 0
 
     if rc:
         print("Blueprint execution failed")

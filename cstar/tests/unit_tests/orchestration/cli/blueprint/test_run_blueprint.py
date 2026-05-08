@@ -73,7 +73,7 @@ def test_blueprint_run_remote_blueprint() -> None:
 
     with mock.patch.object(
         app_config.runner,
-        "execute_xrunner",
+        "execute",
         side_effect=modify_runner,
         autospec=True,
     ) as mock_exec_runner:
@@ -99,7 +99,7 @@ def test_blueprint_run_apply_directive_dne(tmp_path: Path, directive_path: str) 
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
     with mock.patch(
-        "cstar.applications.roms_marbl.RomsMarblRunner.execute_xrunner",
+        "cstar.applications.roms_marbl.RomsMarblRunner.execute",
         return_value=XRunnerResult(
             XRunnerRequest(bp_path, RomsMarblBlueprint),
             ExecutionStatus.COMPLETED,
@@ -126,7 +126,7 @@ def test_blueprint_run_apply_directive_empty(tmp_path: Path) -> None:
     directive_file_path = tmp_path / "directive-dne.json"
     directive_file_path.touch()
 
-    with mock.patch.object(RomsMarblRunner, "execute_xrunner", mock.AsyncMock()):
+    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()):
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -182,7 +182,7 @@ def test_blueprint_run_apply_directives(
         ),
         mock.patch.object(
             RomsMarblRunner,
-            "execute_xrunner",
+            "execute",
             side_effect=modify_runner,
             autospec=True,
         ) as mock_exec_runner,

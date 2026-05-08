@@ -61,7 +61,7 @@ async def test_hello_world_blueprint_serialization(
 
 
 @pytest.mark.asyncio
-async def test_hello_world_runner_execute_xrunner(
+async def test_hello_world_runner_execute(
     capsys: pytest.CaptureFixture[str],
     hello_world_bp_path: Path,
     hello_world_default_target: str,
@@ -83,7 +83,8 @@ async def test_hello_world_runner_execute_xrunner(
     job_cfg = get_job_config()
 
     runner = HelloWorldRunner(request, svc_cfg, job_cfg)
-    result = await runner.execute_xrunner()
+    await runner.execute()
+    result = runner.result
 
     assert result is not None
     # Confirm the success disposition is set

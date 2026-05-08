@@ -973,7 +973,7 @@ def test_worker_main_exec(
     with (
         mock.patch.object(
             RomsMarblRunner,
-            "execute_xrunner",
+            "execute",
             mock_execute,
         ),
         mock.patch.object(sys, "argv", args),
@@ -1028,7 +1028,7 @@ def test_worker_main_exec_continue_from(
         mock.patch.object(sys, "argv", args),
         mock.patch.object(
             RomsMarblRunner,
-            "execute_xrunner",
+            "execute",
             side_effect=modify_runner,
             autospec=True,
         ) as mock_exec_runner,
@@ -1070,7 +1070,7 @@ def test_worker_main_cstar_error(
         mock.patch.object(sys, "argv", args),
         mock.patch.object(
             RomsMarblRunner,
-            "execute_xrunner",
+            "execute",
             mock.AsyncMock(side_effect=exception_type),
         ),
     ):
@@ -1123,7 +1123,7 @@ def test_worker_main_preprocessor_args_parsed(
         mock.patch.object(sys, "argv", args),
         mock.patch.object(
             RomsMarblRunner,
-            "execute_xrunner",
+            "execute",
             side_effect=modify_runner,
             autospec=True,
         ) as mock_exec_runner,
