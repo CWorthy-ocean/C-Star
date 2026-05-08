@@ -767,9 +767,6 @@ TBlueprint = t.TypeVar("TBlueprint", bound=Blueprint)
 TRunner = t.TypeVar("TRunner", bound=XBlueprintRunner[t.Any])
 
 
-class ResourceSpec: ...
-
-
 class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """The contract establishing the metadata needed by the system
     to orchestrate tasks using their blueprints.
@@ -785,8 +782,6 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """The blueprint containing the application configuration."""
     applicable_transforms: tuple[type[Transform], ...]
     """Transforms that must be executed prior to execution."""
-    resources_needed: ResourceSpec | None = None
-    """Hardware requirements of the application."""
 
 
 register_representer(WorkplanState, strenum_representer)
