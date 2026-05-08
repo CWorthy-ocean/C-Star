@@ -12,7 +12,6 @@ from cstar.base.env import (
 )
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
-from cstar.cli.workplan.shared import get_registered_bp
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
@@ -59,7 +58,7 @@ def path_callback(
 
             # use the core blueprint fields to identify the application type
             base_bp = deserialize(local_path, Blueprint)
-            bp_type = get_registered_bp(base_bp.application)
+            bp_type = get_application(base_bp.application).blueprint
 
             ctx.obj = bp_type(**base_bp.model_dump())
 

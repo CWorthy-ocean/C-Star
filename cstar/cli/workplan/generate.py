@@ -8,8 +8,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from cstar.applications.utils import get_application
 from cstar.base.utils import slugify
-from cstar.cli.workplan.shared import get_registered_bp
 from cstar.orchestration.models import (
     Blueprint,
     Step,
@@ -40,7 +40,7 @@ def _locate_blueprints(search_dir: Path) -> Iterable["BPResult"]:
         for file in files:
             base_bp = deserialize(file, Blueprint)
 
-            bp_type = get_registered_bp(base_bp.application)
+            bp_type = get_application(base_bp.application).blueprint
             bp = bp_type(**base_bp.model_dump())
 
             valid_blueprints.append((file, bp))

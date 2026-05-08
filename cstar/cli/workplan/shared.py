@@ -203,35 +203,5 @@ def create_xrunner(
             name=f"{request.application}_runner",
         )
 
-    klass = get_registered_runner(request.application)
+    klass = get_application(request.application).runner
     return klass(request, job_cfg, service_cfg)
-
-
-def get_registered_bp(application: str) -> type[Blueprint]:
-    """Retrieve the Blueprint type registered for the given application.
-
-    Parameters
-    ----------
-    application
-        The application name
-
-    Returns
-    -------
-    type[Blueprint]
-    """
-    return get_application(application).blueprint
-
-
-def get_registered_runner(application: str) -> type[XBlueprintRunner[Blueprint]]:
-    """Retrieve the Runner type registered for the given application.
-
-    Parameters
-    ----------
-    application
-        The application name
-
-    Returns
-    -------
-    type[XBlueprintRunner[Blueprint]]
-    """
-    return get_application(application).runner
