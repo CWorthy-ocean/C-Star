@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
 
-_APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
+APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
 _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
     "ROMS-MARBL simulation runner"
 )
@@ -123,7 +123,7 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
 
 @register_application
 class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRunner]):
-    name: str = _APP_NAME
+    name: str = APP_NAME
     long_name: str = _APP_NAME_LONG
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint

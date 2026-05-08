@@ -14,7 +14,7 @@ from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import ApplicationDefinition, Blueprint
 from cstar.orchestration.transforms import OverrideTransform
 
-_APP_NAME: t.Literal["plotter"] = "plotter"
+APP_NAME: t.Literal["plotter"] = "plotter"
 """The unique identifier for the plotter application type."""
 _APP_NAME_LONG: t.Literal["Plotting Demo Application"] = "Plotting Demo Application"
 """The long-form application name."""
@@ -25,7 +25,7 @@ log = get_logger(__name__)
 class PlotterBlueprint(Blueprint):
     """A blueprint for an example plotting application."""
 
-    application: str = _APP_NAME
+    application: str = APP_NAME
     """The application identifier."""
     input_dir: Path
     """The location of the inputs for this step (the outputs from ROMS)."""
@@ -51,7 +51,7 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
     intended for scientific use.
     """
 
-    application: str = _APP_NAME
+    application: str = APP_NAME
     """The application identifier."""
 
     @t.override
@@ -127,7 +127,7 @@ def make_plots(
 class PlotterApplicationDefinition(
     ApplicationDefinition[PlotterBlueprint, PlotterRunner],
 ):
-    name = _APP_NAME
+    name = APP_NAME
     long_name = _APP_NAME_LONG
     runner = PlotterRunner
     blueprint = PlotterBlueprint

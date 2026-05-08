@@ -6,7 +6,7 @@ from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerResult
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import ApplicationDefinition, Blueprint, Transform
 
-_APP_NAME: t.Literal["hello_world"] = "hello_world"
+APP_NAME: t.Literal["hello_world"] = "hello_world"
 
 
 class HelloWorldBlueprint(Blueprint):
@@ -14,7 +14,7 @@ class HelloWorldBlueprint(Blueprint):
     runner application.
     """
 
-    application: str = _APP_NAME
+    application: str = APP_NAME
     """The application identifier."""
     target: str
     """The person to say hello to."""
@@ -23,7 +23,7 @@ class HelloWorldBlueprint(Blueprint):
 class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
     """Worker class to execute a simple "Hello, world" application specified via blueprint."""
 
-    application: str = _APP_NAME
+    application: str = APP_NAME
     """The application identifier."""
 
     @t.override
@@ -46,8 +46,8 @@ class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
 class HelloWorldApplication(
     ApplicationDefinition[HelloWorldBlueprint, HelloWorldRunner],
 ):
-    name = _APP_NAME
-    long_name = _APP_NAME
+    name = APP_NAME
+    long_name = APP_NAME
     runner = HelloWorldRunner
     blueprint = HelloWorldBlueprint
     applicable_transforms: tuple[type[Transform], ...] = ()
