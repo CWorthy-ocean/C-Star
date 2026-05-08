@@ -1,5 +1,4 @@
 import typing as t
-from dataclasses import dataclass
 from pathlib import Path
 
 from roms_tools import Grid, ROMSOutput
@@ -123,7 +122,6 @@ def make_plots(
 
 
 @register_application
-@dataclass
 class PlotterApplicationDefinition(
     ApplicationDefinition[PlotterBlueprint, PlotterRunner],
 ):

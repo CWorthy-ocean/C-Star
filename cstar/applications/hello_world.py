@@ -1,5 +1,4 @@
 import typing as t
-from dataclasses import dataclass
 
 from cstar.applications.utils import register_application
 from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerResult
@@ -42,7 +41,6 @@ class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
 
 
 @register_application
-@dataclass
 class HelloWorldApplication(
     ApplicationDefinition[HelloWorldBlueprint, HelloWorldRunner],
 ):
