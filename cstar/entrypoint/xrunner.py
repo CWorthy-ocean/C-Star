@@ -172,6 +172,9 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
         ...
 
     @property
+    def application(self) -> str: ...
+
+    @property
     def blueprint(self) -> TBlueprint:
         """Return the deserialized blueprint instance.
 

@@ -50,8 +50,10 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
     intended for scientific use.
     """
 
-    application: str = APP_NAME
-    """The application identifier."""
+    @property
+    def application(self) -> str:
+        """The short, unique application identifier."""
+        return APP_NAME
 
     @t.override
     async def run(self) -> XRunnerResult[PlotterBlueprint]:
