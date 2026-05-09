@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.orchestration.models import Application, Step, Workplan
 
 
 @pytest.fixture

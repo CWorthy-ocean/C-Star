@@ -3,7 +3,9 @@ import sys
 import typing as t
 from typing import TYPE_CHECKING, Final, override
 
-from cstar.applications.utils import register_application
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
+from cstar.applications.utils import ApplicationDefinition, register_application
 from cstar.base.exceptions import CstarError
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
@@ -18,13 +20,12 @@ from cstar.entrypoint.xrunner import (
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import (
-    ApplicationDefinition,
-    RomsMarblBlueprint,
+    Application,
 )
+from cstar.orchestration.serialization import register_representer, strenum_representer
 from cstar.orchestration.transforms import (
     DirectiveConfig,
     OverrideTransform,
-    RomsMarblTimeSplitter,
 )
 from cstar.roms import ROMSSimulation
 
@@ -176,6 +177,9 @@ def main() -> int:
         return 1
 
     return 0
+
+
+register_representer(Application, strenum_representer)
 
 
 if __name__ == "__main__":

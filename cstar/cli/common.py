@@ -1,5 +1,7 @@
+import importlib
 import os
 import typing as t
+from pathlib import Path
 
 import typer
 
@@ -70,3 +72,35 @@ def common_callback(
     ] = False,
 ) -> None:
     pass
+
+
+def locate_app_modules() -> list[str]:
+    """Return a list of absolute import strings where the module matches the
+    application module naming standard of ending with `app.py`
+    (e.g. cstar/applications/hello_app.py).
+
+    Returns
+    -------
+    str
+        The absolute import path, e.g. `cstar.applications.hello_app`
+    """
+    root = Path(__file__).parent.parent  # <path>/cstar
+    location = root / "applications"
+    apps = [
+        f.relative_to(root.parent) for f in location.rglob("*app.py") if f.is_file()
+    ]
+    return [str(f.with_suffix("")).replace("/", ".") for f in apps]
+
+
+def autoimport_apps(module_names: list[str]) -> None:
+    for module_name in module_names:
+        module = importlib.import_module(module_name)
+
+        to_import = getattr(
+            module,
+            "__all__",
+            [n for n in dir(module) if n.endswith("Application")],
+        )
+
+        for name in to_import:
+            globals()[name] = getattr(module, name)

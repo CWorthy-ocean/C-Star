@@ -1,8 +1,12 @@
 import typer
 
-from cstar.applications import *  # noqa: F401, F403
+from cstar.applications import *  # noqa: F403
 from cstar.cli.blueprint import app as app_blueprint
-from cstar.cli.common import common_callback
+from cstar.cli.common import (
+    autoimport_apps,
+    common_callback,
+    locate_app_modules,
+)
 from cstar.cli.environment import app as app_env
 from cstar.cli.template import app as app_template
 from cstar.cli.workplan import app as app_workplan
@@ -42,6 +46,9 @@ def main() -> None:
     """Main entrypoint for the complete C-Star CLI."""
     app()
 
+
+module_names = locate_app_modules()
+autoimport_apps(module_names)
 
 if __name__ == "__main__":
     main()

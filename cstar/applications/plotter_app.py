@@ -3,14 +3,14 @@ from pathlib import Path
 
 from roms_tools import Grid, ROMSOutput
 
-from cstar.applications.utils import register_application
+from cstar.applications.utils import ApplicationDefinition, register_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.xrunner import (
     XBlueprintRunner,
     XRunnerResult,
 )
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import ApplicationDefinition, Blueprint
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.transforms import OverrideTransform
 
 APP_NAME: t.Literal["plotter"] = "plotter"
@@ -104,7 +104,7 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
 
 
 @register_application
-class PlotterApplicationDefinition(
+class PlotterApplication(
     ApplicationDefinition[PlotterBlueprint, PlotterRunner],
 ):
     name = APP_NAME

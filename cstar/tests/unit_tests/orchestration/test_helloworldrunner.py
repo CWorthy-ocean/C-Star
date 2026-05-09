@@ -9,7 +9,7 @@ from unittest import mock
 import pytest
 from typer.testing import CliRunner
 
-from cstar.applications.hello_world import (
+from cstar.applications.hello_world_app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )

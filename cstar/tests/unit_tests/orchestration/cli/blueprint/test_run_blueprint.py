@@ -4,14 +4,15 @@ from unittest import mock
 import pytest
 from typer.testing import CliRunner
 
-from cstar.applications.roms_marbl import RomsMarblRunner
-from cstar.applications.utils import get_application
+from cstar.applications.roms_marbl.app import RomsMarblRunner
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.utils import ApplicationDefinition, get_application
 from cstar.cli.blueprint.run import app
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
-from cstar.entrypoint.xrunner import XRunnerRequest, XRunnerResult
+from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest, XRunnerResult
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.converter.converter import prepare_directive_file
-from cstar.orchestration.models import Application, RomsMarblBlueprint
+from cstar.orchestration.models import Application, Blueprint
 from cstar.orchestration.orchestration import LiveStep
 from cstar.roms.simulation import ROMSSimulation
 
@@ -69,7 +70,9 @@ def test_blueprint_run_remote_blueprint() -> None:
         )
         return self._result
 
-    app_config = get_application("roms_marbl")
+    app_config: ApplicationDefinition[Blueprint, XBlueprintRunner[Blueprint]] = (
+        get_application("roms_marbl")
+    )
 
     with mock.patch.object(
         app_config.runner,
@@ -99,7 +102,7 @@ def test_blueprint_run_apply_directive_dne(tmp_path: Path, directive_path: str) 
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
     with mock.patch(
-        "cstar.applications.roms_marbl.RomsMarblRunner.execute",
+        "cstar.applications.roms_marbl.app.RomsMarblRunner.execute",
         return_value=XRunnerResult(
             XRunnerRequest(bp_path, RomsMarblBlueprint),
             ExecutionStatus.COMPLETED,

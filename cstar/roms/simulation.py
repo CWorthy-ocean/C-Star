@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 import yaml
 
 import cstar.roms.runtime_settings
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -47,7 +48,6 @@ from cstar.orchestration.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -1498,7 +1498,7 @@ class ROMSSimulation(Simulation):
             makefile_repo = self.codebase.working_copy.path / "Work" / "Makefile"
             shutil.copyfile(makefile_repo, makefile_target)
 
-    def pre_run(self, overwrite_existing_files=False) -> None:
+    def pre_run(self, overwrite_existing_files: bool = False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
         This method partitions any required input datasets according to

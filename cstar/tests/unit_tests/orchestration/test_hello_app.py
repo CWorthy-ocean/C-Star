@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from cstar.applications.hello_world import (
+from cstar.applications.hello_world_app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )

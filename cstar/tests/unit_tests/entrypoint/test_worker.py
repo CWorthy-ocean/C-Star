@@ -11,10 +11,9 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.roms_marbl import (
-    RomsMarblRunner,
-    main,
-)
+from cstar.applications.roms_marbl.app import RomsMarblRunner, main
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.transforms import ContinuanceTransform
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
 from cstar.entrypoint.config import (
     JobConfig,
@@ -38,9 +37,7 @@ from cstar.entrypoint.xrunner import (
 )
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
-from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import ContinuanceTransform
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -634,7 +631,7 @@ async def test_runner_shutdown_side_effects(
         mock.patch.object(sim_runner, "_on_iteration", mock.AsyncMock()),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_log_disposition", mock_disposition),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
     ):
         # Trigger a run through the lifecycle as a task. This should trigger
         # the complete set of shutdown behaviors.
@@ -673,7 +670,7 @@ async def test_runner_on_start_without_uri(
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
     ):
         # clear blueprint URI from the default RomsMarblRunner from the fixture
         # use `setattr` to force-change the Final
@@ -718,7 +715,7 @@ async def test_runner_on_start_without_simulation(
     with (
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
-        mock.patch.object(sim_runner, "_simulation", None),
+        mock.patch.object(sim_runner, "simulation", None),
     ):
         # Trigger a run through the lifecycle as a task. Without a Simulation,
         # this should fail but it should still shutdown gracefully.
@@ -761,7 +758,7 @@ async def test_runner_on_start_user_unhandled_setup(
     # don't let it perform any real work
     with (
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
     ):
         # the exception thrown during simulation.setup should be handled
         await sim_runner.execute()
@@ -809,7 +806,7 @@ async def test_runner_on_start_user_unhandled_build(
     mock_simulation = mock.Mock(build=mock_build, run=mock_run)
 
     # don't let it perform any real work
-    with mock.patch.object(sim_runner, "_simulation", mock_simulation):
+    with mock.patch.object(sim_runner, "simulation", mock_simulation):
         # Trigger a run through the lifecycle as a task.
         await sim_runner.execute()
 
@@ -857,7 +854,7 @@ async def test_runner_on_start_user_unhandled_pre_run(
     mock_simulation = mock.Mock(run=mock_run, pre_run=mock_setup)
 
     # don't let it perform any real work
-    with mock.patch.object(sim_runner, "_simulation", mock_simulation):
+    with mock.patch.object(sim_runner, "simulation", mock_simulation):
         # Trigger a run through the lifecycle as a task.
         await sim_runner.execute()
 
@@ -903,7 +900,7 @@ async def test_runner_on_iteration(
     with (
         mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
     ):
         # Trigger a run through the lifecycle as a task.
         await sim_runner.execute()
@@ -1031,7 +1028,7 @@ def test_worker_main_exec_continue_from(
             autospec=True,
         ) as mock_exec_runner,
         mock.patch(
-            "cstar.applications.roms_marbl.ROMSSimulation",
+            "cstar.applications.roms_marbl.app.ROMSSimulation",
             mock_roms_sim_class,
         ),
     ):
@@ -1125,7 +1122,10 @@ def test_worker_main_preprocessor_args_parsed(
             side_effect=modify_runner,
             autospec=True,
         ) as mock_exec_runner,
-        mock.patch("cstar.applications.roms_marbl.ROMSSimulation", mock_roms_sim_class),
+        mock.patch(
+            "cstar.applications.roms_marbl.app.ROMSSimulation",
+            mock_roms_sim_class,
+        ),
     ):
         _ = main()
 
