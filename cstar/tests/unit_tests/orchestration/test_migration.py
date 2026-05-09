@@ -11,6 +11,7 @@ from cstar.system.migration import (
     APP_HW_SCHEMA_1_0_0,
     APP_ROMS_MARBL_SCHEMA_1_0_0,
     APP_ROMS_MARBL_SCHEMA_2_0_0,
+    SCHEMA_VERSION_KEY,
     BlueprintMigration,
     CstarMigrationError,
     CstarUnsupportedMigrationError,
@@ -22,7 +23,6 @@ from cstar.system.migration import (
 APP_SLEEP: t.Literal["sleep"] = "sleep"
 APP_ROMS: t.Literal["roms_marbl"] = "roms_marbl"
 
-KEY_VERSION: t.Literal["version"] = "version"
 KEY_APP: t.Literal["application"] = "application"
 
 
@@ -34,7 +34,7 @@ def test_migration_simple_plan() -> None:
     src_version_exp = APP_ROMS_MARBL_SCHEMA_1_0_0
     tgt_version_exp = APP_ROMS_MARBL_SCHEMA_2_0_0
 
-    bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_ROMS}
+    bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_ROMS}
     migrator = BlueprintMigration()
 
     # static target avoids the test planning multiple steps as migration count grows.
@@ -68,7 +68,7 @@ def test_migration_with_unregistered_application() -> None:
     src_version_exp = BPTestAdapterV0.source()
     tgt_version_exp = BPTestAdapterV3.target()
 
-    bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_SLEEP}
+    bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_SLEEP}
 
     converters: list[RawModelVersionAdapterType] = [
         BPTestAdapterV0,
@@ -104,7 +104,7 @@ def test_migration_to_unknown_target() -> None:
     src_version_exp = BPTestAdapterV0.source()
     tgt_version_exp = "1.0.42"
 
-    bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_SLEEP}
+    bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_SLEEP}
 
     converters: list[RawModelVersionAdapterType] = [
         BPTestAdapterV0,
@@ -139,7 +139,7 @@ def test_migration_from_unknown_source() -> None:
     """Verify that no migration path found raises an exception."""
     src_version_exp = "1.0.UNK"
 
-    bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_SLEEP}
+    bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_SLEEP}
     converters: list[RawModelVersionAdapterType] = [
         BPTestAdapterV0,
         BPTestAdapterV1,
@@ -278,7 +278,7 @@ def test_migration_intermediate_multistep(
     """
     tgt_version_exp = "test.4"
 
-    bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_SLEEP}
+    bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_SLEEP}
 
     # pass in the converters instead of relying on the default
     converters: list[RawModelVersionAdapterType] = [

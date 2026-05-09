@@ -3,7 +3,7 @@ import typing as t
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 
-from cstar.base.adapter import ModelAdapter
+from cstar.base.adapter import MigrationAdapter
 
 APP_ROMS_MARBL: t.Literal["roms_marbl"] = "roms_marbl"
 APP_ROMS_MARBL_SCHEMA_1_0_0: t.Literal["1.0.0"] = "1.0.0"
@@ -12,6 +12,9 @@ APP_ROMS_MARBL_SCHEMA_2_0_0: t.Literal["2.0.0"] = "2.0.0"
 
 APP_HW: t.Literal["hello_world"] = "hello_world"
 APP_HW_SCHEMA_1_0_0: t.Literal["1.0.0"] = "1.0.0"
+
+
+SCHEMA_VERSION_KEY: t.Literal["schema_version"] = "schema_version"
 
 
 class SchemaBounds(t.TypedDict):
@@ -56,7 +59,7 @@ class CstarUnsupportedMigrationError(CstarMigrationError):
     """An error that occurs due to an unknown source or target schema version."""
 
 
-class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
+class SchemaAdapter(abc.ABC, MigrationAdapter[dict[str, t.Any], dict[str, t.Any]]):
     """Contract exposing a mechanism to adapt a source model to a target type."""
 
     def __init__(
@@ -76,6 +79,12 @@ class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
     @classmethod
     @abc.abstractmethod
     def target(cls) -> str: ...
+
+    def adapt_version(self) -> dict[str, str] | None:
+        """Update the schema version automatically."""
+        if model := self.adapt():
+            model[SCHEMA_VERSION_KEY] = self.target()
+        return model
 
 
 RawModelVersionAdapterType: t.TypeAlias = type[SchemaAdapter]
@@ -134,12 +143,11 @@ class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
         )
         if output_dir := runtime_params.pop("output_dir", None):
             self.model["output_dir"] = output_dir
-        self.model["version"] = self.target()
         return {**self.model}
 
 
 class HelloWorldSchemaAdapter2025v1(SchemaAdapter):
-    """Convert RomsMarblBlueprint from the 1.0.0 schema into the 2.0.0 schema."""
+    """Sample schema adapter for the hello world sample app."""
 
     @classmethod
     def application(cls) -> str:
@@ -155,7 +163,7 @@ class HelloWorldSchemaAdapter2025v1(SchemaAdapter):
 
     @t.override
     def adapt(self) -> dict[str, str]:
-        self.model["version"] = self.target()
+        # example: self.model["channel"] = "email"
         return {**self.model}
 
 
@@ -214,7 +222,7 @@ class BlueprintMigration(Migration):
             msg = f"No schema bounds registered for application {application!r}"
             raise CstarUnsupportedMigrationError(msg)
 
-        found_version = str(dumped.get("version", "")).strip()
+        found_version = str(dumped.get(SCHEMA_VERSION_KEY, "")).strip()
         initial_version = found_version or self.schema_bounds[application]["min"]
         version = initial_version
         goal = self.schema_bounds[application]["max"]
@@ -260,10 +268,11 @@ class BlueprintMigration(Migration):
         model = deepcopy(dumped)
         for klass in plan:
             converter = klass(model)
-            result = converter.adapt()
+            result = converter.adapt_version()
             if not result:
                 msg = f"Schema migration from {source!r} to {target!r} failed."
                 raise CstarMigrationError(msg)
+            # ensure schema version is updated.
             model = result
 
         return model
