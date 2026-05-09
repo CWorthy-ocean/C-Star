@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Column, Table
 
-from cstar.applications.utils import get_application
+from cstar.applications.utils import ApplicationDefinition, get_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest
@@ -203,5 +203,8 @@ def create_xrunner(
             name=f"{request.application}_runner",
         )
 
-    klass = get_application(request.application).runner
-    return klass(request, job_cfg, service_cfg)
+    app: ApplicationDefinition[Blueprint, XBlueprintRunner[Blueprint]] = (
+        get_application(request.application)
+    )
+    klass = app.runner
+    return klass(request, service_cfg, job_cfg)

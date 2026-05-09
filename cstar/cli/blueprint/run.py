@@ -4,7 +4,7 @@ import typing as t
 import typer
 from pydantic import ValidationError
 
-from cstar.applications.utils import get_application
+from cstar.applications.utils import ApplicationDefinition, get_application
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
@@ -20,7 +20,7 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
-from cstar.entrypoint.xrunner import XRunnerRequest
+from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
@@ -58,7 +58,7 @@ def path_callback(
 
             # use the core blueprint fields to identify the application type
             base_bp = deserialize(local_path, Blueprint)
-            bp_type = get_application(base_bp.application).blueprint
+            bp_type: type[Blueprint] = get_application(base_bp.application).blueprint
 
             ctx.obj = bp_type(**base_bp.model_dump())
 
@@ -165,7 +165,9 @@ def run(
 
     request = XRunnerRequest(uri, type(bp))
 
-    app_config = get_application(bp.application)
+    app_config: ApplicationDefinition[Blueprint, XBlueprintRunner[Blueprint]] = (
+        get_application(bp.application)
+    )
     runner = app_config.runner(request, service_cfg, job_cfg)
     asyncio.run(runner.execute())
 

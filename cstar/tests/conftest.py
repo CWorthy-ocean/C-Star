@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from cstar.applications.roms_marbl import RomsMarblApplication
+from cstar.applications.roms_marbl.app import RomsMarblApplication
 from cstar.applications.utils import register_application
 
 

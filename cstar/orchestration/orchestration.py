@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from cstar.applications.utils import get_application
+from cstar.applications.utils import ApplicationDefinition, get_application
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,
@@ -35,6 +35,8 @@ KEY_TASK: t.Literal["task"] = "task"
 
 if t.TYPE_CHECKING:
     from networkx import DiGraph
+
+    from cstar.entrypoint.xrunner import XBlueprintRunner
 
 
 class RunMode(StrEnum):
@@ -245,7 +247,9 @@ class LiveStep(Step):
     def blueprint(self) -> Blueprint:
         """Load and return the blueprint associated with this step."""
         base_bp = deserialize(self.blueprint_path, Blueprint)
-        app = get_application(base_bp.application)
+        app: ApplicationDefinition[Blueprint, XBlueprintRunner[Blueprint]] = (
+            get_application(base_bp.application)
+        )
         bp_type = app.blueprint
         return bp_type(**base_bp.model_dump())
 

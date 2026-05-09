@@ -27,7 +27,7 @@ def check(
     if result.item is None:
         raise typer.BadParameter(result.error_msg)
 
-    bp_type = get_application(result.item.application).blueprint
+    bp_type: type[Blueprint] = get_application(result.item.application).blueprint
     result = validate_serialized_entity(path, bp_type)
 
     if result.item is None:
