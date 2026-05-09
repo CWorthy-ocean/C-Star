@@ -155,7 +155,7 @@ def migrate(
 
         display_summary(local_path, plan)
 
-        if len(plan.plan) == 0:
+        if plan.source == plan.target:
             print(f"The blueprint uses the latest schema ({plan.source})")
             raise typer.Exit(0)
 
