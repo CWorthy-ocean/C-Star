@@ -3,9 +3,9 @@ import sys
 import typing as t
 from typing import TYPE_CHECKING, Final, override
 
+from cstar.applications.core import ApplicationDefinition, register_application
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
-from cstar.applications.utils import ApplicationDefinition, register_application
 from cstar.base.exceptions import CstarError
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (

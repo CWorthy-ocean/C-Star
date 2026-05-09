@@ -2,7 +2,7 @@ import typing as t
 
 import typer
 
-from cstar.applications.utils import get_application
+from cstar.applications.core import get_application
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import validate_serialized_entity
 

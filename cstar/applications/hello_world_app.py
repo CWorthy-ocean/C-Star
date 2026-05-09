@@ -1,6 +1,6 @@
 import typing as t
 
-from cstar.applications.utils import (
+from cstar.applications.core import (
     ApplicationDefinition,
     Transform,
     register_application,

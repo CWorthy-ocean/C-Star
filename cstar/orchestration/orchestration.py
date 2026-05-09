@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from cstar.applications.utils import ApplicationDefinition, get_application
+from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,

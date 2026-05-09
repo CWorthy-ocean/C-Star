@@ -1,7 +1,7 @@
 import argparse
 import typing as t
 
-from cstar.applications.utils import (
+from cstar.applications.core import (
     HasApplication,
     XRunner,
     XRunnerRequest,

@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Column, Table
 
-from cstar.applications.utils import ApplicationDefinition, get_application
+from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest

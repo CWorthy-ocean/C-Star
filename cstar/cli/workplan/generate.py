@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from cstar.applications.utils import ApplicationDefinition, get_application
+from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.utils import slugify
 from cstar.orchestration.models import (
     Blueprint,

@@ -4,9 +4,9 @@ from unittest import mock
 import pytest
 from typer.testing import CliRunner
 
+from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.applications.roms_marbl.app import RomsMarblRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.utils import ApplicationDefinition, get_application
 from cstar.cli.blueprint.run import app
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest, XRunnerResult

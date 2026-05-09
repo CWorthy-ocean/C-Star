@@ -8,7 +8,7 @@ from pydantic import (
     BaseModel,
 )
 
-from cstar.applications.utils import ApplicationDefinition, Transform, get_application
+from cstar.applications.core import ApplicationDefinition, Transform, get_application
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,

@@ -4,7 +4,7 @@ import typing as t
 import typer
 from pydantic import ValidationError
 
-from cstar.applications.utils import ApplicationDefinition, get_application
+from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from roms_tools import Grid, ROMSOutput
 
-from cstar.applications.utils import ApplicationDefinition, register_application
+from cstar.applications.core import ApplicationDefinition, register_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.xrunner import (
     XBlueprintRunner,
