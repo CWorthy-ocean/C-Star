@@ -12,15 +12,15 @@ from cstar.system.migration import hw_bounds, rm_bounds
 
 
 @pytest.fixture
-def blueprint_2025_1(
+def blueprint_1_0_0(
     tmp_path: Path,
     bp_templates_dir: Path,
 ) -> Path:
     work_dir = tmp_path / str(uuid.uuid4())
     work_dir.mkdir(parents=True)
 
-    versioned_file_name = "blueprint.2025.1.yaml"
-    bp_2025_1 = bp_templates_dir / versioned_file_name
+    versioned_file_name = "blueprint.1.0.0.yaml"
+    bp_2025_1 = bp_templates_dir / "roms_marbl" / versioned_file_name
     bp_path = work_dir / versioned_file_name
     content = bp_2025_1.read_text()
     bp_path.write_text(content)
@@ -28,11 +28,11 @@ def blueprint_2025_1(
 
 
 @pytest.fixture
-def blueprint_2025_1_sleep(blueprint_2025_1: Path) -> Path:
-    content = blueprint_2025_1.read_text()
+def blueprint_1_0_0_sleep(blueprint_1_0_0: Path) -> Path:
+    content = blueprint_1_0_0.read_text()
     content = content.replace("application: sleep", "application: roms_marbl")
 
-    bp_path = blueprint_2025_1.with_stem(f"{blueprint_2025_1.stem}_sleep")
+    bp_path = blueprint_1_0_0.with_stem(f"{blueprint_1_0_0.stem}_sleep")
     bp_path.write_text(content)
     return bp_path
 
@@ -71,13 +71,13 @@ def test_blueprint_migrate_remote_blueprint_dne() -> None:
     assert "not found" in result.stderr
 
 
-def test_blueprint_migrate_default_output(blueprint_2025_1_sleep: Path) -> None:
+def test_blueprint_migrate_default_output(blueprint_1_0_0_sleep: Path) -> None:
     """Verify that a request to migrate a blueprint without specifying an output
     path explicitly results in the creation of a file matching the expected naming
     convention `<input_file_stem>_<latest_version>.yaml`
     """
     latest = rm_bounds["max"]
-    bp_path = blueprint_2025_1_sleep
+    bp_path = blueprint_1_0_0_sleep
     expected_output_path = Path(f"./{bp_path.stem}_{latest}.yaml")
 
     runner = CliRunner()
@@ -117,11 +117,11 @@ def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
 @pytest.mark.parametrize("output_param", [ARG_OUTPUT_SHORT, ARG_OUTPUT_LONG])
 def test_blueprint_migrate_custom_output(
     tmp_path: Path,
-    blueprint_2025_1_sleep: Path,
+    blueprint_1_0_0_sleep: Path,
     output_param: str,
 ) -> None:
     """Verify that an output path specified by the user is honored."""
-    bp_path = blueprint_2025_1_sleep
+    bp_path = blueprint_1_0_0_sleep
     file_name = f"{uuid.uuid4()!s}.yaml"
     expected_output_path = tmp_path / file_name
 
@@ -144,14 +144,14 @@ def test_blueprint_migrate_custom_output(
 
 def test_blueprint_migrate_dry_run(
     tmp_path: Path,
-    blueprint_2025_1_sleep: Path,
+    blueprint_1_0_0_sleep: Path,
 ) -> None:
     """Verify that dry run mode does not produce a file and displays the plan
     to the user.
     """
     source = rm_bounds["min"]
     target = rm_bounds["max"]
-    bp_path = blueprint_2025_1_sleep
+    bp_path = blueprint_1_0_0_sleep
     expected_output_path = tmp_path / "upgraded.yaml"
 
     runner = CliRunner()

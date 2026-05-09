@@ -6,6 +6,7 @@ state: draft
 valid_start_date: 2000-01-01 00:00:00
 valid_end_date: 2025-01-01 00:00:00
 output_dir: .
+schema_version: 2.0.0
 code:
   roms:
     location: http://github.com/ankona/ucla-roms

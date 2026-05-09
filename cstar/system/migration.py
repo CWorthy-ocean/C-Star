@@ -6,12 +6,12 @@ from copy import deepcopy
 from cstar.base.adapter import ModelAdapter
 
 APP_ROMS_MARBL: t.Literal["roms_marbl"] = "roms_marbl"
-APP_ROMS_MARBL_SCHEMA_2025_1: t.Literal["2025.1"] = "2025.1"
-APP_ROMS_MARBL_SCHEMA_2026_1: t.Literal["2026.1"] = "2026.1"
+APP_ROMS_MARBL_SCHEMA_1_0_0: t.Literal["1.0.0"] = "1.0.0"
+APP_ROMS_MARBL_SCHEMA_2_0_0: t.Literal["2.0.0"] = "2.0.0"
 
 
 APP_HW: t.Literal["hello_world"] = "hello_world"
-APP_HW_SCHEMA_2026_1: t.Literal["2026.1"] = "2026.1"
+APP_HW_SCHEMA_1_0_0: t.Literal["1.0.0"] = "1.0.0"
 
 
 class SchemaBounds(t.TypedDict):
@@ -22,13 +22,13 @@ class SchemaBounds(t.TypedDict):
 
 
 hw_bounds: SchemaBounds = {
-    "min": APP_HW_SCHEMA_2026_1,
-    "max": APP_HW_SCHEMA_2026_1,
+    "min": APP_HW_SCHEMA_1_0_0,
+    "max": APP_HW_SCHEMA_1_0_0,
 }
 """Schema bounds for the hello_world blueprint schema."""
 rm_bounds: SchemaBounds = {
-    "min": APP_ROMS_MARBL_SCHEMA_2025_1,
-    "max": APP_ROMS_MARBL_SCHEMA_2026_1,
+    "min": APP_ROMS_MARBL_SCHEMA_1_0_0,
+    "max": APP_ROMS_MARBL_SCHEMA_2_0_0,
 }
 """Schema bounds for the roms_marbl blueprint schema."""
 default_schema_bounds: Mapping[str, SchemaBounds] = {
@@ -101,7 +101,7 @@ class Migration(abc.ABC):
 
 
 class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
-    """Convert RomsMarblBlueprint from the 2025.1 schema into the 2026.1 schema."""
+    """Convert RomsMarblBlueprint from the 1.0.0 schema into the 2.0.0 schema."""
 
     @classmethod
     def application(cls) -> str:
@@ -109,11 +109,11 @@ class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
 
     @classmethod
     def source(cls) -> str:
-        return APP_ROMS_MARBL_SCHEMA_2025_1
+        return APP_ROMS_MARBL_SCHEMA_1_0_0
 
     @classmethod
     def target(cls) -> str:
-        return APP_ROMS_MARBL_SCHEMA_2026_1
+        return APP_ROMS_MARBL_SCHEMA_2_0_0
 
     @t.override
     def adapt(self) -> dict[str, str]:
@@ -128,7 +128,7 @@ class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
 
 
 class HelloWorldSchemaAdapter2025v1(SchemaAdapter):
-    """Convert RomsMarblBlueprint from the 2025.1 schema into the 2026.1 schema."""
+    """Convert RomsMarblBlueprint from the 1.0.0 schema into the 2.0.0 schema."""
 
     @classmethod
     def application(cls) -> str:
@@ -136,11 +136,11 @@ class HelloWorldSchemaAdapter2025v1(SchemaAdapter):
 
     @classmethod
     def source(cls) -> str:
-        return APP_HW_SCHEMA_2026_1
+        return APP_HW_SCHEMA_1_0_0
 
     @classmethod
     def target(cls) -> str:
-        return APP_HW_SCHEMA_2026_1
+        return APP_HW_SCHEMA_1_0_0
 
     @t.override
     def adapt(self) -> dict[str, str]:

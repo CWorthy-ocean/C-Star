@@ -8,9 +8,9 @@ import pytest
 from cstar.entrypoint.worker.hello_app import HelloWorldBlueprint
 from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import (
-    APP_HW_SCHEMA_2026_1,
-    APP_ROMS_MARBL_SCHEMA_2025_1,
-    APP_ROMS_MARBL_SCHEMA_2026_1,
+    APP_HW_SCHEMA_1_0_0,
+    APP_ROMS_MARBL_SCHEMA_1_0_0,
+    APP_ROMS_MARBL_SCHEMA_2_0_0,
     BlueprintMigration,
     CstarMigrationError,
     CstarUnsupportedMigrationError,
@@ -31,8 +31,8 @@ def test_migration_simple_plan() -> None:
     the default migration adapters registered in `BlueprintMigration`
     for `roms_marbl` blueprints.
     """
-    src_version_exp = APP_ROMS_MARBL_SCHEMA_2025_1
-    tgt_version_exp = APP_ROMS_MARBL_SCHEMA_2026_1
+    src_version_exp = APP_ROMS_MARBL_SCHEMA_1_0_0
+    tgt_version_exp = APP_ROMS_MARBL_SCHEMA_2_0_0
 
     bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_ROMS}
     migrator = BlueprintMigration()
@@ -47,7 +47,7 @@ def test_migration_simple_plan() -> None:
 
 def test_migration_no_migration_needed(hello_world_bp_path: Path) -> None:
     """Verify a blueprint that is already at the latest schema version is not modified."""
-    src_version_exp = APP_HW_SCHEMA_2026_1
+    src_version_exp = APP_HW_SCHEMA_1_0_0
     tgt_version_exp = src_version_exp
 
     bp = deserialize(hello_world_bp_path, HelloWorldBlueprint)
@@ -102,7 +102,7 @@ def test_migration_with_unregistered_application() -> None:
 def test_migration_to_unknown_target() -> None:
     """Verify that an incomplete migration path raises an exception."""
     src_version_exp = BPTestAdapterV0.source()
-    tgt_version_exp = "2026.UNK"
+    tgt_version_exp = "1.0.42"
 
     bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_SLEEP}
 
@@ -137,7 +137,7 @@ def test_migration_to_unknown_target() -> None:
 
 def test_migration_from_unknown_source() -> None:
     """Verify that no migration path found raises an exception."""
-    src_version_exp = "2025.UNK"
+    src_version_exp = "1.0.UNK"
 
     bp0 = {KEY_VERSION: src_version_exp, KEY_APP: APP_SLEEP}
     converters: list[RawModelVersionAdapterType] = [
