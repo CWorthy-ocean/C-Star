@@ -25,16 +25,27 @@ hw_bounds: SchemaBounds = {
     "min": APP_HW_SCHEMA_1_0_0,
     "max": APP_HW_SCHEMA_1_0_0,
 }
-"""Schema bounds for the hello_world blueprint schema."""
+"""Schema bounds for the hello_world blueprint schema.
+
+The schema bounds enable the migration tool to:
+- automatically set version to  minimum version for a blueprint that predated versioning
+- configure which version it will target for updates
+"""
 rm_bounds: SchemaBounds = {
     "min": APP_ROMS_MARBL_SCHEMA_1_0_0,
     "max": APP_ROMS_MARBL_SCHEMA_2_0_0,
 }
-"""Schema bounds for the roms_marbl blueprint schema."""
+"""Schema bounds for the roms_marbl blueprint schema.
+
+The schema bounds enable the migration tool to:
+- automatically set version to  minimum version for a blueprint that predated versioning
+- configure which version it will target for updates
+"""
 default_schema_bounds: Mapping[str, SchemaBounds] = {
     APP_HW: hw_bounds,
     APP_ROMS_MARBL: rm_bounds,
 }
+"""Mapping from app name to known schema bounds for built-in blueprints."""
 
 
 class CstarMigrationError(Exception):
