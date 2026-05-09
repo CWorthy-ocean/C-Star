@@ -351,7 +351,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
 
-    version: str = ""
+    schema_version: str = ""
     """The schema version for the document."""
 
     @property
