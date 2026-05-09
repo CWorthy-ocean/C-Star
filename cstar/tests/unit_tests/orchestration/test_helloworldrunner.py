@@ -17,7 +17,7 @@ from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
-from cstar.entrypoint.xrunner import XRunnerRequest
+from cstar.entrypoint.runner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Workplan, WorkplanState
 from cstar.orchestration.serialization import deserialize, serialize

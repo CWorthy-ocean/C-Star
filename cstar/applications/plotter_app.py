@@ -5,7 +5,7 @@ from roms_tools import Grid, ROMSOutput
 
 from cstar.applications.core import ApplicationDefinition, register_application
 from cstar.base.log import get_logger
-from cstar.entrypoint.xrunner import (
+from cstar.entrypoint.runner import (
     XBlueprintRunner,
     XRunnerResult,
 )

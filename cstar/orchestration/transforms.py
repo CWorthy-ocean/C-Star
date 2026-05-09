@@ -29,7 +29,7 @@ from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
 
 if t.TYPE_CHECKING:
-    from cstar.entrypoint.xrunner import XBlueprintRunner
+    from cstar.entrypoint.runner import XBlueprintRunner
 
 TRANSFORMS: dict[str, list[Transform[LiveStep]]] = defaultdict(list)
 """Storage for transform registrations."""

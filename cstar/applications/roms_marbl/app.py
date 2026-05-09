@@ -12,7 +12,7 @@ from cstar.entrypoint.config import (
     get_job_config,
     get_service_config,
 )
-from cstar.entrypoint.xrunner import (
+from cstar.entrypoint.runner import (
     XBlueprintRunner,
     XRunnerRequest,
     XRunnerResult,

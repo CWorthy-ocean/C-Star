@@ -22,7 +22,7 @@ app = typer.Typer()
 console = Console()
 
 if t.TYPE_CHECKING:
-    from cstar.entrypoint.xrunner import XBlueprintRunner
+    from cstar.entrypoint.runner import XBlueprintRunner
 
     BPResult: t.TypeAlias = tuple[Path, Blueprint]
 

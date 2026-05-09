@@ -8,8 +8,8 @@ from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.applications.roms_marbl.app import RomsMarblRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.run import app
+from cstar.entrypoint.runner import XBlueprintRunner, XRunnerRequest, XRunnerResult
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
-from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest, XRunnerResult
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.converter.converter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint

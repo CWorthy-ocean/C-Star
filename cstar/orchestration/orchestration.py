@@ -36,7 +36,7 @@ KEY_TASK: t.Literal["task"] = "task"
 if t.TYPE_CHECKING:
     from networkx import DiGraph
 
-    from cstar.entrypoint.xrunner import XBlueprintRunner
+    from cstar.entrypoint.runner import XBlueprintRunner
 
 
 class RunMode(StrEnum):

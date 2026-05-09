@@ -5,7 +5,7 @@ from cstar.applications.core import (
     Transform,
     register_application,
 )
-from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerResult
+from cstar.entrypoint.runner import XBlueprintRunner, XRunnerResult
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 

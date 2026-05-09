@@ -13,6 +13,7 @@ from cstar.base.env import (
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
 from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.runner import XBlueprintRunner, XRunnerRequest
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_DIRECTIVES_URI_LONG,
@@ -20,7 +21,6 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
-from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
