@@ -55,7 +55,6 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
             Configuration for submitting jobs to an HPC, such as account ID,
             walltime, job name, and priority.
         """
-        service_cfg.as_service = False
         Service.__init__(self, service_cfg)
         self._request = request
         self._job_cfg = job_cfg
