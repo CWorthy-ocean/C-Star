@@ -24,6 +24,8 @@ Breaking Changes
 - `BlueprintRequest` has been deprecated and removed. (`#510 <https://github.com/CWorthy-ocean/C-Star/pull/510>`_)
 - `--stage` CLI parameter for `cstar blueprint run` is no longer supported (`#510 <https://github.com/CWorthy-ocean/C-Star/pull/510>`_)
 - `deep_merge` is a pure method and no longer changes the inputs (`#498 <https://github.com/CWorthy-ocean/C-Star/pull/498>`_)
+- The `-d` short `dry-run` argument of `cstar workplan run` is removed to avoid a conflict. (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
+- The `output-dir` argument of `cstar workplan run` now uses `--o` and `--output` for consistency (previously `-d` and `--output-dir`). (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -43,6 +45,7 @@ New features
 - Add template-filling transform for user variables and paths (`#500 <https://github.com/CWorthy-ocean/C-Star/pull/500>`_)
 - .ext files are now passed through extract_data_join at the same time as other files are passed through ncjoin (`#495 <https://github.com/CWorthy-ocean/C-Star/pull/495>`_)
 - Add `Directives` to enable just-in-time blueprint manipulation by the runner. (`#498 <https://github.com/CWorthy-ocean/C-Star/pull/498>`_)
+- Enable upgrading blueprint files using the `cstar blueprint migrate` command (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -143,6 +146,7 @@ Improvements
 - Mitigated linter warnings from using deprecated collections (e.g. t.Mapping, t.Iterable) (`#507 <https://github.com/CWorthy-ocean/C-Star/pull/507>`_)
 - Save the generated roms.in to the work directory, where roms is run. (`#514 <https://github.com/CWorthy-ocean/C-Star/pull/514>`_)
 - Symlink the roms executable to the work directory, where roms is run. (`#514 <https://github.com/CWorthy-ocean/C-Star/pull/514>`_)
+- Verbosity and dry-run CLI argument callbacks now ensure the appropriate environment variables are set. (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
