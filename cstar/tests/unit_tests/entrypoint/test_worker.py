@@ -749,31 +749,32 @@ async def test_runner_on_start_user_unhandled_setup(
     # configure the simulation to raise an exception during SETUP
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_run = mock.Mock(return_value=mock_handler)
-    mock_setup = mock.Mock(side_effect=CstarExpectationFailed("Mock setup Failure"))
+    mocked_error_msg = "Mock setup failure"
+    mock_setup = mock.Mock(side_effect=CstarExpectationFailed(mocked_error_msg))
 
     mock_simulation = mock.Mock(setup=mock_setup, run=mock_run)
     mock_shutdown = mock.Mock()
+    mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
     with (
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
+        mock.patch.object(sim_runner, "run", mock_runner_run),
         mock.patch.object(sim_runner, "simulation", mock_simulation),
+        pytest.raises(Exception, match=mocked_error_msg),
     ):
         # the exception thrown during simulation.setup should be handled
         await sim_runner.execute()
 
-        # Now confirm that my target start-up behaviors were executed
-        assert mock_simulation.setup.call_count == 1
-        assert mock_shutdown.call_count == 1
+    # Now confirm that my target start-up behaviors were executed
+    assert mock_simulation.setup.call_count == 1
+    assert mock_shutdown.call_count == 1
 
-        # confirm the sim isn't executed if there is a setup failure
-        mock_run.assert_not_called()
+    # confirm the sim isn't executed if there is a setup failure
+    mock_run.assert_not_called()
 
-        # ... and confirm that the result reflects the failure
-        assert sim_runner.result
-        assert sim_runner.result.errors
-        assert sim_runner.result.status
-        assert ExecutionStatus.is_terminal(sim_runner.result.status)
+    # ... and confirm that the failure occurred before `run` was executed
+    mock_runner_run.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -798,30 +799,33 @@ async def test_runner_on_start_user_unhandled_build(
 
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.AsyncMock()
-    mock_build = mock.Mock(side_effect=RuntimeError("Mock build Failure"))
-    mock_run = mock.Mock(return_value=mock_handler)
+    mocked_error_msg = "Mock build failure"
+    mock_build = mock.Mock(side_effect=RuntimeError(mocked_error_msg))
+    mock_sim_run = mock.Mock(return_value=mock_handler)
 
     # configure the simulation to raise an exception during BUILD
-    mock_simulation = mock.Mock(build=mock_build, run=mock_run)
+    mock_simulation = mock.Mock(build=mock_build, run=mock_sim_run)
+    mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
-    with mock.patch.object(sim_runner, "simulation", mock_simulation):
+    with (
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+        mock.patch.object(sim_runner, "run", mock_runner_run),
+        pytest.raises(Exception, match=mocked_error_msg),
+    ):
         # Trigger a run through the lifecycle as a task.
         await sim_runner.execute()
 
-        # Now confirm that my target start-up behaviors (setup, build) occurred
-        mock_simulation.setup.assert_called()
-        mock_simulation.build.assert_called()
-        mock_iter.assert_not_called()
+    # Now confirm that my target start-up behaviors (setup, build) occurred
+    mock_simulation.setup.assert_called()
+    mock_simulation.build.assert_called()
+    mock_iter.assert_not_called()
 
-        # confirm the sim isn't executed if there is a setup failure
-        mock_run.assert_not_called()
+    # confirm the sim isn't executed if there is a setup failure
+    mock_sim_run.assert_not_called()
 
-        # ... and confirm that the result reflects the failure
-        assert sim_runner.result
-        assert sim_runner.result.errors
-        assert sim_runner.result.status
-        assert ExecutionStatus.is_terminal(sim_runner.result.status)
+    # confirm sim_runner.run never got executed due to failure in _on_start
+    mock_runner_run.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -846,31 +850,34 @@ async def test_runner_on_start_user_unhandled_pre_run(
 
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.AsyncMock()
-    mock_setup = mock.Mock(side_effect=RuntimeError("Mock build Failure"))
-    mock_run = mock.Mock(return_value=mock_handler)
+    mocked_error_msg = "Mock pre-run failure"
+    mock_setup = mock.Mock(side_effect=RuntimeError(mocked_error_msg))
+    mock_sim_run = mock.Mock(return_value=mock_handler)
 
     # configure the simulation to raise an exception during BUILD
-    mock_simulation = mock.Mock(run=mock_run, pre_run=mock_setup)
+    mock_simulation = mock.Mock(run=mock_sim_run, pre_run=mock_setup)
+    mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
-    with mock.patch.object(sim_runner, "simulation", mock_simulation):
+    with (
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+        mock.patch.object(sim_runner, "run", mock_runner_run),
+        pytest.raises(Exception, match=mocked_error_msg),
+    ):
         # Trigger a run through the lifecycle as a task.
         await sim_runner.execute()
 
-        # Now confirm that my target start-up behaviors (setup, build) occurred
-        mock_simulation.setup.assert_called()
-        mock_simulation.build.assert_called()
-        mock_simulation.pre_run.assert_called()
-        mock_iter.assert_not_called()
+    # Now confirm that my target start-up behaviors (setup, build) occurred
+    mock_simulation.setup.assert_called()
+    mock_simulation.build.assert_called()
+    mock_simulation.pre_run.assert_called()
+    mock_iter.assert_not_called()
 
-        # confirm the sim isn't executed if there is a setup failure
-        mock_run.assert_not_called()
+    # confirm the sim isn't executed if there is a setup failure
+    mock_sim_run.assert_not_called()
 
-        # ... and confirm that the result reflects the failure
-        assert sim_runner.result
-        assert sim_runner.result.errors
-        assert sim_runner.result.status
-        assert ExecutionStatus.is_terminal(sim_runner.result.status)
+    # confirm sim_runner.run never got executed due to failure in _on_start
+    mock_runner_run.assert_not_called()
 
 
 @pytest.mark.asyncio

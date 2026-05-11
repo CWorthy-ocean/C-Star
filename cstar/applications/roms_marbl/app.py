@@ -85,39 +85,44 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
             msg = "Simulation creation failed. Unable to execute simulation runner"
             raise RuntimeError(msg)
 
+        self.log.trace("Setting up simulation")
+        self.simulation.setup()
+        self.log.trace("Building simulation")
+        self.simulation.build()
+        self.log.trace("Executing simulation pre-run")
+        self.simulation.pre_run()
+
+        self.log.trace("Starting simulation.")
+        self._handler = self.simulation.run(
+            account_key=self._job_cfg.account_id,
+            walltime=self._job_cfg.walltime,
+            job_name=self._job_cfg.job_name,
+        )
+
     @override
     async def run(self) -> XRunnerResult[RomsMarblBlueprint]:
         """Execute the c-star simulation."""
-        treat_as_failure = False
+        if self._handler is None:
+            msg = "Simulation did not start up successfully"
+            raise CstarError(msg)
 
         try:
-            if not self._handler:
-                self.log.trace("Setting up simulation")
-                self.simulation.setup()
-                self.log.trace("Building simulation")
-                self.simulation.build()
-                self.log.trace("Executing simulation pre-run")
-                self.simulation.pre_run()
-
-                self.log.trace("Starting simulation.")
-                self._handler = self.simulation.run(
-                    account_key=self._job_cfg.account_id,
-                    walltime=self._job_cfg.walltime,
-                    job_name=self._job_cfg.job_name,
-                )
-            else:
-                await self._handler.updates(seconds=1.0)
+            await self._handler.updates(seconds=1.0)
         except Exception as ex:
             msg = "An error occurred while running the simulation"
-            self.set_state(ExecutionStatus.FAILED, [msg, str(ex)])
             self.log.exception(msg)
-            treat_as_failure = True
+            return self.set_state(ExecutionStatus.FAILED, [msg, str(ex)])
+
         return self.set_state(self._handler.status)
 
+    @override
+    def _on_iteration_complete(self) -> None:
+        """Perform post-processing after each iteration of the main event loop."""
+        super()._on_iteration_complete()
         if self.status == ExecutionStatus.COMPLETED:
             self.simulation.post_run()
         elif ExecutionStatus.is_terminal(self.status):
-            msg = "Skipping simulation post-run; simulation is not complete."
+            msg = "Skipping simulation post-run; simulation did not complete."
             self.log.debug(msg)
 
         self._log_disposition()

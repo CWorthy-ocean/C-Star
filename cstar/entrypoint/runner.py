@@ -164,7 +164,11 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         """
         if errors and self._result and self._result.errors:
             errors.extend(self._result.errors)
-            self._result = XRunnerResult(self._request, status, errors)
+
+        if ExecutionStatus.is_terminal(status):
+            self._running = False
+
+        self._result = XRunnerResult(self._request, status, errors)
         return self._result
 
 
