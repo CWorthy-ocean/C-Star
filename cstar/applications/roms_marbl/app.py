@@ -107,14 +107,12 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
                 )
             else:
                 await self._handler.updates(seconds=1.0)
-
-            self.set_result(self._handler.status)
-
-        except Exception:
+        except Exception as ex:
             msg = "An error occurred while running the simulation"
+            self.set_state(ExecutionStatus.FAILED, [msg, str(ex)])
             self.log.exception(msg)
             treat_as_failure = True
-            self.set_result(ExecutionStatus.FAILED, [msg])
+        return self.set_state(self._handler.status)
 
         if self.status == ExecutionStatus.COMPLETED:
             self.simulation.post_run()
@@ -124,7 +122,6 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
 
         self._log_disposition(treat_as_failure=treat_as_failure)
 
-        return self.set_result(self.status)
 
 
 @register_application

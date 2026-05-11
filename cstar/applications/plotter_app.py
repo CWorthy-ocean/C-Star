@@ -68,7 +68,7 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
         self.log.info(msg)
 
         self.make_plots()
-        return self.set_result(ExecutionStatus.COMPLETED)
+        return self.set_state(ExecutionStatus.COMPLETED)
 
     def make_plots(self) -> None:
         """

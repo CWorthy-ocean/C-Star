@@ -203,7 +203,7 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
         """
         ...
 
-    def set_result(
+    def set_state(
         self, status: ExecutionStatus, errors: list[str] | None = None
     ) -> XRunnerResult[TBlueprint]:
         """Set the status and resulting errors after executing the application.

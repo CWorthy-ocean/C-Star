@@ -135,10 +135,10 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         """Execute an application as specified in the blueprint."""
         try:
             self._result = await self.run()
-        except Exception:
+        except Exception as ex:
             msg = f"An error occurred while running blueprint: {self.blueprint_uri!r}"
             self.log.exception(msg)
-            self.set_result(ExecutionStatus.FAILED, [msg])
+            self.set_state(ExecutionStatus.FAILED, [msg, str(ex)])
 
     @t.override
     def _on_shutdown(self) -> None:
@@ -148,7 +148,7 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         """
         self._log_disposition()
 
-    def set_result(
+    def set_state(
         self,
         status: ExecutionStatus,
         errors: list[str] | None = None,
