@@ -107,7 +107,8 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
             `True` if the service can shutdown, `False` otherwise.
         """
         if ExecutionStatus.is_terminal(self.status):
-            self.log.info(f"Shutdown is allowed ({self.status}).")
+            msg = f"Blueprint runner has reached a terminal state {str(self.status)!r})"
+            self.log.info(msg)
             return True
 
         return False
@@ -118,6 +119,7 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
 
         Performs validation of arguments received via CLI.
         """
+        super()._on_start()
         if not self.blueprint_uri:
             msg = "No blueprint URI provided"
             raise ValueError(msg)
