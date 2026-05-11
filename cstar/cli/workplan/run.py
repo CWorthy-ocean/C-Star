@@ -5,7 +5,11 @@ from pathlib import Path
 
 import typer
 
-from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR, ENV_CSTAR_LOG_LEVEL
+from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_LOG_LEVEL,
+)
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
@@ -15,6 +19,7 @@ from cstar.cli.workplan.shared import (
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
+    ARG_DRY_RUN,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
@@ -253,9 +258,9 @@ def run(
     dry_run: t.Annotated[
         bool,
         typer.Option(
-            "--dry-run",
-            "-d",
+            ARG_DRY_RUN,
             help="Generate the execution plan without executing the workplan.",
+            envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
     ] = False,
     log_level: t.Annotated[

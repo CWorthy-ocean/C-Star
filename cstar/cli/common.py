@@ -4,7 +4,13 @@ import typing as t
 import typer
 
 import cstar
-from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR, ENV_CSTAR_LOG_LEVEL
+from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_CLI_VERBOSE,
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_LOG_LEVEL,
+    FLAG_ON,
+)
 
 app = typer.Typer()
 
@@ -32,7 +38,21 @@ def log_level_callback(value: str) -> str:
 def clobber_callback(value: bool) -> bool:
     """Callback for the clobber option."""
     if value:
-        os.environ[ENV_CSTAR_CLOBBER_WORKING_DIR] = "1"
+        os.environ[ENV_CSTAR_CLOBBER_WORKING_DIR] = FLAG_ON
+    return value
+
+
+def verbose_callback(value: bool) -> bool:
+    """Callback for the verbose option."""
+    if value:
+        os.environ[ENV_CSTAR_CLI_VERBOSE] = FLAG_ON
+    return value
+
+
+def dryrun_callback(ctx: typer.Context, value: bool | None) -> bool | None:
+    """Callback for the dry-run option."""
+    if value:
+        os.environ[ENV_CSTAR_CLI_DRY_RUN] = FLAG_ON
     return value
 
 

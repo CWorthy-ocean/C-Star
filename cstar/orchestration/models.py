@@ -351,6 +351,9 @@ class Blueprint(ConfiguredBaseModel, ABC):
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
 
+    schema_version: str = ""
+    """The schema version for the document."""
+
     @property
     def cpus_needed(self) -> int:
         """The number of CPUs needed to run this blueprint.

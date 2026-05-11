@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from cstar.base.utils import lazy_import, slugify
+from cstar.entrypoint.utils import ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
 from cstar.orchestration.serialization import deserialize
@@ -226,9 +227,9 @@ def plan(
     output_dir: t.Annotated[
         Path,
         typer.Option(
-            "-d",
-            "--out-dir",
-            default_factory=lambda: Path.cwd(),
+            ARG_OUTPUT_LONG,
+            ARG_OUTPUT_SHORT,
+            default_factory=Path.cwd,
             help="Path to a directory where the plan will be stored (defaults to current working directory)",
         ),
     ],

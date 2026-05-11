@@ -87,6 +87,17 @@ ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
 """Enable automatic time-splitting of simulations."""
 
 
+ENV_FF_CLI_BP_MIGRATE_SHOW: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_BP_MIGRATE_SHOW"],
+    EnvVar(
+        "Enable CLI for migrating blueprints to the latest schema.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_CLI_BP_MIGRATE_SHOW"
+"""Enable CLI for migrating blueprints to the latest schema."""
+
+
 def is_flag_enabled(flag: str) -> bool:
     """Determine if a boolean environment varible is enabled.
 
