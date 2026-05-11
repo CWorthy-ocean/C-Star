@@ -118,11 +118,12 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
 
         if self.status == ExecutionStatus.COMPLETED:
             self.simulation.post_run()
-        else:
+        elif ExecutionStatus.is_terminal(self.status):
             msg = "Skipping simulation post-run; simulation is not complete."
             self.log.debug(msg)
 
         self._log_disposition(treat_as_failure=treat_as_failure)
+
         return self.set_result(self.status)
 
 
