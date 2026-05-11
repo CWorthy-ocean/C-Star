@@ -15,7 +15,6 @@ from cstar.system.migration import (
     BlueprintMigration,
     CstarMigrationError,
     CstarUnsupportedMigrationError,
-    RawModelVersionAdapterType,
     SchemaAdapter,
     SchemaBounds,
 )
@@ -23,7 +22,39 @@ from cstar.system.migration import (
 APP_SLEEP: t.Literal["sleep"] = "sleep"
 APP_ROMS: t.Literal["roms_marbl"] = "roms_marbl"
 
+KEY_SV = SCHEMA_VERSION_KEY
 KEY_APP: t.Literal["application"] = "application"
+
+
+@pytest.mark.parametrize(
+    ("model", "exp_version"),
+    [
+        pytest.param(
+            {KEY_APP: APP_ROMS},
+            APP_ROMS_MARBL_SCHEMA_2_0_0,
+            id="rm::app-only",
+        ),
+        pytest.param(
+            {KEY_APP: APP_ROMS, KEY_SV: APP_ROMS_MARBL_SCHEMA_1_0_0},
+            APP_ROMS_MARBL_SCHEMA_2_0_0,
+            id="rm::with source schema",
+        ),
+        pytest.param(
+            {KEY_APP: "hello_world", KEY_SV: "1.0.0"},
+            "1.0.0",
+            id="hw::with source schema",
+        ),
+    ],
+)
+def test_migration_version(model: dict[str, t.Any], exp_version: str) -> None:
+    """Verify that a migrated model contains the latest schema version."""
+    bp0 = model
+    migrator = BlueprintMigration()
+
+    migrated = migrator.migrate(bp0)
+
+    assert "schema_version" in migrated
+    assert exp_version == migrated["schema_version"]
 
 
 def test_migration_simple_plan() -> None:
@@ -46,7 +77,9 @@ def test_migration_simple_plan() -> None:
 
 
 def test_migration_no_migration_needed(hello_world_bp_path: Path) -> None:
-    """Verify a blueprint that is already at the latest schema version is not modified."""
+    """Verify a blueprint that is already at the latest schema version results
+    in an empty migration plan.
+    """
     src_version_exp = APP_HW_SCHEMA_1_0_0
     tgt_version_exp = src_version_exp
 
@@ -61,6 +94,25 @@ def test_migration_no_migration_needed(hello_world_bp_path: Path) -> None:
     assert not plan
 
 
+def test_migration_no_plan_no_changes(hello_world_bp_path: Path) -> None:
+    """Verify that a blueprint with no plan (already the latest version) is not
+    modified at all.
+    """
+    bp = deserialize(hello_world_bp_path, HelloWorldBlueprint)
+    migrator = BlueprintMigration()
+
+    dumped = bp.model_dump()
+    source, target, adapters = migrator.plan(dumped)
+
+    assert source == target
+    assert not adapters
+
+    dumped.pop(KEY_SV, None)  # remove version inserted by the fixture.
+    migrated = migrator.migrate(dumped)
+
+    assert KEY_SV not in migrated
+
+
 def test_migration_with_unregistered_application() -> None:
     """Verify that a migration error is raised when a migration of
     an unknown schema type is attempted.
@@ -70,7 +122,7 @@ def test_migration_with_unregistered_application() -> None:
 
     bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_SLEEP}
 
-    converters: list[RawModelVersionAdapterType] = [
+    converters: list[type[SchemaAdapter]] = [
         BPTestAdapterV0,
         BPTestAdapterV1,
         BPTestAdapterV2,
@@ -106,7 +158,7 @@ def test_migration_to_unknown_target() -> None:
 
     bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_SLEEP}
 
-    converters: list[RawModelVersionAdapterType] = [
+    converters: list[type[SchemaAdapter]] = [
         BPTestAdapterV0,
         BPTestAdapterV1,
         BPTestAdapterV2,
@@ -140,7 +192,7 @@ def test_migration_from_unknown_source() -> None:
     src_version_exp = "1.0.UNK"
 
     bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_SLEEP}
-    converters: list[RawModelVersionAdapterType] = [
+    converters: list[type[SchemaAdapter]] = [
         BPTestAdapterV0,
         BPTestAdapterV1,
         BPTestAdapterV2,
@@ -180,9 +232,9 @@ class BPTestAdapterV0(SchemaAdapter):
         """The version of the output model."""
         return "test.1"
 
-    @t.override
-    def adapt(self) -> dict[str, str]:
-        return {**self.model}
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        return {**model}
 
 
 class BPTestAdapterV1(SchemaAdapter):
@@ -203,9 +255,9 @@ class BPTestAdapterV1(SchemaAdapter):
         """The version of the output model."""
         return "test.2"
 
-    @t.override
-    def adapt(self) -> dict[str, str]:
-        return {**self.model}
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        return {**model}
 
 
 class BPTestAdapterV2(SchemaAdapter):
@@ -226,9 +278,9 @@ class BPTestAdapterV2(SchemaAdapter):
         """The version of the output model."""
         return "test.3"
 
-    @t.override
-    def adapt(self) -> dict[str, str]:
-        return {**self.model}
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        return {**model}
 
 
 class BPTestAdapterV3(SchemaAdapter):
@@ -249,9 +301,9 @@ class BPTestAdapterV3(SchemaAdapter):
         """The version of the output model."""
         return "test.4"
 
-    @t.override
-    def adapt(self) -> dict[str, str]:
-        return {**self.model}
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        return {**model}
 
 
 @pytest.mark.parametrize(
@@ -281,7 +333,7 @@ def test_migration_intermediate_multistep(
     bp0 = {SCHEMA_VERSION_KEY: src_version_exp, KEY_APP: APP_SLEEP}
 
     # pass in the converters instead of relying on the default
-    converters: list[RawModelVersionAdapterType] = [
+    converters: list[type[SchemaAdapter]] = [
         BPTestAdapterV0,
         BPTestAdapterV1,
         BPTestAdapterV2,

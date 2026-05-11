@@ -3,7 +3,7 @@ import typing as t
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 
-from cstar.base.adapter import MigrationAdapter
+from cstar.base.adapter import ModelAdapter
 
 APP_ROMS_MARBL: t.Literal["roms_marbl"] = "roms_marbl"
 APP_ROMS_MARBL_SCHEMA_1_0_0: t.Literal["1.0.0"] = "1.0.0"
@@ -59,12 +59,12 @@ class CstarUnsupportedMigrationError(CstarMigrationError):
     """An error that occurs due to an unknown source or target schema version."""
 
 
-class SchemaAdapter(abc.ABC, MigrationAdapter[dict[str, t.Any], dict[str, t.Any]]):
+class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
     """Contract exposing a mechanism to adapt a source model to a target type."""
 
     def __init__(
         self,
-        model: dict[str, str],
+        model: dict[str, t.Any],
     ) -> None:
         super().__init__(model)
 
@@ -74,22 +74,50 @@ class SchemaAdapter(abc.ABC, MigrationAdapter[dict[str, t.Any], dict[str, t.Any]
 
     @classmethod
     @abc.abstractmethod
-    def source(cls) -> str: ...
+    def source(cls) -> str:
+        """Return the schema version the adapter can accept as input."""
+        ...
 
     @classmethod
     @abc.abstractmethod
-    def target(cls) -> str: ...
+    def target(cls) -> str:
+        """Return the schema version the adapter will produce after `adapt` is called."""
+        ...
 
-    def adapt_version(self) -> dict[str, str] | None:
-        """Update the schema version automatically."""
-        if model := self.adapt():
-            model[SCHEMA_VERSION_KEY] = self.target()
-        return model
+    @classmethod
+    @abc.abstractmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        """Perform version-specific modifications to the source model that
+        result in a model compliant with the target version.
+
+        Parameters
+        ----------
+        model : dict[str, t.Any]
+            The original model
+
+        Returns
+        -------
+        dict[str, t.Any]
+            A migrated version of the model
+        """
+        ...
+
+    def adapt(self) -> dict[str, t.Any]:
+        """Perform modifications to the source model that result in a model
+        compliant with the target version.
+
+        This is the main adapter endpoint. It ensures the schema version is
+        updated after any version-specific subclasses perform their changes.
+        """
+        clone: dict[str, t.Any] = deepcopy(self.model) if self.model else {}
+
+        if migrated := self._migrate_schema(clone):
+            migrated[SCHEMA_VERSION_KEY] = self.target()
+
+        return migrated
 
 
-RawModelVersionAdapterType: t.TypeAlias = type[SchemaAdapter]
-"""An adapter that converts the content of a dumped model into another version."""
-ConverterMap: t.TypeAlias = Mapping[tuple[str, str, str], RawModelVersionAdapterType]
+ConverterMap: t.TypeAlias = Mapping[tuple[str, str, str], type[SchemaAdapter]]
 """A mapping of (application, source version, target version) keys to adapters."""
 
 
@@ -100,8 +128,8 @@ class MigrationPlan(t.NamedTuple):
     """The version of the schema that the document will be upgraded from."""
     target: str
     """The version of the schema that the document will be upgraded to."""
-    plan: list[RawModelVersionAdapterType]
-    """The ordered list of adapaters to apply to complete the migration."""
+    adapters: Sequence[type[SchemaAdapter]]
+    """An ordered list of adapters that will complete the migration when applied."""
 
 
 class Migration(abc.ABC):
@@ -135,15 +163,15 @@ class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
     def target(cls) -> str:
         return APP_ROMS_MARBL_SCHEMA_2_0_0
 
-    @t.override
-    def adapt(self) -> dict[str, str]:
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
         runtime_params = t.cast(
-            "dict[str, str]",
-            self.model.get("runtime_params", {"output_dir": None}),
+            "dict[str, str | None]",
+            model.get("runtime_params", {"output_dir": None}),
         )
         if output_dir := runtime_params.pop("output_dir", None):
-            self.model["output_dir"] = output_dir
-        return {**self.model}
+            model["output_dir"] = output_dir
+        return {**model}
 
 
 class HelloWorldSchemaAdapter2025v1(SchemaAdapter):
@@ -161,16 +189,16 @@ class HelloWorldSchemaAdapter2025v1(SchemaAdapter):
     def target(cls) -> str:
         return APP_HW_SCHEMA_1_0_0
 
-    @t.override
-    def adapt(self) -> dict[str, str]:
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
         # example: self.model["channel"] = "email"
-        return {**self.model}
+        return {**model}
 
 
 class BlueprintMigration(Migration):
     """A migration controller for RomsMarblBlueprints."""
 
-    adapters: Sequence[RawModelVersionAdapterType]
+    adapters: Sequence[type[SchemaAdapter]]
     """The adapters available to migrate the blueprint."""
     adapter_lookup: t.Final[ConverterMap]
     """A mapping of unique converter key tuples (app, source, target) to adapters."""
@@ -179,7 +207,7 @@ class BlueprintMigration(Migration):
 
     def __init__(
         self,
-        adapters: Sequence[RawModelVersionAdapterType] | None = None,
+        adapters: Sequence[type[SchemaAdapter]] | None = None,
         schema_bounds: Mapping[str, SchemaBounds] | None = None,
     ) -> None:
         self.adapters = adapters or [RomsMarblSchemaAdapter2025v1]
@@ -215,7 +243,7 @@ class BlueprintMigration(Migration):
         CstarUnsupportedMigrationError
             If unable to identify a complete migration upgrade path.
         """
-        plan: list[RawModelVersionAdapterType] = []
+        plan: list[type[SchemaAdapter]] = []
         application = dumped["application"]
 
         if application not in self.schema_bounds:
@@ -266,13 +294,12 @@ class BlueprintMigration(Migration):
         """
         source, target, plan = self.plan(dumped)
         model = deepcopy(dumped)
+
         for klass in plan:
-            converter = klass(model)
-            result = converter.adapt_version()
-            if not result:
-                msg = f"Schema migration from {source!r} to {target!r} failed."
-                raise CstarMigrationError(msg)
-            # ensure schema version is updated.
-            model = result
+            if model := klass(model).adapt():
+                continue
+
+            msg = f"Schema migration from {source!r} to {target!r} failed."
+            raise CstarMigrationError(msg)
 
         return model
