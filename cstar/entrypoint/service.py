@@ -328,6 +328,15 @@ class Service(ABC, LoggingMixin):
             self.log.debug("Service shutdown may not have completed.")
             raise
 
+    def _cancel(self) -> None:
+        """Handle a request to cancel the service.
+
+        This method is called when the service has been cancelled via a term signal.
+        """
+        self.log.info("Shutting down service.")
+        self._running = False
+        self._shutdown()
+
     async def execute(self) -> None:
         """Execute the complete service lifecycle.
 
@@ -403,8 +412,7 @@ class Service(ABC, LoggingMixin):
 
         try:
             # perform sub-class specific clean-up
-            self._running = False
-            self._shutdown()
+            self._cancel()
         except Exception:
             print("Unable to perform a clean shutdown for signal.")
 

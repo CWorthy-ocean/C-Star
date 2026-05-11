@@ -149,6 +149,15 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         """
         self._log_disposition()
 
+    @t.override
+    def _cancel(self) -> None:
+        """Handle a request to cancel the service."""
+        self.set_state(
+            ExecutionStatus.CANCELLED,
+            ["The service was terminated on demand"],
+        )
+        super()._cancel()
+
     def set_state(
         self,
         status: ExecutionStatus,
