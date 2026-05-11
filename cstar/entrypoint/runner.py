@@ -84,19 +84,18 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
 
         return ExecutionStatus.UNKNOWN
 
-    async def run(self) -> XRunnerResult[TBlueprint]:
-        return XRunnerResult(self.request, ExecutionStatus.COMPLETED)
-
-    def _log_disposition(self, treat_as_failure: bool = False) -> None:
+    def _log_disposition(self) -> None:
         """Log the status of the simulation at shutdown time."""
-        disposition = self.status
+        # if no result is set or the result indicates errors occurred, log as an error
+        treat_as_failure = not self._result or (self._result and self._result.errors)
 
-        if disposition == ExecutionStatus.COMPLETED and not treat_as_failure:
+        if self.status == ExecutionStatus.COMPLETED and not treat_as_failure:
             self.log.info("Simulation completed successfully.")
-        elif disposition == ExecutionStatus.FAILED or treat_as_failure:
+        elif self.status == ExecutionStatus.FAILED or treat_as_failure:
             self.log.error("Simulation failed.")
         else:
-            self.log.warning(f"Simulation ended with status: {disposition}.")
+            msg = f"Simulation ended with status: {self.status}."
+            self.log.warning(msg)
 
     @t.override
     def _can_shutdown(self) -> bool:
