@@ -161,7 +161,8 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         -------
         RunnerResult
         """
-        if self._result is None:
+        if errors and self._result and self._result.errors:
+            errors.extend(self._result.errors)
             self._result = XRunnerResult(self._request, status, errors)
         return self._result
 
