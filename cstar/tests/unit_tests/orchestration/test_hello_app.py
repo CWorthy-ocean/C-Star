@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from cstar.applications.core import XRunnerRequest
 from cstar.applications.hello_world_app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
@@ -14,7 +15,6 @@ from cstar.entrypoint.config import (
     get_job_config,
     get_service_config,
 )
-from cstar.entrypoint.runner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Application
 from cstar.orchestration.serialization import deserialize, serialize

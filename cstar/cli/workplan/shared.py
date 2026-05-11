@@ -7,10 +7,14 @@ import typer
 from rich.console import Console
 from rich.table import Column, Table
 
-from cstar.applications.core import ApplicationDefinition, get_application
+from cstar.applications.core import (
+    ApplicationDefinition,
+    XRunnerRequest,
+    get_application,
+)
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import get_job_config, get_service_config
-from cstar.entrypoint.runner import XBlueprintRunner, XRunnerRequest
+from cstar.entrypoint.runner import XBlueprintRunner
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import Status

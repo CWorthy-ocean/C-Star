@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.core import XRunnerRequest, XRunnerResult
 from cstar.applications.roms_marbl.app import RomsMarblRunner, main
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceTransform
@@ -24,8 +25,6 @@ from cstar.entrypoint.config import (
 )
 from cstar.entrypoint.runner import (
     XBlueprintRunner,
-    XRunnerRequest,
-    XRunnerResult,
     create_parser,
 )
 from cstar.entrypoint.utils import (

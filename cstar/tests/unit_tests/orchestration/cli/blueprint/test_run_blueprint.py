@@ -1,20 +1,28 @@
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
 from typer.testing import CliRunner
 
-from cstar.applications.core import ApplicationDefinition, get_application
+from cstar.applications.core import (
+    ApplicationDefinition,
+    XRunnerRequest,
+    XRunnerResult,
+    get_application,
+)
 from cstar.applications.roms_marbl.app import RomsMarblRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.run import app
-from cstar.entrypoint.runner import XBlueprintRunner, XRunnerRequest, XRunnerResult
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.converter.converter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint
 from cstar.orchestration.orchestration import LiveStep
 from cstar.roms.simulation import ROMSSimulation
+
+if TYPE_CHECKING:
+    from cstar.entrypoint.runner import XBlueprintRunner
 
 
 def test_blueprint_run_file_dne(tmp_path: Path) -> None:

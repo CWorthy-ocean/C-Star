@@ -3,7 +3,12 @@ import sys
 import typing as t
 from typing import TYPE_CHECKING, Final, override
 
-from cstar.applications.core import ApplicationDefinition, register_application
+from cstar.applications.core import (
+    ApplicationDefinition,
+    XRunnerRequest,
+    XRunnerResult,
+    register_application,
+)
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.exceptions import CstarError
@@ -12,12 +17,7 @@ from cstar.entrypoint.config import (
     get_job_config,
     get_service_config,
 )
-from cstar.entrypoint.runner import (
-    XBlueprintRunner,
-    XRunnerRequest,
-    XRunnerResult,
-    create_parser,
-)
+from cstar.entrypoint.runner import XBlueprintRunner, create_parser
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import (
     Application,

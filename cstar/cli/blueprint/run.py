@@ -4,7 +4,11 @@ import typing as t
 import typer
 from pydantic import ValidationError
 
-from cstar.applications.core import ApplicationDefinition, get_application
+from cstar.applications.core import (
+    ApplicationDefinition,
+    XRunnerRequest,
+    get_application,
+)
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
@@ -13,7 +17,6 @@ from cstar.base.env import (
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
 from cstar.entrypoint.config import get_job_config, get_service_config
-from cstar.entrypoint.runner import XBlueprintRunner, XRunnerRequest
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_DIRECTIVES_URI_LONG,
@@ -25,6 +28,9 @@ from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig
+
+if t.TYPE_CHECKING:
+    from cstar.entrypoint.runner import XBlueprintRunner
 
 app = typer.Typer()
 log = get_logger(__name__)

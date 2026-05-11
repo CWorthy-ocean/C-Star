@@ -15,9 +15,7 @@ from cstar.base.feature import (
     is_feature_enabled,
 )
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import (
-    deep_merge,
-)
+from cstar.base.utils import deep_merge
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import (
     Application,
