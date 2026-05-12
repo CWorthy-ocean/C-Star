@@ -24,6 +24,7 @@ from cson_forge.models import (
     RiverForcingItem,
     ForcingInput,
     ModelInputs,
+    _dataset_keys_from_inputs,
 )
 
 
@@ -53,6 +54,17 @@ class TestSourceSpec:
         with pytest.raises(ValidationError) as exc_info:
             SourceSpec(name="GLORYS", extra_field="not allowed")
         assert "extra" in str(exc_info.value).lower() or "forbidden" in str(exc_info.value).lower()
+
+    def test_sourcespec_glorys_layout(self):
+        """GLORYS may set glorys_layout; default is None (regional when mapped)."""
+        assert SourceSpec(name="GLORYS").glorys_layout is None
+        assert SourceSpec(name="GLORYS", glorys_layout="regional").glorys_layout == "regional"
+        assert SourceSpec(name="GLORYS", glorys_layout="global").glorys_layout == "global"
+
+    def test_sourcespec_glorys_layout_only_for_glorys(self):
+        """glorys_layout is invalid for non-GLORYS sources."""
+        with pytest.raises(ValidationError):
+            SourceSpec(name="ERA5", glorys_layout="regional")
 
 
 class TestGridInput:
@@ -621,4 +633,39 @@ class TestModelInputsSerialization:
         assert isinstance(json_str, str)
         parsed = json.loads(json_str)
         assert parsed["grid"]["topography_source"] == "ETOPO5"
+
+
+class TestDatasetKeysFromInputs:
+    """Integration tests for _dataset_keys_from_inputs (GLORYS layout)."""
+
+    def _minimal_inputs(self, ic_source: SourceSpec) -> ModelInputs:
+        grid = GridInput(topography_source="ETOPO5")
+        ic = InitialConditionsInput(source=ic_source)
+        forcing = ForcingInput(
+            surface=[
+                SurfaceForcingItem(
+                    source=SourceSpec(name="ERA5"),
+                    type="physics",
+                ),
+            ],
+            boundary=[
+                BoundaryForcingItem(
+                    source=ic_source,
+                    type="physics",
+                ),
+            ],
+        )
+        return ModelInputs(grid=grid, initial_conditions=ic, forcing=forcing)
+
+    def test_glorys_layout_global(self):
+        g = SourceSpec(name="GLORYS", glorys_layout="global")
+        keys = _dataset_keys_from_inputs(self._minimal_inputs(g))
+        assert "GLORYS_GLOBAL" in keys
+        assert "GLORYS_REGIONAL" not in keys
+
+    def test_glorys_layout_regional_default(self):
+        r = SourceSpec(name="GLORYS")
+        keys = _dataset_keys_from_inputs(self._minimal_inputs(r))
+        assert "GLORYS_REGIONAL" in keys
+        assert "GLORYS_GLOBAL" not in keys
 

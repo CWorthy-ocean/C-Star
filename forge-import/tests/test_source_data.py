@@ -109,7 +109,7 @@ class TestMapSourceToDatasetKey:
     
     def test_map_known_source(self):
         """Test mapping a known source name."""
-        assert map_source_to_dataset_key("GLORYS") in ["GLORYS_REGIONAL", "GLORYS_GLOBAL"]
+        assert map_source_to_dataset_key("GLORYS") == "GLORYS_REGIONAL"
         assert map_source_to_dataset_key("UNIFIED") == "UNIFIED_BGC"
         assert map_source_to_dataset_key("ERA5") == "ERA5"
         assert map_source_to_dataset_key("SRTM15") == f"SRTM15_{SRTM15_VERSION}".upper()
@@ -197,7 +197,8 @@ class TestSourceDataMethods:
         """Test dataset_key_for_source method."""
         sd = SourceData(datasets=["UNIFIED_BGC"])
         
-        assert sd.dataset_key_for_source("GLORYS") in ["GLORYS_REGIONAL", "GLORYS_GLOBAL"]
+        assert sd.dataset_key_for_source("GLORYS") == "GLORYS_REGIONAL"
+        assert sd.dataset_key_for_source("GLORYS", glorys_layout="global") == "GLORYS_GLOBAL"
         assert sd.dataset_key_for_source("UNIFIED") == "UNIFIED_BGC"
         assert sd.dataset_key_for_source("SRTM15") == f"SRTM15_{SRTM15_VERSION}".upper()
     
@@ -317,7 +318,7 @@ class TestConstants:
         """Test that SOURCE_ALIAS values are consistent."""
         # Check that GLORYS maps to a valid dataset key
         glorys_key = SOURCE_ALIAS.get("GLORYS")
-        assert glorys_key in ["GLORYS_REGIONAL", "GLORYS_GLOBAL"]
+        assert glorys_key == "GLORYS_REGIONAL"
         
         # Check that UNIFIED maps to UNIFIED_BGC
         assert SOURCE_ALIAS.get("UNIFIED") == "UNIFIED_BGC"
@@ -329,7 +330,7 @@ class TestRegistryConsistency:
     
     def test_registry_has_expected_datasets(self):
         """Test that registry contains expected datasets."""
-        expected = ["SRTM15", "UNIFIED_BGC", "TPXO"]
+        expected = ["GLORYS_REGIONAL", "SRTM15", "UNIFIED_BGC", "TPXO"]
         
         for dataset in expected:
             assert dataset in DATASET_REGISTRY, f"{dataset} not in registry"

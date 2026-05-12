@@ -181,14 +181,20 @@ def sample_source_data(tmp_path):
     mock_source_data = MagicMock(spec=source_data.SourceData)
     source_file = tmp_path / "source.nc"
     source_file.touch()  # Ensure file exists
+    def _dks(name, glorys_layout=None):
+        if name == "GLORYS":
+            return (
+                "GLORYS_GLOBAL" if glorys_layout == "global" else "GLORYS_REGIONAL"
+            )
+        return {
+            "UNIFIED": "UNIFIED_BGC",
+            "ERA5": "ERA5",
+            "TPXO": "TPXO",
+            "DAI": "DAI",
+        }.get(name, name.upper())
+
     mock_source_data.path_for_source = MagicMock(return_value=source_file)
-    mock_source_data.dataset_key_for_source = MagicMock(side_effect=lambda x: {
-        "GLORYS": "GLORYS_REGIONAL",
-        "UNIFIED": "UNIFIED_BGC",
-        "ERA5": "ERA5",
-        "TPXO": "TPXO",
-        "DAI": "DAI"
-    }.get(x, x.upper()))
+    mock_source_data.dataset_key_for_source = MagicMock(side_effect=_dks)
     
     # Mock STREAMABLE_SOURCES
     with patch('cson_forge.input_data.source_data.STREAMABLE_SOURCES', {"ERA5"}):
