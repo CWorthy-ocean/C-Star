@@ -9,7 +9,7 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.exceptions import CstarError
 from cstar.base.utils import slugify
@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
 
-APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
 _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
     "ROMS-MARBL simulation runner"
 )

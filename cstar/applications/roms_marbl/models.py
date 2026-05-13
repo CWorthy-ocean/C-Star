@@ -1,3 +1,4 @@
+import typing as t
 from datetime import datetime
 from enum import StrEnum, auto
 from pathlib import Path
@@ -12,7 +13,6 @@ from pydantic import (
 )
 from pytimeparse import parse
 
-from cstar.applications.plotter_app import APP_NAME
 from cstar.orchestration.models import (
     Blueprint,
     ConfiguredBaseModel,
@@ -21,6 +21,8 @@ from cstar.orchestration.models import (
     PathFilter,
     TargetDirectoryPath,
 )
+
+APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
 
 
 class ForcingConfiguration(ConfiguredBaseModel):
