@@ -124,13 +124,6 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
             msg = "No blueprint URI provided"
             raise ValueError(msg)
 
-        if self.blueprint.application != self.application:
-            msg = (
-                f"Expected blueprint for application {self.application!r} "
-                f"but received {self.blueprint.application!r}"
-            )
-            raise ValueError(msg)
-
     @t.override
     async def _on_iteration(self) -> None:
         """Execute an application as specified in the blueprint."""

@@ -72,11 +72,6 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
         self.simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
         self.simulation.name = slugify(self.simulation.name)
 
-    @property
-    def application(self) -> str:
-        """The application identifier."""
-        return APP_NAME
-
     @override
     def _on_start(self) -> None:
         super()._on_start()

@@ -30,11 +30,6 @@ class HelloWorldBlueprint(Blueprint):
 class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
     """Worker class to execute a simple "Hello, world" application specified via blueprint."""
 
-    @property
-    def application(self) -> str:
-        """The short, unique application identifier."""
-        return APP_NAME
-
     @t.override
     async def run(self) -> XRunnerResult[HelloWorldBlueprint]:
         """Process the blueprint.
