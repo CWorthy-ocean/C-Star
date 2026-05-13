@@ -1,6 +1,8 @@
 import typing as t
 from pathlib import Path
 
+from pydantic import ValidationInfo, field_validator
+
 from cstar.applications.core import (
     ApplicationDefinition,
     RunnerResult,
@@ -30,8 +32,6 @@ class PlotterBlueprint(Blueprint):
     """The application identifier."""
     input_dir: Path
     """The location of the inputs for this step (the outputs from ROMS)."""
-    output_dir: Path
-    """The location to save the plots."""
     variables: list[str]
     """The variables that the application will plot."""
     time_indices: list[int]
@@ -42,6 +42,15 @@ class PlotterBlueprint(Blueprint):
     """The path to the grid file matching the outputs."""
     file_glob: str = "*rst*.nc"
     """The glob pattern to match the file names to open for plotting."""
+
+    @field_validator("input_dir", "grid_file_path", mode="after")
+    @classmethod
+    def _resolve_input_dir(
+        cls,
+        value: Path,
+        _info: "ValidationInfo",
+    ) -> Path:
+        return value.expanduser().resolve()
 
 
 class PlotterRunner(BlueprintRunner[PlotterBlueprint]):
@@ -85,13 +94,13 @@ class PlotterRunner(BlueprintRunner[PlotterBlueprint]):
         roms = roms_tools.ROMSOutput(
             path=input_dir / blueprint.file_glob, grid=grid, use_dask=True
         )
-        output_dir = blueprint.output_dir.expanduser().resolve()
-        output_dir.mkdir(parents=True, exist_ok=True)
+        working_directory = blueprint.working_directory
+        working_directory.mkdir(parents=True, exist_ok=True)
 
         for var in blueprint.variables:
             for s in blueprint.s_indices:
                 for time in blueprint.time_indices:
-                    out_path = output_dir / f"{var}_s{s}_t{time}.png"
+                    out_path = working_directory / f"{var}_s{s}_t{time}.png"
                     try:
                         roms.ds.variables[var][s][time].compute()
                         roms.plot(var, time=time, s=s, save_path=str(out_path))

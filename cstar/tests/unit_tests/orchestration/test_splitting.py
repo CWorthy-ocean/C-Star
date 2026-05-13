@@ -97,26 +97,26 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
         # one step transforms into 12 monthly steps
         assert len(transformed_steps) == 12
 
-        output_directories: list[str] = []
+        working_directories: list[str] = []
 
         for i, step in enumerate(transformed_steps[:-1]):
             successor = transformed_steps[i + 1]
-            runtime_params = t.cast("dict", step.blueprint_overrides)["runtime_params"]
-            succ_runtime_params = t.cast("dict", successor.blueprint_overrides)[
-                "runtime_params"
-            ]
+            step_overrides = t.cast("dict[str, t.Any]", step.blueprint_overrides)
+            succ_overrides = t.cast("dict[str, t.Any]", successor.blueprint_overrides)
+            runtime_overrides = step_overrides["runtime_params"]
+            succ_runtime_overrides = succ_overrides["runtime_params"]
 
             # verify start and end dates are valid
-            sd = runtime_params["start_date"]
+            sd = runtime_overrides["start_date"]
             if not isinstance(sd, datetime):
                 sd = datetime.strptime(sd, "%Y%m%d %H%M%S")
-            ed = runtime_params["end_date"]
+            ed = runtime_overrides["end_date"]
             if not isinstance(ed, datetime):
                 ed = datetime.strptime(ed, "%Y%m%d %H%M%S")
             assert sd < ed
 
-            output_dir = runtime_params["output_dir"]
-            output_directories.append(output_dir)
+            working_directory = step_overrides["working_directory"]
+            working_directories.append(working_directory)
 
             # verify each step uses output from the prior step as initial conditions
             if i > 0:
@@ -127,7 +127,7 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
                     "location", ""
                 )
 
-                assert str(output_dir) in ic_loc_successor  # type: ignore[union-attr,index,operator]
+                assert str(working_directory) in ic_loc_successor  # type: ignore[union-attr,index,operator]
 
                 # verify the initial conditions reference the prior step's time slice
                 compact_sd = ed.strftime("%Y%m%d%H%M%S")
@@ -141,9 +141,9 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
                 assert expected in str(ic_loc_successor)
 
             # verify successor starts right where current step ends
-            sd_successor = succ_runtime_params["start_date"]
+            sd_successor = succ_runtime_overrides["start_date"]
             # sd_successor = datetime.strptime(sd_successor_str, "%Y-%m-%d %H:%M:%S")
             assert sd_successor == ed
 
         # verify all output directories are unique
-        assert len(output_directories) == len(set(output_directories))
+        assert len(working_directories) == len(set(working_directories))

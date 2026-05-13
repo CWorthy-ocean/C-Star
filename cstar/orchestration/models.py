@@ -17,6 +17,7 @@ from pydantic import (
     PrivateAttr,
     SerializeAsAny,
     StringConstraints,
+    ValidationInfo,
     WithJsonSchema,
     field_validator,
     model_validator,
@@ -159,8 +160,11 @@ class Blueprint(ConfiguredBaseModel, ABC):
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
 
-    schema_version: str = ""
+    schema_version: str = Field("1.0.0", frozen=True)
     """The schema version for the document."""
+
+    working_directory: TargetDirectoryPath = Path()
+    """Path to a directory where assets are stored when executing the blueprint."""
 
     @property
     def cpus_needed(self) -> int:
@@ -169,6 +173,15 @@ class Blueprint(ConfiguredBaseModel, ABC):
         Defaults to 1. Can be overridden by subclasses.
         """
         return 1
+
+    @field_validator("working_directory", mode="after")
+    @classmethod
+    def _resolve_out_dir(
+        cls,
+        value: Path,
+        _info: "ValidationInfo",
+    ) -> Path:
+        return value.expanduser().resolve()
 
 
 class WorkplanState(StrEnum):

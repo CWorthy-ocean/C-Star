@@ -54,7 +54,7 @@ def test_modify_template_blueprint(
         bpyaml["code"]["compile_time"]["location"]
         == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
     )
-    assert bpyaml["runtime_params"]["output_dir"] == str(fs.output_dir)
+    assert bpyaml["working_directory"] == str(fs.output_dir)
 
 
 class TestFetchData:

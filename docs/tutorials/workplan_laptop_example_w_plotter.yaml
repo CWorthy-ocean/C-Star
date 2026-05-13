@@ -18,6 +18,6 @@ steps:
     blueprint_overrides:
       input_dir: "{{work_dir: wales}}/joined_output"
       grid_file_path: "{{work_dir: wales}}/input/input_datasets/roms_grd.nc"
-      output_dir: "{{work_dir: wales_plotter}}/output"
+      working_directory: "{{work_dir: wales_plotter}}/output"
       time_indices:
         - "{{time_slice}}"

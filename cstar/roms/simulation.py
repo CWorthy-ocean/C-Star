@@ -80,14 +80,14 @@ def _ncjoin_wildcard(
 
     Parameters
     ----------
-    wildcard_pattern: the wildcard pattern to match for files within input_dir
-    input_dir: location of the partitioned netcdfs to be joined
-    output_dir: location to move the joined output to
-    logger: logger object to post log messages to
-
-    Returns
-    -------
-    None
+    wildcard_pattern : str
+        The wildcard pattern to match for files within input_dir.
+    input_dir : Path
+        Location of the partitioned netcdfs to be joined.
+    output_dir : Path
+        Location to move the joined output to.
+    logger : logging.Logger
+        Logger object to post log messages to.
     """
     logger.info(f"Spatial join of netCDF files {wildcard_pattern!r} starting")
     _run_cmd(
@@ -112,14 +112,14 @@ def _extract_data_join_wildcard(
 
     Parameters
     ----------
-    wildcard_pattern: the wildcard pattern to match for files within input_dir
-    input_dir: location of the partitioned netcdfs to be joined
-    output_dir: location to move the joined output to
-    logger: logger object to post log messages to
-
-    Returns
-    -------
-    None
+    wildcard_pattern : str
+        The wildcard pattern to match for files within input_dir.
+    input_dir : Path
+        Location of the partitioned netcdfs to be joined.
+    output_dir : Path
+        Location to move the joined output to.
+    logger : logging.Logger
+        Logger object to post log messages to.
     """
     logger.info(f"Spatial extract/join of netCDF files {wildcard_pattern!r} starting")
     _run_cmd(
@@ -1158,7 +1158,7 @@ class ROMSSimulation(Simulation):
 
         return cls(
             name=bp.name,
-            directory=bp.runtime_params.output_dir,
+            directory=bp.working_directory,
             discretization=DiscretizationAdapter(bp).adapt(),
             runtime_code=AddtlCodeAdapter(bp, "run_time").adapt(),
             compile_time_code=AddtlCodeAdapter(bp, "compile_time").adapt(),

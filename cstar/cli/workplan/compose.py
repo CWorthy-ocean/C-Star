@@ -8,6 +8,7 @@ import typer
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME, get_env_item
 from cstar.base.utils import additional_files_dir
+from cstar.cli.common import path_callback
 from cstar.orchestration.dag_runner import build_and_run_dag
 
 app = typer.Typer()
@@ -15,7 +16,7 @@ app = typer.Typer()
 BP_DEFAULT: t.Final[str] = (
     "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
 )
-BP_OUTDIR_DEFAULT: t.Final[str] = "output_dir: ."
+BP_WORKINGDIRECTORY_DEFAULT: t.Final[str] = "working_directory: ."
 
 HELP_SHORT = "Execute a workplan composed of user-supplied blueprints."
 HELP_LONG = f"""\
@@ -49,7 +50,7 @@ def create_host_workplan(
     # update the workplan output directory found in the template
     bp_content = bp_source_path.read_text()
     bp_content = bp_content.replace(
-        BP_OUTDIR_DEFAULT, f"output_dir: {output_path.as_posix()}"
+        BP_WORKINGDIRECTORY_DEFAULT, f"working_directory: {output_path.as_posix()}"
     )
     # write the modified blueprint to the working directory
     bp_target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,10 +87,11 @@ def compose(
     blueprint: t.Annotated[
         str | None, typer.Argument(help="Path to a blueprint file.")
     ] = None,
-    output_dir: t.Annotated[
+    working_directory: t.Annotated[
         str,
         typer.Option(
-            help="Override the output in the blueprint file(s) with this path."
+            help="Override the output in the blueprint file(s) with this path.",
+            callback=path_callback,
         ),
     ] = get_env_item(ENV_CSTAR_STATE_HOME).value,
     run_id: t.Annotated[
@@ -116,10 +118,10 @@ def compose(
     Path
         The path to the workplan that was generated.
     """
-    output_path = Path(output_dir).expanduser().resolve()
+    output_path = Path(working_directory)
     wp_path = Path(workplan) if workplan is not None else None
     bp_path = Path(blueprint) if blueprint is not None else None
-    template = WorkplanTemplate.SINGLE_STEP if not template else template
+    template = template or WorkplanTemplate.SINGLE_STEP
 
     if wp_path is None and bp_path is None and not template:
         print("Run aborted. A workplan, blueprint, or template must be provided")
@@ -134,7 +136,7 @@ def compose(
         wp_path = create_host_workplan(template, bp_path, output_path, run_id)
         print(f"Running workplan at `{wp_path}` with sample blueprint at `{bp_path}`")
 
-    if wp_path is None or not wp_path.exists():
+    if not wp_path.exists():
         raise ValueError("Workplan path is malformed.")
 
     if execute:

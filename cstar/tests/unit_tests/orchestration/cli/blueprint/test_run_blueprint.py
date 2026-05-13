@@ -162,7 +162,7 @@ def test_blueprint_run_apply_directives(
         name="step-for-testing",
         application=Application.ROMS_MARBL.value,
         blueprint=bp_path,
-        work_dir=tmp_path,
+        working_directory=tmp_path,
         directives={
             "continue-from": {"path": step_dir.as_posix()},
         },

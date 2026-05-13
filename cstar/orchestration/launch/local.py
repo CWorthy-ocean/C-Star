@@ -108,7 +108,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         log_file = step.fsm.logs_dir / f"{step.safe_name}.out"
 
         try:
-            if not step.fsm.root.exists():
+            if not step.fsm.working_directory.exists():
                 step.fsm.prepare()
 
             mp_process = mp.Process(

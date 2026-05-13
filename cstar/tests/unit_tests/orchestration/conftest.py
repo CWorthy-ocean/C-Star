@@ -302,6 +302,8 @@ def fill_blueprint_template(
             state: draft
             valid_start_date: 2020-01-01 00:00:00
             valid_end_date: 2020-02-01 00:00:00
+            schema_version: 2.0.0
+            working_directory: .
             code:
               roms:
                 location: http://github.com/ankona/ucla-roms
@@ -366,7 +368,6 @@ def fill_blueprint_template(
               start_date: 2020-01-01 00:00:00
               end_date: 2020-01-02 00:00:00
               checkpoint_frequency: 1d
-              output_dir: .
             grid:
               documentation: http://mockdoc.com/model-params
               data:
@@ -416,12 +417,12 @@ def single_step_workplan(
     Workplan
     """
     bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    default_output_dir = "output_dir: ."
+    default_working_dir = "working_dir: ."
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(
-        default_output_dir, f"output_dir: {tmp_path.as_posix()}"
+        default_working_dir, f"working_dir: {tmp_path.as_posix()}"
     )
     bp_content.replace(Application.SLEEP, Application.ROMS_MARBL)
     bp_path.write_text(bp_content)

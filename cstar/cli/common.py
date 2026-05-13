@@ -12,6 +12,7 @@ from cstar.base.env import (
     FLAG_ON,
 )
 from cstar.base.log import LogLevelChoices, reset_log_level
+from cstar.execution.file_system import is_remote_resource
 
 app = typer.Typer()
 
@@ -147,6 +148,18 @@ def update_loggers(ctx: typer.Context, value: str) -> str:
 
 
 log_level_callback = cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers)
+
+
+def path_callback(value: str | None) -> str | None:
+    """Ensure a path that was provided by a user has been expanded and resolved.
+
+    Returns
+    -------
+    Path
+    """
+    if value and not is_remote_resource(value):
+        return Path(value).expanduser().resolve().as_posix()
+    return value
 
 
 def locate_app_modules() -> list[str]:

@@ -2,6 +2,8 @@
 name: roms_marbl_example_new_bp
 description: this is to test the new blueprint schema, here's "a few" weird characters.
 application: roms_marbl
+schema_version: 2.0.0
+working_directory: <working_directory>
 state: draft
 valid_start_date: 2012-01-01 12:00:00
 valid_end_date: 2012-12-31 12:00:00
@@ -83,4 +85,3 @@ model_params:
 runtime_params:
   start_date: "2012-01-01 12:00:00"
   end_date: "2012-01-01 12:10:00"
-  output_dir: <output_dir>

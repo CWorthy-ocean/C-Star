@@ -2,10 +2,10 @@
 name: wales_plotter
 description: plot outputs from wales domain
 application: plotter
+schema_version: 2.0.0
+working_directory: "~/cstar/wales_plotter/plots"
 state: draft
-
 input_dir: "~/cstar/wales_toy_blueprint/joined_output"
-output_dir: "~/cstar/wales_plotter/plots"
 variables:
   - "ALK"
   - "pH_3D"

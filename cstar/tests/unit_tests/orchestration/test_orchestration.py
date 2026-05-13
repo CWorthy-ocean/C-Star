@@ -32,7 +32,7 @@ if t.TYPE_CHECKING:
 @pytest.fixture
 def diamond_graph(tmp_path: Path) -> nx.DiGraph:
     """Generate a prototype graph with a fan-out, fan-in pattern."""
-    data: dict[str, t.Iterable[str]] = {"0": ["1", "2"], "1": ["3"], "2": ["3"]}
+    data: dict[str, Iterable[str]] = {"0": ["1", "2"], "1": ["3"], "2": ["3"]}
     g: nx.DiGraph = nx.DiGraph(data)
     bp_path = tmp_path / "blueprint.yaml"
     initial_stats = {
@@ -98,12 +98,12 @@ def diamond_workplan(
     Workplan
     """
     bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    default_output_dir = "output_dir: ."
+    default_working_dir = "working_directory: ."
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(
-        default_output_dir, f"output_dir: {tmp_path.as_posix()}"
+        default_working_dir, f"working_directory: {tmp_path.as_posix()}"
     )
     bp_path.write_text(bp_content)
 
@@ -157,12 +157,12 @@ def multi_entrypoint_workplan(
     Workplan
     """
     bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    default_output_dir = "output_dir: ."
+    default_working_dir = "working_directory: ."
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(
-        default_output_dir, f"output_dir: {tmp_path.as_posix()}"
+        default_working_dir, f"working_directory: {tmp_path.as_posix()}"
     )
     bp_path.write_text(bp_content)
 

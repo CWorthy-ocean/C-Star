@@ -35,8 +35,8 @@ def test_file_system_root() -> None:
     user_path = Path("~/cstar-directory")
     fsm = JobFileSystemManager(user_path)
 
-    assert fsm.root.is_absolute()
-    assert "~" not in str(fsm.root)
+    assert fsm.working_directory.is_absolute()
+    assert "~" not in str(fsm.working_directory)
 
 
 def test_file_system_prepare(
@@ -58,7 +58,7 @@ def test_file_system_prepare(
     assert fs.input_dir.exists()
     assert fs.joined_output_dir.exists()
     assert fs._codebases_dir.exists()
-    assert fs.root.exists()
+    assert fs.working_directory.exists()
 
 
 def test_file_system_clear(
@@ -73,9 +73,9 @@ def test_file_system_clear(
         Fixture providing tmp_path and fake files
 
     """
-    output_dir, _ = populated_output_dir
+    working_dir, _ = populated_output_dir
 
-    fs = RomsFileSystemManager(output_dir)
+    fs = RomsFileSystemManager(working_dir)
     fs.prepare()
 
     (fs.compile_time_code_dir / "a.txt").touch()

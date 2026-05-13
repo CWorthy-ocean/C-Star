@@ -169,8 +169,8 @@ class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
             "dict[str, str | None]",
             model.get("runtime_params", {"output_dir": None}),
         )
-        if output_dir := runtime_params.pop("output_dir", None):
-            model["output_dir"] = output_dir
+        if working_directory := runtime_params.pop("output_dir", None):
+            model["working_directory"] = working_directory
         return {**model}
 
 

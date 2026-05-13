@@ -9,14 +9,14 @@ from cstar.applications.core import get_application
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLI_VERBOSE
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
-from cstar.cli.common import cb_pipeline, set_env
+from cstar.cli.common import cb_pipeline, path_callback, set_env
 from cstar.entrypoint.utils import (
     ARG_DRY_RUN,
     ARG_OUTPUT_LONG,
     ARG_OUTPUT_SHORT,
     ARG_VERBOSE,
 )
-from cstar.execution.file_system import is_remote_resource, local_copy
+from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import serialize, validate_serialized_entity
 from cstar.system.migration import BlueprintMigration, MigrationPlan
@@ -75,18 +75,6 @@ def display_summary(bp_path: Path, migration_plan: MigrationPlan) -> None:
         )
 
     console.print(table)
-
-
-def path_callback(value: str | None) -> str | None:
-    """Ensure a path that was provided by a user has been expanded and resolved.
-
-    Returns
-    -------
-    Path
-    """
-    if value and not is_remote_resource(value):
-        return Path(value).expanduser().resolve().as_posix()
-    return value
 
 
 def migrate_dryrun_callback(ctx: typer.Context, value: bool | None) -> bool | None:
