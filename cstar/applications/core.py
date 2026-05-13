@@ -24,7 +24,7 @@ TBlueprint = t.TypeVar("TBlueprint", bound=HasApplication)
 TTransformable = t.TypeVar("TTransformable", bound=SerializableModel)
 
 
-class XRunnerRequest(t.Generic[TBlueprint]):
+class RunnerRequest(t.Generic[TBlueprint]):
     """Generic request containing configuration required to execute an application
     via Blueprint.
     """
@@ -62,7 +62,7 @@ class XRunnerRequest(t.Generic[TBlueprint]):
         """
         self.blueprint_uri = uri.strip()
         self.bp_type = bp_type
-        self.name = name.strip() or XRunnerRequest._generate_job_name()
+        self.name = name.strip() or RunnerRequest._generate_job_name()
         self.directive_uri = directive_uri.strip()
 
     @property
@@ -101,10 +101,10 @@ class XRunnerRequest(t.Generic[TBlueprint]):
         return f"cstar_worker_{formatted_now_utc}"
 
 
-class XRunnerResult(t.Generic[TBlueprint]):
+class RunnerResult(t.Generic[TBlueprint]):
     """Specifies details about the result of running an application."""
 
-    request: XRunnerRequest[TBlueprint]
+    request: RunnerRequest[TBlueprint]
     """The request that was handled and produced the result."""
     status: t.Final[ExecutionStatus | None]
     """The final status of the application."""
@@ -113,17 +113,15 @@ class XRunnerResult(t.Generic[TBlueprint]):
 
     def __init__(
         self,
-        request: XRunnerRequest[TBlueprint],
-        status: (
-            ExecutionStatus | None
-        ) = None,  # TODO: review this... it should be able to be non-nullable.
+        request: RunnerRequest[TBlueprint],
+        status: ExecutionStatus | None = None,
         errors: list[str] | None = None,
     ) -> None:
         """Initialize the result instance.
 
         Parameters
         ----------
-        request : XRunnerRequest[TBlueprint]
+        request : RunnerRequest[TBlueprint]
             The request that was handled and produced the result.
         status : ExecutionStatus | None
             The final status of the application.
@@ -144,7 +142,7 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
 
     def __init__(
         self,
-        request: XRunnerRequest[TBlueprint],
+        request: RunnerRequest[TBlueprint],
         service_cfg: "ServiceConfiguration",
         job_cfg: "JobConfig",
     ) -> None:
@@ -152,7 +150,7 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
 
         Parameters
         ----------
-        request : XRunnerRequest[TBlueprint]
+        request : RunnerRequest[TBlueprint]
             The request containing configuration for executing an application.
         service_cfg : ServiceConfiguration
             Configuration options for the execution of an application in a service.
@@ -163,51 +161,31 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
 
     @property
     def blueprint(self) -> TBlueprint:
-        """Return the deserialized blueprint instance.
-
-        Returns
-        -------
-        TBlueprint
-        """
+        """Return the deserialized blueprint instance."""
         ...
 
     @property
-    def request(self) -> XRunnerRequest[TBlueprint]:
-        """Return the request containing configuration for executing the application.
-
-        Returns
-        -------
-        XRunnerRequest[TBlueprint]
-        """
+    def request(self) -> RunnerRequest[TBlueprint]:
+        """Return the request containing configuration for executing the application."""
         ...
 
     @property
-    def result(self) -> XRunnerResult[TBlueprint] | None:
-        """Return the result produced by executing the application.
+    def result(self) -> RunnerResult[TBlueprint] | None:
+        """Return the runner result object used to record state transitions of
+        the executing blueprint.
 
         Returns
         -------
-        XRunnerResult[TBlueprint]
+        RunnerResult[TBlueprint]
         """
         ...
 
-    async def run(self) -> XRunnerResult[TBlueprint]:
+    async def run(self) -> RunnerResult[TBlueprint]:
         """Execute the application.
 
         Returns
         -------
-        XRunnerResult[TBlueprint]
-        """
-        ...
-
-    def set_state(
-        self, status: ExecutionStatus, errors: list[str] | None = None
-    ) -> XRunnerResult[TBlueprint]:
-        """Set the status and resulting errors after executing the application.
-
-        Returns
-        -------
-        XRunnerResult[TBlueprint]
+        RunnerResult[TBlueprint]
         """
         ...
 

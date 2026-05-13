@@ -2,11 +2,11 @@ import typing as t
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    RunnerResult,
     Transform,
-    XRunnerResult,
     register_application,
 )
-from cstar.entrypoint.runner import XBlueprintRunner
+from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 
@@ -27,11 +27,11 @@ class HelloWorldBlueprint(Blueprint):
     """The person to say hello to."""
 
 
-class HelloWorldRunner(XBlueprintRunner[HelloWorldBlueprint]):
+class HelloWorldRunner(BlueprintRunner[HelloWorldBlueprint]):
     """Worker class to execute a simple "Hello, world" application specified via blueprint."""
 
     @t.override
-    async def run(self) -> XRunnerResult[HelloWorldBlueprint]:
+    async def run(self) -> RunnerResult[HelloWorldBlueprint]:
         """Process the blueprint.
 
         Returns

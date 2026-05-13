@@ -3,12 +3,12 @@ from pathlib import Path
 
 from cstar.applications.core import (
     ApplicationDefinition,
-    XRunnerResult,
+    RunnerResult,
     register_application,
 )
 from cstar.base.log import get_logger
 from cstar.base.utils import lazy_import
-from cstar.entrypoint.runner import XBlueprintRunner
+from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.transforms import OverrideTransform
@@ -45,7 +45,7 @@ class PlotterBlueprint(Blueprint):
     """The glob pattern to match the file names to open for plotting."""
 
 
-class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
+class PlotterRunner(BlueprintRunner[PlotterBlueprint]):
     """Worker class to execute a simple plotting application.
 
     This application is intended primarily as an example of how to build a functioning
@@ -54,7 +54,7 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
     """
 
     @t.override
-    async def run(self) -> XRunnerResult[PlotterBlueprint]:
+    async def run(self) -> RunnerResult[PlotterBlueprint]:
         """Process the blueprint.
 
         Returns

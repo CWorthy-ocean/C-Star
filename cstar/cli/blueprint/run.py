@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from cstar.applications.core import (
     ApplicationDefinition,
-    XRunnerRequest,
+    RunnerRequest,
     get_application,
 )
 from cstar.base.env import (
@@ -30,7 +30,7 @@ from cstar.orchestration.serialization import deserialize, validate_serialized_e
 from cstar.orchestration.transforms import DirectiveConfig
 
 if t.TYPE_CHECKING:
-    from cstar.entrypoint.runner import XBlueprintRunner
+    from cstar.entrypoint.runner import BlueprintRunner
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -169,9 +169,9 @@ def run(
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
-    request = XRunnerRequest(uri, type(bp))
+    request = RunnerRequest(uri, type(bp))
 
-    app_config: ApplicationDefinition[Blueprint, XBlueprintRunner[Blueprint]] = (
+    app_config: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
         get_application(bp.application)
     )
     runner = app_config.runner(request, service_cfg, job_cfg)

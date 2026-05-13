@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from cstar.applications.core import XRunnerRequest
+from cstar.applications.core import RunnerRequest
 from cstar.applications.hello_world_app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
@@ -78,7 +78,7 @@ async def test_hello_world_runner_execute(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     svc_cfg = ServiceConfiguration()
     job_cfg = get_job_config()
 
@@ -112,7 +112,7 @@ async def test_hello_world_runner_execute_runner(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     svc_cfg = ServiceConfiguration()
     job_cfg = get_job_config()
 
@@ -152,7 +152,7 @@ async def test_execute_runner_happy_path(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     job_cfg = get_job_config()
     svc_cfg = get_service_config(
         log_level=LogLevelChoices.INFO,

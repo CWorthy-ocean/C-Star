@@ -221,12 +221,12 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
 
         from cstar.entrypoint.config import JobConfig, ServiceConfiguration
         from cstar.applications.roms_marbl.app import RomsMarblBlueprint, RomsMarblRunner
-        from cstar.applications.core import XRunnerRequest
+        from cstar.applications.core import RunnerRequest
 
         account_id = "your-account-id"
         queue_id = "wholenode"
         
-        request = XRunnerRequest("my_blueprint.yaml", RomsMarblBlueprint)
+        request = RunnerRequest("my_blueprint.yaml", RomsMarblBlueprint)
         service_cfg = ServiceConfiguration()
         job_cfg = JobConfig(account_id=account_id, walltime="00:90:00", priority=queue_id)
 

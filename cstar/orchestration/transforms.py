@@ -27,7 +27,7 @@ from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
 
 if t.TYPE_CHECKING:
-    from cstar.entrypoint.runner import XBlueprintRunner
+    from cstar.entrypoint.runner import BlueprintRunner
 
 TRANSFORMS: dict[str, list[Transform[LiveStep]]] = defaultdict(list)
 """Storage for transform registrations."""
@@ -431,7 +431,7 @@ class OverrideTransform(Transform[LiveStep]):
         """
         bp_path = Path(step.blueprint_path)
 
-        app: ApplicationDefinition[Blueprint, XBlueprintRunner[Blueprint]] = (
+        app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
             get_application(step.application)
         )
         bp_type = app.blueprint

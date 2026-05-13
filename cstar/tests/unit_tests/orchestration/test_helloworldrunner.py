@@ -9,7 +9,7 @@ from unittest import mock
 import pytest
 from typer.testing import CliRunner
 
-from cstar.applications.core import XRunnerRequest
+from cstar.applications.core import RunnerRequest
 from cstar.applications.hello_world_app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
@@ -162,7 +162,7 @@ async def test_hello_world_runner_happy_path(
     bp_path = tmp_path / "hw.yaml"
     bp_path.write_text(bp_content)
 
-    request = XRunnerRequest(str(bp_path), HelloWorldBlueprint)
+    request = RunnerRequest(str(bp_path), HelloWorldBlueprint)
     job_cfg = get_job_config()
     svc_cfg = get_service_config(log_level="INFO")
 

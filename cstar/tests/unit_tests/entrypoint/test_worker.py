@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.core import XRunnerRequest, XRunnerResult
+from cstar.applications.core import RunnerRequest, RunnerResult
 from cstar.applications.roms_marbl.app import RomsMarblRunner, main
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceTransform
@@ -24,7 +24,7 @@ from cstar.entrypoint.config import (
     get_service_config,
 )
 from cstar.entrypoint.runner import (
-    XBlueprintRunner,
+    BlueprintRunner,
     create_parser,
 )
 from cstar.entrypoint.utils import (
@@ -104,7 +104,7 @@ def sim_runner(
     RomsMarblRunner
         An initialized instance of RomsMarblRunner, configured via blueprint.
     """
-    request = XRunnerRequest(
+    request = RunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
     )
@@ -322,7 +322,7 @@ def test_get_request(
         ],
     )
 
-    config = XRunnerRequest(
+    config = RunnerRequest(
         parsed_args.blueprint_uri,
         RomsMarblBlueprint,
     )
@@ -380,7 +380,7 @@ def test_start_runner(
     blueprint_path: Path
         The path to the blueprint yaml file created by the fixture.
     """
-    request = XRunnerRequest(
+    request = RunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
     )
@@ -577,7 +577,7 @@ async def test_runner_shutdown_handler_not_complete(
     sim_runner._config.as_service = True
 
     mock_status_prop = mock.PropertyMock(return_value=status)
-    mock_result = mock.Mock(spec=XRunnerResult)
+    mock_result = mock.Mock(spec=RunnerResult)
     type(mock_result).status = mock_status_prop
 
     # confirm the runner checks the result object for a status
@@ -957,8 +957,8 @@ def test_worker_main_exec(
     with properly formatted arguments.
     """
     mock_execute = mock.AsyncMock(
-        return_value=XRunnerResult(
-            XRunnerRequest(blueprint_path.as_posix(), RomsMarblBlueprint),
+        return_value=RunnerResult(
+            RunnerRequest(blueprint_path.as_posix(), RomsMarblBlueprint),
             ExecutionStatus.COMPLETED,
         ),
     )
@@ -1012,13 +1012,13 @@ def test_worker_main_exec_continue_from(
     ]
 
     async def modify_runner(
-        self: XBlueprintRunner[RomsMarblBlueprint],
-    ) -> XRunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
-        self._result = XRunnerResult(
-            XRunnerRequest(str(blueprint_path), RomsMarblBlueprint),
+        self._result = RunnerResult(
+            RunnerRequest(str(blueprint_path), RomsMarblBlueprint),
             ExecutionStatus.COMPLETED,
         )
         assert ContinuanceTransform.suffix() in str(self.request.blueprint_uri)
@@ -1110,12 +1110,14 @@ def test_worker_main_preprocessor_args_parsed(
         str(continuance_directive_path),
     ]
 
-    async def modify_runner(self) -> XRunnerResult[RomsMarblBlueprint]:
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
-        self._result = XRunnerResult(
-            XRunnerRequest(str(bp_path), RomsMarblBlueprint),
+        self._result = RunnerResult(
+            RunnerRequest(str(bp_path), RomsMarblBlueprint),
             ExecutionStatus.COMPLETED,
         )
         return self._result

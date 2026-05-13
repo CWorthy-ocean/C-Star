@@ -3,9 +3,9 @@ import typing as t
 
 from cstar.applications.core import (
     HasApplication,
+    RunnerRequest,
+    RunnerResult,
     XRunner,
-    XRunnerRequest,
-    XRunnerResult,
 )
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.log import LogLevelChoices
@@ -27,27 +27,27 @@ if t.TYPE_CHECKING:
 TBlueprint = t.TypeVar("TBlueprint", bound=HasApplication)
 
 
-class XBlueprintRunner(Service, XRunner[TBlueprint]):
+class BlueprintRunner(Service, XRunner[TBlueprint]):
     """A service that executes a blueprint."""
 
-    _request: XRunnerRequest[TBlueprint]
+    _request: RunnerRequest[TBlueprint]
     """The instigating request."""
-    _result: XRunnerResult[TBlueprint] | None = None
+    _result: RunnerResult[TBlueprint]
     """The result produced by the application."""
     _job_cfg: "JobConfig"
     """Configuration required to submit jobs on an HPC."""
 
     def __init__(
         self,
-        request: XRunnerRequest[TBlueprint],
+        request: RunnerRequest[TBlueprint],
         service_cfg: "ServiceConfiguration",
         job_cfg: "JobConfig",
     ) -> None:
-        """Initialize the `XBlueprintRunner` with the supplied configuration.
+        """Initialize the instance with the supplied configuration.
 
         Parameters
         ----------
-        request: XRunnerRequest[TBlueprint]
+        request: RunnerRequest[TBlueprint]
             A request containing information about the blueprint to run.
         service_cfg: ServiceConfiguration
             Configuration for modifying behavior of the service process.
@@ -58,13 +58,16 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         Service.__init__(self, service_cfg)
         self._request = request
         self._job_cfg = job_cfg
+        self._result = RunnerResult(
+            request,
+        )
 
     @property
-    def request(self) -> XRunnerRequest[TBlueprint]:
+    def request(self) -> RunnerRequest[TBlueprint]:
         return self._request
 
     @property
-    def result(self) -> XRunnerResult[TBlueprint] | None:
+    def result(self) -> RunnerResult[TBlueprint]:
         return self._result
 
     @property
@@ -155,7 +158,7 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         self,
         status: ExecutionStatus,
         errors: list[str] | None = None,
-    ) -> XRunnerResult[TBlueprint]:
+    ) -> RunnerResult[TBlueprint]:
         """Create a RunnerResult instance and store the value.
 
         Uses
@@ -170,7 +173,7 @@ class XBlueprintRunner(Service, XRunner[TBlueprint]):
         if ExecutionStatus.is_terminal(status):
             self._running = False
 
-        self._result = XRunnerResult(self._request, status, errors)
+        self._result = RunnerResult(self._request, status, errors)
         return self._result
 
 

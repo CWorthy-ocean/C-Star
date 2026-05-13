@@ -36,7 +36,7 @@ KEY_TASK: t.Literal["task"] = "task"
 if t.TYPE_CHECKING:
     from networkx import DiGraph
 
-    from cstar.entrypoint.runner import XBlueprintRunner
+    from cstar.entrypoint.runner import BlueprintRunner
 
 
 class RunMode(StrEnum):
@@ -247,7 +247,7 @@ class LiveStep(Step):
     def blueprint(self) -> Blueprint:
         """Load and return the blueprint associated with this step."""
         base_bp = deserialize(self.blueprint_path, Blueprint)
-        app: ApplicationDefinition[Blueprint, XBlueprintRunner[Blueprint]] = (
+        app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
             get_application(base_bp.application)
         )
         bp_type = app.blueprint

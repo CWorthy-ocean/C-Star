@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, Final, override
 
 from cstar.applications.core import (
     ApplicationDefinition,
-    XRunnerRequest,
-    XRunnerResult,
+    RunnerRequest,
+    RunnerResult,
     register_application,
 )
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
@@ -17,7 +17,7 @@ from cstar.entrypoint.config import (
     get_job_config,
     get_service_config,
 )
-from cstar.entrypoint.runner import XBlueprintRunner, create_parser
+from cstar.entrypoint.runner import BlueprintRunner, create_parser
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.models import (
     Application,
@@ -39,7 +39,7 @@ _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
 )
 
 
-class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
+class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
     """Worker class to run c-star simulations."""
 
     simulation: Final[ROMSSimulation]
@@ -49,7 +49,7 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
 
     def __init__(
         self,
-        request: XRunnerRequest[RomsMarblBlueprint],
+        request: RunnerRequest[RomsMarblBlueprint],
         service_cfg: "ServiceConfiguration",
         job_cfg: "JobConfig",
     ) -> None:
@@ -57,7 +57,7 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
 
         Parameters
         ----------
-        request: XRunnerRequest[RomsMarblBlueprint]
+        request: RunnerRequest[RomsMarblBlueprint]
             A request containing information about the simulation to run
 
         service_cfg: ServiceConfiguration
@@ -95,7 +95,7 @@ class RomsMarblRunner(XBlueprintRunner[RomsMarblBlueprint]):
         )
 
     @override
-    async def run(self) -> XRunnerResult[RomsMarblBlueprint]:
+    async def run(self) -> RunnerResult[RomsMarblBlueprint]:
         """Execute the c-star simulation."""
         if self._handler is None:
             msg = "Simulation did not start up successfully"
@@ -157,7 +157,7 @@ def main() -> int:
     if args.directives:
         blueprint_uri = DirectiveConfig.apply_directives(args.directives, blueprint_uri)
 
-    request = XRunnerRequest(blueprint_uri, RomsMarblBlueprint)
+    request = RunnerRequest(blueprint_uri, RomsMarblBlueprint)
     runner = RomsMarblRunner(request, service_cfg, job_cfg)
 
     try:

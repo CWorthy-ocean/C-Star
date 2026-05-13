@@ -22,7 +22,7 @@ app = typer.Typer()
 console = Console()
 
 if t.TYPE_CHECKING:
-    from cstar.entrypoint.runner import XBlueprintRunner
+    from cstar.entrypoint.runner import BlueprintRunner
 
     BPResult: t.TypeAlias = tuple[Path, Blueprint]
 
@@ -42,7 +42,7 @@ def _locate_blueprints(search_dir: Path) -> Iterable["BPResult"]:
         for file in files:
             base_bp = deserialize(file, Blueprint)
 
-            app: ApplicationDefinition[Blueprint, XBlueprintRunner[Blueprint]] = (
+            app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
                 get_application(base_bp.application)
             )
             bp_type = app.blueprint
