@@ -1,18 +1,20 @@
 import typing as t
 from pathlib import Path
 
-from roms_tools import Grid, ROMSOutput
-
 from cstar.applications.core import (
     ApplicationDefinition,
     XRunnerResult,
     register_application,
 )
 from cstar.base.log import get_logger
+from cstar.base.utils import lazy_import
 from cstar.entrypoint.runner import XBlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.transforms import OverrideTransform
+
+roms_tools = lazy_import("roms_tools")
+
 
 APP_NAME: t.Literal["plotter"] = "plotter"
 """The unique identifier for the plotter application type."""
@@ -79,8 +81,8 @@ class PlotterRunner(XBlueprintRunner[PlotterBlueprint]):
         blueprint = self.request.blueprint
 
         input_dir = blueprint.input_dir.expanduser().resolve()
-        grid = Grid(filename=blueprint.grid_file_path)
-        roms = ROMSOutput(
+        grid = roms_tools.Grid(filename=blueprint.grid_file_path)
+        roms = roms_tools.ROMSOutput(
             path=input_dir / blueprint.file_glob, grid=grid, use_dask=True
         )
         output_dir = blueprint.output_dir.expanduser().resolve()
