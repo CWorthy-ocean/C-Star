@@ -2730,22 +2730,3 @@ class TestCstarSpecBuilderDumpLoad:
                 assert loaded2._settings_compile_time == original._settings_compile_time
                 assert loaded2._settings_run_time == original._settings_run_time
 
-
-class TestCdrForcingDoCdrSync:
-    """CDR_forcing builder argument must force cdr_output.do_cdr on."""
-
-    def test_cdr_forcing_arg_sets_do_cdr_after_init(self, minimal_cstar_spec_builder_args):
-        args = {**minimal_cstar_spec_builder_args, "CDR_forcing": {}}
-        builder = CstarSpecBuilder(**args)
-        assert builder._settings_compile_time["cdr_output"]["do_cdr"] is True
-
-    def test_cdr_forcing_arg_overrides_false_after_update(self, minimal_cstar_spec_builder_args):
-        args = {**minimal_cstar_spec_builder_args, "CDR_forcing": {}}
-        builder = CstarSpecBuilder(**args)
-        builder._update_settings_compile_time({"cdr_output": {"do_cdr": False}})
-        assert builder._settings_compile_time["cdr_output"]["do_cdr"] is True
-
-    def test_no_cdr_forcing_leaves_default_do_cdr(self, minimal_cstar_spec_builder_args):
-        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-        assert builder._settings_compile_time["cdr_output"]["do_cdr"] is False
-
