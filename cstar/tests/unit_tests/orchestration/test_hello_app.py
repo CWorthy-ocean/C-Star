@@ -84,11 +84,10 @@ async def test_hello_world_runner_execute(
 
     runner = HelloWorldRunner(request, svc_cfg, job_cfg)
     await runner.execute()
-    result = runner.result
 
-    assert result is not None
+    assert runner.state is not None
     # Confirm the success disposition is set
-    assert result.status == ExecutionStatus.COMPLETED
+    assert runner.state.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()
@@ -119,17 +118,15 @@ async def test_hello_world_runner_execute_runner(
     runner = HelloWorldRunner(request, svc_cfg, job_cfg)
     await runner.execute()
 
-    if not runner.result:
+    if not runner.state:
         msg = "Failed to set result on runner"
         raise CstarError(msg)
 
-    result = runner.result
-
-    assert result is not None
+    assert runner.state is not None
 
     # Confirm the success disposition is set and no errors are returned
-    assert result.status == ExecutionStatus.COMPLETED
-    assert not result.errors
+    assert runner.state.status == ExecutionStatus.COMPLETED
+    assert not runner.state.errors
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()
@@ -162,7 +159,7 @@ async def test_execute_runner_happy_path(
     await runner.execute()
 
     # Confirm the success disposition is set
-    assert runner.status == ExecutionStatus.COMPLETED
+    assert runner.state.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()

@@ -8,6 +8,7 @@ from cstar.applications.core import (
     ApplicationDefinition,
     RunnerRequest,
     RunnerResult,
+    RunnerState,
     get_application,
 )
 from cstar.applications.roms_marbl.app import RomsMarblRunner
@@ -71,11 +72,8 @@ def test_blueprint_run_remote_blueprint() -> None:
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
-        self._result = RunnerResult(
-            RunnerRequest(str(bp_path), RomsMarblBlueprint),
-            ExecutionStatus.COMPLETED,
-        )
-        return self._result
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
 
     app_config: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
         get_application("roms_marbl")
@@ -112,7 +110,7 @@ def test_blueprint_run_apply_directive_dne(tmp_path: Path, directive_path: str) 
         "cstar.applications.roms_marbl.app.RomsMarblRunner.execute",
         return_value=RunnerResult(
             RunnerRequest(bp_path, RomsMarblBlueprint),
-            ExecutionStatus.COMPLETED,
+            RunnerState(ExecutionStatus.COMPLETED),
         ),
     ) as mock_exec:
         runner = CliRunner()
@@ -180,11 +178,8 @@ def test_blueprint_run_apply_directives(
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
-        self._result = RunnerResult(
-            RunnerRequest(str(bp_path), RomsMarblBlueprint),
-            ExecutionStatus.COMPLETED,
-        )
-        return self._result
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
 
     with (
         mock.patch.object(

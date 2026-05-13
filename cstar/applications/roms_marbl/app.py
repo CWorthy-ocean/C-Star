@@ -99,24 +99,26 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
         """Execute the c-star simulation."""
         if self._handler is None:
             msg = "Simulation did not start up successfully"
+            self.add_state(ExecutionStatus.FAILED, msg)
             raise CstarError(msg)
 
         try:
             await self._handler.updates(seconds=1.0)
+            self.add_state(self._handler.status)
         except Exception as ex:
             msg = "An error occurred while running the simulation"
             self.log.exception(msg)
-            return self.set_state(ExecutionStatus.FAILED, [msg, str(ex)])
+            self.add_state(ExecutionStatus.FAILED, [msg, str(ex)])
 
-        return self.set_state(self._handler.status)
+        return self.result
 
     @override
     def _on_iteration_complete(self) -> None:
         """Perform post-processing after each iteration of the main event loop."""
         super()._on_iteration_complete()
-        if self.status == ExecutionStatus.COMPLETED:
+        if self.state.status == ExecutionStatus.COMPLETED:
             self.simulation.post_run()
-        elif ExecutionStatus.is_terminal(self.status):
+        elif ExecutionStatus.is_terminal(self.state.status):
             msg = "Skipping simulation post-run; simulation did not complete."
             self.log.debug(msg)
 
@@ -162,9 +164,8 @@ def main() -> int:
 
     try:
         asyncio.run(runner.execute())
-        result = runner.result
-        if result and result.errors:
-            print(f"Errors occurred: {', '.join(result.errors)}")
+        if runner.state.errors:
+            print(f"Errors occurred: {', '.join(runner.state.errors)}")
             return 1
     except CstarError as ex:
         print(f"An error occurred during the simulation: {ex}")

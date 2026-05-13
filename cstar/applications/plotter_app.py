@@ -66,7 +66,8 @@ class PlotterRunner(BlueprintRunner[PlotterBlueprint]):
         self.log.info(msg)
 
         self.make_plots()
-        return self.set_state(ExecutionStatus.COMPLETED)
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
 
     def make_plots(self) -> None:
         """

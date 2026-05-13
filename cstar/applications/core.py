@@ -1,6 +1,8 @@
 import typing as t
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import chain
 
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
@@ -101,20 +103,34 @@ class RunnerRequest(t.Generic[TBlueprint]):
         return f"cstar_worker_{formatted_now_utc}"
 
 
+@dataclass
+class RunnerState:
+    """The state of a runner task at a given point in time."""
+
+    status: ExecutionStatus = field(default=ExecutionStatus.UNSUBMITTED)
+    """The final status of the application."""
+    errors: list[str] = field(default_factory=list[str])
+    """The error messages produced by the application."""
+    timestamp: t.Final[str] = field(
+        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
+        init=False,
+        compare=False,
+    )
+    """When the state occurred."""
+
+
 class RunnerResult(t.Generic[TBlueprint]):
     """Specifies details about the result of running an application."""
 
     request: RunnerRequest[TBlueprint]
     """The request that was handled and produced the result."""
-    status: t.Final[ExecutionStatus | None]
-    """The final status of the application."""
-    _errors: t.Final[list[str]]
-    """The error messages produced by the application."""
+    _states: list[RunnerState]
+    """State transitions for the blueprint process recorded during the runner lifecycle."""
 
     def __init__(
         self,
         request: RunnerRequest[TBlueprint],
-        status: ExecutionStatus | None = None,
+        state: Sequence[RunnerState] | RunnerState,
         errors: list[str] | None = None,
     ) -> None:
         """Initialize the result instance.
@@ -127,14 +143,68 @@ class RunnerResult(t.Generic[TBlueprint]):
             The final status of the application.
         errors : list[str] | None
             The error messages produced by the appplication.
+        state : Sequence[RunnerState] | RunnerState
+            The state(s) of the application.
         """
         self.request = request
         self._errors = errors or []
-        self.status = status
+        self._states = []
+
+        if isinstance(state, RunnerState):
+            self._states.append(state)
+        else:
+            list(map(self.add_state, state))
 
     @property
-    def errors(self) -> tuple[str, ...]:
-        return tuple(self._errors)
+    def states(self) -> Sequence[RunnerState]:
+        """Return all unique states encountered by the runner."""
+        return self._states
+
+    @property
+    def state(self) -> RunnerState:
+        """Return the latest state encountered by the runner."""
+        return self._states[-1]
+
+    @property
+    def errors(self) -> Sequence[str]:
+        """Return all recorded error messages."""
+        return list(
+            chain.from_iterable(item.errors for item in self._states if item.errors),
+        )
+
+    def add_state(self, state: RunnerState) -> bool:
+        """Add the state to the state history, while dropping duplicate states.
+
+        Parameters
+        ----------
+        state : RunnerState
+            A state to be added to the history.
+
+        Returns
+        -------
+        bool
+            `True` when the state is stored, `False` when duplicated.
+        """
+        last_state = self._states[-1] if self._states else None
+
+        old = last_state.status if last_state else None
+        new = state.status
+
+        unseen_status = old is None or old != new
+        seen_errors = set(self.errors)
+        unseen_errors = set(state.errors).difference(seen_errors)
+
+        if unseen_status or unseen_errors:
+            old = last_state.status if last_state else None
+            new = state.status
+
+            self._states.append(state)
+
+            msg = f"Runner transitioned from {old} to {new}"
+            log.trace(msg)
+            return True
+
+        return False
 
 
 class XRunner(t.Protocol, t.Generic[TBlueprint]):
@@ -178,6 +248,11 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
         -------
         RunnerResult[TBlueprint]
         """
+        ...
+
+    @property
+    def state(self) -> RunnerState:
+        """Return the current state of the application."""
         ...
 
     async def run(self) -> RunnerResult[TBlueprint]:

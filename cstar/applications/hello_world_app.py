@@ -42,7 +42,8 @@ class HelloWorldRunner(BlueprintRunner[HelloWorldBlueprint]):
         self.log.debug("Executing handler function on blueprint runner")
 
         print(f"Hello, {self.blueprint.target}")
-        return self.set_state(ExecutionStatus.COMPLETED)
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
 
 
 @register_application

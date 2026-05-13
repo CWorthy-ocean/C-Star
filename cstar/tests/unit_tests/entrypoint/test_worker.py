@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.core import RunnerRequest, RunnerResult
+from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
 from cstar.applications.roms_marbl.app import RomsMarblRunner, main
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceTransform
@@ -576,18 +576,20 @@ async def test_runner_shutdown_handler_not_complete(
     # Configure the RomsMarblRunner to run as a service
     sim_runner._config.as_service = True
 
-    mock_status_prop = mock.PropertyMock(return_value=status)
-    mock_result = mock.Mock(spec=RunnerResult)
-    type(mock_result).status = mock_status_prop
+    state = RunnerState(status)
+    result = RunnerResult[RomsMarblBlueprint](
+        mock.MagicMock(),
+        state=state,
+    )
 
-    # confirm the runner checks the result object for a status
-    with mock.patch.object(sim_runner, "_result", mock_result):
-        # and confirm it already says it can exit
+    # confirm the runner uses the result object for state queries
+    with mock.patch.object(sim_runner, "_result", result):
+        # and confirm it does not say it can exit
         assert not sim_runner.can_shutdown
-        assert sim_runner.status == status
+        assert sim_runner.state.status == status
 
         # ... and sanity-check it didn't short-circuit fail during startup
-        assert mock_status_prop.call_count > 0
+        assert not sim_runner.state.errors
 
 
 @pytest.mark.parametrize(
@@ -899,7 +901,10 @@ async def test_runner_on_iteration(
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
-    mock_simulation = mock.Mock()
+    mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
+    mock_sim_run = mock.Mock(return_value=mock_handler)
+
+    mock_simulation = mock.Mock(run=mock_sim_run)
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
@@ -917,6 +922,8 @@ async def test_runner_on_iteration(
         assert mock_simulation.pre_run.call_count == 1
         assert mock_simulation.run.call_count == 1
         assert mock_shutdown.call_count == 1
+
+        assert sim_runner.result.state.status == ExecutionStatus.COMPLETED
 
 
 def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
@@ -959,7 +966,7 @@ def test_worker_main_exec(
     mock_execute = mock.AsyncMock(
         return_value=RunnerResult(
             RunnerRequest(blueprint_path.as_posix(), RomsMarblBlueprint),
-            ExecutionStatus.COMPLETED,
+            RunnerState(ExecutionStatus.COMPLETED),
         ),
     )
     args = [
@@ -1017,12 +1024,9 @@ def test_worker_main_exec_continue_from(
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
-        self._result = RunnerResult(
-            RunnerRequest(str(blueprint_path), RomsMarblBlueprint),
-            ExecutionStatus.COMPLETED,
-        )
+        self.add_state(ExecutionStatus.COMPLETED)
         assert ContinuanceTransform.suffix() in str(self.request.blueprint_uri)
-        return self._result
+        return self.result
 
     # don't let it perform any real work; mock out RomsMarblRunner
     with (
@@ -1116,11 +1120,8 @@ def test_worker_main_preprocessor_args_parsed(
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
-        self._result = RunnerResult(
-            RunnerRequest(str(bp_path), RomsMarblBlueprint),
-            ExecutionStatus.COMPLETED,
-        )
-        return self._result
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
 
     with (
         mock.patch.object(sys, "argv", args),
@@ -1148,3 +1149,46 @@ def test_worker_main_preprocessor_args_parsed(
     # verify initial conditions now point to the --continue-from location
     blueprint = deserialize(modified_uri, RomsMarblBlueprint)
     assert str(reset_dir) in str(blueprint.initial_conditions.data[0].location)
+
+
+@pytest.mark.parametrize(
+    "runner_state",
+    [
+        pytest.param(RunnerState(ExecutionStatus.COMPLETED), id="happy path"),
+        pytest.param(RunnerState(ExecutionStatus.CANCELLED), id="cancel (state only)"),
+        pytest.param(RunnerState(ExecutionStatus.FAILED), id="failed (state only)"),
+        pytest.param(
+            RunnerState(ExecutionStatus.RUNNING, ["runtime error"]),
+            id="errors reported",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_bluerintrunner_can_shutdown(
+    sim_runner: RomsMarblRunner,
+    runner_state: RunnerState,
+) -> None:
+    """Test that the runner recognizes it should shut down if terminal
+    statuses are encountered or if the runner reports an error.
+
+    Parameters
+    ----------
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
+    runner_state : RunnerState
+        A runner state that should trigger shutdown.
+    """
+    output_dir = sim_runner.simulation.fs_manager.output_dir
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "somefile.txt").touch()
+
+    result = RunnerResult[RomsMarblBlueprint](
+        mock.MagicMock(),
+        state=runner_state,
+    )
+
+    # confirm the runner uses the result object for state queries
+    with mock.patch.object(sim_runner, "_result", result):
+        # and confirm it does not say it can exit
+        assert sim_runner.can_shutdown

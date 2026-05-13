@@ -5,6 +5,7 @@ from cstar.applications.core import (
     HasApplication,
     RunnerRequest,
     RunnerResult,
+    RunnerState,
     XRunner,
 )
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
@@ -60,11 +61,16 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         self._job_cfg = job_cfg
         self._result = RunnerResult(
             request,
+            RunnerState(ExecutionStatus.UNSUBMITTED),
         )
 
     @property
     def request(self) -> RunnerRequest[TBlueprint]:
         return self._request
+
+    @property
+    def state(self) -> RunnerState:
+        return self._result.states[-1]
 
     @property
     def result(self) -> RunnerResult[TBlueprint]:
@@ -79,25 +85,18 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         """Return the URI of the blueprint to run."""
         return self._request.blueprint_uri
 
-    @property
-    def status(self) -> ExecutionStatus:
-        """Return the status of the runner's work."""
-        if self._result and self._result.status:
-            return self._result.status
-
-        return ExecutionStatus.UNKNOWN
-
     def _log_disposition(self) -> None:
         """Log the status of the simulation at shutdown time."""
-        # if no result is set or the result indicates errors occurred, log as an error
-        treat_as_failure = not self._result or (self._result and self._result.errors)
+        # log appropriate disposition if the result indicates errors occurred
+        treat_as_failure = bool(self.result.errors)
 
-        if self.status == ExecutionStatus.COMPLETED and not treat_as_failure:
+        if self.state.status == ExecutionStatus.COMPLETED and not treat_as_failure:
             self.log.info("Simulation completed successfully.")
-        elif self.status == ExecutionStatus.FAILED or treat_as_failure:
-            self.log.error("Simulation failed.")
+        elif self.state.status == ExecutionStatus.FAILED or treat_as_failure:
+            msg = f"Simulation failed with errors: {', '.join(self.result.errors)}"
+            self.log.error(msg)
         else:
-            msg = f"Simulation ended with status: {self.status}."
+            msg = f"Simulation ended with status: {self.state.status}."
             self.log.warning(msg)
 
     @t.override
@@ -109,8 +108,8 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         bool
             `True` if the service can shutdown, `False` otherwise.
         """
-        if ExecutionStatus.is_terminal(self.status):
-            msg = f"Blueprint runner has reached a terminal state {str(self.status)!r})"
+        if ExecutionStatus.is_terminal(self.state.status) or self.state.errors:
+            msg = f"Blueprint runner has reached a terminal state {str(self.state.status)!r})"
             self.log.info(msg)
             return True
 
@@ -135,7 +134,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         except Exception as ex:
             msg = f"An error occurred while running blueprint: {self.blueprint_uri!r}"
             self.log.exception(msg)
-            self.set_state(ExecutionStatus.FAILED, [msg, str(ex)])
+            self.add_state(ExecutionStatus.FAILED, [msg, str(ex)])
 
     @t.override
     def _on_shutdown(self) -> None:
@@ -148,17 +147,17 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
     @t.override
     def _cancel(self) -> None:
         """Handle a request to cancel the service."""
-        self.set_state(
+        self.add_state(
             ExecutionStatus.CANCELLED,
             ["The service was terminated on demand"],
         )
         super()._cancel()
 
-    def set_state(
+    def add_state(
         self,
         status: ExecutionStatus,
-        errors: list[str] | None = None,
-    ) -> RunnerResult[TBlueprint]:
+        errors: str | list[str] | None = None,
+    ) -> RunnerState:
         """Create a RunnerResult instance and store the value.
 
         Uses
@@ -167,14 +166,14 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         -------
         RunnerResult
         """
-        if errors and self._result and self._result.errors:
-            errors.extend(self._result.errors)
-
         if ExecutionStatus.is_terminal(status):
             self._running = False
 
-        self._result = RunnerResult(self._request, status, errors)
-        return self._result
+        if isinstance(errors, str) and errors:
+            errors = [errors]
+
+        self.result.add_state(RunnerState(status, errors or []))
+        return self.result.state
 
 
 def create_parser() -> argparse.ArgumentParser:

@@ -171,7 +171,7 @@ async def test_hello_world_runner_happy_path(
     await runner.execute()
 
     # Confirm the success disposition is set
-    assert runner.status == ExecutionStatus.COMPLETED
+    assert runner.state.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {target}".lower() in captured.out.lower()
