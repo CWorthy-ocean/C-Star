@@ -1,10 +1,8 @@
 import os
 import re
 import typing as t
-from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from datetime import datetime, timedelta
-from enum import StrEnum
+from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import (
@@ -21,100 +19,14 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, deep_merge, slugify
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import Directive, DirectiveConfig, OverrideTransform
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
-
-
-class SplitFrequency(StrEnum):
-    Daily = "daily"
-    Weekly = "weekly"
-    Monthly = "monthly"
-
-
-def _dailies(
-    start_date: datetime, end_date: datetime
-) -> Iterable[tuple[datetime, datetime]]:
-    """Get daily time slices for the given start and end dates."""
-    current_date = datetime(start_date.year, start_date.month, start_date.day)
-    while current_date < end_date:
-        day_start = current_date
-        day_end = day_start + timedelta(days=1)
-        yield (day_start, day_end)
-        current_date = day_end
-
-
-def _weeklies(
-    start_date: datetime, end_date: datetime
-) -> Iterable[tuple[datetime, datetime]]:
-    """Get weekly time slices for the given start and end dates."""
-    current_date = datetime(start_date.year, start_date.month, start_date.day)
-    while current_date < end_date:
-        week_start = current_date
-        week_end = week_start + timedelta(days=7)
-        yield (week_start, week_end)
-        current_date = week_end
-
-
-def _monthlies(
-    start_date: datetime, end_date: datetime
-) -> Iterable[tuple[datetime, datetime]]:
-    """Get monthly time slices for the given start and end dates."""
-    current_date = datetime(start_date.year, start_date.month, 1)
-    while current_date < end_date:
-        month_start = current_date
-
-        if month_start.month == 12:
-            month_end = datetime(current_date.year + 1, 1, 1)
-        else:
-            month_end = datetime(current_date.year, month_start.month + 1, 1)
-
-        yield (month_start, month_end)
-        current_date = month_end
-
-
-SLICE_FUNCTIONS = defaultdict(
-    lambda: _monthlies,
-    {
-        SplitFrequency.Daily.value: _dailies,
-        SplitFrequency.Weekly.value: _weeklies,
-        SplitFrequency.Monthly.value: _monthlies,
-    },
+from cstar.orchestration.transforms import (
+    Directive,
+    DirectiveConfig,
+    OverrideTransform,
+    SplitFrequency,
+    get_time_slices,
 )
-
-
-def get_time_slices(
-    start_date: datetime,
-    end_date: datetime,
-    frequency: str = SplitFrequency.Monthly.value,
-) -> Iterable[tuple[datetime, datetime]]:
-    """Get the time slices for the given start and end dates.
-
-    Parameters
-    ----------
-    start_date : datetime
-        The start date.
-    end_date : datetime
-        The end date.
-    frequency : str
-        The desired frequency (daily, weekly, monthly).
-
-    Returns
-    -------
-    Iterable[tuple[datetime, datetime]]
-        Iterable containing 2-tuples of (start_date, end_date).
-    """
-    slice_fn = SLICE_FUNCTIONS[frequency]
-    time_slices = list(slice_fn(start_date, end_date))
-
-    # adjust when the start date is not the first day of the month
-    if start_date > time_slices[0][0]:
-        time_slices[0] = (start_date, time_slices[0][1])
-
-    # adjust when the end date is not the last day of the month
-    if end_date < time_slices[-1][1]:
-        time_slices[-1] = (time_slices[-1][0], end_date)
-
-    return time_slices
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
 
 class RomsMarblTimeSplitter(Transform[LiveStep]):
