@@ -93,7 +93,10 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         if self.state.status == ExecutionStatus.COMPLETED and not treat_as_failure:
             self.log.info("Simulation completed successfully.")
         elif self.state.status == ExecutionStatus.FAILED or treat_as_failure:
-            msg = f"Simulation failed with errors: {', '.join(self.result.errors)}"
+            err_clause = ""
+            if self.result.errors:
+                err_clause = f" Errors: {', '.join(self.result.errors)}"
+            msg = f"Simulation failed.{err_clause}"
             self.log.error(msg)
         else:
             msg = f"Simulation ended with status: {self.state.status}."
