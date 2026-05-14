@@ -21,7 +21,7 @@ import pytest
 import xarray as xr
 import numpy as np
 
-import cson_forge.cstar_compat as cstar_models
+import cstar.orchestration.models as cstar_models
 from cson_forge import input_data
 from cson_forge.input_data import (
     InputData,

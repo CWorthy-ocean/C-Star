@@ -25,7 +25,7 @@ import xarray as xr
 import yaml
 from pydantic import ValidationError
 
-import cson_forge.cstar_compat as cstar_models
+import cstar.orchestration.models as cstar_models
 from cson_forge._core import CstarSpecBuilder
 from cson_forge import models as cson_models
 from cson_forge.config import DataPaths
@@ -2222,7 +2222,7 @@ class TestCstarSpecBuilderGetDsComprehensive:
                 mock_grid.return_value = _create_grid_mock()
                 
                 # Dataset with no location resources - use model_construct to bypass validation
-                from cson_forge.cstar_compat import Dataset as CstarDataset
+                from cstar.orchestration.models import Dataset as CstarDataset
                 placeholder_file = tmp_path / "placeholder_grid.nc"
                 placeholder_file.touch()
                 grid_dataset = cstar_models.Dataset(
