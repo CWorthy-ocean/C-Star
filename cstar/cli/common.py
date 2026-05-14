@@ -94,13 +94,4 @@ def locate_app_modules() -> list[str]:
 
 def autoimport_apps(module_names: list[str]) -> None:
     for module_name in module_names:
-        module = importlib.import_module(module_name)
-
-        to_import = getattr(
-            module,
-            "__all__",
-            [n for n in dir(module) if n.endswith("Application")],
-        )
-
-        for name in to_import:
-            globals()[name] = getattr(module, name)
+        importlib.import_module(module_name)
