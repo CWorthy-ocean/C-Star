@@ -36,7 +36,7 @@ parameters that are user-facing.
 Custom Blueprint Example: ``RomsMarblBlueprint``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:class:`cstar.orchestration.models.RomsMarblBlueprint` contains all information
+:class:`cstar.applications.roms_marbl.app.RomsMarblBlueprint` contains all information
 necessary to execute a coupled simulation using **UCLA-ROMS** with biogeochemistry
 handled by **MARBL**. It adds the following attributes:
 
@@ -44,18 +44,18 @@ handled by **MARBL**. It adds the following attributes:
 
 .. autosummary::
 
-  ~cstar.orchestration.models.RomsMarblBlueprint.valid_start_date
-  ~cstar.orchestration.models.RomsMarblBlueprint.valid_end_date
-  ~cstar.orchestration.models.RomsMarblBlueprint.code
-  ~cstar.orchestration.models.RomsMarblBlueprint.initial_conditions
-  ~cstar.orchestration.models.RomsMarblBlueprint.grid
-  ~cstar.orchestration.models.RomsMarblBlueprint.forcing
-  ~cstar.orchestration.models.RomsMarblBlueprint.partitioning
-  ~cstar.orchestration.models.RomsMarblBlueprint.model_params
-  ~cstar.orchestration.models.RomsMarblBlueprint.runtime_params
-  ~cstar.orchestration.models.RomsMarblBlueprint.cdr_forcing
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.valid_start_date
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.valid_end_date
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.code
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.initial_conditions
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.grid
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.forcing
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.partitioning
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.model_params
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.runtime_params
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.cdr_forcing
 
-Explore the API reference of :class:`cstar.orchestration.models.RomsMarblBlueprint` 
+Explore the API reference of :class:`cstar.applications.roms_marbl.app.RomsMarblBlueprint` 
 for more detail on each item.
 
 
