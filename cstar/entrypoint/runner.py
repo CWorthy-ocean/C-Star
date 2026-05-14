@@ -112,7 +112,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             `True` if the service can shutdown, `False` otherwise.
         """
         if ExecutionStatus.is_terminal(self.state.status) or self.state.errors:
-            msg = f"Blueprint runner has reached a terminal state {str(self.state.status)!r})"
+            msg = f"BlueprintRunner reached a terminal state {str(self.state.status)!r}"
             self.log.info(msg)
             return True
 
