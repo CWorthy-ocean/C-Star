@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 import yaml
 
 import cstar.roms.runtime_settings
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -47,7 +48,6 @@ from cstar.orchestration.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -89,16 +89,16 @@ def _ncjoin_wildcard(
     -------
     None
     """
-    logger.info(f"Joining netCDF files {wildcard_pattern}...")
+    logger.info(f"Spatial join of netCDF files {wildcard_pattern!r} starting")
     _run_cmd(
         f"ncjoin {wildcard_pattern}",
         cwd=input_dir,
         raise_on_error=True,
     )
-    out_file = input_dir / wildcard_pattern.replace("*.", "")
-    out_file_name = out_file.name
-    out_file.rename(output_dir / out_file_name)
-    logger.info(f"Done spatially joining {out_file}")
+    joined_file = input_dir / wildcard_pattern.replace(".*.nc", ".nc")
+    out_file = joined_file.rename(output_dir / joined_file.name)
+
+    logger.info(f"Spatial join of {str(out_file)!r} is complete")
 
     if "rst" not in wildcard_pattern:
         remove_files(input_dir, wildcard_pattern)
@@ -121,19 +121,19 @@ def _extract_data_join_wildcard(
     -------
     None
     """
-    logger.info(f"Joining netCDF files {wildcard_pattern}...")
+    logger.info(f"Spatial extract/join of netCDF files {wildcard_pattern!r} starting")
     _run_cmd(
         f"extract_data_join {wildcard_pattern}",
         cwd=input_dir,
         raise_on_error=True,
     )
 
-    out_file_name = wildcard_pattern.replace("*.", "")
+    out_file_name = wildcard_pattern.replace(".*.nc", ".nc")
     _, out_file_timestamp_dot_nc = out_file_name.split(".", maxsplit=1)
 
     out_file_name = f"child_bry.{out_file_timestamp_dot_nc}"
-    out_file = input_dir / out_file_name
-    out_file.rename(output_dir / out_file_name)
+    joined_file = input_dir / out_file_name
+    out_file = joined_file.rename(output_dir / out_file_name)
 
     ocean_file_name = f"ocean.{out_file_timestamp_dot_nc}"
     ocean_file = input_dir / ocean_file_name
@@ -141,7 +141,7 @@ def _extract_data_join_wildcard(
 
     remove_files(input_dir, wildcard_pattern)
 
-    logger.info(f"Done spatially joining {out_file}")
+    logger.info(f"Spatial extract/join of {str(out_file)!r} is complete")
 
 
 class ROMSSimulation(Simulation):
@@ -1498,7 +1498,7 @@ class ROMSSimulation(Simulation):
             makefile_repo = self.codebase.working_copy.path / "Work" / "Makefile"
             shutil.copyfile(makefile_repo, makefile_target)
 
-    def pre_run(self, overwrite_existing_files=False) -> None:
+    def pre_run(self, overwrite_existing_files: bool = False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
         This method partitions any required input datasets according to

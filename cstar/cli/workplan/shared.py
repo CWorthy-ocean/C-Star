@@ -7,15 +7,18 @@ import typer
 from rich.console import Console
 from rich.table import Column, Table
 
+from cstar.applications.core import (
+    ApplicationDefinition,
+    RunnerRequest,
+    get_application,
+)
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import get_job_config, get_service_config
-from cstar.entrypoint.xrunner import XBlueprintRunner, XRunnerRequest
-from cstar.orchestration.application import APP_CAT_BLUEPRINTS, APP_CAT_RUNNERS
+from cstar.entrypoint.runner import BlueprintRunner
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import TrackingRepository
-from cstar.system.registration import Registrar
 
 console = Console()
 log = get_logger(__name__)
@@ -179,11 +182,11 @@ def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str] | None:
 
 
 def create_xrunner(
-    request: XRunnerRequest[Blueprint],
+    request: RunnerRequest[Blueprint],
     service_cfg: "ServiceConfiguration | None" = None,
     job_cfg: "JobConfig | None" = None,
     log_level: int | str = "INFO",
-) -> XBlueprintRunner[Blueprint]:
+) -> BlueprintRunner[Blueprint]:
     """Dynamically create a runner using the application to look up the
     registered handler.
 
@@ -193,7 +196,7 @@ def create_xrunner(
         Configuration applied to the scheduler.
     service_cfg : ServiceConfiguration
         Configuration applied to the service.
-    request : XRunnerRequest
+    request : RunnerRequest
         A request specifying the blueprint to be executed.
     """
     if job_cfg is None:
@@ -204,37 +207,8 @@ def create_xrunner(
             name=f"{request.application}_runner",
         )
 
-    klass = get_registered_runner(request.application)
-    return klass(request, job_cfg, service_cfg)
-
-
-def get_registered_bp(application: str) -> type[Blueprint]:
-    """Retrieve the Blueprint type registered for the given application.
-
-    Parameters
-    ----------
-    application
-        The application name
-
-    Returns
-    -------
-    type[Blueprint]
-    """
-    registrar = Registrar[Blueprint](APP_CAT_BLUEPRINTS)
-    return registrar.get(application)
-
-
-def get_registered_runner(application: str) -> type[XBlueprintRunner[Blueprint]]:
-    """Retrieve the Runner type registered for the given application.
-
-    Parameters
-    ----------
-    application
-        The application name
-
-    Returns
-    -------
-    type[XBlueprintRunner[Blueprint]]
-    """
-    registrar = Registrar[XBlueprintRunner[Blueprint]](APP_CAT_RUNNERS)
-    return registrar.get(application)
+    app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = get_application(
+        request.application
+    )
+    klass = app.runner
+    return klass(request, service_cfg, job_cfg)

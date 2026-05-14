@@ -5,20 +5,27 @@ import os
 import shutil
 import sys
 import textwrap
-import typing as t
 from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from cstar.base.exceptions import BlueprintError, CstarError
+from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
+from cstar.applications.roms_marbl.app import RomsMarblRunner, main
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.transforms import ContinuanceTransform
+from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
 from cstar.entrypoint.config import (
     JobConfig,
     ServiceConfiguration,
     configure_environment,
     get_job_config,
     get_service_config,
+)
+from cstar.entrypoint.runner import (
+    BlueprintRunner,
+    create_parser,
 )
 from cstar.entrypoint.utils import (
     ARG_DIRECTIVES_URI_LONG,
@@ -27,17 +34,9 @@ from cstar.entrypoint.utils import (
     ARG_URI_LONG,
     ARG_URI_SHORT,
 )
-from cstar.entrypoint.worker.worker import (
-    SimulationRunner,
-    get_request,
-    main,
-)
-from cstar.entrypoint.xrunner import XRunnerRequest, create_parser
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
-from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import ContinuanceTransform
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -51,7 +50,7 @@ DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
 @pytest.fixture(scope="module", autouse=True)
 def clean_up_logs() -> Generator[None, None, None]:
     """
-    SimulationRunner sets up a log file during init. I could try to mock it out, but
+    RomsMarblRunner sets up a log file during init. I could try to mock it out, but
     it's a bit hard to get at. For now, just clean things up after the module is done.
     """
     yield
@@ -60,7 +59,7 @@ def clean_up_logs() -> Generator[None, None, None]:
 
 @pytest.fixture
 def valid_args() -> dict[str, str]:
-    """Fixture to provide valid arguments for the SimulationRunner."""
+    """Fixture to provide valid arguments for the RomsMarblRunner."""
     return {
         ARG_URI_LONG: "blueprint.yaml",
         ARG_LOGLEVEL_LONG: "INFO",
@@ -69,7 +68,7 @@ def valid_args() -> dict[str, str]:
 
 @pytest.fixture
 def valid_args_short() -> dict[str, str]:
-    """Fixture to provide valid arguments for the SimulationRunner."""
+    """Fixture to provide valid arguments for the RomsMarblRunner."""
     return {
         ARG_URI_SHORT: "blueprint.yaml",
         ARG_LOGLEVEL_SHORT: "INFO",
@@ -97,15 +96,15 @@ def sim_runner(
     blueprint_path: Path,
     patch_romssimulation_init_sourcedata,
     fake_job_config: JobConfig,
-) -> SimulationRunner:
-    """Fixture to create a SimulationRunner instance.
+) -> RomsMarblRunner:
+    """Fixture to create a RomsMarblRunner instance.
 
     Returns
     -------
-    SimulationRunner
-        An initialized instance of SimulationRunner, configured via blueprint.
+    RomsMarblRunner
+        An initialized instance of RomsMarblRunner, configured via blueprint.
     """
-    request = XRunnerRequest(
+    request = RunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
     )
@@ -120,13 +119,12 @@ def sim_runner(
     )
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        runner = SimulationRunner(request, service_config, fake_job_config)
+        runner = RomsMarblRunner(request, service_config, fake_job_config)
 
-    output_path = runner._simulation.fs_manager.output_dir
+    output_path = runner.simulation.fs_manager.output_dir
 
-    runner._output_root = output_path  # type: ignore[misc]
-    # sim._output_dir = output_path / sim._output_dir.name  # type: ignore[misc]
-    runner._simulation.directory = output_path
+    runner.blueprint.runtime_params.output_dir = output_path
+    runner.simulation.directory = output_path
 
     return runner
 
@@ -291,7 +289,7 @@ def test_get_service_config(
         ],
     )
 
-    config = get_service_config(parsed_args.log_level, name="SimulationRunner")
+    config = get_service_config(parsed_args.log_level, name="RomsMarblRunner")
 
     # some values are currently hardcoded for the worker service
     assert config.as_service
@@ -321,10 +319,13 @@ def test_get_request(
             blueprint_uri,
             ARG_LOGLEVEL_LONG,
             "INFO",
-        ]
+        ],
     )
 
-    config = get_request(parsed_args.blueprint_uri)
+    config = RunnerRequest(
+        parsed_args.blueprint_uri,
+        RomsMarblBlueprint,
+    )
 
     assert config.blueprint_uri == blueprint_uri
 
@@ -372,14 +373,14 @@ def test_start_runner(
     patch_romssimulation_init_sourcedata,
     fake_job_config: JobConfig,
 ) -> None:
-    """Test creating a SimulationRunner and starting it.
+    """Test creating a RomsMarblRunner and starting it.
 
     Parameters
     ----------
     blueprint_path: Path
         The path to the blueprint yaml file created by the fixture.
     """
-    request = XRunnerRequest(
+    request = RunnerRequest(
         str(blueprint_path),
         RomsMarblBlueprint,
     )
@@ -394,13 +395,13 @@ def test_start_runner(
     )
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        runner = SimulationRunner(request, service_config, fake_job_config)
+        runner = RomsMarblRunner(request, service_config, fake_job_config)
 
-    assert runner._blueprint_uri == request.blueprint_uri
+    assert runner.request.blueprint_uri == request.blueprint_uri
 
 
 def test_runner_directory_check_ignore_logs(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
     """Test the simulation runner's file system preparation.
 
@@ -409,10 +410,10 @@ def test_runner_directory_check_ignore_logs(
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logs_dir = output_dir / "logs"
@@ -423,7 +424,7 @@ def test_runner_directory_check_ignore_logs(
 
 
 def test_runner_directory_prep(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
     """Test the simulation runner's file system preparation.
 
@@ -431,43 +432,44 @@ def test_runner_directory_prep(
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    actual_output_dir = sim_runner.blueprint.runtime_params.output_dir
     # Confirm the output directory is created...
-    assert sim_runner._output_root.exists()
-    assert sim_runner._output_root.is_dir()
+    assert actual_output_dir.exists()
+    assert actual_output_dir.is_dir()
 
     # ...and is empty so no conflicts will occur.
-    output_content = list(x for x in sim_runner._output_root.iterdir() if x.is_file())
+    output_content = [x for x in actual_output_dir.iterdir() if x.is_file()]
     assert not output_content, "Output directory should be empty after prep."
 
 
 @pytest.mark.asyncio
 async def test_runner_can_shutdown_as_task(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
     """Test the shutdown override of the base Service class.
 
-    Verifies that a SimulationRunner configured as a task will
+    Verifies that a RomsMarblRunner configured as a task will
     automatically exit after a single event loop.
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
-    # Configure the SimulationRunner to run as a task
+    # Configure the RomsMarblRunner to run as a task
     sim_runner._config.as_service = False
 
     # don't let it perform any real work
@@ -484,99 +486,6 @@ async def test_runner_can_shutdown_as_task(
         assert sim_runner._can_shutdown()
 
 
-@pytest.mark.asyncio
-async def test_runner_can_shutdown_as_task_null_sim(
-    sim_runner: SimulationRunner,
-) -> None:
-    """Test the shutdown override of the base Service class.
-
-    Verifies that a SimulationRunner that fails to load
-    a simulation blueprint properly will automatically exit.
-
-    Parameters
-    ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
-    """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
-    # Configure the SimulationRunner to run as a task
-    sim_runner._config.as_service = False
-
-    with mock.patch.object(sim_runner, "_simulation", None):
-        # and confirm it exits immediately when the simulation is None
-        assert sim_runner._can_shutdown()
-        assert sim_runner._is_status_complete()
-
-
-@pytest.mark.asyncio
-async def test_runner_can_shutdown_as_service_null_sim(
-    sim_runner: SimulationRunner,
-) -> None:
-    """Test the shutdown override of the base Service class.
-
-    Verifies that a SimulationRunner that fails to load
-    a simulation blueprint properly will automatically exit,
-    even if configured to run as a service.
-
-    Parameters
-    ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
-    """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
-    # Configure the SimulationRunner to run as a task
-    sim_runner._config.as_service = True
-
-    with mock.patch.object(sim_runner, "_simulation", None):
-        # and confirm it exits immediately when the simulation is None
-        assert sim_runner._can_shutdown()
-        assert sim_runner._is_status_complete()
-
-
-@pytest.mark.asyncio
-async def test_runner_shutdown_no_update_handler(
-    sim_runner: SimulationRunner,
-) -> None:
-    """Test the shutdown criteria of the SimulationRunner.
-
-    This test verifies that the SimulationRunner will
-    shut down if no update handler is set.
-
-    Parameters
-    ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
-    """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
-    # Configure the SimulationRunner to run as a service
-    sim_runner._config.as_service = True
-
-    # don't let it perform any real work
-    with (
-        mock.patch.object(sim_runner, "_on_start", mock.Mock),
-        mock.patch.object(sim_runner, "_on_iteration", mock.Mock),
-        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock),
-    ):
-        # And confirm it already says it can exit
-        assert sim_runner.can_shutdown
-
-        # and the (mocked) internal state says it should keep running
-        assert sim_runner._can_shutdown()
-        assert sim_runner._handler is None
-
-
 @pytest.mark.parametrize(
     "status",
     [
@@ -587,42 +496,45 @@ async def test_runner_shutdown_no_update_handler(
 )
 @pytest.mark.asyncio
 async def test_runner_shutdown_handler_complete(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
     status: ExecutionStatus,
 ) -> None:
-    """Test the shutdown criteria of the SimulationRunner.
+    """Test the shutdown criteria of the RomsMarblRunner.
 
-    This test verifies that the SimulationRunner will
+    This test verifies that the RomsMarblRunner will
     shut down if the update handler reports that it is completed.
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
-    # Configure the SimulationRunner to run as a service
+    # Configure the RomsMarblRunner to run as a service
     sim_runner._config.as_service = True
 
     mock_status_attr = mock.PropertyMock(return_value=status)
-    assert mock_status_attr.call_count == 0
 
     mock_handler = mock.Mock(spec=ExecutionHandler)
     type(mock_handler).status = mock_status_attr
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_start", mock.Mock),
-        mock.patch.object(sim_runner, "_on_iteration", mock.Mock),
-        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock),
+        mock.patch.object(sim_runner, "_on_start", mock.Mock()),
+        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
         mock.patch.object(sim_runner, "_handler", mock_handler),
+        mock.patch.object(sim_runner.simulation, "post_run", mock.Mock()),
+        mock.patch.object(sim_runner.simulation, "_execution_handler", mock_handler),
     ):
+        # make the simulation go through the main loop...
+        await sim_runner._on_iteration()
+
         # and confirm it already says it can exit
         assert sim_runner.can_shutdown
 
@@ -641,48 +553,43 @@ async def test_runner_shutdown_handler_complete(
 )
 @pytest.mark.asyncio
 async def test_runner_shutdown_handler_not_complete(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
     status: ExecutionStatus,
 ) -> None:
-    """Test the shutdown criteria of the SimulationRunner.
+    """Test the shutdown criteria of the RomsMarblRunner.
 
-    This test verifies that the SimulationRunner will not
+    This test verifies that the RomsMarblRunner will not
     shut down if the update handler reports that it is not done.
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
-    # Configure the SimulationRunner to run as a service
+    # Configure the RomsMarblRunner to run as a service
     sim_runner._config.as_service = True
 
-    mock_status_attr = mock.PropertyMock(return_value=status)
-    assert mock_status_attr.call_count == 0
+    state = RunnerState(status)
+    result = RunnerResult[RomsMarblBlueprint](
+        mock.MagicMock(),
+        state=state,
+    )
 
-    mock_handler = mock.Mock(spec=ExecutionHandler)
-    type(mock_handler).status = mock_status_attr
-
-    # don't let it perform any real work
-    with (
-        mock.patch.object(sim_runner, "_on_start", mock.Mock),
-        mock.patch.object(sim_runner, "_on_iteration", mock.Mock),
-        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock),
-        mock.patch.object(sim_runner, "_handler", mock_handler),
-    ):
-        # and confirm it already says it can exit
+    # confirm the runner uses the result object for state queries
+    with mock.patch.object(sim_runner, "_result", result):
+        # and confirm it does not say it can exit
         assert not sim_runner.can_shutdown
+        assert sim_runner.state.status == status
 
-        # ... and confirm the can_shutdown didn't short-circuit before looking
-        # the handler.status property by checking the call count
-        assert mock_status_attr.call_count > 0
+        # ... and sanity-check it didn't short-circuit fail during startup
+        assert not sim_runner.state.errors
 
 
 @pytest.mark.parametrize(
@@ -695,22 +602,22 @@ async def test_runner_shutdown_handler_not_complete(
 )
 @pytest.mark.asyncio
 async def test_runner_shutdown_side_effects(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
     status: ExecutionStatus,
 ) -> None:
-    """Test the shutdown behavior of the SimulationRunner.
+    """Test the shutdown behavior of the RomsMarblRunner.
 
-    This test verifies that the SimulationRunner executes the desired
+    This test verifies that the RomsMarblRunner executes the desired
     behaviors during shutdown.
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -725,7 +632,7 @@ async def test_runner_shutdown_side_effects(
         mock.patch.object(sim_runner, "_on_iteration", mock.AsyncMock()),
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "_log_disposition", mock_disposition),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
     ):
         # Trigger a run through the lifecycle as a task. This should trigger
         # the complete set of shutdown behaviors.
@@ -737,19 +644,19 @@ async def test_runner_shutdown_side_effects(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_without_uri(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
-    """Test the error handling behavior of the SimulationRunner.
+    """Test the error handling behavior of the RomsMarblRunner.
 
     This test verifies that the simulation runner will raise an error
     if a URI for a blueprint is not provided.
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
@@ -764,15 +671,15 @@ async def test_runner_on_start_without_uri(
         mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
     ):
-        # clear blueprint URI from the default SimulationRunner from the fixture
+        # clear blueprint URI from the default RomsMarblRunner from the fixture
         # use `setattr` to force-change the Final
-        setattr(sim_runner, "_blueprint_uri", None)  # noqa: B010
+        setattr(sim_runner.request, "blueprint_uri", None)  # noqa: B010
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="blueprint"):
             await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
@@ -782,9 +689,9 @@ async def test_runner_on_start_without_uri(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_without_simulation(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
-    """Test the error handling behavior of the SimulationRunner.
+    """Test the error handling behavior of the RomsMarblRunner.
 
     This test verifies that the simulation runner will raise an error
     if the Blueprint URI isn't provided, but it will fail gracefully and
@@ -792,33 +699,28 @@ async def test_runner_on_start_without_simulation(
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
-    mock_simulation = mock.Mock()
+    # mock_simulation = mock.Mock()
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
         mock.patch.object(sim_runner, "_handler", mock_handler),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", None),
     ):
-        # simulate a failure to load the simulation blueprint
-        # use `setattr` to force-change the Final
-        setattr(sim_runner, "_simulation", None)  # noqa: B010
-
-        # Trigger a run through the lifecycle as a task. Without a blueprint URI,
+        # Trigger a run through the lifecycle as a task. Without a Simulation,
         # this should fail but it should still shutdown gracefully.
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError, match="creation failed"):
             await sim_runner.execute()
 
         # Now confirm that my target start-up behaviors were executed
@@ -828,9 +730,9 @@ async def test_runner_on_start_without_simulation(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_setup(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
-    """Test the error handling behavior of the SimulationRunner.
+    """Test the error handling behavior of the RomsMarblRunner.
 
     This test verifies that the simulation runner will raise an error
     if the simulation setup fails, but it will fail gracefully and
@@ -838,49 +740,50 @@ async def test_runner_on_start_user_unhandled_setup(
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
-    mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
-    mock_iter = mock.Mock()
-
     # configure the simulation to raise an exception during SETUP
-    mock_simulation = mock.Mock(
-        setup=mock.Mock(side_effect=ValueError("Mock setup Failure"))
-    )
+    mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
+    mock_run = mock.Mock(return_value=mock_handler)
+    mocked_error_msg = "Mock setup failure"
+    mock_setup = mock.Mock(side_effect=CstarExpectationFailed(mocked_error_msg))
+
+    mock_simulation = mock.Mock(setup=mock_setup, run=mock_run)
     mock_shutdown = mock.Mock()
+    mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_iteration", mock_iter),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
-        mock.patch.object(sim_runner, "_handler", mock_handler),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "run", mock_runner_run),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+        pytest.raises(Exception, match=mocked_error_msg),
     ):
-        # # simulate a failure to load the simulation blueprint
-        # sim_runner._simulation = None
+        # the exception thrown during simulation.setup should be handled
+        await sim_runner.execute()
 
-        # Trigger a run through the lifecycle as a task. Without a blueprint URI,
-        # this should fail but it should still shutdown gracefully.
-        with pytest.raises(Exception):
-            await sim_runner.execute()
+    # Now confirm that my target start-up behaviors were executed
+    assert mock_simulation.setup.call_count == 1
+    assert mock_shutdown.call_count == 1
 
-        # Now confirm that my target start-up behaviors were executed
-        assert mock_simulation.setup.call_count == 1
-        assert mock_iter.call_count == 0
-        assert mock_shutdown.call_count == 1
+    # confirm the sim isn't executed if there is a setup failure
+    mock_run.assert_not_called()
+
+    # ... and confirm that the failure occurred before `run` was executed
+    mock_runner_run.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_build(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
-    """Test the error handling behavior of the SimulationRunner.
+    """Test the error handling behavior of the RomsMarblRunner.
 
     This test verifies that the simulation runner will raise an error
     if the simulation setup fails, but it will fail gracefully and
@@ -888,47 +791,50 @@ async def test_runner_on_start_user_unhandled_build(
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
-    mock_iter = mock.Mock()
+    mock_iter = mock.AsyncMock()
+    mocked_error_msg = "Mock build failure"
+    mock_build = mock.Mock(side_effect=RuntimeError(mocked_error_msg))
+    mock_sim_run = mock.Mock(return_value=mock_handler)
 
     # configure the simulation to raise an exception during BUILD
-    mock_simulation = mock.Mock(
-        build=mock.Mock(side_effect=RuntimeError("Mock build Failure"))
-    )
+    mock_simulation = mock.Mock(build=mock_build, run=mock_sim_run)
+    mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_iteration", mock_iter),
-        mock.patch.object(sim_runner, "_handler", mock_handler),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+        mock.patch.object(sim_runner, "run", mock_runner_run),
+        pytest.raises(Exception, match=mocked_error_msg),
     ):
-        # # simulate a failure to load the simulation blueprint
-        # sim_runner._simulation = None
+        # Trigger a run through the lifecycle as a task.
+        await sim_runner.execute()
 
-        # Trigger a run through the lifecycle as a task. Without a blueprint URI,
-        # this should fail but it should still shutdown gracefully.
-        with pytest.raises(Exception):
-            await sim_runner.execute()
+    # Now confirm that my target start-up behaviors (setup, build) occurred
+    mock_simulation.setup.assert_called()
+    mock_simulation.build.assert_called()
+    mock_iter.assert_not_called()
 
-        # Now confirm that my target start-up behaviors were executed
-        assert mock_simulation.setup.call_count == 1
-        assert mock_iter.call_count == 0
-        # assert mock_shutdown.call_count == 1
+    # confirm the sim isn't executed if there is a setup failure
+    mock_sim_run.assert_not_called()
+
+    # confirm sim_runner.run never got executed due to failure in _on_start
+    mock_runner_run.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_pre_run(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
-    """Test the error handling behavior of the SimulationRunner.
+    """Test the error handling behavior of the RomsMarblRunner.
 
     This test verifies that the simulation runner will raise an error
     if the simulation setup fails, but it will fail gracefully and
@@ -936,69 +842,76 @@ async def test_runner_on_start_user_unhandled_pre_run(
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
-    mock_iter = mock.Mock()
+    mock_iter = mock.AsyncMock()
+    mocked_error_msg = "Mock pre-run failure"
+    mock_setup = mock.Mock(side_effect=RuntimeError(mocked_error_msg))
+    mock_sim_run = mock.Mock(return_value=mock_handler)
 
-    # configure the simulation to raise an exception during PRE-RUN
-    mock_simulation = mock.Mock(
-        pre_run=mock.Mock(side_effect=Exception("Mock pre-run Failure"))
-    )
+    # configure the simulation to raise an exception during BUILD
+    mock_simulation = mock.Mock(run=mock_sim_run, pre_run=mock_setup)
+    mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
     with (
-        mock.patch.object(sim_runner, "_on_iteration", mock_iter),
-        mock.patch.object(sim_runner, "_handler", mock_handler),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+        mock.patch.object(sim_runner, "run", mock_runner_run),
+        pytest.raises(Exception, match=mocked_error_msg),
     ):
-        # # simulate a failure to load the simulation blueprint
-        # sim_runner._simulation = None
+        # Trigger a run through the lifecycle as a task.
+        await sim_runner.execute()
 
-        # Trigger a run through the lifecycle as a task. Without a blueprint URI,
-        # this should fail but it should still shutdown gracefully.
-        with pytest.raises(Exception):
-            await sim_runner.execute()
+    # Now confirm that my target start-up behaviors (setup, build) occurred
+    mock_simulation.setup.assert_called()
+    mock_simulation.build.assert_called()
+    mock_simulation.pre_run.assert_called()
+    mock_iter.assert_not_called()
 
-        # Now confirm that my target start-up behaviors were executed
-        assert mock_simulation.setup.call_count == 1
-        assert mock_iter.call_count == 0
-        # assert mock_shutdown.call_count == 1
+    # confirm the sim isn't executed if there is a setup failure
+    mock_sim_run.assert_not_called()
+
+    # confirm sim_runner.run never got executed due to failure in _on_start
+    mock_runner_run.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_runner_on_iteration(
-    sim_runner: SimulationRunner,
+    sim_runner: RomsMarblRunner,
 ) -> None:
-    """Test the main iteration behavior of the SimulationRunner.
+    """Test the main iteration behavior of the RomsMarblRunner.
 
-    This test verifies that the SimulationRunner triggers
+    This test verifies that the RomsMarblRunner triggers
     execution of the simulation.
 
     Parameters
     ----------
-    sim_runner: SimulationRunner
-        An instance of SimulationRunner to be used for the test.
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "somefile.txt").touch()
 
-    mock_simulation = mock.Mock()
+    mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
+    mock_sim_run = mock.Mock(return_value=mock_handler)
+
+    mock_simulation = mock.Mock(run=mock_sim_run)
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
     with (
         mock.patch.object(sim_runner, "_start_healthcheck", mock.Mock()),
         mock.patch.object(sim_runner, "_on_shutdown", mock_shutdown),
-        mock.patch.object(sim_runner, "_simulation", mock_simulation),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
     ):
         # Trigger a run through the lifecycle as a task.
         await sim_runner.execute()
@@ -1010,31 +923,29 @@ async def test_runner_on_iteration(
         assert mock_simulation.run.call_count == 1
         assert mock_shutdown.call_count == 1
 
+        assert sim_runner.result.state.status == ExecutionStatus.COMPLETED
 
-def test_worker_main(tmp_path: Path, sim_runner: SimulationRunner) -> None:
+
+def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     """Test the main entrypoint of the worker service.
 
     This test verifies that the the main function will fail to run when called without
-    explicit arguments.
+    supplying a path to a blueprint.
     """
     mock_execute = mock.Mock()
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    output_dir = sim_runner._simulation.fs_manager.output_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    args = [
-        "cstar.entrypoint.worker.worker",
-        ARG_URI_LONG,
-        str(bp_path),
-        ARG_LOGLEVEL_LONG,
-        "DEBUG",
-    ]
+    args = ["cstar.applications.roms_marbl.py"]
 
-    with mock.patch.dict(os.environ, {}), mock.patch.object(sys, "argv", args):
-        # don't let it perform any real work
+    with (
+        mock.patch.dict(os.environ, {}),
+        mock.patch.object(sys, "argv", args),
+    ):
         return_code = main()
 
     # Confirm an error code is returned
@@ -1052,10 +963,14 @@ def test_worker_main_exec(
     This test verifies that the main function will run the simulation when called
     with properly formatted arguments.
     """
-    mock_execute = mock.AsyncMock(return_code=0)
-
+    mock_execute = mock.AsyncMock(
+        return_value=RunnerResult(
+            RunnerRequest(blueprint_path.as_posix(), RomsMarblBlueprint),
+            RunnerState(ExecutionStatus.COMPLETED),
+        ),
+    )
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
@@ -1065,7 +980,7 @@ def test_worker_main_exec(
     # don't let it perform any real work; mock out runner.execute
     with (
         mock.patch.object(
-            SimulationRunner,
+            RomsMarblRunner,
             "execute",
             mock_execute,
         ),
@@ -1088,8 +1003,13 @@ def test_worker_main_exec_continue_from(
     """Verify that the continuance transform is executed when included in
     the directives file.
     """
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+    mock_roms_sim_class = mock.Mock()
+    mock_roms_sim_class.from_blueprint.return_value = mock_sim_instance
+
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
@@ -1098,19 +1018,29 @@ def test_worker_main_exec_continue_from(
         str(continuance_directive_path),
     ]
 
-    # don't let it perform any real work; mock out SimulationRunner
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        """Mock the main execution method to avoid `real work` and ensure the result
+        attribute is updated.
+        """
+        self.add_state(ExecutionStatus.COMPLETED)
+        assert ContinuanceTransform.suffix() in str(self.request.blueprint_uri)
+        return self.result
+
+    # don't let it perform any real work; mock out RomsMarblRunner
     with (
-        mock.patch.object(
-            SimulationRunner,
-            "execute",
-            mock.AsyncMock(),
-        ) as mock_execute,
-        mock.patch.object(
-            SimulationRunner,
-            "__init__",
-            mock.Mock(return_value=None),
-        ) as mock_init,
         mock.patch.object(sys, "argv", args),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+        mock.patch(
+            "cstar.applications.roms_marbl.app.ROMSSimulation",
+            mock_roms_sim_class,
+        ),
     ):
         # This should run the simulation and return a success code
         return_code = main()
@@ -1119,13 +1049,7 @@ def test_worker_main_exec_continue_from(
     assert return_code == 0
 
     # Confirm the runner ran the simulation
-    mock_init.assert_called_once()
-    mock_execute.assert_called_once()
-
-    request: XRunnerRequest[RomsMarblBlueprint] = mock_init.call_args[0][0]
-
-    # confirm directive was applied by verifying a transformed blueprint was created
-    assert ContinuanceTransform.suffix() in str(request.blueprint_uri)
+    mock_exec_runner.assert_called_once()
 
 
 @pytest.mark.parametrize("exception_type", [CstarError, BlueprintError, Exception])
@@ -1139,25 +1063,21 @@ def test_worker_main_cstar_error(
     gracefully.
     """
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
         "DEBUG",
     ]
 
-    def return_mocked_sim_runner(*_args: str, **_kwargs: str) -> None:
-        msg = "Mock error"
-        raise exception_type(msg)
-
     # don't let it perform any real work; mock out runner.execute
     with (
-        mock.patch.object(
-            SimulationRunner,
-            "__new__",
-            return_mocked_sim_runner,
-        ),
         mock.patch.object(sys, "argv", args),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            mock.AsyncMock(side_effect=exception_type),
+        ),
     ):
         # This should run the simulation and return a failure code.
         return_code = main()
@@ -1181,33 +1101,94 @@ def test_worker_main_preprocessor_args_parsed(
 
     reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
 
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+    mock_roms_sim_class = mock.Mock()
+    mock_roms_sim_class.from_blueprint.return_value = mock_sim_instance
+
     args = [
-        "cstar.entrypoint.worker.worker",
+        "cstar.applications.roms_marbl",
         ARG_URI_LONG,
         str(bp_path),
         ARG_DIRECTIVES_URI_LONG,
         str(continuance_directive_path),
     ]
 
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        """Mock the main execution method to avoid `real work` and ensure the result
+        attribute is updated.
+        """
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
     with (
-        mock.patch(
-            "cstar.entrypoint.worker.worker.execute_runner",
-            mock.AsyncMock(),
-        ) as mock_exec_runner,
         mock.patch.object(sys, "argv", args),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+        mock.patch(
+            "cstar.applications.roms_marbl.app.ROMSSimulation",
+            mock_roms_sim_class,
+        ),
     ):
         _ = main()
 
     mock_exec_runner.assert_called_once()
 
-    *_, req = mock_exec_runner.mock_calls[0].args
-
-    request = t.cast("XRunnerRequest[RomsMarblBlueprint]", req)
+    modified_uri = mock_roms_sim_class.from_blueprint.mock_calls[0].args[0]
 
     # verify the blueprint uri was modified by preprocessing prior to invocation
-    assert request.blueprint_uri != str(bp_path)
-    assert ContinuanceTransform.suffix() in request.blueprint_uri
+    assert modified_uri != str(bp_path)
+    assert ContinuanceTransform.suffix() in modified_uri
 
     # verify initial conditions now point to the --continue-from location
-    blueprint = deserialize(request.blueprint_uri, RomsMarblBlueprint)
+    blueprint = deserialize(modified_uri, RomsMarblBlueprint)
     assert str(reset_dir) in str(blueprint.initial_conditions.data[0].location)
+
+
+@pytest.mark.parametrize(
+    "runner_state",
+    [
+        pytest.param(RunnerState(ExecutionStatus.COMPLETED), id="happy path"),
+        pytest.param(RunnerState(ExecutionStatus.CANCELLED), id="cancel (state only)"),
+        pytest.param(RunnerState(ExecutionStatus.FAILED), id="failed (state only)"),
+        pytest.param(
+            RunnerState(ExecutionStatus.RUNNING, ["runtime error"]),
+            id="errors reported",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_bluerintrunner_can_shutdown(
+    sim_runner: RomsMarblRunner,
+    runner_state: RunnerState,
+) -> None:
+    """Test that the runner recognizes it should shut down if terminal
+    statuses are encountered or if the runner reports an error.
+
+    Parameters
+    ----------
+    sim_runner: RomsMarblRunner
+        An instance of RomsMarblRunner to be used for the test.
+    runner_state : RunnerState
+        A runner state that should trigger shutdown.
+    """
+    output_dir = sim_runner.simulation.fs_manager.output_dir
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "somefile.txt").touch()
+
+    result = RunnerResult[RomsMarblBlueprint](
+        mock.MagicMock(),
+        state=runner_state,
+    )
+
+    # confirm the runner uses the result object for state queries
+    with mock.patch.object(sim_runner, "_result", result):
+        # and confirm it does not say it can exit
+        assert sim_runner.can_shutdown

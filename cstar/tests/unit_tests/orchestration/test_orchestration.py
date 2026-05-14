@@ -8,10 +8,12 @@ from unittest import mock
 import networkx as nx
 import pytest
 
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
+from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import (
     KEY_STATUS,
     KEY_STEP,
@@ -21,11 +23,7 @@ from cstar.orchestration.orchestration import (
     Status,
 )
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import (
-    RomsMarblTimeSplitter,
-    WorkplanTransformer,
-    get_time_slices,
-)
+from cstar.orchestration.transforms import WorkplanTransformer, get_time_slices
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterable

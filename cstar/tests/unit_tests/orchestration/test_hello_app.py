@@ -3,6 +3,11 @@ from pathlib import Path
 
 import pytest
 
+from cstar.applications.core import RunnerRequest
+from cstar.applications.hello_world_app import (
+    HelloWorldBlueprint,
+    HelloWorldRunner,
+)
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices
 from cstar.entrypoint.config import (
@@ -10,11 +15,6 @@ from cstar.entrypoint.config import (
     get_job_config,
     get_service_config,
 )
-from cstar.entrypoint.worker.hello_app import (
-    HelloWorldBlueprint,
-    HelloWorldRunner,
-)
-from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Application
 from cstar.orchestration.serialization import deserialize, serialize
@@ -61,7 +61,7 @@ async def test_hello_world_blueprint_serialization(
 
 
 @pytest.mark.asyncio
-async def test_hello_world_runner_execute_xrunner(
+async def test_hello_world_runner_execute(
     capsys: pytest.CaptureFixture[str],
     hello_world_bp_path: Path,
     hello_world_default_target: str,
@@ -78,16 +78,16 @@ async def test_hello_world_runner_execute_xrunner(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     svc_cfg = ServiceConfiguration()
     job_cfg = get_job_config()
 
-    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
-    result = await runner.execute_xrunner()
+    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
+    await runner.execute()
 
-    assert result is not None
+    assert runner.state is not None
     # Confirm the success disposition is set
-    assert result.status == ExecutionStatus.COMPLETED
+    assert runner.state.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()
@@ -111,24 +111,22 @@ async def test_hello_world_runner_execute_runner(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     svc_cfg = ServiceConfiguration()
     job_cfg = get_job_config()
 
-    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
     await runner.execute()
 
-    if not runner.result:
+    if not runner.state:
         msg = "Failed to set result on runner"
         raise CstarError(msg)
 
-    result = runner.result
-
-    assert result is not None
+    assert runner.state is not None
 
     # Confirm the success disposition is set and no errors are returned
-    assert result.status == ExecutionStatus.COMPLETED
-    assert not result.errors
+    assert runner.state.status == ExecutionStatus.COMPLETED
+    assert not runner.state.errors
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()
@@ -151,17 +149,17 @@ async def test_execute_runner_happy_path(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    request = XRunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
+    request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     job_cfg = get_job_config()
     svc_cfg = get_service_config(
         log_level=LogLevelChoices.INFO,
     )
 
-    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
     await runner.execute()
 
     # Confirm the success disposition is set
-    assert runner.status == ExecutionStatus.COMPLETED
+    assert runner.state.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {hello_world_default_target}".lower() in captured.out.lower()

@@ -2,7 +2,7 @@ import typing as t
 
 import typer
 
-from cstar.cli.workplan.shared import get_registered_bp
+from cstar.applications.core import get_application
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import validate_serialized_entity
 
@@ -27,7 +27,7 @@ def check(
     if result.item is None:
         raise typer.BadParameter(result.error_msg)
 
-    bp_type = get_registered_bp(result.item.application)
+    bp_type: type[Blueprint] = get_application(result.item.application).blueprint
     result = validate_serialized_entity(path, bp_type)
 
     if result.item is None:

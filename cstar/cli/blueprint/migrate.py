@@ -5,11 +5,11 @@ import typer
 from rich.console import Console
 from rich.table import Column, Table
 
+from cstar.applications.core import get_application
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLI_VERBOSE
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.cli.common import dryrun_callback, verbose_callback
-from cstar.cli.workplan.shared import get_registered_bp
 from cstar.entrypoint.utils import (
     ARG_DRY_RUN,
     ARG_OUTPUT_LONG,
@@ -178,7 +178,7 @@ def migrate(
         persist_to = persist_to.expanduser().resolve()
 
         try:
-            bp_type = get_registered_bp(result.item.application)
+            bp_type = get_application(result.item.application).blueprint
             updated_bp = bp_type(**updated)
             nbytes = serialize(persist_to, updated_bp)
             assert nbytes, "The migrated blueprint failed to write content"

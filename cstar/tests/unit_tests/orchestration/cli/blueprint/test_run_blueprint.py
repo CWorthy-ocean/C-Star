@@ -4,11 +4,23 @@ from unittest import mock
 import pytest
 from typer.testing import CliRunner
 
+from cstar.applications.core import (
+    ApplicationDefinition,
+    RunnerRequest,
+    RunnerResult,
+    RunnerState,
+    get_application,
+)
+from cstar.applications.roms_marbl.app import RomsMarblRunner
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.run import app
+from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
+from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.converter.converter import prepare_directive_file
-from cstar.orchestration.models import Application
+from cstar.orchestration.models import Application, Blueprint
 from cstar.orchestration.orchestration import LiveStep
+from cstar.roms.simulation import ROMSSimulation
 
 
 def test_blueprint_run_file_dne(tmp_path: Path) -> None:
@@ -54,10 +66,25 @@ def test_blueprint_run_remote_blueprint() -> None:
     """
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
-    with mock.patch(
-        "cstar.cli.blueprint.run.exec_romsmarbl_runner",
-        return_value=0,
-    ) as mock_exec:
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        """Mock the main execution method to avoid `real work` and ensure the result
+        attribute is updated.
+        """
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    app_config: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
+        get_application("roms_marbl")
+    )
+
+    with mock.patch.object(
+        app_config.runner,
+        "execute",
+        side_effect=modify_runner,
+        autospec=True,
+    ) as mock_exec_runner:
         runner = CliRunner()
         _ = runner.invoke(
             app,
@@ -65,7 +92,7 @@ def test_blueprint_run_remote_blueprint() -> None:
             color=False,
         )
 
-    mock_exec.assert_called_once()
+    mock_exec_runner.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -80,9 +107,12 @@ def test_blueprint_run_apply_directive_dne(tmp_path: Path, directive_path: str) 
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
     with mock.patch(
-        "cstar.cli.blueprint.run.exec_romsmarbl_runner",
-        return_value=0,
-    ):
+        "cstar.applications.roms_marbl.app.RomsMarblRunner.execute",
+        return_value=RunnerResult(
+            RunnerRequest(bp_path, RomsMarblBlueprint),
+            RunnerState(ExecutionStatus.COMPLETED),
+        ),
+    ) as mock_exec:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -95,6 +125,7 @@ def test_blueprint_run_apply_directive_dne(tmp_path: Path, directive_path: str) 
         )
 
     assert "file not found" in result.stderr
+    mock_exec.assert_not_called()
 
 
 def test_blueprint_run_apply_directive_empty(tmp_path: Path) -> None:
@@ -103,10 +134,7 @@ def test_blueprint_run_apply_directive_empty(tmp_path: Path) -> None:
     directive_file_path = tmp_path / "directive-dne.json"
     directive_file_path.touch()
 
-    with mock.patch(
-        "cstar.cli.blueprint.run.exec_romsmarbl_runner",
-        return_value=0,
-    ):
+    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()):
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -141,10 +169,31 @@ def test_blueprint_run_apply_directives(
     )
     directive_path = prepare_directive_file(temp_step)
 
-    with mock.patch(
-        "cstar.cli.blueprint.run.exec_romsmarbl_runner",
-        return_value=0,
-    ) as mock_exec:
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        """Mock the main execution method to avoid `real work` and ensure the result
+        attribute is updated.
+        """
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    with (
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+    ):
         runner = CliRunner()
         _ = runner.invoke(
             app,
@@ -156,4 +205,4 @@ def test_blueprint_run_apply_directives(
             color=False,
         )
 
-    mock_exec.assert_called_once()
+    mock_exec_runner.assert_called_once()

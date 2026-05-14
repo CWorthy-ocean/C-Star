@@ -4,6 +4,11 @@ import typing as t
 import typer
 from pydantic import ValidationError
 
+from cstar.applications.core import (
+    ApplicationDefinition,
+    RunnerRequest,
+    get_application,
+)
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
@@ -11,7 +16,6 @@ from cstar.base.env import (
 )
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import clobber_callback, log_level_callback
-from cstar.cli.workplan.shared import create_xrunner, get_registered_bp
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
@@ -20,13 +24,13 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
-from cstar.entrypoint.worker.worker import execute_runner as exec_romsmarbl_runner
-from cstar.entrypoint.worker.worker import get_request
-from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.models import Application, Blueprint
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig
+
+if t.TYPE_CHECKING:
+    from cstar.entrypoint.runner import BlueprintRunner
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -60,7 +64,7 @@ def path_callback(
 
             # use the core blueprint fields to identify the application type
             base_bp = deserialize(local_path, Blueprint)
-            bp_type = get_registered_bp(base_bp.application)
+            bp_type: type[Blueprint] = get_application(base_bp.application).blueprint
 
             ctx.obj = bp_type(**base_bp.model_dump())
 
@@ -165,20 +169,18 @@ def run(
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
-    if bp.application == Application.ROMS_MARBL.value:
-        # NOTE: temporary conditional to use old runner until it is converted to XRunner
-        rm_request = get_request(uri)
-        rc = asyncio.run(exec_romsmarbl_runner(job_cfg, service_cfg, rm_request))
-    else:
-        request = XRunnerRequest(uri, type(bp))
+    request = RunnerRequest(uri, type(bp))
 
-        runner = create_xrunner(request, service_cfg, job_cfg)
-        xresult = asyncio.run(runner.execute_xrunner())
+    app_config: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
+        get_application(bp.application)
+    )
+    runner = app_config.runner(request, service_cfg, job_cfg)
+    asyncio.run(runner.execute())
 
-        if errors := xresult.errors:
-            print(f"Errors occurred: {', '.join(errors)}")
+    if runner.state and runner.state.errors:
+        print(f"Errors occurred: {', '.join(runner.state.errors)}")
 
-        rc = len(errors)
+    rc = len(runner.state.errors) if runner.state else 0
 
     if rc:
         print("Blueprint execution failed")

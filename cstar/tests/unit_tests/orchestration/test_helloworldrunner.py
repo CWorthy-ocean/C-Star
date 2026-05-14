@@ -9,15 +9,15 @@ from unittest import mock
 import pytest
 from typer.testing import CliRunner
 
+from cstar.applications.core import RunnerRequest
+from cstar.applications.hello_world_app import (
+    HelloWorldBlueprint,
+    HelloWorldRunner,
+)
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
-from cstar.entrypoint.worker.hello_app import (
-    HelloWorldBlueprint,
-    HelloWorldRunner,
-)
-from cstar.entrypoint.xrunner import XRunnerRequest
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Workplan, WorkplanState
 from cstar.orchestration.serialization import deserialize, serialize
@@ -162,16 +162,16 @@ async def test_hello_world_runner_happy_path(
     bp_path = tmp_path / "hw.yaml"
     bp_path.write_text(bp_content)
 
-    request = XRunnerRequest(str(bp_path), HelloWorldBlueprint)
+    request = RunnerRequest(str(bp_path), HelloWorldBlueprint)
     job_cfg = get_job_config()
     svc_cfg = get_service_config(log_level="INFO")
 
-    runner = HelloWorldRunner(request, job_cfg, svc_cfg)
+    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
 
     await runner.execute()
 
     # Confirm the success disposition is set
-    assert runner.status == ExecutionStatus.COMPLETED
+    assert runner.state.status == ExecutionStatus.COMPLETED
 
     captured = capsys.readouterr()
     assert f"hello, {target}".lower() in captured.out.lower()

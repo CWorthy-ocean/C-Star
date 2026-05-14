@@ -5,15 +5,17 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.transforms import SplitFrequency
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
-from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
+from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import SplitFrequency, WorkplanTransformer
+from cstar.orchestration.transforms import WorkplanTransformer
 from cstar.orchestration.utils import (
     ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_TRX_FREQ,

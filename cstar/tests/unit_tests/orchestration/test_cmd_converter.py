@@ -5,6 +5,8 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.transforms import ContinuanceTransform
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.file_system import RomsFileSystemManager
@@ -15,12 +17,10 @@ from cstar.orchestration.converter.converter import (
 )
 from cstar.orchestration.models import (
     Application,
-    RomsMarblBlueprint,
     Step,
 )
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import ContinuanceTransform
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 

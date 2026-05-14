@@ -8,8 +8,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.utils import slugify
-from cstar.cli.workplan.shared import get_registered_bp
 from cstar.orchestration.models import (
     Blueprint,
     Step,
@@ -22,6 +22,8 @@ app = typer.Typer()
 console = Console()
 
 if t.TYPE_CHECKING:
+    from cstar.entrypoint.runner import BlueprintRunner
+
     BPResult: t.TypeAlias = tuple[Path, Blueprint]
 
 
@@ -40,7 +42,10 @@ def _locate_blueprints(search_dir: Path) -> Iterable["BPResult"]:
         for file in files:
             base_bp = deserialize(file, Blueprint)
 
-            bp_type = get_registered_bp(base_bp.application)
+            app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
+                get_application(base_bp.application)
+            )
+            bp_type = app.blueprint
             bp = bp_type(**base_bp.model_dump())
 
             valid_blueprints.append((file, bp))

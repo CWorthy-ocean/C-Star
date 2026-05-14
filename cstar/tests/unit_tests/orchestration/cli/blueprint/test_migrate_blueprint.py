@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.migrate import app
 from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
-from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import hw_bounds, rm_bounds
 

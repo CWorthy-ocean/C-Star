@@ -4,17 +4,17 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from cstar.orchestration.application import register_blueprint
-from cstar.orchestration.models import RomsMarblBlueprint
+from cstar.applications.core import register_application
+from cstar.applications.roms_marbl.app import RomsMarblApplication
 
 
-@register_blueprint("sleep")
-class SleepBlueprint(RomsMarblBlueprint):
+@register_application
+class SleepApplication(RomsMarblApplication):
     """For the sake of test suites, the 'sleep' app sometimes replaces roms-marbl and
     can use the RomsMarblBlueprint
     """
 
-    pass
+    name = "sleep"
 
 
 @pytest.fixture(scope="session")

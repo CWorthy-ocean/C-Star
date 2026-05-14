@@ -6,7 +6,8 @@ from pathlib import Path
 
 from typer import Argument, Option, Typer
 
-from cstar.orchestration.models import RomsMarblBlueprint, Workplan
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.orchestration.models import Workplan
 
 
 class TemplateType(enum.StrEnum):

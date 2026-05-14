@@ -4,13 +4,13 @@ from pathlib import Path
 
 import typer
 
+from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.utils import lazy_import, slugify
 from cstar.entrypoint.utils import ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
-    RomsMarblTimeSplitter,
     WorkplanTransformer,
 )
 
