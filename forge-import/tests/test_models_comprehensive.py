@@ -17,7 +17,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-import cstar.orchestration.models as cstar_models
+import cson_forge.cstar_compat as cstar_models
 from cson_forge.models import (
     SourceSpec,
     GridInput,
