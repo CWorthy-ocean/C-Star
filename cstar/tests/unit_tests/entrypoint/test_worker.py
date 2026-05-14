@@ -121,24 +121,24 @@ def sim_runner(
     with patch_romssimulation_init_sourcedata(from_worker=True):
         runner = RomsMarblRunner(request, service_config, fake_job_config)
 
-    output_path = runner.simulation.fs_manager.output_dir
+    asset_dir = runner.simulation.fs_manager.asset_dir
 
-    runner.blueprint.runtime_params.output_dir = output_path
-    runner.simulation.directory = output_path
+    runner.blueprint.working_directory = asset_dir
+    runner.simulation.directory = asset_dir
 
     return runner
 
 
 @pytest.fixture
 def continuance_directive_path(
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> Path:
     """Fixture to return a Path pointing to a file containing directive
     configuration that causes the `ContinuanceTransform` to execute.
 
     Parameters
     ----------
-    mock_sim_output_dir : tuple[Path, Path, Path]
+    mocked_simulation_outputs : tuple[Path, Path, Path]
         Used to create the mock run outputs that the directive config file will
         refer to (to locate reset files).
 
@@ -147,7 +147,7 @@ def continuance_directive_path(
     Path
         The path to the directive configuration file.
     """
-    _, step_dir, _ = mock_sim_output_dir
+    _, step_dir, _ = mocked_simulation_outputs
 
     directives = textwrap.dedent(
         f"""\
@@ -413,10 +413,10 @@ def test_runner_directory_check_ignore_logs(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
+    asset_dir = sim_runner.simulation.fs_manager.asset_dir
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir = output_dir / "logs"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = asset_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=False)
 
     # A file in the logs directory should be ignored
@@ -435,10 +435,10 @@ def test_runner_directory_prep(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
+    asset_dir = sim_runner.simulation.fs_manager.asset_dir
 
     # an empty output dir should be ok
-    output_dir.mkdir(parents=True, exist_ok=True)
+    asset_dir.mkdir(parents=True, exist_ok=True)
 
     actual_working_directory = sim_runner.blueprint.working_directory
     # Confirm the output directory is created...
@@ -887,8 +887,8 @@ def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
+    asset_dir = sim_runner.simulation.fs_manager.asset_dir
+    asset_dir.mkdir(parents=True, exist_ok=True)
 
     args = ["cstar.applications.roms_marbl.py"]
 
@@ -1036,7 +1036,7 @@ def test_worker_main_cstar_error(
 
 
 def test_worker_main_preprocessor_args_parsed(
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
     continuance_directive_path: Path,
 ) -> None:
     """Verify that the worker receives directives and they are supplied
@@ -1047,7 +1047,7 @@ def test_worker_main_preprocessor_args_parsed(
     mock_sim_output_dir : tuple[Path, Path, Path]
         Creates files/directories mimicking output of a prior simulation run.
     """
-    *_, step_dir, bp_path = mock_sim_output_dir
+    *_, step_dir, bp_path = mocked_simulation_outputs
 
     reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
 

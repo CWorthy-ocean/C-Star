@@ -63,7 +63,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
-        bp_path = step.fsm.work_dir / Path(step.blueprint_path).name
+        bp_path = step.fsm.run_dir / Path(step.blueprint_path).name
         serialize(bp_path, blueprint)
 
         time_slices = list(get_time_slices(start_date, end_date, self.frequency))
@@ -113,7 +113,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
                     RestartFileTrxAdapter.adapt(last_restart_file),
                 )
 
-            child_bp_path = child_fs.work_dir / f"{child_step_name}_bp.yaml"
+            child_bp_path = child_fs.run_dir / f"{child_step_name}_bp.yaml"
             serialize(child_bp_path, bp_copy)
 
             updates: dict[str, t.Any] = {
@@ -140,7 +140,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
 
             # Use the last restart file as initial conditions for the follow-up step
             restart_file = RestartFile.from_parts(
-                output_root_name, ed, partition_segment, child_fs.output_dir
+                output_root_name, ed, partition_segment, child_fs.asset_dir
             )
 
             # use output dir of the last step as the input for the next step
@@ -274,7 +274,7 @@ class RestartFile(BaseModel):
             raise ValueError(msg)
 
         if re.fullmatch(RestartFile.PATTERN_RST, value.name, flags=re.ASCII):
-            return value
+            return value.expanduser().resolve()
 
         msg = f"File name does not match expected naming convention: {value}"
         raise ValueError(msg)

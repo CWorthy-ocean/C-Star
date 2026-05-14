@@ -262,8 +262,8 @@ def plan(
         planner = Planner(workplan)
         plan_path = asyncio.run(render(planner, output_dir))
 
-        if plan_path is None:
-            raise ValueError("Unable to generate plan")
+        if not plan_path.exists():
+            print("Unable to generate plan")
 
         print(f"The plan has been generated and stored at: {plan_path}")
     except ValueError as ex:

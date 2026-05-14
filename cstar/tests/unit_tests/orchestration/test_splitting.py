@@ -133,9 +133,9 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
                 compact_sd = ed.strftime("%Y%m%d%H%M%S")
 
                 # verify the joined reset files are used
-                out_dir = step.fsm.output_dir
+                asset_dir = step.fsm.asset_dir
                 expected = (
-                    f"{out_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
+                    f"{asset_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
                 )
 
                 assert expected in str(ic_loc_successor)

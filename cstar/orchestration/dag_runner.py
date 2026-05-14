@@ -285,8 +285,8 @@ async def build_and_run_dag(
         The path to the workplan that was executed after any tranformations
         were applied.
     """
+    output_dir = (output_dir or DirectoryManager.data_home()).expanduser().resolve()
     configure_environment(output_dir, run_id)
-    output_dir = DirectoryManager.data_home()
 
     launcher = get_launcher()
 

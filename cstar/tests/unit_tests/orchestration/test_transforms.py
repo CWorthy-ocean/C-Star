@@ -275,7 +275,7 @@ def test_continuance_transform_path_dne() -> None:
 @pytest.mark.parametrize("pad_size", range(1, 10))
 def test_continuance_transform_happy_path(
     single_step_workplan: Workplan,
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
     pad_size: int,
 ) -> None:
     """Verify that applying a well-formed continuance transform causes the
@@ -285,7 +285,7 @@ def test_continuance_transform_happy_path(
     ----------
     single_step_workplan : Workplan
         A workplan with a valid blueprint file on disk.
-    mock_sim_output_dir : Path
+    mocked_simulation_outputs : Path
         Paths to mocked simulation outputs; used here to pass a valid path
         to the continuance transform (containing files meeting glob pattern *_rst.nc)
     pad_size : int
@@ -293,7 +293,7 @@ def test_continuance_transform_happy_path(
         name. This ensures that the restart file search can locate files regardless
         of the number of partitions.
     """
-    _, continue_from_dir, _ = mock_sim_output_dir
+    _, continue_from_dir, _ = mocked_simulation_outputs
 
     for seg_id in ["000", "001", "002"]:
         rf_glob = f"*_rst.*.{seg_id}.nc"

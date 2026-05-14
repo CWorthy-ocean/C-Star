@@ -108,7 +108,7 @@ def _extract_data_join_wildcard(
     wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
 ) -> None:
     """Spatially join netcdfs matching the wildcard pattern using extract_data_join,
-     move the joined output to output_dir, and remove the unjoined outputs.
+    move the joined output to output_dir, and remove the unjoined outputs.
 
     Parameters
     ----------
@@ -1267,7 +1267,7 @@ class ROMSSimulation(Simulation):
         compile_time_code_dir = self.fs_manager.compile_time_code_dir
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
-        work_dir = self.fs_manager.work_dir
+        run_dir = self.fs_manager.run_dir
 
         self._conditionally_clear_root()
 
@@ -1275,7 +1275,7 @@ class ROMSSimulation(Simulation):
             compile_time_code_dir.mkdir(parents=True)
             runtime_code_dir.mkdir(parents=True)
             input_datasets_dir.mkdir(parents=True)
-            work_dir.mkdir(
+            run_dir.mkdir(
                 parents=True, exist_ok=True
             )  # this one gets made by C-Star FSM
         except OSError as e:
@@ -1628,9 +1628,9 @@ class ROMSSimulation(Simulation):
                 "and try again"
             )
 
-        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.run_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.fs_manager.output_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.asset_dir.mkdir(parents=True, exist_ok=True)
 
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
             queue_name = cstar_sysmgr.scheduler.primary_queue_name
@@ -1638,22 +1638,22 @@ class ROMSSimulation(Simulation):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
         # we run ROMS in the work dir
-        run_path = self.fs_manager.work_dir
+        run_path = self.fs_manager.run_dir
         runtime_settings_fname = "cstar_generated_roms.in"
 
         # save modified roms.in in the work directory
-        final_runtime_settings_file = self.fs_manager.work_dir / runtime_settings_fname
+        final_runtime_settings_file = self.fs_manager.run_dir / runtime_settings_fname
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
-        script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
+        script_path = self.fs_manager.run_dir / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
 
         # symlink roms exe into work dir for ability to easily rerun from the correct
         # location if debugging
 
-        roms_symlink_path = self.fs_manager.work_dir / self.exe_path.name
+        roms_symlink_path = self.fs_manager.run_dir / self.exe_path.name
         roms_symlink_path.symlink_to(self.exe_path)
 
         ## 2: RUN ROMS
@@ -1750,7 +1750,7 @@ class ROMSSimulation(Simulation):
                 + f"but current execution status is '{self._execution_handler.status}'"
             )
 
-        output_dir = self.fs_manager.output_dir
+        output_dir = self.fs_manager.asset_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
@@ -1768,7 +1768,7 @@ class ROMSSimulation(Simulation):
             )
             joiner(
                 wildcard_pattern,
-                input_dir=self.fs_manager.output_dir,
+                input_dir=self.fs_manager.asset_dir,
                 output_dir=self.fs_manager.joined_output_dir,
                 logger=self.log,
             )
@@ -1837,7 +1837,7 @@ class ROMSSimulation(Simulation):
         """
         new_sim = cast("ROMSSimulation", super().restart(new_end_date=new_end_date))
 
-        restart_dir = self.fs_manager.output_dir
+        restart_dir = self.fs_manager.asset_dir
 
         new_start_date = new_sim.start_date
         restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")

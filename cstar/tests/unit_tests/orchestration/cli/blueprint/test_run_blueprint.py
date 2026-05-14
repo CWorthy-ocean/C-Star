@@ -150,13 +150,13 @@ def test_blueprint_run_apply_directive_empty(tmp_path: Path) -> None:
 
 
 def test_blueprint_run_apply_directives(
-    tmp_path: Path, mock_sim_output_dir: tuple[Path, Path, Path]
+    tmp_path: Path, mocked_simulation_outputs: tuple[Path, Path, Path]
 ) -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
     blueprint is executed.
     """
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
-    _, step_dir, _ = mock_sim_output_dir
+    _, step_dir, _ = mocked_simulation_outputs
 
     temp_step = LiveStep(
         name="step-for-testing",
