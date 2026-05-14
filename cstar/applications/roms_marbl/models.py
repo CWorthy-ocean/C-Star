@@ -1,6 +1,5 @@
 import typing as t
 from datetime import datetime
-from enum import StrEnum, auto
 from pathlib import Path
 
 from pydantic import (
@@ -270,16 +269,3 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     def cpus_needed(self) -> int:
         """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
         return self.partitioning.n_procs_x * self.partitioning.n_procs_y
-
-
-class ComputePlatform(StrEnum):
-    """Supported execution platforms."""
-
-    Local = auto()
-    """Indicate that execution should take place locally."""
-
-    AWS = auto()
-    """Indicate that execution should take place on AWS resources."""
-
-    Perlmutter = auto()
-    """Indicate that execution should take place on Perlmutter."""
