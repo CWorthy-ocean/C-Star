@@ -26,6 +26,11 @@ Breaking Changes
 - `deep_merge` is a pure method and no longer changes the inputs (`#498 <https://github.com/CWorthy-ocean/C-Star/pull/498>`_)
 - The `-d` short `dry-run` argument of `cstar workplan run` is removed to avoid a conflict. (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
 - The `output-dir` argument of `cstar workplan run` now uses `--o` and `--output` for consistency (previously `-d` and `--output-dir`). (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
+- ROMS-specific blueprint, runner, and transforms have been moved to align with the demo applications (now contained in `cstar.applications.roms_marbl`) (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- The ROMS-specific `SimulationRunner` has been replaced by the use of the generic `BlueprintRunner` and can no longer be invoked with the same entrypoint (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Core contracts for application building (e.g. `Transform`, `XRunner`, `RunnerRequest, etc) have been relocated  `cstar.applications.core` (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Deprecated the `Registrar` (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Deprecated unused `ComputingPlatform` model (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -46,6 +51,7 @@ New features
 - .ext files are now passed through extract_data_join at the same time as other files are passed through ncjoin (`#495 <https://github.com/CWorthy-ocean/C-Star/pull/495>`_)
 - Add `Directives` to enable just-in-time blueprint manipulation by the runner. (`#498 <https://github.com/CWorthy-ocean/C-Star/pull/498>`_)
 - Enable upgrading blueprint files using the `cstar blueprint migrate` command (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
+- Added support for dynamic discovery of applications residing in subpackages of `cstar.application` (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -97,6 +103,10 @@ Bug Fixes
 - Generalize OverrideTransform for non-ROMS application types (`#500 <https://github.com/CWorthy-ocean/C-Star/pull/500>`_)
 - Create work-dir earlier to avoid failure when making sym-links for CDR/nesting files. (`#513 <https://github.com/CWorthy-ocean/C-Star/pull/513>`_)
 - File system's `.clear()` method now correctly clears the `work` directory (`#516 <https://github.com/CWorthy-ocean/C-Star/pull/516>`_)
+- Fixed a bug where a path that has been renamed logged the old path and the file appeared to have been deleted (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Fixed a failure after joining partitioned files due to an aggressive string replacement (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Fixed a bug where the `Service` signal handler failed to initiate shutdown (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Fixed a bug caused by inconsistent `__init__` argument ordering and removed the prior fix of adding a dupe attribute (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -147,6 +157,9 @@ Improvements
 - Save the generated roms.in to the work directory, where roms is run. (`#514 <https://github.com/CWorthy-ocean/C-Star/pull/514>`_)
 - Symlink the roms executable to the work directory, where roms is run. (`#514 <https://github.com/CWorthy-ocean/C-Star/pull/514>`_)
 - Verbosity and dry-run CLI argument callbacks now ensure the appropriate environment variables are set. (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
+- Simplified application registration process via use of `ApplicationDefinition` (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Enabled state tracking when running blueprints for improved progress visibility (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Improved docstrings and type-hinting in affected code (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
