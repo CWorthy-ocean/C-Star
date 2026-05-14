@@ -121,8 +121,6 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
             msg = "Skipping simulation post-run; simulation did not complete."
             self.log.debug(msg)
 
-        self._log_disposition()
-
 
 @register_application
 class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRunner]):
