@@ -12,15 +12,15 @@ from cstar.orchestration.orchestration import LiveStep
 
 
 @pytest.fixture
-def populated_asset_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
+def populated_output_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
     """Create a populated asset directory."""
-    asset_root = tmp_path / "my_asset_dir"
+    asset_root = tmp_path / "my_output_dir"
     fs = RomsFileSystemManager(asset_root)
     fs.prepare()
 
     files = [
         fs.input_dir / "some_input_file",
-        fs.asset_dir / "some_output_file",
+        fs.output_dir / "some_output_file",
         fs.joined_output_dir / "some_joined_file",
     ]
 
@@ -50,11 +50,11 @@ def test_file_system_prepare(
     tmp_path : Path
         The path to temporary test outputs.
     """
-    asset_root = tmp_path / "my_asset_dir"
-    fs = RomsFileSystemManager(asset_root)
+    output_dir = tmp_path / "my_output_dir"
+    fs = RomsFileSystemManager(output_dir)
     fs.prepare()
 
-    assert fs.asset_dir.exists()
+    assert fs.output_dir.exists()
     assert fs.input_dir.exists()
     assert fs.joined_output_dir.exists()
     assert fs._codebases_dir.exists()
@@ -62,17 +62,17 @@ def test_file_system_prepare(
 
 
 def test_file_system_clear(
-    populated_asset_dir: tuple[Path, list[Path]],
+    populated_output_dir: tuple[Path, list[Path]],
 ) -> None:
     """
     Test that fs.clear correctly clears the working directory.
 
     Parameters
     ----------
-    populated_asset_dir : Path
+    populated_output_dir : Path
         Fixture providing tmp_path and fake files
     """
-    working_dir, _ = populated_asset_dir
+    working_dir, _ = populated_output_dir
 
     fs = RomsFileSystemManager(working_dir)
     fs.prepare()
@@ -81,9 +81,9 @@ def test_file_system_clear(
     (fs.runtime_code_dir / "b.txt").touch()
     (fs.input_datasets_dir / "c.txt").touch()
     (fs.joined_output_dir / "d.txt").touch()
-    (fs.working_directory / "e.txt").touch()
-    (fs.working_directory / "f.yaml").touch()
-    (fs.working_directory / "g.yml").touch()
+    (fs.run_dir / "e.txt").touch()
+    (fs.run_dir / "f.yaml").touch()
+    (fs.run_dir / "g.yml").touch()
 
     fs.clear()
 
@@ -93,9 +93,9 @@ def test_file_system_clear(
     assert not fs.joined_output_dir.exists()
 
     # confirm yaml in work_dir is not removed.
-    assert not (fs.working_directory / "e.txt").exists()
-    assert (fs.working_directory / "f.yaml").exists()
-    assert (fs.working_directory / "g.yml").exists()
+    assert not (fs.run_dir / "e.txt").exists()
+    assert (fs.run_dir / "f.yaml").exists()
+    assert (fs.run_dir / "g.yml").exists()
 
 
 def test_file_system_pickle_job_fs(tmp_path: Path) -> None:

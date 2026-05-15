@@ -121,10 +121,10 @@ def sim_runner(
     with patch_romssimulation_init_sourcedata(from_worker=True):
         runner = RomsMarblRunner(request, service_config, fake_job_config)
 
-    asset_dir = runner.simulation.fs_manager.asset_dir
+    output_dir = runner.simulation.fs_manager.output_dir
 
-    runner.blueprint.working_directory = asset_dir
-    runner.simulation.directory = asset_dir
+    runner.blueprint.working_directory = output_dir
+    runner.simulation.directory = output_dir
 
     return runner
 
@@ -413,10 +413,10 @@ def test_runner_directory_check_ignore_logs(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    asset_dir = sim_runner.simulation.fs_manager.asset_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
-    asset_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir = asset_dir / "logs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = output_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=False)
 
     # A file in the logs directory should be ignored
@@ -435,10 +435,10 @@ def test_runner_directory_prep(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    asset_dir = sim_runner.simulation.fs_manager.asset_dir
+    output_dir = sim_runner.simulation.fs_manager.output_dir
 
     # an empty output dir should be ok
-    asset_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     actual_working_directory = sim_runner.blueprint.working_directory
     # Confirm the output directory is created...
@@ -887,8 +887,8 @@ def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    asset_dir = sim_runner.simulation.fs_manager.asset_dir
-    asset_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = sim_runner.simulation.fs_manager.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     args = ["cstar.applications.roms_marbl.py"]
 

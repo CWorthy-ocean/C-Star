@@ -1630,7 +1630,7 @@ class ROMSSimulation(Simulation):
 
         self.fs_manager.run_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.fs_manager.asset_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.output_dir.mkdir(parents=True, exist_ok=True)
 
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
             queue_name = cstar_sysmgr.scheduler.primary_queue_name
@@ -1750,7 +1750,7 @@ class ROMSSimulation(Simulation):
                 + f"but current execution status is '{self._execution_handler.status}'"
             )
 
-        output_dir = self.fs_manager.asset_dir
+        output_dir = self.fs_manager.output_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
@@ -1768,7 +1768,7 @@ class ROMSSimulation(Simulation):
             )
             joiner(
                 wildcard_pattern,
-                input_dir=self.fs_manager.asset_dir,
+                input_dir=self.fs_manager.output_dir,
                 output_dir=self.fs_manager.joined_output_dir,
                 logger=self.log,
             )
@@ -1837,7 +1837,7 @@ class ROMSSimulation(Simulation):
         """
         new_sim = cast("ROMSSimulation", super().restart(new_end_date=new_end_date))
 
-        restart_dir = self.fs_manager.asset_dir
+        restart_dir = self.fs_manager.output_dir
 
         new_start_date = new_sim.start_date
         restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")

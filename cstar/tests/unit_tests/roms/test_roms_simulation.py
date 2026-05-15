@@ -1804,20 +1804,20 @@ class TestProcessingAndExecution:
         # Setup
         sim = stub_romssimulation
         sim.fs_manager.prepare()
-        asset_dir = sim.fs_manager.asset_dir
+        output_dir = sim.fs_manager.output_dir
 
         # Create fake partitioned NetCDF files
-        (asset_dir / "ocean_his.20240101000000.001.nc").touch()
-        (asset_dir / "ocean_his.20240101000000.002.nc").touch()
-        (asset_dir / "ocean_rst.20240101000000.001.nc").touch()
+        (output_dir / "ocean_his.20240101000000.001.nc").touch()
+        (output_dir / "ocean_his.20240101000000.002.nc").touch()
+        (output_dir / "ocean_rst.20240101000000.001.nc").touch()
 
         # Create fake partitioned ext files which shouldn't be joined
-        (asset_dir / "ocean_ext.20240101000000.001.nc").touch()
+        (output_dir / "ocean_ext.20240101000000.001.nc").touch()
 
         # Create fake output of join process to make sure it gets moved
-        (asset_dir / "ocean_his.20240101000000.nc").touch()
-        (asset_dir / "ocean_rst.20240101000000.nc").touch()
-        (asset_dir / "child_bry.20240101000000.nc").touch()
+        (output_dir / "ocean_his.20240101000000.nc").touch()
+        (output_dir / "ocean_rst.20240101000000.nc").touch()
+        (output_dir / "child_bry.20240101000000.nc").touch()
 
         # Mock execution handler
         sim._execution_handler = mock.MagicMock()
@@ -1832,14 +1832,14 @@ class TestProcessingAndExecution:
         # Check that ncjoin was called correctly
         mock_subprocess.assert_any_call(
             "ncjoin ocean_his.20240101000000.*.nc",
-            cwd=asset_dir,
+            cwd=output_dir,
             capture_output=True,
             text=True,
             shell=True,
         )
         mock_subprocess.assert_any_call(
             "ncjoin ocean_rst.20240101000000.*.nc",
-            cwd=asset_dir,
+            cwd=output_dir,
             capture_output=True,
             text=True,
             shell=True,
@@ -1847,7 +1847,7 @@ class TestProcessingAndExecution:
 
         mock_subprocess.assert_any_call(
             "extract_data_join ocean_ext.20240101000000.*.nc",
-            cwd=asset_dir,
+            cwd=output_dir,
             capture_output=True,
             text=True,
             shell=True,
@@ -1861,10 +1861,10 @@ class TestProcessingAndExecution:
         assert (new_joined_dir / "child_bry.20240101000000.nc").exists()
 
         # assert all non-rst partitioned files got cleaned up
-        assert not (asset_dir / "ocean_his.20240101000000.001.nc").exists()
-        assert not (asset_dir / "ocean_his.20240101000000.002.nc").exists()
-        assert not (asset_dir / "ocean_ext.20240101000000.001.nc").exists()
-        assert (asset_dir / "ocean_rst.20240101000000.001.nc").exists()
+        assert not (output_dir / "ocean_his.20240101000000.001.nc").exists()
+        assert not (output_dir / "ocean_his.20240101000000.002.nc").exists()
+        assert not (output_dir / "ocean_ext.20240101000000.001.nc").exists()
+        assert (output_dir / "ocean_rst.20240101000000.001.nc").exists()
 
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
@@ -1915,13 +1915,13 @@ class TestProcessingAndExecution:
         """
         # Setup
         sim = stub_romssimulation
-        asset_dir = sim.fs_manager.asset_dir
-        asset_dir.mkdir(exist_ok=True, parents=True)
+        output_dir = sim.fs_manager.output_dir
+        output_dir.mkdir(exist_ok=True, parents=True)
 
         # Fake file paths to match ncjoin pattern
         fake_files = [
-            asset_dir / "ocean_his.20240101000000.001.nc",
-            asset_dir / "ocean_his.20240101000000.002.nc",
+            output_dir / "ocean_his.20240101000000.001.nc",
+            output_dir / "ocean_his.20240101000000.002.nc",
         ]
         mock_glob.return_value = fake_files
 
@@ -1943,7 +1943,7 @@ class TestProcessingAndExecution:
 
         mock_subprocess.assert_called_once_with(
             "ncjoin ocean_his.20240101000000.*.nc",
-            cwd=asset_dir,
+            cwd=output_dir,
             capture_output=True,
             text=True,
             shell=True,
@@ -1980,7 +1980,7 @@ class TestROMSSimulationRestart:
         new_end_date = datetime(2026, 6, 1)
 
         # Mock restart file found
-        restart_file = sim.fs_manager.asset_dir / "restart_rst.20251231000000.nc"
+        restart_file = sim.fs_manager.output_dir / "restart_rst.20251231000000.nc"
         mock_glob.return_value = [restart_file]
 
         # Call method
@@ -2057,7 +2057,7 @@ class TestROMSSimulationRestart:
         - A `ValueError` is raised if multiple restart files are found.
         """
         sim = stub_romssimulation
-        restart_dir = sim.fs_manager.asset_dir
+        restart_dir = sim.fs_manager.output_dir
         new_end_date = datetime(2025, 6, 1)
 
         # Fake multiple unique restart files

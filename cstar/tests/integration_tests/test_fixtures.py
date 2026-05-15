@@ -42,7 +42,7 @@ def test_modify_template_blueprint(
         strs_to_replace={
             "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
         },
-        out_dir=fs.asset_dir,
+        out_dir=fs.output_dir,
     )
 
     assert isinstance(test_blueprint, LocalPath), (
@@ -54,7 +54,7 @@ def test_modify_template_blueprint(
         bpyaml["code"]["compile_time"]["location"]
         == "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git"
     )
-    assert bpyaml["working_directory"] == str(fs.asset_dir)
+    assert bpyaml["working_directory"] == str(fs.output_dir)
 
 
 class TestFetchData:

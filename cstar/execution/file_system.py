@@ -150,7 +150,7 @@ class JobFileSystemManager(LoggingMixin):
     """The name of the subfolder where job sub-tasks will be executed."""
     _LOGS_NAME: t.ClassVar[t.Literal["logs"]] = "logs"
     """The name of the subfolder where job logs will be written."""
-    _OUTPUT_NAME: t.ClassVar[t.Literal["assets"]] = "assets"
+    _OUTPUT_NAME: t.ClassVar[t.Literal["output"]] = "output"
     """The name of the subfolder where job outputs will be written."""
     _root: t.Final[Path]
     """The root directory of the job."""
@@ -177,7 +177,7 @@ class JobFileSystemManager(LoggingMixin):
             self.run_dir,
             self.tasks_dir,
             self.logs_dir,
-            self.asset_dir,
+            self.output_dir,
         }
 
     @property
@@ -217,7 +217,7 @@ class JobFileSystemManager(LoggingMixin):
         return self.working_directory / self._LOGS_NAME
 
     @property
-    def asset_dir(self) -> Path:
+    def output_dir(self) -> Path:
         """The directory for writing any outputs from the job."""
         return self.working_directory / self._OUTPUT_NAME
 
@@ -240,7 +240,7 @@ class JobFileSystemManager(LoggingMixin):
             self.run_dir,
             self.tasks_dir,
             self.logs_dir,
-            self.asset_dir,
+            self.output_dir,
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
@@ -257,7 +257,7 @@ class JobFileSystemManager(LoggingMixin):
         for directory in [
             self.input_dir,
             self.logs_dir,
-            self.asset_dir,
+            self.output_dir,
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
@@ -362,8 +362,8 @@ class RomsFileSystemManager(JobFileSystemManager):
                 shutil.rmtree(directory)
 
         # clear everything from workdir except blueprints
-        if self.working_directory.exists():
-            for f in self.working_directory.iterdir():
+        if self.run_dir.exists():
+            for f in self.run_dir.iterdir():
                 if not f.name.endswith(".yml") and not f.name.endswith(".yaml"):
                     f.unlink()
 

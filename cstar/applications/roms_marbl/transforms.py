@@ -140,7 +140,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
 
             # Use the last restart file as initial conditions for the follow-up step
             restart_file = RestartFile.from_parts(
-                output_root_name, ed, partition_segment, child_fs.asset_dir
+                output_root_name, ed, partition_segment, child_fs.output_dir
             )
 
             # use output dir of the last step as the input for the next step
