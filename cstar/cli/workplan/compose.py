@@ -8,7 +8,6 @@ import typer
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME, get_env_item
 from cstar.base.utils import additional_files_dir
-from cstar.cli.common import path_callback
 from cstar.orchestration.dag_runner import build_and_run_dag
 
 app = typer.Typer()
@@ -91,8 +90,7 @@ def compose(
     working_directory: t.Annotated[
         str,
         typer.Option(
-            help="Override the output in the blueprint file(s) with this path.",
-            callback=path_callback,
+            help="Override the output in the blueprint file(s) with this path."
         ),
     ] = get_env_item(ENV_CSTAR_STATE_HOME).value,
     run_id: t.Annotated[
@@ -119,7 +117,7 @@ def compose(
     Path
         The path to the workplan that was generated.
     """
-    output_path = Path(working_directory)
+    output_path = Path(working_directory).expanduser().resolve()
     wp_path = Path(workplan) if workplan is not None else None
     bp_path = Path(blueprint) if blueprint is not None else None
     template = template or WorkplanTemplate.SINGLE_STEP
@@ -137,7 +135,7 @@ def compose(
         wp_path = create_host_workplan(template, bp_path, output_path, run_id)
         print(f"Running workplan at `{wp_path}` with sample blueprint at `{bp_path}`")
 
-    if not wp_path.exists():
+    if wp_path is None or not wp_path.exists():
         raise ValueError("Workplan path is malformed.")
 
     if execute:

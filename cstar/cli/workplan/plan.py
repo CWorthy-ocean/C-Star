@@ -5,7 +5,6 @@ from pathlib import Path
 import typer
 
 from cstar.base.utils import lazy_import, slugify
-from cstar.cli.common import path_callback
 from cstar.entrypoint.utils import ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import Planner
@@ -224,7 +223,6 @@ def plan(
         Path,
         typer.Argument(
             help="Path to a blueprint file.",
-            callback=path_callback,
         ),
     ],
     output_dir: t.Annotated[
@@ -234,7 +232,6 @@ def plan(
             ARG_OUTPUT_SHORT,
             default_factory=Path.cwd,
             help="Path to a directory where the plan will be stored (defaults to current working directory)",
-            callback=path_callback,
         ),
     ],
     transform: t.Annotated[
@@ -262,7 +259,7 @@ def plan(
         planner = Planner(workplan)
         plan_path = asyncio.run(render(planner, output_dir))
 
-        if not plan_path.exists():
+        if plan_path is None:
             print("Unable to generate plan")
 
         print(f"The plan has been generated and stored at: {plan_path}")

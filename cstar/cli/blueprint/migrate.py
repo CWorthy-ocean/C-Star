@@ -16,7 +16,7 @@ from cstar.entrypoint.utils import (
     ARG_OUTPUT_SHORT,
     ARG_VERBOSE,
 )
-from cstar.execution.file_system import local_copy
+from cstar.execution.file_system import is_remote_resource, local_copy
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import serialize, validate_serialized_entity
 from cstar.system.migration import BlueprintMigration, MigrationPlan
@@ -75,6 +75,18 @@ def display_summary(bp_path: Path, migration_plan: MigrationPlan) -> None:
         )
 
     console.print(table)
+
+
+def path_callback(value: str | None) -> str | None:
+    """Ensure a path that was provided by a user has been expanded and resolved.
+
+    Returns
+    -------
+    Path
+    """
+    if value and not is_remote_resource(value):
+        return Path(value).expanduser().resolve().as_posix()
+    return value
 
 
 def migrate_dryrun_callback(ctx: typer.Context, value: bool | None) -> bool | None:
