@@ -5,8 +5,8 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
+from cstar_roms_marbl.models import RomsMarblBlueprint
 
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.orchestration.models import Step, Workplan
 
 

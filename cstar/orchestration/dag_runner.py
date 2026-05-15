@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
 
+from cstar_roms_marbl.transforms import RomsMarblTimeSplitter
 from prefect import flow
 
-from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager

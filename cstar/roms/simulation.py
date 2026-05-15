@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 
 import yaml
+from cstar_roms_marbl.models import RomsMarblBlueprint
 
 import cstar.roms.runtime_settings
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,

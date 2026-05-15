@@ -4,9 +4,9 @@ import textwrap
 import typing as t
 from pathlib import Path
 
+from cstar_roms_marbl.models import RomsMarblBlueprint
 from typer import Argument, Option, Typer
 
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.orchestration.models import Workplan
 
 

@@ -1,6 +1,7 @@
 import typing as t
 
-from cstar.applications.roms_marbl.models import CodeRepository, RomsMarblBlueprint
+from cstar_roms_marbl.models import CodeRepository, RomsMarblBlueprint
+
 from cstar.base.adapter import ModelAdapter
 from cstar.base.additional_code import AdditionalCode
 from cstar.execution.file_system import RomsFileSystemManager

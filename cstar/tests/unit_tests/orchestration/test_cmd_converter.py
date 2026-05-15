@@ -1,8 +1,8 @@
 import shutil
 
 import pytest
+from cstar_roms_marbl.transforms import ContinuanceTransform
 
-from cstar.applications.roms_marbl.transforms import ContinuanceTransform
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import (

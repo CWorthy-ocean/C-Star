@@ -3,8 +3,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import SplitFrequency
+from cstar_roms_marbl.models import RomsMarblBlueprint
+from cstar_roms_marbl.transforms import SplitFrequency
 
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT

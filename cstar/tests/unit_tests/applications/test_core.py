@@ -2,9 +2,9 @@
 from pathlib import Path
 
 import pytest
+from cstar_roms_marbl.models import RomsMarblBlueprint
 
 from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.execution.handler import ExecutionStatus
 
 

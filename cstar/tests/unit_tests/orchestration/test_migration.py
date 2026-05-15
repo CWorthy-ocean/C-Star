@@ -4,8 +4,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from cstar_helloworld.app import HelloWorldBlueprint
 
-from cstar.applications.hello_world_app import HelloWorldBlueprint
 from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import (
     APP_HW_SCHEMA_1_0_0,

@@ -36,7 +36,7 @@ parameters that are user-facing.
 Custom Blueprint Example: ``RomsMarblBlueprint``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:class:`cstar.applications.roms_marbl.app.RomsMarblBlueprint` contains all information
+:class:`cstar_roms_marbl.app.RomsMarblBlueprint` contains all information
 necessary to execute a coupled simulation using **UCLA-ROMS** with biogeochemistry
 handled by **MARBL**. It adds the following attributes:
 
@@ -44,18 +44,18 @@ handled by **MARBL**. It adds the following attributes:
 
 .. autosummary::
 
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.valid_start_date
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.valid_end_date
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.code
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.initial_conditions
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.grid
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.forcing
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.partitioning
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.model_params
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.runtime_params
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.cdr_forcing
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.valid_start_date
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.valid_end_date
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.code
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.initial_conditions
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.grid
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.forcing
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.partitioning
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.model_params
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.runtime_params
+  ~cstar_roms_marbl.app.RomsMarblBlueprint.cdr_forcing
 
-Explore the API reference of :class:`cstar.applications.roms_marbl.app.RomsMarblBlueprint` 
+Explore the API reference of :class:`cstar_roms_marbl.app.RomsMarblBlueprint` 
 for more detail on each item.
 
 
@@ -220,7 +220,7 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
       :caption: Executing a blueprint YAML file in python.
 
         from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-        from cstar.applications.roms_marbl.app import RomsMarblBlueprint, RomsMarblRunner
+        from cstar_roms_marbl.app import RomsMarblBlueprint, RomsMarblRunner
         from cstar.applications.core import RunnerRequest
 
         account_id = "your-account-id"

@@ -4,7 +4,7 @@
 # import pytest
 
 # from cstar.applications.core import RunnerRequest
-# from cstar.applications.hello_world_app import (
+# from cstar_helloworld.app import (
 #     HelloWorldBlueprint,
 #     HelloWorldRunner,
 # )

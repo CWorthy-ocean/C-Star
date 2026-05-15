@@ -3,9 +3,9 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+from cstar_roms_marbl.app import RomsMarblApplication
 
 from cstar.applications.core import register_application
-from cstar.applications.roms_marbl.app import RomsMarblApplication
 
 
 @register_application

@@ -7,13 +7,13 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from typer.testing import CliRunner
-
-from cstar.applications.core import RunnerRequest
-from cstar.applications.hello_world_app import (
+from cstar_helloworld.app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )
+from typer.testing import CliRunner
+
+from cstar.applications.core import RunnerRequest
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
