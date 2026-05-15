@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.orchestration.models import Application, Step, Workplan
+from cstar.orchestration.models import Step, Workplan
 
 
 @pytest.fixture
@@ -423,7 +423,7 @@ def single_step_workplan(
     bp_content = bp_content.replace(
         default_output_dir, f"output_dir: {tmp_path.as_posix()}"
     )
-    bp_content.replace(Application.SLEEP, Application.ROMS_MARBL)
+    bp_content.replace("sleep", "roms_marbl")
     bp_path.write_text(bp_content)
 
     return Workplan(
@@ -432,7 +432,7 @@ def single_step_workplan(
         steps=[
             Step(
                 name="s-00",
-                application=Application.SLEEP,
+                application="sleep",
                 blueprint=bp_path.as_posix(),
             ),
         ],

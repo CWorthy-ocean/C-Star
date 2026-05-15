@@ -129,8 +129,8 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
 app_to_cmd_map: dict[str, StepToCommandConversionFn] = defaultdict(
     lambda: convert_step_to_blueprint_run_command,
     {
-        Application.SLEEP.value: convert_step_to_placeholder,
-        Application.ROMS_MARBL.value: convert_step_to_blueprint_run_command,
+        "sleep": convert_step_to_placeholder,
+        "roms_marbl": convert_step_to_blueprint_run_command,
     },
 )
 """Map application types to a function that converts a step to a CLI command."""

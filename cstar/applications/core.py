@@ -2,6 +2,7 @@ import typing as t
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from importlib.metadata import entry_points
 from itertools import chain
 
 from cstar.base.log import get_logger
@@ -328,21 +329,18 @@ def register_application(
 
 
 def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
-    """Get an application from the application registry.
+    # look for a pre-registered application using the supplied key
+    group_name: t.Final[str] = "cstar.applications"
+    if matches := entry_points(group=group_name):
+        log.trace(f"{len(matches)} apps registered in group {group_name!r}")
 
-    Returns
-    -------
-    Application
-        The application matching the supplied name
+    if name not in _registry and name in matches:
+        log.trace(f"Loading registered application {name!r}")
+        matches[name].load()
 
-    Raises
-    ------
-    ValueError
-        if no registered application is associated with this classification
-    """
     if application := _registry.get(name):
         log.trace(f"Located application context {application.__name__!r} for {name!r}")
         return application()
 
-    msg = f"No application for {name!r}"
+    msg = f"No application found for {name}"
     raise ValueError(msg)

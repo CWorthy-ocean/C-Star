@@ -62,6 +62,11 @@ docs = [
     "sphinx-book-theme",
     "sphinx-design",
 ]
+orchestration = [
+    "cstar-hw @ git+https://github.com/ankona/cstar-hw@main",
+    "cstar-plotter @ git+https://github.com/ankona/cstar-plotter@main",
+    "cstar-roms-marbl @ git+https://github.com/ankona/cstar-roms-marbl@main",
+]
 
 [project.scripts]
 cstar = "cstar.cli.cli:main"

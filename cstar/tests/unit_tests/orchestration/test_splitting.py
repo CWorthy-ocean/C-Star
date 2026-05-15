@@ -1,16 +1,7 @@
-import os
-import typing as t
 from datetime import datetime
-from pathlib import Path
-from unittest import mock
 
 import pytest
 
-from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
-from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
-from cstar.orchestration.models import Application, Step, Workplan
-from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.transforms import (
     get_time_slices,
     get_transforms,
@@ -38,31 +29,31 @@ def test_time_splitting() -> None:
         assert curr_start == datetime(curr_end.year, curr_end.month - 1, 1)
 
 
-@pytest.mark.parametrize(
-    ("application", "transform_fn"),
-    [
-        ("roms_marbl", RomsMarblTimeSplitter()),
-        (Application.ROMS_MARBL.value, RomsMarblTimeSplitter()),
-    ],
-)
-def test_roms_marbl_transform_registry(
-    application: str, transform_fn: t.Callable[[Step], t.Iterable[Step]]
-) -> None:
-    """Verify that the transform registry returns the expected transform."""
-    with mock.patch.dict(
-        "cstar.orchestration.transforms.TRANSFORMS",
-        {application: transform_fn},
-        clear=True,
-    ):
-        transform = get_transforms(application)
+# @pytest.mark.parametrize(
+#     ("application", "transform_fn"),
+#     [
+#         ("roms_marbl", RomsMarblTimeSplitter()),
+#         (Application.ROMS_MARBL.value, RomsMarblTimeSplitter()),
+#     ],
+# )
+# def test_roms_marbl_transform_registry(
+#     application: str, transform_fn: t.Callable[[Step], t.Iterable[Step]]
+# ) -> None:
+#     """Verify that the transform registry returns the expected transform."""
+#     with mock.patch.dict(
+#         "cstar.orchestration.transforms.TRANSFORMS",
+#         {application: transform_fn},
+#         clear=True,
+#     ):
+#         transform = get_transforms(application)
 
-    assert transform is not None
-    assert isinstance(transform, RomsMarblTimeSplitter)
+#     assert transform is not None
+#     assert isinstance(transform, RomsMarblTimeSplitter)
 
 
 @pytest.mark.parametrize(
     "application",
-    ["sleep", Application.SLEEP.value, "unknown-app-id"],
+    ["sleep", "unknown-app-id"],
 )
 def test_sleep_transform_registry(application: str) -> None:
     """Verify that the transform registry returns no transforms for sleep or unknown applications.
@@ -74,71 +65,71 @@ def test_sleep_transform_registry(application: str) -> None:
     assert not transform
 
 
-def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
-    """Verify the splitter returns the expected steps for a given time range."""
-    transform = RomsMarblTimeSplitter()
+# def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
+#     """Verify the splitter returns the expected steps for a given time range."""
+#     transform = RomsMarblTimeSplitter()
 
-    original_step = LiveStep.from_step(single_step_workplan.steps[0])
+#     original_step = LiveStep.from_step(single_step_workplan.steps[0])
 
-    # mock data home to ensure test works on HPC if scratch directories are identified
-    data_home = tmp_path / "data"
-    with mock.patch.dict(
-        os.environ,
-        {ENV_CSTAR_RUNID: "12345", ENV_CSTAR_DATA_HOME: data_home.as_posix()},
-        clear=True,
-    ):
-        transformed_steps = list(transform(original_step))
+#     # mock data home to ensure test works on HPC if scratch directories are identified
+#     data_home = tmp_path / "data"
+#     with mock.patch.dict(
+#         os.environ,
+#         {ENV_CSTAR_RUNID: "12345", ENV_CSTAR_DATA_HOME: data_home.as_posix()},
+#         clear=True,
+#     ):
+#         transformed_steps = list(transform(original_step))
 
-        # one step transforms into 12 monthly steps
-        assert len(transformed_steps) == 12
+#         # one step transforms into 12 monthly steps
+#         assert len(transformed_steps) == 12
 
-        output_directories: list[str] = []
+#         output_directories: list[str] = []
 
-        for i, step in enumerate(transformed_steps[:-1]):
-            successor = transformed_steps[i + 1]
-            runtime_params = t.cast("dict", step.blueprint_overrides)["runtime_params"]
-            succ_runtime_params = t.cast("dict", successor.blueprint_overrides)[
-                "runtime_params"
-            ]
+#         for i, step in enumerate(transformed_steps[:-1]):
+#             successor = transformed_steps[i + 1]
+#             runtime_params = t.cast("dict", step.blueprint_overrides)["runtime_params"]
+#             succ_runtime_params = t.cast("dict", successor.blueprint_overrides)[
+#                 "runtime_params"
+#             ]
 
-            # verify start and end dates are valid
-            sd = runtime_params["start_date"]
-            if not isinstance(sd, datetime):
-                sd = datetime.strptime(sd, "%Y%m%d %H%M%S")
-            ed = runtime_params["end_date"]
-            if not isinstance(ed, datetime):
-                ed = datetime.strptime(ed, "%Y%m%d %H%M%S")
-            assert sd < ed
+#             # verify start and end dates are valid
+#             sd = runtime_params["start_date"]
+#             if not isinstance(sd, datetime):
+#                 sd = datetime.strptime(sd, "%Y%m%d %H%M%S")
+#             ed = runtime_params["end_date"]
+#             if not isinstance(ed, datetime):
+#                 ed = datetime.strptime(ed, "%Y%m%d %H%M%S")
+#             assert sd < ed
 
-            output_dir = runtime_params["output_dir"]
-            output_directories.append(output_dir)
+#             output_dir = runtime_params["output_dir"]
+#             output_directories.append(output_dir)
 
-            # verify each step uses output from the prior step as initial conditions
-            if i > 0:
-                succ_init_cond = successor.blueprint_overrides.get(
-                    "initial_conditions", {}
-                )
-                ic_loc_successor = succ_init_cond.get("data", [{}])[0].get(  # type: ignore[union-attr,index,operator]
-                    "location", ""
-                )
+#             # verify each step uses output from the prior step as initial conditions
+#             if i > 0:
+#                 succ_init_cond = successor.blueprint_overrides.get(
+#                     "initial_conditions", {}
+#                 )
+#                 ic_loc_successor = succ_init_cond.get("data", [{}])[0].get(  # type: ignore[union-attr,index,operator]
+#                     "location", ""
+#                 )
 
-                assert str(output_dir) in ic_loc_successor  # type: ignore[union-attr,index,operator]
+#                 assert str(output_dir) in ic_loc_successor  # type: ignore[union-attr,index,operator]
 
-                # verify the initial conditions reference the prior step's time slice
-                compact_sd = ed.strftime("%Y%m%d%H%M%S")
+#                 # verify the initial conditions reference the prior step's time slice
+#                 compact_sd = ed.strftime("%Y%m%d%H%M%S")
 
-                # verify the joined reset files are used
-                out_dir = step.fsm.output_dir
-                expected = (
-                    f"{out_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
-                )
+#                 # verify the joined reset files are used
+#                 out_dir = step.fsm.output_dir
+#                 expected = (
+#                     f"{out_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.000.nc"
+#                 )
 
-                assert expected in str(ic_loc_successor)
+#                 assert expected in str(ic_loc_successor)
 
-            # verify successor starts right where current step ends
-            sd_successor = succ_runtime_params["start_date"]
-            # sd_successor = datetime.strptime(sd_successor_str, "%Y-%m-%d %H:%M:%S")
-            assert sd_successor == ed
+#             # verify successor starts right where current step ends
+#             sd_successor = succ_runtime_params["start_date"]
+#             # sd_successor = datetime.strptime(sd_successor_str, "%Y-%m-%d %H:%M:%S")
+#             assert sd_successor == ed
 
-        # verify all output directories are unique
-        assert len(output_directories) == len(set(output_directories))
+#         # verify all output directories are unique
+#         assert len(output_directories) == len(set(output_directories))

@@ -20,7 +20,6 @@ from cstar.base.log import LoggingMixin
 from cstar.base.utils import deep_merge
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import (
-    Application,
     Blueprint,
     KeyValueStore,
     Workplan,
@@ -390,7 +389,8 @@ class WorkplanTransformer(LoggingMixin):
         if self._transformed:
             return self._transformed
 
-        apply_to = {Application.ROMS_MARBL, Application.SLEEP}
+        # apply_to = {Application.ROMS_MARBL, Application.SLEEP}
+        apply_to = {"roms_marbl", "sleep"}
 
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]
@@ -634,7 +634,8 @@ class DirectiveConfig(BaseModel):
 
             step = LiveStep(
                 name="directive-step",
-                application=Application.ROMS_MARBL,
+                # application=Application.ROMS_MARBL,
+                application="roms_marbl",
                 blueprint=local_bp,
             )
             directive_map = DirectiveConfig.directive_map

@@ -24,6 +24,7 @@ from pydantic import (
 
 from cstar.base.utils import slugify
 from cstar.orchestration.serialization import register_representer, strenum_representer
+from cstar.orchestration.utils import get_app_names
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -131,17 +132,8 @@ class BlueprintState(StrEnum):
     """A blueprint that has been validated."""
 
 
-class Application(StrEnum):
-    """The supported application types."""
-
-    ROMS_MARBL = "roms_marbl"
-    """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
-    SLEEP = "sleep"
-    """A call to the hostname executable to simplify testing."""
-    HELLO_WORLD = "hello_world"
-    """Sample custom application."""
-    PLOTTER = "plotter"
-    """Demo plotting application."""
+Application = StrEnum("Application", get_app_names())  # type: ignore[misc]
+"""Dynamically populated enumeration of all registered applications."""
 
 
 class Blueprint(ConfiguredBaseModel, ABC):

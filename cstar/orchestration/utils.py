@@ -1,5 +1,6 @@
 import os
 import typing as t
+from importlib.metadata import entry_points
 
 from cstar.base.env import ENV_CSTAR_RUNID, EnvVar, generate_run_id
 
@@ -79,3 +80,21 @@ def get_run_id() -> str:
     str
     """
     return os.getenv(ENV_CSTAR_RUNID, generate_run_id())
+
+
+def get_app_names() -> list[str]:  # Mapping[str, str]:
+    """Discover all registered entrypoints in the cstar.applications group.
+
+    Returns
+    -------
+    Mapping[str, str]
+        Mapping from the application key to the configured entrypoint name.
+    """
+    # always provide the sleep app as a fallback
+    members = {"SLEEP": "sleep"}
+
+    # add each registered entrypoint to the mapping
+    for ep in entry_points(group="cstar.applications"):
+        members[ep.name.upper().replace("-", "_")] = ep.name
+
+    return list(members.values())

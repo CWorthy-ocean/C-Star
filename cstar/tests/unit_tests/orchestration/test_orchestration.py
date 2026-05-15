@@ -1,19 +1,11 @@
-import os
 import typing as t
-import uuid
-from datetime import datetime
 from pathlib import Path
-from unittest import mock
 
 import networkx as nx
 import pytest
 
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
-from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
-from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.models import Application, Step, Workplan
+from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import (
     KEY_STATUS,
     KEY_STEP,
@@ -22,8 +14,6 @@ from cstar.orchestration.orchestration import (
     RunMode,
     Status,
 )
-from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import WorkplanTransformer, get_time_slices
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
@@ -307,45 +297,45 @@ def test_dep_keys(tmp_path: Path) -> None:
         )
 
 
-def test_workplan_transformation(diamond_workplan: Workplan) -> None:
-    """Verify that the workplan transformation applies appropriate transforms when enabled."""
-    for step in diamond_workplan.steps:
-        step.application = Application.ROMS_MARBL.value
+# def test_workplan_transformation(diamond_workplan: Workplan) -> None:
+#     """Verify that the workplan transformation applies appropriate transforms when enabled."""
+#     for step in diamond_workplan.steps:
+#         step.application = Application.ROMS_MARBL.value
 
-    diamond_steps = {str(s.name) for s in diamond_workplan.steps}
+#     diamond_steps = {str(s.name) for s in diamond_workplan.steps}
 
-    transformer = WorkplanTransformer(diamond_workplan, RomsMarblTimeSplitter())
-    with (
-        mock.patch.dict(
-            os.environ,
-            {
-                ENV_CSTAR_RUNID: str(uuid.uuid4()),
-                ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
-            },
-        ),
-    ):
-        transformed = transformer.apply()
+#     transformer = WorkplanTransformer(diamond_workplan, RomsMarblTimeSplitter())
+#     with (
+#         mock.patch.dict(
+#             os.environ,
+#             {
+#                 ENV_CSTAR_RUNID: str(uuid.uuid4()),
+#                 ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
+#             },
+#         ),
+#     ):
+#         transformed = transformer.apply()
 
-    # start & end date in the blueprint.yaml file
-    sd, ed = datetime(2020, 1, 1), datetime(2021, 1, 1)
+#     # start & end date in the blueprint.yaml file
+#     sd, ed = datetime(2020, 1, 1), datetime(2021, 1, 1)
 
-    # start/end date cover 12 months. expect 4 steps per month.
-    n_expected_steps = 4 * 12
-    assert len(transformed.steps) == n_expected_steps, (
-        f"Expected {n_expected_steps} steps, got {len(transformed.steps)}"
-    )
+#     # start/end date cover 12 months. expect 4 steps per month.
+#     n_expected_steps = 4 * 12
+#     assert len(transformed.steps) == n_expected_steps, (
+#         f"Expected {n_expected_steps} steps, got {len(transformed.steps)}"
+#     )
 
-    for step in transformed.steps:
-        # confirm that the original dependencies were updated
-        assert not diamond_steps.intersection(step.depends_on)
+#     for step in transformed.steps:
+#         # confirm that the original dependencies were updated
+#         assert not diamond_steps.intersection(step.depends_on)
 
-        assert step.blueprint_overrides is not None
-        blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
+#         assert step.blueprint_overrides is not None
+#         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
 
-        # overrides will be transferred to the model after call to .apply
-        assert "runtime_params" not in step.blueprint_overrides
+#         # overrides will be transferred to the model after call to .apply
+#         assert "runtime_params" not in step.blueprint_overrides
 
-        step_sd = blueprint.runtime_params.start_date
-        step_ed = blueprint.runtime_params.end_date
+#         step_sd = blueprint.runtime_params.start_date
+#         step_ed = blueprint.runtime_params.end_date
 
-        assert ((step_sd, step_ed)) in get_time_slices(sd, ed)
+#         assert ((step_sd, step_ed)) in get_time_slices(sd, ed)

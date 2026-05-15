@@ -7,7 +7,7 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 
 from cstar.orchestration.launch.slurm import SlurmHandle
-from cstar.orchestration.models import Application, Workplan
+from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
 from cstar.orchestration.state import sentinel_path
 
@@ -140,7 +140,7 @@ def test_serialization_workplan_happy_path(
     assert workplan.name == "Test Workplan"
     assert workplan.steps[0].name == "Test Step"
     assert not workplan.steps[0].depends_on
-    assert workplan.steps[0].application == Application.SLEEP
+    assert workplan.steps[0].application == "sleep"
     assert workplan.steps[0].blueprint_overrides == {}
     assert workplan.steps[0].workflow_overrides["segment_length"] in {16, 16.0}
     assert workplan.steps[0].compute_overrides["walltime"] == "00:10:00"

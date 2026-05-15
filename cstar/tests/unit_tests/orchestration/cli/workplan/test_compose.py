@@ -1,23 +1,20 @@
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 import pytest
-
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import SplitFrequency
+
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
-from cstar.orchestration.models import Application, Workplan
+from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
-from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import WorkplanTransformer
+from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
-    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_TRX_FREQ,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -301,80 +298,80 @@ async def test_prepare_composed_dag(
     assert len(steps) == num_timeslices
 
 
-@pytest.mark.skip
-@pytest.mark.asyncio
-async def test_run_composed_dag(
-    tmp_path: Path,
-    bp_templates_dir: Path,
-    wp_templates_dir: Path,
-) -> None:
-    """Verify that the composed DAG is transformed by the DAG runner.
+# @pytest.mark.skip
+# @pytest.mark.asyncio
+# async def test_run_composed_dag(
+#     tmp_path: Path,
+#     bp_templates_dir: Path,
+#     wp_templates_dir: Path,
+# ) -> None:
+#     """Verify that the composed DAG is transformed by the DAG runner.
 
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs
-    wp_templates_dir: Path
-        Fixture returning the path to the directory containing workplan template files
-    default_blueprint_path : str
-        Fixture returning the default blueprint path contained in template workplans
-    """
-    workplan_name: str = "single_step"
+#     Parameters
+#     ----------
+#     tmp_path : Path
+#         Temporary directory for test outputs
+#     wp_templates_dir: Path
+#         Fixture returning the path to the directory containing workplan template files
+#     default_blueprint_path : str
+#         Fixture returning the default blueprint path contained in template workplans
+#     """
+#     workplan_name: str = "single_step"
 
-    wp_template_file = f"{workplan_name}.yaml"
-    wp_template_path = wp_templates_dir / wp_template_file
+#     wp_template_file = f"{workplan_name}.yaml"
+#     wp_template_path = wp_templates_dir / wp_template_file
 
-    bp_template_file = "blueprint.yaml"
-    bp_template_path = bp_templates_dir / bp_template_file
+#     bp_template_file = "blueprint.yaml"
+#     bp_template_path = bp_templates_dir / bp_template_file
 
-    output_dir = Path("/home/x-cmcbride/dag/jan12001")
-    run_id = f"test-run-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+#     output_dir = Path("/home/x-cmcbride/dag/jan12001")
+#     run_id = f"test-run-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
-    print(f"Composing workplan in: {tmp_path}")
-    mock_env = {
-        ENV_CSTAR_SLURM_ACCOUNT: "ees250129",
-        ENV_CSTAR_SLURM_QUEUE: "wholenode",
-        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
-        ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
-        ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
-        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
-    }
+#     print(f"Composing workplan in: {tmp_path}")
+#     mock_env = {
+#         ENV_CSTAR_SLURM_ACCOUNT: "ees250129",
+#         ENV_CSTAR_SLURM_QUEUE: "wholenode",
+#         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
+#         ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
+#         ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
+#         ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
+#     }
 
-    mock_run_cmd = mock.Mock(return_code=0, stderr="", stdout="mock-run-output")
+#     mock_run_cmd = mock.Mock(return_code=0, stderr="", stdout="mock-run-output")
 
-    def no_delay():
-        while True:
-            yield 1
+#     def no_delay():
+#         while True:
+#             yield 1
 
-    with (
-        mock.patch.dict(os.environ, mock_env, clear=True),
-        mock.patch("cstar.base.utils._run_cmd", mock_run_cmd),
-    ):
-        generated_wp_path = compose(
-            wp_template_path.as_posix(),
-            bp_template_path.as_posix(),
-            output_dir.as_posix(),
-            run_id=run_id,
-            template=WorkplanTemplate[workplan_name.upper()],
-        )
+#     with (
+#         mock.patch.dict(os.environ, mock_env, clear=True),
+#         mock.patch("cstar.base.utils._run_cmd", mock_run_cmd),
+#     ):
+#         generated_wp_path = compose(
+#             wp_template_path.as_posix(),
+#             bp_template_path.as_posix(),
+#             output_dir.as_posix(),
+#             run_id=run_id,
+#             template=WorkplanTemplate[workplan_name.upper()],
+#         )
 
-        wp = deserialize(generated_wp_path, Workplan)
-        for step in wp.steps:
-            step.application = Application.ROMS_MARBL.value
+#         wp = deserialize(generated_wp_path, Workplan)
+#         for step in wp.steps:
+#             step.application = Application.ROMS_MARBL.value
 
-        tweak_path = WorkplanTransformer.derived_path(
-            generated_wp_path, suffix="_composed"
-        )
-        serialize(tweak_path, wp)
+#         tweak_path = WorkplanTransformer.derived_path(
+#             generated_wp_path, suffix="_composed"
+#         )
+#         serialize(tweak_path, wp)
 
-        wp_path = await build_and_run_dag(tweak_path, run_id, output_dir)
+#         wp_path = await build_and_run_dag(tweak_path, run_id, output_dir)
 
-    wp = deserialize(wp_path, Workplan)
-    steps = list(wp.steps)
+#     wp = deserialize(wp_path, Workplan)
+#     steps = list(wp.steps)
 
-    paths = set()
-    for step in steps:
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        paths.add(bp.runtime_params.output_dir)
+#     paths = set()
+#     for step in steps:
+#         bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+#         paths.add(bp.runtime_params.output_dir)
 
-        assert bp.runtime_params.output_dir.exists()
+#         assert bp.runtime_params.output_dir.exists()
