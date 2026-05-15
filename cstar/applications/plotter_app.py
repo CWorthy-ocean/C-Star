@@ -94,7 +94,7 @@ class PlotterRunner(BlueprintRunner[PlotterBlueprint]):
         roms = roms_tools.ROMSOutput(
             path=input_dir / blueprint.file_glob, grid=grid, use_dask=True
         )
-        working_dir = blueprint.working_directory
+        working_dir = blueprint.working_dir
         working_dir.mkdir(parents=True, exist_ok=True)
 
         for var in blueprint.variables:

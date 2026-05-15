@@ -1965,7 +1965,7 @@ def preprocessable_roms_livestep(
     *_, step_dir, _ = mocked_simulation_outputs
     return LiveStep.from_step(
         preprocessable_roms_step,
-        update={"working_directory": step_dir},
+        update={"working_dir": step_dir},
     )
 
 

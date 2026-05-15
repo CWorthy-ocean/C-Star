@@ -12,7 +12,7 @@ steps:
     application: sleep
     blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
     blueprint_overrides:
-      working_directory: /other_dir
+      working_dir: /other_dir
       runtime_params:
         start_date: 2010-01-15 00:00:00
         end_date: 2010-06-25 00:00:00

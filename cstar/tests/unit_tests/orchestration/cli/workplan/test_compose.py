@@ -76,7 +76,7 @@ async def test_compose_host_creation(
     step = steps[0]
     bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
 
-    assert bp.working_directory == working_dir
+    assert bp.working_dir == working_dir
 
     expected_bp = working_dir / run_id / "blueprint.yaml"
     expected_host_wp = working_dir / run_id / f"{workplan_name}-host.yaml"
@@ -294,9 +294,9 @@ async def test_prepare_composed_dag(
     paths: set[Path] = set()
     for step in steps:
         bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        paths.add(bp.working_directory)
+        paths.add(bp.working_dir)
 
-        assert bp.working_directory.exists()
+        assert bp.working_dir.exists()
 
     # confirm that every step has a unique output path
     assert len(steps) == num_timeslices
@@ -372,6 +372,6 @@ async def test_run_composed_dag(
     paths: set[Path] = set()
     for step in steps:
         bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        paths.add(bp.working_directory)
+        paths.add(bp.working_dir)
 
-        assert bp.working_directory.exists()
+        assert bp.working_dir.exists()

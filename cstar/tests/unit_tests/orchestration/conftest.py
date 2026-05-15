@@ -303,7 +303,7 @@ def fill_blueprint_template(
             valid_start_date: 2020-01-01 00:00:00
             valid_end_date: 2020-02-01 00:00:00
             schema_version: 2.0.0
-            working_directory: .
+            working_dir: .
             code:
               roms:
                 location: http://github.com/ankona/ucla-roms

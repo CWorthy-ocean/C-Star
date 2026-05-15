@@ -85,7 +85,7 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
     description: this is mainly to test infra like containers and workplans. it should run on 256 processors (2 nodes)
     application: roms_marbl
     schema_version: 2.0.0
-    working_directory: /anvil/scratch/x-seilerman/2node_1wk_job1/
+    working_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
     state: draft
     valid_start_date: 2000-01-15 0:00:00
     valid_end_date: 2000-01-23 0:00:00

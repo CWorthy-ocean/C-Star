@@ -163,7 +163,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     schema_version: str = Field("1.0.0", frozen=True)
     """The schema version for the document."""
 
-    working_directory: TargetDirectoryPath = Path()
+    working_dir: TargetDirectoryPath = Path()
     """Path to a directory where assets are stored when executing the blueprint."""
 
     @property
@@ -174,7 +174,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
         """
         return 1
 
-    @field_validator("working_directory", mode="after")
+    @field_validator("working_dir", mode="after")
     @classmethod
     def _resolve_out_dir(
         cls,

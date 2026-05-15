@@ -3,7 +3,7 @@ name: roms_marbl_example_wales_new_bp
 description: toy domain near wales, for fast laptop/CI runs
 application: roms_marbl
 schema_version: 2.0.0
-working_directory: "~/cstar/wales_toy_blueprint"
+working_dir: "~/cstar/wales_toy_blueprint"
 state: draft
 valid_start_date: 2012-01-01 00:00:00
 valid_end_date: 2012-01-31 12:00:00

@@ -104,7 +104,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
                     "start_date": sd,
                     "end_date": ed,
                 },
-                "working_directory": child_fs.root_dir.as_posix(),
+                "working_dir": child_fs.root_dir.as_posix(),
             }
 
             if last_restart_file:

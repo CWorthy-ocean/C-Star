@@ -1158,7 +1158,7 @@ class ROMSSimulation(Simulation):
 
         return cls(
             name=bp.name,
-            directory=bp.working_directory,
+            directory=bp.working_dir,
             discretization=DiscretizationAdapter(bp).adapt(),
             runtime_code=AddtlCodeAdapter(bp, "run_time").adapt(),
             compile_time_code=AddtlCodeAdapter(bp, "compile_time").adapt(),

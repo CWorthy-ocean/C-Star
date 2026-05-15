@@ -115,7 +115,7 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
                 ed = datetime.strptime(ed, "%Y%m%d %H%M%S")
             assert sd < ed
 
-            working_dir = step_overrides["working_directory"]
+            working_dir = step_overrides["working_dir"]
             working_dirs.append(working_dir)
 
             # verify each step uses output from the prior step as initial conditions

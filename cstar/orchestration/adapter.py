@@ -237,7 +237,7 @@ class CdrForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSCdrForcing]):
         if self.model.cdr_forcing is None:
             return None
 
-        fs_manager = RomsFileSystemManager(self.model.working_directory)
+        fs_manager = RomsFileSystemManager(self.model.working_dir)
 
         return ROMSCdrForcing(
             location=str(self.model.cdr_forcing.data[0].location),
@@ -265,7 +265,7 @@ class NestingInfoAdapter(ModelAdapter[RomsMarblBlueprint, ROMSNestingInfo]):
         if self.model.nesting_info is None:
             return None
 
-        fs_manager = RomsFileSystemManager(self.model.working_directory)
+        fs_manager = RomsFileSystemManager(self.model.working_dir)
 
         return ROMSNestingInfo(
             location=str(self.model.nesting_info.data[0].location),
