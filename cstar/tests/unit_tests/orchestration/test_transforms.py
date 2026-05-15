@@ -384,7 +384,7 @@ def test_workplan_transformer_applies_working_directory_overrides(
     assert blueprint.working_directory != dir_orig
 
     # confirm the workplan override took precedence over user-supplied overrides
-    exp_dir = step_trx.fsm.working_directory
+    exp_dir = step_trx.fsm.working_dir
     assert blueprint.working_directory == exp_dir
     assert blueprint.working_directory != dir_orig
     assert blueprint.working_directory != original_override

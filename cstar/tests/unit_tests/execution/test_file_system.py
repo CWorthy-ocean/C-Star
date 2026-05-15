@@ -35,8 +35,8 @@ def test_file_system_root() -> None:
     user_path = Path("~/cstar-directory")
     fsm = JobFileSystemManager(user_path)
 
-    assert fsm.working_directory.is_absolute()
-    assert "~" not in str(fsm.working_directory)
+    assert fsm.working_dir.is_absolute()
+    assert "~" not in str(fsm.working_dir)
 
 
 def test_file_system_prepare(
@@ -58,7 +58,7 @@ def test_file_system_prepare(
     assert fs.input_dir.exists()
     assert fs.joined_output_dir.exists()
     assert fs._codebases_dir.exists()
-    assert fs.working_directory.exists()
+    assert fs.working_dir.exists()
 
 
 def test_file_system_clear(
