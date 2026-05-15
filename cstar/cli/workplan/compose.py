@@ -16,7 +16,7 @@ app = typer.Typer()
 BP_DEFAULT: t.Final[str] = (
     "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
 )
-BP_WORKINGDIRECTORY_DEFAULT: t.Final[str] = "working_directory: ."
+BP_WORKINGDIR_DEFAULT: t.Final[str] = "working_directory: ."
 
 HELP_SHORT = "Execute a workplan composed of user-supplied blueprints."
 HELP_LONG = f"""\
@@ -50,7 +50,8 @@ def create_host_workplan(
     # update the workplan output directory found in the template
     bp_content = bp_source_path.read_text()
     bp_content = bp_content.replace(
-        BP_WORKINGDIRECTORY_DEFAULT, f"working_directory: {output_path.as_posix()}"
+        BP_WORKINGDIR_DEFAULT,
+        f"working_directory: {output_path.as_posix()}",
     )
     # write the modified blueprint to the working directory
     bp_target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +76,7 @@ def _run(wp_path: Path, output_path: Path, run_id: str) -> None:
         print(f"Completed execution of composed workplan: {wp_path}.")
     except Exception as ex:
         print(
-            f"Composed workplan run at `{wp_path}` has completed unsuccessfully: {ex}"
+            f"Composed workplan run of `{wp_path}` failed: {ex}",
         )
 
 
@@ -105,7 +106,7 @@ def compose(
     execute: t.Annotated[
         bool,
         typer.Option(
-            help="Set this flag to automatically execute the generated workplan."
+            help="Set this flag to immediately execute the generated workplan.",
         ),
     ] = False,
 ) -> Path:

@@ -97,7 +97,7 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
         # one step transforms into 12 monthly steps
         assert len(transformed_steps) == 12
 
-        working_directories: list[str] = []
+        working_dirs: list[str] = []
 
         for i, step in enumerate(transformed_steps[:-1]):
             successor = transformed_steps[i + 1]
@@ -115,8 +115,8 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
                 ed = datetime.strptime(ed, "%Y%m%d %H%M%S")
             assert sd < ed
 
-            working_directory = step_overrides["working_directory"]
-            working_directories.append(working_directory)
+            working_dir = step_overrides["working_directory"]
+            working_dirs.append(working_dir)
 
             # verify each step uses output from the prior step as initial conditions
             if i > 0:
@@ -127,7 +127,7 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
                     "location", ""
                 )
 
-                assert str(working_directory) in ic_loc_successor  # type: ignore[union-attr,index,operator]
+                assert str(working_dir) in ic_loc_successor  # type: ignore[union-attr,index,operator]
 
                 # verify the initial conditions reference the prior step's time slice
                 compact_sd = ed.strftime("%Y%m%d%H%M%S")
@@ -146,4 +146,4 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
             assert sd_successor == ed
 
         # verify all output directories are unique
-        assert len(working_directories) == len(set(working_directories))
+        assert len(working_dirs) == len(set(working_dirs))

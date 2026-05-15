@@ -94,13 +94,13 @@ class PlotterRunner(BlueprintRunner[PlotterBlueprint]):
         roms = roms_tools.ROMSOutput(
             path=input_dir / blueprint.file_glob, grid=grid, use_dask=True
         )
-        working_directory = blueprint.working_directory
-        working_directory.mkdir(parents=True, exist_ok=True)
+        working_dir = blueprint.working_directory
+        working_dir.mkdir(parents=True, exist_ok=True)
 
         for var in blueprint.variables:
             for s in blueprint.s_indices:
                 for time in blueprint.time_indices:
-                    out_path = working_directory / f"{var}_s{s}_t{time}.png"
+                    out_path = working_dir / f"{var}_s{s}_t{time}.png"
                     try:
                         roms.ds.variables[var][s][time].compute()
                         roms.plot(var, time=time, s=s, save_path=str(out_path))

@@ -191,13 +191,13 @@ async def test_converter_hello_world(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    working_directory = tmp_path / "work"
+    working_dir = tmp_path / "work"
 
     step = LiveStep(
         name=f"{__name__}",
         application=Application.HELLO_WORLD,
         blueprint=hello_world_bp_path.as_posix(),
-        working_directory=working_directory,
+        working_directory=working_dir,
     )
 
     # find the registered command converter for this application and launcher type

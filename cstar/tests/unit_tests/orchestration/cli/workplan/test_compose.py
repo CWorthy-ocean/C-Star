@@ -53,14 +53,14 @@ async def test_compose_host_creation(
     bp_template_path = bp_templates_dir / bp_template_file
 
     mock_process = mock.AsyncMock()
-    working_directory = tmp_path / "test-outputs"
+    working_dir = tmp_path / "test-outputs"
     run_id = "my-run"
 
     with mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process):
         generated_wp_path = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            working_directory.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
             execute=False,
@@ -76,10 +76,10 @@ async def test_compose_host_creation(
     step = steps[0]
     bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
 
-    assert bp.working_directory == working_directory
+    assert bp.working_directory == working_dir
 
-    expected_bp = working_directory / run_id / "blueprint.yaml"
-    expected_host_wp = working_directory / run_id / f"{workplan_name}-host.yaml"
+    expected_bp = working_dir / run_id / "blueprint.yaml"
+    expected_host_wp = working_dir / run_id / f"{workplan_name}-host.yaml"
 
     # confirm a copy of the blueprint was made
     assert expected_bp.exists()
@@ -118,12 +118,12 @@ async def test_compose_host_run_parameter(
     bp_template_path = bp_templates_dir / bp_template_file
 
     mock_process = mock.AsyncMock()
-    working_directory = tmp_path / "default-assets"
-    working_directory_override = tmp_path / "overridden-assets"
+    working_dir = tmp_path / "default-assets"
+    working_dir_override = tmp_path / "overridden-assets"
 
     mock_run = mock.Mock()
     run_id = "my-run"
-    mock_env = {ENV_CSTAR_STATE_HOME: working_directory_override.as_posix()}
+    mock_env = {ENV_CSTAR_STATE_HOME: working_dir_override.as_posix()}
 
     with (
         mock.patch("cstar.cli.workplan.compose._run", mock_run),
@@ -133,7 +133,7 @@ async def test_compose_host_run_parameter(
         _ = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            working_directory.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
             execute=do_run,
@@ -184,8 +184,8 @@ async def test_build_and_run_dag_env(
     bp_template_file = "blueprint.yaml"
     bp_template_path = bp_templates_dir / bp_template_file
 
-    working_directory = tmp_path / "original-output-dir"
-    working_directory_override = tmp_path / "overridden-output-dir"
+    working_dir = tmp_path / "original-output-dir"
+    working_dir_override = tmp_path / "overridden-output-dir"
     run_id = "my-run"
 
     mock_process = mock.AsyncMock()
@@ -195,7 +195,7 @@ async def test_build_and_run_dag_env(
     mock_sys_manager.scheduler = mock.Mock()
 
     mock_env = {
-        ENV_CSTAR_STATE_HOME: working_directory_override.as_posix(),
+        ENV_CSTAR_STATE_HOME: working_dir_override.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -214,12 +214,12 @@ async def test_build_and_run_dag_env(
         generated_wp_path = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            working_directory.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
         )
 
-        await build_and_run_dag(generated_wp_path, run_id, working_directory)
+        await build_and_run_dag(generated_wp_path, run_id, working_dir)
 
     assert key in str(ex)
 
@@ -249,12 +249,12 @@ async def test_prepare_composed_dag(
     bp_template_file = "blueprint.yaml"
     bp_template_path = bp_templates_dir / bp_template_file
 
-    working_directory = tmp_path / "original-output-dir"
-    working_directory_override = tmp_path / "overridden-output-dir"
+    working_dir = tmp_path / "original-output-dir"
+    working_dir_override = tmp_path / "overridden-output-dir"
     run_id = "my-run"
 
     mock_env = {
-        ENV_CSTAR_STATE_HOME: working_directory_override.as_posix(),
+        ENV_CSTAR_STATE_HOME: working_dir_override.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -273,18 +273,16 @@ async def test_prepare_composed_dag(
         generated_wp_path = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            working_directory.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
         )
 
-        configure_environment(working_directory, run_id)
+        configure_environment(working_dir, run_id)
         run_id = get_run_id()
-        working_directory = DirectoryManager.data_home()
+        working_dir = DirectoryManager.data_home()
         check_environment()
-        wp, wp_path = await prepare_workplan(
-            generated_wp_path, working_directory, run_id
-        )
+        wp, wp_path = await prepare_workplan(generated_wp_path, working_dir, run_id)
 
     wp = deserialize(wp_path, Workplan)
     steps = list(wp.steps)
@@ -330,7 +328,7 @@ async def test_run_composed_dag(
     bp_template_file = "blueprint.yaml"
     bp_template_path = bp_templates_dir / bp_template_file
 
-    working_directory = Path("/home/x-cmcbride/dag/jan12001")
+    working_dir = Path("/home/x-cmcbride/dag/jan12001")
     run_id = f"test-run-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
     print(f"Composing workplan in: {tmp_path}")
@@ -352,7 +350,7 @@ async def test_run_composed_dag(
         generated_wp_path = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            working_directory.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
         )
@@ -366,7 +364,7 @@ async def test_run_composed_dag(
         )
         serialize(tweak_path, wp)
 
-        wp_path = await build_and_run_dag(tweak_path, run_id, working_directory)
+        wp_path = await build_and_run_dag(tweak_path, run_id, working_dir)
 
     wp = deserialize(wp_path, Workplan)
     steps = list(wp.steps)

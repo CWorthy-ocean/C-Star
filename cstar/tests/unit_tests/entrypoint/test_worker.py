@@ -440,13 +440,13 @@ def test_runner_directory_prep(
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    actual_working_directory = sim_runner.blueprint.working_directory
+    actual_working_dir = sim_runner.blueprint.working_directory
     # Confirm the output directory is created...
-    assert actual_working_directory.exists()
-    assert actual_working_directory.is_dir()
+    assert actual_working_dir.exists()
+    assert actual_working_dir.is_dir()
 
     # ...and is empty so no conflicts will occur.
-    output_content = [x for x in actual_working_directory.iterdir() if x.is_file()]
+    output_content = [x for x in actual_working_dir.iterdir() if x.is_file()]
     assert not output_content, "Output directory should be empty after prep."
 
 
