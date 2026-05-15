@@ -19,8 +19,28 @@ Data paths are automatically configured based on the detected system. The `confi
 - **Input data** (`config.paths.input_data`): Generated ROMS-MARBL input files
 - **Scratch directory** (`config.paths.scratch`): Model execution directories
 - **Model configs** (`config.paths.model_configs`): Model configuration templates and defaults
-- **Blueprints** (`config.paths.blueprints`): Generated blueprint specifications
+    - **Catalog root** (`config.paths.catalog`): Inner directory that directly contains ``blueprints/`` and ``builds/`` (default: ``<cson-forge-data base>/cson_forge_data/catalog`` when ``source-data`` lives under the usual layout; avoids ``cson_forge_data/cson_forge_data`` if ``source_data`` is already under ``cson_forge_data``)
+- **Blueprints** (`config.paths.blueprints`): Generated blueprint YAML files (default: `config.paths.catalog / "blueprints"`)
+- **Builds** (`config.paths.builds`): Rendered compile-time and run-time code directories (default: `config.paths.catalog / "builds"`)
 - **YAML files** (`config.paths.models_yaml`, `config.paths.builds_yaml`, `config.paths.machines_yaml`): Configuration files
+
+### Relocating the catalog
+
+To point blueprints and builds at another directory (for example scratch or a shared drive), build a new `DataPaths` with `config.with_catalog` and assign it to `config.paths`:
+
+```python
+from pathlib import Path
+from cson_forge import config
+
+config.paths = config.with_catalog(config.paths, Path("/scratch/me/cson-catalog"))
+```
+
+Create the new `blueprints` and `builds` directories if needed before running workflows.
+
+Per-domain or per-builder overrides use ``CstarSpecBuilder(catalog_root=...)`` (outer anchor:
+``<catalog_root>/catalog/blueprints`` and ``<catalog_root>/catalog/builds``) or
+``catalog_root="local"`` for the in-repo ``cson_forge/catalog`` layout. See ``CstarSpecEngine`` for a
+default ``catalog_root`` applied to all domains from YAML.
 
 ### Accessing Configuration in Code
 

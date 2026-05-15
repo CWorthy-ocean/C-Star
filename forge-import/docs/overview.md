@@ -39,23 +39,24 @@ cson-forge/
 │   ├── input_data.py           # Input file generation
 │   ├── settings.py             # Template rendering
 │   ├── config.py               # Path management and system detection
-│   ├── catalog.py              # Blueprint catalog
 │   ├── models.yml              # Model configuration specifications
 │   ├── domains.yml             # Established domain configurations
 │   ├── machines.yml            # Machine-specific settings
-│   ├── blueprints/             # Generated blueprint YAML files
-│   │   └── {machine}/
+│   ├── catalog/                # Package: blueprint catalog API + on-disk catalog layout
+│   │   ├── __init__.py         # BlueprintCatalog API (see also ``cson_forge.catalog``)
+│   │   ├── blueprints/         # Generated blueprint YAML files
+│   │   │   └── {machine}/
+│   │   │       └── {model}_{grid}/
+│   │   │           ├── B_{name}_{stage}.yml      # Blueprint files (preconfig, postconfig, build, run)
+│   │   │           ├── settings_B_{name}_{stage}.yml  # Settings sidecar files (same directory)
+│   │   │           └── _{input_type}.yml         # Input-specific blueprints
+│   │   └── builds/             # Model compilation directories
 │   │       └── {model}_{grid}/
-│   │           ├── B_{name}_{stage}.yml      # Blueprint files (preconfig, postconfig, build, run)
-│   │           ├── settings_B_{name}_{stage}.yml  # Settings sidecar files (same directory)
-│   │           └── _{input_type}.yml         # Input-specific blueprints
-│   ├── builds/                 # Model compilation directories
-│   │   └── {model}_{grid}/
-│   │       └── compile-time/   # Rendered configuration files
-│   │           ├── *.opt       # Compile-time options (cppdefs, param, etc.)
-│   │       └── run-time/       # ROMS-MARBL runtime files
-│   │           ├── roms.in     # Run-time configuration
-│   │           └── marbl_*     # MARBL input files
+│   │           ├── compile-time/   # Rendered configuration files
+│   │           │   └── *.opt       # Compile-time options (cppdefs, param, etc.)
+│   │           └── run-time/       # ROMS-MARBL runtime files
+│   │               ├── roms.in     # Run-time configuration
+│   │               └── marbl_*     # MARBL input files
 │   └── model-configs/          # Model templates and defaults
 │       └── {model}/
 │           └── templates/

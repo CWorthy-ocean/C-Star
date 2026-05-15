@@ -30,7 +30,10 @@ from cson_forge.config import (
     SYSTEM_LAYOUT_REGISTRY,
     register_system,
     main,
+    with_catalog,
+    default_catalog_inner_dir,
 )
+from cson_forge._core import resolve_catalog_dir
 
 
 class TestDataPaths:
@@ -38,13 +41,16 @@ class TestDataPaths:
     
     def test_datapaths_creation(self, tmp_path):
         """Test creating DataPaths with all required fields."""
+        cat = tmp_path / "catalog"
         paths = DataPaths(
             here=tmp_path,
             model_configs=tmp_path / "model-configs",
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
             scratch=tmp_path / "run-dir",
-            blueprints=tmp_path / "blueprints",
+            catalog=cat,
+            blueprints=cat / "blueprints",
+            builds=cat / "builds",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
             machines_yaml=tmp_path / "machines.yml",
@@ -55,20 +61,25 @@ class TestDataPaths:
         assert paths.source_data == tmp_path / "source-data"
         assert paths.input_data == tmp_path / "input-data"
         assert paths.scratch == tmp_path / "run-dir"
-        assert paths.blueprints == tmp_path / "blueprints"
+        assert paths.catalog == cat
+        assert paths.blueprints == cat / "blueprints"
+        assert paths.builds == cat / "builds"
         assert paths.models_yaml == tmp_path / "models.yml"
         assert paths.builds_yaml == tmp_path / "builds.yml"
         assert paths.machines_yaml == tmp_path / "machines.yml"
     
     def test_datapaths_frozen(self, tmp_path):
         """Test that DataPaths is frozen (immutable)."""
+        cat = tmp_path / "catalog"
         paths = DataPaths(
             here=tmp_path,
             model_configs=tmp_path / "model-configs",
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
             scratch=tmp_path / "run-dir",
-            blueprints=tmp_path / "blueprints",
+            catalog=cat,
+            blueprints=cat / "blueprints",
+            builds=cat / "builds",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
             machines_yaml=tmp_path / "machines.yml",
@@ -76,6 +87,60 @@ class TestDataPaths:
         
         with pytest.raises(FrozenInstanceError):
             paths.here = tmp_path / "new"
+
+    def test_with_catalog(self, tmp_path):
+        """Relocating catalog updates blueprints and builds together."""
+        cat = tmp_path / "catalog"
+        paths = DataPaths(
+            here=tmp_path,
+            model_configs=tmp_path / "model-configs",
+            source_data=tmp_path / "source-data",
+            input_data=tmp_path / "input-data",
+            scratch=tmp_path / "run-dir",
+            catalog=cat,
+            blueprints=cat / "blueprints",
+            builds=cat / "builds",
+            models_yaml=tmp_path / "models.yml",
+            builds_yaml=tmp_path / "builds.yml",
+            machines_yaml=tmp_path / "machines.yml",
+        )
+        other = tmp_path / "other_catalog"
+        moved = with_catalog(paths, other)
+        assert moved.catalog == other
+        assert moved.blueprints == other / "blueprints"
+        assert moved.builds == other / "builds"
+        assert moved.here == paths.here
+
+
+class TestResolveCatalogDir:
+    def test_resolve_none_uses_config_catalog(self):
+        from cson_forge import config as cfg
+
+        p = cfg.paths.catalog
+        assert resolve_catalog_dir(None) == p
+
+    def test_resolve_local_package_catalog(self):
+        from cson_forge import config as cfg
+
+        assert resolve_catalog_dir("local") == cfg.paths.here / "catalog"
+        assert resolve_catalog_dir("LOCAL") == cfg.paths.here / "catalog"
+
+    def test_resolve_path(self, tmp_path):
+        outer = (tmp_path / "x").resolve()
+        assert resolve_catalog_dir(tmp_path / "x") == outer / "catalog"
+
+class TestDefaultCatalogInnerDir:
+    def test_under_cson_forge_data_base(self, tmp_path):
+        # Standard layout: source-data is a direct child of the base directory.
+        # Catalog is a sibling of source-data inside that same base.
+        sd = tmp_path / "cson-forge-data" / "source-data"
+        sd.mkdir(parents=True)
+        assert default_catalog_inner_dir(sd) == tmp_path / "cson-forge-data" / "catalog"
+
+    def test_when_source_data_already_under_cson_forge_data(self, tmp_path):
+        sd = tmp_path / "cson_forge_data" / "source-data"
+        sd.mkdir(parents=True)
+        assert default_catalog_inner_dir(sd) == tmp_path / "cson_forge_data" / "catalog"
 
 
 class TestMachineConfig:
@@ -273,8 +338,12 @@ class TestGetDataPaths:
         assert paths.source_data.exists()
         assert paths.input_data.exists()
         assert paths.scratch.exists()
+        assert paths.catalog.exists()
         assert paths.blueprints.exists()
+        assert paths.builds.exists()
         assert paths.model_configs.exists()
+        assert paths.catalog == default_catalog_inner_dir(paths.source_data)
+        assert paths.blueprints == paths.catalog / "blueprints"
     
     @patch('cson_forge.config._detect_system')
     def test_get_data_paths_creates_directories(self, mock_detect, tmp_path):
@@ -289,6 +358,9 @@ class TestGetDataPaths:
         assert paths.source_data.exists()
         assert paths.input_data.exists()
         assert paths.scratch.exists()
+        assert paths.catalog.exists()
+        assert paths.blueprints.exists()
+        assert paths.builds.exists()
 
 
 class TestLoadMachineConfig:
@@ -368,7 +440,9 @@ class TestCLI:
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             scratch=Path("/test/run"),
-            blueprints=Path("/test/blueprints"),
+            catalog=Path("/test/catalog"),
+            blueprints=Path("/test/catalog/blueprints"),
+            builds=Path("/test/catalog/builds"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
             machines_yaml=Path("/test/machines.yml"),
@@ -395,7 +469,9 @@ class TestCLI:
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             scratch=Path("/test/run"),
-            blueprints=Path("/test/blueprints"),
+            catalog=Path("/test/catalog"),
+            blueprints=Path("/test/catalog/blueprints"),
+            builds=Path("/test/catalog/builds"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
             machines_yaml=Path("/test/machines.yml"),
@@ -424,7 +500,9 @@ class TestCLI:
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             scratch=Path("/test/run"),
-            blueprints=Path("/test/blueprints"),
+            catalog=Path("/test/catalog"),
+            blueprints=Path("/test/catalog/blueprints"),
+            builds=Path("/test/catalog/builds"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
             machines_yaml=Path("/test/machines.yml"),
