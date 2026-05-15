@@ -221,9 +221,7 @@ async def render(
 def plan(
     path: t.Annotated[
         Path,
-        typer.Argument(
-            help="Path to a blueprint file.",
-        ),
+        typer.Argument(help="Path to a blueprint file."),
     ],
     output_dir: t.Annotated[
         Path,
@@ -260,7 +258,7 @@ def plan(
         plan_path = asyncio.run(render(planner, output_dir))
 
         if plan_path is None:
-            print("Unable to generate plan")
+            raise ValueError("Unable to generate plan")
 
         print(f"The plan has been generated and stored at: {plan_path}")
     except ValueError as ex:

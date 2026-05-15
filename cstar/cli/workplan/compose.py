@@ -68,14 +68,14 @@ def create_host_workplan(
     return wp_path
 
 
-def _run(wp_path: Path, output_path: Path, run_id: str) -> None:
+def _run(wp_path: Path, working_dir: Path, run_id: str) -> None:
     """Execute the DAG synchronously."""
     try:
-        asyncio.run(build_and_run_dag(wp_path, run_id, output_path))
+        asyncio.run(build_and_run_dag(wp_path, run_id, working_dir))
         print(f"Completed execution of composed workplan: {wp_path}.")
     except Exception as ex:
         print(
-            f"Composed workplan run of `{wp_path}` failed: {ex}",
+            f"Composed workplan run at `{wp_path}` has completed unsuccessfully: {ex}"
         )
 
 
@@ -104,7 +104,7 @@ def compose(
     execute: t.Annotated[
         bool,
         typer.Option(
-            help="Set this flag to immediately execute the generated workplan.",
+            help="Set this flag to automatically execute the generated workplan.",
         ),
     ] = False,
 ) -> Path:
@@ -117,7 +117,7 @@ def compose(
     Path
         The path to the workplan that was generated.
     """
-    output_path = Path(working_directory).expanduser().resolve()
+    working_dir = Path(working_directory).expanduser().resolve()
     wp_path = Path(workplan) if workplan is not None else None
     bp_path = Path(blueprint) if blueprint is not None else None
     template = template or WorkplanTemplate.SINGLE_STEP
@@ -128,18 +128,18 @@ def compose(
 
     if bp_path:
         # host the blueprint in a workplan template
-        wp_path = create_host_workplan(template, bp_path, output_path, run_id)
+        wp_path = create_host_workplan(template, bp_path, working_dir, run_id)
         print(f"Running template workplan at `{wp_path}` with blueprint at `{bp_path}`")
     else:
         bp_path = Path(BP_DEFAULT)
-        wp_path = create_host_workplan(template, bp_path, output_path, run_id)
+        wp_path = create_host_workplan(template, bp_path, working_dir, run_id)
         print(f"Running workplan at `{wp_path}` with sample blueprint at `{bp_path}`")
 
     if wp_path is None or not wp_path.exists():
         raise ValueError("Workplan path is malformed.")
 
     if execute:
-        _run(wp_path, output_path, run_id)
+        _run(wp_path, working_dir, run_id)
 
     return wp_path
 

@@ -182,7 +182,7 @@ class JobFileSystemManager(LoggingMixin):
 
     @property
     def working_dir(self) -> Path:
-        """The root directory containing all files created for and by a job.
+        """The root directory containing all job outputs.
 
         Returns
         -------
@@ -464,7 +464,7 @@ def local_copy(uri: str) -> Generator[Path, None, None]:
 
     Parameters
     ----------
-    uri_or_path : str
+    uri : str
         The resource URI
 
     Returns
@@ -475,7 +475,7 @@ def local_copy(uri: str) -> Generator[Path, None, None]:
     if is_remote_resource(uri):
         with TemporaryDirectory() as tmp_dir:
             bp_path = write_local_copy(uri, Path(tmp_dir))
-            yield bp_path.expanduser().resolve()
+            yield bp_path
     else:
         yield Path(uri).expanduser().resolve()
 
