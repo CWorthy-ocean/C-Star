@@ -85,7 +85,7 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
             source={
                 "name": "ROMS",
                 "grid": parent_grid,
-                "path": self.blueprint.restart_file,
+                "path": self.blueprint.parent_rst,
             },
             use_dask=True,
         )
