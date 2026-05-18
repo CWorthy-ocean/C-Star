@@ -58,7 +58,8 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         self.log.info(f"Running nest ic application for {self.blueprint}")
 
         self._create_initial_conditions()
-        return self.add_state(ExecutionStatus.COMPLETED)
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
 
     @staticmethod
     def _has_bgc(filepath):
