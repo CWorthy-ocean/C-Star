@@ -173,6 +173,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
 
                 validation_result = validate_serialized_entity(local_path, Workplan)
                 if not validation_result.item:
+                    log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 

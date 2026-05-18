@@ -6,12 +6,12 @@ from roms_tools import Grid, InitialConditions
 
 from cstar.applications.core import (
     ApplicationDefinition,
-    XRunnerResult,
+    RunnerResult,
     register_application,
 )
 from cstar.applications.roms_marbl.transforms import RestartFile
 from cstar.base.log import get_logger
-from cstar.entrypoint.runner import XBlueprintRunner
+from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 
@@ -34,7 +34,7 @@ class NestIcBlueprint(Blueprint):
     output_dir: Path
 
 
-class NestIcRunner(XBlueprintRunner[NestIcBlueprint]):
+class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
     """Worker class to execute a simple plotting application.
 
     This application is intended primarily as an example of how to build a functioning
@@ -46,7 +46,7 @@ class NestIcRunner(XBlueprintRunner[NestIcBlueprint]):
     """The application identifier."""
 
     @t.override
-    async def run(self) -> XRunnerResult[NestIcBlueprint]:
+    async def run(self) -> RunnerResult[NestIcBlueprint]:
         """Process the blueprint.
 
         Returns
