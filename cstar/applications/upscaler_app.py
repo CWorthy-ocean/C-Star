@@ -68,7 +68,7 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
         cdr_upscaler.populate_cdr_dataset()
         cdr_upscaler.save(out_path)
 
-        return self.set_state(ExecutionStatus.COMPLETED)
+        return self.add_state(ExecutionStatus.COMPLETED)
 
 
 @register_application
