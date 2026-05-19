@@ -30,7 +30,7 @@ def workplan_log(
     """Print the log for a workplan step."""
     root_fsm = JobFileSystemManager(DirectoryManager.data_home() / run_id)
     step_fsm = root_fsm.get_subtask_manager(step_name)
-    log_path = step_fsm.logs_dir / f"{slugify(step_name)}.log"
+    log_path = step_fsm.logs_dir / f"{slugify(step_name)}.out"
 
     if not log_path.exists():
         print(f"No log file found for step '{step_name}' in run '{run_id}'.")
