@@ -161,8 +161,8 @@ def main() -> int:
 
     try:
         asyncio.run(runner.execute())
-        if runner.state.errors:
-            print(f"Errors occurred: {', '.join(runner.state.errors)}")
+        if runner.result.errors:
+            print(f"Errors occurred: {', '.join(runner.result.errors)}")
             return 1
     except CstarError as ex:
         print(f"An error occurred during the simulation: {ex}")

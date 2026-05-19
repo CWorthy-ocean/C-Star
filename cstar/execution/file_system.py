@@ -356,10 +356,15 @@ class RomsFileSystemManager(JobFileSystemManager):
             self.input_datasets_dir,
             self._codebases_dir,
             self.joined_output_dir,
-            self.work_dir,
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
+
+        # clear everything from workdir except blueprints
+        if self.work_dir.exists():
+            for f in self.work_dir.iterdir():
+                if not f.name.endswith(".yml") and not f.name.endswith(".yaml"):
+                    f.unlink()
 
 
 class StateDirectoryManager:
