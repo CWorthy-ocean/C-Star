@@ -28,7 +28,7 @@ class UpscalerBlueprint(Blueprint):
     application: str = APP_NAME
     """The application identifier."""
 
-    uscl_file_location: Path
+    uscl_file_location: str
     output_dir: Path
 
 
@@ -53,17 +53,19 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
             The result of the blueprint processing.
         """
         self.log.trace("Executing handler function on blueprint runner")
-        self.log.info(f"Running nest ic application for {self.blueprint}")
+        self.log.info(f"Running upscaler application for {self.blueprint}")
 
         uscl_dir = Path(self.blueprint.uscl_file_location)
         if not Path(uscl_dir).exists or not uscl_dir.is_dir():
             raise f"Specified path of upscale files doesn't exist or isn't a directory: {uscl_dir}"
 
-        file_pattern = uscl_dir / "*_uscl.??????????????.nc"
+        files = list(uscl_dir.glob("*_uscl.??????????????.nc"))
+        if len(files) == 0:
+            raise f"No uscl files found in {uscl_dir}"
 
         out_path = self.blueprint.output_dir / "upscaled_cdr.nc"
 
-        cdr_upscaler = CDRUpscaler([file_pattern])
+        cdr_upscaler = CDRUpscaler(files)
         cdr_upscaler.create_cdr_dataset()
         cdr_upscaler.populate_cdr_dataset()
         cdr_upscaler.save(out_path)
