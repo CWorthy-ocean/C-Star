@@ -390,7 +390,7 @@ class WorkplanTransformer(LoggingMixin):
         if self._transformed:
             return self._transformed
 
-        apply_to = {Application.ROMS_MARBL, Application.SLEEP, Application.NEST_IC}
+        apply_to = {Application.ROMS_MARBL, Application.SLEEP, Application.NEST_IC, Application.UPSCALER}
 
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]

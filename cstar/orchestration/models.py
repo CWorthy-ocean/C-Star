@@ -143,6 +143,7 @@ class Application(StrEnum):
     PLOTTER = "plotter"
     """Demo plotting application."""
     NEST_IC = "nest_ic"
+    UPSCALER="upscaler"
 
 
 class Blueprint(ConfiguredBaseModel, ABC):
