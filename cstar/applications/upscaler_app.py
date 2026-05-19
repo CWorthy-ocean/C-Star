@@ -63,7 +63,7 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
         if len(files) == 0:
             raise f"No uscl files found in {uscl_dir}"
 
-        out_path = self.blueprint.output_dir / "upscaled_cdr.nc"
+        out_path = self.blueprint.output_dir / "output" / "upscaled_cdr.nc"
 
         cdr_upscaler = CDRUpscaler(files)
         cdr_upscaler.create_cdr_dataset()
