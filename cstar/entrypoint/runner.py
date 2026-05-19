@@ -9,6 +9,7 @@ from cstar.applications.core import (
     XRunner,
 )
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
+from cstar.base.exceptions import SimulationError
 from cstar.base.log import LogLevelChoices
 from cstar.entrypoint.service import Service
 from cstar.entrypoint.utils import (
@@ -98,6 +99,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
                 err_clause = f" Errors: {', '.join(self.result.errors)}"
             msg = f"Simulation failed.{err_clause}"
             self.log.error(msg)
+            raise SimulationError(err_clause)
         else:
             msg = f"Simulation ended with status: {self.state.status}."
             self.log.warning(msg)

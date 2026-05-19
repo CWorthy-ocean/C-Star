@@ -57,11 +57,13 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
 
         uscl_dir = Path(self.blueprint.uscl_file_location)
         if not Path(uscl_dir).exists or not uscl_dir.is_dir():
-            raise f"Specified path of upscale files doesn't exist or isn't a directory: {uscl_dir}"
+            msg = f"Specified path of upscale files doesn't exist or isn't a directory: {uscl_dir}"
+            raise FileNotFoundError(msg)
 
         files = list(uscl_dir.glob("*_uscl.??????????????.nc"))
         if len(files) == 0:
-            raise f"No uscl files found in {uscl_dir}"
+            msg = f"No uscl files found in {uscl_dir}"
+            raise FileNotFoundError(msg)
 
         out_path = self.blueprint.output_dir / "output" / "upscaled_cdr.nc"
 
