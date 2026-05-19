@@ -350,8 +350,6 @@ class RomsFileSystemManager(JobFileSystemManager):
 
     def clear(self) -> None:
         """Ensure the job's working directories are empty."""
-        super().clear()
-
         for directory in [
             self.compile_time_code_dir,
             self.runtime_code_dir,
