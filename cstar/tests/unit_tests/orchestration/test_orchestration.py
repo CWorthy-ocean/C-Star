@@ -8,6 +8,7 @@ from unittest import mock
 import networkx as nx
 import pytest
 
+from cstar.applications.roms_marbl.app import RomsMarblApplication  # noqa: F401
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
