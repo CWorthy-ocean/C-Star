@@ -43,7 +43,7 @@ cstar-forge/
 │   ├── domains.yml             # Established domain configurations
 │   ├── machines.yml            # Machine-specific settings
 │   ├── catalog/                # Package: blueprint catalog API + on-disk catalog layout
-│   │   ├── __init__.py         # BlueprintCatalog API (see also ``cson_forge.catalog``)
+│   │   ├── __init__.py         # BlueprintCatalog API (see also ``cstar_forge.catalog``)
 │   │   ├── blueprints/         # Generated blueprint YAML files
 │   │   │   └── {machine}/
 │   │   │       └── {model}_{grid}/

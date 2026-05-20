@@ -30,9 +30,9 @@ To point blueprints and builds at another directory (for example scratch or a sh
 
 ```python
 from pathlib import Path
-from cson_forge import config
+from cstar_forge import config
 
-config.paths = config.with_catalog(config.paths, Path("/scratch/me/cson-catalog"))
+config.paths = config.with_catalog(config.paths, Path("/scratch/me/cstar-catalog"))
 ```
 
 Create the new `blueprints` and `builds` directories if needed before running workflows.

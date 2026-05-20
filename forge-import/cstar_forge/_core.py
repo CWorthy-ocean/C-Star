@@ -49,7 +49,7 @@ def resolve_catalog_dir(catalog_root: Optional[Union[str, Path]]) -> Path:
     catalog_root
         - ``None``: use ``config.paths.catalog`` (default data-tree location).
         - ``"local"`` (case-insensitive string): use the package layout
-          ``<cson_forge>/catalog`` (same as ``config.paths.here / "catalog"``); no extra
+          ``<cstar_forge>/catalog`` (same as ``config.paths.here / "catalog"``); no extra
           ``/catalog`` suffix is applied.
         - Any other ``str`` or ``Path``: *outer* catalog anchor; the inner directory is
           ``<resolved_anchor>/catalog`` (i.e. blueprints live at ``.../catalog/blueprints``).
@@ -211,7 +211,7 @@ class CstarSpecBuilder(BaseModel):
     - Source data can be prepared independently via `ensure_source_data()`
     - Optional ``catalog_root`` selects an *outer* anchor so blueprints and builds live under
       ``<catalog_root>/catalog/`` (or use ``catalog_root='local'`` for the in-repo
-      ``cson_forge/catalog`` tree; default uses ``config.paths.catalog``).
+      ``cstar_forge/catalog`` tree; default uses ``config.paths.catalog``).
     
     .. warning::
         This functionality is under active development and not yet fully implemented.
@@ -246,7 +246,7 @@ class CstarSpecBuilder(BaseModel):
             "Optional *outer* catalog anchor. Blueprints and builds use "
             "``<catalog_root>/catalog/blueprints`` and ``<catalog_root>/catalog/builds``. "
             "Omit to use ``config.paths.catalog``. Use ``catalog_root='local'`` for the "
-            "in-repo ``cson_forge/catalog`` package directory (no extra ``/catalog`` suffix)."
+            "in-repo ``cstar_forge/catalog`` package directory (no extra ``/catalog`` suffix)."
         ),
     )
     # Internal attributes (computed/loaded)
@@ -2660,7 +2660,7 @@ class CstarSpecEngine:
         catalog_root : str or Path, optional
             Default *outer* anchor passed to every ``CstarSpecBuilder`` (inner paths are
             ``<catalog_root>/catalog/blueprints`` and ``<catalog_root>/catalog/builds``, except
-            ``catalog_root="local"`` which uses the in-repo ``cson_forge/catalog`` directory).
+            ``catalog_root="local"`` which uses the in-repo ``cstar_forge/catalog`` directory).
         """
         domains_file = Path(domains_file)
         

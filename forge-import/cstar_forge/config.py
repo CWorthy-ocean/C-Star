@@ -190,7 +190,7 @@ def default_catalog_inner_dir(source_data: Path) -> Path:
     Default inner *catalog* directory: the folder that directly contains ``blueprints/`` and ``builds/``.
 
     The catalog lives alongside ``source-data`` inside the base data directory, e.g.
-    ``~/cson-forge-data/catalog/{blueprints,builds}``.
+    ``~/cstar-forge-data/catalog/{blueprints,builds}``.
     """
     return source_data.parent.resolve() / "catalog"
 
@@ -211,7 +211,7 @@ def get_data_paths() -> DataPaths:
 
     here = Path(__file__).resolve().parent
     model_configs = here / "model-configs"
-    # Inner catalog dir: .../cson_forge_data/catalog/{blueprints,builds}
+    # Inner catalog dir: .../cstar_forge_data/catalog/{blueprints,builds}
     catalog = default_catalog_inner_dir(source_data)
     blueprints_dir = catalog / "blueprints"
     builds_dir = catalog / "builds"
@@ -246,7 +246,7 @@ def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
     respectively. Other fields (``here``, data roots, YAML paths) are unchanged.
 
     Intended for relocating the on-disk catalog without editing ``get_data_paths``;
-    assign the result to ``cson_forge.config.paths`` (and create directories as needed).
+    assign the result to ``cstar_forge.config.paths`` (and create directories as needed).
     """
     catalog = Path(catalog)
     return replace(
