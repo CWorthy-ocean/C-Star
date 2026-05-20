@@ -400,7 +400,6 @@ class WorkplanTransformer(LoggingMixin):
         # must happen before time-splitting so the splitter reads correct blueprint values
         steps = [apply_automatic_overrides(step) for step in live_steps]
 
-        # if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
         transformed_steps: list[LiveStep] = []
         named_dep_map: dict[str, str] = {}
 
