@@ -1,0 +1,14 @@
+compile_time:
+  cppdefs:
+    test: true
+run_time:
+  roms.in:
+    title:
+      casename: cson_roms-marbl_v0.1_test-grid_20120101-20120102
+    time_stepping:
+      ntimes: 14400
+      dt: 6
+      ndtfast: 60
+      ninfo: 1
+    output_root_name:
+      output_root_name: /Users/mclong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_test-grid_20120101-20120102/output/cson_roms-marbl_v0.1_test-grid_20120101-20120102

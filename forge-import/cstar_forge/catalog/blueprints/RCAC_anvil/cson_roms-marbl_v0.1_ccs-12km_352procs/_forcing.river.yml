@@ -1,0 +1,92 @@
+---
+roms_tools_version: 3.4.0
+---
+Grid:
+  nx: 224
+  ny: 440
+  size_x: 2688
+  size_y: 5280
+  center_lon: -134.5
+  center_lat: 39.6
+  rot: 33.3
+  N: 60
+  theta_s: 6.0
+  theta_b: 6.0
+  hc: 250.0
+  topography_source:
+    name: ETOPO5
+  mask_shapefile: null
+  hmin: 5.0
+RiverForcing:
+  start_time: '2024-01-01T00:00:00'
+  end_time: '2024-01-02T00:00:00'
+  source:
+    name: DAI
+    climatology: false
+  convert_to_climatology: if_any_missing
+  include_bgc: true
+  model_reference_date: '2000-01-01T00:00:00'
+  indices:
+    Columbia:
+    - 237, 207
+    Fraser:
+    - 256, 222
+    Stikine:
+    - 347, 208
+    Susitna:
+    - 434, 166
+    Copper:
+    - 410, 178
+    Skeena:
+    - 323, 207
+    Alsek:
+    - 383, 196
+    Nass:
+    - 327, 209
+    Sacramento:
+    - 162, 182
+    Willamette:
+    - 230, 202
+    Kvichak:
+    - 435, 139
+    Klamath:
+    - 199, 186
+    Taku:
+    - 363, 207
+    Cowlitz:
+    - 238, 208
+    Umpqua:
+    - 217, 194
+    Eel:
+    - 192, 180
+    Rogue:
+    - 209, 188
+    SanJoaquim:
+    - 160, 182
+    Chehalis:
+    - 245, 209
+    Talkeetna:
+    - 434, 166
+    QuinaultRiver:
+    - 248, 209
+    Speel:
+    - 363, 207
+    Colorado-AR:
+    - 83, 198
+    SalmonRiverAt:
+    - 199, 186
+    Farragut:
+    - 355, 207
+    WilsonRiverNe:
+    - 232, 203
+    Salmon:
+    - 338, 207
+    Harding:
+    - 342, 208
+    Skagway:
+    - 374, 198
+    NfSkokomishR:
+    - 249, 219
+    FishCNrKetch:
+    - 336, 206
+    _convention: eta_rho, xi_rho

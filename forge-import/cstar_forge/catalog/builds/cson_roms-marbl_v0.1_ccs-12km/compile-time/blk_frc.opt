@@ -1,0 +1,26 @@
+      ! ***************************************************************
+      ! User inputs, make sure that units in the forcing files match!
+
+      ! Interpolate forcing from coarser input grid (=1) or not (=0)
+      integer :: interp_frc = 0 ! Factor 2 only for now
+
+      logical :: do_check_units=.false.                  ! check units of input vars
+
+      ! Type ncforce contains all required netcdf variables and input data array for frc variable.
+      ! Set the name and tname of variable to match what is in the input forcing files.
+      ! Use same name as bulk_frc variable name, e.g. uwnd has nc_uwnd for netcdf vars.
+      type (ncforce) :: nc_uwnd  = ncforce(vname='uwnd', tname='time' )  ! u-wind (input data in m/s at 10m)
+      type (ncforce) :: nc_vwnd  = ncforce(vname='vwnd', tname='time' )  ! v-wind (input data in m/s at 10m)
+      type (ncforce) :: nc_tair  = ncforce(vname='Tair', tname='time' )  ! Air temp (input data Degrees C at 2m)
+      type (ncforce) :: nc_Q     = ncforce(vname='qair', tname='time' )  ! Q (Specific humidity (kg/kg)
+      type (ncforce) :: nc_prate = ncforce(vname='rain', tname='time' )  ! Precipitation rate (cm/day)
+      type (ncforce) :: nc_lwrad = ncforce(vname='lwrad',tname='time' )  ! Downward longwave radiation [W/m^2]
+      type (ncforce) :: nc_swrad = ncforce(vname='swrad',tname='time' )  ! net shortwave radiation [W/m^2]
+
+#if defined TAU_CORRECTION
+      type (ncforce)  :: nc_taux = ncforce(vname='TauX_corr',tname='Taucorr_time'  )  ! The TAU_CORRECTION flag is used to active a correction term to
+      type (ncforce)  :: nc_tauy = ncforce(vname='TauY_corr',tname='Taucorr_time'  )  ! bring bulk force field closer to that of the measured data.
+#endif
+
+      ! End of user inputs
+      ! ***************************************************************

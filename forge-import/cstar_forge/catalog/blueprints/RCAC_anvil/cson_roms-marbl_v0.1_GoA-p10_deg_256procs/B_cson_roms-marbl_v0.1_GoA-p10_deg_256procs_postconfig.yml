@@ -1,0 +1,79 @@
+name: cson_roms-marbl_v0.1_GoA-p10_deg_256procs
+description: Gulf of Alaska 1/10 deg (nested)
+application: roms_marbl
+state: notset
+valid_start_date: '2010-01-03T00:00:00'
+valid_end_date: '2010-01-10T00:00:00'
+code:
+  roms:
+    documentation: ''
+    locked: false
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    commit: 00706a1
+    branch: ''
+    filter: null
+  run_time:
+    documentation: ''
+    locked: false
+    location: placeholder://run_time
+    commit: ''
+    branch: main
+    filter: null
+  compile_time:
+    documentation: ''
+    locked: false
+    location: placeholder://compile_time
+    commit: ''
+    branch: main
+    filter: null
+  marbl:
+    documentation: ''
+    locked: false
+    location: https://github.com/marbl-ecosys/MARBL.git
+    commit: marbl0.45.0
+    branch: ''
+    filter: null
+initial_conditions:
+  documentation: ''
+  locked: false
+  data:
+  - location: /anvil/projects/x-ees250129/cson-forge-data/x-awyatt1/input-data/cson_roms-marbl_v0.1_GoA-p10_deg_256procs/cson_roms-marbl_v0.1_GoA-p10_deg_256procs_initial_conditions.nc
+    partitioned: false
+grid:
+  documentation: ''
+  locked: false
+  data:
+  - location: /anvil/projects/x-ees250129/cson-forge-data/x-awyatt1/input-data/cson_roms-marbl_v0.1_GoA-p10_deg_256procs/cson_roms-marbl_v0.1_GoA-p10_deg_256procs_grid.nc
+    partitioned: false
+forcing:
+  boundary:
+    documentation: ''
+    locked: false
+    data: []
+  surface:
+    documentation: ''
+    locked: false
+    data:
+    - location: /anvil/projects/x-ees250129/cson-forge-data/x-awyatt1/input-data/cson_roms-marbl_v0.1_GoA-p10_deg_256procs/cson_roms-marbl_v0.1_GoA-p10_deg_256procs_surface-physics_201001.nc
+      partitioned: false
+    - location: /anvil/projects/x-ees250129/cson-forge-data/x-awyatt1/input-data/cson_roms-marbl_v0.1_GoA-p10_deg_256procs/cson_roms-marbl_v0.1_GoA-p10_deg_256procs_surface-bgc_clim.nc
+      partitioned: false
+  tidal:
+    documentation: ''
+    locked: false
+    data:
+    - location: /anvil/projects/x-ees250129/cson-forge-data/x-awyatt1/input-data/cson_roms-marbl_v0.1_GoA-p10_deg_256procs/cson_roms-marbl_v0.1_GoA-p10_deg_256procs_tidal.nc
+      partitioned: false
+  river:
+    documentation: ''
+    locked: false
+    data:
+    - location: /anvil/projects/x-ees250129/cson-forge-data/x-awyatt1/input-data/cson_roms-marbl_v0.1_GoA-p10_deg_256procs/cson_roms-marbl_v0.1_GoA-p10_deg_256procs_river.nc
+      partitioned: false
+  corrections: null
+partitioning:
+  documentation: ''
+  locked: false
+  hash: null
+  n_procs_x: 16
+  n_procs_y: 16

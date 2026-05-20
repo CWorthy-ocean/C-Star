@@ -1,0 +1,38 @@
+! Parameter options file
+
+! Dimensions of Physical Grid and array dimensions:
+!----------- -- -------- ---- --- ----- -----------
+! LLm   Number of the internal points of the PHYSICAL grid in XI-
+! MMm   and ETA-directions, excluding physical side boundary points,
+!       peroodic ghost points, and MPI-margins (if any).
+!
+! Domain subdivision parameters:
+!------- ----------- -----------
+! NP_XI,  NP_ETA     number of MPI subdomains in XI-, ETA-directions;
+! NSUB_X, NSUB_E     number of shared memory subdomains (tiles) in XI- and ETA-directions;
+
+! Number of tracers
+!------- -----------
+! nt  must be 2 or more if Salinity is defined
+
+      integer, parameter ::
+     &               LLm=6, MMm=2, N=3  ! LUZON
+
+      integer, parameter ::
+     &      NP_XI=1, NP_ETA=1, NSUB_X=1, NSUB_E=1
+
+      integer, parameter ::
+     &         nt_passive=0
+#  ifdef BIOLOGY_BEC2
+     &       , ntrc_bio_base=26
+#   ifdef Ncycle_SY
+     &       , ntrc_bio_ncycle=3
+#   else /* not Ncycle_SY */
+     &       , ntrc_bio_ncycle=0
+#   endif /* Ncycle_SY */
+     &       , ntrc_bio=ntrc_bio_base+ntrc_bio_ncycle
+#  else /* No BIOLOGY_BEC2 */
+     &       , ntrc_bio=0
+#  endif  /* BIOLOGY_BEC2 */
+     &       , NT=isalt+nt_passive+ntrc_bio
+

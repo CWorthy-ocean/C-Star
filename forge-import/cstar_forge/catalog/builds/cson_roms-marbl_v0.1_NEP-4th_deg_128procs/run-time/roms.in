@@ -1,0 +1,52 @@
+title:
+   cson_roms-marbl_v0.1_NEP-4th_deg_128procs_20120101-20120102
+
+time_stepping: NTIMES   dt[sec]  NDTFAST  NINFO
+      1440    60    60    1
+
+MARBL_biogeochemistry: namelist  tracer_output_list   diagnostic_output_list
+     marbl_in
+     marbl_tracer_output_list
+     marbl_diagnostic_output_list
+
+S-coord: THETA_S,   THETA_B,    TCLINE (m)
+          6.0D0        3.0D0    250D0
+
+grid:  filename
+      /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_grid.nc
+
+forcing: filename
+      /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_surface-physics_201112.nc
+      /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_surface-bgc_clim.nc
+      
+      
+      /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_river.nc
+
+initial: NRREC  filename
+      1
+      /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_initial_conditions.nc
+
+output_root_name:
+      /Users/mclong/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_20120101-20120102/output/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_20120101-20120102
+
+lateral_visc:   VISC2,    VISC4    [m^2/sec for all]
+                 0.0       0.0
+rho0:
+      1000.0
+  
+vertical_mixing:  Akv  Akt(1:NT)     [m^2/sec for all]
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0                   
+tracer_diff2: TNU2(1:NT)           [m^2/sec for all]
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 
+bottom_drag:     RDRG [m/s],  RDRG2,  Zob [m],  Cdb_min, Cdb_max
+      0.0       0.001   0.01     0.0001    0.01
+
+v_sponge:       V_SPONGE [m^2/sec]
+      0.0
+                 
+gamma2:
+      1.0D0
+
+ubind: OBC binding velocity scale [m/s]
+      0.1
+       

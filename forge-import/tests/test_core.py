@@ -340,9 +340,9 @@ class TestCstarSpecBuilderInitialization:
                 "tidal": [{"source": {"name": "TPXO"}}],
             },
         }
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 CstarSpecBuilder(**minimal_cstar_spec_builder_args)
 
@@ -367,11 +367,11 @@ class TestCstarSpecBuilderInitialization:
         mock_model_spec,
     ):
         """POSTCONFIG missing-file messages use the same paths as generated NetCDF files."""
-        from cson_forge.input_data import netcdf_filename_component
+        from cstar_forge.input_data import netcdf_filename_component
 
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
         raw = builder.name
@@ -386,9 +386,9 @@ class TestCstarSpecBuilderInitialization:
         minimal_cstar_spec_builder_args,
         mock_model_spec,
     ):
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
 
@@ -465,9 +465,9 @@ class TestOverrideSettings:
             encoding="utf-8",
         )
         minimal_cstar_spec_builder_args["override"] = [str(override_file)]
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
         assert builder._settings_compile_time["cppdefs"]["test"] is False
@@ -481,9 +481,9 @@ class TestOverrideSettings:
             encoding="utf-8",
         )
         minimal_cstar_spec_builder_args["override"] = [str(override_file)]
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 with pytest.warns(UserWarning, match="unknown_top"):
                     builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
@@ -512,9 +512,9 @@ class TestOverrideSettings:
             encoding="utf-8",
         )
         minimal_cstar_spec_builder_args["override"] = [str(override_file)]
-        with patch("cson_forge._core.cson_models.load_models_yaml") as mock_load:
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
             mock_load.return_value = mock_model_spec
-            with patch("cson_forge._core.rt.Grid") as mock_grid:
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
         assert builder._settings_run_time["roms.in"]["foo_section"]["bar"] == 99

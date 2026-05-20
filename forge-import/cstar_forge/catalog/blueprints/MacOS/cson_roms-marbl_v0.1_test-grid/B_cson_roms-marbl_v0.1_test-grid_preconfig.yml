@@ -1,0 +1,65 @@
+name: cson_roms-marbl_v0.1_test-grid
+description: Generated blueprint
+application: roms_marbl
+state: notset
+valid_start_date: '2012-01-01T00:00:00'
+valid_end_date: '2012-01-02T00:00:00'
+code:
+  roms:
+    documentation: ''
+    locked: false
+    location: https://github.com/test/roms.git
+    commit: ''
+    branch: main
+  run_time:
+    documentation: ''
+    locked: false
+    location: https://github.com/test/run_time.git
+    commit: ''
+    branch: main
+    filter:
+      directory: ''
+      files:
+      - roms.in
+  compile_time:
+    documentation: ''
+    locked: false
+    location: https://github.com/test/compile_time.git
+    commit: ''
+    branch: main
+    filter:
+      directory: ''
+      files:
+      - Makefile
+  marbl:
+    documentation: ''
+    locked: false
+    location: https://github.com/test/marbl.git
+    commit: test-commit
+    branch: ''
+initial_conditions:
+  documentation: ''
+  locked: false
+  data:
+  - partitioned: false
+grid:
+  documentation: ''
+  locked: false
+  data:
+  - partitioned: false
+forcing:
+  boundary:
+    documentation: ''
+    locked: false
+    data:
+    - partitioned: false
+  surface:
+    documentation: ''
+    locked: false
+    data:
+    - partitioned: false
+partitioning:
+  documentation: ''
+  locked: false
+  n_procs_x: 2
+  n_procs_y: 2

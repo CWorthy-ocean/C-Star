@@ -33,7 +33,7 @@ from cstar_forge.config import (
     with_catalog,
     default_catalog_inner_dir,
 )
-from cson_forge._core import resolve_catalog_dir
+from cstar_forge._core import resolve_catalog_dir
 
 
 class TestDataPaths:
@@ -114,13 +114,13 @@ class TestDataPaths:
 
 class TestResolveCatalogDir:
     def test_resolve_none_uses_config_catalog(self):
-        from cson_forge import config as cfg
+        from cstar_forge import config as cfg
 
         p = cfg.paths.catalog
         assert resolve_catalog_dir(None) == p
 
     def test_resolve_local_package_catalog(self):
-        from cson_forge import config as cfg
+        from cstar_forge import config as cfg
 
         assert resolve_catalog_dir("local") == cfg.paths.here / "catalog"
         assert resolve_catalog_dir("LOCAL") == cfg.paths.here / "catalog"
@@ -130,17 +130,17 @@ class TestResolveCatalogDir:
         assert resolve_catalog_dir(tmp_path / "x") == outer / "catalog"
 
 class TestDefaultCatalogInnerDir:
-    def test_under_cson_forge_data_base(self, tmp_path):
+    def test_under_cstar_forge_data_base(self, tmp_path):
         # Standard layout: source-data is a direct child of the base directory.
         # Catalog is a sibling of source-data inside that same base.
         sd = tmp_path / "cson-forge-data" / "source-data"
         sd.mkdir(parents=True)
         assert default_catalog_inner_dir(sd) == tmp_path / "cson-forge-data" / "catalog"
 
-    def test_when_source_data_already_under_cson_forge_data(self, tmp_path):
-        sd = tmp_path / "cson_forge_data" / "source-data"
+    def test_when_source_data_already_under_cstar_forge_data(self, tmp_path):
+        sd = tmp_path / "cstar_forge_data" / "source-data"
         sd.mkdir(parents=True)
-        assert default_catalog_inner_dir(sd) == tmp_path / "cson_forge_data" / "catalog"
+        assert default_catalog_inner_dir(sd) == tmp_path / "cstar_forge_data" / "catalog"
 
 
 class TestMachineConfig:

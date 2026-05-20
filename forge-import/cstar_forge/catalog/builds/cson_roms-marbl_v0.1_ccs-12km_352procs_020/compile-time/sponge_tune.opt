@@ -1,0 +1,19 @@
+      ! ****************************************************************
+      ! User inputs
+
+      type (ncforce) :: nc_pflx_w = ncforce( vname='up_west', tname='bry_time')
+      type (ncforce) :: nc_pflx_e = ncforce( vname='up_east', tname='bry_time')
+      type (ncforce) :: nc_pflx_s = ncforce( vname='vp_south', tname='bry_time')
+      type (ncforce) :: nc_pflx_n = ncforce( vname='vp_north', tname='bry_time')
+
+      logical,public,parameter  :: ub_tune = .false.
+      logical         :: spn_avg = .true.
+
+      real,   parameter :: sp_timscale = 86400 ! filtering time scale
+
+      logical,parameter :: wrt_sponge=.true.     ! yes/no output sponge to file
+      integer,parameter :: nrpf = 7              ! Number of records per file
+      real   ,parameter :: output_period = 86400  ! time between outputs in seconds
+
+      ! End of user inputs
+      ! ****************************************************************

@@ -45,7 +45,7 @@ def _patch_xarray_open_dataset_for_input_data(mock_ds):
     Patch xarray.open_dataset where input_data (and roms_tools) resolve it.
 
     Tests use empty ``.touch()`` NetCDF paths; real ``open_dataset`` needs a backend
-    (e.g. netCDF4). Patching only ``xarray.open_dataset`` misses ``cson_forge.input_data.xr``
+    (e.g. netCDF4). Patching only ``xarray.open_dataset`` misses ``cstar_forge.input_data.xr``
     after import; patching both avoids IO backend errors.
     """
 
@@ -54,7 +54,7 @@ def _patch_xarray_open_dataset_for_input_data(mock_ds):
         yield mock_ds
 
     with (
-        patch("cson_forge.input_data.xr.open_dataset", side_effect=_fake_open),
+        patch("cstar_forge.input_data.xr.open_dataset", side_effect=_fake_open),
         patch("xarray.open_dataset", side_effect=_fake_open),
     ):
         yield
@@ -259,7 +259,7 @@ class TestInputData:
 
     def test_inputdata_input_data_dir_sanitizes_domain_dots(self, tmp_path):
         """Directory name matches NetCDF basename rule (no ``.`` except in ``.nc`` files)."""
-        with patch("cson_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
+        with patch("cstar_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="run_v0.1_case",
                 start_date=datetime(2012, 1, 1),
@@ -282,7 +282,7 @@ class TestInputData:
 
     def test_inputdata_forcing_filename_dots_replaced_except_nc_suffix(self, tmp_path):
         """Basenames must have no ``.`` except ``.nc`` (e.g. ``v0.1`` in domain name)."""
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             data = InputData(
                 domain_name="case_v0.1_x",
                 start_date=datetime(2012, 1, 1),
@@ -783,13 +783,13 @@ class TestRomsMarblInputDataGeneration:
             )
         assert "type" in str(exc_info.value).lower()
 
-    @patch('cson_forge.input_data.rt.SurfaceForcing')
+    @patch('cstar_forge.input_data.rt.SurfaceForcing')
     def test_generate_surface_forcing_reuse_skips_roms_tools_calls(
         self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
     ):
         """When NetCDF exists, reuse paths without constructing SurfaceForcing."""
 
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data.input_data_dir = (
                 tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             )
@@ -864,13 +864,13 @@ class TestRomsMarblInputDataGeneration:
             # Check that resource was added to forcing.tidal
             assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
 
-    @patch("cson_forge.input_data.rt.TidalForcing")
+    @patch("cstar_forge.input_data.rt.TidalForcing")
     def test_generate_tidal_forcing_reuse_skips_roms_tools_calls(
         self, mock_tf_class, sample_roms_marbl_input_data, tmp_path
     ):
 
         """When NetCDF and YAML exist, do not construct TidalForcing."""
-        with patch("cson_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
+        with patch("cstar_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data.input_data_dir = (
                 tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             )
@@ -916,12 +916,12 @@ class TestRomsMarblInputDataGeneration:
             # Check that resource was added to forcing.river
             assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
 
-    @patch("cson_forge.input_data.rt.RiverForcing")
+    @patch("cstar_forge.input_data.rt.RiverForcing")
     def test_generate_river_forcing_reuse_skips_roms_tools_calls(
         self, mock_rf_class, sample_roms_marbl_input_data, tmp_path
     ):
         """When NetCDF and YAML exist, do not construct RiverForcing."""
-        with patch("cson_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
+        with patch("cstar_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
             sample_roms_marbl_input_data.input_data_dir = (
                 tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             )
@@ -992,9 +992,9 @@ class TestRomsMarblInputDataGeneration:
         with pytest.raises(NotImplementedError):
             sample_roms_marbl_input_data._generate_corrections()
 
-    @patch('cson_forge.input_data.roms_tools_nesting_writer')
+    @patch('cstar_forge.input_data.roms_tools_nesting_writer')
     @patch('cstar_forge.input_data.rt.Grid')
-    def test_generate_grid_with_child(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
+    def test_generate_grid_with_child(self, mock_grid_class, mock_nesting_writer, sample_roms_marbl_input_data, tmp_path):
         """Test _generate_grid sets nesting_info and extract_data settings when grid_child is present."""
         mock_grid = MagicMock()
         mock_grid.nx = 20
@@ -1043,9 +1043,9 @@ class TestRomsMarblInputDataGeneration:
             assert extract_data["theta_b_chd"] == mock_child.theta_b
             assert extract_data["hc_chd"] == mock_child.hc
 
-    @patch('cson_forge.input_data.roms_tools_nesting_writer')
+    @patch('cstar_forge.input_data.roms_tools_nesting_writer')
     @patch('cstar_forge.input_data.rt.Grid')
-    def test_generate_grid_extract_file_is_basename(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
+    def test_generate_grid_extract_file_is_basename(self, mock_grid_class, mock_nesting_writer, sample_roms_marbl_input_data, tmp_path):
         """Test that extract_file in compile-time settings is the bare filename, not a full path."""
         mock_grid = MagicMock()
         mock_grid.nx = 20
@@ -1187,7 +1187,7 @@ class TestRomsMarblInputDataGenerateAll:
         })
         mock_river_instance.ds = mock_river_ds
         mock_river.return_value = mock_river_instance
-        
+        mock_ds = xr.Dataset()
         with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             # Mock xr.open_dataset to prevent file operations when opening source files
             with patch('xarray.combine_by_coords') as mock_combine:
@@ -1320,7 +1320,7 @@ class TestRomsMarblInputDataGenerateAll:
         })
         mock_river.return_value = mock_river_instance
 
-        with patch('cson_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
             (sample_roms_marbl_input_data.input_data_dir / "existing.nc").touch()
             mock_ds = xr.Dataset()
             with patch('xarray.combine_by_coords') as mock_combine:

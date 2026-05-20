@@ -1,0 +1,35 @@
+---
+roms_tools_version: 3.5.1.dev6+g40b5a2ea3
+---
+Grid:
+  nx: 208
+  ny: 192
+  size_x: 7300
+  size_y: 11100
+  center_lon: -165
+  center_lat: 40
+  rot: -90
+  N: 10
+  theta_s: 6.0
+  theta_b: 3.0
+  hc: 250.0
+  topography_source:
+    name: ETOPO5
+  mask_shapefile: null
+  hmin: 5.0
+InitialConditions:
+  ini_time: '2012-01-01T00:00:00'
+  source:
+    name: GLORYS
+    climatology: false
+    path:
+    - /Users/mclong/cson-forge-data/source-data/GLORYS_REGIONAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_REGIONAL_PAC_2fth_deg_20120101.nc
+    - /Users/mclong/cson-forge-data/source-data/GLORYS_REGIONAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_REGIONAL_PAC_2fth_deg_20120102.nc
+  bgc_source:
+    name: UNIFIED
+    climatology: true
+    path: /Users/mclong/cson-forge-data/source-data/UNIFIED_BGC/BGCdataset.nc
+  model_reference_date: '2000-01-01T00:00:00'
+  allow_flex_time: false
+  horizontal_chunk_size: 50
+  bypass_validation: false

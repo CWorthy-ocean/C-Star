@@ -1,0 +1,511 @@
+
+/* This is "cppdefs.opt": MODEL CONFIGURATION FILE
+   ==== == ============ ===== ============= ==== */
+#define CWORTHY
+
+#if defined CWORTHY
+
+!---------- Do not delete anything above this line! --------
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!! MODEL SETUP OPTIONS !!!!!!!!!!!!!!!!!!!!!!!!!
+
+! Attempt to do an exact restart using the initial conditions
+! Usage notes: Requires two time records in the init file; will return a warning but not crash the model if two records are not available. Only known to work with double-precision output.
+#define EXACT_RESTARTS
+
+! Use Jackett and McDougall (1995) nonlinear equation of state
+! Usage notes:
+#define NONLIN_EOS
+
+! Use salinity as a thermodynamic variable
+! Usage notes:
+#define SALINITY
+
+! Solve the governing equations in three dimensions
+! Usage notes: We have never tested what happens if this is undefined
+#define SOLVE3D
+
+! Use an equation of state that ensures that monotonically increasing density is equivalent to stable stratification
+! Usage notes:
+#define SPLIT_EOS
+
+! Apply tidal forcing
+! Usage notes:
+#define TIDES
+
+! Use advection in horizontal momentum equations
+! Usage notes:
+#define UV_ADV
+
+! Use Coriolis term in horizontal momentum equations
+! Usage notes:
+#define UV_COR
+
+!----------------------------------------------------------
+
+! Rotate the advection and diffusion operators so they are oriented in the isoneutral direction
+! Usage notes:
+#undef ADV_ISONEUTRAL
+
+! Switch to allow mixed [tiled + single-block] execution in OpenMP.
+!Usage notes: Useful for debugging purposes only. Normally should be kept undefined.
+#undef ALLOW_SINGLE_BLOCK_MODE
+
+! Keep tracer values constant in time and space
+! Usage notes: At each timestep the tracer tendencies will be calculated, but in the end it will just keep the value it had at the previous timestep
+#undef CONST_TRACERS
+
+! Enable the calculation and writing of "diagnostics" (term-by-term momentum and tracer budgets)
+! Usage notes: Options are set in diagnostics.opt
+#undef DIAGNOSTICS
+
+! Enable the calculation and writing of "diagnostics" for the nonhydrostatic vertical velocity equation
+! Usage notes:
+#undef DIAGNOSTICS_NHMG
+
+! Use non-hydrostatic momentum equations
+! Usage notes: Solves prognostically for the vertical velocity. Apprximately doubles the cost of the model.
+! WARNING: Presently untested and unmaintained by [C]Worthy. May break important features like exact restarts, and may require extra inputs to work successfully (unknown).
+#undef NHMG
+
+! Write momentum equation diagnostics for non-hydrostatic mode
+! Usage notes:
+#undef NHMGDIAG
+
+! During initialization print information about the HPC cluster and MPI setup
+! Usage notes:
+#undef PRINT_HOSTNAME
+
+! Make each MPI rank print the size of its local subdomain
+! Usage notes:
+#undef PRINT_TILE_RANGES
+
+! Enable special forcing for marine CO2 removal
+! Usage notes: Required inputs and fields are specified in cdr_frc.opt.
+#undef CDR_FORCING
+
+! Save advective tendencies at lateral boundaries for use in upscaling applications.
+! Usage notes: Meant to be used in child domains when forcing will be subsequently applied to parent domains. Only saves ALK and DIC perturbations. Requires MARBL and MARBL_DIAGS to be enabled.
+#undef UPSCALING
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!! GRID OPTIONS !!!!!!!!!!!!!!!!!!!!!!!!!
+
+! Use an orthogonal curvilinear grid
+! Usage notes: Makes slight adjustments to the velocity tendencies due to spatial changes in dx and dy
+#define CURVGRID
+
+! Use land masks for tracer and velocity points to set values to zero
+! Usage notes: It is recommended that this flag is always enabled
+#define MASKING
+
+! Use a spherical geometry in the grid setup
+! Usage notes: The model will look for coordinates based on latitude and longitude instead of distance
+#define SPHERICAL
+
+! Increase viscosity and diffusivity for momentum and tracers near the lateral boundaries
+! Usage notes: The magnitude is set under the header "v_sponge" in the runtime .in file
+#define SPONGE
+
+!----------------------------------------------------------
+
+! Analytically prescribe the grid
+! Usage notes: Hardcoded in analytical.F
+#undef ANA_GRID
+
+! Make the domain periodic in the east-west direction
+! Usage notes: This has not been tested or used, so it is unclear whether it would induce conflicts with more recent code
+#undef EW_PERIODIC
+
+! Use horizontal components of Coriolis force
+! Usage notes: Presently only affects density calculation (possibly incomplete implementation?)
+#undef NON_TRADITIONAL
+
+! Make the domain periodic in the north-south direction
+! Usage notes: This has not been tested or used, so it is unclear whether it would induce conflicts with more recent code
+#undef NS_PERIODIC
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!! ATMOSPHERIC FORCING !!!!!!!!!!!!!!!!!!!!!!!!!
+
+! Use the bulk forcing module for atmospheric forcing
+! Usage notes: ROMS will use flux forcing if this CPP key is not set and the ANA_ keys are not present
+#define BULK_FRC
+
+!----------------------------------------------------------
+
+! Analytically prescribe surface momentum flux (with flux forcing)
+! Usage notes: Hardcoded in analytical.F
+#undef ANA_SMFLUX
+
+! Analytically prescribe surface shortwave radiative flux (with flux forcing)
+! Usage notes: Hardcoded in analytical.F
+#undef ANA_SRFLUX
+
+! Analytically prescribe surface salinity flux (with flux forcing)
+! Usage notes: Hardcoded in analytical.F
+#undef ANA_SSFLUX
+
+! Analytically prescribe surface heat flux (with flux forcing)
+! Usage notes: Hardcoded in analytical.F
+#undef ANA_STFLUX
+
+! Modulate daily-averaged shortwave radiation to simulate a diurnal cycle
+! Usage notes: This seems to be an artifact from a time before hourly swrad was available.  Likely obsolete for this reason.
+#undef DIURNAL_SRFLUX
+
+! Apply restoring to sea surface temperature
+! Usage notes:
+#undef QCORRECTION
+
+! Apply restoring to sea surface salinity
+! Usage notes:
+#undef SFLX_CORR
+
+! Apply a correction to the wind stress to bring it closer to observations
+! Usage notes: Only used in conjunction with the BULK_FORCING module. Requires additional fields in the input file.
+#undef TAU_CORRECTION
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!! NUMERICAL ALGORITHMS !!!!!!!!!!!!!!!!!!!!!!!!!
+
+! Use the fourth-order Akima scheme for horizontal advection
+! Usage notes: Overrides the default 3rd-order upstream advection
+#undef AKIMA
+
+! Use the fourth-order Akima scheme for vertical advection
+! Usage notes: Overrides the default piecewise parabolic reconstruction
+#undef AKIMA_V
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!! BOUNDARY CONDITIONS !!!!!!!!!!!!!!!!!!!!!!!!!
+
+! Apply barotropic (2D) momentum forcing at the open boundaries
+! Usage notes: Can be combined with other keys (M2NUDGING, OBC_M2SPECIFIED) to have different effects. Requires inputs for ubar and vbar.
+#define M2_FRC_BRY
+
+! Apply baroclinic (3D) momentum forcing at the open boundaries
+! Usage notes: Can be combined with other keys (SPONGE_TUNE, OBC_M3SPECIFIED) to have different effects. Requires inputs for u and v (and w, if non-hydrostatic).
+#define M3_FRC_BRY
+
+! Use an open boundary on the "east" side of the domain
+! Usage notes: "East" in this context refers to MPI nodes with i-rank = NP_XI-1
+#define OBC_EAST
+
+! Use the Flather scheme for the 2D dynamical fields at open boundaries
+! Usage notes:
+#define OBC_M2FLATHER
+
+! Use the Orlanski scheme for the 3D dynamical fields at open boundaries
+! Usage notes: Designed to allow waves to exit the domain with minimal reflection
+#define OBC_M3ORLANSKI
+
+! Use an open boundary on the "north" side of the domain
+! Usage notes: "North" in this context refers to MPI nodes with j-rank = NP_ETA-1
+#define OBC_NORTH
+
+! Use an open boundary on the "south" side of the domain
+! Usage notes: "South" in this context refers to MPI nodes with j-rank = 0
+#define OBC_SOUTH
+
+! Use the Orlanski scheme for the thermodynamical fields at open boundaries
+! Usage notes: Designed to allow waves to exit the domain with minimal reflection
+#define OBC_TORLANSKI
+
+! Use an open boundary on the "west" side of the domain
+! Usage notes: "West" in this context refers to MPI nodes with i-rank = 0
+#define OBC_WEST
+
+! Apply tracer forcing at the open boundaries
+! Usage notes: Requires inputs for each thermodynamic and biogeochemical tracer.
+#define T_FRC_BRY
+
+! Apply SSH forcing at the open boundaries
+! Usage notes: Requires inputs for SSH.
+#define Z_FRC_BRY
+
+!----------------------------------------------------------
+
+! Analytically prescribe the lateral boundary conditions
+! Usage notes:  Hardcoded in analytical.F
+#undef ANA_BRY
+
+! Use the Orlanski scheme for the 2D dynamical fields at open boundaries
+! Usage notes: Designed to allow waves to exit the domain with minimal reflection
+#undef OBC_M2ORLANSKI
+
+! Use "clamped" boundary conditions for the 3D dynamical fields at open boundaries
+! Usage notes:
+#undef OBC_M3SPECIFIED
+
+! Calculate radiation for the Orlanski scheme using only the normal component of the velocity
+! Usage notes: Only has an effect if OBC_M2ORLANSKI or OBC_M3ORLANSKI is enabled
+#undef OBC_RAD_NORMAL
+
+! Explicitly set radiation for the Orlanski scheme to be zero for the velocity parallel to the boundary
+! Usage notes: Only has an effect if OBC_RAD_NORMAL is enabled
+#undef OBC_RAD_NPO
+
+! Use "clamped" boundary conditions for the thermodynamical fields at open boundaries
+! Usage notes:
+#undef OBC_TSPECIFIED
+
+! Add baroclinic pressure fluxes at open boundaries
+! Usage notes: Used in the child domain during downscaling of nested simulations. Requires pressure fluxes to be saved in the parent simulation. Use is optional.
+#undef SPONGE_TUNE
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!! MIXING OPTIONS !!!!!!!!!!!!!!!!!!!!!!!!!
+
+! Use the KPP parameterization (Large et al., 1994) in the bottom boundary layer
+! Usage notes:
+#define LMD_BKPP
+
+! Compute double-diffusive mixing (Large et al., 1994)
+! Usage notes:
+#undef LMD_DDMIX
+
+! Use the KPP parameterization (Large et al., 1994) in the surface boundary layer
+! Usage notes:
+#define LMD_KPP
+
+! Enable and compute various parameterizations from Large et al., 1994 (KPP, etc.)
+! Usage notes: This is the overarching CPP key for all other LMD keys. This needs to be defined in order for KPP and others to be used.
+#define LMD_MIXING
+
+! Compute the non-local term in the KPP parameterization
+! Usage notes: Can be used with either/both LMD_KPP and LMD_BKPP
+#define LMD_NONLOCAL
+
+! Compute mixing due to breaking internal waves
+! Usage notes: Designed only to have an effect where local gradient Richardson number is small
+#define LMD_RIMIX
+
+! Apply Laplacian diffusion along sigma-surfaces
+! Usage notes: Diffusivities are specified under the "tracer_diff2" header in the runtime .in file
+#define TS_DIF2
+
+! Apply Laplacian viscosity along sigma-surfaces
+! Usage notes: Viscosities are specified under the "lateral_visc" header in the runtime .in file
+#define UV_VIS2
+
+!----------------------------------------------------------
+
+! Analytically prescribe vertical mixing coefficient
+! Usage notes: Hardcoded in analytical.F
+#undef ANA_VMIX
+
+! Treat the eastern boundary as if it is a "wall" in the calculation of the biharmonic viscosity
+! Usage notes: Only affects how the biharm viscosity is computed; has no other effect
+#undef EASTERN_WALL
+
+! If surface and bottom boundary layers overlap, set them both to be the entire depth of the water column
+! Usage notes: Unclear whether this is needed for physical or numerical reasons; disabled by default
+#undef MERGE_OVERLAP
+
+! Mellor-Yamada second-order vertical mixing scheme
+! Usage notes:
+#undef MY25_MIXING
+
+! Treat the northern boundary as if it is a "wall" in the calculation of the biharmonic viscosity
+! Usage notes: Only affects how the biharm viscosity is computed; has no other effect
+#undef NORTHERN_WALL
+
+! Treat the southern boundary as if it is a "wall" in the calculation of the biharmonic viscosity
+! Usage notes: Only affects how the biharm viscosity is computed; has no other effect
+#undef SOUTHERN_WALL
+
+! Apply biharmonic diffusion along sigma-surfaces
+! Usage notes: Currently not fully implemented (do not use)
+#undef TS_DIF4
+
+! Treat the western boundary as if it is a "wall" in the calculation of the biharmonic viscosity
+! Usage notes: Only affects how the biharm viscosity is computed; has no other effect
+#undef WESTERN_WALL
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!! BIOGEOCHEMICAL OPTIONS !!!!!!!!!!!!!!!!!!!!!!!!!
+
+! Use the MARBL biogeochemical library
+! Usage notes: Cannot be used simultaneously with BIOLOGY_BEC2
+#define MARBL
+
+! Enable the writing of diagnostics and other variables from the MARBL biogeochemical library
+! Usage notes: Specific variables can be requested in the runtime "marbl_diagnostic_output_list" file
+#define MARBL_DIAGS
+
+! Use ammonia atmospheric forcing
+! Usage notes:
+#define NHY_FORCING
+
+! Use nitrogen oxide atmospheric forcing
+! Usage notes:
+#define NOX_FORCING
+
+! Use atmospheric forcing for CO2
+! Usage notes:
+#define PCO2AIR_FORCING
+
+!----------------------------------------------------------
+
+! Enable BEC biogeochemical model
+! Usage notes: Only associated with BEC
+#undef BIOLOGY_BEC2
+
+! Enable BEC diagnostics
+! Usage notes: Only associated with BEC
+#undef BEC2_DIAG
+
+! Use the daily averaged photosynthetically available radiation instead of instantaneous
+! Usage notes: Only works with BEC, and only with BULK_FRC enabled
+#undef DAILYPAR_BEC
+
+! Use a 1st-order advection scheme only for BGC tracers
+! Usage notes: Likely for testing purposes only
+#undef BIO_1ST_USTREAM_TEST
+
+! Use a bottom boundary layer formulation in updating sediment thickness
+! Usage notes: Only used in the "sediment" module associated with BEC
+#undef BBL
+
+! Restore to specified concentration of nitrate
+! Usage notes: Only works with BEC2. May require an input file (unknown)
+#undef NO3_RESTORE
+
+! Nitrogen Cycle with NO2, N2O and N2 tracers
+! Usage notes: Only works with BEC2
+#undef Ncycle_SY
+
+! Apply temperature dependency for particulate remineralization
+! Usage notes: Only used in the BEC2 biogeochemical module.
+#undef TDEP_REMIN
+
+!!!!!!!!!!!!!!!!!!!!!!!!! MISCELLANEOUS !!!!!!!!!!!!!!!!!!!!!!!!!
+
+! Analytically prescribe the initial conditions
+! Usage notes: Hardcoded in analytical.F
+#undef ANA_INITIAL
+
+! Analytically prescribe pipe forcing
+! Usage notes: Hardcoded in ana_grid.h
+#undef ANA_PIPES
+
+
+
+!---------- Do not delete anything below this line! --------
+#endif
+
+#include "set_global_definitions.h"
+
+
+
+
+
+
+
+/* This is "cppdefs.opt": MODEL CONFIGURATION FILE
+   ==== == ============ ===== ============= ==== */
+
+/*
+ * CHOOSE ONLY ONE PRIMARY FLAG FOR SWITCH LIST BELOW
+ */
+
+#define PACIFIC_PD
+
+#if defined PACIFIC_PD
+
+/* Basics */
+#define SOLVE3D
+#define UV_ADV
+#define UV_COR
+#define ADV_ISONEUTRAL
+
+#define UPSCALING
+
+/* Equation of State */
+#define SALINITY
+#define NONLIN_EOS
+#define SPLIT_EOS
+
+#define SEA_ICE_NOFLUX
+
+/*  Forcing */
+
+/*   - surface */
+#define BULK_FRC
+#undef VFLX_CORR
+#undef QCORRECTION
+#undef DIURNAL_SRFLUX
+
+/*   - lateral */
+#define T_FRC_BRY
+#define Z_FRC_BRY
+#define M2_FRC_BRY
+#define M3_FRC_BRY
+#define SPONGE
+#define SPONGE_WIDTH /* # of sponge points is input parameter */
+
+/* Mixing */
+
+/*  - lateral */
+#define UV_VIS2
+#define TS_DIF2
+
+/*  - vertical */
+#define LMD_MIXING
+#define LMD_KPP
+#define LMD_NONLOCAL
+#define LMD_RIMIX
+#define LMD_CONVEC
+#define LMD_BKPP
+
+#define IMPLICIT_BOTTOM_DRAG
+
+/* Grid Configuration */
+#define CURVGRID
+#define SPHERICAL
+#define MASKING
+
+/* Output Options */
+#define MASK_LAND_DATA
+
+/* Restart */
+#define EXACT_RESTART
+
+/* Open Boundary Conditions */
+#define OBC_WEST
+#define OBC_EAST
+#define OBC_NORTH
+#define OBC_SOUTH
+
+/* Open Boundaries */
+#define OBC_M2FLATHER  /* Barotop. BC: OBC_M2FLATHER, OBC_M2ORLANSKI, OBC_M2SPECIFIED */
+#define OBC_M3ORLANSKI /* Baroclin. BC: OBC_M3ORLANSKI, OBC_M3SPECIFIED */
+#define OBC_TORLANSKI  /* Tracer BC: OBC_TORLANSKI, OBC_TSPECIFIED */
+#define OBC_TSPECIFIED
+
+/* Tides */
+#define TIDES
+#ifdef TIDES
+#  define POT_TIDES
+#  define SSH_TIDES
+#  define UV_TIDES
+#endif
+
+#define MARBL
+
+# define DIAGNOSTICS
+
+#ifdef MARBL
+#  define MARBL_DIAGS
+#  define NOX_FORCING
+#  define NHY_FORCING
+#endif
+
+#define PCO2AIR_FORCING
+
+#endif
+
+#include "set_global_definitions.h"
+

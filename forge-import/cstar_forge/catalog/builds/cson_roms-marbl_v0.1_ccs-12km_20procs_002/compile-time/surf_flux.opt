@@ -1,0 +1,20 @@
+      ! ****************************************************************
+      ! User inputs
+
+      logical,public,parameter :: wrt_smflx = .false.              ! output surface momentum flux
+      logical,public,parameter :: wrt_stflx = .false.              ! output surface tracer flux
+      logical,parameter :: sflx_avg  = .false.              ! write averaged sflx data
+
+      real,parameter           :: output_period = 31536000       ! output averaging period in seconds
+      integer,parameter        :: nrpf          = 10        ! total recs per file
+
+
+      ! edit variable name and time name to match input netcdf file if necessary:          
+      type (ncforce) :: nc_sst  = ncforce(vname='sst',tname='sst_time' )       ! sea-surface temperature (SST) data
+      type (ncforce) :: nc_sss  = ncforce(vname='sss',tname='sss_time' )       ! sea-surface salinity (SSS) data
+
+      ! interpolate forcing from coarser input grid (=1) or not (=0)
+      integer :: interp_frc = 1 ! For SST and SSS correction
+
+      ! End of user inputs
+      ! *************************************************************

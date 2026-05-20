@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 import pandas as pd
 
-from .. import config
+from . import config
 import roms_tools as rt
 
 

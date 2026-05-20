@@ -1,0 +1,184 @@
+compile_time:
+  bgc:
+    wrt_his: true
+    output_period_his: 86400
+    nrpf_his: 7
+    wrt_avg: false
+    output_period_avg: 86400
+    nrpf_avg: 7
+    wrt_his_dia: true
+    output_period_his_dia: 86400
+    nrpf_his_dia: 7
+    wrt_avg_dia: false
+    output_period_avg_dia: 60
+    nrpf_avg_dia: 1
+    nbgc_flx: 2
+    interp_frc: 0
+  blk_frc:
+    interp_frc: 0
+  cppdefs:
+    obc_west: true
+    obc_east: true
+    obc_north: true
+    obc_south: true
+    marbl: true
+  param:
+    LLm: 224
+    MMm: 440
+    N: 60
+    NP_XI: 14
+    NP_ETA: 20
+    NSUB_X: 1
+    NSUB_E: 1
+    nt_passive: 0
+    ntrc_bio: 32
+  ocean_vars:
+    wrt_file_rst: true
+    output_period_rst: 43200
+    monthly_restarts: false
+    nrpf_rst: 2
+    wrt_file_his: true
+    output_period_his: 86400
+    nrpf_his: 7
+    wrt_Z: true
+    wrt_Ub: true
+    wrt_Vb: true
+    wrt_U: true
+    wrt_V: true
+    wrt_R: false
+    wrt_O: false
+    wrt_W: true
+    wrt_Akv: false
+    wrt_Akt: false
+    wrt_Aks: false
+    wrt_Hbls: false
+    wrt_Hbbl: false
+    wrt_file_avg: false
+    output_period_avg: 604800
+    nrpf_avg: 1
+    wrt_avg_Z: true
+    wrt_avg_Ub: true
+    wrt_avg_Vb: true
+    wrt_avg_U: true
+    wrt_avg_V: true
+    wrt_avg_R: true
+    wrt_avg_O: true
+    wrt_avg_W: true
+    wrt_avg_Akv: true
+    wrt_avg_Akt: true
+    wrt_avg_Aks: true
+    wrt_avg_Hbls: true
+    wrt_avg_Hbbl: true
+    code_check: false
+  surf_flux:
+    wrt_smflx: false
+    wrt_stflx: false
+    sflx_avg: false
+    output_period: 31536000
+    nrpf: 10
+    sst_vname: sst
+    sst_tname: sst_time
+    sss_vname: sss
+    sss_tname: sss_time
+    interp_frc: 1
+  tides:
+    ntides: 10
+    bry_tides: true
+    pot_tides: true
+    ana_tides: false
+  river_frc:
+    river_source: true
+    analytical: false
+    nriv: 34
+    rvol_vname: river_volume
+    rvol_tname: river_time
+    rtrc_vname: river_tracer
+    rtrc_tname: river_time
+  diagnostics:
+    diag_avg: false
+    output_period: 86400
+    nrpf: 7
+    diag_uv: false
+    diag_trc: false
+    diag_pflx: true
+    timescale: 86400
+    diag_prec: nf90_double
+  tracers:
+    interp_t: 1
+  cdr_frc:
+    cdr_source: false
+    cdr_volume: true
+    cdr_analytical: false
+    ncdr: 1
+    cdr_file: cdr_forcing.nc
+    cdrvol_vname: cdr_volume
+    cdrvol_tname: cdr_time
+    cdrtrc_vname: cdr_tracer
+    cdrtrc_tname: cdr_time
+    cdrflx_vname: cdr_trcflx
+    cdrflx_tname: cdr_time
+    cdr_loc_lon: cdr_lon
+    cdr_loc_lat: cdr_lat
+    cdr_loc_dep: cdr_dep
+    cdr_scl_hor: cdr_hsc
+    cdr_scl_vrt: cdr_vsc
+  sponge_tune:
+    pflx_w_vname: up_west
+    pflx_w_tname: bry_time
+    pflx_e_vname: up_east
+    pflx_e_tname: bry_time
+    pflx_s_vname: vp_south
+    pflx_s_tname: bry_time
+    pflx_n_vname: vp_north
+    pflx_n_tname: bry_time
+    ub_tune: false
+    spn_avg: true
+    sp_timscale: 86400
+    wrt_sponge: true
+    nrpf: 7
+    output_period: 86400
+run_time:
+  roms.in:
+    title:
+      casename: cson_roms-marbl_v0.1_ccs-12km_280procs_20240101-20240102
+    time_stepping:
+      ntimes: 2700
+      dt: 32
+      ndtfast: 60
+      ninfo: 1
+    s_coord:
+      tcline: 250.0
+      theta_b: 6.0
+      theta_s: 6.0
+    grid:
+      grid_file: /anvil/projects/x-ees250129/cson-forge-data/x-mlong/input-data/cson_roms-marbl_v0.1_ccs-12km_280procs/cson_roms-marbl_v0.1_ccs-12km_280procs_grid.nc
+    forcing:
+      surface_forcing_path: /anvil/projects/x-ees250129/cson-forge-data/x-mlong/input-data/cson_roms-marbl_v0.1_ccs-12km_280procs/cson_roms-marbl_v0.1_ccs-12km_280procs_surface-physics_202401.nc
+      surface_forcing_bgc_path: /anvil/projects/x-ees250129/cson-forge-data/x-mlong/input-data/cson_roms-marbl_v0.1_ccs-12km_280procs/cson_roms-marbl_v0.1_ccs-12km_280procs_surface-bgc_clim.nc
+      boundary_forcing_path: /anvil/projects/x-ees250129/cson-forge-data/x-mlong/input-data/cson_roms-marbl_v0.1_ccs-12km_280procs/cson_roms-marbl_v0.1_ccs-12km_280procs_boundary-physics_202401.nc
+      boundary_forcing_bgc_path: /anvil/projects/x-ees250129/cson-forge-data/x-mlong/input-data/cson_roms-marbl_v0.1_ccs-12km_280procs/cson_roms-marbl_v0.1_ccs-12km_280procs_boundary-bgc_clim.nc
+      river_path: /anvil/projects/x-ees250129/cson-forge-data/x-mlong/input-data/cson_roms-marbl_v0.1_ccs-12km_280procs/cson_roms-marbl_v0.1_ccs-12km_280procs_river.nc
+    lateral_visc:
+      visc2: 0.0
+      visc4: 0.0
+      rho0: 1000.0
+    output_root_name:
+      output_root_name: /anvil/scratch/x-mlong/cson-forge-run/cson_roms-marbl_v0.1_ccs-12km_280procs_20240101-20240102/output/cson_roms-marbl_v0.1_ccs-12km_280procs_20240101-20240102
+    vertical_mixing:
+      akv: 0.0
+      akt_default: 0.0
+    tracer_diff2:
+      tnu2_default: 0.0
+    bottom_drag:
+      rdrg: 0.0
+      rdrg2: 0.001
+      zob: 0.01
+      cdb_min: 0.0001
+      cdb_max: 0.01
+    v_sponge:
+      v_sponge: 0.0
+    gamma2: 1.0
+    ubind: 0.1
+    initial:
+      nrrec: 1
+      initial_file: /anvil/projects/x-ees250129/cson-forge-data/x-mlong/input-data/cson_roms-marbl_v0.1_ccs-12km_280procs/cson_roms-marbl_v0.1_ccs-12km_280procs_initial_conditions.nc

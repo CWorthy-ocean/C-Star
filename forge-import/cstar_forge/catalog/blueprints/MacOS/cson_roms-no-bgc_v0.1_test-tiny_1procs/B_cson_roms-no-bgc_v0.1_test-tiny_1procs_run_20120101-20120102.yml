@@ -1,0 +1,104 @@
+name: cson_roms-no-bgc_v0.1_test-tiny_1procs
+description: Test tiny
+application: roms_marbl
+state: notset
+valid_start_date: '2012-01-01T00:00:00'
+valid_end_date: '2012-01-02T00:00:00'
+code:
+  roms:
+    documentation: ''
+    locked: false
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    commit: 84f4ee7886e9ee4c33b3248b35c955551f3b9c06
+    branch: ''
+    filter: null
+  run_time:
+    documentation: ''
+    locked: false
+    location: /Users/mclong/codes/cson-forge/cson_forge/catalog/builds/cson_roms-no-bgc_v0.1_test-tiny_1procs/run-time
+    commit: ''
+    branch: na
+    filter:
+      files:
+      - roms.in
+  compile_time:
+    documentation: ''
+    locked: false
+    location: /Users/mclong/codes/cson-forge/cson_forge/catalog/builds/cson_roms-no-bgc_v0.1_test-tiny_1procs/compile-time
+    commit: ''
+    branch: na
+    filter:
+      files:
+      - Makefile
+      - blk_frc.opt
+      - cdr_frc.opt
+      - cppdefs.opt
+      - diagnostics.opt
+      - ocean_vars.opt
+      - param.opt
+      - river_frc.opt
+      - sponge_tune.opt
+      - surf_flux.opt
+      - tides.opt
+      - tracers.opt
+  marbl:
+    documentation: ''
+    locked: false
+    location: https://github.com/marbl-ecosys/MARBL.git
+    commit: marbl0.45.0
+    branch: ''
+    filter: null
+initial_conditions:
+  documentation: ''
+  locked: false
+  data:
+  - location: /Users/mclong/cson-forge-data/input-data/cson_roms-no-bgc_v0.1_test-tiny_1procs/cson_roms-no-bgc_v0.1_test-tiny_1procs_initial_conditions.nc
+    partitioned: false
+grid:
+  documentation: ''
+  locked: false
+  data:
+  - location: /Users/mclong/cson-forge-data/input-data/cson_roms-no-bgc_v0.1_test-tiny_1procs/cson_roms-no-bgc_v0.1_test-tiny_1procs_grid.nc
+    partitioned: false
+forcing:
+  boundary:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-no-bgc_v0.1_test-tiny_1procs/cson_roms-no-bgc_v0.1_test-tiny_1procs_boundary-physics_201201.nc
+      partitioned: false
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-no-bgc_v0.1_test-tiny_1procs/cson_roms-no-bgc_v0.1_test-tiny_1procs_boundary-bgc_clim.nc
+      partitioned: false
+  surface:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-no-bgc_v0.1_test-tiny_1procs/cson_roms-no-bgc_v0.1_test-tiny_1procs_surface-physics_201201.nc
+      partitioned: false
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-no-bgc_v0.1_test-tiny_1procs/cson_roms-no-bgc_v0.1_test-tiny_1procs_surface-bgc_clim.nc
+      partitioned: false
+  tidal:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-no-bgc_v0.1_test-tiny_1procs/cson_roms-no-bgc_v0.1_test-tiny_1procs_tidal.nc
+      partitioned: false
+  river:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-no-bgc_v0.1_test-tiny_1procs/cson_roms-no-bgc_v0.1_test-tiny_1procs_river.nc
+      partitioned: false
+  corrections: null
+partitioning:
+  documentation: ''
+  locked: false
+  hash: null
+  n_procs_x: 1
+  n_procs_y: 1
+model_params:
+  time_step: 1800
+runtime_params:
+  start_date: '2012-01-01T00:00:00'
+  end_date: '2012-01-02T00:00:00'
+  output_dir: /Users/mclong/cson-forge-data/cson-forge-run/cson_roms-no-bgc_v0.1_test-tiny_1procs_20120101-20120102

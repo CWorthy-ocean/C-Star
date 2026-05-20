@@ -1,0 +1,81 @@
+name: cson_roms-marbl_v0.1_NEP-4th_deg_128procs
+description: Northeast Pacific 1/4 deg (nested)
+application: roms_marbl
+state: notset
+valid_start_date: '2012-01-01T00:00:00'
+valid_end_date: '2012-01-02T00:00:00'
+code:
+  roms:
+    documentation: ''
+    locked: false
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    commit: 84f4ee7886e9ee4c33b3248b35c955551f3b9c06
+    branch: ''
+    filter: null
+  run_time:
+    documentation: ''
+    locked: false
+    location: placeholder://run_time
+    commit: ''
+    branch: main
+    filter: null
+  compile_time:
+    documentation: ''
+    locked: false
+    location: placeholder://compile_time
+    commit: ''
+    branch: main
+    filter: null
+  marbl:
+    documentation: ''
+    locked: false
+    location: https://github.com/marbl-ecosys/MARBL.git
+    commit: marbl0.45.0
+    branch: ''
+    filter: null
+initial_conditions:
+  documentation: ''
+  locked: false
+  data:
+  - location: /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_initial_conditions.nc
+    partitioned: false
+grid:
+  documentation: ''
+  locked: false
+  data:
+  - location: /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_grid.nc
+    partitioned: false
+forcing:
+  boundary:
+    documentation: ''
+    locked: false
+    data: []
+  surface:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_surface-physics_201112.nc
+      partitioned: false
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_surface-physics_201201.nc
+      partitioned: false
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_surface-bgc_clim.nc
+      partitioned: false
+  tidal:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_tidal.nc
+      partitioned: false
+  river:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/mclong/cson-forge-data/input-data/cson_roms-marbl_v0.1_NEP-4th_deg_128procs/cson_roms-marbl_v0.1_NEP-4th_deg_128procs_river.nc
+      partitioned: false
+  corrections: null
+partitioning:
+  documentation: ''
+  locked: false
+  hash: null
+  n_procs_x: 16
+  n_procs_y: 8

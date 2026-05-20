@@ -1,0 +1,19 @@
+---
+roms_tools_version: 3.3.0
+---
+Grid:
+  nx: 6
+  ny: 2
+  size_x: 500
+  size_y: 1000
+  center_lon: 0
+  center_lat: 55
+  rot: 10
+  N: 3
+  theta_s: 5.0
+  theta_b: 2.0
+  hc: 250.0
+  topography_source:
+    name: ETOPO5
+  mask_shapefile: null
+  hmin: 5.0

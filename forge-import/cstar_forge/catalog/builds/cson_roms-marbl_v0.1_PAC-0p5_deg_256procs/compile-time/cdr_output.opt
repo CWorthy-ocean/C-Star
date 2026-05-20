@@ -1,0 +1,14 @@
+
+      !-----------------------------------------------------------
+      ! User inputs for cdr output module
+      !
+      !-----------------------------------------------------------
+
+      logical,public,parameter :: do_cdr = .false.
+      logical,parameter        :: do_avg = .true.  ! NOTE: For most applications it is recommended that do_avg = .true.
+      logical,parameter        :: monthly_averages = .false. ! This overrides output_period
+      real   ,parameter :: output_period = 3600 ! in seconds
+      integer,parameter :: nrpf   = 24          ! number of frames per file
+
+      !
+      !-----------------------------------------------------------

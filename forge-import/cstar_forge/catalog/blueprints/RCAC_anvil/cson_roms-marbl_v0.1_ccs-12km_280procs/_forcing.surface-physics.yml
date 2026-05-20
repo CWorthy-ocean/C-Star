@@ -1,0 +1,32 @@
+---
+roms_tools_version: 3.4.0
+---
+Grid:
+  nx: 224
+  ny: 440
+  size_x: 2688
+  size_y: 5280
+  center_lon: -134.5
+  center_lat: 39.6
+  rot: 33.3
+  N: 60
+  theta_s: 6.0
+  theta_b: 6.0
+  hc: 250.0
+  topography_source:
+    name: ETOPO5
+  mask_shapefile: null
+  hmin: 5.0
+SurfaceForcing:
+  start_time: '2024-01-01T00:00:00'
+  end_time: '2024-01-02T00:00:00'
+  source:
+    name: ERA5
+    climatology: false
+    path: gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3
+  type: physics
+  correct_radiation: true
+  wind_dropoff: false
+  coarse_grid_mode: never
+  model_reference_date: '2000-01-01T00:00:00'
+  bypass_validation: false

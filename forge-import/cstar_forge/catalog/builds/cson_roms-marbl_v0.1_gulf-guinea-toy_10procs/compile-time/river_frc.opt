@@ -1,0 +1,11 @@
+      ! ****************************************************************
+      ! user inputs
+      logical,parameter,public :: river_source = .true.    ! default should be false if not using rivers
+      logical,parameter        :: analytical   = .false.   ! analytical forcing, if false then realistic
+      integer,public,parameter :: nriv = 30                 ! number of rivers
+
+      ! realistic rivers only: enter netcdf variable name and time name
+      type (ncforce) :: nc_rvol = ncforce( vname='river_volume', tname='river_time')
+      type (ncforce) :: nc_rtrc = ncforce( vname='river_tracer', tname='river_time')
+      ! end user inputs
+      ! ****************************************************************
