@@ -16,6 +16,7 @@ from pydantic import (
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, is_feature_enabled
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, deep_merge, slugify
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
@@ -55,6 +56,9 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         Sequence[Step]
             Steps for each subtask resulting from the split.
         """
+        if not is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
+            return [step]
+
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date

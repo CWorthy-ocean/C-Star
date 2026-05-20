@@ -344,14 +344,21 @@ def test_workplan_transformer_applies_output_dir_overrides(
         An override that was already on the step before the WP transformer is invoked
     """
     wp_transformer = WorkplanTransformer(step_overiding_wp)
-    original_bp_path = step_overiding_wp.steps[0].blueprint_path
+    original_bp_path = Path(step_overiding_wp.steps[0].blueprint_path)
     step_orig: Step = step_overiding_wp.steps[0]
     bp_orig = deserialize(step_orig.blueprint_path, RomsMarblBlueprint)
+    mock_overrides = {"runtime_params": {"output_dir": test_output_dir_override}}
 
-    with mock.patch.dict(
-        os.environ,
-        {ENV_CSTAR_RUNID: "12345", ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_OFF},
-        clear=True,
+    with (
+        mock.patch.dict(
+            os.environ,
+            {ENV_CSTAR_RUNID: "12345", ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_OFF},
+            clear=True,
+        ),
+        mock.patch(
+            "cstar.orchestration.transforms.get_system_overrides",
+            mock.Mock(return_value=mock_overrides),
+        ),
     ):
         wp_trx = wp_transformer.apply()
 
@@ -378,7 +385,7 @@ def test_workplan_transformer_applies_output_dir_overrides(
     assert blueprint.runtime_params.output_dir != dir_orig
 
     # confirm the workplan override took precedence over any original override or output_dir
-    exp_dir = step_trx.fsm.root
+    exp_dir = test_output_dir_override
     assert blueprint.runtime_params.output_dir == exp_dir
     assert blueprint.runtime_params.output_dir != dir_orig
     assert blueprint.runtime_params.output_dir != original_override
