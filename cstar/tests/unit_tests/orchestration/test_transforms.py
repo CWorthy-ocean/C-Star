@@ -16,13 +16,15 @@ from cstar.applications.roms_marbl.transforms import (
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
-from cstar.orchestration.models import Application, Step, Workplan
+from cstar.orchestration.models import Application, BlueprintState, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
     OverrideTransform,
     TemplateFillTransform,
     WorkplanTransformer,
+    apply_automatic_overrides,
+    get_system_overrides,
     get_transforms,
 )
 
@@ -810,3 +812,34 @@ def test_restart_file_adapter(tmp_path: Path) -> None:
     data0 = data[0]
     assert data0["location"] == reset_file.path.as_posix()
     assert not data0["partitioned"]
+
+
+def test_app_specific_system_overrides(live_step_with_templates: LiveStep) -> None:
+    """Verify the default behavior contains an override for roms-marbl."""
+    live_step_with_templates.application = "roms_marbl"
+
+    sys_overrides_for_app = get_system_overrides(live_step_with_templates)
+    assert sys_overrides_for_app
+
+
+def test_apply_automatic_overrides(
+    live_step_with_templates: LiveStep, bp_templates_dir: Path
+) -> None:
+    """Verify that app-specific overrides are applied."""
+    live_step_with_templates.blueprint_overrides.clear()
+    Path(live_step_with_templates.blueprint_path).write_text(
+        (bp_templates_dir / "blueprint.yaml").read_text(),
+    )
+    assert live_step_with_templates.blueprint.state != BlueprintState.Validated
+
+    value = "validated"
+    mock_overrides = {"state": BlueprintState.Validated}
+
+    with mock.patch(
+        "cstar.orchestration.transforms.get_system_overrides",
+        mock.Mock(return_value=mock_overrides),
+    ):
+        step = apply_automatic_overrides(live_step_with_templates)
+
+    # the mocked system overrides should be applied
+    assert step.blueprint.state == value

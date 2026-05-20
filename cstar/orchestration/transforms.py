@@ -397,20 +397,13 @@ class WorkplanTransformer(LoggingMixin):
         if self.fill_transform is not None:
             step_index = {s.name: s for s in live_steps}
             fill = self.fill_transform.with_path_resolver(
-                lambda name: step_index[name].get_working_dir
+                lambda name: step_index[name].get_working_dir,
             )
             live_steps = [filled for step in live_steps for filled in fill(step)]
 
         # apply user blueprint_overrides and ensure consistent output targets;
         # must happen before time-splitting so the splitter reads correct blueprint values
-        steps: list[LiveStep] = []
-
-        for i in range(len(live_steps)):
-            step = live_steps[i]
-
-            if step.application in apply_to:
-                step = override_output_directory(step)
-            steps.append(step)
+        steps = [apply_automatic_overrides(step) for step in live_steps]
 
         if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             split_steps: list[LiveStep] = []
@@ -555,11 +548,25 @@ class OverrideTransform(Transform[LiveStep]):
         return "ovrd"
 
 
-def override_output_directory(step: LiveStep) -> LiveStep:
+def get_system_overrides(step: LiveStep) -> Mapping[str, t.Any]:
+    """Create a step-specific mapping of system-level overrides
+    that will be applied to orchestrated steps.
+
+    Returns
+    -------
+    LiveStep
+        The transformed step.
+    """
+    if step.application == "roms_marbl":
+        return {"runtime_params": {"output_dir": step.fsm.root}}
+    return {}
+
+
+def apply_automatic_overrides(step: LiveStep) -> LiveStep:
     """Automatically override the output directory specified in a blueprint
     to write to the C-Star home directories.
 
-    See `cstar.execution.file_system.DirectoryManager` for more detail
+    See `cstar.execution.file_system.JobFileSystemManager` for more detail
     on the available set of home directories.
 
     Returns
@@ -567,8 +574,11 @@ def override_output_directory(step: LiveStep) -> LiveStep:
     LiveStep
         The transformed step.
     """
-    sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
-    override_transform = OverrideTransform(sys_overrides)
+    sys_overrides = get_system_overrides(step)
+    if not sys_overrides:
+        return step
+
+    override_transform = OverrideTransform(sys_overrides=sys_overrides)
     overridden_step_result = override_transform(step)
 
     return overridden_step_result[0]
