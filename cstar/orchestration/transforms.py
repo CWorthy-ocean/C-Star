@@ -1,3 +1,4 @@
+import functools
 import itertools
 import re
 import typing as t
@@ -15,7 +16,7 @@ from cstar.applications.core import ApplicationDefinition, Transform, get_applic
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import deep_merge
-from cstar.execution.file_system import local_copy
+from cstar.execution.file_system import JobFileSystemManager, local_copy
 from cstar.orchestration.models import (
     Application,
     Blueprint,
@@ -165,8 +166,61 @@ def get_time_slices(
     return time_slices
 
 
+def fsm_resolver(
+    fsm_map: Mapping[str, JobFileSystemManager],
+    step_name: str,
+    purpose: str,
+) -> str:
+    """A resolver for attributes available on a file-system manager.
+
+    Parameters
+    ----------
+    fsm_map: Mapping[str, JobFileSystemManager]
+        Mapping from the step safe name to the related file-system manager
+    step_name: str
+        The step name to retrieve an FSM for
+    purpose : str
+        The purpose to be resolved (which attribute on the FSM instance).
+    """
+    fsm_attrs = [
+        p
+        for p in dir(next(iter(fsm_map.values())))
+        if not p.startswith("_") and p.endswith("_dir")
+    ]
+    fsm_attrs.append("root")
+    resolution_map = {
+        f"{step_name}_{fsm_attr}": str(getattr(fsm, fsm_attr))
+        for step_name, fsm in fsm_map.items()
+        for fsm_attr in fsm_attrs
+    }
+    if value := resolution_map.get(f"{step_name}_{purpose}"):
+        return value
+
+    ph = f"{{{purpose}: {step_name}}}"
+    msg = f"Unable to resolve {purpose!r} for placeholder {ph!r}"
+    raise ValueError(msg)
+
+
+def get_fsm_resolver(steps: Sequence[LiveStep]) -> Callable[[str, str], str]:
+    """Create a resolver function for file-system manager attributes.
+
+    Parameters
+    ----------
+    steps : Sequence[LiveStep]
+        The steps to be used in the creation of the resolver.
+
+    Returns
+    -------
+    Callable[[str, str], str]
+        Callable accepting the step name and purpose as parameters and returning
+        the resolved value.
+    """
+    fsm_map: dict[str, JobFileSystemManager] = {s.name: s.fsm for s in steps}
+    return functools.partial(fsm_resolver, fsm_map)
+
+
 class TemplateFillTransform:
-    """Fill ``{{placeholder}}`` template strings in a step's blueprint_overrides.
+    """Fill ``<purpose>: {{placeholder}}`` template strings in a step's blueprint_overrides.
 
     Recursively traverses the nested blueprint_overrides structure and
     dispatches each placeholder to one of two resolvers:
@@ -182,10 +236,13 @@ class TemplateFillTransform:
     ``blueprint_overrides`` is not mutated.
     """
 
+    _variable_resolver: Callable[[str], str] | None = None
+    _purpose_resolver: Callable[[str, str], str] | None = None
+
     def __init__(
         self,
         variable_resolver: Callable[[str], str] | None = None,
-        path_resolver: Callable[[str], Path] | None = None,
+        purpose_resolver: Callable[[str, str], str] | None = None,
     ) -> None:
         """Initialize the transform.
 
@@ -198,10 +255,11 @@ class TemplateFillTransform:
             when ``blueprint_overrides`` contains ``{{path: …}}`` tokens.
         """
         self._variable_resolver = variable_resolver
-        self._path_resolver = path_resolver
+        self._purpose_resolver = purpose_resolver
 
-    def with_path_resolver(
-        self, path_resolver: Callable[[str], Path]
+    def with_purpose_resolver(
+        self,
+        resolver: Callable[[str, str], str],
     ) -> "TemplateFillTransform":
         """Return a new instance with the given path resolver bound.
 
@@ -214,7 +272,10 @@ class TemplateFillTransform:
         -------
         TemplateFillTransform
         """
-        return TemplateFillTransform(self._variable_resolver, path_resolver)
+        return TemplateFillTransform(
+            self._variable_resolver,
+            resolver,
+        )
 
     @staticmethod
     def suffix() -> str:
@@ -240,18 +301,18 @@ class TemplateFillTransform:
         ValueError
             If the appropriate resolver has not been provided.
         """
-        if content.startswith("path:"):
-            step_name = content[len("path:") :].strip()
-            if self._path_resolver is None:
-                raise ValueError(
-                    f"No path resolver provided for placeholder '{{{{path: {step_name}}}}}'"
-                )
-            return str(self._path_resolver(step_name))
+        parts = content.split(":", maxsplit=1)
+        if len(parts) > 1:
+            purpose, ph = [x.strip() for x in parts]
+            if not self._purpose_resolver:
+                msg = f"No {purpose!r} resolver provided for placeholder {ph!r}"
+                raise ValueError(msg)
+
+            return self._purpose_resolver(ph, purpose)
 
         if self._variable_resolver is None:
-            raise ValueError(
-                f"No variable resolver provided for placeholder '{{{{{content}}}}}'"
-            )
+            msg = f"No variable resolver provided for placeholder '{{{{{content}}}}}'"
+            raise ValueError(msg)
         return self._variable_resolver(content)
 
     def _fill(self, step: LiveStep) -> LiveStep:
@@ -390,10 +451,9 @@ class WorkplanTransformer(LoggingMixin):
 
         # fill template placeholders before any other transform operates on overrides
         if self.fill_transform is not None:
-            step_index = {s.name: s for s in live_steps}
-            fill = self.fill_transform.with_path_resolver(
-                lambda name: step_index[name].get_working_dir,
-            )
+            resolver = get_fsm_resolver(live_steps)
+            fill = self.fill_transform.with_purpose_resolver(resolver)
+
             live_steps = [filled for step in live_steps for filled in fill(step)]
 
         # apply user blueprint_overrides and ensure consistent output targets;

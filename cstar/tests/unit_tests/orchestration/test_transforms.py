@@ -1,3 +1,4 @@
+# ruff: noqa: SLF001, S101
 import os
 import typing as t
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
     apply_automatic_overrides,
+    get_fsm_resolver,
     get_system_overrides,
     get_transforms,
 )
@@ -402,7 +404,7 @@ def live_step_with_templates(tmp_path: Path) -> LiveStep:
         blueprint=bp.as_posix(),
         blueprint_overrides={
             "input_dir": "{{base_dir}}/input",
-            "output_dir": "{{path: upstream}}/output",
+            "output_dir": "{{output_dir: upstream}}/output",
             "variables": ["{{var1}}", "{{var2}}"],
             "nested": {"key": "{{base_dir}}"},
             "count": 42,
@@ -438,9 +440,11 @@ def test_template_fill_path_substitution(
 ) -> None:
     """{{path: step_name}} tokens are replaced using the path resolver."""
     upstream_dir = tmp_path / "upstream"
-    path_resolver = lambda name: upstream_dir  # noqa: E731
 
-    transform = TemplateFillTransform(path_resolver=path_resolver)
+    def _resolve(_x: str, _y: str) -> str:
+        return str(upstream_dir)
+
+    transform = TemplateFillTransform(purpose_resolver=_resolve)
     step = LiveStep.from_step(
         live_step_with_templates,
         update={"blueprint_overrides": {"output_dir": "{{path: upstream}}/output"}},
@@ -511,7 +515,7 @@ def test_template_fill_missing_path_resolver_raises(
         live_step_with_templates,
         update={"blueprint_overrides": {"key": "{{path: some_step}}"}},
     )
-    with pytest.raises(ValueError, match="No path resolver"):
+    with pytest.raises(ValueError, match="No 'path' resolver"):
         list(transform(step))
 
 
@@ -520,12 +524,34 @@ def test_template_fill_with_path_resolver_returns_new_instance(
 ) -> None:
     """with_path_resolver returns a new instance; the original is unchanged."""
     original = TemplateFillTransform(variable_resolver=str)
-    bound = original.with_path_resolver(lambda _: tmp_path)
+
+    def _resolve(_x: str, _y: str) -> str:
+        return str(tmp_path)
+
+    bound = original.with_purpose_resolver(_resolve)
 
     assert bound is not original
-    assert bound._path_resolver is not None
-    assert original._path_resolver is None
+    assert bound._purpose_resolver is not None
+    assert original._purpose_resolver is None
     assert bound._variable_resolver is original._variable_resolver
+
+
+def test_template_fill_with_path_resolver_unknown_purpose(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """Verify that a template matching the purpose format `{{purpose: step_name}}`
+    raises an exception if the purpose cannot be resolved.
+    """
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {"key": "{{path: some_step}}"}},
+    )
+    resolver = get_fsm_resolver([step])
+
+    fill = TemplateFillTransform(variable_resolver=str, purpose_resolver=resolver)
+
+    with pytest.raises(ValueError, match="Unable to resolve"):
+        list(fill(step))
 
 
 def test_template_fill_does_not_mutate_original_step(
@@ -558,23 +584,41 @@ def test_template_fill_yields_single_step(live_step_with_templates: LiveStep) ->
     assert len(results) == 1
 
 
+@pytest.mark.parametrize(
+    "purpose",
+    [
+        "root",
+        "input_dir",
+        "work_dir",
+        "tasks_dir",
+        "logs_dir",
+        "output_dir",
+    ],
+)
 def test_template_fill_combined_resolvers(
-    tmp_path: Path, live_step_with_templates: LiveStep
+    tmp_path: Path, live_step_with_templates: LiveStep, purpose: str
 ) -> None:
-    """Variable and path resolvers can both operate in the same transform pass."""
+    """Variable and path resolvers can both operate in the same transform pass.
+
+    Parammeters
+    -----------
+    purpose : str
+        Parameterized value that ensures all expected/known purpose keys can be retrieved.
+    """
     upstream_dir = tmp_path / "tasks" / "upstream"
     variables = {"var1": "ALK"}
     transform = TemplateFillTransform(
         variable_resolver=variables.__getitem__,
-        path_resolver=lambda _: upstream_dir,
+        purpose_resolver=lambda _key, _purpose: str(upstream_dir),
     )
+    template = f"{{{{{purpose}: var1}}}}"
     step = LiveStep.from_step(
         live_step_with_templates,
         update={
             "blueprint_overrides": {
                 "variable": "{{var1}}",
-                "input_dir": "{{path: upstream}}/joined_output",
-            }
+                "input_dir": f"{template}/joined_output",
+            },
         },
     )
     (result,) = transform(step)
