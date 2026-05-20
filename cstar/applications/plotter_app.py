@@ -11,7 +11,6 @@ from cstar.base.utils import lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
-from cstar.orchestration.transforms import OverrideTransform
 
 roms_tools = lazy_import("roms_tools")
 
@@ -110,4 +109,4 @@ class PlotterApplication(
     long_name = _APP_NAME_LONG
     runner = PlotterRunner
     blueprint = PlotterBlueprint
-    applicable_transforms = (OverrideTransform,)
+    applicable_transforms = ()
