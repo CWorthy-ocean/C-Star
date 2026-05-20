@@ -372,42 +372,6 @@ def load_visualization_settings(path: Union[Path, str]) -> VisualizationSettings
     return VisualizationSettings(domains=domains, variables=variables)
 
 
-def parse_slurm_job_id(file_path: Union[str, Path]) -> Optional[str]:
-    """
-    Search for SLURM Job ID line in a file and return the job ID.
-    
-    Parameters
-    ----------
-    file_path : str or Path
-        Path to the log file to search
-        
-    Returns
-    -------
-    str or None
-        The SLURM job ID if found, None otherwise
-        
-    Examples
-    --------
-    >>> from pathlib import Path
-    >>> job_id = parse_slurm_job_id("logfile.out")
-    >>> print(f"SLURM Job ID: {job_id}")
-    """
-    file_path = Path(file_path)
-    if not file_path.exists():
-        return None
-    
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
-    
-    for line in lines:
-        if "SLURM Job ID:" in line:
-            # Extract job ID using regex
-            match = re.search(r'SLURM Job ID:\s*(\d+)', line)
-            if match:
-                return match.group(1)
-    
-    return None
-
 
 def _tres_count(tres_list: list[dict[str, Any]] | None, tres_type: str) -> Optional[int]:
     """Return integer count for a given TRES type (e.g., 'cpu', 'mem') from a Slurm TRES list."""
