@@ -166,6 +166,13 @@ def get_time_slices(
     return time_slices
 
 
+def mustache(s: str) -> str:
+    """Return the string formatted with enclosing double-curly-brackets
+    in the mustache template style.
+    """
+    return f"{{{{{s}}}}}"
+
+
 def fsm_resolver(
     fsm_map: Mapping[str, JobFileSystemManager],
     step_name: str,
@@ -196,7 +203,7 @@ def fsm_resolver(
     if value := resolution_map.get(f"{step_name}_{purpose}"):
         return value
 
-    ph = f"{{{purpose}: {step_name}}}"
+    ph = mustache(f"{purpose}: {step_name}")
     msg = f"Unable to resolve {purpose!r} for placeholder {ph!r}"
     raise ValueError(msg)
 
@@ -220,7 +227,7 @@ def get_fsm_resolver(steps: Sequence[LiveStep]) -> Callable[[str, str], str]:
 
 
 class TemplateFillTransform:
-    """Fill ``<purpose>: {{placeholder}}`` template strings in a step's blueprint_overrides.
+    """Fill ``{{<purpose>: <placeholder>}}`` template strings in a step's blueprint_overrides.
 
     Recursively traverses the nested blueprint_overrides structure and
     dispatches each placeholder to one of two resolvers:
@@ -311,7 +318,7 @@ class TemplateFillTransform:
             return self._purpose_resolver(ph, purpose)
 
         if self._variable_resolver is None:
-            msg = f"No variable resolver provided for placeholder '{{{{{content}}}}}'"
+            msg = f"No variable resolver provided for placeholder '{mustache(content)}'"
             raise ValueError(msg)
         return self._variable_resolver(content)
 
@@ -323,7 +330,7 @@ class TemplateFillTransform:
 
         # use set to replace all occurrences at once
         for match in set(matches):
-            content = content.replace(f"{{{{{match}}}}}", self._resolve(match))
+            content = content.replace(mustache(match), self._resolve(match))
 
         if PLACEHOLDER_RE.findall(content):
             raise CstarExpectationFailed(

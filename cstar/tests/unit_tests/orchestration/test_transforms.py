@@ -28,6 +28,7 @@ from cstar.orchestration.transforms import (
     get_fsm_resolver,
     get_system_overrides,
     get_transforms,
+    mustache,
 )
 
 
@@ -611,12 +612,12 @@ def test_template_fill_combined_resolvers(
         variable_resolver=variables.__getitem__,
         purpose_resolver=lambda _key, _purpose: str(upstream_dir),
     )
-    template = f"{{{{{purpose}: var1}}}}"
+    template = mustache(f"{purpose}: var1")
     step = LiveStep.from_step(
         live_step_with_templates,
         update={
             "blueprint_overrides": {
-                "variable": "{{var1}}",
+                "variable": mustache("var1"),
                 "input_dir": f"{template}/joined_output",
             },
         },
