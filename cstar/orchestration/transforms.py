@@ -66,8 +66,8 @@ PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
 """Pattern matching double-brace template placeholders.
 
 Captures the full content between braces so dispatch logic can distinguish
-plain variable references (``{{my_var}}``) from path references
-(``{{path: step_name}}``).
+plain variable references (``{{my_var}}``) from purpose references
+(``{{<purpose>: step_name}}``).
 """
 
 
@@ -234,7 +234,7 @@ class TemplateFillTransform:
 
     - **variable resolver** — handles plain ``{{name}}`` tokens by looking up
       *name* in the caller-supplied mapping (e.g. user-defined runtime variables).
-    - **path resolver** — handles ``{{path: step_name}}`` tokens by returning
+    - **path resolver** — handles ``{{<purpose>: step_name}}`` tokens by returning
       the working-directory path of the named step.  Must be bound via
       :meth:`with_path_resolver` before any step that uses this syntax is
       processed.
@@ -257,9 +257,9 @@ class TemplateFillTransform:
         ----------
         variable_resolver : Callable[[str], str] | None
             Maps a plain placeholder name to its replacement string.
-        path_resolver : Callable[[str], Path] | None
-            Maps a step name to its working-directory path.  Required only
-            when ``blueprint_overrides`` contains ``{{path: …}}`` tokens.
+        purpose_resolver : Callable[[str, str], Path] | None
+            Maps a step name to a resolver handling job paths.  Required only
+            when ``blueprint_overrides`` contains ``{{<purpose>: <step>}}`` tokens.
         """
         self._variable_resolver = variable_resolver
         self._purpose_resolver = purpose_resolver

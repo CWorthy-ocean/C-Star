@@ -405,7 +405,7 @@ def live_step_with_templates(tmp_path: Path) -> LiveStep:
         blueprint=bp.as_posix(),
         blueprint_overrides={
             "input_dir": "{{base_dir}}/input",
-            "output_dir": "{{output_dir: upstream}}/output",
+            "output_dir": "{{work_dir: upstream}}/output",
             "variables": ["{{var1}}", "{{var2}}"],
             "nested": {"key": "{{base_dir}}"},
             "count": 42,
@@ -439,7 +439,7 @@ def test_template_fill_variable_substitution(
 def test_template_fill_path_substitution(
     live_step_with_templates: LiveStep, tmp_path: Path
 ) -> None:
-    """{{path: step_name}} tokens are replaced using the path resolver."""
+    """{{work_dir: step_name}} tokens are replaced using the path resolver."""
     upstream_dir = tmp_path / "upstream"
 
     def _resolve(_x: str, _y: str) -> str:
@@ -448,7 +448,7 @@ def test_template_fill_path_substitution(
     transform = TemplateFillTransform(purpose_resolver=_resolve)
     step = LiveStep.from_step(
         live_step_with_templates,
-        update={"blueprint_overrides": {"output_dir": "{{path: upstream}}/output"}},
+        update={"blueprint_overrides": {"output_dir": "{{work_dir: upstream}}/output"}},
     )
     (result,) = transform(step)
 
@@ -514,9 +514,9 @@ def test_template_fill_missing_path_resolver_raises(
     transform = TemplateFillTransform()
     step = LiveStep.from_step(
         live_step_with_templates,
-        update={"blueprint_overrides": {"key": "{{path: some_step}}"}},
+        update={"blueprint_overrides": {"key": "{{work_dir: some_step}}"}},
     )
-    with pytest.raises(ValueError, match="No 'path' resolver"):
+    with pytest.raises(ValueError, match="No 'work_dir' resolver"):
         list(transform(step))
 
 
@@ -545,7 +545,7 @@ def test_template_fill_with_path_resolver_unknown_purpose(
     """
     step = LiveStep.from_step(
         live_step_with_templates,
-        update={"blueprint_overrides": {"key": "{{path: some_step}}"}},
+        update={"blueprint_overrides": {"key": "{{work_dir: some_step}}"}},
     )
     resolver = get_fsm_resolver([step])
 
