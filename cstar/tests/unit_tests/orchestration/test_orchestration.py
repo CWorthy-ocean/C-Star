@@ -9,7 +9,6 @@ import networkx as nx
 import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.launch.local import LocalLauncher
@@ -314,7 +313,7 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
 
     diamond_steps = {str(s.name) for s in diamond_workplan.steps}
 
-    transformer = WorkplanTransformer(diamond_workplan, RomsMarblTimeSplitter())
+    transformer = WorkplanTransformer(diamond_workplan)
     with (
         mock.patch.dict(
             os.environ,

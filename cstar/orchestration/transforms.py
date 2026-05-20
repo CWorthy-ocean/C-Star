@@ -305,12 +305,10 @@ class WorkplanTransformer(LoggingMixin):
     def __init__(
         self,
         wp: Workplan,
-        transform: Transform[t.Any],
         fill_transform: TemplateFillTransform | None = None,
     ) -> None:
         """Initialize the instance."""
         self.original = Workplan(**wp.model_dump(by_alias=True))
-        self.transform_fn = transform
         self.fill_transform = fill_transform
         self._transformed: Workplan | None = None
 

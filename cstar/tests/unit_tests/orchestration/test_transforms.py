@@ -341,7 +341,7 @@ def test_workplan_transformer_applies_output_dir_overrides(
     test_output_dir_override : Path
         An override that was already on the step before the WP transformer is invoked
     """
-    wp_transformer = WorkplanTransformer(step_overiding_wp, OverrideTransform())
+    wp_transformer = WorkplanTransformer(step_overiding_wp)
     original_bp_path = step_overiding_wp.steps[0].blueprint_path
     step_orig: Step = step_overiding_wp.steps[0]
     bp_orig = deserialize(step_orig.blueprint_path, RomsMarblBlueprint)
