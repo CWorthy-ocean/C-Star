@@ -12,10 +12,19 @@ log = get_logger(__name__)
 app = typer.Typer()
 
 _MONITOR_POLL_INTERVAL: t.Final[float] = 0.25
+
+
+HELP_SHORT = "Print the log for a workplan step."
+HELP_LONG = f"""\
+{HELP_SHORT}
+
+The `run_id` may be from an in-progress or completed run.
+"""
+
 ARG_MONITOR: t.Final[str] = "--monitor"
 
 
-@app.command(name="log", help="Print the log for a workplan step.")
+@app.command(name="log", help=HELP_LONG, short_help=HELP_SHORT)
 def workplan_log(
     run_id: t.Annotated[
         str,
