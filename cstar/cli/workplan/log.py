@@ -45,7 +45,7 @@ def workplan_log(
     log_path = step_fsm.logs_dir / f"{slugify(step_name)}.out"
 
     if not monitor and not log_path.exists():
-        print(f"No log file found for step '{step_name}' in run '{run_id}'.")
+        print(f"No log file found for step {step_name!r} in run {run_id!r}.")
         print(f"Expected path: {log_path}")
         raise typer.Exit(1)
 
