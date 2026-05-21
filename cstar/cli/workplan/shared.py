@@ -15,6 +15,7 @@ from cstar.applications.core import (
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
+from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import Status
@@ -50,6 +51,23 @@ def list_runs(incomplete: str) -> list[tuple[str, str]]:
         return [("run-id", "no results found")]
 
     return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list if r]
+
+
+def list_steps(ctx: typer.Context, incomplete: str) -> list[str]:
+    """Return step names for the already-typed run_id, for shell autocompletion."""
+    run_id = ctx.params.get("run_id")
+    if not run_id:
+        return []
+
+    tasks_dir = JobFileSystemManager(DirectoryManager.data_home() / run_id).tasks_dir
+    if not tasks_dir.exists():
+        return []
+
+    return [
+        d.name
+        for d in sorted(tasks_dir.iterdir())
+        if d.is_dir() and d.name.startswith(incomplete)
+    ]
 
 
 def checkmark(color: str) -> str:
