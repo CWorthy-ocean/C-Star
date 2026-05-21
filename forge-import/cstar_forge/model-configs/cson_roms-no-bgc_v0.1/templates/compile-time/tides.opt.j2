@@ -1,0 +1,10 @@
+      ! ****************************************************************
+      ! user inputs
+
+      integer,parameter        :: ntides={{ tides.ntides }}         ! Number of tidal components to consider.
+      logical,parameter,public :: bry_tides={{ tides.bry_tides|lower }} ! Barotropic tides at the boundary from TPXO
+      logical,parameter,public :: pot_tides={{ tides.pot_tides|lower }}  ! Surface tidal potential
+      logical,parameter,public :: ana_tides={{ tides.ana_tides|lower }} ! Surface tidal potential
+      ! end user inputs
+      ! ****************************************************************
+

@@ -1,0 +1,66 @@
+# Default configuration parameters for ROMS run-time configuration
+# This file contains default values for all template parameters in roms.in
+
+roms.in:
+  title:
+    casename: null  # Set dynamically from blueprint
+
+  time_stepping:
+    ntimes: 1200
+    dt: 2160  # seconds
+    ndtfast: 60
+    ninfo: 1
+
+  s_coord:
+    theta_s: null # Set dynamically from grid file
+    theta_b: null # Set dynamically from grid file
+    tcline: null  # Set dynamically from grid file
+
+  grid:
+    grid_file: null  # Set dynamically from generated grid file
+
+  forcing:
+    surface_forcing_path: null  # Set dynamically
+    surface_forcing_bgc_path: null  # Set dynamically
+    boundary_forcing_path: null  # Set dynamically
+    boundary_forcing_bgc_path: null  # Set dynamically
+    tidal_forcing_path: null  # Set dynamically
+    river_path: null  # Set dynamically
+
+  lateral_visc:
+    visc2: 0.0  # m^2/sec
+    visc4: 0.0  # m^2/sec
+    rho0: 1000.0
+
+  output_root_name:
+    output_root_name: null
+    
+  vertical_mixing:
+    akv: 0.0  # m^2/sec
+    # akt is a list of values, one per tracer (NT tracers)
+    # Default is all zeros - will be generated in template
+    akt_default: 0.0
+
+  tracer_diff2:
+    # tnu2 is a list of values, one per tracer (NT tracers)
+    # Default is all zeros - will be generated in template
+    tnu2_default: 0.0
+
+  bottom_drag:
+    rdrg: 0.0E-4  # m/s
+    rdrg2: 1.0E-3
+    zob: 1.0E-2  # meters
+    cdb_min: 1.0E-4
+    cdb_max: 1.0E-2
+
+  v_sponge:
+    v_sponge: 0.0  # m^2/sec
+
+  gamma2: 1.0  # Slipperiness parameter
+
+  ubind: 0.1  # m/s, OBC binding velocity scale
+
+  initial:
+    nrrec: 1
+    initial_file: null  # Set dynamically from generated initial conditions file
+

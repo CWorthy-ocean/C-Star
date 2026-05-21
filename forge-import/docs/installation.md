@@ -1,4 +1,4 @@
-# Get Started with C-SON Forge
+# Get Started with C-STAR Forge
 
 ## Prerequisites
 
@@ -10,15 +10,15 @@
 
 ### 1. Fork the Repository
 
-Create a fork of the repository at [https://github.com/CWorthy-ocean/cson-forge](https://github.com/CWorthy-ocean/cson-forge).
+Create a fork of the repository at [https://github.com/CWorthy-ocean/cstar-forge](https://github.com/CWorthy-ocean/cstar-forge).
 
 ### 2. Clone Your Fork
 
 In your terminal, clone your forked repository:
 
 ```bash
-git clone https://github.com/<YOUR_GITHUB_USERNAME>/cson-forge.git
-cd cson-forge
+git clone https://github.com/<YOUR_GITHUB_USERNAME>/cstar-forge.git
+cd cstar-forge
 ```
 Consider creating a branch to keep your work organized
 ```bash
@@ -32,8 +32,8 @@ git checkout -b <branch-name>
 The command above uses HTTPS. Alternatively, you can use SSH:
 
 ```bash
-git clone git@github.com:<YOUR_GITHUB_USERNAME>/cson-forge.git
-cd cson-forge
+git clone git@github.com:<YOUR_GITHUB_USERNAME>/cstar-forge.git
+cd cstar-forge
 ```
 
 For more information on HTTPS and SSH access, see the [GitHub documentation on cloning repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
@@ -68,7 +68,7 @@ Run the setup script:
 The `dev-setup.sh` script automates the setup process:
 - [Installing Micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) (if needed)
 - [Creating the conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file)
-- [Installing the `cson-forge` package in editable mode](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs)
+- [Installing the `cstar-forge` package in editable mode](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs)
 - [Installing `C-Star`](https://c-star.readthedocs.io)
 - [Setting up the Jupyter kernel](https://ipython.readthedocs.io/en/stable/install/index.html)
 :::
@@ -82,26 +82,27 @@ To verify that everything is installed correctly:
 ```bash
 # Activate the environment (using micromamba or conda)
 eval "$(./bin/micromamba shell hook --shell bash)"  # or use conda if micromamba not available
-micromamba activate cson-forge-v0  # or: conda activate cson-forge-v0
+micromamba activate cstar-forge-v0  # or: conda activate cstar-forge-v0
 
-# Test that cson_forge can be imported
+# Test that cstar_forge can be imported
 cd workflows
-python -c "import cson_forge; print('✓ cson_forge works')"
+python -c "import cstar_forge; print('✓ cstar_forge works')"
 ```
 
 **b) Check that the Jupyter kernel is installed:**
 
 ```bash
-jupyter kernelspec list | grep cson-forge-v0
+jupyter kernelspec list | grep cstar-forge-v0
 ```
 
-You should see `cson-forge-v0` in the list. If not, the kernel installation may have failed.
+You should see `cstar-forge-v0` in the list. If not, the kernel installation may have failed.
 
 **c) Check that the package can be imported in Python:**
 
 ```python
-import cson_forge
-print(f"System detected: {cson_forge.config.system}")
+import cstar_forge
+
+print(f"System detected: {cstar_forge.config.system}")
 ```
 
 **d) Inspect the configured paths:**
@@ -109,7 +110,7 @@ print(f"System detected: {cson_forge.config.system}")
 The `show-paths` command displays the detected system and all configured data paths:
 
 ```bash
-python -m cson_forge.config show-paths
+python -m cstar_forge.config show-paths
 ```
 
 This will show output like:
@@ -118,8 +119,8 @@ System tag : MacOS
 Hostname   : your-hostname
 
 Paths:
-  here         -> /path/to/cson-forge/cson_forge
-  model_configs -> /path/to/cson-forge/cson_forge/model-configs
+  here         -> /path/to/cstar-forge/cstar_forge
+  model_configs -> /path/to/cstar-forge/cstar_forge/model-configs
   source_data  -> /path/to/source-data
   input_data   -> /path/to/input-data
   scratch      -> /path/to/scratch-directory
@@ -128,7 +129,7 @@ Paths:
 
 ## Register for data access
 
-CSON Forge facilitates access to a collection of open datasets required to force regional oceanographic models. 
+CSFORGE Forge facilitates access to a collection of open datasets required to force regional oceanographic models. 
 These data are documented in ROMS Tools [here](https://roms-tools.readthedocs.io/en/latest/datasets.html).
 
 Access to most of the data is facilitated automatically. 
@@ -152,7 +153,7 @@ Once your environment is set up, you can try running the `CStarSpecBuilder` demo
 
 3. **Open the demo notebook:**
    - Open `CStarSpecBuilder-demo.ipynb` in Jupyter. Located at: `workflows/generate-models/templates/CStarSpecBuilder-demo.ipynb`
-   - Make sure the kernel is set to `cson-forge-v0` (you can change it in the Kernel menu if needed)
+   - Make sure the kernel is set to `cstar-forge-v0` (you can change it in the Kernel menu if needed)
 
 4. **Run the notebook:**
    - Execute the cells sequentially to:

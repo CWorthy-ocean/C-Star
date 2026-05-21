@@ -14,7 +14,7 @@ Tests cover:
 import pytest
 from pydantic import ValidationError
 
-from cson_forge.models import (
+from cstar_forge.models import (
     SourceSpec,
     GridInput,
     InitialConditionsInput,

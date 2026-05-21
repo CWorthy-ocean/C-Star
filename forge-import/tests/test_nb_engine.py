@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from cson_forge import nb_engine
-from cson_forge import parsers
+from cstar_forge import nb_engine
+from cstar_forge import parsers
 
 
 def test_run_notebook_calls_papermill(monkeypatch, tmp_path):
@@ -39,7 +39,7 @@ def test_run_notebook_calls_papermill(monkeypatch, tmp_path):
             notebook_path.name,
             str(output_path),
             params,
-            "cson-forge-v0",
+            "cstar-forge-v0",
             str(notebook_path.parent.resolve()),
         ),
     ]

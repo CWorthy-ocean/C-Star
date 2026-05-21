@@ -1,0 +1,106 @@
+---
+roms_tools_version: 3.3.0
+---
+Grid:
+  nx: 6
+  ny: 2
+  size_x: 500
+  size_y: 1000
+  center_lon: 0
+  center_lat: 55
+  rot: 10
+  N: 3
+  theta_s: 5.0
+  theta_b: 2.0
+  hc: 250.0
+  topography_source:
+    name: ETOPO5
+  mask_shapefile: null
+  hmin: 5.0
+RiverForcing:
+  start_time: '2012-01-01T00:00:00'
+  end_time: '2012-01-02T00:00:00'
+  source:
+    name: DAI
+    climatology: false
+  convert_to_climatology: if_any_missing
+  include_bgc: true
+  model_reference_date: '2000-01-01T00:00:00'
+  indices:
+    Rhine:
+    - 1, 4
+    Loire:
+    - 1, 3
+    Seine:
+    - 1, 3
+    Maas(Meuse):
+    - 1, 4
+    Tay:
+    - 2, 2
+    Trent:
+    - 1, 3
+    Ems:
+    - 1, 4
+    Tweed:
+    - 2, 2
+    Thames(natural:
+    - 1, 3
+    Wye:
+    - 1, 3
+    Spey:
+    - 2, 2
+    Severn:
+    - 1, 3
+    Tyne:
+    - 2, 2
+    Tywi:
+    - 1, 3
+    Dee(RoyalDee):
+    - 2, 2
+    Lune:
+    - 1, 3
+    Vecht:
+    - 1, 4
+    Somme:
+    - 1, 4
+    Dee(AfonDyfrd:
+    - 1, 3
+    Teifi:
+    - 1, 3
+    Usk:
+    - 1, 3
+    Tamar:
+    - 1, 3
+    Scheldte(Escau:
+    - 1, 4
+    Taw:
+    - 1, 3
+    Taff:
+    - 1, 3
+    Conwy:
+    - 1, 3
+    Wharfe:
+    - 1, 3
+    Lygna:
+    - 2, 2
+    Exe:
+    - 1, 3
+    Derwent-EU:
+    - 1, 3
+    BedfordOuse:
+    - 1, 3
+    Nene:
+    - 1, 3
+    Medway:
+    - 1, 3
+    Kennet:
+    - 1, 3
+    Liffey:
+    - 1, 3
+    Itchen:
+    - 1, 3
+    Avon(BristolA:
+    - 1, 3
+    GreatStour:
+    - 1, 3
+    _convention: eta_rho, xi_rho

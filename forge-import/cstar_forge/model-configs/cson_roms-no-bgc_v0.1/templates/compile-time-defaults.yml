@@ -1,0 +1,139 @@
+# Default configuration parameters for ROMS model configuration templates
+# This file contains default values for all template parameters
+
+blk_frc:
+  interp_frc: 0
+
+cppdefs:
+  # Boundary condition flags
+  obc_west: true
+  obc_east: true
+  obc_north: true
+  obc_south: true
+  marbl: false
+  cdr_forcing: false
+
+param:
+  LLm: 512
+  MMm: 512
+  N: 60
+  NP_XI: 16
+  NP_ETA: 16
+  NSUB_X: 1
+  NSUB_E: 1
+  nt_passive: 0
+  ntrc_bio: 0
+
+ocean_vars:
+  wrt_file_rst: true
+  output_period_rst: 43200  # 12*3600 seconds
+  monthly_restarts: false
+  nrpf_rst: 2
+  wrt_file_his: false
+  output_period_his: 86400  # 24*3600 seconds
+  nrpf_his: 7
+  wrt_Z: true
+  wrt_Ub: true
+  wrt_Vb: true
+  wrt_U: true
+  wrt_V: true
+  wrt_R: false
+  wrt_O: false
+  wrt_W: true
+  wrt_Akv: false
+  wrt_Akt: false
+  wrt_Aks: false
+  wrt_Hbls: false
+  wrt_Hbbl: false
+  wrt_file_avg: false
+  output_period_avg: 604800  # 7*24*3600 seconds
+  nrpf_avg: 1
+  wrt_avg_Z: true
+  wrt_avg_Ub: true
+  wrt_avg_Vb: true
+  wrt_avg_U: true
+  wrt_avg_V: true
+  wrt_avg_R: true
+  wrt_avg_O: true
+  wrt_avg_W: true
+  wrt_avg_Akv: true
+  wrt_avg_Akt: true
+  wrt_avg_Aks: true
+  wrt_avg_Hbls: true
+  wrt_avg_Hbbl: true
+  code_check: false
+
+surf_flux:
+  wrt_smflx: false
+  wrt_stflx: false
+  sflx_avg: false
+  output_period: 31536000  # seconds
+  nrpf: 10
+  sst_vname: 'sst'
+  sst_tname: 'sst_time'
+  sss_vname: 'sss'
+  sss_tname: 'sss_time'
+  interp_frc: 1
+
+tides:
+  ntides: 10
+  bry_tides: true
+  pot_tides: true
+  ana_tides: false
+
+river_frc:
+  river_source: false
+  analytical: false
+  nriv: 0
+  rvol_vname: 'river_volume'
+  rvol_tname: 'river_time'
+  rtrc_vname: 'river_tracer'
+  rtrc_tname: 'river_time'
+
+diagnostics:
+  diag_avg: false
+  output_period: 86400  # 24*3600 seconds
+  nrpf: 7
+  diag_uv: false
+  diag_trc: false
+  diag_pflx: true
+  timescale: 86400  # 1*3600*24 seconds
+  diag_prec: 'nf90_double'
+
+tracers:
+  interp_t: 1
+
+cdr_frc:
+  cdr_source: false
+  cdr_volume: false
+  cdr_analytical: false
+  ncdr_parm: 1
+  cdr_file: 'cdr.nc'
+  cdrvol_vname: 'cdr_volume'
+  cdrvol_tname: 'cdr_time'
+  cdrtrc_vname: 'cdr_tracer'
+  cdrtrc_tname: 'cdr_time'
+  cdrflx_vname: 'cdr_trcflx'
+  cdrflx_tname: 'cdr_time'
+  cdr_loc_lon: 'cdr_lon'
+  cdr_loc_lat: 'cdr_lat'
+  cdr_loc_dep: 'cdr_dep'
+  cdr_scl_hor: 'cdr_hsc'
+  cdr_scl_vrt: 'cdr_vsc'
+  nz_chd: 50
+
+sponge_tune:
+  pflx_w_vname: 'up_west'
+  pflx_w_tname: 'bry_time'
+  pflx_e_vname: 'up_east'
+  pflx_e_tname: 'bry_time'
+  pflx_s_vname: 'vp_south'
+  pflx_s_tname: 'bry_time'
+  pflx_n_vname: 'vp_north'
+  pflx_n_tname: 'bry_time'
+  ub_tune: false
+  spn_avg: true
+  sp_timscale: 86400  # 24*3600 seconds
+  wrt_sponge: false
+  nrpf: 7
+  output_period: 86400  # 24*3600 seconds

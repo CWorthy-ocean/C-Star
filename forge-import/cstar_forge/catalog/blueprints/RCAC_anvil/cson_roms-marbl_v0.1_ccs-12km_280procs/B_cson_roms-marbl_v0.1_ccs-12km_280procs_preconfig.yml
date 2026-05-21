@@ -1,0 +1,57 @@
+name: cson_roms-marbl_v0.1_ccs-12km_280procs
+description: California Current System
+application: roms_marbl
+state: notset
+valid_start_date: '2024-01-01T00:00:00'
+valid_end_date: '2024-01-02T00:00:00'
+code:
+  roms:
+    documentation: ''
+    locked: false
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    commit: 84f4ee7886e9ee4c33b3248b35c955551f3b9c06
+    branch: ''
+  run_time:
+    documentation: ''
+    locked: false
+    location: placeholder://run_time
+    commit: ''
+    branch: main
+  compile_time:
+    documentation: ''
+    locked: false
+    location: placeholder://compile_time
+    commit: ''
+    branch: main
+  marbl:
+    documentation: ''
+    locked: false
+    location: https://github.com/marbl-ecosys/MARBL.git
+    commit: marbl0.45.0
+    branch: ''
+initial_conditions:
+  documentation: ''
+  locked: false
+  data:
+  - partitioned: false
+grid:
+  documentation: ''
+  locked: false
+  data:
+  - partitioned: false
+forcing:
+  boundary:
+    documentation: ''
+    locked: false
+    data:
+    - partitioned: false
+  surface:
+    documentation: ''
+    locked: false
+    data:
+    - partitioned: false
+partitioning:
+  documentation: ''
+  locked: false
+  n_procs_x: 14
+  n_procs_y: 20

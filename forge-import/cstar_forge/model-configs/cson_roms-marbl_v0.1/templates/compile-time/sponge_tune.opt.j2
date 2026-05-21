@@ -1,0 +1,19 @@
+      ! ****************************************************************
+      ! User inputs
+
+      type (ncforce) :: nc_pflx_w = ncforce( vname='{{ sponge_tune.pflx_w_vname }}', tname='{{ sponge_tune.pflx_w_tname }}')
+      type (ncforce) :: nc_pflx_e = ncforce( vname='{{ sponge_tune.pflx_e_vname }}', tname='{{ sponge_tune.pflx_e_tname }}')
+      type (ncforce) :: nc_pflx_s = ncforce( vname='{{ sponge_tune.pflx_s_vname }}', tname='{{ sponge_tune.pflx_s_tname }}')
+      type (ncforce) :: nc_pflx_n = ncforce( vname='{{ sponge_tune.pflx_n_vname }}', tname='{{ sponge_tune.pflx_n_tname }}')
+
+      logical,public,parameter  :: ub_tune = {{ sponge_tune.ub_tune|lower }}
+      logical         :: spn_avg = {{ sponge_tune.spn_avg|lower }}
+
+      real,   parameter :: sp_timscale = {{ sponge_tune.sp_timscale }} ! filtering time scale
+
+      logical,parameter :: wrt_sponge={{ sponge_tune.wrt_sponge|lower }}     ! yes/no output sponge to file
+      integer,parameter :: nrpf = {{ sponge_tune.nrpf }}              ! Number of records per file
+      real   ,parameter :: output_period = {{ sponge_tune.output_period }}  ! time between outputs in seconds
+
+      ! End of user inputs
+      ! ****************************************************************

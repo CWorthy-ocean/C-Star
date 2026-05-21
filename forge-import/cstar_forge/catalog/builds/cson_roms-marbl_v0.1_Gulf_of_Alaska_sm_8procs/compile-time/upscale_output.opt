@@ -1,0 +1,12 @@
+      ! The upscaling module is designed to facilitate the accounting for and passive of variables
+      ! from a finer-resolution "child" grid to a coarser-resolution "parent" grid. This .opt file contains
+      ! options to allow users to save data at the boundaries of the child grid or to read in data
+      ! at vertical transects on the parent grid.
+      !
+      !------------------------------
+      logical,parameter,public :: do_upscale = .false.
+
+      integer,parameter :: nrpf_uscl = 48   ! number of records per output file
+      real,parameter    :: output_period_uscl = 3600    ! output period in seconds
+      integer,parameter :: uscl_prec = nf90_double  ! Precision of output variables (nf90_float/nf90_double)
+      !------------------------------

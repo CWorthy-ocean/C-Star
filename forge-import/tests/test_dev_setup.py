@@ -40,11 +40,11 @@ def test_environment(test_dir, fixtures_dir):
     env_file = fixtures_dir / "test-environment.yml"
     shutil.copy(env_file, Path(test_dir) / "environment.yml")
     
-    # Create mock cson_forge package
-    cson_forge_dir = Path(test_dir) / "cson_forge"
-    cson_forge_dir.mkdir()
-    init_file = fixtures_dir / "cson_forge" / "__init__.py"
-    shutil.copy(init_file, cson_forge_dir / "__init__.py")
+    # Create mock cstar_forge package
+    cstar_forge_dir = Path(test_dir) / "cstar_forge"
+    cstar_forge_dir.mkdir()
+    init_file = fixtures_dir / "cstar_forge" / "__init__.py"
+    shutil.copy(init_file, cstar_forge_dir / "__init__.py")
     
     # Copy setup.py
     setup_file = fixtures_dir / "setup.py"
@@ -81,7 +81,7 @@ class TestDevSetupScript:
             env_data = yaml.safe_load(f)
         
         assert "name" in env_data, "environment.yml missing 'name' field"
-        assert env_data["name"] == "test-cson-forge", "Environment name mismatch"
+        assert env_data["name"] == "test-cstar-forge", "Environment name mismatch"
     
     def test_environment_yml_structure(self, test_environment):
         """Test that test environment.yml has correct structure."""
@@ -96,12 +96,12 @@ class TestDevSetupScript:
         assert isinstance(env_data["dependencies"], list)
     
     def test_mock_package_structure(self, test_environment):
-        """Test that mock cson_forge package is set up correctly."""
-        cson_forge_dir = Path(test_environment) / "cson_forge"
-        init_file = cson_forge_dir / "__init__.py"
+        """Test that mock cstar_forge package is set up correctly."""
+        cstar_forge_dir = Path(test_environment) / "cstar_forge"
+        init_file = cstar_forge_dir / "__init__.py"
         
-        assert cson_forge_dir.exists(), "cson_forge directory does not exist"
-        assert init_file.exists(), "cson_forge/__init__.py does not exist"
+        assert cstar_forge_dir.exists(), "cstar_forge directory does not exist"
+        assert init_file.exists(), "cstar_forge/__init__.py does not exist"
         
         # Check that __init__.py has version
         with open(init_file) as f:

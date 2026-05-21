@@ -1,6 +1,6 @@
 # Settings
 
-C-SON Forge curates default settings for each model configuration.
+C-STAR Forge curates default settings for each model configuration.
 These defaults are used in the templating engine to generate source code and input files with the correct parameters.
 
 Settings are managed in `forge` using 

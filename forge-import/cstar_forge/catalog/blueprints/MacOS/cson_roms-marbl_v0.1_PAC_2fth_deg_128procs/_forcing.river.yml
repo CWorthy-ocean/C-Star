@@ -1,0 +1,216 @@
+---
+roms_tools_version: 3.5.1.dev6+g40b5a2ea3
+---
+Grid:
+  nx: 208
+  ny: 192
+  size_x: 7300
+  size_y: 11100
+  center_lon: -165
+  center_lat: 40
+  rot: -90
+  N: 10
+  theta_s: 6.0
+  theta_b: 3.0
+  hc: 250.0
+  topography_source:
+    name: ETOPO5
+  mask_shapefile: null
+  hmin: 5.0
+RiverForcing:
+  start_time: '2012-01-01T00:00:00'
+  end_time: '2012-01-02T00:00:00'
+  source:
+    name: DAI
+    climatology: false
+  convert_to_climatology: if_any_missing
+  include_bgc: true
+  model_reference_date: '2000-01-01T00:00:00'
+  indices:
+    Amur:
+    - 33, 35
+    Mackenzie:
+    - 102, 1
+    Yukon:
+    - 97, 30
+    Columbia:
+    - 150, 64
+    Kolyma:
+    - 79, 1
+    Fraser:
+    - 148, 59
+    Stikine:
+    - 132, 39
+    Susitna:
+    - 110, 34
+    Copper:
+    - 117, 34
+    Kuskokwim:
+    - 99, 39
+    Kamchatka:
+    - 61, 41
+    Skeena:
+    - 136, 45
+    Alsek:
+    - 124, 35
+    Nass:
+    - 136, 45
+    Sacramento:
+    - 159, 86
+    Nushagak:
+    - 104, 43
+    Willamette:
+    - 151, 66
+    Han:
+    - 3, 53
+    Kvichak:
+    - 107, 41
+    Klamath:
+    - 154, 78
+    Shinano:
+    - 15, 71
+    Amgun:
+    - 32, 25
+    Ishikari:
+    - 25, 59
+    Kobuk:
+    - 100, 16
+    Taku:
+    - 130, 37
+    Mogami:
+    - 18, 69
+    Noatak:
+    - 98, 14
+    Nagdong(Nakdon:
+    - 1, 62
+    Kiso:
+    - 10, 74
+    BolshoyAnyuy:
+    - 79, 1
+    Amguema:
+    - 86, 11
+    Yodo:
+    - 9, 75
+    Cowlitz:
+    - 150, 63
+    Umpqua:
+    - 152, 72
+    Eel:
+    - 155, 81
+    Rogue:
+    - 153, 75
+    Gono:
+    - 4, 68
+    Oyodo:
+    - 1, 73
+    Yoshino:
+    - 6, 74
+    Jintsu:
+    - 13, 71
+    Amnok(Yalu):
+    - 6, 48
+    Avacha:
+    - 54, 48
+    SanJoaquim:
+    - 160, 87
+    Sai:
+    - 14, 71
+    Chehalis:
+    - 150, 63
+    Talkeetna:
+    - 110, 34
+    Chikugo:
+    - 1, 70
+    Taedong:
+    - 3, 49
+    QuinaultRiver:
+    - 149, 61
+    Fuji:
+    - 12, 77
+    Ota:
+    - 3, 70
+    Yaqui:
+    - 186, 100
+    Hino:
+    - 11, 71
+    Toshibetsu:
+    - 27, 63
+    Speel:
+    - 130, 37
+    Yoshii:
+    - 7, 70
+    Nam-KP:
+    - 3, 49
+    Hunhe:
+    - 4, 48
+    Colorado-AR:
+    - 175, 95
+    Tym:
+    - 35, 38
+    Zangza:
+    - 4, 48
+    SalmonRiverAt:
+    - 154, 78
+    Watari(Shimant:
+    - 3, 74
+    Taizi:
+    - 4, 48
+    Farragut:
+    - 131, 38
+    Sagavanirktok:
+    - 102, 1
+    Kizu:
+    - 9, 75
+    Nam-KR:
+    - 1, 61
+    Palyavaam:
+    - 80, 2
+    Kuparuk:
+    - 102, 1
+    Sinaloa:
+    - 191, 103
+    Midori:
+    - 1, 72
+    Firth:
+    - 102, 1
+    Kikuchi:
+    - 1, 71
+    Biryu:
+    - 3, 49
+    WilsonRiverNe:
+    - 151, 66
+    Fuerte:
+    - 189, 102
+    Salmon:
+    - 133, 42
+    Shonai:
+    - 10, 74
+    Gap:
+    - 2, 59
+    Culiacn(Humay:
+    - 192, 104
+    Harding:
+    - 133, 42
+    Saba:
+    - 2, 69
+    Ilistaya:
+    - 14, 46
+    Skagway:
+    - 125, 36
+    NfSkokomishR:
+    - 149, 61
+    Oda:
+    - 3, 73
+    FishCNrKetch:
+    - 134, 44
+    Sodusu:
+    - 9, 46
+    oliiStreamNr:
+    - 115, 168
+    EbOfNfWailua:
+    - 107, 162
+    HonokohauStrea:
+    - 113, 165
+    WestWailuaiki:
+    - 113, 165
+    _convention: eta_rho, xi_rho

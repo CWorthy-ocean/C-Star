@@ -1,0 +1,268 @@
+! User notes:
+!   1) Specify tracer variable details here. 
+!      (number of tracers (NT) still set in param.h for now)
+!
+!   2) tracer name in netcdf file for _bry.nc and _init.nc
+!   must have same name as trace variable. E.g. ptrace1 -> ptrace1
+!   However, in the surface flux forcing file, the name of the
+!   variable must be appended with _flx. E.g. ptrace1 -> ptrace1_flx
+!
+!   3) Make sure tracer surface flux units are correct!
+
+! USER INPUT 1:
+! - Interpolate forcing from coarser input grid (=1) or not (=0)
+      interp_t = 1 ! Factor 2 scaling only for now
+! - now complete USER INPUT 2 below.
+
+
+! MARBL USERS NOTE:
+!--------------------------------------------------------------------------------
+!      if running with MARBL, do not specify BGC tracers in this file: they are
+!      provided to ROMS by MARBL. Control the MARBL config (therefore tracers)
+!      using a "marbl_in" file in your run directory. 
+!      Regarding output: by default, all MARBL tracers are written to output file.
+!      To control which particular tracers to write out, make a
+!      text file "marbl_tracer_output_list" in your run directory
+!      and add the shortname of each required tracer to a new line.
+!      If the text file is empty, does not exist,
+!      contains only comments (!) or no recognised tracers,
+!      ROMS will revert to default behaviour and output all MARBL tracers.
+!      Output frequency etc. are still controlled using "bgc.opt".
+!      For a list of available MARBL tracers, see
+!      $MARBL_ROOT/tests/regression_tests/requested_tracers/requested_tracers.py 
+
+
+! USER INPUT 2:
+!
+! descriptions:
+!
+! wrt_t     = True/False whether to write tracer to output file
+! wrt_t_avg = True/False whether to write tracer avg to output file
+! t_vname   = Tracer short name
+! t_units   = Tracer units (for outputing tracer)
+! t_lname   = Tracer long name (for outputing tracer)
+! t_tname   = Name of time dimension that goes with tracer in forcing file.
+!             Not necessary for analytical model or no surface forcing for tracer.
+! t_ana_frc = Whether surf flux is read in (0), or analytical (1)
+!             Could be extended 2,3,... depending on different types of
+!             analytical forcing, e.g. time variant/invariant, and further
+!             specific for each variable using its 'itrace' index...
+! itot      = Counter to increment tracer indices without hard-coding indices,
+!             thus each new tracer index (e.g. itrcX) simply needs:
+!             itot=itot+1, then itot can populate arrays in correct position;
+! wrt_t_dia = Only with DIAGNOSTICS flag. Don't need otherwise.
+!             True/False to output tracer diagnostics.
+!
+! nt_passive= Number of passive tracers (default=0). Set here is you have them.
+
+! - TEMP & SALT:
+
+      wrt_t     (itemp)=.True.;    wrt_t_avg(itemp) =.True.    ! temp
+!      wrt_t_dia(itemp) = .true.
+      
+#ifdef SALINITY
+      wrt_t     (isalt)=.True.;    wrt_t_avg(isalt) =.True.    ! salinity
+!      wrt_t_dia(isalt) = .true.
+#endif
+
+! - PASSIVE TRACERS:
+
+! - BGC TRACERS: (must come after passive tracers)
+
+! -- default bgc tracers
+
+!    For code-dev only, don't use bgc for physics only.
+!    Note, order of bgc tracers must match the indexing of tracers
+!    in bgc_ecosys_bec2.h.
+!    BGC tracers have corresponding index in bgc_tracers_indx.opt,
+!    since the indices are used in tracers.F and bgc.F, need to be public.
+
+#ifdef BIOLOGY_BEC2
+
+      ! itrc_bio=1+iTandS ! Starting tracer index for bgc tracers. Set in tracers_defs.h
+
+      itot=itot+1;                iPO4=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='PO4';        t_units  (itot)='mMol P m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Phosphate'
+
+      itot=itot+1;                iNO3=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='NO3';        t_units  (itot)='mMol N m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Nitrate'
+
+      itot=itot+1;                iSIO3=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='SiO3';       t_units  (itot)='mMol Si m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Silicate'
+
+      itot=itot+1;                iNH4=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='NH4';        t_units  (itot)='mMol N m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Ammonium'
+
+      itot=itot+1;                iFE=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='Fe';         t_units  (itot)='mMol Fe m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Iron'
+
+      itot=itot+1;                iO2=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='O2';         t_units  (itot)='mMol O2 m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Oxygen'
+
+      itot=itot+1;                iDIC=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DIC';        t_units  (itot)='mMol C m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Dissolved inorganic carbon'
+
+      itot=itot+1;                iALK=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='Alk';        t_units  (itot)='mMol m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Alkalinity'
+
+      itot=itot+1;                iDOC=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DOC';        t_units  (itot)='mMol C m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Dissolved organic carbon'
+
+      itot=itot+1;                iDon=itot
+      wrt_t  (itot) =.True.;      wrt_t_avg(itot)=.True.
+      t_vname(itot)='DON';        t_units  (itot)='mMol N m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Dissolved organic nitrogen'
+
+      itot=itot+1;                iDofe=itot
+      wrt_t  (itot) =.True.;      wrt_t_avg(itot)=.True.
+      t_vname(itot)='DOFE';       t_units  (itot)='mMol Fe m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Dissolved organic iron'
+
+      itot=itot+1;                iDop=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DOP';        t_units  (itot)='mMol P m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Dissolved organic phosphorus'
+
+      itot=itot+1;                iDopr=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DOPR';       t_units  (itot)='mMol P m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Refractory dissolved organic phosphorus'
+
+      itot=itot+1;                iDonr=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DONR';       t_units  (itot)='mMol N m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Refractory dissolved organic nitrogen'
+
+      itot=itot+1;                iZOOC=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='ZOOC';       t_units  (itot)='mMol C m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Zooplankton'
+
+      itot=itot+1;                iSPC=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='SPC';        t_units  (itot)='mMol C m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Small phytoplankton carbon'
+
+      itot=itot+1;                iSPCHL=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='SPCHL';      t_units  (itot)='mg Chl-a m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Small phytoplankton chlorophyll'
+
+      itot=itot+1;                iSPFE=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='SPFE';       t_units  (itot)='mMol Fe m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Small phytoplankton iron'
+
+      itot=itot+1;                iSPCACO3=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='SPCACO3';    t_units  (itot)='mMol CaCO3 m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Small phytoplankton CaCO3'
+
+      itot=itot+1;                iDIATC=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DIATC';      t_units  (itot)='mMol C m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Diatom carbon'
+
+      itot=itot+1;                iDIATCHL=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DIATCHL';    t_units  (itot)='mg Chl-a m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Diatom chlorophyll'
+
+      itot=itot+1;                iDIATFE=itot
+      wrt_t  (itot) =.True.;      wrt_t_avg(itot)=.True.
+      t_vname(itot)='DIATFE';     t_units  (itot)='mMol Fe m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Diatom Iron'
+
+      itot=itot+1;                iDIATSI=itot
+      wrt_t  (itot) =.True.;      wrt_t_avg(itot)=.True.
+      t_vname(itot)='DIATSI';     t_units  (itot)='mMol Si m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Diatom silicon'
+
+      itot=itot+1;                iDiazc=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DIAZC';      t_units  (itot)='mMol C m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Diazotroph carbon'
+
+      itot=itot+1;                iDiazchl=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DIAZCHL';    t_units  (itot)='mg Chl-a m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Diazotroph chlorophyll'
+
+      itot=itot+1;                iDiazfe=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='DIAZFE';     t_units  (itot)='mMol Fe m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Diazotroph iron'
+
+      !ntrc_bio_base=26 ! Total number of base bgc tracers. Hard-coded for now. Use itot later.
+
+#ifdef Ncycle_SY
+      itot=itot+1;                iNO2=itot
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='NO2';        t_units  (itot)='mMol N m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Nitrite'
+
+      itot=itot+1;                iN2=itot;
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='N2';         t_units  (itot)='mMol N2 m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Dinitrogen'
+
+      itot=itot+1;                iN2O=itot;
+      wrt_t  (itot)=.True.;       wrt_t_avg(itot)=.True.
+      t_vname(itot)='N2O';        t_units  (itot)='mMol N2O m-3'
+      t_tname(itot)='';           t_ana_frc(itot)=1
+      t_lname(itot)='Nitrous oxide'
+#endif /* Ncycle_SY */
+
+      ! total number of bgc tracers
+      !ntrc_bio=ntrc_bio_base ! +ntrc_bio_cocco +ntrc_bio_ncycle
+
+
+#endif /* BIOLOGY_BEC2 */
+
+

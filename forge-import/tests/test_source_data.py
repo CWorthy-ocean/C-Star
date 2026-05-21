@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
-from cson_forge.source_data import (
+from cstar_forge.source_data import (
     DatasetHandler,
     register_dataset,
     DATASET_REGISTRY,
@@ -371,7 +371,7 @@ class TestSourceDataHelperMethods:
         sd = SourceData(datasets=["GLORYS_REGIONAL"], grid_name="test_grid")
         date = datetime(2020, 1, 15)
         
-        with patch('cson_forge.source_data.config.paths') as mock_paths:
+        with patch('cstar_forge.source_data.config.paths') as mock_paths:
             mock_paths.source_data = tmp_path / "source_data"
             path = sd._construct_glorys_path(date, is_regional=True)
             
@@ -385,7 +385,7 @@ class TestSourceDataHelperMethods:
         sd = SourceData(datasets=["GLORYS_GLOBAL"])
         date = datetime(2020, 1, 15)
         
-        with patch('cson_forge.source_data.config.paths') as mock_paths:
+        with patch('cstar_forge.source_data.config.paths') as mock_paths:
             mock_paths.source_data = tmp_path / "source_data"
             path = sd._construct_glorys_path(date, is_regional=False)
             

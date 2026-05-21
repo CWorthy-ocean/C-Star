@@ -1,0 +1,37 @@
+---
+roms_tools_version: 3.6.1.dev12+gedc3cf7b5
+---
+Grid:
+  nx: 160
+  ny: 80
+  size_x: 1460
+  size_y: 700
+  center_lon: -150.0
+  center_lat: 57.5
+  rot: 41
+  N: 10
+  theta_s: 6.0
+  theta_b: 3.0
+  hc: 250.0
+  topography_source:
+    name: ETOPO5
+  mask_shapefile: null
+  close_narrow_channels: false
+  hmin: 5.0
+  filename: null
+RiverForcing:
+  start_time: '2010-01-01T00:00:00'
+  end_time: '2010-01-05T00:00:00'
+  source:
+    name: DAI
+    climatology: false
+    glorys_layout: null
+  convert_to_climatology: if_any_missing
+  include_bgc: true
+  model_reference_date: '2000-01-01T00:00:00'
+  indices:
+    Copper:
+    - 46, 128
+    Alsek:
+    - 11, 153
+    _convention: eta_rho, xi_rho

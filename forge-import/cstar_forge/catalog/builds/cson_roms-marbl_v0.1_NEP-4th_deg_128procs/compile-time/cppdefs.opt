@@ -1,0 +1,102 @@
+/* This is "cppdefs.opt": MODEL CONFIGURATION FILE
+   ==== == ============ ===== ============= ==== */
+
+/*
+ * CHOOSE ONLY ONE PRIMARY FLAG FOR SWITCH LIST BELOW
+ */
+
+#define PACIFIC_PD
+
+#if defined PACIFIC_PD
+
+/* Basics */
+#define SOLVE3D
+#define UV_ADV
+#define UV_COR
+#define ADV_ISONEUTRAL
+
+#define UPSCALING
+
+/* Equation of State */
+#define SALINITY
+#define NONLIN_EOS
+#define SPLIT_EOS
+
+#define SEA_ICE_NOFLUX
+
+/*  Forcing */
+
+/*   - surface */
+#define BULK_FRC
+#undef VFLX_CORR
+#undef QCORRECTION
+#undef DIURNAL_SRFLUX
+
+/*   - lateral */
+#define T_FRC_BRY
+#define Z_FRC_BRY
+#define M2_FRC_BRY
+#define M3_FRC_BRY
+#define SPONGE
+#define SPONGE_WIDTH /* # of sponge points is input parameter */
+
+/* Mixing */
+
+/*  - lateral */
+#define UV_VIS2
+#define TS_DIF2
+
+/*  - vertical */
+#define LMD_MIXING
+#define LMD_KPP
+#define LMD_NONLOCAL
+#define LMD_RIMIX
+#define LMD_CONVEC
+#define LMD_BKPP
+
+#define IMPLICIT_BOTTOM_DRAG
+
+/* Grid Configuration */
+#define CURVGRID
+#define SPHERICAL
+#define MASKING
+
+/* Output Options */
+#define MASK_LAND_DATA
+
+/* Restart */
+#define EXACT_RESTART
+
+/* Open Boundary Conditions */
+#define OBC_WEST
+#define OBC_NORTH
+#define OBC_SOUTH
+
+/* Open Boundaries */
+#define OBC_M2FLATHER  /* Barotop. BC: OBC_M2FLATHER, OBC_M2ORLANSKI, OBC_M2SPECIFIED */
+#define OBC_M3ORLANSKI /* Baroclin. BC: OBC_M3ORLANSKI, OBC_M3SPECIFIED */
+#define OBC_TORLANSKI  /* Tracer BC: OBC_TORLANSKI, OBC_TSPECIFIED */
+#define OBC_TSPECIFIED
+
+/* Tides */
+#define TIDES
+#ifdef TIDES
+#  define POT_TIDES
+#  define SSH_TIDES
+#  define UV_TIDES
+#endif
+
+#define MARBL
+
+#ifdef MARBL
+#  define MARBL_DIAGS
+#  define NOX_FORCING
+#  define NHY_FORCING
+#endif
+
+#define PCO2AIR_FORCING
+
+#endif
+
+#include "set_global_definitions.h"
+

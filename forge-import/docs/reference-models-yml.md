@@ -2,6 +2,6 @@
 
 `models.yml`
 
-```{include} ../cson_forge/models.yml
+```{include} ../cstar_forge/models.yml
 :code: yaml
 ```

@@ -200,7 +200,7 @@ For example:
 ## Usage Pattern
 
 ```python
-from cson_forge.input_data import RomsMarblInputData
+from cstar_forge.input_data import RomsMarblInputData
 
 # Create input data generator
 input_gen = RomsMarblInputData(

@@ -1,5 +1,5 @@
 # Machines (`machines.yml`)
 
-```{include} ../cson_forge/machines.yml
+```{include} ../cstar_forge/machines.yml
 :code: yaml
 ```

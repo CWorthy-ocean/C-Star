@@ -1,0 +1,12 @@
+      ! ****************************************************************
+      ! user inputs
+      logical,parameter,public :: river_source = {{ river_frc.river_source|lower }}    ! default should be false if not using rivers
+      logical,parameter        :: analytical   = {{ river_frc.analytical|lower }}   ! analytical forcing, if false then realistic
+      integer,public,parameter :: nriv = {{ river_frc.nriv }}                 ! number of rivers
+
+      ! realistic rivers only: enter netcdf variable name and time name
+      type (ncforce) :: nc_rvol = ncforce( vname='{{ river_frc.rvol_vname }}', tname='{{ river_frc.rvol_tname }}')
+      type (ncforce) :: nc_rtrc = ncforce( vname='{{ river_frc.rtrc_vname }}', tname='{{ river_frc.rtrc_tname }}')
+      ! end user inputs
+      ! ****************************************************************
+

@@ -1,0 +1,120 @@
+name: cson_roms-marbl_v0.1_Gulf_of_Alaska_sm_4procs
+description: GulfOfAlaska_sm
+application: roms_marbl
+state: notset
+valid_start_date: '2010-01-01T00:00:00'
+valid_end_date: '2010-01-10T00:00:00'
+code:
+  roms:
+    documentation: ''
+    locked: false
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    commit: '6588486'
+    branch: ''
+    filter: null
+  run_time:
+    documentation: ''
+    locked: false
+    location: /Users/blsaenz/Projects/git/cson-forge/cson_forge/catalog/builds/cson_roms-marbl_v0.1_Gulf_of_Alaska_sm_4procs/run-time
+    commit: ''
+    branch: na
+    filter:
+      files:
+      - marbl_diagnostic_output_list
+      - marbl_in
+      - marbl_tracer_output_list
+      - roms.in
+  compile_time:
+    documentation: ''
+    locked: false
+    location: /Users/blsaenz/Projects/git/cson-forge/cson_forge/catalog/builds/cson_roms-marbl_v0.1_Gulf_of_Alaska_sm_4procs/compile-time
+    commit: ''
+    branch: na
+    filter:
+      files:
+      - bgc.opt
+      - blk_frc.opt
+      - cdr_frc.opt
+      - cdr_output.opt
+      - cppdefs.opt
+      - diagnostics.opt
+      - extract_data.opt
+      - ocean_vars.opt
+      - param.opt
+      - river_frc.opt
+      - sponge_tune.opt
+      - surf_flux.opt
+      - tides.opt
+      - tracers.opt
+      - upscale_output.opt
+  marbl:
+    documentation: ''
+    locked: false
+    location: https://github.com/marbl-ecosys/MARBL.git
+    commit: marbl0.45.0
+    branch: ''
+    filter: null
+initial_conditions:
+  documentation: ''
+  locked: false
+  data:
+  - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_initial_conditions.nc
+    partitioned: false
+grid:
+  documentation: ''
+  locked: false
+  data:
+  - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_grid.nc
+    partitioned: false
+forcing:
+  boundary:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_boundary-physics_200912.nc
+      partitioned: false
+    - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_boundary-physics_201001.nc
+      partitioned: false
+    - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_boundary-bgc_clim.nc
+      partitioned: false
+  surface:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_surface-physics_200912.nc
+      partitioned: false
+    - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_surface-physics_201001.nc
+      partitioned: false
+    - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_surface-bgc_clim.nc
+      partitioned: false
+  tidal:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_tidal.nc
+      partitioned: false
+  river:
+    documentation: ''
+    locked: false
+    data:
+    - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_river.nc
+      partitioned: false
+  corrections: null
+partitioning:
+  documentation: ''
+  locked: false
+  hash: null
+  n_procs_x: 2
+  n_procs_y: 2
+model_params:
+  time_step: 675
+runtime_params:
+  start_date: '2010-01-01T00:00:00'
+  end_date: '2010-01-10T00:00:00'
+  output_dir: /Users/blsaenz/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_Gulf_of_Alaska_sm_4procs_20100101-20100110
+cdr_forcing:
+  documentation: ''
+  locked: false
+  data:
+  - location: /Users/blsaenz/cson-forge-data/input-data/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs/cson_roms-marbl_v0_1_Gulf_of_Alaska_sm_4procs_cdr.nc
+    partitioned: false

@@ -1,4 +1,4 @@
-name: test-cson-forge
+name: test-cstar-forge
 channels:
   - conda-forge
   - nodefaults

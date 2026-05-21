@@ -52,7 +52,7 @@ setup_test_env() {
   
   # Create minimal environment.yml
   cat > environment.yml << 'EOF'
-name: test-cson-forge
+name: test-cstar-forge
 channels:
   - conda-forge
   - nodefaults
@@ -62,10 +62,10 @@ dependencies:
   - pip
 EOF
 
-  # Create mock cson_forge package
-  mkdir -p cson_forge
-  cat > cson_forge/__init__.py << 'EOF'
-"""Mock cson_forge package for testing."""
+  # Create mock cstar_forge package
+  mkdir -p cstar_forge
+  cat > cstar_forge/__init__.py << 'EOF'
+"""Mock cstar_forge package for testing."""
 __version__ = "0.1.0"
 EOF
 
@@ -74,7 +74,7 @@ EOF
 from setuptools import setup, find_packages
 
 setup(
-    name="cson-forge",
+    name="cstar-forge",
     version="0.1.0",
     packages=find_packages(),
 )
@@ -101,7 +101,7 @@ test_parse_env_file() {
   setup_test_env
   
   KERNEL_NAME=$(awk -F': *' '$1=="name"{print $2; exit}' environment.yml 2>/dev/null)
-  if [[ "$KERNEL_NAME" == "test-cson-forge" ]]; then
+  if [[ "$KERNEL_NAME" == "test-cstar-forge" ]]; then
     test_pass "Successfully parsed environment name from environment.yml"
   else
     test_fail "Failed to parse environment name (got: $KERNEL_NAME)"
@@ -172,7 +172,7 @@ test_mock_package() {
   test_start "Mock package structure"
   setup_test_env
   
-  if [[ -f "cson_forge/__init__.py" ]] && [[ -f "setup.py" ]]; then
+  if [[ -f "cstar_forge/__init__.py" ]] && [[ -f "setup.py" ]]; then
     test_pass "Mock package structure is correct"
   else
     test_fail "Mock package structure is incorrect"
