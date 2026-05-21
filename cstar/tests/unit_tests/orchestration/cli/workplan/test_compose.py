@@ -12,7 +12,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
-from cstar.orchestration.converter.converter import convert_step_to_placeholder
+from cstar.orchestration.converter.converter import convert_step_to_placeholder_request
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
@@ -358,7 +358,7 @@ async def test_run_composed_dag(
         mock.patch("cstar.base.utils._run_cmd", mock_run_cmd),
         mock.patch(
             "cstar.orchestration.converter.converter.convert_step_to_blueprint_run_command",
-            convert_step_to_placeholder,
+            convert_step_to_placeholder_request,
         ),
     ):
         generated_wp_path = compose(
