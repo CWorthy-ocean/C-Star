@@ -390,7 +390,12 @@ class WorkplanTransformer(LoggingMixin):
         if self._transformed:
             return self._transformed
 
-        apply_to = {Application.ROMS_MARBL, Application.SLEEP}
+        apply_to = {
+            Application.ROMS_MARBL,
+            Application.SLEEP,
+            Application.NEST_IC,
+            Application.UPSCALER,
+        }
 
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]
@@ -443,7 +448,7 @@ class WorkplanTransformer(LoggingMixin):
         override_transform = OverrideTransform()
         final_steps: list[LiveStep] = []
         for step in steps:
-            if step.blueprint_overrides:
+            if step.blueprint_overrides or step.directives:
                 final_steps.extend(override_transform(step))
             else:
                 final_steps.append(step)
@@ -569,7 +574,11 @@ def override_output_directory(step: LiveStep) -> LiveStep:
     LiveStep
         The transformed step.
     """
-    sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
+    sys_overrides = (
+        {"runtime_params": {"output_dir": step.fsm.root}}
+        if step.application == Application.ROMS_MARBL
+        else {"output_dir": step.fsm.root}  # type: ignore[dict-item]
+    )
     override_transform = OverrideTransform(sys_overrides)
     overridden_step_result = override_transform(step)
 

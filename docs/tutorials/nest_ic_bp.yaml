@@ -1,0 +1,9 @@
+name: create_nested_ic
+description: create IC file from a parent
+application: nest_ic
+state: draft
+
+parent_grid: "/Users/eilerman/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_PAC-0p5_deg_8procs_20100101-20100110/input/input_datasets/cson_roms-marbl_v0_1_PAC-0p5_deg_8procs_grid.nc"
+parent_rst: "/Users/eilerman/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_PAC-0p5_deg_8procs_20100101-20100110/joined_output/output_rst.20100105000000.nc"
+child_grid: "/Users/eilerman/cson-forge-data/input-data/cson_roms-marbl_v0_1_NEP-p25_deg_8procs/cson_roms-marbl_v0_1_NEP-p25_deg_8procs_grid.nc"
+output_dir: "~/cstar/nest_ic_example/"
