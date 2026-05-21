@@ -23,24 +23,14 @@ def status(
             autocompletion=list_runs,
         ),
     ] = None,
-    run_id_flag: t.Annotated[
-        str | None,
-        typer.Option(
-            "--run-id",
-            help="The unique identifier of a specific workplan execution.",
-            autocompletion=list_runs,
-        ),
-    ] = None,
 ) -> None:
     """Retrieve the current status of a workplan."""
-    effective_run_id = run_id or run_id_flag
-
-    if effective_run_id is None:
+    if run_id is None:
         print("A run-id must be provided.")
         raise typer.Exit(1)
 
     repo = TrackingRepository()
-    workplan_run = asyncio.run(repo.get_workplan_run(effective_run_id))
+    workplan_run = asyncio.run(repo.get_workplan_run(run_id))
 
     if workplan_run is None:
         print("An unknown run-id was supplied.")
@@ -49,8 +39,8 @@ def status(
     launcher = get_launcher()
 
     try:
-        status = asyncio.run(load_run_state(effective_run_id, launcher))
-        display_summary(effective_run_id, status)
+        status = asyncio.run(load_run_state(run_id, launcher))
+        display_summary(run_id, status)
     except FileNotFoundError:  # blueprint not found.
         console.print_exception()
 
