@@ -350,8 +350,6 @@ class RomsFileSystemManager(JobFileSystemManager):
 
     def clear(self) -> None:
         """Ensure the job's working directories are empty."""
-        super().clear()
-
         for directory in [
             self.compile_time_code_dir,
             self.runtime_code_dir,
@@ -361,6 +359,12 @@ class RomsFileSystemManager(JobFileSystemManager):
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
+
+        # clear everything from workdir except blueprints
+        if self.work_dir.exists():
+            for f in self.work_dir.iterdir():
+                if not f.name.endswith(".yml") and not f.name.endswith(".yaml"):
+                    f.unlink()
 
 
 class StateDirectoryManager:
