@@ -137,7 +137,7 @@ def run(
         typer.Option(
             ARG_CLOBBER,
             callback=clobber_callback,
-            help="Clobber the working directory if it exists.",
+            help="Set this flag to remove any pre-existing files in the working directory.",
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
         ),
     ] = False,

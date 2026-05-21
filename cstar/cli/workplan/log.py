@@ -34,7 +34,7 @@ def workplan_log(
         typer.Option(
             "--monitor",
             "-m",
-            help="Stream new output as the log file is updated (like tail -f). "
+            help="Set this flag to stream updates from the log file indefinitely (like tail -f). "
             "Waits for the file to appear if it does not yet exist.",
         ),
     ] = False,
