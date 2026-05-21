@@ -12,6 +12,7 @@ log = get_logger(__name__)
 app = typer.Typer()
 
 _MONITOR_POLL_INTERVAL: t.Final[float] = 0.25
+ARG_MONITOR: t.Final[str] = "--monitor"
 
 
 @app.command(name="log", help="Print the log for a workplan step.")
@@ -32,8 +33,7 @@ def workplan_log(
     monitor: t.Annotated[
         bool,
         typer.Option(
-            "--monitor",
-            "-m",
+            ARG_MONITOR,
             help="Set this flag to stream updates from the log file indefinitely (like tail -f). "
             "Waits for the file to appear if it does not yet exist.",
         ),
