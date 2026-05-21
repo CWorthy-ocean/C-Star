@@ -107,6 +107,7 @@ Bug Fixes
 - Fixed a failure after joining partitioned files due to an aggressive string replacement (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - Fixed a bug where the `Service` signal handler failed to initiate shutdown (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - Fixed a bug caused by inconsistent `__init__` argument ordering and removed the prior fix of adding a dupe attribute (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- Fix bug where CSTAR_CLOBBER_WORK_DIR would also delete important workplan artifacts (`#527 <https://github.com/CWorthy-ocean/C-Star/pull/527>`_)
 
 Improvements
 ~~~~~~~~~~~~
