@@ -11,6 +11,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.converter.converter import (
+    RunRequest,
     app_to_cmd_map,
     get_command_mapping,
     register_command_mapping,
@@ -24,9 +25,9 @@ from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 
-def custom_map_function(step: Step) -> str:
+def custom_map_function(step: Step) -> RunRequest:
     """A custom step mapping function for testing purposes."""
-    return f"UNIT-TEST-MAPPING: {step.name}"
+    return RunRequest(command=["UNIT-TEST-MAPPING", step.name])
 
 
 @pytest.mark.parametrize(
@@ -205,12 +206,12 @@ async def test_converter_hello_world(
     assert cmd_converter is not None, "Command converter not found"
 
     # use the converter function to generate the command
-    command = cmd_converter(step)
+    request = cmd_converter(step)
 
     # confirm the retrieved converter produces the output expected
     # from the function: convert_step_to_blueprint_run_command
-    assert "cstar blueprint run" in command
-    assert str(hello_world_bp_path) in command
+    assert "cstar blueprint run" in request.as_script()
+    assert str(hello_world_bp_path) in request.as_script()
 
 
 def test_convert_step_with_directives(
@@ -231,11 +232,13 @@ def test_convert_step_with_directives(
     result = cmd_converter(step)
 
     # confirm the parameter is sent
-    assert ARG_DIRECTIVES_URI_LONG in result
+    assert ARG_DIRECTIVES_URI_LONG in result.command
 
     # confirm the directive path exists
-    dir_path = result.split(ARG_DIRECTIVES_URI_LONG)[1].split(" ", maxsplit=1)[0]
-    assert bp_path in result, "The blueprint path should be unchanged"
+    dir_path = (
+        result.as_command().split(ARG_DIRECTIVES_URI_LONG)[1].split(" ", maxsplit=1)[0]
+    )
+    assert bp_path in result.as_command(), "The blueprint path should be unchanged"
     assert Path(dir_path).exists()
 
 
