@@ -133,9 +133,9 @@ class TestDefaultCatalogInnerDir:
     def test_under_cstar_forge_data_base(self, tmp_path):
         # Standard layout: source-data is a direct child of the base directory.
         # Catalog is a sibling of source-data inside that same base.
-        sd = tmp_path / "cson-forge-data" / "source-data"
+        sd = tmp_path / "cstar-forge-data" / "source-data"
         sd.mkdir(parents=True)
-        assert default_catalog_inner_dir(sd) == tmp_path / "cson-forge-data" / "catalog"
+        assert default_catalog_inner_dir(sd) == tmp_path / "cstar-forge-data" / "catalog"
 
     def test_when_source_data_already_under_cstar_forge_data(self, tmp_path):
         sd = tmp_path / "cstar_forge_data" / "source-data"
@@ -281,18 +281,18 @@ class TestSystemLayoutRegistry:
         layout_fn = SYSTEM_LAYOUT_REGISTRY["MacOS"]
         source_data, input_data, scratch = layout_fn(tmp_path, {})
         
-        assert source_data == tmp_path / "cson-forge-data" / "source-data"
-        assert input_data == tmp_path / "cson-forge-data" / "input-data"
-        assert scratch == tmp_path / "cson-forge-data" / "cson-forge-run"
+        assert source_data == tmp_path / "cstar-forge-data" / "source-data"
+        assert input_data == tmp_path / "cstar-forge-data" / "input-data"
+        assert scratch == tmp_path / "cstar-forge-data" / "cstar-forge-run"
     
     def test_unknown_layout(self, tmp_path):
         """Test unknown layout function."""
         layout_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
         source_data, input_data, scratch = layout_fn(tmp_path, {})
         
-        assert source_data == tmp_path / "cson-forge-data" / "source-data"
-        assert input_data == tmp_path / "cson-forge-data" / "input-data"
-        assert scratch == tmp_path / "cson-forge-data" / "cson-forge-run"
+        assert source_data == tmp_path / "cstar-forge-data" / "source-data"
+        assert input_data == tmp_path / "cstar-forge-data" / "input-data"
+        assert scratch == tmp_path / "cstar-forge-data" / "cstar-forge-run"
     
     def test_anvil_layout(self, tmp_path):
         """Test RCAC Anvil layout function."""
@@ -301,9 +301,9 @@ class TestSystemLayoutRegistry:
         env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
         source_data, input_data, scratch = layout_fn(tmp_path, env)
         
-        assert source_data == tmp_path / "work" / "cson-forge-data" / "source-data"
-        assert input_data == tmp_path / "work" / "cson-forge-data" / USER / "input-data"
-        assert scratch == tmp_path / "scratch" / "cson-forge-run"
+        assert source_data == tmp_path / "work" / "cstar-forge-data" / "source-data"
+        assert input_data == tmp_path / "work" / "cstar-forge-data" / USER / "input-data"
+        assert scratch == tmp_path / "scratch" / "cstar-forge-run"
     
     def test_perlmutter_layout(self, tmp_path):
         """Test NERSC Perlmutter layout function."""
@@ -312,9 +312,9 @@ class TestSystemLayoutRegistry:
         env = {"SCRATCH": str(tmp_path / "scratch")}
         source_data, input_data, scratch = layout_fn(tmp_path, env)
         
-        assert source_data == tmp_path / "scratch" / "cson-forge-data" / "source-data"
-        assert input_data == tmp_path / "scratch" / "cson-forge-data" / USER / "input-data"
-        assert scratch == tmp_path / "scratch" / "cson-forge-data" / "cson-forge-run"
+        assert source_data == tmp_path / "scratch" / "cstar-forge-data" / "source-data"
+        assert input_data == tmp_path / "scratch" / "cstar-forge-data" / USER / "input-data"
+        assert scratch == tmp_path / "scratch" / "cstar-forge-data" / "cstar-forge-run"
 
 
 class TestGetDataPaths:
