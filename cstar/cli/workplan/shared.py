@@ -17,8 +17,9 @@ from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.dag_runner import DagStatus
-from cstar.orchestration.models import Blueprint
+from cstar.orchestration.models import Blueprint, Workplan
 from cstar.orchestration.orchestration import Status
+from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
 console = Console()
@@ -26,6 +27,7 @@ log = get_logger(__name__)
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.orchestration.tracking import WorkplanRun
 
 
 def list_runs(incomplete: str) -> list[tuple[str, str]]:
@@ -59,8 +61,30 @@ def list_steps(ctx: typer.Context, incomplete: str) -> list[str]:
     if not run_id:
         return []
 
-    tasks_dir = JobFileSystemManager(DirectoryManager.data_home() / run_id).tasks_dir
+    wp_run: WorkplanRun | None = None
+    try:
+        repo = TrackingRepository()
+
+        if wp_run := asyncio.run(repo.get_workplan_run(run_id)):
+            wp = deserialize(wp_run.trx_workplan_path, Workplan)
+            step_names = [str(s.name) for s in wp.steps]
+
+            if incomplete:
+                step_names = [s for s in step_names if s.startswith(incomplete)]
+
+            return step_names
+    except FileNotFoundError:
+        if wp_run:
+            msg = f"Workplan run contains a dead path: {wp_run.trx_workplan_path} was not found"
+            log.debug(msg)
+
+    # run state may be cleaned up. fallback to directory search
+    run_dir = DirectoryManager.data_home() / run_id
+    tasks_dir = JobFileSystemManager(run_dir).tasks_dir
+
     if not tasks_dir.exists():
+        msg = f"tasks_dir {str(tasks_dir)!r} was not found"
+        log.debug(msg)
         return []
 
     return [
